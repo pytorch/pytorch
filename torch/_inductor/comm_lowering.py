@@ -426,13 +426,7 @@ def register_comm_lowerings():
         tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
         kernel = c10d.batch_p2p_ops.default
         with V.graph.fake_mode:
-            (
-                example_output,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                unbacked_bindings,
-            ) = ir._CollectiveKernel.process_kernel(
+            result = ir._CollectiveKernel.process_kernel(
                 kernel,
                 op_list,
                 peer_list,
@@ -440,14 +434,18 @@ def register_comm_lowerings():
                 tensors,
                 group_name,
             )
-        if unbacked_bindings:
-            raise AssertionError(f"{kernel} {unbacked_bindings}")
+        example_output = result.example_output
+        tensor_args = result.tensor_args
+        non_tensor_args = result.non_tensor_args
+        unflatten_args = result.unflatten_args
+        if result.unbacked_bindings:
+            raise AssertionError(f"{kernel} {result.unbacked_bindings}")
         for op, tensor_arg in zip(op_list, tensor_args):
             tensor_arg.realize()
             if op == "irecv":
                 V.graph.mark_buffer_mutated(tensor_arg.get_name())
 
-        device = tensor_args[0].get_device()
+        device = tensor_args[0].get_device_or_error()
         packed = ir._CollectiveKernel(
             ir.MultiOutputLayout(device=device),
             kernel,
