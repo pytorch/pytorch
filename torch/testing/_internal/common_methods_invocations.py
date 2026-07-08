@@ -17529,7 +17529,13 @@ op_db: list[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'nn.functional.threshold',
-        ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
+        # np.asarray(value).astype(x.dtype) wraps the fill value into the input
+        # dtype up front. Passing the raw Python int to np.where makes NumPy
+        # (>2.4.6) strict-cast the scalar and raise OverflowError for negative
+        # values against unsigned dtypes (e.g. value=-9 with uint8).
+        ref=lambda x, threshold, value: np.where(
+            x <= threshold, np.asarray(value).astype(x.dtype), x
+        ).astype(x.dtype),
         dtypes=all_types_and(torch.half, torch.bfloat16),
         dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
         inplace_variant=lambda x, threshold, value:
