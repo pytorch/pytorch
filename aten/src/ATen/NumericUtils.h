@@ -38,15 +38,6 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
 #endif
 }
 
-template <typename T, std::enable_if_t<c10::is_complex<T>::value, int> = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-#if defined(__SYCL_DEVICE_ONLY__)
-  return sycl::isnan(val.real()) || sycl::isnan(val.imag());
-#else
-  return std::isnan(val.real()) || std::isnan(val.imag());
-#endif
-}
-
 template <typename T, std::enable_if_t<std::is_same_v<T, at::Half>, int> = 0>
 inline C10_HOST_DEVICE bool _isnan(T val) {
   return at::_isnan(static_cast<float>(val));
@@ -89,6 +80,11 @@ template <
     std::enable_if_t<std::is_same_v<T, at::Float8_e4m3fnuz>, int> = 0>
 inline C10_HOST_DEVICE bool _isnan(T val) {
   return val.isnan();
+}
+
+template <typename T, std::enable_if_t<c10::is_complex<T>::value, int> = 0>
+inline C10_HOST_DEVICE bool _isnan(T val) {
+  return at::_isnan(val.real()) || at::_isnan(val.imag());
 }
 
 // std::isinf isn't performant to use on integral types; it will
