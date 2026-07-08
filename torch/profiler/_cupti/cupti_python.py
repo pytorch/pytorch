@@ -153,6 +153,14 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
             ctypes.POINTER(ctypes.c_uint64),
         ]
         lib.cuptiGetTimestamp_v2.restype = ctypes.c_int
+    # Custom timestamp callback (CUpti_TimestampCallbackFunc, a uint64_t(*)(void)):
+    # registers a function CUPTI invokes to stamp activity records, replacing its
+    # default CPU timer. Used to put records on the profiler's approx clock (kineto's
+    # timebase). Global, and per the header usable only when multiple subscribers are
+    # NOT allowed; NULL unregisters.
+    if hasattr(lib, "cuptiActivityRegisterTimestampCallback"):
+        lib.cuptiActivityRegisterTimestampCallback.argtypes = [ctypes.c_void_p]
+        lib.cuptiActivityRegisterTimestampCallback.restype = ctypes.c_int
     # External correlation push/pop. The plain (v1) calls return
     # CUPTI_ERROR_NOT_COMPATIBLE while a user-defined-record subscriber is active
     # (same as cuptiGetTimestamp), so the subscriber-aware _v2 variants are required
@@ -351,6 +359,26 @@ class _PyLibCupti:
             "cuptiGetTimestamp_v2",
         )
         return ts.value
+
+    def register_timestamp_callback(self, callback_addr: int) -> int:
+        """Register a CUpti_TimestampCallbackFunc (by address) so CUPTI stamps activity
+        records with the caller's clock instead of its default CPU timer -- used to put
+        records directly on the profiler's approx clock (kineto's timebase). Returns the
+        raw CUptiResult rather than raising: current libcupti rejects this with
+        CUPTI_ERROR_NOT_COMPATIBLE while multiple subscribers are allowed (a documented
+        beta limitation), so the caller decides whether to fall back. Returns -1 if the
+        symbol is absent (libcupti too old)."""
+        fn = getattr(self._lib, "cuptiActivityRegisterTimestampCallback", None)
+        if fn is None:
+            return -1
+        return fn(ctypes.c_void_p(callback_addr))
+
+    def unregister_timestamp_callback(self) -> None:
+        """Clear a previously registered timestamp callback (NULL restores CUPTI's
+        default timer). Best-effort -- teardown continues regardless."""
+        fn = getattr(self._lib, "cuptiActivityRegisterTimestampCallback", None)
+        if fn is not None:
+            fn(None)
 
     def activity_flush_all(self) -> None:
         """Hand over COMPLETED buffers only (``cuptiActivityFlushAll(0)``). The monitor

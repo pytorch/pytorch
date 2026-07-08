@@ -2,6 +2,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Logging.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 
@@ -355,6 +356,33 @@ void mallocAsync(
     err = cudaErrorMemoryAllocation;
   } else {
     err = cudaMallocAsync(devPtr, size, stream);
+    if (err == cudaErrorMemoryAllocation) {
+      // Before declaring OOM, reclaim freed-but-cached pool backing and retry
+      // once. PyTorch sets the pool's releaseThreshold to UINT64_MAX, so freed
+      // blocks stay cached instead of returning to the OS; a true peak-live OOM
+      // has nothing to reclaim and falls through to the error below.
+      (void)cudaGetLastError(); // clear the OOM before retrying
+      cudaMemPool_t mempool = nullptr;
+      if (cudaDeviceGetDefaultMemPool(&mempool, device) == cudaSuccess) {
+        // Sync first: cudaMemPoolTrimTo only releases backing whose frees have
+        // completed. Use the raw API rather than c10::cuda::stream_synchronize
+        // to avoid taking the GIL while holding the allocator lock. A sync
+        // failure is a device fault, not a recoverable OOM, so surface it
+        // instead of retrying.
+        cudaError_t sync_err = cudaStreamSynchronize(stream);
+        if (sync_err == cudaSuccess) {
+          (void)cudaMemPoolTrimTo(mempool, 0);
+          err = cudaMallocAsync(devPtr, size, stream);
+          if (err == cudaSuccess) {
+            LOG(WARNING)
+                << "[cudaMallocAsync] recovered from an allocation failure by "
+                   "trimming the pool and retrying.";
+          }
+        } else {
+          err = sync_err;
+        }
+      }
+    }
   }
 
   if (err == cudaErrorMemoryAllocation) {
