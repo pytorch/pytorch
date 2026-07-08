@@ -2000,10 +2000,6 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
-            # Exception: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
             # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
@@ -2034,10 +2030,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
-            ),
-            # Exception: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
             # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
             DecorateInfo(
@@ -2070,10 +2062,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
-            ),
-            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
             # Exception: linalg.lu_factor(): MPS doesn't support complex types.
             DecorateInfo(
@@ -2111,17 +2099,6 @@ op_db: list[OpInfo] = [
                 unittest.skip("Tests different backward paths"),
                 "TestCommon",
                 "test_floating_inputs_are_differentiable",
-            ),
-            # RuntimeError: The size of tensor a (5) must match the size of tensor b (4) at non-singleton dimension 1
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            # AssertionError: The values for attribute 'shape' do not match: torch.Size([3, 4]) != torch.Size([0]).
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
             # RuntimeError: linalg.solve.triangular(); Only float is supported!
             DecorateInfo(
