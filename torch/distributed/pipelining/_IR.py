@@ -625,7 +625,7 @@ class Pipe(torch.nn.Module):
                 "To run pipeline locally, invoke the Pipe object directly, not `split_gm`"
             )
 
-        self.split_gm.forward = throw
+        self.split_gm.forward = throw  # type: ignore[method-assign]
 
         # Make submodules use custom direct-serialized GraphModule
         i = 0

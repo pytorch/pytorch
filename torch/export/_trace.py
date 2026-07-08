@@ -1653,13 +1653,13 @@ def patch_forward(obj: torch.nn.Module, new_method):
     original_method = obj.forward
 
     # Patch the method
-    obj.forward = new_method.__get__(obj, obj.__class__)
+    obj.forward = new_method.__get__(obj, obj.__class__)  # type: ignore[method-assign]
 
     try:
         yield
     finally:
         # Restore the original method
-        obj.forward = original_method
+        obj.forward = original_method  # type: ignore[method-assign]
 
 
 @contextmanager

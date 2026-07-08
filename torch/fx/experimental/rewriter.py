@@ -139,7 +139,7 @@ def _rewrite(
                         else:
                             self.__dict__[k] = copy.copy(v)
 
-            RewrittenModule.forward = AST_Rewriter().rewrite(
+            RewrittenModule.forward = AST_Rewriter().rewrite(  # type: ignore[method-assign]
                 cast(FunctionType, m.forward)
             )
             return RewrittenModule(m)

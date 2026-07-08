@@ -7,8 +7,8 @@ import warnings
 import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, Optional, overload, TypeVar, Union
-from typing_extensions import Self
+from typing import Any, cast, Generic, Optional, overload, TYPE_CHECKING, Union
+from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
 from torch import device, dtype, Tensor
@@ -35,6 +35,13 @@ _grad_t = tuple[Tensor, ...] | Tensor
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar("T", bound="Module")
+
+# `Module` is generic over the parameters and return type of `forward`/`__call__`
+# so that a typed subclass gets a precise `model(...)` signature. The defaults
+# (`...`/`Any`) make a bare `nn.Module` behave exactly as before: any arguments,
+# `Any` return. See the `if TYPE_CHECKING` branches on `forward`/`__call__`.
+_P = ParamSpec("_P", default=...)
+_R = TypeVar("_R", default=Any)
 
 
 class _IncompatibleKeys(
@@ -404,7 +411,7 @@ def _forward_unimplemented(self, *input: Any) -> None:
     )
 
 
-class Module:
+class Module(Generic[_P, _R]):
     r"""Base class for all neural network modules.
 
     Your models should also subclass this class.
@@ -523,7 +530,13 @@ class Module:
         if self.call_super_init:
             super().__init__(*args, **kwargs)
 
-    forward: Callable[..., Any] = _forward_unimplemented
+    if TYPE_CHECKING:
+        # Expose the parametrized signature to type checkers while keeping the
+        # runtime value-assignment (see `_forward_unimplemented` above) that
+        # dodges mypy's contravariance rules on overrides.
+        def forward(self, *input: _P.args, **kwargs: _P.kwargs) -> _R: ...
+    else:
+        forward: Callable[..., Any] = _forward_unimplemented
 
     def register_buffer(
         self, name: str, tensor: Tensor | None, persistent: bool = True
@@ -1780,7 +1793,10 @@ class Module:
     # torchrec tests the code consistency with the following code
     # fmt: off
     def _call_impl(self, *args, **kwargs):
-        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        # `forward_call` is dynamic dispatch (tracing vs. the typed `forward`);
+        # keep it `Any`-typed so the generic `forward` return type does not leak
+        # into this internal machinery.
+        forward_call = cast("Callable[..., Any]", self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
@@ -1914,7 +1930,13 @@ class Module:
             raise
     # fmt: on
 
-    __call__: Callable[..., Any] = _wrapped_call_impl
+    if TYPE_CHECKING:
+        # Give `model(...)` the same typed signature/return as `forward`. The
+        # runtime `__call__` is still `_wrapped_call_impl` (compiled call,
+        # hooks, tracing, `_call_impl`); only the static type is refined here.
+        def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R: ...
+    else:
+        __call__: Callable[..., Any] = _wrapped_call_impl
 
     def __getstate__(self):
         state = self.__dict__.copy()

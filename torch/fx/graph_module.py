@@ -224,7 +224,7 @@ def _deserialize_graph_module(
     """
 
     # Try to retrieve the forward source in a backward-compatible way
-    _CodeOnlyModule.forward = forward
+    _CodeOnlyModule.forward = forward  # type: ignore[method-assign]
 
     tracer_cls = body.get("_tracer_cls")
     if tracer_cls is None:
@@ -983,7 +983,7 @@ class {module_name}(torch.nn.Module):
                 f"torch._C._profiler._RecordFunctionFast('## {filename} ##')",
             )
 
-        cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
+        cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)  # type: ignore[method-assign]
 
         # Determine whether this class explicitly defines a __call__ implementation
         # to wrap. If it does, save it in order to have wrapped_call invoke it.

@@ -1646,7 +1646,7 @@ class _WrappedMethod(torch.nn.Module):
         # share state of method's self module
         _sync_state(method.__self__, self)
         # redirect forward to method
-        self.forward = method
+        self.forward = method  # type: ignore[method-assign]
 
 
 def wrap_method(method):

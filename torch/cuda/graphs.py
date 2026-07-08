@@ -1042,7 +1042,7 @@ def make_graphed_callables(
 
                 return new_fwd
 
-            func.forward = make_graphed_forward(
+            func.forward = make_graphed_forward(  # type: ignore[method-assign]
                 func, func.training, graphed, func.forward
             )
             ret.append(func)
