@@ -85,11 +85,11 @@ static bool isHipSparseLtSupported() {
 
   // Return cached result (platform-wide)
   if (!g_hipSparseLtSupported) {
-      TORCH_CHECK(
-          false,
-          "hipSparseLt not supported on this device. Supported architectures: ",
-          c10::Join(", ", hipSparseLtSupportedArchs()),
-          ". hipSparseLt on ROCm requires ROCm 7.12 or newer.");
+    TORCH_CHECK(
+        false,
+        "hipSparseLt not supported on this device. Supported architectures: ",
+        c10::Join(", ", hipSparseLtSupportedArchs()),
+        ". hipSparseLt on ROCm requires ROCm 7.12 or newer.");
   }
   return g_hipSparseLtSupported;
 }
