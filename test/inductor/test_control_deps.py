@@ -649,6 +649,42 @@ class TestControlDeps(InductorTestCase):
                 "OrderingBarrier is_no_op() must be True",
             )
 
+    @requires_cuda_triton
+    def test_bidirectional_stream_sync_correctness(self):
+        """Regression: passthrough OrderingBarrier must be ordered after all subgraph ops.
+
+        Bidirectional stream sync exposes a bug where additional_buffer_deps was
+        keyed by barrier.get_name() (buffer name) instead of
+        barrier.get_operation_name() (operation name), so compute_dependencies
+        silently lost the ordering dep and the scheduler could place barrier2
+        before record_event1, producing wrong results.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            event_s1 = torch.cuda.Event()
+            event_s2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x * 2
+                event_s1.record(s1)
+            with torch.cuda.stream(s2):
+                event_s1.wait(s2)
+                b = a + 1
+                event_s2.record(s2)
+            with torch.cuda.stream(s1):
+                event_s2.wait(s1)
+                c = b * 2
+            s1.synchronize()
+            s2.synchronize()
+            return c
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        result, _ = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:
