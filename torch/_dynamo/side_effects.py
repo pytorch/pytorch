@@ -866,6 +866,20 @@ class SideEffects:
         self.keepalive.append(cell)
         return variable
 
+    def track_empty_cell(self, cell: CellType, cellvar: VariableTracker) -> None:
+        # Alias a real empty cell object to an already-existing CellVariable.
+        # Used for class-body closures that capture a free var (or the class's
+        # own name) assigned after the `class` statement: the cell is legitimately
+        # empty at build time and only read once a method runs. Registering the
+        # mapping makes later LOAD/STORE_DEREF on the freevar resolve back to the
+        # same cellvar via load_cell/store_cell.
+        if not isinstance(cellvar, variables.CellVariable):
+            raise AssertionError(
+                f"Expected CellVariable, got {type(cellvar)} in track_empty_cell"
+            )
+        self.id_to_variable[id(cell)] = cellvar
+        self.keepalive.append(cell)
+
     def track_global_existing(self, source: Source, item: Any) -> VariableTracker:
         variable = variables.NewGlobalVariable(
             mutation_type=AttributeMutationExisting(),
