@@ -11,7 +11,12 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch._vmap_internals import vmap
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, skipIfRocmVersionAtLeast, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfRocmVersionAtLeast,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 FALLBACK_REGEX = r"There is a performance drop"

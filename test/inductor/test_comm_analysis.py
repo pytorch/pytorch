@@ -20,7 +20,11 @@ except ImportError:
 
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfRocmVersionAtLeast, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfRocmVersionAtLeast,
+    TestCase,
+)
 
 
 def _get_all_gather_node(group_size, group_name):

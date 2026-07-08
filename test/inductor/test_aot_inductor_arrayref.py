@@ -7,7 +7,13 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import getRocmVersion, IS_CI, IS_FBCODE, IS_WINDOWS, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    getRocmVersion,
+    IS_CI,
+    IS_FBCODE,
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+)
 
 
 if IS_WINDOWS and IS_CI:

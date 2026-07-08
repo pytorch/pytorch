@@ -13,7 +13,6 @@ from tools.testing.test_run import ShardedTest, TestRun
 
 try:
     import torch
-
     from torch.testing._internal.common_cuda import SM80OrLater
     from torch.testing._internal.common_utils import TEST_CUDA
 except ImportError:

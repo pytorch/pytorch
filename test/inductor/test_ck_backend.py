@@ -54,6 +54,15 @@ class TestCKBackend(TestCase):
         if not self.ck_dir:
             raise unittest.SkipTest("Composable Kernel library is not installed")
 
+        # The ck4inductor headers shipped in the TheRock ROCm preview wheels are
+        # missing the CMake-generated ck/config.h, so every CK kernel compile
+        # fails with "fatal error: 'ck/config.h' file not found". Skip until the
+        # wheel packaging includes the generated header.
+        if not os.path.exists(os.path.join(self.ck_dir, "include", "ck", "config.h")):
+            raise unittest.SkipTest(
+                "ck4inductor headers are incomplete (ck/config.h missing)"
+            )
+
         try:
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()

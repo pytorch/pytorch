@@ -1039,7 +1039,12 @@ if HAS_CPU and not torch.backends.mps.is_available():
         device = "cpu"
         autocast = torch.cpu.amp.autocast
 
-    copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu", ROCM_7_14_FREEZING_CPU_TEST_FAILURES)
+    copy_tests(
+        OptimizeForInferenceTemplate,
+        FreezingCpuTests,
+        "cpu",
+        ROCM_7_14_FREEZING_CPU_TEST_FAILURES,
+    )
 
 if HAS_GPU:
 

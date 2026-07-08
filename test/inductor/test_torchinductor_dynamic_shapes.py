@@ -25,12 +25,12 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
 )
 from torch.testing._internal.common_utils import (
+    getRocmVersion,
     IS_ARM64,
     IS_FBCODE,
     MI350_ARCH,
     parametrize,
     serialTest,
-    getRocmVersion,
     skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
