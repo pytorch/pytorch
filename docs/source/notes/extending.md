@@ -168,9 +168,6 @@ memory is reduced by up to 2/3 of the total grad memory:
 ```{code-block} python
 :dedent: 4
 
-    import torch
-    from torch.autograd import Function
-
     class QKVProjection(Function):
         """Projects input x into Q, K, V: q = x @ w_q, k = x @ w_k, v = x @ w_v."""
         boxed_grads_call = True
