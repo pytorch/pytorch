@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -926,6 +927,7 @@ class TestSortAndSelectDevice(TestCase):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor(
@@ -962,6 +964,7 @@ class TestSortAndSelectDevice(TestCase):
             self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
     @dtypesIfCUDA(*all_types_and(torch.bfloat16))
+    @dtypesIfXPU(*all_types_and(torch.bfloat16))
     @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_topk_zero(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/49205
@@ -1225,6 +1228,7 @@ class TestSortAndSelectDevice(TestCase):
 
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
+    @dtypesIfXPU(*all_types_and(torch.half))
     def test_isin(self, device, dtype):
         def assert_isin_equal(a, b):
             # Compare to the numpy reference implementation.
@@ -1451,6 +1455,7 @@ class TestSortAndSelectCUDA(TestCase):
     @slowTest
     @largeTensorTest("170GB", "cpu")
     @largeTensorTest("72GB", "cuda")
+    @largeTensorTest("72GB", "xpu")
     @parametrize("test_case", ["random", "identical"])
     def test_topk_large_k(self, device, dtype, test_case):
         """Test topk with k > 2^32 (integer overflow bug fix).
@@ -1538,7 +1543,7 @@ class TestSortAndSelectCUDA(TestCase):
             )
 
 
-instantiate_device_type_tests(TestSortAndSelectDevice, globals())
+instantiate_device_type_tests(TestSortAndSelectDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestSortAndSelectCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
