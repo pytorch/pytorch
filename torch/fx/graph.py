@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import builtins
 import contextlib
 import copy
@@ -15,7 +16,7 @@ import re
 import types
 import typing
 import warnings
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -93,6 +94,11 @@ _illegal_names = {k: object() for k in keyword.kwlist}
 _illegal_names.update(builtins.__dict__)  # can't shadow a builtin name
 
 _custom_builtins: dict[str, _CustomBuiltin] = {}
+_script_dict_key_types = {complex, float, int, str}
+# TorchScript lexes the min int literal before applying unary minus, so
+# -2**63 overflows before negation.
+_script_int_min = -(2**63) + 1
+_script_int_max = 2**63 - 1
 
 
 def _register_custom_builtin(name: str, import_str: str, obj: object) -> None:
@@ -1164,6 +1170,133 @@ class _BoxedCodeGen(CodeGen):
                 fn_def += "\n    args_list.clear()"
 
         return fn_def
+
+
+class _PyTreeOutputCodeGen(CodeGen):
+    def __init__(self, out_spec: pytree.TreeSpec) -> None:
+        super().__init__()
+        self.out_spec = out_spec
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> _PyTreeOutputCodeGen:
+        result = _PyTreeOutputCodeGen(self.out_spec)
+        memo[id(self)] = result
+        result._body_transformer = copy.deepcopy(self._body_transformer, memo)
+        result._func_name = self._func_name
+        return result
+
+    def process_outputs(self, out: Any) -> Any:
+        if not isinstance(out, (list, tuple)):
+            out = [out]
+        return pytree.tree_unflatten(out, self.out_spec)
+
+    def _gen_script_output(
+        self,
+        output_args: Argument,
+        repr_fn: Callable[[object], str],
+    ) -> str | None:
+        # TorchScript cannot call pytree.tree_unflatten or represent
+        # OrderedDict/defaultdict, so this scripting-only fallback emits plain
+        # dict literals for those containers.
+        leaves = (
+            list(output_args)
+            if isinstance(output_args, (list, tuple))
+            else [output_args]
+        )
+        if len(leaves) != self.out_spec.num_leaves:
+            return None
+
+        leaf_idx = 0
+
+        def next_leaf() -> str:
+            nonlocal leaf_idx
+            result = repr_fn(leaves[leaf_idx])
+            leaf_idx += 1
+            return result
+
+        def gen_key(key: Any) -> str | None:
+            if type(key) not in _script_dict_key_types:
+                return None
+            if type(key) is int and not (_script_int_min <= key <= _script_int_max):
+                return None
+            key_repr = repr(key)
+            try:
+                ast.literal_eval(key_repr)
+            except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+                return None
+            return key_repr
+
+        def gen_dict(keys: Iterable[Any], child_strs: list[str]) -> str | None:
+            key_strs: list[str] = []
+            key_type = None
+            for key in keys:
+                if key_type is None:
+                    key_type = type(key)
+                elif type(key) is not key_type:
+                    return None
+                key_str = gen_key(key)
+                if key_str is None:
+                    return None
+                key_strs.append(key_str)
+            return (
+                "{"
+                + ", ".join(
+                    f"{key}: {child}"
+                    for key, child in zip(key_strs, child_strs, strict=True)
+                )
+                + "}"
+            )
+
+        def gen(treespec: pytree.TreeSpec) -> str | None:
+            if treespec.is_leaf():
+                return next_leaf()
+
+            children = [gen(child) for child in treespec.children()]
+            if any(child is None for child in children):
+                return None
+
+            child_strs = [child for child in children if child is not None]
+            typ = treespec.type
+            if typ is tuple:
+                if len(child_strs) == 1:
+                    return f"({child_strs[0]},)"
+                return f"({', '.join(child_strs)})"
+            if typ is list:
+                return f"[{', '.join(child_strs)}]"
+            if typ in (dict, OrderedDict, immutable_dict):
+                return gen_dict(treespec.context, child_strs)
+            if typ is defaultdict:
+                return gen_dict(treespec.context[1], child_strs)
+            return None
+
+        result = gen(self.out_spec)
+        if leaf_idx != len(leaves):
+            return None
+        return result
+
+    def generate_output(
+        self,
+        output_args: Argument,
+        *,
+        descs: Sequence[str] | None = None,
+        repr_fn: Callable[[object], str] | None = None,
+    ) -> str:
+        if repr_fn is None:
+            repr_fn = repr
+        if descs is not None and isinstance(output_args, (list, tuple)):
+            return (
+                self._format_multiline_container(
+                    output_args,
+                    descs,
+                    "return pytree.tree_unflatten(",
+                    repr_fn=repr_fn,
+                )
+                + ", self._out_spec)"
+            )
+        output = f"return pytree.tree_unflatten({repr_fn(output_args)}, self._out_spec)"
+        script_output = self._gen_script_output(output_args, repr_fn)
+        if script_output is None:
+            return output
+        return f"if torch.jit.is_scripting():\n    return {script_output}\n{output}"
 
 
 class _PyTreeCodeGen(CodeGen):
