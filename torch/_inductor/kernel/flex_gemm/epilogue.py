@@ -910,6 +910,32 @@ def local_reduce_aux_result(
     return aux_result
 
 
+def block_local_reduce_base_reduction_type(
+    analysis: FlexGemmLocalReduceAnalysis,
+    node: torch.fx.Node,
+    geometry: FlexGemmBlockLocalReduceGeometry,
+) -> str | None:
+    """Find the reduction feeding a block contract through pointwise finalizers."""
+    stack = [node]
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        reduction = reduction_from_node(current)
+        if reduction is not None:
+            return reduction[4]
+        for arg in iter_fx_node_inputs((current.args, current.kwargs)):
+            contract = analysis.contract_for(arg)
+            if (
+                isinstance(contract, FlexGemmBlockLocalReduceContract)
+                and contract.geometry == geometry
+            ):
+                stack.append(arg)
+    return None
+
+
 def local_reduce_compressed_aux_plan(
     analysis: FlexGemmLocalReduceAnalysis,
     output: Any,
@@ -923,8 +949,10 @@ def local_reduce_compressed_aux_plan(
         return None
     match contract:
         case FlexGemmBlockLocalReduceContract(geometry=geometry):
-            reduction = reduction_from_node(aux)
-            if reduction is None or reduction[4] not in ("max", "min", "sum", "mean"):
+            reduction_type = block_local_reduce_base_reduction_type(
+                analysis, aux, geometry
+            )
+            if reduction_type not in ("max", "min", "sum", "mean"):
                 raise NotImplementedError(LOCAL_REDUCE_BLOCK_REDUCTION_ERROR)
             expected_aux_shape = local_reduce_block_compressed_shape(
                 output_meta.shape, geometry.group_m, geometry.group_n
