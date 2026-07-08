@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import pytest
 from _pytest.config import Config, filename_arg
@@ -33,6 +33,11 @@ except ImportError:
 
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
+
+    from torch.testing._internal.common_distributed import (
+        MultiProcContinuousTest,
+        MultiProcessTestCase,
+    )
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
@@ -302,6 +307,45 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     items.clear()
     # NB: Need to edit items directly here to have the list reflected back to pytest
     items.extend(filtered_items)
+
+
+def _spawns_multiple_processes(
+    cls: type | None,
+) -> TypeGuard["type[MultiProcessTestCase | MultiProcContinuousTest] | None"]:
+    """
+    A distributed test needs multiple GPUs iff its class spawns multiple
+    processes. This is encoded by the base class: MultiProcessTestCase and
+    MultiProcContinuousTest fork `world_size` subprocesses, one per GPU. Plain
+    TestCase and MultiThreadedTestCase run in a single process (one GPU).
+
+    Returns True (needs multiple GPUs) on any ambiguity, so we never route a
+    process-spawning test to a single-GPU runner.
+    """
+    if cls is None:
+        return True
+    import torch.distributed as dist
+
+    if not dist.is_available():
+        # Distributed wasn't built: no test can spawn processes, so nothing is
+        # multigpu and the single-GPU config runs everything.
+        return False
+    from torch.testing._internal.common_distributed import (
+        MultiProcContinuousTest,
+        MultiProcessTestCase,
+    )
+
+    return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
+
+
+def pytest_itemcollected(item: Any) -> None:
+    """
+    Auto-apply the `multigpu` marker based on the resolved test class. Runs
+    per-item during collection, before pytest applies `-m` deselection, so the
+    distributed CI configs can partition a file into multigpu and `not
+    multigpu` halves without touching the test source.
+    """
+    if _spawns_multiple_processes(getattr(item, "cls", None)):
+        item.add_marker("multigpu")
 
 
 class StepcurrentPlugin:
