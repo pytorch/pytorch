@@ -86,6 +86,7 @@
 	path = third_party/cudnn_frontend
 	url = https://github.com/NVIDIA/cudnn-frontend.git
 [submodule "third_party/kineto"]
+    ignore = dirty
     path = third_party/kineto
     url = https://github.com/pytorch/kineto
 [submodule "third_party/pocketfft"]
