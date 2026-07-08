@@ -796,7 +796,7 @@ inline void set_item(
   if (!valueSizes.equals(slicedValueSizes)) {
     valuesSliced = valueTensor.view_symint(slicedValueSizes);
   } else {
-    valuesSliced = valueTensor;
+    valuesSliced = std::move(valueTensor);
   }
   dispatch_index_put_(sliced, std::move(tensorIndices), valuesSliced);
   return;

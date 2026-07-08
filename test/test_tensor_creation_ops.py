@@ -1279,6 +1279,22 @@ class TestTensorCreation(TestCase):
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.tensor([1, 2, -1, 3, 4], device=device))
 
+        # Negative repeats must be rejected even when output_size is passed,
+        # otherwise the CPU kernel can write out of bounds: the corrupted cumsum
+        # makes a later non-negative element produce start < 0, and in a
+        # multi-threaded run that OOB write races ahead of the sibling thread's
+        # check. See https://github.com/pytorch/pytorch/issues/188938
+        # On CUDA the kernel rejects these inputs via a device-side assert,
+        # which cannot be caught cleanly and poisons the context, so this is
+        # validated on CPU only.
+        if torch.device(device).type == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
+                torch.repeat_interleave(
+                    torch.tensor([-1, -1, 2], device=device), output_size=0)
+            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
+                torch.repeat_interleave(
+                    torch.tensor([5, -2, 1], device=device), output_size=4)
+
         y = torch.tensor([[1, 2], [3, 4]], device=device)
 
         y1_v1 = torch.repeat_interleave(y, 2)
