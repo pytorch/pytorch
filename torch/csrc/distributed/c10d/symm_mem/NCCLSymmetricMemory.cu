@@ -529,6 +529,9 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       size_t size,
       int device_idx,
       const std::optional<std::string>& group_name) override {
+    // Returns the data buffer pointer (alloc_base + buffer_offset), not
+    // alloc_base; the signal pad stays hidden in front and free()/rendezvous()
+    // key off this returned pointer.
     TORCH_CHECK(
         group_name == std::nullopt,
         "NCCLSymmetricMemoryAllocator::alloc "
@@ -649,6 +652,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
     NCCLAllocation* allocation;
+    // The covering allocation's map key is buffer_ptr (the data buffer base
+    // alloc() returned, == alloc_base + buffer_offset); captured here so we
+    // don't recompute it below.
+    void* buffer_ptr_key = nullptr;
     SymmMemKey key{ptr, *group_name};
     {
       std::lock_guard<std::mutex> lock(mutex_);
@@ -666,6 +673,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
           "Pointer not within any SymmetricMemory allocation, "
           "is the tensor allocated from SymmetricMemory?");
       allocation = alloc_it->second.get();
+      buffer_ptr_key = alloc_it->first;
     }
 
     // Get or create peer alloc info for the group under the per-allocation
@@ -678,10 +686,8 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       pai = c10::make_intrusive<NCCLPeerAllocInfo>(allocation, *group_name);
     }
     // Offset is relative to the data buffer base (past the signal pad).
-    const uintptr_t buffer_ptr =
-        reinterpret_cast<uintptr_t>(allocation->alloc_base) +
-        allocation->buffer_offset;
-    size_t offset = reinterpret_cast<uintptr_t>(ptr) - buffer_ptr;
+    size_t offset = reinterpret_cast<uintptr_t>(ptr) -
+        reinterpret_cast<uintptr_t>(buffer_ptr_key);
     // Create the SymmetricMemory handle.
     auto symm_mem = c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
     {
@@ -699,8 +705,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       // There is no more use of `key`; we can move it into the per-allocation
       // key set to avoid an extra copy. Key by the data pointer (the value
       // returned by alloc()), matching the lookup done in free().
-      symm_mem_keys_by_alloc_[reinterpret_cast<void*>(buffer_ptr)].insert(
-          std::move(key));
+      symm_mem_keys_by_alloc_[buffer_ptr_key].insert(std::move(key));
     }
     return symm_mem;
   }
