@@ -1747,26 +1747,32 @@ class FlatParamHandle:
             _same_storage(self.flat_param, self._get_padded_unsharded_flat_param()),
             "Expects the unpadded parameter to be a view into the padded parameter",
         )
-        if self.flat_param.device.type == "cpu":
-            # If already on CPU, freeing the unsharded parameter would leave
-            # flat_param (and its views) aliasing freed storage.
+        cpu_offload_ctx = (
+            contextlib.nullcontext()
+            if self.flat_param.device.type == "cpu"
+            else self._offload_to_cpu()
+        )
+        with cpu_offload_ctx:
             yield
-            return
+
+    @contextlib.contextmanager
+    def _offload_to_cpu(self):
         self.flat_param_to(torch.device("cpu"))
         self._free_unsharded_flat_param()
         try:
             yield
         finally:
-            _p_assert(
-                self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
-                f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
-            )
-            padded_unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
-            # Copy from CPU to the compute device
-            padded_unsharded_flat_param[: self.flat_param.numel()].copy_(
-                self.flat_param
-            )
-            self._use_unsharded_flat_param(padded_unsharded_flat_param)
+            self._restore_unsharded_flat_param_from_cpu()
+
+    def _restore_unsharded_flat_param_from_cpu(self):
+        _p_assert(
+            self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
+            f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
+        )
+        padded_unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
+        # Copy from CPU to the compute device
+        padded_unsharded_flat_param[: self.flat_param.numel()].copy_(self.flat_param)
+        self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def reshard(self, free_unsharded_flat_param: bool):
         """
