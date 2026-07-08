@@ -26,7 +26,7 @@ from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
-from torch._prims_common import suggest_memory_format
+from torch._prims_common import canonicalize_dim, suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
     assert_metadata_eq,
@@ -81,6 +81,52 @@ pytree = torch.utils._pytree
 T = TypeVar("T")
 
 aten = torch._ops.ops.aten
+
+_MKLDNN_PROPAGATE_OPS = {
+    aten.alias.default,
+    aten.clone.default,
+    aten.detach.default,
+    aten._prelu_kernel.default,
+    aten.prelu.default,
+    aten.relu.default,
+    aten.transpose.int,
+}
+_MKLDNN_DENSE_OUTPUT_OPS = {
+    aten._to_dense.default,
+    aten.to_dense.default,
+}
+_MKLDNN_METADATA_OPS = {
+    torch.ops.prim.device.default,
+    aten.dim.default,
+    aten.is_contiguous.default,
+    aten.is_contiguous.memory_format,
+    aten.is_non_overlapping_and_dense.default,
+    aten.is_strides_like_format.default,
+    aten.numel.default,
+    aten.size.default,
+    aten.size.int,
+    aten.stride.default,
+    aten.stride.int,
+    aten.sym_numel.default,
+    aten.sym_size.default,
+    aten.sym_size.int,
+    aten.sym_stride.default,
+    aten.sym_stride.int,
+}
+_MKLDNN_SCALAR_ERROR_OPS = {
+    # Eager mkldnn scalar add lowers through a dense scalar path and fails while
+    # converting that scalar back to ideep. Scalar mul has a native mkldnn path.
+    aten.add.Tensor,
+    aten.add_.Tensor,
+}
+_MKLDNN_AUXILIARY_TENSOR_NAMESPACES = {
+    "mkldnn",
+    "mkl",
+    "onednn",
+}
+_MKLDNN_AUXILIARY_TENSOR_OPS = {
+    aten.mkldnn_rnn_layer.default,
+}
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -801,6 +847,158 @@ class SymNumberMemoDescriptor:
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
 
+def _fake_tensor_dim_order(
+    self: FakeTensor, *, ambiguity_check: bool | list[torch.memory_format] = False
+) -> tuple[int, ...]:
+    if not isinstance(ambiguity_check, bool):
+        with torch._C.DisableTorchFunctionSubclass():
+            return cast(
+                tuple[int, ...],
+                torch.Tensor.dim_order(self, ambiguity_check=ambiguity_check),
+            )
+
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    ndim = self.ndim
+    if ndim == 0:
+        return ()
+    if ndim == 1:
+        return (0,)
+
+    shape = torch.ops.aten.sym_size.default(self)
+    strides = torch.ops.aten.sym_stride.default(self)
+
+    if ambiguity_check and any(guard_or_false(size == 1) for size in shape):
+        raise RuntimeError(
+            "The tensor does not have unique dim order, or cannot map to exact one of the given memory formats."
+        )
+
+    def ge(a: IntLikeType, b: IntLikeType) -> bool:
+        if guard_or_false(b == 0):
+            return True
+        if guard_or_false(a == 0):
+            return False
+        # Match TensorImpl::dim_order's symbolic stride comparison: if the
+        # strict ordering is unknown, divisibility can still prove the order.
+        return guard_or_false(a >= b) or guard_or_false(cast(Any, a) % b == 0)
+
+    def should_swap(idx_a: int, idx_b: int) -> int:
+        stride_a = strides[idx_a]
+        stride_b = strides[idx_b]
+
+        if guard_or_false(stride_a == 0) or guard_or_false(stride_b == 0):
+            return 0
+
+        if guard_or_false(stride_a == stride_b):
+            if ge(shape[idx_b], shape[idx_a]):
+                return 0
+            return 1
+
+        if ge(stride_b, stride_a):
+            return -1
+
+        if ge(stride_a, stride_b):
+            return 1
+
+        return 0
+
+    perm = list(reversed(range(ndim)))
+    for i in range(1, ndim):
+        dim1 = i
+        for dim0 in reversed(range(i)):
+            comparison = should_swap(perm[dim0], perm[dim1])
+            if comparison > 0:
+                perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
+                dim1 = dim0
+            elif comparison < 0:
+                break
+
+    if ambiguity_check:
+        for i, j in zip(range(ndim - 1), range(1, ndim)):
+            if should_swap(perm[i], perm[j]) != -1:
+                raise RuntimeError("The tensor does not have unique dim order.")
+
+    return tuple(reversed(perm))
+
+
+def _is_mkldnn_tensor_arg(arg: Tensor) -> bool:
+    fake_is_mkldnn = getattr(arg, "_fake_is_mkldnn", None)
+    if fake_is_mkldnn is not None:
+        return bool(fake_is_mkldnn)
+    return arg.is_mkldnn
+
+
+def _mkldnn_flatten_shape(
+    input_: Tensor,
+    start_dim: int = 0,
+    end_dim: int = -1,
+) -> tuple[IntLikeType, ...] | None:
+    start_dim = canonicalize_dim(input_.dim(), start_dim)
+    end_dim = canonicalize_dim(input_.dim(), end_dim)
+    if start_dim > end_dim:
+        raise RuntimeError(
+            "flatten() has invalid args: start_dim cannot come after end_dim"
+        )
+    if start_dim == end_dim and input_.dim() != 0:
+        return None
+
+    flattened: IntLikeType = 1
+    for size in input_.shape[start_dim : end_dim + 1]:
+        flattened = flattened * size
+    return (
+        tuple(input_.shape[:start_dim])
+        + (flattened,)
+        + tuple(input_.shape[end_dim + 1 :])
+    )
+
+
+def _allows_mkldnn_auxiliary_tensors(func: OpOverload) -> bool:
+    return (
+        func in _MKLDNN_AUXILIARY_TENSOR_OPS
+        or func.namespace in _MKLDNN_AUXILIARY_TENSOR_NAMESPACES
+    )
+
+
+def _should_propagate_mkldnn(func: OpOverload, flat_args: Sequence[object]) -> bool:
+    leaves = pytree.tree_leaves(flat_args)
+    if not any(
+        isinstance(arg, Tensor) and _is_mkldnn_tensor_arg(arg) for arg in leaves
+    ):
+        return False
+
+    tensor_args = [arg for arg in leaves if isinstance(arg, Tensor)]
+    mkldnn_args = [_is_mkldnn_tensor_arg(arg) for arg in tensor_args]
+    if not mkldnn_args[0]:
+        if _allows_mkldnn_auxiliary_tensors(func):
+            return False
+        raise RuntimeError("itensor_from_mkldnn expects MKL-DNN tensor input")
+    if any(not is_mkldnn for is_mkldnn in mkldnn_args) and not (
+        func in _MKLDNN_PROPAGATE_OPS or _allows_mkldnn_auxiliary_tensors(func)
+    ):
+        raise RuntimeError("itensor_from_mkldnn expects MKL-DNN tensor input")
+    if func in _MKLDNN_DENSE_OUTPUT_OPS:
+        return False
+    if func in _MKLDNN_METADATA_OPS:
+        return False
+    if func in _MKLDNN_SCALAR_ERROR_OPS and len(tensor_args) == 1:
+        raise RuntimeError("itensor_from_mkldnn expects MKL-DNN tensor input")
+    if func in _MKLDNN_PROPAGATE_OPS or _has_mkldnn_kernel(func):
+        return True
+    raise NotImplementedError(
+        f"Could not run '{func.name()}' with arguments from the 'MkldnnCPU' backend."
+    )
+
+
+@functools.cache
+def _has_mkldnn_kernel(func: OpOverload) -> bool:
+    try:
+        return torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), "MkldnnCPU")
+    except RuntimeError as e:
+        if "does not exist" in str(e):
+            return False
+        raise
+
+
 class FakeTensor(Tensor):
     """
     Meta tensors give you the ability to run PyTorch code without having to
@@ -811,6 +1009,7 @@ class FakeTensor(Tensor):
     """
 
     _fake_device: torch.device
+    _fake_is_mkldnn: bool
     fake_mode: FakeTensorMode
     constant: Tensor | None
     real_tensor: Tensor | None
@@ -843,7 +1042,9 @@ class FakeTensor(Tensor):
     @property
     # pyrefly: ignore [bad-override]
     def is_mkldnn(self) -> bool:
-        return _dispatch_keys_has_mkldnn(self.dispatch_keys)
+        return bool(
+            getattr(self, "_fake_is_mkldnn", False)
+        ) or _dispatch_keys_has_mkldnn(self.dispatch_keys)
 
     @property
     # pyrefly: ignore [bad-override]
@@ -928,6 +1129,7 @@ class FakeTensor(Tensor):
         fake_mode: FakeTensorMode | None = None,
         fake_device: torch.device | str | None = None,
         _fake_device: torch.device | str | None = None,
+        _fake_is_mkldnn: bool = False,
         requires_grad: bool | None = None,
         _is_param: bool = False,
         **state: Unpack[_FakeTensorConstructorIgnoredState],
@@ -1023,6 +1225,9 @@ class FakeTensor(Tensor):
                 )
         self.fake_device = device
         self.fake_mode = fake_mode
+        self._fake_is_mkldnn = _fake_is_mkldnn
+        if _fake_is_mkldnn and cls is FakeTensor:
+            _mark_fake_tensor_mkldnn(self)
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
@@ -1071,6 +1276,194 @@ class FakeTensor(Tensor):
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
         return fake_mode.from_tensor(t)
+
+    @classmethod
+    def _mkldnn_torch_function(
+        cls,
+        func: object,
+        types: Sequence[type],
+        args: Sequence[object] = (),
+        kwargs: Mapping[str, object] | None = None,
+    ) -> object:
+        kwargs = kwargs or {}
+
+        if func is torch.Tensor.dim_order:
+            input_arg = args[0]
+            if not isinstance(input_arg, FakeTensor):
+                return super().__torch_function__(func, types, args, kwargs)
+            return _fake_tensor_dim_order(
+                input_arg,
+                ambiguity_check=cast(
+                    bool | list[torch.memory_format],
+                    kwargs.get("ambiguity_check", False),
+                ),
+            )
+
+        if func is aten.item.default:
+            return super().__torch_function__(func, types, args, kwargs)
+
+        input_arg = (
+            args[0] if len(args) > 0 else kwargs.get("input", kwargs.get("self"))
+        )
+        is_mkldnn_fake = isinstance(input_arg, FakeTensor) and bool(
+            getattr(input_arg, "_fake_is_mkldnn", False)
+        )
+
+        if is_mkldnn_fake:
+            missing = object()
+
+            def get_arg(
+                index: int, names: tuple[str, ...], default: object = missing
+            ) -> object:
+                if len(args) > index:
+                    return args[index]
+                for name in names:
+                    if name in kwargs:
+                        return kwargs[name]
+                return default
+
+            input_ = cast(FakeTensor, input_arg)
+            if func in (
+                torch.nn.functional.max_pool2d,
+                torch.max_pool2d,
+                aten.max_pool2d.default,
+            ):
+                return_indices = get_arg(6, ("return_indices",), False)
+                if not return_indices:
+                    kernel_size = get_arg(1, ("kernel_size",))
+                    stride = get_arg(2, ("stride",), None)
+                    padding = get_arg(3, ("padding",), 0)
+                    dilation = get_arg(4, ("dilation",), 1)
+                    ceil_mode = get_arg(5, ("ceil_mode",), False)
+                    if stride is None:
+                        stride = ()
+                    with torch._C.DisableTorchFunctionSubclass():
+                        return aten.mkldnn_max_pool2d.default(
+                            input_, kernel_size, stride, padding, dilation, ceil_mode
+                        )
+
+            if func in (
+                torch.nn.functional.max_pool3d,
+                torch.max_pool3d,
+                aten.max_pool3d.default,
+            ):
+                return_indices = get_arg(6, ("return_indices",), False)
+                if not return_indices:
+                    kernel_size = get_arg(1, ("kernel_size",))
+                    stride = get_arg(2, ("stride",), None)
+                    padding = get_arg(3, ("padding",), 0)
+                    dilation = get_arg(4, ("dilation",), 1)
+                    ceil_mode = get_arg(5, ("ceil_mode",), False)
+                    if stride is None:
+                        stride = ()
+                    with torch._C.DisableTorchFunctionSubclass():
+                        return aten.mkldnn_max_pool3d.default(
+                            input_, kernel_size, stride, padding, dilation, ceil_mode
+                        )
+
+            if func in (torch.reshape, torch.Tensor.reshape, aten.reshape.default):
+                if len(args) > 1:
+                    shape = args[1:]
+                else:
+                    shape_arg = get_arg(1, ("shape",))
+                    if shape_arg is missing:
+                        return super().__torch_function__(func, types, args, kwargs)
+                    shape = (shape_arg,)
+                if len(shape) == 1 and isinstance(shape[0], (list, tuple, torch.Size)):
+                    shape = tuple(shape[0])
+                with torch._C.DisableTorchFunctionSubclass():
+                    return aten._mkldnn_reshape.default(input_, shape)
+
+            if func in (torch.flatten, torch.Tensor.flatten, aten.flatten.using_ints):
+                # Calling aten.flatten here would decompose through view before
+                # FakeTensor sees the pre-decomposition mkldnn handler.
+                shape = _mkldnn_flatten_shape(
+                    input_,
+                    cast(int, get_arg(1, ("start_dim",), 0)),
+                    cast(int, get_arg(2, ("end_dim",), -1)),
+                )
+                if shape is None:
+                    return input_
+                with torch._C.DisableTorchFunctionSubclass():
+                    return aten._mkldnn_reshape.default(input_, shape)
+
+            if func in (
+                torch.Tensor.to_dense,
+                aten.to_dense.default,
+            ):
+                dtype = get_arg(1, ("dtype",), None)
+                masked_grad = get_arg(2, ("masked_grad",), None)
+                with torch._C.DisableTorchFunctionSubclass():
+                    return aten._to_dense.default(input_, dtype, masked_grad)
+
+            if func in (torch.Tensor.clone, torch.clone, aten.clone.default):
+                explicit_memory_format = len(args) > 1 or "memory_format" in kwargs
+                memory_format = get_arg(1, ("memory_format",), None)
+                if (
+                    explicit_memory_format
+                    and memory_format is not None
+                    and not input_.fake_mode.in_kernel_invocation
+                ):
+                    memory_format_name = cast(
+                        dict[object, str],
+                        {
+                            torch.contiguous_format: "Contiguous",
+                            torch.preserve_format: "Preserve",
+                            torch.channels_last: "ChannelsLast",
+                            torch.channels_last_3d: "ChannelsLast3d",
+                        },
+                    ).get(memory_format, str(memory_format))
+                    raise RuntimeError(
+                        f"unsupported memory format option {memory_format_name}"
+                    )
+                with torch._C.DisableTorchFunctionSubclass():
+                    output = aten.clone.default(input_, memory_format=memory_format)
+                if isinstance(output, FakeTensor):
+                    _mark_fake_tensor_mkldnn(output)
+                return output
+
+            if func in (torch.Tensor.permute, torch.permute, aten.permute.default):
+                raise NotImplementedError("aten::as_strided")
+
+            if func in (
+                torch.Tensor.is_contiguous,
+                aten.is_contiguous.default,
+                aten.is_contiguous.memory_format,
+            ):
+                memory_format = get_arg(1, ("memory_format",), torch.contiguous_format)
+                return memory_format in (
+                    torch.contiguous_format,
+                    torch.preserve_format,
+                )
+
+            if func is aten.is_non_overlapping_and_dense.default:
+                return True
+
+            if func in (torch.Tensor.sigmoid, torch.sigmoid):
+                with torch._C.DisableTorchFunctionSubclass():
+                    output = aten.sigmoid.default(input_)
+                if isinstance(output, FakeTensor):
+                    _mark_fake_tensor_mkldnn(output)
+                return output
+
+        if any(
+            torch_function_type is not torch.Tensor
+            and not issubclass(torch_function_type, cls)
+            for torch_function_type in types
+        ):
+            return NotImplemented
+
+        with torch._C.DisableTorchFunctionSubclass():
+            output = cast(Any, func)(*args, **kwargs)
+        if isinstance(func, torch._ops.OpOverload) and _should_propagate_mkldnn(
+            func, (args, kwargs)
+        ):
+            output_tensors = [
+                out for out in pytree.tree_leaves(output) if isinstance(out, FakeTensor)
+            ]
+            if len(output_tensors) == 1:
+                _mark_fake_tensor_mkldnn(output_tensors[0])
+        return output
 
     @classmethod
     @count
@@ -1292,6 +1685,25 @@ class FakeTensor(Tensor):
             return [elem.item() for elem in self]
         else:
             return [elem.tolist() for elem in self]
+
+
+class MkldnnFakeTensor(FakeTensor):
+    @classmethod
+    def __torch_function__(
+        cls,
+        func: object,
+        types: Sequence[type],
+        args: Sequence[object] = (),
+        kwargs: Mapping[str, object] | None = None,
+    ) -> object:
+        return cls._mkldnn_torch_function(func, types, args, kwargs)
+
+
+def _mark_fake_tensor_mkldnn(t: FakeTensor) -> FakeTensor:
+    t._fake_is_mkldnn = True
+    if type(t) is FakeTensor:
+        t.__class__ = MkldnnFakeTensor
+    return t
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
@@ -1626,7 +2038,7 @@ class FakeTensorMode(TorchDispatchMode):
     # to distinguish between our fake tensor and other fake tensors.  That's
     # what this function does.
     def is_our_fake(self, t: object) -> TypeGuard[FakeTensor]:
-        return isinstance(t, FakeTensor) and t.fake_mode is self
+        return isinstance(t, FakeTensor) and getattr(t, "fake_mode", None) is self
 
     # If we should avoid device init. This changes the behavior of various APIs:
     # - We avoid constant-prop on Tensors with ops that move them to another device
@@ -2004,10 +2416,10 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("not our fake")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
-                if is_sparse_any(arg):
-                    raise _BypassDispatchCache(f"{arg.layout} tensor")
                 if arg.is_mkldnn:
                     raise _BypassDispatchCache("mkldnn tensor")
+                if is_sparse_any(arg):
+                    raise _BypassDispatchCache(f"{arg.layout} tensor")
                 metadata = extract_tensor_metadata(arg)
                 metadata._flatten_into(result, self, state)
             elif isinstance(arg, Tensor):
@@ -3002,6 +3414,15 @@ class FakeTensorMode(TorchDispatchMode):
                 # TODO: Is this really needed?
                 compute_unbacked_bindings(self.shape_env, fake_out, peek=True)
 
+            if _should_propagate_mkldnn(func, flat_args):
+                output_tensors = [
+                    out
+                    for out in pytree.tree_leaves(fake_out)
+                    if isinstance(out, FakeTensor)
+                ]
+                if len(output_tensors) == 1:
+                    _mark_fake_tensor_mkldnn(output_tensors[0])
+
             return fake_out
 
         # Try for fastpath
@@ -3022,6 +3443,12 @@ class FakeTensorMode(TorchDispatchMode):
             )
             if op_impl_out is not NotImplemented:
                 return maybe_propagate_real_tensors(cast(FakeTensor, op_impl_out))
+
+        pre_decomposition_impl = get_pre_decomposition_op_impls().get(func)
+        if pre_decomposition_impl is not None:
+            op_impl_out = pre_decomposition_impl(self, func, *args, **kwargs)
+            if op_impl_out is not NotImplemented:
+                return maybe_propagate_real_tensors(op_impl_out)
 
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table
@@ -3280,6 +3707,12 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             input_dispatch_keys = flat_args[0].dispatch_keys
             preserve_dispatch_keys = input_dispatch_keys is not None
+        propagate_mkldnn = _should_propagate_mkldnn(func, flat_args)
+        if propagate_mkldnn:
+            output_tensors = [
+                out for out in pytree.tree_leaves(r) if isinstance(out, Tensor)
+            ]
+            propagate_mkldnn = len(output_tensors) == 1
 
         def wrap(e: T) -> T | FakeTensor:
             nonlocal common_device
@@ -3302,6 +3735,8 @@ class FakeTensorMode(TorchDispatchMode):
                 )
                 if preserve_dispatch_keys:
                     e.dispatch_keys = input_dispatch_keys
+                if propagate_mkldnn:
+                    _mark_fake_tensor_mkldnn(e)
                 return cast(T, e)
             elif converter is not None:
                 if has_scalar_only_inputs:
@@ -3315,6 +3750,8 @@ class FakeTensorMode(TorchDispatchMode):
                     )
                 if preserve_dispatch_keys:
                     out.dispatch_keys = input_dispatch_keys
+                if propagate_mkldnn:
+                    _mark_fake_tensor_mkldnn(out)
                 return out
             else:
                 # pyrefly: ignore [bad-return]
@@ -3721,6 +4158,7 @@ from torch._subclasses.fake_impls import (  # noqa: F401
     _like_tensor_constructors,
     contains_tensor_types,
     get_fast_op_impls,
+    get_pre_decomposition_op_impls,
     has_meta,
     maybe_to_dense_mkldnn,
     op_implementations_checks,
