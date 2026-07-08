@@ -409,7 +409,11 @@ def fn():
             self.assertIsNone(inst.starts_line)
             if inst.opname.startswith("LOAD"):
                 self.assertNotIn(inst.argval, varname_map)
-                if inst.opname not in ("LOAD_GLOBAL", "LOAD_ATTR", "LOAD_COMMON_CONSTANT"):
+                if inst.opname not in (
+                    "LOAD_GLOBAL",
+                    "LOAD_ATTR",
+                    "LOAD_COMMON_CONSTANT",
+                ):
                     self.assertIsNone(inst.arg)
             self.assertFalse(inst.opname.startswith("RETURN"))
 
