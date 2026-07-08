@@ -101,7 +101,6 @@ jobs:
           { config: "inductor_torchbench_perf_cpu_x86_zen", shard: 4, num_shards: 4, runner: "linux.24xlarge.amd" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -121,7 +120,6 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit
@@ -140,7 +138,6 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
     secrets: inherit

@@ -46,7 +46,6 @@ jobs:
         { include: [
           { config: "inductor-micro-benchmark-cpu-x86", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.24xl.spr-metal", owners: ["oncall:pt2"] },
         ]}
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: cpu
@@ -63,7 +62,6 @@ jobs:
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
-      use-arc: true
       python-version: "3.10"
       compiler: gcc11
       cuda-version: cpu

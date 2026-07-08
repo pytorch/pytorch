@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, metrics
-from ..runtime.hints import DeviceProperties
+from ..runtime.hints import DeviceProperties, TritonMeta
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import (
     RoundRobinComboKernelGrid,
@@ -833,16 +833,21 @@ class ComboKernel(Kernel):
         for i, sub in enumerate(self.sub_kernels):
             self.min_x_blocks_sub_kernel(sub, i)
         self.select_dispatch_strategy()
-        triton_meta: dict[str, Any] = {
-            "signature": signature_to_meta(
-                signature, size_dtype=size_dtype, argdefs=argdefs
-            ),
-            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
-            "constants": {},
-            # Inherit enable_fp_fusion, launch_pdl, disable_ftz so combo kernels
-            # compile with the same Triton options as standalone kernels.
-            **TritonKernel.triton_meta_common(),
-        }
+        triton_meta: TritonMeta = cast(
+            TritonMeta,
+            {
+                "signature": signature_to_meta(
+                    signature, size_dtype=size_dtype, argdefs=argdefs
+                ),
+                "device": DeviceProperties.create(
+                    V.graph.get_current_device_or_throw()
+                ),
+                "constants": {},
+                # Inherit enable_fp_fusion, launch_pdl, disable_ftz so combo kernels
+                # compile with the same Triton options as standalone kernels.
+                **TritonKernel.triton_meta_common(),
+            },
+        )
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
