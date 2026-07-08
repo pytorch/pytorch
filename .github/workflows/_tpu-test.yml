@@ -1,4 +1,4 @@
-# Owner(s): ["module: ci"]
+# Owner(s): ["oncall: pt2"]
 name: tpu-test
 
 on:
