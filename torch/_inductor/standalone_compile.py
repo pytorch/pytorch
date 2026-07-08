@@ -38,6 +38,8 @@ if TYPE_CHECKING:
     from torch.compiler._cache import CacheInfo
     from torch.fx import GraphModule
 
+    from .output_code import OutputCode
+
 
 log = logging.getLogger(__name__)
 
@@ -588,6 +590,265 @@ def standalone_compile(
             )
 
     return CacheCompiledArtifact(compiled_fn, artifacts)
+
+
+class NoRunnableInductorModuleError(RuntimeError):
+    """Raised by ``compile_to_python`` when the graph yields no runnable Inductor
+    output module -- it has no compute to lower (returns inputs/constants unchanged),
+    so the compiled artifact carries no output-module source. Callers (e.g.
+    torch.compiler.precompile) convert this to a clear user-facing error suggesting an
+    alternative.
+    """
+
+
+def _runnable_source(compiled_graph: OutputCode) -> str:
+    """Return the Inductor output-module source for a compiled inner graph.
+
+    ``compile_fx_inner`` returns a ``CompiledFxGraph`` that carries the wrapper-module
+    source as ``source_code``. A graph with no compute (returns inputs/constants
+    unchanged) short-circuits to a boxed passthrough with no such source, which we
+    surface as ``NoRunnableInductorModuleError``.
+    """
+    source = getattr(compiled_graph, "source_code", None)
+    if not source:
+        raise NoRunnableInductorModuleError(
+            "the compiled graph produced no runnable Inductor output module: it has no "
+            "compute to lower (returns inputs/constants unchanged)."
+        )
+    return source
+
+
+def _placeholder_fake_inputs(gm: GraphModule) -> list[Any]:
+    """Return the fake ``val`` metadata of ``gm``'s placeholders -- the compile-time input
+    contract for a post-AOTAutograd graph. These fake tensors already carry the
+    AOTAutograd-decided static/symbolic shapes under one consistent ``FakeTensorMode``, so
+    lowering against them (rather than re-fakifying real ``example_inputs``) preserves
+    symbolic dims. A placeholder without ``val`` means ``gm`` was not traced under a
+    ``FakeTensorMode``, violating the post-AOTAutograd precondition."""
+    fake_inputs = []
+    for node in gm.graph.nodes:
+        if node.op != "placeholder":
+            continue
+        if "val" not in node.meta:
+            raise RuntimeError(
+                "compile_to_python placeholder has no fake ``val`` metadata; expected a "
+                "post-AOTAutograd graph traced under a FakeTensorMode."
+            )
+        fake_inputs.append(node.meta["val"])
+    return fake_inputs
+
+
+def _acceleration_cache_bytes(
+    artifacts: tuple[bytes, CacheInfo] | None,
+) -> bytes | None:
+    """Return the opaque cache-artifacts bundle that accelerates a later ``load_from_python``,
+    or ``None`` when nothing cacheable was produced (no compute) or caches are disabled.
+
+    This is a PURE ACCELERATOR, not a serialized callable. It is the raw
+    ``save_cache_artifacts()`` bundle (FxGraph entry + any triton/autotune cache);
+    ``load_from_python`` feeds it to ``load_cache_artifacts`` so that exec'ing the emitted
+    ``python_code`` loads the precompiled kernels instead of JIT-compiling them. The
+    ``python_code`` runs correctly without it, so it carries no key/header framing -- it is
+    handed straight back to ``load_cache_artifacts``.
+    """
+    if artifacts is None:
+        log.debug("no cache artifacts captured; no acceleration cache")
+        return None
+    artifact_bytes, _ = artifacts
+    return artifact_bytes
+
+
+def load_from_python(
+    python_code: str, cache: bytes | None = None
+) -> Callable[..., Any]:
+    """Load the module emitted by ``compile_to_python`` into a runnable ``call``.
+
+    ``python_code`` is self-contained: exec'ing it defines ``call`` and JIT-compiles the
+    inlined kernels on first use, so it runs with ``cache=None``. When ``cache`` (the
+    accelerator bundle from ``compile_to_python``) is provided, it is loaded FIRST so the
+    kernels load their precompiled binaries instead of recompiling -- a pure speedup, never
+    a correctness requirement. Mirrors ``compile_to_python``: (python_code, cache) in,
+    runnable ``call`` out.
+    """
+    if cache is not None:
+        torch.compiler.load_cache_artifacts(cache)
+    namespace: dict[str, Any] = {"__name__": "__compile_to_python__"}
+    exec(compile(python_code, "<compile_to_python>", "exec"), namespace)
+    call = namespace.get("call")
+    if not callable(call):
+        raise RuntimeError(
+            "compile_to_python module did not define a callable ``call``."
+        )
+    return call
+
+
+def compile_to_python(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    *,
+    options: dict[str, Any] | None = None,
+) -> tuple[str, bytes | None]:
+    """Compile ``gm`` and return ``(inner_python, cache)`` -- the INNER half of the
+    backend contract behind ``torch.compiler.precompile``.
+
+    This is an INTERNAL layered-contract entry point, not an end-user API. End users
+    should call ``torch.compiler.precompile``; this function only emits the inductor
+    piece of the artifact and assumes its caller (the AOT layer) wraps it. It lives in
+    ``torch._inductor`` (a private, leading-underscore module), so it is exposed for
+    the AOT layer to import, not as a stable public surface.
+
+    ``inner_python`` is the Inductor output module exposing ``call(args) -> outs``
+    for the post-AOTAutograd inner graph (dense, functionalized). It is the inductor
+    piece only: it carries NO prelude/epilogue (subclass flatten/unflatten, input-
+    mutation copy-back, output-alias regen, grad disabling). Those belong to the AOT
+    layer -- a companion change in ``torch._functorch.aot_autograd`` wraps this and
+    composes AOTAutograd's codegen'd runtime wrappers around the result.
+    Callers must run ``call`` under ``torch.no_grad()`` (the kernels use out= ops).
+
+    Caller preconditions (this layer does not re-derive them):
+
+    - ``gm`` is a post-AOTAutograd dense, functionalized inner graph (the dense
+      forward/backward AOTAutograd hands to its inductor backend), NOT a raw Dynamo
+      or pre-dispatch graph still carrying subclasses or autograd. Crucially it must be
+      DECOMPOSED against the inductor decomposition table: this function drives the
+      inductor codegen entry point directly, and inductor lowering asserts "both a
+      fallback and a decomp for same op" on an undecomposed op (e.g. ``aten._softmax``).
+    - Placeholders carry fake ``val`` metadata (the graph was traced under a
+      ``FakeTensorMode``); those fake tensors are the compile-time input contract.
+    - ``gm`` lowers to a runnable inductor output module. A graph with no compute
+      raises ``NoRunnableInductorModuleError``.
+
+    The compile lowers against the placeholders' fake ``val`` metadata, whose
+    static/symbolic shapes AOTAutograd already resolved, so the graph is the source of
+    truth for shapes -- there is no ``dynamic_shapes`` knob. ``example_inputs`` is accepted
+    for the backend-contract signature but is not re-fakified for the compile itself.
+
+    ``options`` is an optional inductor config-override dict (``None`` means no
+    overrides), the same shape as ``torch._inductor.compile``'s ``options``. The
+    keys are inductor config names: they are merged into the ``config.patch``
+    block this function already wraps the compile in, so they take effect as
+    config rather than being forwarded as ``compile_fx`` kwargs. The two
+    capture-critical pins below (``benchmark_harness``, ``cpp_wrapper``) always win
+    over a conflicting user option, since the source-capture contract depends on
+    them and a caller cannot be allowed to break the emitted module.
+
+    ``inner_python`` is self-contained: exec'ing it JIT-compiles the inlined kernels on
+    first use, so it runs with no cache. ``cache`` is a PURE ACCELERATOR -- the opaque
+    ``save_cache_artifacts()`` bundle; passing it to ``load_from_python`` warms the kernel
+    caches so exec loads the precompiled binaries instead of recompiling. It is ``None``
+    when the graph produced no cacheable module (no compute) or caches are disabled
+    (``force_disable_caches`` or ``fx_graph_cache=False``); ``inner_python`` still runs.
+
+    ``inner_python`` is read off the ``CompiledFxGraph`` that ``compile_fx_inner``
+    returns -- Inductor stashes the wrapper-module source on it as ``source_code`` -- so
+    it reflects the FINAL selected module on a cold compile, a warm cache restore, or with
+    caches disabled. No process-global codegen hook is involved, and the throwaway
+    max_autotune benchmark lowerings (which compile to their own modules during
+    autotuning) never become the returned graph, so nothing needs to be filtered out.
+    """
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise TypeError(
+            f"compile_to_python expects a post-AOTAutograd torch.fx.GraphModule, "
+            f"got {type(gm)}. This is an internal entry point wrapped by a higher AOT "
+            f"layer and is not meant to be called directly."
+        )
+    # The experimental TORCHINDUCTOR_FX_COMPILE_MODE=async+/progressive+ schemes make
+    # compile_fx return an _AsyncOutputCode/_ProgressiveOutputCode that carries only
+    # _boxed_call and never surfaces the wrapper ``source_code`` this contract reads off.
+    # These are module-level globals resolved from the env at import time, not
+    # config-patchable like the pins below, so detect them up front and fail with a
+    # distinct error instead of the no-compute NoRunnableInductorModuleError -- the graph
+    # is runnable, the async scheme just did not surface its source.
+    from torch._inductor import compile_fx as _compile_fx
+
+    if _compile_fx.fx_compile_async or _compile_fx.fx_compile_progressive:
+        raise RuntimeError(
+            "compile_to_python needs synchronous source capture and does not yet "
+            "support TORCHINDUCTOR_FX_COMPILE_MODE=async+/progressive+ (the async "
+            "output code does not surface the wrapper source)."
+        )
+    # Treat ``options`` as inductor config overrides and fold them into the same
+    # ``config.patch`` we wrap the compile in. ``keep_static_cubin_raw`` is defaulted True
+    # (BEFORE user options, so a caller can still trade it off for a smaller cache): its
+    # default False nulls the static-launcher raw cubin and relies on the cubin FILE being
+    # on disk, which holds for a same-machine warm cache but NOT the cold/cross-container
+    # load this cache targets -- keeping it lets ``load_from_python`` rehydrate the cubin
+    # from the bundle so the static CUDA launcher survives a fresh-dir load instead of
+    # silently falling back to the slower dynamic launch. The two output pins are applied
+    # AFTER the user options so they override any conflicting key: benchmark_harness=False
+    # keeps the emitted module runnable (no get_args()/benchmark_compiled_module()/__main__),
+    # and cpp_wrapper=False keeps it a python wrapper (the C++ backend emits a C++ ``call``
+    # we cannot inline). A caller must not be able to break either.
+    config_patches: dict[str, Any] = {"keep_static_cubin_raw": True}
+    if options is not None:
+        config_patches.update(options)
+    config_patches.update(
+        {
+            "benchmark_harness": False,
+            "cpp_wrapper": False,
+        }
+    )
+    # ``gm`` is a POST-AOTAutograd inner graph: already functionalized and decomposed
+    # against the inductor decomposition table. That precondition lets us drive the
+    # inductor codegen entry point (``compile_fx_inner``) DIRECTLY on the dense graph
+    # rather than re-entering AOTAutograd via ``standalone_compile``. Re-entry would only
+    # re-run decomposition -- a no-op on an already-decomposed graph -- and hand back an
+    # AOTAutograd-level cache artifact that belongs to the layer above; driving the inner
+    # compile keeps this at the inductor layer and yields the accelerator cache bundle that
+    # ``_acceleration_cache_bytes`` returns. (If ``gm`` is NOT decomposed against the
+    # inductor table, inductor lowering asserts "both a fallback and a decomp for same op"
+    # -- the precondition is load-bearing, not defensive.)
+    from torch._guards import detect_fake_mode, tracing, TracingContext
+    from torch.compiler._cache import CacheArtifactManager
+
+    from .compile_fx import compile_fx_inner
+    from .virtualized import V
+
+    # Own a copy: the collective rewrites and inductor may mutate the graph, and ``gm`` may
+    # carry a non-pickleable torchbind ProcessGroup smuggled through deepcopy as a shared
+    # reference (mirrors ``standalone_compile``). ``make_fx`` traces ``dist.*`` collectives
+    # as opaque ``c10d.{op}_`` calls; rewrite them to the ``_c10d_functional.{op}`` +
+    # ``wait_tensor`` form inductor recognizes and unbox torchbind ProcessGroups.
+    with _share_torchbind_and_process_group_on_deepcopy():
+        gm = copy.deepcopy(gm)
+    gm = _functionalize_inplace_collectives(gm)
+    gm = _unbox_process_group_torchbinds(gm)
+
+    # Lower against the placeholders' fake ``val`` metadata (the compile-time input
+    # contract, carrying the graph's static/symbolic shapes under one FakeTensorMode)
+    # rather than re-fakifying ``example_inputs``, which are real and would drop symbolic
+    # dims. A post-AOTAutograd graph's shapes are already baked into this metadata, so
+    # there is no separate dynamic-shapes knob.
+    fake_inputs = _placeholder_fake_inputs(gm)
+    fake_mode = detect_fake_mode(fake_inputs)
+    if fake_mode is None:
+        raise RuntimeError(
+            "compile_to_python could not detect a FakeTensorMode on the graph's "
+            "placeholders; expected a post-AOTAutograd graph traced under one."
+        )
+    # no_grad pins the inference path; autotune_at_compile_time keeps the emitted source
+    # self-contained (autotuning resolved at compile, not deferred to runtime). The fresh
+    # CacheArtifactManager isolates the cache bundle ``_acceleration_cache_bytes`` returns.
+    with (
+        torch.no_grad(),
+        config.patch(config_patches),
+        config.patch("triton.autotune_at_compile_time", True),
+        tracing(TracingContext(fake_mode)),
+        V.set_fake_mode(fake_mode),
+        CacheArtifactManager.with_fresh_cache(),
+    ):
+        compiled_graph = compile_fx_inner(
+            gm,
+            fake_inputs,
+            static_input_idxs=(),
+            cudagraphs=BoxedBool(False),
+            is_inference=True,
+            boxed_forward_device_index=BoxedDeviceIndex(None),
+        )
+        artifacts = torch.compiler.save_cache_artifacts()
+    inner_python = _runnable_source(compiled_graph)
+    cache = _acceleration_cache_bytes(artifacts)
+    return inner_python, cache
 
 
 def autograd_cache_key(

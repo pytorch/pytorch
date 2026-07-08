@@ -1987,6 +1987,7 @@ class TestFP8Matmul(TestCase):
         if sqnr.item() <= approx_match_sqnr_target:
             raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
         "a_eye_b_eye",
@@ -2619,6 +2620,7 @@ class TestFP8Matmul(TestCase):
                 self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
 
 
+    @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_mxfp8_compile(self, device) -> None:
 
@@ -2647,6 +2649,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 
+    @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_nvfp4_compile(self, device) -> None:
 
