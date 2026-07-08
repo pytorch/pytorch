@@ -944,23 +944,44 @@ def _threshold_impl(
     kernel_dtype: torch.dtype,
     result_dtype: torch.dtype,
 ) -> TensorLikeType:
-    other = prims.convert_element_type(a, kernel_dtype)
+    other = (
+        a if a.dtype == kernel_dtype else prims.convert_element_type(a, kernel_dtype)
+    )
     cmp: TensorLikeType = other
-    cmp_dtype = kernel_dtype
+    cmp_threshold: TensorLikeType | NumberType = threshold
     if utils.is_float_dtype(kernel_dtype) and utils.is_low_precision_dtype(
         kernel_dtype
     ):
         if a.device.type in ("cuda", "xpu", "mps"):
             # CUDA/XPU/MPS threshold kernels cast the scalar to the iterator dtype.
-            cmp_dtype = kernel_dtype
+            cmp_threshold = torch.scalar_tensor(
+                threshold, dtype=kernel_dtype, device=a.device
+            )
         else:
             # CPU threshold kernels compare reduced floating inputs in fp32.
-            cmp_dtype = torch.float32
-            cmp = prims.convert_element_type(a, torch.float32)
-    cmp_threshold = torch.scalar_tensor(threshold, dtype=cmp_dtype, device=a.device)
-    value_tensor = torch.scalar_tensor(value, dtype=kernel_dtype, device=a.device)
-    result = torch.where(cmp <= cmp_threshold, value_tensor, other)
-    return prims.convert_element_type(result, result_dtype)
+            cmp = (
+                a
+                if a.dtype == torch.float32
+                else prims.convert_element_type(a, torch.float32)
+            )
+            cmp_threshold = torch.scalar_tensor(
+                threshold, dtype=torch.float32, device=a.device
+            )
+    elif not utils.is_float_dtype(kernel_dtype):
+        cmp_threshold = torch.scalar_tensor(
+            threshold, dtype=kernel_dtype, device=a.device
+        )
+    value_arg: TensorLikeType | bool | int | float = value
+    if not utils.is_float_dtype(kernel_dtype) or utils.is_low_precision_dtype(
+        kernel_dtype
+    ):
+        value_arg = torch.scalar_tensor(value, dtype=kernel_dtype, device=a.device)
+    result = torch.where(cmp <= cmp_threshold, value_arg, other)
+    return (
+        result
+        if result_dtype == kernel_dtype
+        else prims.convert_element_type(result, result_dtype)
+    )
 
 
 @register_decomposition(aten.threshold.default)
