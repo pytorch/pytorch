@@ -123,6 +123,8 @@ class TestBwdGradients(TestGradients):
             skip("nn.functional.max_unpool3d"),
             xfail("cat"),
             xfail("nn.functional.ctc_loss", dtypes=(torch.float64,)),
+            xfail("nn.functional.linear_cross_entropy", variant_name="chunked_none"),
+            xfail("nn.functional.linear_cross_entropy", variant_name="chunked"),
             xfail("linalg.norm"),
             xfail("linalg.norm", variant_name="subgradients_at_zero"),
             skip("masked.logaddexp"),
