@@ -4839,26 +4839,24 @@ def is_utils_checkpoint(obj: Any) -> bool:
     return obj is torch.utils.checkpoint.checkpoint
 
 
-def is_utils_checkpoint_wrapped(obj: Any) -> TypeGuard[Callable[..., Any]]:
-    missing = object()
-    return (
-        callable(obj)
-        and inspect.getattr_static(obj, "_torch_checkpoint_wrapped_function", missing)
-        is not missing
-        and inspect.getattr_static(obj, "_torch_checkpoint_kwargs", missing)
-        is not missing
-    )
+class _CheckpointWrapped(typing.Protocol):
+    function: Callable[..., Any]
+    checkpoint_kwargs: dict[str, Any]
 
 
-class _CheckpointFactory(typing.Protocol):
-    _torch_checkpoint_kwargs: dict[str, Any]
+def is_utils_checkpoint_wrapped(obj: Any) -> TypeGuard[_CheckpointWrapped]:
+    import torch.utils.checkpoint
+
+    return isinstance(obj, torch.utils.checkpoint._CheckpointFunction)
 
 
-def is_checkpoint_factory(obj: Any) -> TypeGuard[_CheckpointFactory]:
-    missing = object()
+def is_checkpoint_factory(obj: Any) -> TypeGuard[functools.partial[Any]]:
+    import torch.utils.checkpoint
+
     return (
         isinstance(obj, functools.partial)
-        and getattr(obj, "_torch_checkpoint_kwargs", missing) is not missing
+        and obj.func is torch.utils.checkpoint._make_checkpoint_wrapper
+        and len(obj.args) == 0
     )
 
 

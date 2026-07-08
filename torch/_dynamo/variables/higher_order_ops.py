@@ -4489,10 +4489,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         from torch.utils.checkpoint import noop_context_fn
 
         context_fn = None
-        if (
-            "context_fn" in checkpoint_kwargs
-            and checkpoint_kwargs["context_fn"] is not noop_context_fn
-        ):
+        if "context_fn" in checkpoint_kwargs:
             ctx = checkpoint_kwargs.pop("context_fn")
             if isinstance(ctx, torch._dynamo.variables.UserFunctionVariable):
                 context_fn = ctx.fn
@@ -4500,10 +4497,14 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
                 context_fn = ctx.guard_as_python_constant()
+            elif isinstance(ctx, torch._dynamo.variables.functions.SkipFunctionVariable):
+                context_fn = ctx.value
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
                 )
+            if context_fn is noop_context_fn:
+                context_fn = None
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
