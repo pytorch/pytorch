@@ -57,7 +57,7 @@ def numpy_pin() -> str:
     if pin is None:
         sys.exit(
             f"Unsupported Python version {version}: add a numpy pin to "
-            "NUMPY_PINS in .ci/macwheel/build_install_deps.py"
+            "NUMPY_PINS in .ci/wheel/mac/build_install_deps.py"
         )
     return pin
 
