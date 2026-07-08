@@ -2393,13 +2393,109 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch._dynamo.reset()
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda._clear_cublas_workspaces()
+            torch._C._cuda_clearCublasWorkspaces()
         torch.accelerator.empty_cache()
         torch._dynamo.reset()
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda._clear_cublas_workspaces()
+            torch._C._cuda_clearCublasWorkspaces()
         torch.accelerator.empty_cache()
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @dtypes(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
+    @common_utils.parametrize("compiled", [False, True])
+    def test_unused_captured_score_mod_grad(self, device, dtype, compiled):
+        """Unused captured grad slots should propagate None through backward."""
+        B_local, H_local, S_local, D_local = 1, 4, 16, 64
+        make_input = functools.partial(
+            torch.randn,
+            (B_local, H_local, S_local, D_local),
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        q, k, v = make_input(), make_input(), make_input()
+        unused = torch.zeros(
+            (H_local, 2), device=device, dtype=dtype, requires_grad=True
+        )
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            _ = unused[h]
+            return score
+
+        attention = torch.compile(flex_attention) if compiled else flex_attention
+        attention(q, k, v, score_mod=score_mod).sum().backward()
+
+        self.assertIsNotNone(q.grad)
+        self.assertIsNotNone(k.grad)
+        self.assertIsNotNone(v.grad)
+        self.assertIsNone(unused.grad)
+        torch._dynamo.reset()
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @dtypes(torch.float16)
+    @dtypesIfCUDA(torch.float16)
+    @common_utils.parametrize("detach_temp", [False, True])
+    @expected_not_implemented_on_mps
+    def test_captured_0d_scalar_grad(self, device, dtype, detach_temp):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.temp = nn.Parameter(
+                    torch.tensor(0.7, device=device, dtype=torch.float32)
+                )
+
+            def forward(self, q, k, v):
+                temp = self.temp
+
+                def score_mod(score, b, h, q_idx, kv_idx):
+                    if detach_temp:
+                        return score + temp.detach()
+                    return score * temp + temp
+
+                return flex_attention(q, k, v, score_mod=score_mod)
+
+        torch.manual_seed(123)
+        shape = (1, 2, 16, 16)
+        q = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        grad = torch.randn(shape, device=device, dtype=dtype)
+        q2 = q.detach().clone().requires_grad_()
+        k2 = k.detach().clone().requires_grad_()
+        v2 = v.detach().clone().requires_grad_()
+        m1 = M()
+        m2 = M()
+        m2.load_state_dict(m1.state_dict())
+
+        out1 = m1(q, k, v)
+        out1.backward(grad)
+        out2 = torch.compile(m2)(q2, k2, v2)
+        out2.backward(grad)
+        if device == "cuda":
+            torch.cuda.synchronize()
+
+        pairs = [
+            (out1, out2),
+            (q.grad, q2.grad),
+            (k.grad, k2.grad),
+            (v.grad, v2.grad),
+        ]
+        if detach_temp:
+            self.assertIsNone(m1.temp.grad)
+            self.assertIsNone(m2.temp.grad)
+        else:
+            self.assertIsNotNone(m1.temp.grad)
+            self.assertIsNotNone(m2.temp.grad)
+            pairs.append((m1.temp.grad, m2.temp.grad))
+        for a, b in pairs:
+            self.assertEqual(a, b, atol=1e-2, rtol=1e-2)
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -3832,7 +3928,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         _, code = run_and_get_code(func, q, k, v, _identity)
         # Ensure that we're still generating the flexattention kernel
-        FileCheck().check_count(".run(primals_1, primals_2, primals_3", 1, True).run(
+        FileCheck().check_count(".run(primals_2, primals_1, primals_3", 1, True).run(
             code[0]
         )
 
@@ -5691,34 +5787,34 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_query_: "f64[2, 2, 128, 4]", L_key_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
-        l_query_ = L_query_
-        l_key_ = L_key_
-        l_value_ = L_value_
+    def forward(self, L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_key_: "f64[2, 2, 128, 4]", L_query_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]"):
+        l_block_mask_full_kv_indices = L_block_mask_full_kv_indices
+        l_block_mask_full_kv_num_blocks = L_block_mask_full_kv_num_blocks
+        l_block_mask_full_q_indices = L_block_mask_full_q_indices
+        l_block_mask_full_q_num_blocks = L_block_mask_full_q_num_blocks
         l_block_mask_kv_indices = L_block_mask_kv_indices
         l_block_mask_kv_num_blocks = L_block_mask_kv_num_blocks
-        l_block_mask_full_kv_num_blocks = L_block_mask_full_kv_num_blocks
-        l_block_mask_full_kv_indices = L_block_mask_full_kv_indices
-        l_block_mask_q_num_blocks = L_block_mask_q_num_blocks
         l_block_mask_q_indices = L_block_mask_q_indices
-        l_block_mask_full_q_num_blocks = L_block_mask_full_q_num_blocks
-        l_block_mask_full_q_indices = L_block_mask_full_q_indices
+        l_block_mask_q_num_blocks = L_block_mask_q_num_blocks
+        l_key_ = L_key_
+        l_query_ = L_query_
+        l_value_ = L_value_
 
-        score_mod_0 = self.score_mod_0
         mask_fn_0 = self.mask_fn_0
+        score_mod_0 = self.score_mod_0
         flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, None, None, None, None, 128, 128, mask_fn_0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
-        out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
-        return (out,)
-
-    class score_mod_0(torch.nn.Module):
-        def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
-            mul: "f64[]" = child * child;  child = None
-            return mul
+        getitem: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
+        return (getitem,)
 
     class mask_fn_0(torch.nn.Module):
         def forward(self, child: "i32[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]"):
             ge: "b8[]" = child_2 >= child_3;  child_2 = child_3 = None
             return ge
+
+    class score_mod_0(torch.nn.Module):
+        def forward(self, child: "f64[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]", child_4: "i32[]"):
+            mul: "f64[]" = child * child;  child = None
+            return mul
 """,
         )
         # Save the AOT graphs
@@ -5741,15 +5837,15 @@ class GraphModule(torch.nn.Module):
             joint_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
+    def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1, 1]", convert_element_type_1: "i32[1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, None, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, None, None, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_2, primals_1, primals_3, getitem_2, getitem_3, tangents_1, None, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type_1, convert_element_type, None, None, None, None, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_2 = primals_1 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type_1 = convert_element_type = mask_graph0 = None
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_7: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
-        return (getitem_5, getitem_6, getitem_7)
+        return (getitem_6, getitem_5, getitem_7)
 
     class fw_graph0(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]"):
@@ -7119,6 +7215,22 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
+
+    @supported_platform
+    def test_block_mask_sparsity_with_partial_block(self, device):
+        document_id = torch.zeros(100, dtype=torch.int, device=device)
+        document_id[10:20] = 1
+        for i in range(20, 100, 20):
+            document_id[i : i + 20] = i // 20 + 1
+
+        def document_causal_mask(b, h, q_idx, kv_idx):
+            causal_mask = q_idx >= kv_idx
+            document_mask = document_id[q_idx] == document_id[kv_idx]
+            return causal_mask & document_mask
+
+        block_mask = create_block_mask(document_causal_mask, 1, 1, 100, 100, device)
+        self.assertEqual(block_mask.sparsity(), 0.0)
+        self.assertTrue("sparsity=0.00%" in str(block_mask))
 
     @supported_platform
     def test_adjust_block_mask_ignores_entries_past_num_blocks(self, device):
