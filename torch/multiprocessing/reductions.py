@@ -565,14 +565,32 @@ def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
     return storage._shared_decref()
 
 
-def rebuild_storage_xpu(cls, device, handle, event, size_bytes, offset_bytes):
+def rebuild_storage_xpu(
+    cls,
+    device,
+    handle,
+    event,
+    ref_counter_handle,
+    ref_counter_offset,
+    size_bytes,
+    offset_bytes,
+):
     cache_key = (handle, offset_bytes)
     storage: torch.TypedStorage | torch.UntypedStorage = storage_from_cache(
         cls, cache_key
     )
     if storage is not None:
+        cls._release_ipc_counter_xpu(ref_counter_handle, ref_counter_offset)
         return storage
-    storage = cls._new_shared_xpu(device, handle, event, size_bytes, offset_bytes)
+    storage = cls._new_shared_xpu(
+        device,
+        handle,
+        event,
+        ref_counter_handle,
+        ref_counter_offset,
+        size_bytes,
+        offset_bytes,
+    )
     shared_cache[cache_key] = StorageWeakRef(storage)
     return storage
 
@@ -622,9 +640,25 @@ def reduce_storage(storage):
         # (with size 0) cannot be mmapped.
         return (rebuild_storage_empty, (type(storage),))
     elif storage.device.type == "xpu":
-        device, handle, event, size_bytes, offset_bytes = storage._share_xpu_()
+        (
+            device,
+            handle,
+            event,
+            ref_counter_handle,
+            ref_counter_offset,
+            size_bytes,
+            offset_bytes,
+        ) = storage._share_xpu_()
         cache_key = (handle, offset_bytes)
-        metadata = (device, handle, event, size_bytes, offset_bytes)
+        metadata = (
+            device,
+            handle,
+            event,
+            ref_counter_handle,
+            ref_counter_offset,
+            size_bytes,
+            offset_bytes,
+        )
         rebuild = rebuild_storage_xpu  # type: ignore[assignment]
     else:
         fd, size = storage._share_fd_cpu_()

@@ -41,7 +41,10 @@
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <atomic>
+#include <mutex>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
@@ -647,12 +650,263 @@ static PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
 #ifdef USE_XPU
 namespace {
 
+inline constexpr int64_t XPU_IPC_REF_COUNTER_FILE_SIZE = 10000;
+inline constexpr int64_t XPU_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
+
+struct XpuIPCRefCountersFile final {
+  XpuIPCRefCountersFile(std::string handle, uint64_t size, at::DataPtr data_ptr)
+      : size_(size), handle_(std::move(handle)), refcounted_shared_mem_(std::move(data_ptr)) {}
+
+  uint64_t* counter_ptr() {
+    return static_cast<uint64_t*>(refcounted_shared_mem_.get()) + next_offset_;
+  }
+
+  void set_counter(uint64_t value) {
+    *counter_ptr() = value;
+  }
+
+  bool have_offsets() {
+    return next_offset_ < size_;
+  }
+
+  bool offsets_in_use() {
+    return used_slots_;
+  }
+
+  uint64_t get_offset() {
+    return next_offset_;
+  }
+
+  void rotate_offset() {
+    next_offset_++;
+    used_slots_++;
+  }
+
+  void return_offset(uint64_t offset) {
+    (void)offset;
+    used_slots_--;
+  }
+
+  const std::string& handle() {
+    return handle_;
+  }
+
+ private:
+  uint64_t next_offset_{0};
+  uint64_t size_;
+  uint64_t used_slots_{0};
+  std::string handle_;
+  at::DataPtr refcounted_shared_mem_;
+};
+
+class XpuIPCSentData final {
+ public:
+  XpuIPCSentData(
+      std::string handle,
+      uint64_t offset,
+      uint64_t* counter_ptr,
+      at::Device device)
+      : handle_(std::move(handle)),
+        offset_(offset),
+        counter_ptr_(counter_ptr),
+        device_(device) {}
+
+  ~XpuIPCSentData();
+
+  uint64_t counter_value() {
+    return *counter_ptr_;
+  }
+
+  const std::string& handle() {
+    return handle_;
+  }
+
+  uint64_t offset() {
+    return offset_;
+  }
+
+  void set_original_ptr(at::DataPtr data_ptr) {
+    original_ptr_ = std::move(data_ptr);
+  }
+
+ private:
+  std::string handle_;
+  uint64_t offset_;
+  uint64_t* counter_ptr_;
+  at::DataPtr original_ptr_;
+  at::Device device_;
+};
+
+struct XpuIPCSentDataLimbo final {
+  bool collect() {
+    bool freed_memory = false;
+    std::vector<std::unique_ptr<XpuIPCSentData>> kept_blocks;
+    {
+      std::lock_guard<std::mutex> lock(limbo_mutex_);
+      kept_blocks.reserve(shared_blocks_.size());
+      for (auto& sd : shared_blocks_) {
+        if (sd->counter_value() > 0) {
+          kept_blocks.push_back(std::move(sd));
+        } else {
+          freed_memory = true;
+        }
+      }
+      shared_blocks_ = std::move(kept_blocks);
+    }
+    return freed_memory;
+  }
+
+  void add(std::unique_ptr<XpuIPCSentData> shared_block) {
+    std::lock_guard<std::mutex> lock(limbo_mutex_);
+    shared_blocks_.push_back(std::move(shared_block));
+    if (shared_blocks_.size() > XPU_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO) {
+      TORCH_WARN_ONCE(
+          "XPU IPC tensors waiting on refcount release exceeded ",
+          XPU_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO,
+          ". Consider ensuring consumers release shared tensors promptly.");
+    }
+  }
+
+  uint64_t size() {
+    std::lock_guard<std::mutex> lock(limbo_mutex_);
+    return shared_blocks_.size();
+  }
+
+ private:
+  std::vector<std::unique_ptr<XpuIPCSentData>> shared_blocks_;
+  std::mutex limbo_mutex_;
+};
+
+struct XpuIPCGlobalEntities final {
+  XpuIPCGlobalEntities() = default;
+
+  ~XpuIPCGlobalEntities() {
+    alive = false;
+  }
+
+  void safe_clean_current_file() {
+    std::lock_guard<std::mutex> lock(ref_counters_mutex_);
+    if (next_available_ref_counters_file_ &&
+        next_available_ref_counters_file_->offsets_in_use() == 0) {
+      ref_counters_files_.erase(next_available_ref_counters_file_->handle());
+      next_available_ref_counters_file_.reset();
+    }
+  }
+
+  static bool alive;
+  std::mutex ref_counters_mutex_;
+  std::unordered_map<std::string, std::shared_ptr<XpuIPCRefCountersFile>>
+      ref_counters_files_;
+  std::shared_ptr<XpuIPCRefCountersFile> next_available_ref_counters_file_;
+  XpuIPCSentDataLimbo limbo_;
+};
+
+bool XpuIPCGlobalEntities::alive = true;
+XpuIPCGlobalEntities xpu_ipc_global_entities;
+
+void ReturnXpuRefCounter(const std::string& handle, uint64_t offset) {
+  if (!XpuIPCGlobalEntities::alive) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(xpu_ipc_global_entities.ref_counters_mutex_);
+  auto& map = xpu_ipc_global_entities.ref_counters_files_;
+  auto it = map.find(handle);
+  if (it != map.end()) {
+    it->second->return_offset(offset);
+    if (it->second->offsets_in_use() == 0 && !it->second->have_offsets()) {
+      map.erase(handle);
+    }
+  }
+}
+
+XpuIPCSentData::~XpuIPCSentData() {
+  if (!XpuIPCGlobalEntities::alive) {
+    original_ptr_.release_context();
+  }
+  ReturnXpuRefCounter(handle_, offset_);
+}
+
+void XpuIPCSentDataDelete(void* ptr) {
+  std::unique_ptr<XpuIPCSentData> sent_data(static_cast<XpuIPCSentData*>(ptr));
+  if (!XpuIPCGlobalEntities::alive) {
+    return;
+  }
+  if (sent_data->counter_value() > 0) {
+    xpu_ipc_global_entities.limbo_.add(std::move(sent_data));
+  }
+  xpu_ipc_global_entities.limbo_.collect();
+}
+
+at::DataPtr GetNewRefCountedXpuSentData(void* data, at::Device device) {
+  {
+    std::lock_guard<std::mutex> lock(xpu_ipc_global_entities.ref_counters_mutex_);
+    if (!xpu_ipc_global_entities.next_available_ref_counters_file_) {
+      std::string ref_counter_handle = at::NewProcessWideShmHandle();
+      int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
+      at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
+          ref_counter_handle.c_str(),
+          flags,
+          sizeof(int64_t) * XPU_IPC_REF_COUNTER_FILE_SIZE,
+          nullptr);
+      auto rc = std::make_shared<XpuIPCRefCountersFile>(
+          ref_counter_handle,
+          XPU_IPC_REF_COUNTER_FILE_SIZE,
+          std::move(sptr));
+      xpu_ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
+      xpu_ipc_global_entities.next_available_ref_counters_file_ = rc;
+    }
+  }
+
+  xpu_ipc_global_entities.next_available_ref_counters_file_->set_counter(1);
+  auto sent_data = new XpuIPCSentData(
+      xpu_ipc_global_entities.next_available_ref_counters_file_->handle(),
+      xpu_ipc_global_entities.next_available_ref_counters_file_->get_offset(),
+      xpu_ipc_global_entities.next_available_ref_counters_file_->counter_ptr(),
+      device);
+
+  xpu_ipc_global_entities.next_available_ref_counters_file_->rotate_offset();
+  if (!xpu_ipc_global_entities.next_available_ref_counters_file_->have_offsets()) {
+    xpu_ipc_global_entities.next_available_ref_counters_file_.reset();
+  }
+  return at::DataPtr(data, sent_data, XpuIPCSentDataDelete, device);
+}
+
+bool XpuIPCCollect() {
+  if (!XpuIPCGlobalEntities::alive) {
+    return true;
+  }
+  bool freed_memory = xpu_ipc_global_entities.limbo_.collect();
+  if (xpu_ipc_global_entities.limbo_.size() == 0) {
+    xpu_ipc_global_entities.safe_clean_current_file();
+  }
+  return freed_memory;
+}
+
+void ReleaseXpuIPCRefCounter(const std::string& handle, ptrdiff_t offset) {
+  if (handle.empty()) {
+    return;
+  }
+  int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
+  try {
+    auto sptr = at::RefcountedMapAllocator::makeDataPtr(
+        handle.c_str(),
+        flags,
+        sizeof(int64_t) * XPU_IPC_REF_COUNTER_FILE_SIZE,
+        nullptr);
+    *(static_cast<int64_t*>(sptr.get()) + offset) -= 1;
+  } catch (c10::Error&) {
+  }
+  XpuIPCCollect();
+}
+
 struct XpuSharedStorageArgs {
   c10::DeviceIndex device;
   std::string handle;
   std::string event;
+  std::string ref_counter_handle;
   size_t storage_size;
   ptrdiff_t storage_offset_bytes;
+  ptrdiff_t ref_counter_offset;
 };
 
 class XpuIpcEvent {
@@ -839,10 +1093,12 @@ void markImportedStorage(c10::StorageImpl& storage) {
 }
 
 THPObjectPtr createXpuShareTuple(const at::Storage& storage) {
-  THPObjectPtr tuple(PyTuple_New(5));
+  THPObjectPtr tuple(PyTuple_New(7));
   THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
   THPObjectPtr handle(Py_NewRef(Py_None));
   THPObjectPtr event(PyBytes_FromStringAndSize(nullptr, 0));
+  THPObjectPtr ref_counter(Py_NewRef(Py_None));
+  THPObjectPtr ref_counter_offset(THPUtils_packInt32(0));
   THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
   THPObjectPtr offset_bytes(THPUtils_packInt32(0));
 
@@ -858,36 +1114,52 @@ THPObjectPtr createXpuShareTuple(const at::Storage& storage) {
     event = PyBytes_FromStringAndSize(
         event_handle.c_str(), static_cast<Py_ssize_t>(event_handle.size()));
     offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
+
+    at::DataPtr sent_data_ptr =
+        GetNewRefCountedXpuSentData(storage.mutable_data(), storage.device());
+    auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
+    auto sent_data =
+        static_cast<XpuIPCSentData*>(storage.data_ptr().get_context());
+    sent_data->set_original_ptr(std::move(old_data_ptr));
+    ref_counter = PyBytes_FromString(sent_data->handle().c_str());
+    ref_counter_offset = THPUtils_packUInt64(sent_data->offset());
   }
 
-  if (!tuple || !device || !handle || !event || !size_bytes || !offset_bytes) {
+  if (!tuple || !device || !handle || !event || !size_bytes || !offset_bytes ||
+      !ref_counter || !ref_counter_offset) {
     return {};
   }
 
   PyTuple_SET_ITEM(tuple.get(), 0, device.release());
   PyTuple_SET_ITEM(tuple.get(), 1, handle.release());
   PyTuple_SET_ITEM(tuple.get(), 2, event.release());
-  PyTuple_SET_ITEM(tuple.get(), 3, size_bytes.release());
-  PyTuple_SET_ITEM(tuple.get(), 4, offset_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 3, ref_counter.release());
+  PyTuple_SET_ITEM(tuple.get(), 4, ref_counter_offset.release());
+  PyTuple_SET_ITEM(tuple.get(), 5, size_bytes.release());
+  PyTuple_SET_ITEM(tuple.get(), 6, offset_bytes.release());
   return tuple;
 }
 
 bool parseXpuSharedStorageArgs(PyObject* args, XpuSharedStorageArgs& parsed) {
-  TORCH_CHECK(PyTuple_GET_SIZE(args) == 5, "tuple of 5 items expected");
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 7, "tuple of 7 items expected");
   PyObject* device = PyTuple_GET_ITEM(args, 0);
   PyObject* handle = PyTuple_GET_ITEM(args, 1);
   PyObject* event = PyTuple_GET_ITEM(args, 2);
-  PyObject* size_bytes = PyTuple_GET_ITEM(args, 3);
-  PyObject* offset_bytes = PyTuple_GET_ITEM(args, 4);
+  PyObject* ref_counter = PyTuple_GET_ITEM(args, 3);
+  PyObject* ref_counter_offset = PyTuple_GET_ITEM(args, 4);
+  PyObject* size_bytes = PyTuple_GET_ITEM(args, 5);
+  PyObject* offset_bytes = PyTuple_GET_ITEM(args, 6);
 
-  if (!(THPUtils_checkLong(device) && PyBytes_Check(handle) && PyBytes_Check(event) &&
-        THPUtils_checkLong(size_bytes) && THPUtils_checkLong(offset_bytes))) {
+  if (!(THPUtils_checkLong(device) && PyBytes_Check(handle) &&
+        PyBytes_Check(event) && PyBytes_Check(ref_counter) &&
+        THPUtils_checkLong(ref_counter_offset) && THPUtils_checkLong(size_bytes) &&
+        THPUtils_checkLong(offset_bytes))) {
     THPUtils_invalidArguments(
         args,
         nullptr,
         "_new_shared in XPU mode",
         1,
-        "(int device, bytes handle, bytes event, int storage_size_bytes, int storage_offset_bytes)");
+        "(int device, bytes handle, bytes event, bytes ref_counter, int ref_counter_offset, int storage_size_bytes, int storage_offset_bytes)");
     return false;
   }
 
@@ -910,6 +1182,16 @@ bool parseXpuSharedStorageArgs(PyObject* args, XpuSharedStorageArgs& parsed) {
     TORCH_CHECK(false, "Failed to extract IPC event bytes");
   }
   parsed.event = std::string(event_data, event_size);
+
+  char* ref_counter_data = nullptr;
+  Py_ssize_t ref_counter_size = 0;
+  if (PyBytes_AsStringAndSize(
+          ref_counter, &ref_counter_data, &ref_counter_size) == -1) {
+    TORCH_CHECK(false, "Failed to extract IPC ref-counter bytes");
+  }
+  parsed.ref_counter_handle = std::string(ref_counter_data, ref_counter_size);
+  parsed.ref_counter_offset =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(ref_counter_offset));
   return true;
 }
 
@@ -928,11 +1210,17 @@ c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
   struct XpuIpcDeleterContext {
     std::shared_ptr<void> base_ptr;
     XpuIpcEventRefGuard event_guard;
+    std::string ref_counter_handle;
+    ptrdiff_t ref_counter_offset{0};
+    c10::DeviceIndex device{-1};
   };
 
   auto ctx = std::make_unique<XpuIpcDeleterContext>();
   ctx->base_ptr = std::move(base_ptr);
   ctx->event_guard = std::move(event_guard);
+  ctx->ref_counter_handle = args.ref_counter_handle;
+  ctx->ref_counter_offset = args.ref_counter_offset;
+  ctx->device = args.device;
 
   void* dev_ptr = ctx->base_ptr.get();
   dev_ptr = static_cast<char*>(dev_ptr) + args.storage_offset_bytes;
@@ -943,6 +1231,12 @@ c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
       +[](void* ctx_) {
         std::unique_ptr<XpuIpcDeleterContext> ctx(
             static_cast<XpuIpcDeleterContext*>(ctx_));
+        ctx->base_ptr.reset();
+        if (ctx->device >= 0) {
+          c10::xpu::syncStreamsOnDevice(ctx->device);
+        }
+        ReleaseXpuIPCRefCounter(
+            ctx->ref_counter_handle, ctx->ref_counter_offset);
       },
       at::Device(at::DeviceType::XPU, args.device));
 
@@ -981,6 +1275,31 @@ static PyObject* THPStorage_shareXpu(PyObject* self, PyObject* noargs) {
   } catch (const c10::Error& e) {
     TORCH_CHECK(false, "Failed to get XPU IPC handle: ", e.what());
   }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_releaseIPCCounterXpu(
+    PyObject* _unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(PyTuple_GET_SIZE(args) == 2, "tuple of 2 items expected");
+  PyObject* ref_counter = PyTuple_GET_ITEM(args, 0);
+  PyObject* ref_counter_offset = PyTuple_GET_ITEM(args, 1);
+  if (!(PyBytes_Check(ref_counter) && THPUtils_checkLong(ref_counter_offset))) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "_release_ipc_counter_xpu in XPU mode",
+        1,
+        "(bytes ref_counter, int ref_counter_offset)");
+    return nullptr;
+  }
+
+  std::string ref_counter_handle = PyBytes_AS_STRING(ref_counter);
+  ptrdiff_t offset =
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(ref_counter_offset));
+  ReleaseXpuIPCRefCounter(ref_counter_handle, offset);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -1023,6 +1342,10 @@ static PyMethodDef THPStorage_sharingMethods[] = {
      THPStorage_newSharedXpu,
      METH_VARARGS | METH_STATIC,
      nullptr},
+  {"_release_ipc_counter_xpu",
+   THPStorage_releaseIPCCounterXpu,
+   METH_VARARGS | METH_STATIC,
+   nullptr},
 #endif
     {"_share_fd_cpu_", THPStorage_shareFd, METH_NOARGS, nullptr},
     {"_new_shared_fd_cpu",
