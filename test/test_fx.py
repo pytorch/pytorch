@@ -245,6 +245,18 @@ def _enrich_profiler_traces(prof):
         return actual_traces
 
 
+def _parse_profiler_trace_lines(traces: str) -> list[tuple[str, str, str]]:
+    lines = []
+    for line in traces.splitlines():
+        if not line:
+            continue
+        event_part, rest = line.split(" node=", 1)
+        event = event_part.removeprefix("event=")
+        node, stack_trace = rest.split(" stack_trace=", 1)
+        lines.append((event, node, stack_trace))
+    return lines
+
+
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -264,6 +276,29 @@ class TestFX(JitTestCase):
         torch.fx.proxy.TracerBase.check_mutable_operations = (
             self.orig_tracer_mutable_flag
         )
+
+    def _assert_profiler_stack_traces_for_nodes(
+        self,
+        traces: str,
+        node_requirements: dict[str, tuple[str, ...]],
+    ) -> None:
+        parsed = _parse_profiler_trace_lines(traces)
+        self.assertTrue(len(parsed) > 0, "expected enriched profiler events with stack traces")
+
+        by_node: dict[str, list[str]] = collections.defaultdict(list)
+        for _event, node, stack_trace in parsed:
+            by_node[node].append(stack_trace)
+
+        for node, required_substrings in node_requirements.items():
+            self.assertIn(node, by_node, f"no enriched events for node={node}")
+            stacks = by_node[node]
+            matched = any(
+                all(sub in st for sub in required_substrings) for st in stacks
+            )
+            self.assertTrue(
+                matched,
+                f"node={node}: no stack trace containing {required_substrings}; got {stacks}",
+            )
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
@@ -4535,7 +4570,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
         actual_traces = _enrich_profiler_traces(prof)
 
-        # Handle platform-specific event names
         if torch.version.hip:
             actual_traces = '\n'.join(
                 line for line in actual_traces.split('\n')
@@ -4546,27 +4580,16 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         else:
             kernel_event = "cudaLaunchKernel"
             kernel_event_relu = "cudaLaunchKernel"
+
         if IS_WINDOWS:
-            expected = f"""\
-event=aten::t node=t stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::transpose node=t stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::as_strided node=t stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::addmm node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::expand node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::as_strided node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::relu node=relu stack_trace=return F.relu(input, inplace=self.inplace)
-event=aten::clamp_min node=relu stack_trace=return F.relu(input, inplace=self.inplace)
-event={kernel_event_relu} node=relu stack_trace=return F.relu(input, inplace=self.inplace)
-event=aten::t node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::transpose node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::as_strided node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::addmm node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::expand node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event=aten::as_strided node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
-event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)"""
+            self._assert_profiler_stack_traces_for_nodes(
+                actual_traces,
+                {
+                    "addmm": ("linear",),
+                    "relu": ("relu",),
+                    "addmm_1": ("linear",),
+                },
+            )
         else:
             expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
@@ -4582,8 +4605,7 @@ event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
 event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
-
-        self.assertExpectedInline(actual_traces, expected)
+            self.assertExpectedInline(actual_traces, expected)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)

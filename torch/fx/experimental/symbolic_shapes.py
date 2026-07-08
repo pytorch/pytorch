@@ -60,7 +60,7 @@ from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtracking
 from torch._custom_class_base import CustomClassBase
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
@@ -1008,7 +1008,7 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
     elif val is None:
         pass
     # see Note: [Generator arguments in AOTDispatcher]
-    elif isinstance(val, torch.Generator) or is_opaque_value(val):
+    elif isinstance(val, torch.Generator) or is_custom_class_obj(val):
         pass
     elif isinstance(val, FakeScriptObject):
         pass
@@ -7501,31 +7501,24 @@ class ShapeEnv:
                     for s in diff.free_symbols
                     if (vr := range_env.get(s)) is not None
                 }
-                try:
-                    diff_range = bound_sympy(safe_expand(diff), comparison_ranges)
-                    if bool(diff_range.lower >= 0):
-                        le_cache[cache_key] = True
-                        return True
-                except (AttributeError, KeyError, NotImplementedError, TypeError):
-                    pass
-
-                comparison = sympy.Le(a, b)
-                if comparison is sympy.true:
-                    le_cache[cache_key] = True
-                    return True
-                if comparison is sympy.false:
-                    le_cache[cache_key] = False
-                    return False
-
-                try:
-                    out = bound_sympy(comparison, comparison_ranges)  # type: ignore[arg-type]
-                    if out.is_singleton() and out.lower is sympy.true:
-                        le_cache[cache_key] = True
-                        return True
-                except (AttributeError, KeyError, NotImplementedError, TypeError):
-                    pass
+                if comparison_ranges:
+                    try:
+                        diff_range = bound_sympy(safe_expand(diff), comparison_ranges)
+                        if bool(diff_range.lower >= 0):
+                            le_cache[cache_key] = True
+                            return True
+                    except (AttributeError, KeyError, NotImplementedError, TypeError):
+                        pass
 
                 if use_static_fallback:
+                    comparison = sympy.Le(a, b)
+                    if comparison is sympy.true:
+                        le_cache[cache_key] = True
+                        return True
+                    if comparison is sympy.false:
+                        le_cache[cache_key] = False
+                        return False
+
                     result = (
                         self._maybe_evaluate_static(
                             comparison,
