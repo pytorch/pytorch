@@ -22,6 +22,17 @@ class FrozenstSubclass(frozenset):
     pass
 
 
+class BadCmp:
+    # Elements collide on hash (so __eq__ runs during set insertion/lookup),
+    # and __eq__ raises so the error must propagate.  Mirrors CPython
+    # test_set.py BadCmp.
+    def __hash__(self):
+        return 1
+
+    def __eq__(self, other):
+        raise RuntimeError
+
+
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -86,6 +97,25 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(1)
         y = fn(x)
         self.assertEqual(y, x.sin())
+
+    def test_set_iterator_length_hint(self):
+        # setiter_len/dictiter_len: __length_hint__ returns the number of
+        # not-yet-consumed elements and decreases as the iterator advances.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            results = []
+            for obj in ({1, 2, 3}, {1: "a", 2: "b"}, {1: "a"}.values()):
+                it = iter(obj)
+                results.append(it.__length_hint__())
+                next(it)
+                results.append(it.__length_hint__())
+            results.append(iter(set()).__length_hint__())
+            return x.sin(), results
+
+        x = torch.randn(1)
+        y, results = fn(x)
+        self.assertEqual(y, x.sin())
+        self.assertEqual(results, [3, 2, 2, 1, 1, 0, 0])
 
     def test_do_not_rehash_dict_keys(self):
         # Building a set/frozenset (or subclass) from a dict must reuse the
@@ -379,6 +409,20 @@ class _FrozensetBase:
         self.assertEqual(p ^ p, self.thetype())
         self.assertEqual(p ^ q, self.thetype("acef"))
         self.assertEqual(self.thetype.__xor__(p, q), set("acef"))
+
+    @make_dynamo_test
+    def test_badcmp(self):
+        # A comparison error during insertion/lookup must propagate as the
+        # user exception.  For frozenset types hasattr(s, "add") is False, so
+        # the mutating block is skipped (regression: exact frozenset used to
+        # report hasattr(set, "add")).  Mirrors CPython test_set.py test_badcmp.
+        s = self.thetype([BadCmp()])
+        self.assertRaises(RuntimeError, self.thetype, [BadCmp(), BadCmp()])
+        self.assertRaises(RuntimeError, s.__contains__, BadCmp())
+        if hasattr(s, "add"):
+            self.assertRaises(RuntimeError, s.add, BadCmp())
+            self.assertRaises(RuntimeError, s.discard, BadCmp())
+            self.assertRaises(RuntimeError, s.remove, BadCmp())
 
     @make_dynamo_test
     def test_cmp_eq(self):
