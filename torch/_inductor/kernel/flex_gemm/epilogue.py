@@ -20,6 +20,8 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     grouped_reduce_dims_match,
     LOCAL_REDUCE_AUX_TENSORSSA_ERROR,
     local_reduce_block_compressed_shape,
+    LOCAL_REDUCE_BLOCK_FEED_MAIN_ERROR,
+    LOCAL_REDUCE_BLOCK_REDUCTION_ERROR,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     local_reduce_compressed_shape,
     LOCAL_REDUCE_CONTRACT_NODE_ERROR,
@@ -54,6 +56,7 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     has_local_reduce_store_source,
     is_shape_preserving_pointwise_node,
     iter_fx_node_inputs,
+    lower_block_tensorssa_reduce,
     lower_full_scalar,
     lower_getitem,
     lower_prepare_softmax_online,
@@ -184,7 +187,11 @@ class FlexGemmOutputLocalReducePlan:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.requires_physical_finalize or self.geometry.needs_physical_callbacks
+        return (
+            isinstance(self.geometry, FlexGemmBlockLocalReduceGeometry)
+            or self.requires_physical_finalize
+            or self.geometry.needs_physical_callbacks
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -916,6 +923,9 @@ def local_reduce_compressed_aux_plan(
         return None
     match contract:
         case FlexGemmBlockLocalReduceContract(geometry=geometry):
+            reduction = reduction_from_node(aux)
+            if reduction is None or reduction[4] not in ("max", "min", "sum", "mean"):
+                raise NotImplementedError(LOCAL_REDUCE_BLOCK_REDUCTION_ERROR)
             expected_aux_shape = local_reduce_block_compressed_shape(
                 output_meta.shape, geometry.group_m, geometry.group_n
             )
@@ -936,6 +946,8 @@ def local_reduce_feed_main_output_plan(
     feed_contract = common_local_reduce_feed_main_contract((output, *aux_outputs))
     if feed_contract is None:
         return None
+    if isinstance(feed_contract, FlexGemmBlockLocalReduceContract):
+        raise NotImplementedError(LOCAL_REDUCE_BLOCK_FEED_MAIN_ERROR)
     return FlexGemmOutputPlan(
         output,
         aux_outputs,
@@ -1041,7 +1053,11 @@ def materialize_flex_gemm_epilogue(
     gemm_op: torch._ops.OpOverload,
     outputs: FlexGemmOutputPlan,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
-) -> tuple[str, str, tuple[FlexGemmLocalReduceGeometry, ...]]:
+) -> tuple[
+    str,
+    str,
+    tuple[FlexGemmLocalReduceGeometry | FlexGemmBlockLocalReduceGeometry, ...],
+]:
     """Build the generated CuTeDSL epilogue callable from a classified FX body.
 
     Also returns the grouped TensorSSA fragment geometries the epilogue relies
@@ -1057,6 +1073,7 @@ def materialize_flex_gemm_epilogue(
         )
     }
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSAInfo] = {}
+    block_grouped_tensors: dict[torch.fx.Node, FlexGemmBlockLocalReduceGeometry] = {}
     local_reduce_store_sources: dict[torch.fx.Node, Any] = {}
     local_reduce_physical_reductions: dict[
         torch.fx.Node, FlexGemmPhysicalReduction
@@ -1141,18 +1158,28 @@ def materialize_flex_gemm_epilogue(
                         grouped_tensors,
                         local_reduce_store_sources,
                         node is local_reduce_feed_main_input,
+                        block_grouped_tensors,
                     )
                     if lowered_view is not None:
                         env[node] = lowered_view
                         continue
-                    lowered_reduce = lower_tensorssa_reduce(
+                    lowered_reduce = lower_block_tensorssa_reduce(
                         node,
                         env,
                         kernel,
-                        grouped_tensors,
+                        block_grouped_tensors,
                         local_reduce_store_sources,
                         local_reduce_physical_reductions,
                     )
+                    if lowered_reduce is None:
+                        lowered_reduce = lower_tensorssa_reduce(
+                            node,
+                            env,
+                            kernel,
+                            grouped_tensors,
+                            local_reduce_store_sources,
+                            local_reduce_physical_reductions,
+                        )
                     if lowered_reduce is not None:
                         if (
                             local_reduce_feed_main is not None
@@ -1232,6 +1259,11 @@ def materialize_flex_gemm_epilogue(
                         )
                         if grouped_info is not None:
                             grouped_tensors[node] = grouped_info
+                        block_geometry = propagate_block_grouped_geometry(
+                            node, block_grouped_tensors
+                        )
+                        if block_geometry is not None:
+                            block_grouped_tensors[node] = block_geometry
                     continue
                 raise NotImplementedError(
                     f"unsupported FlexGEMM epilogue node: {node.format_node()}"
@@ -1293,8 +1325,13 @@ def materialize_flex_gemm_epilogue(
         f"{body}    return {result}\n",
         tuple(
             OrderedSet(
-                FlexGemmLocalReduceGeometry(info.group_size, info.axis)
-                for info in grouped_tensors.values()
+                (
+                    *(
+                        FlexGemmLocalReduceGeometry(info.group_size, info.axis)
+                        for info in grouped_tensors.values()
+                    ),
+                    *block_grouped_tensors.values(),
+                )
             )
         ),
     )

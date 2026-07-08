@@ -21,11 +21,13 @@ from .constraints import (
     is_flex_gemm_partial_reduction_shape,
     LOCAL_REDUCE_AUX_METADATA_ERROR,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
-    LOCAL_REDUCE_BLOCK_KERNEL_ERROR,
+    LOCAL_REDUCE_BLOCK_CONFIG_ERROR,
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
     statically_known_shape_equal,
+    validate_flex_gemm_block_local_reduce_config,
     validate_flex_gemm_local_reduce_config,
+    validate_supported_local_reduce_block_groups,
 )
 
 
@@ -174,7 +176,9 @@ def flex_gemm_local_reduce_metas(
     if local_reduce is None:
         return ()
     if isinstance(local_reduce.geometry, FlexGemmBlockLocalReduceGeometry):
-        raise NotImplementedError(LOCAL_REDUCE_BLOCK_KERNEL_ERROR)
+        validate_supported_local_reduce_block_groups(
+            local_reduce.geometry.group_m, local_reduce.geometry.group_n
+        )
     if local_reduce.store_node is None:
         return ()
     local_reduce_meta = local_reduce.store_node.meta.get("val")
@@ -204,12 +208,19 @@ def flex_gemm_config_keys_for_local_reduce(
         gemm_config_key,
     )
 
+    def config_supports_geometry(config: Any, geometry: Any) -> bool:
+        if isinstance(geometry, FlexGemmBlockLocalReduceGeometry):
+            return validate_flex_gemm_block_local_reduce_config(
+                config, geometry.group_m, geometry.group_n
+            )
+        return validate_flex_gemm_local_reduce_config(
+            config, geometry.group, geometry.axis
+        )
+
     if not tuned:
         default_key = default_gemm_config_key(device, m, n)
         if all(
-            validate_flex_gemm_local_reduce_config(
-                dict(default_key), geometry.group, geometry.axis
-            )
+            config_supports_geometry(dict(default_key), geometry)
             for geometry in local_reduce_geometries
         ):
             return (default_key,)
@@ -218,13 +229,11 @@ def flex_gemm_config_keys_for_local_reduce(
     configs = candidate_configs
     for geometry in local_reduce_geometries:
         configs = tuple(
-            config
-            for config in configs
-            if validate_flex_gemm_local_reduce_config(
-                config, geometry.group, geometry.axis
-            )
+            config for config in configs if config_supports_geometry(config, geometry)
         )
         if not configs:
+            if isinstance(geometry, FlexGemmBlockLocalReduceGeometry):
+                raise NotImplementedError(LOCAL_REDUCE_BLOCK_CONFIG_ERROR)
             raise NotImplementedError(
                 flex_gemm_local_reduce_config_error(
                     candidate_configs,

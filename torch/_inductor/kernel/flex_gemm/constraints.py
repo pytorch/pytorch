@@ -126,9 +126,17 @@ LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR = (
     "FlexGEMM local reductions currently support only reductions over the "
     "innermost grouped dimension"
 )
-LOCAL_REDUCE_BLOCK_KERNEL_ERROR = (
-    "FlexGEMM 2-D block local reductions are not supported by the QUACK kernel yet"
+LOCAL_REDUCE_BLOCK_GROUP_ERROR = (
+    "FlexGEMM 2-D block local reductions currently support only 128x128 groups"
 )
+LOCAL_REDUCE_BLOCK_FEED_MAIN_ERROR = (
+    "FlexGEMM 2-D block local reductions cannot feed the main output yet"
+)
+LOCAL_REDUCE_BLOCK_CONFIG_ERROR = (
+    "FlexGEMM 2-D block local-reduce aux outputs require non-swap_ab configs "
+    "with tile_m=128 and tile_n=128"
+)
+LOCAL_REDUCE_BLOCK_REDUCTION_ERROR = "FlexGEMM 2-D block local reductions currently support only min/max/sum/mean store reductions"
 LOCAL_REDUCE_GROUPED_RESHAPE_ERROR = (
     "FlexGEMM local-reduce grouped reshape must split exactly one GEMM output dimension"
 )
@@ -333,6 +341,13 @@ def validate_local_reduce_block_groups(group_m: int, group_n: int) -> None:
         raise RuntimeError(LOCAL_REDUCE_GROUP_POSITIVE_ERROR)
 
 
+def validate_supported_local_reduce_block_groups(group_m: int, group_n: int) -> None:
+    """Limit the first block-store kernel slice to one CTA-local 128x128 block."""
+    validate_local_reduce_block_groups(group_m, group_n)
+    if group_m != 128 or group_n != 128:
+        raise NotImplementedError(LOCAL_REDUCE_BLOCK_GROUP_ERROR)
+
+
 def local_reduce_block_compressed_shape(
     shape: Sequence[Any], group_m: int, group_n: int
 ) -> tuple[Any, ...]:
@@ -371,6 +386,24 @@ def flex_gemm_local_reduce_config_fields(
                 config.cluster_m,
                 config.cluster_n,
             )
+
+
+def validate_flex_gemm_block_local_reduce_config(
+    config: Any, group_m: int, group_n: int
+) -> bool:
+    """Return whether a QuACK config can store one value per 128x128 CTA block."""
+    swap_ab, tile_m, tile_n, cluster_m, cluster_n = (
+        flex_gemm_local_reduce_config_fields(config)
+    )
+    return (
+        not swap_ab
+        and group_m == 128
+        and group_n == 128
+        and tile_m == 128
+        and tile_n == 128
+        and cluster_m == 1
+        and cluster_n == 1
+    )
 
 
 def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:

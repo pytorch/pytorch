@@ -138,8 +138,11 @@ class GemmActMixin(ComposableEpiMixin):
         ("tensor_epilogue_returns_aux", cutlass.Constexpr, False),
         ("tensor_epilogue_returns_local_reduce", cutlass.Constexpr, False),
         ("local_reduce_feeds_main", cutlass.Constexpr, False),
+        ("local_reduce_is_block", cutlass.Constexpr, False),
         ("local_reduce_group", cutlass.Constexpr, 0),
         ("local_reduce_axis", cutlass.Constexpr, 1),
+        ("local_reduce_group_m", cutlass.Constexpr, 0),
+        ("local_reduce_group_n", cutlass.Constexpr, 0),
     )
 
     @mlir_namedtuple
@@ -151,8 +154,11 @@ class GemmActMixin(ComposableEpiMixin):
         tensor_epilogue_returns_aux: cutlass.Constexpr[bool] = False
         tensor_epilogue_returns_local_reduce: cutlass.Constexpr[bool] = False
         local_reduce_feeds_main: cutlass.Constexpr[bool] = False
+        local_reduce_is_block: cutlass.Constexpr[bool] = False
         local_reduce_group: cutlass.Constexpr[int] = 0
         local_reduce_axis: cutlass.Constexpr[int] = 1
+        local_reduce_group_m: cutlass.Constexpr[int] = 0
+        local_reduce_group_n: cutlass.Constexpr[int] = 0
         local_reduce_combine_fn: cutlass.Constexpr[Optional[Callable]] = None
         local_reduce_finalize_fn: cutlass.Constexpr[Optional[Callable]] = None
         alpha: Optional[Float32 | cute.Tensor] = None
@@ -197,11 +203,17 @@ class GemmActMixin(ComposableEpiMixin):
         d["tensor_epilogue_returns_aux"] = args.tensor_epilogue_returns_aux
         d["tensor_epilogue_returns_local_reduce"] = args.tensor_epilogue_returns_local_reduce
         d["local_reduce_feeds_main"] = args.local_reduce_feeds_main
+        d["local_reduce_is_block"] = args.local_reduce_is_block
         d["local_reduce_group"] = args.local_reduce_group
         d["local_reduce_axis"] = args.local_reduce_axis
+        d["local_reduce_group_m"] = args.local_reduce_group_m
+        d["local_reduce_group_n"] = args.local_reduce_group_n
         self.local_reduce_feeds_main = args.local_reduce_feeds_main
+        self.local_reduce_is_block = args.local_reduce_is_block
         self.local_reduce_group = args.local_reduce_group
         self.local_reduce_axis = args.local_reduce_axis
+        self.local_reduce_group_m = args.local_reduce_group_m
+        self.local_reduce_group_n = args.local_reduce_group_n
         for key in ("mRowVecBroadcast", "mColVecBroadcast"):
             if key in self.concat_layout and key in d:
                 d[key] = layout_utils.concat_to_interleave(d[key], 1)
@@ -212,8 +224,10 @@ class GemmActMixin(ComposableEpiMixin):
         result = super().epi_smem_bytes(args, cta_tile_shape_mnk, epi_tile, warp_shape_mnk)
         if (
             args.mLocalReduce is not None
-            and args.local_reduce_axis == 0
-            and args.local_reduce_group > 32
+            and (
+                (args.local_reduce_axis == 0 and args.local_reduce_group > 32)
+                or args.local_reduce_is_block
+            )
         ):
             smem_warps = max((warp_shape_mnk[0] if warp_shape_mnk is not None else 1) - 1, 0)
             result += EpiSmemBytes(
@@ -652,6 +666,9 @@ def _compile_gemm_act(
     local_reduce_ndim,
     local_reduce_group,
     local_reduce_axis,
+    local_reduce_is_block,
+    local_reduce_group_m,
+    local_reduce_group_n,
     local_reduce_stride_divisibility,
     local_reduce_combine_key,
     local_reduce_finalize_key,
@@ -753,7 +770,13 @@ def _compile_gemm_act(
         fake_tensor(dtype, (1,), leading_dim=0, divisibility=1)
         for dtype in tensor_epilogue_scalar_dtypes
     ) or None
-    if local_reduce_dtype is not None and local_reduce_axis == 0:
+    if local_reduce_dtype is not None and local_reduce_is_block:
+        local_reduce_shape = (
+            (l, cute.sym_int(), cute.sym_int())
+            if local_reduce_ndim == 3
+            else (cute.sym_int(), cute.sym_int())
+        )
+    elif local_reduce_dtype is not None and local_reduce_axis == 0:
         local_reduce_shape = (
             (l, cute.sym_int(), n) if local_reduce_ndim == 3 else (cute.sym_int(), n)
         )
@@ -812,8 +835,11 @@ def _compile_gemm_act(
         tensor_epilogue_returns_aux=tensor_epilogue_returns_aux,
         tensor_epilogue_returns_local_reduce=tensor_epilogue_returns_local_reduce,
         local_reduce_feeds_main=local_reduce_feeds_main,
+        local_reduce_is_block=local_reduce_is_block,
         local_reduce_group=local_reduce_group,
         local_reduce_axis=local_reduce_axis,
+        local_reduce_group_m=local_reduce_group_m,
+        local_reduce_group_n=local_reduce_group_n,
         local_reduce_combine_fn=local_reduce_combine_fn,
         local_reduce_finalize_fn=local_reduce_finalize_fn,
         alpha=fake_scalar(alpha_mode, Float32),
@@ -894,6 +920,9 @@ def gemm_act(
     local_reduce_out: Optional[Tensor] = None,
     local_reduce_group: int = 0,
     local_reduce_axis: int = 1,
+    local_reduce_is_block: bool = False,
+    local_reduce_group_m: int = 0,
+    local_reduce_group_n: int = 0,
     local_reduce_combine_key: Optional[str] = None,
     local_reduce_finalize_key: Optional[str] = None,
     alpha: float | Tensor = 1.0,
@@ -1023,6 +1052,8 @@ def gemm_act(
             "tensor_epilogue_returns_local_reduce requires local_reduce_out and vice versa"
         )
     if local_reduce_feeds_main:
+        if local_reduce_is_block:
+            raise NotImplementedError("local_reduce_feeds_main does not support block local reductions")
         if local_reduce_axis != 0:
             raise NotImplementedError("local_reduce_feeds_main currently supports only axis 0")
         if local_reduce_group <= 0:
@@ -1043,18 +1074,35 @@ def gemm_act(
     if local_reduce_out is not None and tensor_epilogue_fn is None and tensor_epilogue_key is None:
         raise RuntimeError("local_reduce_out requires tensor_epilogue_fn")
     if local_reduce_out is not None:
-        if local_reduce_group <= 0:
-            raise RuntimeError("local_reduce_group must be positive")
-        if local_reduce_axis not in (0, 1):
-            raise RuntimeError("local_reduce_axis must be 0 or 1")
-        if (local_reduce_axis == 0 or local_reduce_group > 32) and (
-            local_reduce_combine_key is None or local_reduce_finalize_key is None
-        ):
-            raise RuntimeError(
-                "physical local reductions require generated local-reduce callback keys"
-            )
+        if local_reduce_is_block:
+            if local_reduce_group_m != 128 or local_reduce_group_n != 128:
+                raise NotImplementedError(
+                    "block local reductions currently support only 128x128 groups"
+                )
+            if tile_M != 128 or tile_N != 128 or cluster_M != 1 or cluster_N != 1:
+                raise NotImplementedError(
+                    "block local reductions require tile_M=128, tile_N=128, and cluster_M=cluster_N=1"
+                )
+            if local_reduce_combine_key is None or local_reduce_finalize_key is None:
+                raise RuntimeError(
+                    "physical local reductions require generated local-reduce callback keys"
+                )
+        else:
+            if local_reduce_group <= 0:
+                raise RuntimeError("local_reduce_group must be positive")
+            if local_reduce_axis not in (0, 1):
+                raise RuntimeError("local_reduce_axis must be 0 or 1")
+            if (local_reduce_axis == 0 or local_reduce_group > 32) and (
+                local_reduce_combine_key is None or local_reduce_finalize_key is None
+            ):
+                raise RuntimeError(
+                    "physical local reductions require generated local-reduce callback keys"
+                )
         if local_reduce_out.ndim != 3:
             raise NotImplementedError("QUACK local_reduce_out must be 3-D")
+    if local_reduce_is_block:
+        local_reduce_group = local_reduce_group_n
+        local_reduce_axis = 1
     concat_layout = tuple(sorted(concat_layout)) if concat_layout else ()
     local_reduce_dtype = (
         torch2cute_dtype_map[local_reduce_out.dtype]
@@ -1103,6 +1151,9 @@ def gemm_act(
         local_reduce_out.ndim if local_reduce_out is not None else 0,
         local_reduce_group,
         local_reduce_axis,
+        local_reduce_is_block,
+        local_reduce_group_m,
+        local_reduce_group_n,
         local_reduce_stride_divisibility,
         local_reduce_combine_key,
         local_reduce_finalize_key,
@@ -1144,8 +1195,11 @@ def gemm_act(
         tensor_epilogue_returns_aux=None,
         tensor_epilogue_returns_local_reduce=None,
         local_reduce_feeds_main=None,
+        local_reduce_is_block=None,
         local_reduce_group=None,
         local_reduce_axis=None,
+        local_reduce_group_m=None,
+        local_reduce_group_n=None,
         local_reduce_combine_fn=None,
         local_reduce_finalize_fn=None,
         alpha=scalar_arg(alpha, alpha_mode, Float32),
