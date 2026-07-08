@@ -9,7 +9,7 @@ import unittest
 from collections.abc import Callable, Sequence
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.distributed as dist
@@ -2349,6 +2349,23 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
 
 class TestMoriSdmaAllGather(TestCase):
     """Backend-level tests that do not require the ``mori`` runtime or GPUs."""
+
+    def test_missing_mori_dependency_error(self):
+        def import_module(name: str):
+            if name == "mori.shmem":
+                raise ModuleNotFoundError("No module named 'mori'", name="mori")
+            raise AssertionError(f"unexpected import: {name}")
+
+        comm = MoriSdmaAllGather()
+        group = SimpleNamespace(rank=lambda: 0, size=lambda: 1)
+        with patch(
+            "torch.distributed.fsdp._fully_shard._mori_sdma_allgather.importlib.import_module",
+            side_effect=import_module,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "requires the optional ROCm MORI Python package"
+            ):
+                comm._get_collective(group)
 
     def test_zero_copy_output_disabled(self):
         comm = MoriSdmaAllGather(zero_copy_output=False)

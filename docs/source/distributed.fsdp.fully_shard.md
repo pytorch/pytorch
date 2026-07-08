@@ -206,6 +206,9 @@ for module in modules:
     module.set_custom_all_gather(all_gather)
 ```
 
+`MoriSdmaAllGather` requires the optional ROCm MORI runtime/package and imports
+it lazily only when the backend is used.
+
 
 ```{eval-rst}
 .. currentmodule:: torch.distributed.fsdp

@@ -283,8 +283,17 @@ class MoriSdmaAllGather(AllGather):
         ):
             return self._collective
 
-        shmem = importlib.import_module("mori.shmem")
-        AllgatherSdma = importlib.import_module("mori.ccl").AllgatherSdma
+        try:
+            shmem = importlib.import_module("mori.shmem")
+            AllgatherSdma = importlib.import_module("mori.ccl").AllgatherSdma
+        except ModuleNotFoundError as exc:
+            if exc.name and exc.name.split(".")[0] == "mori":
+                raise RuntimeError(
+                    "MoriSdmaAllGather requires the optional ROCm MORI Python "
+                    "package providing `mori.shmem` and `mori.ccl`. Install or "
+                    "load MORI before using this backend."
+                ) from exc
+            raise
 
         my_pe = shmem.shmem_mype()
         npes = shmem.shmem_npes()
