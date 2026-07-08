@@ -278,7 +278,7 @@ template <
 inline T cast_scalar_to_scalar(const U from) {
   return cast_to_uchar(from);
 }
-}
+} // namespace detail
 
 //  - No-op if types as the same
 template <
