@@ -192,22 +192,26 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int, contig: bool):
 
 @instrumented_cutedsl_cache(
     "aten::scatter_add",
-    key_fn=lambda torch_dtype, N, contig: f"vec {torch_dtype} N={N} contig={contig}",
+    key_fn=lambda torch_dtype, contig: f"vec {torch_dtype} contig={contig}",
 )
-def _compile_vec_scatter(torch_dtype: torch.dtype, N: int, contig: bool):
+def _compile_vec_scatter(torch_dtype: torch.dtype, contig: bool):
+    # N is a runtime arg (``D``), never a compile-time constant here: the
+    # kernel loops ``while off < D`` and loads fixed ``vec_elems`` chunks off
+    # a raw iterator, so the inner dim can stay symbolic. One compile per
+    # (dtype, contig) serves every N.
     dtype = _TORCH_TO_CUTE[torch_dtype]
     elem_bytes = dtype.width // 8
     vec_elems = _VEC_BYTES // elem_bytes
     launcher = _make_kernel(dtype, elem_bytes, vec_elems, contig)
 
     mSrc_fake = cute.runtime.make_fake_tensor(
-        dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
+        dtype, (cute.sym_int(), cute.sym_int()), stride=(cute.sym_int64(), 1)
     )
     # Index is contiguous (see _flatten_for_expanded_1d); fix stride=1
     # so `mIndex[i]` doesn't emit a runtime stride multiply.
     mIndex_fake = cute.runtime.make_fake_tensor(Int64, (cute.sym_int(),), stride=(1,))
     mOut_fake = cute.runtime.make_fake_tensor(
-        dtype, (cute.sym_int(), N), stride=(cute.sym_int64(), 1)
+        dtype, (cute.sym_int(), cute.sym_int()), stride=(cute.sym_int64(), 1)
     )
     return cute.compile(
         launcher,
@@ -248,7 +252,7 @@ def vec_scatter_add_into(
     """
     M, N = src.shape
     contig = src.stride(0) == N and out.stride(0) == N
-    compiled = _compile_vec_scatter(src.dtype, N, contig)
+    compiled = _compile_vec_scatter(src.dtype, contig)
     sm = torch.cuda.get_device_properties(out.device).multi_processor_count
     grid = min((M + _WARPS_PER_BLOCK - 1) // _WARPS_PER_BLOCK, sm * 8)
     compiled(src, index_1d, out, M, N, grid, src.stride(0), out.stride(0))
