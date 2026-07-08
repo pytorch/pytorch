@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +11,6 @@ from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.registry import lookup_backend
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
-from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyHPU,
@@ -138,7 +138,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("eager_noexcept", device, boxed=False)
 
     @skipIfHpu
-    @_force_skip_lazy_graph_module()
     def test_torchscript(self, device):
         self._check_backend_works("ts", device, boxed=False)
 
@@ -149,7 +148,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("aot_eager_decomp_partition", device)
 
     @skipIfHpu
-    @_force_skip_lazy_graph_module()
     def test_aot_ts(self, device):
         self._check_backend_works("aot_ts", device)
 
@@ -162,6 +160,16 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("tvm", device)
         self._check_backend_works("tvm", device, options={"scheduler": None})
         self._check_backend_works("tvm", device, options={"opt_level": 0})
+
+    def test_tvm_scheduler_backends(self, device):
+        from torch._dynamo.backends.tvm import tvm_auto_scheduler, tvm_meta_schedule
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        for backend in (tvm_meta_schedule, tvm_auto_scheduler):
+            # blocking the tvm import keeps this fast and deterministic;
+            # reaching ImportError proves the partial's kwargs are valid
+            with patch.dict(sys.modules, {"tvm": None}):
+                self.assertRaises(ImportError, backend, gm, [torch.randn(2)])
 
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
@@ -385,6 +393,29 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
                 fn, backend="inductor", options={"_raise_error_for_testing": True}
             )
             opt_fn(input)
+
+    def test_cudagraphs_backend_accepts_extra_kwargs(self):
+        # Issue #169939: torch.compile(backend="cudagraphs", options=...) used
+        # to raise TypeError because CudagraphsBackend.__call__ did not accept
+        # extra kwargs. The backend should ignore unknown kwargs with a warning,
+        # matching eager and other compiler-fn-style backends.
+        from torch._dynamo.backends.cudagraphs import CudagraphsBackend
+
+        backend = CudagraphsBackend()
+        gm = MagicMock()
+        sentinel = object()
+        with patch(
+            "torch._dynamo.backends.cudagraphs.cudagraphs", return_value=sentinel
+        ) as mock_cudagraphs:
+            with self.assertLogs(
+                "torch._dynamo.backends.cudagraphs", level="WARNING"
+            ) as cm:
+                result = backend(gm, [], options={"trace.enabled": True})
+
+        self.assertIs(result, sentinel)
+        # Extra kwargs are dropped, not forwarded to the inner compiler.
+        mock_cudagraphs.assert_called_once_with(gm, [])
+        self.assertTrue(any("ignoring extra kwargs" in m for m in cm.output))
 
     def test_backend_graph_freeze(self):
         from functorch.compile import make_boxed_func

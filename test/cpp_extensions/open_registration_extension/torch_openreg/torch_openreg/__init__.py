@@ -10,6 +10,7 @@ if sys.platform == "win32":
     del _load_dll_libraries
 
 import torch_openreg._C  # type: ignore[misc]
+import torch_openreg.compiler
 import torch_openreg.openreg
 
 
