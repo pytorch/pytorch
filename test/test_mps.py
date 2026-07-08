@@ -6636,6 +6636,24 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), "trunc")
         helper((2, 8, 4, 5), "floor_divide")
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("op", ["floor_divide", "div_floor"])
+    def test_div_floor_extremal(self, dtype, op):
+        # Floor division follows Python semantics (c10::div_floor_floating),
+        # not a naive floor(a / b): e.g. inf // 1 -> nan, 1 // -inf -> -1, and
+        # division by zero falls through to the IEEE result.
+        vals = [float("nan"), float("inf"), -float("inf"), 0.0, -0.0,
+                1.0, -1.0, 2.0, -2.0, 3.5, -3.5, 7.0, -7.0]
+        n = len(vals)
+        cpu_a = torch.tensor(vals, dtype=dtype).repeat_interleave(n)
+        cpu_b = torch.tensor(vals, dtype=dtype).repeat(n)
+        mps_a, mps_b = cpu_a.to("mps"), cpu_b.to("mps")
+        if op == "floor_divide":
+            self.assertEqual(torch.floor_divide(mps_a, mps_b), torch.floor_divide(cpu_a, cpu_b))
+        else:
+            self.assertEqual(torch.div(mps_a, mps_b, rounding_mode="floor"),
+                             torch.div(cpu_a, cpu_b, rounding_mode="floor"))
+
     def test_rounding(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
