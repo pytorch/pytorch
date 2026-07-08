@@ -21,7 +21,7 @@ from torch._library.opaque_object import is_custom_class, is_opaque_symbolic_typ
 
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
-from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
+from .graph import _PyTreeCodeGen, _PyTreeInfo, _PyTreeOutputCodeGen, Graph
 from .graph_module import GraphModule
 from .node import Argument, base_types, map_aggregate
 from .proxy import ParameterProxy, Proxy, Scope, ScopeContextManager, TracerBase
@@ -48,6 +48,13 @@ _ConstantAttributeType: TypeAlias = (
 )
 
 _constant_attribute_types = get_args(_ConstantAttributeType)
+
+
+def _contains_ordered_dict(value: Any) -> bool:
+    leaves, _ = pytree.tree_flatten(
+        value, is_leaf=lambda x: isinstance(x, collections.OrderedDict)
+    )
+    return any(isinstance(leaf, collections.OrderedDict) for leaf in leaves)
 
 
 # We only want to print this once to avoid flooding logs
@@ -908,10 +915,16 @@ class Tracer(TracerBase):
                         patcher, module.__dict__, self._autowrap_function_ids
                     )
                 ann = inspect.get_annotations(inspect.unwrap(fn))
+                output = fn(*args)
+                if not isinstance(
+                    self.graph._codegen, _PyTreeCodeGen
+                ) and _contains_ordered_dict(output):
+                    output, out_spec = pytree.tree_flatten(output)
+                    self.graph.set_codegen(_PyTreeOutputCodeGen(out_spec))
                 self.create_node(
                     "output",
                     "output",
-                    (self.create_arg(fn(*args)),),
+                    (self.create_arg(output),),
                     {},
                     type_expr=ann.get("return", None),
                 )
