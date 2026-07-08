@@ -314,6 +314,9 @@ class FileStore(Store):
 class HashStore(Store):
     def __init__(self) -> None: ...
 
+class FakeStore(Store):
+    def __init__(self) -> None: ...
+
 class TCPStore(Store):
     def __init__(
         self,
