@@ -135,4 +135,9 @@ bool is_apple_family_or_newer(AppleGPUFamily family) {
   return [MPSDevice::getInstance()->device() supportsFamily:mtl_family];
 }
 
+bool has_mpp() {
+  // MetalPerformancePrimitives matmul2d (cooperative tensors) needs macOS 26.2+
+  return is_macos_at_least(MacOSVersion::MACOS_26_2);
+}
+
 } // namespace at::mps
