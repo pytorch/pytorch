@@ -63,17 +63,19 @@ static void initHipSparseLtSupport() {
   // Default to not supported
   g_hipSparseLtSupported = false;
 
-    // Check only the first available device
-    try {
-        if (at::cuda::device_count() > 0) {
-            g_hipSparseLtSupported = at::detail::getCUDAHooks().isGPUArch(
-                hipSparseLtSupportedArchs(), 0);
-        }
-    } catch (const std::exception&) {
-        // If an exception occurs during device property check, we assume hipSparseLt is not supported
-        // This could happen due to driver issues, device access problems, or other runtime errors
-        g_hipSparseLtSupported = false;
-        TORCH_WARN("Exception occurred while checking hipSparseLt support. Assuming not supported.");
+  // Check only the first available device
+  try {
+    if (at::cuda::device_count() > 0) {
+      g_hipSparseLtSupported = at::detail::getCUDAHooks().isGPUArch(
+          hipSparseLtSupportedArchs(), 0);
+    }
+  } catch (const std::exception&) {
+    // If an exception occurs during device property check, we assume
+    // hipSparseLt is not supported This could happen due to driver issues,
+    // device access problems, or other runtime errors
+    g_hipSparseLtSupported = false;
+    TORCH_WARN(
+        "Exception occurred while checking hipSparseLt support. Assuming not supported.");
   }
 }
 
@@ -81,15 +83,15 @@ static bool isHipSparseLtSupported() {
   // Initialize support check only once
   c10::call_once(g_hipSparseLtSupportInitFlag, initHipSparseLtSupport);
 
-    // Return cached result (platform-wide)
-    if (!g_hipSparseLtSupported) {
-        TORCH_CHECK(
-            false,
-            "hipSparseLt not supported on this device. Supported architectures: ",
-            c10::Join(", ", hipSparseLtSupportedArchs()),
-            ". hipSparseLt on ROCm requires ROCm 7.12 or newer.");
-    }
-    return g_hipSparseLtSupported;
+  // Return cached result (platform-wide)
+  if (!g_hipSparseLtSupported) {
+      TORCH_CHECK(
+          false,
+          "hipSparseLt not supported on this device. Supported architectures: ",
+          c10::Join(", ", hipSparseLtSupportedArchs()),
+          ". hipSparseLt on ROCm requires ROCm 7.12 or newer.");
+  }
+  return g_hipSparseLtSupported;
 }
 #endif
 
