@@ -13,7 +13,6 @@ from torch.distributed.collective_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import onlyOn
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -142,12 +141,15 @@ class TestCollectiveUtils(MultiProcessTestCase):
             all_gather(data_or_fn=func)
 
     @parametrize("device", ["cpu"] if device_type == "cpu" else ["cpu", device_type])
-    @onlyOn(["cuda", "xpu"])
     @skip_if_lt_x_gpu(4)
     def test_check_rng_sync(
         self,
         device,
     ) -> None:
+        if device == "cuda" and not torch.cuda.is_available():
+            self.skipTest("CUDA is not available")
+        if device == "xpu" and not torch.xpu.is_available():
+            self.skipTest("XPU is not available")
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size
