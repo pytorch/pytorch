@@ -1,4 +1,4 @@
-@setlocal
+@setlocal EnableDelayedExpansion
 
 set MAGMA_VERSION=2.5.4
 
@@ -15,9 +15,20 @@ echo Building for configuration: %CONFIG_LOWERCASE%, %CUVER%
 curl -k https://s3.amazonaws.com/ossci-windows/ninja_1.8.2.exe --output C:\Tools\ninja.exe
 if errorlevel 1 exit /b 1
 
-set "PATH=C:\Tools;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%\bin;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%\libnvvp;%PATH%"
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%
-set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
+set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%"
+
+if /I "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
+  call "%VS_VCVARSALL%" arm64 -vcvars_ver=14.51
+  if errorlevel 1 exit /b 1
+  set "PATH=C:\Tools;%CUDA_PATH%\bin;%CUDA_PATH%\bin\arm64;!PATH!"
+  set "MAGMA_ARCH_SUFFIX=_arm64"
+  set EXTRA_CMAKE_ARGS=-DCUDA_CUDART_LIBRARY="%CUDA_PATH%\lib\arm64\cudart.lib" -DCUDA_cublas_LIBRARY="%CUDA_PATH%\lib\arm64\cublas.lib" -DCUDA_cusparse_LIBRARY="%CUDA_PATH%\lib\arm64\cusparse.lib"
+) else (
+  set "PATH=C:\Tools;%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;!PATH!"
+  set "NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt"
+  set "MAGMA_ARCH_SUFFIX="
+  set "EXTRA_CMAKE_ARGS="
+)
 
 mkdir magma_cuda%CUVER_NODOT%
 cd magma_cuda%CUVER_NODOT%
@@ -35,6 +46,7 @@ cd magma
 mkdir build && cd build
 
 set GPU_TARGET=All
+:: TODO
 if "%CUVER_NODOT%" == "132" (
   set CUDA_ARCH_LIST=-gencode=arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120
 )
@@ -61,7 +73,8 @@ cmake .. -DGPU_TARGET="%GPU_TARGET%" ^
             -DCMAKE_GENERATOR=Ninja ^
             -DCMAKE_INSTALL_PREFIX=..\install\ ^
             -DCUDA_ARCH_LIST="%CUDA_ARCH_LIST%" ^
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ^
+            %EXTRA_CMAKE_ARGS%
 if errorlevel 1 exit /b 1
 
 cmake --build . --target install --config %CONFIG% -- -j%NUMBER_OF_PROCESSORS%
@@ -70,7 +83,7 @@ if errorlevel 1 exit /b 1
 cd ..\..\..
 
 :: Create
-7z a magma_%MAGMA_VERSION%_cuda%CUVER_NODOT%_%CONFIG_LOWERCASE%.7z %cd%\magma_cuda%CUVER_NODOT%\magma\install\*
+7z a magma_%MAGMA_VERSION%_cuda%CUVER_NODOT%_%CONFIG_LOWERCASE%%MAGMA_ARCH_SUFFIX%.7z %cd%\magma_cuda%CUVER_NODOT%\magma\install\*
 
 rmdir /S /Q magma_cuda%CUVER_NODOT%\
 @endlocal
