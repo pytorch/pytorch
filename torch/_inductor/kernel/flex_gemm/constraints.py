@@ -70,13 +70,6 @@ LOCAL_REDUCE_C_ALPHA_BETA_ERROR = (
 LOCAL_REDUCE_SWAP_AB_ERROR = (
     "FlexGEMM local reductions do not support swap_ab configs yet"
 )
-LOCAL_REDUCE_AUX_OUT_COMPOSITION_ERROR = (
-    "FlexGEMM local-reduce aux outputs cannot be combined with aux_out yet"
-)
-LOCAL_REDUCE_AUX_SAME_SHAPE_COMPOSITION_ERROR = (
-    "FlexGEMM local-reduce aux outputs cannot be combined with same-shape aux "
-    "outputs yet"
-)
 LOCAL_REDUCE_AUX_METADATA_ERROR = (
     "FlexGEMM local-reduce aux outputs require aux output metadata"
 )
@@ -86,6 +79,10 @@ LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
 LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR = (
     "FlexGEMM does not support this aux output shape yet. Please file an issue "
     "with the FlexGEMM epilogue expression."
+)
+LOCAL_REDUCE_AUX_OUT_COMPOSITION_ERROR = (
+    "FlexGEMM local-reduce aux outputs cannot be combined with same-shape aux "
+    "outputs yet"
 )
 LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR = (
     "FlexGEMM local-reduce broadcast values support one generated physical reduction"
@@ -231,9 +228,12 @@ def validate_local_reduce_group_axis(group: int, axis: int) -> None:
 def validate_local_reduce_selected_dim_divisible(
     shape: Sequence[Any], group: int, axis: int
 ) -> None:
-    """Require the selected M/N dimension to have an integral compressed shape."""
+    """Reject selected M/N dimensions known not to have an integral compressed shape."""
     validate_local_reduce_group_axis(group, axis)
-    if not statically_known_multiple(shape[axis - 2], group):
+    selected_dim = shape[axis - 2]
+    if statically_known_multiple(selected_dim, group):
+        return
+    if statically_known(selected_dim % group != 0):
         raise RuntimeError(LOCAL_REDUCE_DIVISIBLE_SHAPE_ERROR)
 
 
@@ -326,35 +326,70 @@ def validate_local_reduce_no_aux_out_composition(aux_out: Any | None) -> None:
         raise NotImplementedError(LOCAL_REDUCE_AUX_OUT_COMPOSITION_ERROR)
 
 
+def flex_gemm_local_reduce_config_fields(
+    config: Any,
+) -> tuple[bool, int, int, int, int]:
+    """Normalize config objects and keys for local-reduce capability checks."""
+    match config:
+        case {
+            "swap_ab": swap_ab,
+            "tile_m": tile_m,
+            "tile_n": tile_n,
+            "cluster_m": cluster_m,
+            "cluster_n": cluster_n,
+        }:
+            return swap_ab, tile_m, tile_n, cluster_m, cluster_n
+        case _:
+            return (
+                config.swap_ab,
+                config.tile_m,
+                config.tile_n,
+                config.cluster_m,
+                config.cluster_n,
+            )
+
+
 def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:
     """Return whether a QuACK config can keep grouped reductions inside one CTA."""
-    if group <= 0 or axis not in (0, 1) or config.swap_ab:
+    swap_ab, tile_m, tile_n, cluster_m, cluster_n = (
+        flex_gemm_local_reduce_config_fields(config)
+    )
+    match axis:
+        case 0:
+            tile = tile_m
+        case 1:
+            tile = tile_n
+        case _:
+            return False
+    if group <= 0 or swap_ab:
         return False
-    tile_m = config.tile_m
-    tile_n = config.tile_n
-    cluster_m = config.cluster_m
-    cluster_n = config.cluster_n
     if tile_n < 128 or tile_n % 64 != 0:
         return False
-    tile = tile_n if axis == 1 else tile_m
     if tile % group != 0:
         return False
-    if group <= 32:
-        return 32 % group == 0 and group < tile
-    return (
-        group % 32 == 0
-        and group <= tile
-        and tile_m == 128
-        and cluster_m == 1
-        and cluster_n == 1
-    )
+    match group:
+        case _ if group <= 32:
+            return 32 % group == 0 and group < tile
+        case _:
+            return (
+                group % 32 == 0
+                and group <= tile
+                and tile_m == 128
+                and cluster_m == 1
+                and cluster_n == 1
+            )
 
 
 def flex_gemm_local_reduce_candidate_groups(config: Any, axis: int) -> tuple[int, ...]:
     """Enumerate group sizes worth checking against the config capability gate."""
-    if axis not in (0, 1):
-        return ()
-    tile = config.tile_n if axis == 1 else config.tile_m
+    _, tile_m, tile_n, _, _ = flex_gemm_local_reduce_config_fields(config)
+    match axis:
+        case 0:
+            tile = tile_m
+        case 1:
+            tile = tile_n
+        case _:
+            return ()
     return (2, 4, 8, 16, 32, *range(64, tile + 1, 32))
 
 
