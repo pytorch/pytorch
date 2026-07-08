@@ -111,6 +111,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import (
         InliningGeneratorInstructionTranslator,
         InliningInstructionTranslator,
@@ -589,9 +590,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        if getattr(fn, "_dynamo_marked_constant", False) or getattr(
-            fn, "_dynamo_marked_constant_guarded", False
-        ):
+        if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
         else:
@@ -1830,6 +1829,21 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         codegen.extend_output(create_call_function(1, False))
 
 
+def _mutated_constant_arg(name: str, source_name: str) -> Never:
+    unimplemented(
+        gb_type="assume_constant_result specialize_args argument mutated in graph",
+        context=f"function {name}, source {source_name}",
+        explanation=f"Argument `{source_name}` of function {name} marked with "
+        f"torch._dynamo.assume_constant_result(specialize_args=True) was mutated "
+        f"inside the torch.compile region before the call, so value guards derived "
+        f"from it would not match the value at frame entry.",
+        hints=[
+            "Perform the mutation outside the torch.compile region",
+            "Pass the already-mutated value in as an input instead",
+        ],
+    )
+
+
 def _unguardable_constant_arg(
     source: Source, value: Any, name: str, reason: str
 ) -> Never:
@@ -1854,7 +1868,11 @@ def _unguardable_constant_arg(
 
 
 def _install_constant_arg_guards(
-    source: Source, value: Any, name: str, seen: set[int]
+    source: Source,
+    value: Any,
+    name: str,
+    seen: set[int],
+    side_effects: "SideEffects",
 ) -> None:
     """
     Install value guards rooted at `source` so the baked constant is invalidated
@@ -1866,6 +1884,13 @@ def _install_constant_arg_guards(
     graph break: value-based invalidation is the point of specialize_args, so
     there is deliberately no identity fallback.
     """
+    # A nested object mutated in-graph before the call has guards derived from
+    # its traced (post-mutation) state, which cannot match the frame-entry
+    # value; the top-level VariableTracker check in convert cannot see it.
+    if value in side_effects:
+        vt = side_effects[value]
+        if vt.mutation_type is not None and side_effects.is_modified(vt):
+            _mutated_constant_arg(name, source.name)
     if (
         ConstantVariable.is_literal(value)
         or isinstance(value, enum.Enum)
@@ -1880,7 +1905,9 @@ def _install_constant_arg_guards(
     if isinstance(value, (tuple, list)):
         install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
         for i, item in enumerate(value):
-            _install_constant_arg_guards(GetItemSource(source, i), item, name, seen)
+            _install_constant_arg_guards(
+                GetItemSource(source, i), item, name, seen, side_effects
+            )
         return
     if isinstance(value, dict):
         for k in value:
@@ -1893,7 +1920,9 @@ def _install_constant_arg_guards(
                 )
         install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
         for k, v in value.items():
-            _install_constant_arg_guards(DictGetItemSource(source, k), v, name, seen)
+            _install_constant_arg_guards(
+                DictGetItemSource(source, k), v, name, seen, side_effects
+            )
         return
     if not isinstance(value, type) and dataclasses.is_dataclass(value):
         install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
@@ -1903,7 +1932,11 @@ def _install_constant_arg_guards(
                     source, value, name, f"dataclass field `{field.name}` is unset"
                 )
             _install_constant_arg_guards(
-                AttrSource(source, field.name), getattr(value, field.name), name, seen
+                AttrSource(source, field.name),
+                getattr(value, field.name),
+                name,
+                seen,
+                side_effects,
             )
         return
     _unguardable_constant_arg(source, value, name, "no value-guardable structure")
@@ -1919,12 +1952,12 @@ def invoke_and_store_as_constant(
     """
     Run `fn` on the converted arguments at compile time and bake the result into
     the graph as a constant. With `assume_constant_result(specialize_args=True)`
-    (the `_dynamo_marked_constant_guarded` marker on `fn`), sourced arguments get
+    (the `_dynamo_specialize_args` marker on `fn`), sourced arguments get
     value guards derived from their structure (see `_install_constant_arg_guards`)
     instead of the default identity-only guarding, so a freshly-allocated but
     equal argument does not recompile and a changed field value does.
     """
-    specialize_args = getattr(fn, "_dynamo_marked_constant_guarded", False)
+    specialize_args = getattr(fn, "_dynamo_specialize_args", False)
 
     def convert_plain(x: VariableTracker) -> Any:
         if isinstance(x, UserDefinedObjectVariable):
@@ -1983,19 +2016,9 @@ def invoke_and_store_as_constant(
                         "Ensure all arguments can be converted to constants",
                     ],
                 )
+        source = x.source
         if x.mutation_type is not None and tx.output.side_effects.is_modified(x):
-            unimplemented(
-                gb_type="assume_constant_result specialize_args argument mutated in graph",
-                context=f"function {name}, source {x.source.name}",
-                explanation=f"Argument `{x.source.name}` of function {name} marked with "
-                f"torch._dynamo.assume_constant_result(specialize_args=True) was mutated "
-                f"inside the torch.compile region before the call, so value guards derived "
-                f"from it would not match the value at frame entry.",
-                hints=[
-                    "Perform the mutation outside the torch.compile region",
-                    "Pass the already-mutated value in as an input instead",
-                ],
-            )
+            _mutated_constant_arg(name, source.name)
         if isinstance(x, UserDefinedObjectVariable):
             value = x.value
         else:
@@ -2013,7 +2036,7 @@ def invoke_and_store_as_constant(
                         "Ensure all arguments can be converted to constants",
                     ],
                 )
-        _install_constant_arg_guards(x.source, value, name, set())
+        _install_constant_arg_guards(source, value, name, set(), tx.output.side_effects)
         return value
 
     def convert(x: VariableTracker) -> Any:

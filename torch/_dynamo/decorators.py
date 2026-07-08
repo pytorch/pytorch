@@ -224,10 +224,8 @@ def assume_constant_result(fn=None, *, specialize_args=False):  # type: ignore[n
         return functools.partial(
             assume_constant_result, specialize_args=specialize_args
         )
-    if specialize_args:
-        fn._dynamo_marked_constant_guarded = True  # type: ignore[attr-defined]
-    else:
-        fn._dynamo_marked_constant = True  # type: ignore[attr-defined]
+    fn._dynamo_marked_constant = True  # type: ignore[attr-defined]
+    fn._dynamo_specialize_args = specialize_args  # type: ignore[attr-defined]
     return fn
 
 

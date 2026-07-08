@@ -1740,6 +1740,25 @@ class DecoratorTests(PytreeRegisteringTestCase):
         fn(torch.ones(4), Cfg(torch.device("meta"), b"a"))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_assume_constant_result_specialize_args_nested_mutation(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class P:
+            cfg: dict
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return p.cfg["scale"] + p.cfg.get("extra", 0.0)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, p):
+            p.cfg["extra"] = 1.0
+            return x * select(p)
+
+        with self.assertRaisesRegex(Unsupported, "mutated in graph"):
+            fn(torch.ones(4), P({"scale": 2.0}))
+
     def test_assume_constant_result_specialize_args_tensor_arg(self):
         @torch._dynamo.assume_constant_result(specialize_args=True)
         def select(t):

@@ -1819,6 +1819,15 @@
   "GB1560": [
     {
       "Gb_type": "assume_constant_result specialize_args argument mutated in graph",
+      "Context": "function {name}, source {source_name}",
+      "Explanation": "Argument `{source_name}` of function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) was mutated inside the torch.compile region before the call, so value guards derived from it would not match the value at frame entry.",
+      "Hints": [
+        "Perform the mutation outside the torch.compile region",
+        "Pass the already-mutated value in as an input instead"
+      ]
+    },
+    {
+      "Gb_type": "assume_constant_result specialize_args argument mutated in graph",
       "Context": "function {name}, source {x.source.name}",
       "Explanation": "Argument `{x.source.name}` of function {name} marked with torch._dynamo.assume_constant_result(specialize_args=True) was mutated inside the torch.compile region before the call, so value guards derived from it would not match the value at frame entry.",
       "Hints": [
