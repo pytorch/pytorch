@@ -813,33 +813,39 @@ static Tensor& add_relu_impl(
   auto iter = TensorIterator::binary_op(result, self, other);
   Scalar min_val;
   Scalar max_val;
-  if (self.dtype() == at::kInt) {
+
+  // Bounds are keyed off the iterator's promoted dtype rather than
+  // self.dtype(). binary_op promotes mixed inputs and the kernel dispatches on
+  // iter.dtype(), so self.dtype() can pick a saturation bound that is too small
+  const auto compute_dtype = iter.dtype();
+
+  if (compute_dtype == at::kInt) {
     min_val = 0;
     max_val = std::numeric_limits<int32_t>::max();
-  } else if (self.dtype() == at::kLong) {
+  } else if (compute_dtype == at::kLong) {
     min_val = 0;
     max_val = std::numeric_limits<int64_t>::max();
-  } else if (self.dtype() == at::kShort) {
+  } else if (compute_dtype == at::kShort) {
     min_val = 0;
     max_val = std::numeric_limits<int16_t>::max();
-  } else if (self.dtype() == at::kChar) {
+  } else if (compute_dtype == at::kChar) {
     min_val = 0;
     max_val = std::numeric_limits<int8_t>::max();
-  } else if (self.dtype() == at::kFloat) {
+  } else if (compute_dtype == at::kFloat) {
     min_val = 0.0;
     max_val = std::numeric_limits<float>::max();
-  } else if (self.dtype() == at::kDouble) {
+  } else if (compute_dtype == at::kDouble) {
     min_val = 0.0;
     max_val = std::numeric_limits<double>::max();
-  } else if (self.dtype() == at::kHalf) {
+  } else if (compute_dtype == at::kHalf) {
     min_val = 0.0;
     max_val = static_cast<double>(std::numeric_limits<at::Half>::max());
-  } else if (self.dtype() == at::kBFloat16) {
+  } else if (compute_dtype == at::kBFloat16) {
     min_val = 0.0;
     max_val = static_cast<double>(std::numeric_limits<at::BFloat16>::max());
   } else {
     TORCH_INTERNAL_ASSERT(
-        false, "Unsupported datatype for add_relu:", self.dtype().name());
+        false, "Unsupported datatype for add_relu:", compute_dtype);
   }
 
   result = iter.output();
