@@ -15734,6 +15734,54 @@ fn
         self.assertEqual(fn(t), outer.get_scale() + t.sum())
         self.assertEqual(cnt.frame_count, 2)
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_later_assigned_name(self):
+        # A class-body method closes over a free variable that is only assigned
+        # *after* the class statement. The cell is legitimately empty when the
+        # class is built; CPython reads it only when the method runs. Dynamo must
+        # build the class with a genuine empty cell rather than graph-breaking on
+        # an uninitialized cell read.
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(t):
+            class Maker:
+                def make(self):
+                    return Helper()  # Helper is defined below the class.
+
+            class Helper:
+                def value(self):
+                    return 5
+
+            return Maker().make().value() + t.sum()
+
+        t = torch.randn(3)
+        self.assertEqual(fn(t), 5 + t.sum())
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_self_name(self):
+        # A class-body method references the class's own name (the cell for that
+        # name is empty until __build_class__ binds it), as in isinstance checks
+        # against the class itself.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            class C:
+                def __init__(self, v):
+                    self.v = v
+
+                def same_type(self, other):
+                    return isinstance(other, C)
+
+            a = C(1)
+            b = C(2)
+            return a.same_type(b), t.cos()
+
+        t = torch.randn(3)
+        same, cos = fn(t)
+        self.assertTrue(same)
+        self.assertEqual(cos, t.cos())
+
     def test_dunder_weakref(self):
         class Foo:
             pass

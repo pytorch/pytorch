@@ -1972,10 +1972,30 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             tx = InstructionTranslator.current_tx()
             cells = []
 
+            side_effects = tx.output.side_effects
             for cell_var in self.closure.items:  # type: ignore[attr-defined]
+                # A class body may define methods that close over a free var (or
+                # the class's own name) that is only assigned after the `class`
+                # statement. That cell is legitimately empty at build time and is
+                # only read once the method runs, which CPython handles fine.
+                # Materialize a genuine empty cell aliased to cell_var so later
+                # LOAD/STORE_DEREF resolve back to it, and skip the load_cell read.
+                if (
+                    allow_sourced_cells
+                    and isinstance(cell_var, variables.CellVariable)
+                    and not side_effects.has_pending_mutation_of_attr(
+                        cell_var, "cell_contents"
+                    )
+                    and not cell_var.pre_existing_contents
+                ):
+                    empty_cell = CellType()
+                    side_effects.track_empty_cell(empty_cell, cell_var)
+                    cells.append(empty_cell)
+                    continue
+
                 # Get the cell contents from side_effects or pre_existing_contents
                 # load_cell will replay the side-effects
-                cell_contents = tx.output.side_effects.load_cell(cell_var)
+                cell_contents = side_effects.load_cell(cell_var)
 
                 # Check for self-referential closure (function capturing itself for recursion)
                 # For example:
