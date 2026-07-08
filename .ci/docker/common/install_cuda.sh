@@ -86,18 +86,18 @@ function install_cupti_headers {
   major_minor=${cupti_version%.*}   # e.g. "13.3"
   target_dir="/usr/local/cupti-headers-${major_minor}"
 
-  # The CUDA toolkit runfile ships an older CUPTI than the standalone
-  # nvidia-cuda-cupti wheel, so pull the newer headers into a throwaway venv
-  # and stage them somewhere the build can pick them up.
-  tmp_venv=$(mktemp -d)
-  python3 -m venv "${tmp_venv}"
-  "${tmp_venv}/bin/pip" install -q --no-deps "nvidia-cuda-cupti==${cupti_version}"
+  # The CUDA toolkit runfile ships an older CUPTI than the standalone redist
+  # archive, so stage the newer headers where the build can pick them up. The
+  # headers are architecture independent, so always grab the x86_64 archive.
+  redist_url="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cupti/linux-x86_64"
+  archive="cuda_cupti-linux-x86_64-${cupti_version}-archive"
 
-  include_dir=$(dirname "$("${tmp_venv}/bin/python" -c "import glob, sys; print(glob.glob(sys.prefix + '/**/cupti_activity.h', recursive=True)[0])")")
+  tmp_dir=$(mktemp -d)
+  curl -fsL "${redist_url}/${archive}.tar.xz" | tar -xJ -C "${tmp_dir}"
   mkdir -p "${target_dir}"
-  cp -a "${include_dir}/"* "${target_dir}/"
+  cp -a "${tmp_dir}/${archive}/include/"* "${target_dir}/"
 
-  rm -rf "${tmp_venv}"
+  rm -rf "${tmp_dir}"
   echo "CUPTI ${cupti_version} headers installed to ${target_dir}."
 }
 
