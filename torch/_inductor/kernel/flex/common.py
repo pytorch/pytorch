@@ -54,12 +54,8 @@ def can_skip_boundary_checks(seq_len, sparse_block_size) -> bool:
     """True when per-tile bounds masking can be skipped along this dim.
 
     This is decided before a config is chosen, so divisibility is checked
-    against 128, the max (and LCM) of all candidate pow2 tile sizes; it is
-    conservative for smaller tiles and assumes no tile exceeds 128. Every
-    sparse block must also lie inside seq_len: sparse blocks either tile
-    seq_len exactly or a single block covers it (the walk then starts at 0,
-    so the tile-count cap bounds it). Otherwise a row whose selected blocks
-    jump ahead can walk unmasked tiles past seq_len and read out of bounds.
+    against 128, the max (and LCM) of all candidate pow2 tile sizes for
+    inner block_m/n.
     """
     return V.graph.sizevars.statically_known_true(
         sympy.And(
