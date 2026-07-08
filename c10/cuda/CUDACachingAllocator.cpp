@@ -438,6 +438,11 @@ struct ExpandableSegment {
       return rangeFromHandles(begin, end);
     }
 
+#ifdef _WIN32
+    // No Win32 IPC handle type implemented; share() still errors clearly
+    // for cross-process use.
+    constexpr bool enable_ipc_handles = false;
+#else
     // In fbcode, IPC handle types for expandable segments are disabled by
     // default because some jobs were failing (see
     // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
@@ -452,6 +457,7 @@ struct ExpandableSegment {
     static const bool enable_ipc_handles =
         c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
             .value_or(default_enable_ipc);
+#endif
 
     // Determine IPC handle type upfront based on config and device capability.
     // Resolve once per segment lifetime: fromShared() pre-sets handle_type_
