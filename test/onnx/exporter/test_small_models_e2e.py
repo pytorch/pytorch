@@ -1041,6 +1041,20 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         self.assertIn("Expand", all_ops)
         self.assertIn("Reshape", all_ops)
 
+    def test_cumprod_opset_26(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.cumprod(x, dim=-1)
+
+        x = torch.randn(1, 1, 8, 4)
+        onnx_program = self.export(Model(), (x,), opset_version=26)
+        self.assertIn(
+            "CumProd",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+        # TODO(after ort support): As of ONNX Runtime 1.23, CumProd is not
+        # implemented yet. Call assert_onnx_program once ORT supports it.
+
     def test_onnx_export_invoke_subgraph(self):
         class InvokeSubgraphModel(torch.nn.Module):
             def forward(self, x, y):
