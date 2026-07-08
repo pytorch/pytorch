@@ -365,7 +365,7 @@ struct div_floor_functor {
       typename T,
       ::metal::enable_if_t<!::metal::is_integral_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
-    return metal::floor(c10::metal::div(a, b));
+    return c10::metal::div_floor(a, b);
   }
   template <
       typename T,
