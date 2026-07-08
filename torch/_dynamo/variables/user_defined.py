@@ -3688,26 +3688,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
             fn_source = (
-                AttrSource(source, "_torch_checkpoint_wrapped_function")
+                AttrSource(source, "function")
                 if source
                 else None
             )
             fn = variables.UserMethodVariable(
-                type_attr._torch_checkpoint_wrapped_function,  # pyrefly: ignore[missing-attribute]
+                type_attr.function,
                 self,
                 source_fn=fn_source,
             )
 
             kwargs_source = (
-                AttrSource(source, "_torch_checkpoint_kwargs") if source else None
+                AttrSource(source, "checkpoint_kwargs") if source else None
             )
             checkpoint_kwargs = {}
-            for (
-                k,
-                v,
-            ) in (
-                type_attr._torch_checkpoint_kwargs.items()  # pyrefly: ignore[missing-attribute]
-            ):
+            for k, v in type_attr.checkpoint_kwargs.items():
                 checkpoint_kwargs[k] = VariableTracker.build(
                     tx,
                     v,
