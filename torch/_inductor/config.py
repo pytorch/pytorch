@@ -1847,6 +1847,12 @@ class triton:
     Config specific to codegen/triton.py
     """
 
+    # No-op unless fbtriton (a Triton fork) is installed
+    tlx_mode: Literal["default", "allow", "force"] = cast(
+        Literal["default", "allow", "force"],
+        os.environ.get("TORCHINDUCTOR_TLX_MODE", "default"),
+    )
+
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
