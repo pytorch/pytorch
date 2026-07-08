@@ -11,7 +11,7 @@ handoff the exports made here die with this process.
 Environment variables written (to --env-out):
     OMP_PREFIX - if /opt/llvm-openmp exists it is exported so the build links
                  the conda-forge libomp (supports older macOS than the Homebrew
-                 build). See .ci/macwheel/install_libomp.sh.
+                 build). See .ci/wheel/mac/install_libomp.sh.
     (plus the static macOS build flags in MACOS_BUILD_ENV)
 """
 

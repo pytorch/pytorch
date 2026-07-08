@@ -15,7 +15,7 @@
 set -ex
 
 SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-PYTORCH_ROOT="${PYTORCH_ROOT:-$(cd "${SCRIPTPATH}/../.." && pwd)}"
+PYTORCH_ROOT="${PYTORCH_ROOT:-$(cd "${SCRIPTPATH}/../../.." && pwd)}"
 
 : "${DESIRED_PYTHON:?DESIRED_PYTHON must be set}"
 
