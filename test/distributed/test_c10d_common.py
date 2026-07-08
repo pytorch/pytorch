@@ -480,7 +480,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
+        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -1764,6 +1764,9 @@ class DummyProcessGroup(dist.ProcessGroup):
         self.group_size = args[1]
         self._aborted = False
         self._shutdown = False
+        # Records the name of every collective dispatched into this PG, so a
+        # test can assert a given collective routed through the trampoline.
+        self.collectives_called = set()
 
     def rank(self):
         return self.global_rank
@@ -1786,9 +1789,6 @@ class DummyProcessGroup(dist.ProcessGroup):
     def eager_connect_single_device(self, device=None):
         self._bound_device_id = device
 
-    def _set_sequence_number_for_group(self):
-        pass
-
     def _get_backend(self, device):
         return self
 
@@ -1802,6 +1802,7 @@ class DummyProcessGroup(dist.ProcessGroup):
         return "Dummy"
 
     def allgather(self, output_tensor_lists, input_tensor_list, opts=None):
+        self.collectives_called.add("allgather")
         for output_tensor_list, input_tensor in zip(
             output_tensor_lists, input_tensor_list
         ):
@@ -1811,6 +1812,7 @@ class DummyProcessGroup(dist.ProcessGroup):
         return DummyWork()
 
     def allreduce(self, tensor_list, opts=None):
+        self.collectives_called.add("allreduce")
         for tensor in tensor_list:
             tensor.add_(2)
 
@@ -1836,16 +1838,71 @@ class DummyProcessGroup(dist.ProcessGroup):
         return DummyWork()
 
     def broadcast(self, tensor_list, opts=None):
+        self.collectives_called.add("broadcast")
         for tensor in tensor_list:
             tensor.add_(1)
 
         return DummyWork()
 
     def reduce_scatter(self, output_tensor_list, input_tensor_lists, opts=None):
+        self.collectives_called.add("reduce_scatter")
         for output_tensor, input_tensor_list in zip(
             output_tensor_list, input_tensor_lists
         ):
             output_tensor.copy_(input_tensor_list[self.rank()])
+
+        return DummyWork()
+
+    def all_gather_single(self, output_tensor, input_tensor, opts=None):
+        self.collectives_called.add("all_gather_single")
+        for chunk in output_tensor.chunk(self.size()):
+            chunk.copy_(input_tensor)
+
+        return DummyWork()
+
+    def reduce_scatter_single(self, output_tensor, input_tensor, opts=None):
+        self.collectives_called.add("reduce_scatter_single")
+        output_tensor.copy_(input_tensor.chunk(self.size())[self.rank()])
+
+        return DummyWork()
+
+    def reduce(self, tensor_list, opts=None):
+        self.collectives_called.add("reduce")
+        for tensor in tensor_list:
+            tensor.add_(3)
+
+        return DummyWork()
+
+    def gather(self, output_tensor_lists, input_tensor_list, opts=None):
+        self.collectives_called.add("gather")
+        for output_tensor_list, input_tensor in zip(
+            output_tensor_lists, input_tensor_list
+        ):
+            for output_tensor in output_tensor_list:
+                output_tensor.copy_(input_tensor)
+
+        return DummyWork()
+
+    def scatter(self, output_tensor_list, input_tensor_lists, opts=None):
+        self.collectives_called.add("scatter")
+        for output_tensor, input_tensor_list in zip(
+            output_tensor_list, input_tensor_lists
+        ):
+            output_tensor.copy_(input_tensor_list[self.rank()])
+
+        return DummyWork()
+
+    def alltoall(self, output_tensor_list, input_tensor_list, opts=None):
+        self.collectives_called.add("alltoall")
+        for output_tensor, input_tensor in zip(output_tensor_list, input_tensor_list):
+            output_tensor.copy_(input_tensor)
+
+        return DummyWork()
+
+    def recvAnysource(self, tensor_list, tag):
+        self.collectives_called.add("recvAnysource")
+        for tensor in tensor_list:
+            tensor.add_(4)
 
         return DummyWork()
 
@@ -2216,19 +2273,22 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
         new_group_called = False
         new_group_ranks = None
+        new_group_backend = None
 
         class _DelegatingPG(DummyProcessGroup):
             def new_group(
                 self,
                 ranks,
                 timeout=None,
+                backend=None,
                 pg_options=None,
                 group_name=None,
                 group_desc=None,
             ):
-                nonlocal new_group_called, new_group_ranks
+                nonlocal new_group_called, new_group_ranks, new_group_backend
                 new_group_called = True
                 new_group_ranks = list(ranks)
+                new_group_backend = backend
                 my_rank = self.rank()
                 if my_rank not in ranks:
                     return None
@@ -2252,6 +2312,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             sub_pg = dist.new_group(ranks=[0])
             self.assertTrue(new_group_called)
             self.assertEqual(new_group_ranks, [0])
+            self.assertEqual(new_group_backend, "delegating")
 
             if self.rank == 0:
                 self.assertIsNotNone(sub_pg)
@@ -2263,6 +2324,54 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
                     sub_pg is None
                     or sub_pg == dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
                 )
+        finally:
+            dist.destroy_process_group()
+
+    def test_new_group_delegates_to_pg_explicit_backend(self):
+        """dist.new_group forwards an explicit multi-backend string to the
+        delegated default_pg.new_group."""
+
+        new_group_called = False
+        new_group_backend = None
+
+        class _DelegatingPG(DummyProcessGroup):
+            def new_group(
+                self,
+                ranks,
+                timeout=None,
+                backend=None,
+                pg_options=None,
+                group_name=None,
+                group_desc=None,
+            ):
+                nonlocal new_group_called, new_group_backend
+                new_group_called = True
+                new_group_backend = backend
+                my_rank = self.rank()
+                if my_rank not in ranks:
+                    return None
+                return DummyProcessGroup(ranks.index(my_rank), len(ranks))
+
+        dist.Backend.register_backend(
+            "delegating",
+            lambda *args, **kwargs: _DelegatingPG(
+                args[0].group_rank, args[0].group_size
+            ),
+            extended_api=True,
+            devices=["cpu", "cuda"],
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group(
+            "delegating", rank=self.rank, world_size=self.world_size
+        )
+
+        try:
+            backend = "cpu:delegating,cuda:delegating"
+            dist.new_group(ranks=[0], backend=backend)
+            self.assertTrue(new_group_called)
+            self.assertEqual(new_group_backend, backend)
         finally:
             dist.destroy_process_group()
 
@@ -2344,6 +2453,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 # Hide all GPUs
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["ONEAPI_DEVICE_SELECTOR"] = "!*:gpu"
 
 import torch
 from torch import distributed as dist
@@ -2425,7 +2535,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             store=store,
         )
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
         tensors = [torch.ones(10, 10, device=torch.device(device))]
         dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
         for tensor in tensors:

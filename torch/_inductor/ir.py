@@ -54,7 +54,7 @@ from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value
+from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -957,6 +957,9 @@ class Operation:
         if self.operation_name is None:
             raise AssertionError("Expected self.operation_name is not None")
         return self.operation_name
+
+    def get_buffer_name(self) -> str | None:
+        return None
 
     def get_config_patches(self) -> dict[str, Any]:
         """Get config patches for this operation (e.g., coordinate_descent_tuning)."""
@@ -5104,6 +5107,7 @@ class Buffer(IRNode, CodegenSymbol):
     # a meaningful name
     name: str | None
     layout: OutputSpec
+    ordering_only: ClassVar[bool] = False
 
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
@@ -5118,6 +5122,9 @@ class Buffer(IRNode, CodegenSymbol):
     def get_name(self) -> str:
         if not self.name:
             raise AssertionError(self)
+        return self.name
+
+    def get_buffer_name(self) -> str | None:
         return self.name
 
     def get_example(self) -> torch.Tensor | torch.SymInt:
@@ -8071,6 +8078,38 @@ class MutationOutput(Buffer):
         ]
 
 
+class OrderingBarrier(NopKernel):
+    """A no-op that creates a rename chain for scheduling order.
+
+    Takes a source buffer and produces a new buffer name. The scheduler
+    sees this as a node with a rename (source -> self), so future readers
+    of the source are redirected through this barrier.
+
+    Uses WeakDep(is_fake=True) instead of StarDep via the ``ordering_only``
+    flag, avoiding lifetime extension and mark_buffer_mutated side effects.
+    No kernel is generated and no allocation occurs.
+    """
+
+    ordering_only = True
+
+    def __init__(self, source_node: IRNode) -> None:
+        source_node.realize()
+        super().__init__(
+            name=None,
+            layout=NoneLayout(device=source_node.get_device()),
+            inputs=[source_node],
+        )
+        self.mutation_names = [source_node.get_name()]
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    def get_mutation_names(self) -> Sequence[str]:
+        return self.mutation_names
+
+    def should_allocate(self) -> bool:
+        return False
+
+
 class TMADescriptor(ExternKernel):
     """
     An IR node representing a generic host-side TMA descriptor in the Triton API
@@ -8758,6 +8797,31 @@ class SetSourceTensorKernel(ExternKernelAlloc):
         return [self.input_name(0), self.input_name(1)]
 
 
+class ShallowCopyDataKernel(ExternKernelAlloc):
+    def __init__(self, self_tensor: IRNode, storage_tensor: IRNode) -> None:
+        storage_tensor = self.realize_input(storage_tensor)
+        storage_tensor.freeze_layout()
+        super().__init__(
+            storage_tensor.get_layout(),
+            [self_tensor, storage_tensor],
+            python_kernel_name="torch.ops.aten.shallow_copy_data_",
+            op_overload=torch.ops.aten.set_.source_Tensor,
+        )
+        if not isinstance(self_tensor, (BaseView, StorageBox, TensorBox)):
+            raise AssertionError(type(self_tensor))
+        V.graph.never_reuse_buffers.add(self_tensor.data.get_name())
+        V.graph.never_reuse_buffers.add(storage_tensor.get_name())
+        V.graph.never_reuse_buffers.add(self.get_name())
+        device = storage_tensor.get_device()
+        self.mutation_outputs = [
+            MutationOutput(NoneLayout(device=device), self_tensor, self),
+            MutationOutput(NoneLayout(device=device), storage_tensor, self),
+        ]
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        return [self.input_name(0), self.input_name(1)]
+
+
 class ScatterFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly.
@@ -9348,7 +9412,7 @@ class FallbackKernel(ExternKernelAlloc):
             return example_output.device
         if isinstance(
             example_output, (torch._C.ScriptObject, FakeScriptObject)
-        ) or is_opaque_value(example_output):
+        ) or is_custom_class_obj(example_output):
             return torch.device("cpu")
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
@@ -9838,7 +9902,7 @@ class FallbackKernel(ExternKernelAlloc):
                 return output.node.expr
             elif isinstance(
                 output, (torch._C.ScriptObject, FakeScriptObject)
-            ) or is_opaque_value(output):
+            ) or is_custom_class_obj(output):
                 return OpaqueMultiOutput(
                     NoneLayout(device=device),
                     packed,
@@ -11322,7 +11386,7 @@ class TorchBindObject(NonTensorObj):
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
 
-        if is_opaque_value(real_script_obj):
+        if is_custom_class_obj(real_script_obj):
             return 0
 
         if not hasattr(real_script_obj, "__obj_flatten__"):
