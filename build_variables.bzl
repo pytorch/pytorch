@@ -113,6 +113,7 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/profiler/collection.cpp",
+    "torch/csrc/profiler/cupti/monitor_native.cpp",
     "torch/csrc/profiler/data_flow.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
     "torch/csrc/mtia/profiler/MTIAMemoryProfiler.cpp",
@@ -894,8 +895,6 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
     "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/shared/cudnn.cpp",
     "torch/csrc/cuda/shared/cusparselt.cpp",
-    "torch/csrc/profiler/cupti/monitor_native.cpp",
-    "torch/csrc/profiler/cupti/monitor_python.cpp",
 ]
 
 libtorch_python_xpu_sources = [
@@ -1022,6 +1021,7 @@ libtorch_python_core_sources = [
     "torch/csrc/monitor/python_init.cpp",
     "torch/csrc/multiprocessing/init.cpp",
     "torch/csrc/onnx/init.cpp",
+    "torch/csrc/profiler/cupti/monitor_python.cpp",
     "torch/csrc/profiler/python/init.cpp",
     "torch/csrc/profiler/python/combined_traceback.cpp",
     "torch/csrc/serialization.cpp",
