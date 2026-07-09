@@ -384,6 +384,141 @@ class TestLocalMap(DTensorTestBase):
             )
             self.assertEqual(W_dt.grad.full_tensor(), W.grad)
 
+    @with_comms()
+    def test_local_map_with_nested_grad_placement(self):
+        """
+        Nested in_grad_placements (mirroring a nested args structure) must
+        flow to to_local(grad_placements=...) the same way as a flat tuple.
+        """
+        device_mesh = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(self.world_size,)
+        )
+        torch.manual_seed(12)
+
+        X = torch.randn(4, 2, device=self.device_type, requires_grad=True)
+        W = torch.randn(2, 4, device=self.device_type, requires_grad=True)
+        X_dt = distribute_tensor(X, device_mesh, row_wise)
+        W_dt = distribute_tensor(W, device_mesh, replicate)
+
+        def mm_pair(pair):
+            return torch.mm(pair[0], pair[1])
+
+        # Single positional arg is a list of two DTensors -- 2 flat leaves.
+        # in_placements / in_grad_placements mirror that nested structure.
+        nested_in_grad = ([Shard(0)], [Partial()])
+        local_mm_pair = local_map(
+            mm_pair,
+            out_placements=[Shard(0)],
+            in_placements=([row_wise, replicate],),
+            in_grad_placements=(nested_in_grad,),
+            device_mesh=device_mesh,
+        )
+        Y_dt = local_mm_pair([X_dt, W_dt])
+        loss = Y_dt.to_local().sum()
+        loss.backward()
+
+        # Without input redistribution, in_grad_placements feeds directly
+        # into to_local(grad_placements=...) and the input grad placements
+        # match the nested spec we passed in.
+        self.assertEqual(X_dt.grad.placements, tuple(nested_in_grad[0]))
+        self.assertEqual(W_dt.grad.placements, tuple(nested_in_grad[1]))
+
+        # Mismatched length on in_grad_placements raises the expected error.
+        bad_grad_fn = local_map(
+            mm_pair,
+            out_placements=[Shard(0)],
+            in_placements=([row_wise, replicate],),
+            in_grad_placements=([Shard(0)],),
+            device_mesh=device_mesh,
+            redistribute_inputs=True,
+        )
+        with self.assertRaisesRegex(
+            AssertionError, "in_grad_placements length 1 does not match"
+        ):
+            bad_grad_fn([X_dt, W_dt])
+
+    @with_comms
+    def test_nested_in_out_placements(self):
+        """
+        in_placements and out_placements may either be flat (matching the
+        pytree-flattened args/output 1:1) or mirror the args/output structure.
+        Both forms must accept the same set of placement specs at the leaves.
+        """
+        device_mesh = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(self.world_size,)
+        )
+
+        X = torch.randn(16, 8, device=self.device_type, requires_grad=False)
+        W = torch.randn(16, 8, device=self.device_type, requires_grad=False)
+        X_dt = distribute_tensor(X, device_mesh, row_wise)
+        W_dt = distribute_tensor(W, device_mesh, row_wise)
+
+        def add_pair(pair):
+            return pair[0] + pair[1]
+
+        def split_pair(pair):
+            return [pair[0] * 2.0, pair[1] * 3.0]
+
+        # Nested in_placements mirrors the input tree, single-leaf output.
+        nested_in_fn = local_map(
+            add_pair,
+            out_placements=row_wise,
+            in_placements=([row_wise, row_wise],),
+            device_mesh=device_mesh,
+        )
+        result = nested_in_fn([X_dt, W_dt])
+        self.assertEqual(result.placements, tuple(row_wise))
+        self.assertEqual(result.full_tensor(), X + W)
+
+        # Nested out_placements mirrors a list-shaped output.
+        nested_out_fn = local_map(
+            split_pair,
+            out_placements=[row_wise, row_wise],
+            in_placements=([row_wise, row_wise],),
+            device_mesh=device_mesh,
+        )
+        outs = nested_out_fn([X_dt, W_dt])
+        self.assertIsInstance(outs, list)
+        self.assertEqual(len(outs), 2)
+        for d in outs:
+            self.assertEqual(d.placements, tuple(row_wise))
+
+        # Flat forms still work alongside nested ones (backward compat).
+        flat_fn = local_map(
+            split_pair,
+            out_placements=(row_wise, row_wise),
+            in_placements=(row_wise, row_wise),
+            device_mesh=device_mesh,
+        )
+        flat_outs = flat_fn([X_dt, W_dt])
+        for d in flat_outs:
+            self.assertEqual(d.placements, tuple(row_wise))
+
+        # Dict-shaped args with dict-shaped in_placements.
+        def dict_fn(d):
+            return d["a"] + d["b"]
+
+        dict_fn_wrapped = local_map(
+            dict_fn,
+            out_placements=row_wise,
+            in_placements=({"a": row_wise, "b": row_wise},),
+            device_mesh=device_mesh,
+        )
+        result = dict_fn_wrapped({"a": X_dt, "b": W_dt})
+        self.assertEqual(result.placements, tuple(row_wise))
+
+        # Mismatched length still raises a helpful error.
+        bad_fn = local_map(
+            add_pair,
+            out_placements=row_wise,
+            in_placements=(row_wise,),
+            device_mesh=device_mesh,
+        )
+        with self.assertRaisesRegex(
+            AssertionError, "in_placements length 1 does not match"
+        ):
+            bad_fn([X_dt, W_dt])
+
     @skip_if_lt_x_gpu(4)
     @with_comms
     def test_multi_mesh_inputs(self):
