@@ -8853,6 +8853,25 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
+    def _invoke_subgraph_body_cudagraph_skip_reason(
+        self, invoke_subgraph: ir.InvokeSubgraph
+    ) -> str | None:
+        """
+        Reason the region body cannot be captured as one cudagraph partition
+        (non-GPU or cudagraph-unsafe op), or None if it is safe.
+        """
+        subgraph = invoke_subgraph.subgraph
+        if subgraph is None or subgraph.graph is None:
+            return None
+        body = subgraph.graph
+        for device in body.device_types:
+            if not is_gpu(device):
+                return f"invoke_subgraph body has non-GPU ({device}) ops"
+        for op in body.operations:
+            if is_cudagraph_unsafe_op(op):
+                return "invoke_subgraph body has a CUDAGraph-unsafe op"
+        return None
+
     def should_partition(self, node: BaseSchedulerNode) -> str | None:
         """
         Return the reason why we should partition the inductor graph on this node,
@@ -8873,6 +8892,37 @@ class Scheduler:
                 if not isinstance(op, torch._ops.OpOverload):
                     raise AssertionError("expected op to be a torch._ops.OpOverload")
                 return f"custom partition op: {op_overload_name}"
+
+        # A region with an explicit cudagraphs preference is its own partition:
+        # opt-in -> a standalone cudagraph partition, opt-out -> inlined. Its
+        # MultiOutput extractions must share that partition; a Python-container
+        # output cannot cross a partition boundary.
+        region: ir.InvokeSubgraph | None = None
+        if isinstance(node.node, ir.InvokeSubgraph):
+            region = node.node
+        elif isinstance(node.node, ir.MultiOutput):
+            region = next(
+                (i for i in node.node.inputs if isinstance(i, ir.InvokeSubgraph)),
+                None,
+            )
+        if region is not None:
+            patches = getattr(region.subgraph, "inductor_config_patches", None)
+            if patches is not None and "triton.cudagraphs" in patches:
+                if patches["triton.cudagraphs"]:
+                    # opt-in, but only if the whole body is cudagraph-safe (there
+                    # is no inner partitioning to isolate unsafe ops).
+                    skip_reason = self._invoke_subgraph_body_cudagraph_skip_reason(
+                        region
+                    )
+                    if skip_reason is None:
+                        return None
+                    if isinstance(node.node, ir.InvokeSubgraph):
+                        cudagraphs_log.debug(
+                            "skipping cudagraphs for invoke_subgraph region: %s",
+                            skip_reason,
+                        )
+                    return skip_reason
+                return "invoke_subgraph opts out of cudagraphs"
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
