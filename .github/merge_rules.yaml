@@ -478,6 +478,16 @@
   - Lint
   - pull
 
+- name: TVM backend
+  patterns:
+  - torch/_dynamo/backends/tvm.py
+  approved_by:
+  - guan404ming
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Dynamo
   patterns:
   - torch/_dynamo/**
