@@ -113,7 +113,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
         // The problem with using accscalar_t is that accscalar_t might be
         // float32 on gpu for a float32 scalar_t, but double on cpu for the
         // same, and the effective output size starts differing on CPU vs GPU
-        // because of precision issues, which we dont want. the corner-case we
+        // because of precision issues, which we don't want. the corner-case we
         // do want to take into account is int64_t, which has higher precision
         // than double NOLINTNEXTLINE(bugprone-branch-clone)
         if constexpr (std::is_same_v<scalar_t, int64_t>) {
@@ -506,12 +506,6 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   return {Shape(tensors[0].scalar_type(), out_shape)};
 }
 
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_cholesky(
-    const at::Tensor& self,
-    bool upper) {
-  return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
     const at::Tensor& input,
     const ::std::optional<at::Tensor>& weight,
@@ -581,6 +575,42 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
       std::vector<int64_t>{num_features});
 
   return shapes;
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_group_norm(
+    const at::Tensor& input,
+    const ::std::optional<at::Tensor>& weight,
+    const ::std::optional<at::Tensor>& bias,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    double eps) {
+  return {
+      {input.scalar_type(), input.sizes().vec()},
+      {input.scalar_type(), {N, group}},
+      {input.scalar_type(), {N, group}}};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_group_norm_backward(
+    const at::Tensor& grad_out,
+    const at::Tensor& input,
+    const at::Tensor& mean,
+    const at::Tensor& rstd,
+    const ::std::optional<at::Tensor>& weight,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    ::std::array<bool, 3> output_mask) {
+  auto param_type{
+      weight && weight->defined() ? weight->scalar_type()
+                                  : input.scalar_type()};
+  return {
+      {input.scalar_type(),
+       output_mask[0] ? input.sizes().vec() : c10::IntArrayRef{}},
+      {param_type, output_mask[1] ? c10::IntArrayRef{C} : c10::IntArrayRef{}},
+      {param_type, output_mask[2] ? c10::IntArrayRef{C} : c10::IntArrayRef{}}};
 }
 
 std::vector<Shape> compute_shape_native_layer_norm(

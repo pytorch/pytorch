@@ -112,7 +112,10 @@ class BoundVars:
                 indirect = partial(self.set_indirect, var)
                 result[key] = indirect
             else:
-                assert "scan" in key
+                if "scan" not in key:
+                    raise AssertionError(
+                        f"expected 'scan' in submodule key, got {key!r}"
+                    )
                 result[key] = submodules[key]
 
         return result
@@ -128,13 +131,15 @@ class BoundVars:
         interp = InterpreterShim(subblock.graph, submodules)
         interp.run(V.get_ops_handler(), initial_env=env)
         output = [node for node in subblock.graph.nodes if node.target == "output"]
-        assert len(output) == 1
+        if len(output) != 1:
+            raise AssertionError(f"expected exactly 1 output node, got {len(output)}")
         # don't bother unioning with value since the load from buffer will be
         # pessimistically assumed to be inf anyway
         return interp.env[output[0]]
 
     def set_indirect(self, old: Expr, new: ValueRanges[Expr]) -> ValueRanges[Expr]:
-        assert isinstance(new, ValueRanges)
+        if not isinstance(new, ValueRanges):
+            raise AssertionError(f"expected ValueRanges, got {type(new)}")
         self.replacement_vals[old] = new
         return new
 
@@ -191,8 +196,13 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
 
     @classmethod
     def index_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
-        assert isinstance(index, ValueRanges)
+        if not isinstance(index, ValueRanges):
+            raise AssertionError(f"expected ValueRanges, got {type(index)}")
         return cls.to_dtype(index, dtype)
+
+    @classmethod
+    def value_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
+        return cls.index_expr(index, dtype)
 
     @staticmethod
     # pyrefly: ignore [bad-override]

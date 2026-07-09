@@ -588,6 +588,15 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
   auto dims = input.dim();
   auto leading_dims = input.dim() - pooling_dims;
+  for (int64_t i = 1; i < dims; ++i) {
+    TORCH_CHECK(input.size(i) > 0,
+                op_name,
+                ": Expected input to have non-zero size for non-batch dimensions, but got ",
+                input.sizes(),
+                " with dimension ",
+                i,
+                " being empty.");
+  }
 
   const auto memory_format = input.suggest_memory_format();
   std::vector<int64_t> output_size(dims);
@@ -595,15 +604,27 @@ static void max_unpool_out_mps_template(const Tensor& input,
     output_size[dim] = input.sizes()[dim];
   }
   for (int dim : c10::irange(pooling_dims)) {
+    TORCH_CHECK(output_size_[dim] >= 0,
+                op_name,
+                ": output_size must contain non-negative spatial dimensions, but got output_size[",
+                dim,
+                "]=",
+                output_size_[dim]);
     output_size[leading_dims + dim] = output_size_[dim];
   }
 
   output.resize_(output_size, memory_format);
+  if (output.numel() == 0) {
+    return;
+  }
   output.fill_(0);
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = input.numel();
+  if (numThreads == 0) {
+    return;
+  }
   MaxUnpoolingParams<5> params;
 
   params.dims = dims;
@@ -764,6 +785,7 @@ static void avg_pool_out_mps_template(const Tensor& output,
                                       std::optional<int64_t> divisor_override,
                                       const int32_t pooling_dims,
                                       const std::string& op_name) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
   auto [dims, output_size, kernel_size, stride, padding, _] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, std::nullopt, ceil_mode, pooling_dims, op_name);
 
@@ -821,6 +843,7 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
                                                std::optional<int64_t> divisor_override,
                                                const int32_t pooling_dims,
                                                const std::string& op_name) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
   auto [dims, _, kernel_size, stride, padding, __] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, std::nullopt, ceil_mode, pooling_dims, op_name);
 

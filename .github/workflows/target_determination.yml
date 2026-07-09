@@ -1,7 +1,12 @@
+# Owner(s): ["module: ci"]
 name: target-determination
 
 on:
   workflow_call:
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
 
@@ -15,34 +20,53 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: "arc,lf"
 
   target-determination:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64"
     needs: get-label-type
+    container:
+      image: ghcr.io/actions/actions-runner:latest
     steps:
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
           submodules: false
+          use-arc: true
+
+      - name: Setup uv
+        uses: pytorch/test-infra/.github/actions/setup-uv@main
+        with:
+          enable-cache: true
+
+      - name: Configure AWS credentials
+        id: aws-creds
+        # Fork PRs can't assume the OIDC role; fall back to GHA-native artifacts below.
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
 
       - name: Get workflow job id
         id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
+        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@main
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download pytest cache
-        uses: ./.github/actions/pytest-cache-download
+        uses: pytorch/pytorch/.github/actions/pytest-cache-download@main
+        # Public-read bucket; works without creds (anonymous fallback) on fork PRs.
         continue-on-error: true
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}
 
-      - name: Download LLM Artifacts from S3
-        uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
+      - name: Download LLM Artifacts
+        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         continue-on-error: true
         with:
           name: llm_results
@@ -64,15 +88,16 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           unzip -o .additional_ci_files/llm_results/mappings.zip -d .additional_ci_files/llm_results || true
-          python3 -m pip install boto3==1.35.42
-          python3 tools/testing/do_target_determination_for_s3.py
+          # Dependencies are declared inline in the script via PEP 723.
+          uv run --no-project --python 3.12 tools/testing/do_target_determination_for_s3.py
 
       - name: Upload TD results to s3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
-        if: steps.td.outcome == 'success'
+        # Skipped on fork PRs (no S3 creds); the GHA-native upload below is the fallback.
+        if: steps.td.outcome == 'success' && steps.aws-creds.outcome == 'success'
         with:
           name: td_results
-          retention-days: 14
+          retention-days: 1
           if-no-files-found: error
           path: td_results.json
 
@@ -81,6 +106,6 @@ jobs:
         if: steps.td.outcome == 'success'
         with:
           name: td_results.json
-          retention-days: 14
+          retention-days: 1
           if-no-files-found: error
           path: td_results.json

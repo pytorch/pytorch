@@ -1213,5 +1213,35 @@ class TestUserDefinedSetitem(TestCase):
         self.assertEqual(_DelClassMeta["y"], 2)
 
 
+class TestObjectConstruction(TestCase):
+    @make_dynamo_test
+    def test_object_call_identity(self):
+        a = object()
+        b = object()
+        self.assertEqual(a is a, True)
+        self.assertEqual(a is b, False)
+        self.assertEqual(type(a) is object, True)
+
+    @make_dynamo_test
+    def test_object_call_as_sentinel(self):
+        sentinel = object()
+        self.assertEqual(sentinel == 1, False)
+        self.assertEqual(sentinel == sentinel, True)
+
+    def test_object_call_escapes_graph_breaks(self):
+        # A bare object() that escapes the compiled region is opaque and
+        # sourceless, so reconstruction graph-breaks (runs in eager) rather
+        # than failing; the returned value is a real object instance.
+        cnt = dynamo_testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x + 1, object()
+
+        _, s = fn(torch.randn(3))
+        self.assertIs(type(s), object)
+        self.assertEqual(cnt.frame_count, 0)
+
+
 if __name__ == "__main__":
     run_tests()

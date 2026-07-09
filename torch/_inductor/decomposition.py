@@ -36,7 +36,11 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
-from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    statically_known_true,
+    sym_eq,
+)
 
 from . import config, inductor_prims
 from .utils import (
@@ -61,6 +65,8 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.adaptive_max_pool2d,
+        aten.adaptive_max_pool3d,
         aten.index_select,
         aten.addmv,
         aten.arange,
@@ -152,6 +158,72 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+if torch.distributed.is_available():
+
+    @register_decomposition([torch.ops._dtensor.shard_dim_alltoall.default])
+    def shard_dim_alltoall_decomp(
+        inp: torch.Tensor,
+        gather_dim: int,
+        shard_dim: int,
+        group_name: str,
+    ) -> torch.Tensor:
+        if not config.decompose_shard_dim_alltoall:
+            return NotImplemented
+        if inp.dtype.is_complex:
+            return NotImplemented
+
+        ndim = inp.dim()
+        gather_dim = gather_dim + ndim if gather_dim < 0 else gather_dim
+        shard_dim = shard_dim + ndim if shard_dim < 0 else shard_dim
+        if not (0 <= gather_dim < ndim and 0 <= shard_dim < ndim):
+            return NotImplemented
+        if gather_dim == shard_dim:
+            return NotImplemented
+
+        try:
+            from torch.distributed.distributed_c10d import (
+                _get_group_size_by_name,
+                GroupName,
+            )
+
+            group_size = _get_group_size_by_name(GroupName(group_name))
+        except (RuntimeError, ValueError):
+            return NotImplemented
+
+        input_shape = list(inp.shape)
+        shard_dim_size = input_shape[shard_dim]
+        # Match eager shard_dim_alltoall semantics. DTensor pads uneven logical
+        # shards before reaching this op, so the local shard dim should split
+        # evenly across the process group here. If the guard fails at runtime,
+        # Dynamo recompiles and may keep the original shard_dim_alltoall fallback.
+        if not guard_or_false(sym_eq(shard_dim_size % group_size, 0)):
+            return NotImplemented
+        local_shard_dim_size = shard_dim_size // group_size
+
+        pre_view_shape = list(input_shape)
+        pre_view_shape[shard_dim] = local_shard_dim_size
+        pre_view_shape.insert(shard_dim, group_size)
+
+        post_view_shape = list(input_shape)
+        post_view_shape[shard_dim] = local_shard_dim_size
+        post_view_shape[gather_dim] = post_view_shape[gather_dim] * group_size
+
+        out = aten.view.default(inp, pre_view_shape)
+        out = aten.movedim.int(out, shard_dim, 0)
+        out = aten.clone.default(out, memory_format=torch.contiguous_format)
+        out = torch.ops._c10d_functional.all_to_all_single.default(
+            out,
+            [1] * group_size,
+            [1] * group_size,
+            group_name,
+        )
+        out = torch.ops._c10d_functional.wait_tensor.default(out)
+        out = aten.movedim.int(out, 0, gather_dim)
+        out = aten.clone.default(out, memory_format=torch.contiguous_format)
+        counters["inductor"]["decompose_shard_dim_alltoall"] += 1
+        return aten.view.default(out, post_view_shape)
 
 
 @register_decomposition([aten.lerp.Scalar])
@@ -640,6 +712,35 @@ def fmax(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     return torch.where(torch.isnan(other) | (other < self), self, other)
 
 
+@register_decomposition(prims.normal)
+def normal(
+    shape: list[int | torch.SymInt],
+    *,
+    mean: torch.types.Number,
+    std: torch.types.Number,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    if generator is None:
+        normal_samples = torch.randn(
+            shape,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+    else:
+        normal_samples = torch.randn(
+            shape,
+            generator=generator,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+    return std * normal_samples + mean
+
+
 @register_decomposition(aten.amax)
 def amax(
     self: torch.Tensor,
@@ -734,7 +835,8 @@ def full_like(
         return result.to(memory_format=memory_format)
 
     else:
-        assert layout == torch.strided
+        if layout != torch.strided:
+            raise AssertionError(f"expected torch.strided layout, got {layout}")
         shape, permutation = _get_shape_permutation_like(self)
         result = torch.full(
             shape,
@@ -906,12 +1008,75 @@ def _foreach_lerp_scalar(
     end_tensors: list[torch.Tensor],
     weight: torch.types.Number,
 ) -> list[torch.Tensor]:
-    return aten._foreach_add.List(
-        start_tensors,
-        aten._foreach_mul.Scalar(
-            aten._foreach_sub.List(end_tensors, start_tensors), weight
-        ),
+    def opmath_dtype(t: torch.Tensor) -> torch.dtype:
+        if t.dtype in (torch.float16, torch.bfloat16):
+            return torch.float32
+        return t.dtype
+
+    def cast_weight(dtype: torch.dtype) -> float | complex:
+        if isinstance(weight, complex) and not dtype.is_complex:
+            if weight.imag != 0:
+                return torch.tensor(weight, dtype=dtype).item()
+            return torch.tensor(weight.real, dtype=dtype).item()
+        return torch.tensor(weight, dtype=dtype).item()
+
+    def use_high_formula(dtype: torch.dtype) -> bool:
+        casted_weight = cast_weight(dtype)
+        if isinstance(casted_weight, complex):
+            return (
+                casted_weight.real * casted_weight.real
+                + casted_weight.imag * casted_weight.imag
+                >= 0.25
+            )
+        return casted_weight >= 0.5 or casted_weight <= -0.5
+
+    def scalar_tensor(
+        dtype: torch.dtype, device: torch.device, high_weight: bool
+    ) -> torch.Tensor:
+        if isinstance(weight, complex) and not dtype.is_complex:
+            if weight.imag != 0:
+                weight_tensor = torch.tensor(weight, dtype=dtype, device=device)
+                if high_weight:
+                    return -(1.0 - weight_tensor)
+                return weight_tensor
+            weight_tensor = torch.tensor(weight.real, dtype=dtype, device=device)
+            if high_weight:
+                return -(1.0 - weight_tensor)
+            return weight_tensor
+        weight_tensor = torch.tensor(weight, dtype=dtype, device=device)
+        if high_weight:
+            return -(1.0 - weight_tensor)
+        return weight_tensor
+
+    dtype = start_tensors[0].dtype
+    device = start_tensors[0].device
+    compute_dtype = opmath_dtype(start_tensors[0])
+    use_foreach = dtype not in (torch.float16, torch.bfloat16) and all(
+        t.dtype == dtype and t.device == device for t in start_tensors
     )
+    if use_foreach:
+        high_weight = use_high_formula(compute_dtype)
+        bases = end_tensors if high_weight else start_tensors
+        diff = aten._foreach_sub.List(end_tensors, start_tensors)
+        scalar = scalar_tensor(dtype, device, high_weight)
+        return aten._foreach_addcmul.Scalar(bases, [scalar] * len(diff), diff)
+
+    return [
+        torch.addcmul(
+            (end if high_weight else t).to(compute_dtype),
+            scalar_tensor(compute_dtype, t.device, high_weight),
+            end.to(compute_dtype) - t.to(compute_dtype),
+        ).to(t.dtype)
+        for t, end, compute_dtype, high_weight in (
+            (
+                t,
+                end,
+                opmath_dtype(t),
+                use_high_formula(opmath_dtype(t)),
+            )
+            for t, end in zip(start_tensors, end_tensors)
+        )
+    ]
 
 
 @register_decomposition(aten._foreach_lerp.ScalarList)
@@ -1207,24 +1372,6 @@ def max_pool3d_with_indices(
     )
 
 
-@register_decomposition(aten.adaptive_max_pool2d)
-def adaptive_max_pool2d(
-    x: torch.Tensor, output_size: list[int]
-) -> tuple[torch.Tensor, torch.Tensor]:
-    *batch, h_in, w_in = x.shape
-    h_out, w_out = output_size
-
-    if h_out == 0 or w_out == 0:
-        o_size = [*batch, h_out, w_out]
-        return x.new_empty(o_size), x.new_empty(o_size, dtype=torch.int64)
-
-    if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        return aten.max_pool2d_with_indices(x, kernel_size)
-
-    return NotImplemented
-
-
 @register_decomposition(aten.searchsorted.Scalar)
 def searchsorted_scalar(
     sorted_sequence: torch.Tensor,
@@ -1294,8 +1441,12 @@ def repeat_interleave_Tensor(
         return NotImplemented
     if repeat.device.type == "mps":
         return NotImplemented
-    assert repeat.dtype in [torch.int32, torch.int64]
-    assert repeat.ndim == 1
+    if repeat.dtype not in [torch.int32, torch.int64]:
+        raise AssertionError(
+            f"expected repeat dtype int32 or int64, got {repeat.dtype}"
+        )
+    if repeat.ndim != 1:
+        raise AssertionError(f"expected repeat.ndim == 1, got {repeat.ndim}")
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
     indices = torch.searchsorted(
@@ -1304,7 +1455,7 @@ def repeat_interleave_Tensor(
     return torch.clamp(indices, max=repeat.size(0) - 1)
 
 
-# intentionally not regiestered
+# intentionally not registered
 def conv1d_to_conv2d(
     input: torch.Tensor,
     weight: torch.Tensor,
@@ -1318,9 +1469,8 @@ def conv1d_to_conv2d(
     # input:  (N, C_in, L_in)
     # weight: (C_out, C_in // groups, K)
     # bias:   (C_out,)
-    assert input.dim() == 3 and weight.dim() == 3, (
-        "Expect (N,C_in,L) and (C_out,C_in//groups,K)"
-    )
+    if not (input.dim() == 3 and weight.dim() == 3):
+        raise AssertionError("Expect (N,C_in,L) and (C_out,C_in//groups,K)")
 
     # pyrefly: ignore [bad-assignment]
     stride = stride[0]

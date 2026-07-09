@@ -1775,7 +1775,8 @@ std::
     }
   }
 
-  return std::make_tuple(new_sizes, new_strides, wrapped_dims);
+  return std::make_tuple(
+      std::move(new_sizes), std::move(new_strides), std::move(wrapped_dims));
 }
 
 Tensor permute(const Tensor& self, IntArrayRef dims) {
@@ -2484,14 +2485,18 @@ Tensor index_select_sparse_cpu(
             auto [sorted_dim_indices, sorted_dim_indices_idx] =
                 dim_indices.sort();
             return std::make_tuple(
-                sorted_dim_indices, sorted_dim_indices_idx, nneg_index);
+                std::move(sorted_dim_indices),
+                std::move(sorted_dim_indices_idx),
+                nneg_index);
           }
         }
         // sort nneg_index to binary search into it
         else {
           auto [sorted_nneg_index, sorted_nneg_index_idx] = nneg_index.sort();
           return std::make_tuple(
-              sorted_nneg_index, sorted_nneg_index_idx, dim_indices);
+              std::move(sorted_nneg_index),
+              std::move(sorted_nneg_index_idx),
+              dim_indices);
         }
       }();
 
@@ -2571,7 +2576,8 @@ Tensor index_select_sparse_cpu(
       // Short-circuit if empty intersection
       if (!res_len) {
         auto empty_idx = at::empty({0}, src.options());
-        return std::make_tuple(empty_idx, empty_idx);
+        auto empty_idx_copy = empty_idx;
+        return std::make_tuple(std::move(empty_idx), std::move(empty_idx_copy));
       }
 
       // Now that we know "i", "j" and the counts, we "unflatten"
@@ -2749,7 +2755,8 @@ Tensor index_select_sparse_cpu(
       // Short-circuit if empty intersection
       if (!res_len) {
         auto empty_idx = at::empty({0}, index.options());
-        return std::make_tuple(empty_idx, empty_idx);
+        auto empty_idx_copy = empty_idx;
+        return std::make_tuple(std::move(empty_idx), std::move(empty_idx_copy));
       }
       const auto intersection_offsets = intersection_counts.cumsum(0);
 
@@ -2873,10 +2880,10 @@ Tensor index_select_sparse_cpu(
               }
             });
 
-        const auto src_idx_offsets =
+        auto src_idx_offsets =
             src_intersection_offsets.sub_(src_intersection_counts);
 
-        return std::make_tuple(src_idx, src_idx_offsets);
+        return std::make_tuple(std::move(src_idx), std::move(src_idx_offsets));
       }();
 
       auto [idx_selected, src_selected] =
@@ -2934,7 +2941,8 @@ Tensor index_select_sparse_cpu(
               }
             });
 
-        return std::make_tuple(idx_selected, src_selected);
+        return std::make_tuple(
+            std::move(idx_selected), std::move(src_selected));
       }();
 
       return search_in_dim_indices
@@ -3398,6 +3406,47 @@ Tensor& _chunk_cat_out(
   return out;
 }
 
+Tensor stack_meta(TensorList tensors, int64_t dim) {
+  TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  if (wrapped_dim < tensors[0].dim()) {
+    auto entry_shape = tensors[0].sym_sizes();
+    for (const auto i : c10::irange(1, tensors.size())) {
+      auto shape = tensors[i].sym_sizes();
+      TORCH_CHECK(
+          shape.size() == entry_shape.size(),
+          "stack expects each tensor to be equal size, but got ",
+          entry_shape,
+          " at entry 0 and ",
+          shape,
+          " at entry ",
+          i);
+      for (const auto d : c10::irange(entry_shape.size())) {
+        TORCH_SYM_CHECK(
+            shape[d].sym_eq(entry_shape[d]),
+            "stack expects each tensor to be equal size, but got ",
+            entry_shape,
+            " at entry 0 and ",
+            shape,
+            " at entry ",
+            i);
+      }
+    }
+    auto result_sizes = entry_shape.vec();
+    result_sizes.insert(
+        result_sizes.begin() + wrapped_dim,
+        c10::SymInt(static_cast<int64_t>(tensors.size())));
+    return at::cat(tensors, wrapped_dim).view_symint(result_sizes);
+  }
+  // dim == tensors[0].dim(): cannot be expressed as a view of cat
+  std::vector<Tensor> unsqueezed;
+  unsqueezed.reserve(tensors.size());
+  for (const Tensor& t : tensors) {
+    unsqueezed.push_back(t.unsqueeze(wrapped_dim));
+  }
+  return at::cat(unsqueezed, wrapped_dim);
+}
+
 // TODO(msubkhankulov): refactor to use _stack
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
@@ -3408,8 +3457,8 @@ Tensor stack(TensorList tensors, int64_t dim) {
     result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
     auto out = at::cat(tensors, wrapped_dim);
     return out.view(result_sizes); // one can always split a dimension with view
-  } else { // dim = tensors[0].ndimension() cannot be efficiently handled by
-           // view
+  } else {
+    // if dim = tensors[0].ndimension(), view cannot efficiently handle it
     return at::cat(get_stack_inputs(tensors, dim), dim);
   }
 }

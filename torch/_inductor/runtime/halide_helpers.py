@@ -38,7 +38,8 @@ def _uint_to_uniform_float(x):
     # conditions can be simplified
     # scale is ((2**23 - 1) / 2**23) * 2**(N_BITS - 1)
     # https://github.com/triton-lang/triton/blob/e4a0d93ff1a367c7d4eeebbcd7079ed267e6b06f/python/triton/language/random.py#L116-L132.
-    assert x.type() == hl.UInt(32) or x.type() == hl.Int(32)
+    if x.type() != hl.UInt(32) and x.type() != hl.Int(32):
+        raise AssertionError(f"Expected UInt(32) or Int(32), got {x.type()}")
     x = hl.cast(hl.Int(32), x)
     scale = hl.f64(4.6566127342e-10)
     x = hl.select(x < 0, -x - 1, x)
@@ -68,7 +69,8 @@ def philox_impl(c0, c1, c2, c3, k0, k1, n_rounds):
 def halide_philox(seed, c0, c1, c2, c3, n_rounds):
     seed = hl.cast(hl.UInt(64), seed)
 
-    assert c0.type().bits() == 32
+    if c0.type().bits() != 32:
+        raise AssertionError(f"Expected 32-bit type, got {c0.type().bits()}-bit")
 
     seed_hi = hl.cast(hl.UInt(32), (seed >> 32) & hl.u64(0xFFFFFFFF))
     seed_lo = hl.cast(hl.UInt(32), seed & hl.u64(0xFFFFFFFF))
