@@ -175,6 +175,14 @@ struct TORCH_API Engine {
     return nullptr;
   }
 
+  // Attaches the backward pre/post hooks registered by any active
+  // torch.autograd.graph.node_creation_hook context (a Python-only feature)
+  // directly to `node`. libtorch_cpu cannot call into Python, so this is a
+  // no-op here and overridden by PythonEngine (same pattern as
+  // get_default_saved_variable_hooks).
+  virtual void attach_node_creation_hooks(
+      const c10::intrusive_ptr<Node>& /*node*/) {}
+
   // We pass cpu_ready_queue to evaluate_function, so that it knows
   // the correct ready queue to push to after a NodeTask is ready
   void evaluate_function(

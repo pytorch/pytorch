@@ -11356,6 +11356,328 @@ for shape in [(1,), ()]:
             out = Func.apply(a)
         out.backward()
 
+    def test_node_creation_hook(self):
+        events = []
+
+        def prehook(grad_outputs):
+            events.append("pre")
+
+        def posthook(grad_inputs, grad_outputs):
+            events.append("post")
+
+        a = torch.randn(2, requires_grad=True)
+        b = a * 2
+        with torch.autograd.graph.node_creation_hook(prehook, posthook):
+            c = b.exp()
+            d = c + c
+        # b's MulBackward0 was created outside the context; c (ExpBackward0) and
+        # d (AddBackward0) inside. Only the latter two get hooks.
+        d.sum().backward()
+        self.assertEqual(events.count("pre"), 2)
+        self.assertEqual(events.count("post"), 2)
+
+    def test_node_creation_hook_only_prehook(self):
+        events = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: events.append("pre")
+        ):
+            b = a.exp()
+        b.sum().backward()
+        self.assertEqual(events, ["pre"])
+
+    def test_node_creation_hook_only_posthook(self):
+        events = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            posthook=lambda gI, gO: events.append("post")
+        ):
+            b = a.exp()
+        b.sum().backward()
+        self.assertEqual(events, ["post"])
+
+    def test_node_creation_hook_multi_output_fires_once(self):
+        count = [0]
+        a = torch.randn(6, requires_grad=True)
+        # split() has multiple differentiable outputs that all share a single
+        # grad_fn, so the hook is attached exactly once regardless of output
+        # count.
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: count.__setitem__(0, count[0] + 1)
+        ):
+            outs = a.split(2)
+        torch.cat(outs).sum().backward()
+        self.assertEqual(count[0], 1)
+
+    def test_node_creation_hook_nesting(self):
+        calls = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: calls.append("outer")
+        ):
+            b = a * 2
+            with torch.autograd.graph.node_creation_hook(
+                prehook=lambda gO: calls.append("inner")
+            ):
+                c = b.exp()
+        c.sum().backward()
+        # b gets only the outer prehook; c gets both, outermost first.
+        self.assertEqual(calls.count("outer"), 2)
+        self.assertEqual(calls.count("inner"), 1)
+        # For c the outer prehook runs before the inner one.
+        self.assertLess(calls.index("outer"), calls.index("inner"))
+
+    def test_node_creation_hook_custom_function(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * 2
+
+        events = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: events.append("pre")
+        ):
+            out = Func.apply(a)
+        out.sum().backward()
+        self.assertEqual(events, ["pre"])
+
+    def test_node_creation_hook_inplace(self):
+        events = []
+        a = torch.randn(2, requires_grad=True)
+        b = a * 2
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: events.append("pre")
+        ):
+            b.mul_(2)
+        b.sum().backward()
+        # The rebased MulBackward0 from the in-place op is created in-context.
+        self.assertEqual(events, ["pre"])
+
+    def test_node_creation_hook_no_fire_outside_context(self):
+        events = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: events.append("pre")
+        ):
+            pass
+        b = a * 2
+        # AccumulateGrad is created lazily during backward, outside any context,
+        # and should not be covered either.
+        b.sum().backward()
+        self.assertEqual(events, [])
+
+    def test_node_creation_hook_during_backward(self):
+        # Nodes created during backward (create_graph=True) should get hooks
+        # when backward runs under the context; the TLS must propagate to engine
+        # worker threads via ThreadLocalState.
+        events = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: events.append("pre")
+        ):
+            b = (a * a).sum()
+            (grad,) = torch.autograd.grad(b, a, create_graph=True)
+            self.assertIsNotNone(grad.grad_fn)
+            # Running double-backward exercises the hooks attached to the graph
+            # nodes built while the first backward ran inside the context.
+            grad.sum().backward()
+        self.assertGreater(len(events), 0)
+
+    def test_node_creation_hook_checkpoint_recompute(self):
+        # Recomputation during backward recreates graph nodes; those should get
+        # hooks when backward runs under the context.
+        count = [0]
+
+        def fn(x):
+            return x.exp().sin()
+
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: count.__setitem__(0, count[0] + 1)
+        ):
+            out = torch.utils.checkpoint.checkpoint(fn, a, use_reentrant=False)
+            out.sum().backward()
+        # exp and sin each contribute a backward node during recompute.
+        self.assertGreaterEqual(count[0], 2)
+
+    def test_node_creation_hook_pre_before_post(self):
+        # The motivating pattern: capture state at node creation, restore it
+        # around the node's execution in backward.
+        events = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: events.append("pre"),
+            posthook=lambda gI, gO: events.append("post"),
+        ):
+            b = a.exp()
+        b.sum().backward()
+        self.assertEqual(events, ["pre", "post"])
+
+    def test_node_creation_hook_always_call_on_error(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise RuntimeError("boom")
+
+        events = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            prehook=lambda gO: events.append("pre"),
+            posthook=lambda gI, gO: events.append("post"),
+            always_call=True,
+        ):
+            out = Func.apply(a)
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            out.sum().backward()
+        # The prehook ran, backward raised, and the always_call posthook still
+        # ran (both on the Func node); the original error still propagates.
+        self.assertIn("pre", events)
+        self.assertIn("post", events)
+
+    def test_node_creation_hook_no_always_call_skips_posthook_on_error(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise RuntimeError("boom")
+
+        events = []
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            posthook=lambda gI, gO: events.append("post"),
+            always_call=False,
+        ):
+            out = Func.apply(a)
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            out.sum().backward()
+        # Without always_call, the posthook on the failing node is skipped.
+        self.assertNotIn("post", events)
+
+    def test_node_creation_hook_always_call_posthook_error_swallowed(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise RuntimeError("boom")
+
+        def posthook(gI, gO):
+            raise ValueError("posthook boom")
+
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            posthook=posthook, always_call=True
+        ):
+            out = Func.apply(a)
+        # The original error propagates; the posthook error is swallowed.
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            out.sum().backward()
+
+    def test_node_creation_hook_always_call_normal_path_once(self):
+        # always_call must not cause a double-fire on the success path.
+        count = [0]
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook(
+            posthook=lambda gI, gO: count.__setitem__(0, count[0] + 1),
+            always_call=True,
+        ):
+            b = a.exp()
+        b.sum().backward()
+        self.assertEqual(count[0], 1)
+
+    def test_node_creation_hook_from_context_manager(self):
+        events = []
+
+        @contextlib.contextmanager
+        def region(name):
+            events.append(("enter", name))
+            try:
+                yield
+            finally:
+                events.append(("exit", name))
+
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook.from_context_manager(
+            lambda: region("r")
+        ):
+            b = a.exp().sin()
+        b.sum().backward()
+        # Each hooked node enters and exits the region around its own backward,
+        # balanced (every enter has a matching exit).
+        self.assertEqual(len(events), 4)
+        depth = 0
+        for kind, _ in events:
+            depth += 1 if kind == "enter" else -1
+            self.assertGreaterEqual(depth, 0)
+        self.assertEqual(depth, 0)
+
+    def test_node_creation_hook_from_context_manager_exits_on_error(self):
+        events = []
+
+        @contextlib.contextmanager
+        def region():
+            events.append("enter")
+            try:
+                yield
+            finally:
+                events.append("exit")
+
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise RuntimeError("boom")
+
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook.from_context_manager(region):
+            out = Func.apply(a)
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            out.sum().backward()
+        # Func is the single hooked node created in-context (the .sum() node is
+        # created outside it); its context manager is exited even though its
+        # backward raised.
+        self.assertEqual(events, ["enter", "exit"])
+
+    def test_node_creation_hook_from_context_manager_double_backward(self):
+        order = []
+
+        @contextlib.contextmanager
+        def region():
+            order.append("enter")
+            try:
+                yield
+            finally:
+                order.append("exit")
+
+        a = torch.randn(2, requires_grad=True)
+        with torch.autograd.graph.node_creation_hook.from_context_manager(region):
+            (grad,) = torch.autograd.grad((a * a).sum(), a, create_graph=True)
+            grad.sum().backward()
+        # Nested node executions stay balanced (LIFO stack of context managers).
+        depth = 0
+        for event in order:
+            depth += 1 if event == "enter" else -1
+            self.assertGreaterEqual(depth, 0)
+        self.assertEqual(depth, 0)
+        self.assertGreater(len(order), 0)
+
     def test_unpack_hooks_exec_count(self):
         def f(x, y):
             return x * y

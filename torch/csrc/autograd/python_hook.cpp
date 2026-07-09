@@ -211,6 +211,35 @@ void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) const {
   Py_END_CRITICAL_SECTION();
 }
 
+PyFunctionSinglePostHook::PyFunctionSinglePostHook(
+    c10::SafePyObject hook,
+    bool always_call)
+    : hook_(std::move(hook)), always_call_(always_call) {}
+
+auto PyFunctionSinglePostHook::operator()(
+    const variable_list& _outputs, /* grad_inputs */
+    const variable_list& _inputs /* grad_outputs */) -> variable_list {
+  pybind11::gil_scoped_acquire gil;
+  THPObjectPtr grad_inputs(wrap_variables(_outputs));
+  THPObjectPtr grad_outputs(wrap_variables(_inputs));
+  PyObject* hook = hook_.ptr(getPyInterpreter());
+  THPObjectPtr res(PyObject_CallFunctionObjArgs(
+      hook, grad_inputs.get(), grad_outputs.get(), nullptr));
+  if (!res) {
+    throw python_error();
+  }
+  if (Py_IsNone(res) || res.get() == grad_inputs.get()) {
+    return _outputs;
+  }
+  check_result(grad_inputs.get(), res.get(), hook);
+  return unwrap_variables(res.get());
+}
+
+void PyFunctionSinglePostHook::compiled_args(CompiledNodeArgs& args) const {
+  args.add_post_hook(c10::SafePyObject(
+      Py_NewRef(hook_.ptr(getPyInterpreter())), getPyInterpreter()));
+}
+
 PyFunctionTensorPostAccGradHooks::PyFunctionTensorPostAccGradHooks(
     PyObject* dict)
     : dict(dict) {

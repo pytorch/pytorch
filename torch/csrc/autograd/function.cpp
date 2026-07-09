@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/function.h>
 
+#include <ATen/NodeCreationHooks.h>
 #include <c10/util/ThreadLocal.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/variable.h>
@@ -35,6 +36,17 @@ NodeGuard::~NodeGuard() {
 
 c10::intrusive_ptr<Node> get_current_node() {
   return current_evaluating_node;
+}
+
+void fire_node_creation_hooks(const c10::intrusive_ptr<Node>& node) {
+  if (C10_LIKELY(at::impl::NodeCreationHooks::empty())) {
+    return;
+  }
+  if (node->node_creation_hooks_fired()) {
+    return;
+  }
+  node->set_node_creation_hooks_fired();
+  Engine::get_default_engine().attach_node_creation_hooks(node);
 }
 
 void Node::assign_parent() {

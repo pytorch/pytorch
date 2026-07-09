@@ -831,6 +831,29 @@ static variable_list call_post_hooks(
   return outputs;
 }
 
+// Runs the post hooks that opted in via should_run_on_error() after the node's
+// backward threw, so state-restoring hooks (see node_creation_hook's
+// always_call) still fire. grad_inputs are unavailable, so pass empty. Any
+// exception from these hooks is swallowed so it doesn't mask the original.
+static void call_post_hooks_on_error(Node& fn, const variable_list& inputs) {
+  for (const auto& hook : fn.post_hooks()) {
+    if (!hook->should_run_on_error()) {
+      continue;
+    }
+    try {
+      variable_list empty_grad_inputs;
+      (*hook)(empty_grad_inputs, inputs);
+    } catch (std::exception& e) {
+      TORCH_WARN(
+          "Ignoring exception from node_creation_hook always_call post hook "
+          "raised while handling another error in ",
+          fn.name(),
+          ": ",
+          e.what());
+    }
+  }
+}
+
 void set_device(int device) {
   // NB: We MUST NOT construct the guard for device CPU,
   // as in some settings we compile with cuda, but
@@ -1029,26 +1052,31 @@ static variable_list call_function(
   const auto has_post_hooks = !fn.post_hooks().empty();
   variable_list outputs;
 
-  if (has_post_hooks) {
-    // In functions/accumulate_grad.cpp, there is some logic to check the
-    // conditions under which the incoming gradient can be stolen directly
-    // (which elides a deep copy) instead of cloned. One of these conditions
-    // is that the incoming gradient's refcount must be 1 (nothing else is
-    // referencing the same data).  Stashing inputs_copy here bumps the
-    // refcount, so if post hooks are employed, it's actually still ok for
-    // accumulate_grad.cpp to steal the gradient if the refcount is 2.
-    //
-    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
-    // accumulate_grad.cpp accounts for this, but also creates a silent
-    // dependency between engine.cpp (ie, this particular engine
-    // implementation) and accumulate_grad.cpp.
-    //
-    // If you change the logic here, make sure it's compatible with
-    // accumulate_grad.cpp.
-    auto inputs_copy = inputs;
-    outputs = fn(std::move(inputs_copy));
-  } else {
-    outputs = fn(std::move(inputs));
+  try {
+    if (has_post_hooks) {
+      // In functions/accumulate_grad.cpp, there is some logic to check the
+      // conditions under which the incoming gradient can be stolen directly
+      // (which elides a deep copy) instead of cloned. One of these conditions
+      // is that the incoming gradient's refcount must be 1 (nothing else is
+      // referencing the same data).  Stashing inputs_copy here bumps the
+      // refcount, so if post hooks are employed, it's actually still ok for
+      // accumulate_grad.cpp to steal the gradient if the refcount is 2.
+      //
+      // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
+      // accumulate_grad.cpp accounts for this, but also creates a silent
+      // dependency between engine.cpp (ie, this particular engine
+      // implementation) and accumulate_grad.cpp.
+      //
+      // If you change the logic here, make sure it's compatible with
+      // accumulate_grad.cpp.
+      auto inputs_copy = inputs;
+      outputs = fn(std::move(inputs_copy));
+    } else {
+      outputs = fn(std::move(inputs));
+    }
+  } catch (...) {
+    call_post_hooks_on_error(fn, inputs);
+    throw;
   }
 
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {

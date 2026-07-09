@@ -59,6 +59,16 @@ class NodeGuard {
 // executed.
 TORCH_API c10::intrusive_ptr<Node> get_current_node();
 
+// Attaches the backward pre/post hooks registered by any active
+// torch.autograd.graph.node_creation_hook context to `node`, if it hasn't
+// happened for this node yet. Called from the sites that attach a grad_fn to
+// output tensors (see impl::set_gradient_edge) rather than the Node
+// constructor: at construction the node has no owning intrusive_ptr yet, so it
+// cannot be safely wrapped in a PyObject. The per-node fired flag means the
+// hooks attach on the first output bound (attaching is idempotent w.r.t. which
+// output triggers it, and it runs no user code).
+TORCH_API void fire_node_creation_hooks(const c10::intrusive_ptr<Node>& node);
+
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -401,6 +411,16 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
     return thread_id_;
   }
 
+  // Used by fire_node_creation_hooks to ensure the node creation hooks attach
+  // at most once per node, even when the node is bound to multiple outputs.
+  bool node_creation_hooks_fired() const noexcept {
+    return node_creation_hooks_fired_;
+  }
+
+  void set_node_creation_hooks_fired() noexcept {
+    node_creation_hooks_fired_ = true;
+  }
+
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
 
@@ -633,6 +653,9 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;
+
+  // See node_creation_hooks_fired() above.
+  bool node_creation_hooks_fired_ = false;
 
   // Note [Thread Safety on Autograd Node]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

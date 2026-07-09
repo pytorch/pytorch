@@ -39,6 +39,7 @@ __all__ = [
     "saved_tensors_hooks",
     "save_on_cpu",
     "disable_saved_tensors_hooks",
+    "node_creation_hook",
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
     "Node",
@@ -454,6 +455,165 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
             torch._C._autograd._saved_tensors_hooks_enable()
         else:
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
+
+
+class node_creation_hook:
+    """Context-manager that attaches backward pre/post hooks to every autograd Node created within it.
+
+    While active, every autograd graph node created by operations on tensors
+    that require grad has ``prehook`` registered via
+    :meth:`~torch.autograd.graph.Node.register_prehook` and ``posthook``
+    registered via :meth:`~torch.autograd.graph.Node.register_hook`. Either may
+    be ``None`` to skip that side.
+
+    Unlike registering the hooks by hand on each node, this fires at graph
+    construction time, so it also covers nodes you never get a Python handle to
+    and nodes created during backward (e.g. ``create_graph=True`` or checkpoint
+    recomputation). This makes it a more restrictive but robust tool than a
+    creation-time callback that receives the node: it does not depend on the
+    node being fully constructed when a callback would run, only on the pre/post
+    hooks observing the node at backward time when it is complete.
+
+    The hooks have the same signatures as the ones accepted by
+    :meth:`~torch.autograd.graph.Node.register_prehook` and
+    :meth:`~torch.autograd.graph.Node.register_hook`::
+
+        prehook(grad_outputs: tuple[Tensor, ...]) -> tuple[Tensor, ...] | None
+        posthook(
+            grad_inputs: tuple[Tensor, ...], grad_outputs: tuple[Tensor, ...]
+        ) -> tuple[Tensor, ...] | None
+
+    The registration is thread-local. It is captured into
+    :class:`~torch.autograd.graph.saved_tensors_hooks`-style thread-local
+    state, so it propagates to any worker thread that autograd spins up: if
+    backward is run under this context (or graph nodes are created during
+    backward), the hooks are attached to those nodes too. When nesting this
+    context-manager, the hooks of all active contexts are attached to each
+    node, outermost first.
+
+    The motivating use case is attributing work done during backward to the
+    forward region that created the graph, by capturing state at node creation
+    time and restoring it around the node's backward execution. Pair a
+    ``prehook`` that enters the region with a ``posthook`` that leaves it, and
+    pass ``always_call=True`` so the region is left even if the node's backward
+    raises::
+
+        >>> # xdoctest: +SKIP
+        >>> # ``current_region()``/``enter_region()`` are user-defined and stand
+        >>> # in for whatever thread-local state you want to restore while a node
+        >>> # runs in backward (e.g. memory-metadata tagging).
+        >>> region = current_region()
+        >>> with torch.autograd.graph.node_creation_hook(
+        ...     prehook=lambda gO: enter_region(region),
+        ...     posthook=lambda gI, gO: enter_region(None),
+        ...     always_call=True,
+        ... ):
+        ...     loss = model(inputs)
+
+    Args:
+        prehook (Callable, optional): registered on each node via
+            :meth:`~torch.autograd.graph.Node.register_prehook`.
+        posthook (Callable, optional): registered on each node via
+            :meth:`~torch.autograd.graph.Node.register_hook`.
+        always_call (bool): if ``True``, ``posthook`` is also run when the
+            node's backward raises (with an empty ``grad_inputs`` tuple), so
+            state set up by ``prehook`` can be torn down even on error. Mirrors
+            :meth:`torch.nn.Module.register_forward_hook`'s ``always_call``.
+            An exception from the posthook on this error path is swallowed with
+            a warning so it does not mask the original error. Default: ``False``.
+
+    .. note::
+        Hooks are attached only to nodes bound to output tensors during the
+        context. In particular, gradient accumulation nodes for leaf tensors
+        (``AccumulateGrad``) are created lazily at their first use in backward
+        and are not covered.
+
+    .. note::
+        The hooks are captured into compiled autograd and run when the compiled
+        backward executes. The ``always_call`` error path is an exception: it
+        relies on the eager engine, so under compiled autograd a ``posthook``
+        with ``always_call=True`` does not run if the compiled backward raises.
+    """
+
+    def __init__(
+        self,
+        prehook: Callable[..., Any] | None = None,
+        posthook: Callable[..., Any] | None = None,
+        always_call: bool = False,
+    ) -> None:
+        self.prehook = prehook
+        self.posthook = posthook
+        self.always_call = always_call
+
+    def __enter__(self) -> None:
+        torch._C._autograd._push_node_creation_hook(
+            self.prehook, self.posthook, self.always_call
+        )
+
+    def __exit__(self, *args: object) -> None:
+        torch._C._autograd._pop_node_creation_hook()
+
+    @classmethod
+    def from_context_manager(
+        cls,
+        context_manager: Callable[[], contextlib.AbstractContextManager[Any]],
+    ) -> "node_creation_hook":
+        r"""Build a :class:`node_creation_hook` that runs a context manager around each node's backward.
+
+        ``context_manager`` is a zero-argument callable returning a fresh
+        context manager (e.g. a ``@contextmanager`` function, or the class
+        itself). For every node created within the returned
+        ``node_creation_hook``, a new context manager is entered just before the
+        node's backward runs and exited just after, so state established on
+        ``__enter__`` is active exactly while the node executes. This is a
+        convenience wrapper over the ``prehook``/``posthook`` pair with
+        ``always_call=True`` so the context manager is always exited, even if
+        the node's backward raises.
+
+        Example::
+
+            >>> # xdoctest: +SKIP
+            >>> @contextlib.contextmanager
+            >>> def in_region(region):
+            ...     token = enter_region(region)
+            ...     try:
+            ...         yield
+            ...     finally:
+            ...         exit_region(token)
+            >>>
+            >>> region = current_region()
+            >>> with torch.autograd.graph.node_creation_hook.from_context_manager(
+            ...     lambda: in_region(region)
+            ... ):
+            ...     loss = model(inputs)
+
+        .. warning::
+            On the error path (the node's backward raised), the context
+            manager's ``__exit__`` is called with ``(None, None, None)`` rather
+            than the real exception info, since the autograd engine does not
+            expose it to post hooks. A context manager that inspects the
+            exception to decide cleanup will behave as if backward succeeded;
+            unconditional cleanup (the common case) is unaffected.
+        """
+        # A per-thread LIFO stack of entered context managers: nodes may nest
+        # (the prehook/posthook of a node bracket strictly) and backward runs on
+        # engine worker threads, so the stack must be thread-local.
+        local = threading.local()
+
+        def stack() -> list[contextlib.AbstractContextManager[Any]]:
+            if not hasattr(local, "cms"):
+                local.cms = []
+            return local.cms
+
+        def prehook(grad_outputs: Any) -> None:
+            cm = context_manager()
+            cm.__enter__()
+            stack().append(cm)
+
+        def posthook(grad_inputs: Any, grad_outputs: Any) -> None:
+            stack().pop().__exit__(None, None, None)
+
+        return cls(prehook=prehook, posthook=posthook, always_call=True)
 
 
 def region_activation_memory_budget(

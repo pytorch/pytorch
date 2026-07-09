@@ -411,6 +411,27 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_node_creation_hook(self):
+        # node_creation_hook's pre/post hooks are captured into compiled
+        # autograd and run when the compiled backward executes.
+        events = []
+
+        def fn():
+            for _ in range(3):
+                events.clear()
+                x = torch.randn([2, 4], requires_grad=True)
+                with torch.autograd.graph.node_creation_hook(
+                    prehook=lambda gO: events.append("pre"),
+                    posthook=lambda gI, gO: events.append("post"),
+                ):
+                    result = x.exp().sum()
+                result.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn)
+        self.assertIn("pre", events)
+        self.assertIn("post", events)
+
     def test_reorder_acc_grad(self):
         model = torch.nn.Sequential(
             torch.nn.Conv2d(4, 4, 3, bias=True),
