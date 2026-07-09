@@ -13,7 +13,12 @@
 #include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <map>
 #include <mutex>
+#include <vector>
 
 // Starting from NVSHMEM 3.3.9, nvshmem_host.h exists so that we can cleanly
 // include only the nvshmem host library headers:
@@ -31,14 +36,24 @@ namespace symmetric_memory {
 /* Start of NVSHMEMSymmetricMemory implementation */
 
 static StoreExchange storeExchange = StoreExchange("NVSHMEMSymmetricMemory");
+static StoreExchange freeStoreExchange =
+    StoreExchange("NVSHMEMSymmetricMemoryFree");
 
 struct NVSHMEMAllocation {
   void* ptr;
   size_t buffer_size;
   int device_idx;
+  uint64_t alloc_id;
 
-  NVSHMEMAllocation(void* ptr, size_t buffer_size, int device_idx)
-      : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
+  NVSHMEMAllocation(
+      void* ptr,
+      size_t buffer_size,
+      int device_idx,
+      uint64_t alloc_id)
+      : ptr(ptr),
+        buffer_size(buffer_size),
+        device_idx(device_idx),
+        alloc_id(alloc_id) {}
 
   // Delete copy and move operations to prevent double-free
   NVSHMEMAllocation(const NVSHMEMAllocation&) = delete;
@@ -46,13 +61,23 @@ struct NVSHMEMAllocation {
   NVSHMEMAllocation(NVSHMEMAllocation&&) = delete;
   NVSHMEMAllocation& operator=(NVSHMEMAllocation&&) = delete;
 
-  ~NVSHMEMAllocation() {
+  void collective_free() {
+    if (ptr == nullptr) {
+      return;
+    }
     // Avoid calling CUDA functions after driver shutting down
     if (is_finalizing()) {
+      ptr = nullptr;
       return;
     }
     c10::cuda::CUDAGuard guard(device_idx);
     nvshmem_free(ptr); // nvshmem_free has no return value
+    ptr = nullptr;
+  }
+
+  ~NVSHMEMAllocation() {
+    // nvshmem_free is collective. Storage destruction is not, so the allocator
+    // defers actual frees to rank-synchronized allocation boundaries.
   }
 };
 
@@ -377,20 +402,43 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     initialize_nvshmem_with_store(
         group->getStore(), group->getRank(), group->getSize(), device_idx);
 
+    drain_pending_frees_(group->getStore(), group->getRank(), group->getSize());
+
     auto ptr = nvshmem_malloc(size);
     // If size is 0 (which is legal allocation request) we shouldn't error out
     TORCH_CHECK(ptr != nullptr || size == 0, "nvshmem_malloc failed");
     {
       std::lock_guard<std::mutex> lock(mutex_);
       allocations_.try_emplace(
-          ptr, std::make_unique<NVSHMEMAllocation>(ptr, size, device_idx));
+          ptr,
+          std::make_unique<NVSHMEMAllocation>(
+              ptr, size, device_idx, next_alloc_id_++));
     }
     return ptr;
   }
 
   void free(void* ptr) override {
     std::lock_guard<std::mutex> lock(mutex_);
-    allocations_.erase(ptr);
+    auto it = allocations_.find(ptr);
+    if (it == allocations_.end()) {
+      return;
+    }
+
+    std::vector<SymmMemKey> stale_keys;
+    for (const auto& entry : symm_mems_) {
+      if (entry.first.first == ptr) {
+        stale_keys.push_back(entry.first);
+      }
+    }
+    for (const auto& key : stale_keys) {
+      symm_mems_.erase(key);
+    }
+
+    // nvshmem_free is collective, but tensor storage destruction is not.
+    // Queue this allocation and drain it at a future collective alloc boundary.
+    auto alloc_id = it->second->alloc_id;
+    pending_frees_.emplace(alloc_id, std::move(it->second));
+    allocations_.erase(it);
   };
 
   size_t get_alloc_size(void* ptr) override {
@@ -488,8 +536,62 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
+  static constexpr uint64_t kNoPendingFree =
+      std::numeric_limits<uint64_t>::max();
+
+  uint64_t next_pending_free_at_or_after_(uint64_t alloc_id) {
+    auto it = pending_frees_.lower_bound(alloc_id);
+    if (it == pending_frees_.end()) {
+      return kNoPendingFree;
+    }
+    return it->first;
+  }
+
+  void drain_pending_frees_(
+      const c10::intrusive_ptr<c10d::Store>& store,
+      int rank,
+      int world_size) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Repeatedly all-gather each rank's next pending id at or after
+    // search_from. Equal candidates are the stored intersection and are safe to
+    // collectively free; unequal candidates advance the search.
+    uint64_t search_from = 0;
+    while (true) {
+      auto candidate = next_pending_free_at_or_after_(search_from);
+      auto candidates =
+          freeStoreExchange.all_gather(store, rank, world_size, candidate);
+
+      uint64_t next_search_from = candidate;
+      bool all_match = candidate != kNoPendingFree;
+      for (const auto peer_candidate : candidates) {
+        if (peer_candidate == kNoPendingFree) {
+          return;
+        }
+        all_match &= peer_candidate == candidate;
+        next_search_from = std::max(next_search_from, peer_candidate);
+      }
+
+      if (!all_match) {
+        search_from = next_search_from;
+        continue;
+      }
+
+      auto it = pending_frees_.find(candidate);
+      TORCH_INTERNAL_ASSERT(
+          it != pending_frees_.end(),
+          "rank-agreed pending NVSHMEM free is missing locally");
+      it->second->collective_free();
+      pending_frees_.erase(it);
+      search_from = candidate + 1;
+    }
+  }
   std::mutex mutex_;
   std::unordered_map<void*, std::unique_ptr<NVSHMEMAllocation>> allocations_;
+  std::map<uint64_t, std::unique_ptr<NVSHMEMAllocation>> pending_frees_;
+  // Assigned in lockstep (alloc() is collective), so alloc_id is comparable
+  // across ranks.
+  uint64_t next_alloc_id_{0};
   ska::flat_hash_map<
       SymmMemKey,
       c10::intrusive_ptr<NVSHMEMSymmetricMemory>,
