@@ -410,15 +410,14 @@ def switch_func(ctx, index, branches, inputs):
     )
     from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
 
-    if hasattr(ctx, "mode"):
-        hop_instance = HopInstance.create(switch_op, index, branches, inputs)
-        if can_auto_functionalize(hop_instance):
-            return do_auto_functionalize_v2(
-                ctx.mode,
-                hop_instance,
-                tuple(pytree.tree_flatten((index, branches, inputs))[0]),
-                {},
-            )
+    hop_instance = HopInstance.create(switch_op, index, branches, inputs)
+    if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        return do_auto_functionalize_v2(
+            ctx.mode,
+            hop_instance,
+            tuple(pytree.tree_flatten((index, branches, inputs))[0]),
+            {},
+        )
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_index = ctx.unwrap_tensors(index)
