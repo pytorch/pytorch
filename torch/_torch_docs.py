@@ -5600,7 +5600,7 @@ allocated during inference mode. A view tensor is an inference
 tensor if and only if the tensor it is a view of is an inference tensor.
 
 For details on inference mode please see
-`Inference Mode <https://pytorch.org/cppdocs/notes/inference_mode.html>`_.
+`Inference Mode <https://docs.pytorch.org/docs/2.9/notes/autograd.html#inference-mode>`_.
 
 Args:
     {input}
@@ -9624,11 +9624,11 @@ Example::
     tensor([ 5.,  -2.,  9., -8.])
 
     >>> # Values equidistant from two integers are rounded towards the
-    >>> #   the nearest even value (zero is treated as even)
+    >>> #   nearest even value (zero is treated as even)
     >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
     tensor([-0., 0., 2., 2.])
 
-    >>> # A positive decimals argument rounds to the to that decimal place
+    >>> # A positive decimals argument rounds to that decimal place
     >>> torch.round(torch.tensor([0.1234567]), decimals=3)
     tensor([0.1230])
 
@@ -14107,7 +14107,8 @@ the returned index satisfies the following rules:
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
                               dimension unless :attr:`sorter` is provided, in which case the sequence does not
-                              need to be sorted
+                              need to be sorted. PyTorch does not validate this condition when :attr:`sorter` is
+                              not provided, and the behavior is undefined if the sequence is not sorted.
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
 
 Keyword args:

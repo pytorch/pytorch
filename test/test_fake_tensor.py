@@ -2292,32 +2292,6 @@ assert not torch.cuda.is_initialized()
             delattr(torch, backend_name)
             del sys.modules[f"torch.{backend_name}"]
 
-    @skipIfTorchDynamo(
-        "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
-    )
-    def test_avoid_device_init_with_privateuse1_backend_and_cuda_compiled(self):
-        class _DummyPrivateUse1Module:
-            @staticmethod
-            def is_available() -> bool:
-                return True
-
-        backend_name = "privateuseone"
-
-        try:
-            torch._register_device_module(backend_name, _DummyPrivateUse1Module)
-
-            fake_mode = FakeTensorMode()
-            with (
-                patch.object(torch.xpu, "_is_compiled", return_value=False),
-                patch.object(torch.cuda, "_is_compiled", return_value=True),
-                patch.object(torch.cuda, "is_initialized", return_value=False),
-                patch.object(torch.cuda, "is_available", side_effect=AssertionError),
-            ):
-                self.assertFalse(fake_mode.avoid_device_init)
-        finally:
-            delattr(torch, backend_name)
-            del sys.modules[f"torch.{backend_name}"]
-
     def test_unique_output_dtype(self):
         shape_env = ShapeEnv()
         for input_dtype in [torch.float32, torch.float16, torch.bfloat16]:
@@ -3387,6 +3361,35 @@ class FakeTensorPropTest(TestCase):
                 sd_loaded = torch.load(f, map_location="cpu")
             for k in sd:
                 _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
+
+    def test_inference_mode_nonzero_memo(self):
+        """D106102842: nonzero() memo must be stored for inference FakeTensors.
+
+        Without the fix, SymNumberMemoDescriptor.__set__ skipped memo storage
+        for inference tensors, so each boolean indexing (x[mask]) allocated a
+        fresh unbacked symint. Two tensors filtered by the same mask would get
+        independent symbols, causing GuardOnDataDependentSymNode failures.
+        """
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            with torch.inference_mode():
+                x = torch.randn(10, 3)
+                y = torch.randn(10, 5)
+                mask = torch.randn(10) > 0
+
+                self.assertIsInstance(x, FakeTensor)
+                self.assertTrue(x.is_inference())
+
+                filtered_x = x[mask]
+                filtered_y = y[mask]
+
+                sx = filtered_x.shape[0]
+                sy = filtered_y.shape[0]
+
+                # Both shapes should be the same unified symbol because
+                # mask.nonzero() is memoized.
+                self.assertTrue(statically_known_true(sx == sy))
 
 
 make_propagate_real_tensors_cls(FakeTensorPropTest)

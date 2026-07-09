@@ -382,6 +382,23 @@ def _get_class_init_kind(cls: type[object]) -> str:
 _get_class_init_kind._dynamo_marked_constant = True  # type: ignore[attr-defined]
 
 
+def _class_has_standard_new(cls: type[object]) -> bool:
+    for base in type.__getattribute__(cls, "__mro__"):
+        class_dict = type.__getattribute__(base, "__dict__")
+        if "__new__" in class_dict:
+            new = class_dict["__new__"]
+            break
+    else:
+        new = object.__new__
+
+    if isinstance(new, staticmethod):
+        new = new.__func__
+    return new is object.__new__
+
+
+_class_has_standard_new._dynamo_marked_constant = True  # type: ignore[attr-defined]
+
+
 def instantiate_user_defined_class_object(
     cls: type[T], /, *args: Any, **kwargs: Any
 ) -> T:
@@ -395,7 +412,10 @@ def instantiate_user_defined_class_object(
     if issubclass(type(obj), cls):
         init = type(obj).__init__
         if init is object.__init__:
-            return obj
+            if (len(args) == 0 and len(kwargs) == 0) or (
+                not _class_has_standard_new(type(obj))
+            ):
+                return obj
         if (
             len(args) == 0
             and len(kwargs) == 0

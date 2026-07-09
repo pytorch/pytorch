@@ -764,7 +764,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 not is_torch_class(self.value)
                 or (
                     name == "__init__"
-                    and issubclass(self.value, (dict, list, set, frozenset))
+                    and issubclass(
+                        self.value,
+                        (dict, list, set, frozenset, collections.deque),
+                    )
                 )
             )
             and name not in ("__get__", "__set__", "__delete__")
@@ -1141,6 +1144,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     f"descriptor '__init__' requires a 'collections.defaultdict' object but received a '{receiver.python_type_name()}'",
                 )
             receiver.call_method(tx, "__init__", args[1:], kwargs)
+            return variables.ConstantVariable.create(None)
+        elif issubclass(self.value, collections.deque) and name == "__init__" and args:
+            receiver = args[0]
+            if not issubclass(receiver.python_type(), collections.deque):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__init__' requires a 'collections.deque' object but received a '{receiver.python_type_name()}'",
+                )
+            if isinstance(receiver, variables.UserDefinedObjectVariable):
+                if receiver._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedObjectVariable._base_vt must not be None"
+                    )
+                receiver._base_vt.call_method(tx, "__init__", args[1:], kwargs)
+            else:
+                receiver.call_method(tx, "__init__", args[1:], kwargs)
             return variables.ConstantVariable.create(None)
         elif issubclass(self.value, dict) and name == "__init__" and args:
             receiver = args[0]

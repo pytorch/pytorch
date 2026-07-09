@@ -199,6 +199,35 @@ class TestUserDefinedObjectConstruction(TestCase):
         ):
             opt_fn(x)
 
+    def test_instantiate_class_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            Foo(1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"object\.__init__\(\) takes exactly one argument",
+        ):
+            opt_fn(x)
+
+    def test_instantiate_class_object_init_with_extra_arg_custom_new_noop(self):
+        class Foo:
+            def __new__(cls, *args):
+                return object.__new__(cls)
+
+        def fn(t):
+            Foo(1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_explicit_class_object_init_with_extra_arg_custom_new_noop(self):
         class Foo:
             def __new__(cls):
@@ -558,6 +587,52 @@ class TestUserDefinedObjectConstruction(TestCase):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(), fn())
+
+    def test_instantiate_deque_subclass_init(self):
+        class MyDeque(collections.deque):
+            pass
+
+        def fn(t):
+            d = MyDeque(range(25))
+            d.__init__(range(200))
+            for i in range(200, 400):
+                d.append(i)
+            for i in reversed(range(-200, 0)):
+                d.appendleft(i)
+            left = [d.popleft() for _ in range(250)]
+            return t.sin(), len(d), list(d), left
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_deque_subclass_init_resets_maxlen(self):
+        class MyDeque(collections.deque):
+            pass
+
+        def fn(t):
+            d = MyDeque([1, 2], maxlen=2)
+            MyDeque.__init__(d, range(4))
+            return t.sin(), d.maxlen, list(d)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_deque_init_with_wrong_receiver_not_supported(self):
+        class MyDeque(collections.deque):
+            pass
+
+        def fn():
+            values = []
+            MyDeque.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
 
     def test_explicit_frozenset_init_noop(self):
         class MyFrozenSet(frozenset):
