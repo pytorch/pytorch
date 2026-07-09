@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng"]
 name: Build Official Docker Images
 
 on:
@@ -35,20 +36,9 @@ env:
 permissions: read-all
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-
   generate-matrix:
     if: github.repository_owner == 'pytorch'
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.large"
+    runs-on: "linux.large"
     outputs:
       matrix: ${{ steps.generate-matrix.outputs.matrix }}
     steps:
@@ -56,7 +46,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           fetch-depth: 1
-          submodules: true
+          submodules: 'false'
       - name: Get docker release matrix
         id: generate-matrix
         run: |
@@ -66,12 +56,11 @@ jobs:
 
   build:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+    runs-on: "linux.2xlarge"
     environment: ${{ (github.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     timeout-minutes: 240
     needs:
       - generate-matrix
-      - get-label-type
     strategy:
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
       fail-fast: false
@@ -86,15 +75,11 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
-      # [see note: pytorch repo ref]
-      # deep clone (fetch-depth 0) required for git merge-base
-      - name: Checkout PyTorch
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
-          submodules: 'recursive'
+
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        with:
+          submodules: 'false'
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
@@ -137,7 +122,7 @@ jobs:
             } >> "${GITHUB_ENV}"
           fi
       - name: Setup nightly specific variables
-        if: ${{ github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
+        if: ${{ github.event_name == 'pull_request' || github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
         run: |
           {
             echo "DOCKER_IMAGE=pytorch-nightly";

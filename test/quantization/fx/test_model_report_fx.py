@@ -1150,7 +1150,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         """
         Tests for generation of qconfigs by ModelReport API
         - Tests that qconfigmapping is generated
-        - Tests that mappings include information for for relevant modules
+        - Tests that mappings include information for relevant modules
         """
         with override_quantized_engine('fbgemm'):
             # set the backend for this test
@@ -1209,7 +1209,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         """
         Tests for generation of qconfigs by ModelReport API
         - Tests that equalization config generated when input-weight equalization detector used
-        - Tests that mappings include information for for relevant modules
+        - Tests that mappings include information for relevant modules
         """
         with override_quantized_engine('fbgemm'):
             # set the backend for this test

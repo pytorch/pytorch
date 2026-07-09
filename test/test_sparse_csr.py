@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import \
      IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
+     precisionOverride, toleranceOverride, tol, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -28,6 +28,11 @@ from torch.testing._internal.opinfo.definitions.linalg import sample_inputs_lina
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED, HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
 import operator
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    TEST_WITH_SLOW,
+    skipIfRocm,
+)
 
 if TEST_SCIPY:
     import scipy.sparse as sp
@@ -964,6 +969,10 @@ class TestSparseCompressed(TestCase):
                 dense_to_dtype = sparse.to_dense().to(to_dtype)
                 self.assertEqual(sparse_to_dtype.to_dense(), dense_to_dtype)
 
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182086")
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181682")
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181536")
+    @unittest.skipIf(IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181535")
     @skipMeta
     @all_sparse_compressed_layouts()
     @dtypes(torch.double)
@@ -1029,6 +1038,16 @@ def _npref_block_addmm_addmv(c, a, b, alpha, beta):
 
 
 class TestSparseCSR(TestCase):
+
+    @onlyCPU
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_empty_plain_indices_with_stride_zero(self, device, dtype):
+        # Test that empty plain_indices with stride 0 works.
+        crow_indices = torch.tensor([0, 0], dtype=torch.int32, device=device)
+        col_indices = torch.as_strided(torch.empty((0,), device=device, dtype=torch.int32), (0,), (0,))
+        values = torch.empty(0, dtype=dtype, device=device)
+        t = torch.sparse_csr_tensor(crow_indices, col_indices, values, (1, 100), dtype=dtype, device=device)
+        self.assertEqual(t._nnz(), 0)
 
     def test_csr_stride(self):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
@@ -1386,6 +1405,11 @@ class TestSparseCSR(TestCase):
             torch._convert_indices_from_coo_to_csr(
                 torch.randint(100, (5, 5), device=device),
                 size=100)
+
+        with self.assertRaisesRegex(RuntimeError, "size must be non-negative"):
+            torch._convert_indices_from_coo_to_csr(
+                torch.tensor([1, 2, 3], device=device),
+                size=-1)
 
         size = (5, 5)
         sparse_dim = 2
@@ -2257,8 +2281,8 @@ class TestSparseCSR(TestCase):
         for sparse in self.generate_simple_inputs(
                 layout, device=device, dtype=dtype, index_dtype=torch.int32, enable_hybrid=enable_hybrid):
             for scalar_dtype in all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half):
-                # ComplexHalf is experimental
-                if dtype is torch.half and scalar_dtype.is_complex:
+                # ComplexHalf/BComplex32 is experimental
+                if dtype in (torch.half, torch.bfloat16) and scalar_dtype.is_complex:
                     continue
 
                 scalar_t = torch.tensor(2, dtype=scalar_dtype)
@@ -2277,6 +2301,7 @@ class TestSparseCSR(TestCase):
                         self.assertEqual(res_in, res_in_dense)
                         self.assertEqual(res_out, res_in)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/167783")
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
@@ -2410,9 +2435,16 @@ class TestSparseCSR(TestCase):
             run_test(n, k, upper, unitriangular, transpose, zero)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
+    @toleranceOverride({torch.float16: tol(atol=1e-3, rtol=1.6e-2),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1.6e-2)})
     def test_sampled_addmm(self, device, dtype):
+        if dtype in (torch.half, torch.bfloat16) and torch.cuda.is_available() and \
+                torch.cuda.get_device_capability()[0] < 8:
+            self.skipTest("cuSPARSE SDDMM fp16/bf16 requires compute capability >= 8.0")
+
         def run_test(c, a, b, op_a, op_b, *, alpha=None, beta=None):
             if dtype.is_complex:
                 alpha = random.random() + 0.3j if alpha is None else alpha
@@ -2460,7 +2492,16 @@ class TestSparseCSR(TestCase):
                     run_test(c, a, b, op_a, op_b)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    @toleranceOverride({torch.float16: tol(atol=1e-3, rtol=1.6e-2),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1.6e-2)})
     def test_sampled_addmm_autograd(self, device, dtype):
+        if dtype in (torch.half, torch.bfloat16) and torch.cuda.is_available() and \
+                torch.cuda.get_device_capability()[0] < 8:
+            self.skipTest("cuSPARSE SDDMM fp16/bf16 requires compute capability >= 8.0")
+
         from torch.testing._internal.common_methods_invocations import sample_inputs_sparse_sampled_addmm
 
         samples = list(sample_inputs_sparse_sampled_addmm(None, device, dtype, requires_grad=True))
@@ -2680,12 +2721,12 @@ class TestSparseCSR(TestCase):
                 (output_zero, expected_zero),
                 (output_explicit_zeros, expected_explicit_zeros)
         ]:
-            self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
+            self.assertEqual(output, expected, lambda msg: f"{msg}\nThis operator ({op.name}) should not be supported for "
                              "Sparse CSR as it breaks 0->0 correspondence.")
 
         for inp in [zero.to_sparse_csr(), tensor_explicit_zeros]:
             self.assertEqual(op(inp).values().numel(), inp.values().numel(),
-                             f"{op.name} fails to preserve sparsity pattern.")
+                             lambda msg: f"{msg}\n{op.name} fails to preserve sparsity pattern.")
 
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):

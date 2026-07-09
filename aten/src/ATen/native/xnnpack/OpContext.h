@@ -56,6 +56,12 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
 class XNNPackLinearOpContext final : public LinearOpContext {
  private:
   ContextLinear op_context_;
+  // xnnpack fully-connected ops mutate per-call slots in gemm_context
+  // (.a, .c, quantization_params) inside xnn_setup_fully_connected_nc_*
+  // and read them inside xnn_compute_gemm. If two threads call run() on
+  // the same op context, those writes/reads race and crash the GEMM
+  // ukernel. Mirrors the protection on XNNPackConv2dOpContext below.
+  std::mutex xnnp_mutex_;
 
  public:
   XNNPackLinearOpContext(

@@ -4,7 +4,6 @@
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
-#include <ATen/core/Vitals.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/Exceptions.h>
@@ -86,9 +85,6 @@ struct _Initializer {
 // let's not if we don't need to!)
 void CUDAHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
-  // Force the update to enable unit testing. This code get executed before unit tests
-  // have a chance to enable vitals.
-  at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
@@ -558,7 +554,13 @@ const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
     "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 70000
-    "gfx950"
+    "gfx950",
+#endif
+#if ROCM_VERSION >= 71300
+    "gfx1100", "gfx1101", "gfx1151",
+#endif
+#if ROCM_VERSION >= 71400
+    "gfx1250",
 #endif
   };
   return archs;
@@ -573,7 +575,7 @@ const std::vector<std::string>& CUDAHooks::getHipblasltSupportedArchs() const {
 #if ROCM_VERSION >= 70000
     "gfx950", "gfx1150", "gfx1151",
 #endif
-#if ROCM_VERSION >= 70200
+#if ROCM_VERSION >= 71400
     "gfx1250"
 #endif
   };
