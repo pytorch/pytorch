@@ -2508,7 +2508,7 @@ class GraphLowering(torch.fx.Interpreter):
         autotune block (see `DeferredCpuTritonCallWrapper` in
         `cpp_wrapper_cpu.py`).
         """
-        has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
+        has_gpu = any(is_gpu(device) for device in self.device_types)
         # CPU + user-defined Triton + AOTI + autotune block disabled is the
         # only CPU configuration that needs the two-pass dance: the autotune
         # block normally populates CpuTritonKernelCache, but here it doesn't run.
@@ -2817,7 +2817,7 @@ class GraphLowering(torch.fx.Interpreter):
         # A "cpu" device would precompile cpp_wrapper/cpu.h, which does not
         # include the CUDA headers needed to compile the kernel call sites.
         device_type = next(
-            (d for d in self.device_types if d in ("cuda", "xpu")),
+            (d for d in self.device_types if is_gpu(d)),
             next((d for d in self.device_types if d != "meta"), "cpu"),
         )
 

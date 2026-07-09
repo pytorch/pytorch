@@ -98,24 +98,50 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
+# GPU_TYPES is kept as a late-binding compatibility shim backed by the
+# private _gpu_types().  For membership tests, use is_gpu() predicate;
+# for enumeration use _gpu_types() or get_gpu_type().  This list can be
+# removed once all call-sites have migrated to is_gpu().
 GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
+
+def _gpu_types() -> list[str]:
+    """Private: walk the registered DeviceInterface registry and return
+    device-type names for which is_gpu() returns True.  Used only by
+    get_gpu_type() and the GPU_TYPES compatibility shim."""
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+
+    return [
+        d
+        for d, iface in get_registered_device_interfaces()
+        if ":" not in d and iface.is_gpu()
+    ]  # filter "cuda:0"-style indexed entries
+
+
+from torch._dynamo.device_interface import get_interface_for_device
 
 # defines here before import torch._dynamo is for avoiding circular import
 # when get_gpu_type is imported from dynamo
 @functools.cache
 def get_gpu_type() -> str:
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
-    if not len(avail_gpus) <= 1:
-        raise AssertionError(
-            f"Expected at most 1 available GPU type, got {len(avail_gpus)}: {avail_gpus}"
-        )
-    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
-    return gpu_type
+    avail_gpus = [
+        t for t in _gpu_types() if get_interface_for_device(t).is_available()
+    ]
+    if len(avail_gpus) == 1:
+        return avail_gpus[0]
+    # Coexistence disambiguation: PrivateUse1 first, matching the
+    # priority of C++ getAccelerator().
+    acc = (
+        torch.accelerator.current_accelerator()
+        if hasattr(torch, "accelerator")
+        else None
+    )
+    if acc is not None and is_gpu(acc.type):
+        return acc.type
+    return avail_gpus[0] if avail_gpus else "cuda"
 
 
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
@@ -3615,7 +3641,12 @@ def get_cloned_parameter_buffer_name(name: str) -> str:
 
 
 def is_gpu(device: str | None) -> bool:
-    return device in GPU_TYPES
+    if device is None:
+        return False
+    try:
+        return get_interface_for_device(device).is_gpu()
+    except NotImplementedError:
+        return False
 
 
 def is_rocm() -> bool:
@@ -3699,7 +3730,8 @@ def is_triton_fp8_dtype_supported(
 
 
 def device_need_guard(device: str) -> bool:
-    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
+    iface = get_interface_for_device(device)
+    return iface.is_gpu() and iface.exposes_streams()
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
