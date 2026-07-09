@@ -277,20 +277,21 @@ class ItertoolsVariable(VariableTracker):
             return RepeatIteratorVariable(
                 item, times=max(times_val, 0), mutation_type=ValueMutationNew()
             )
-        elif self.value is itertools.count and not kwargs:
-            if len(args) == 0:
-                return variables.CountIteratorVariable(mutation_type=ValueMutationNew())
-            if len(args) == 1:
-                return variables.CountIteratorVariable(
-                    item=args[0], mutation_type=ValueMutationNew()
-                )
-            if len(args) == 2:
-                return variables.CountIteratorVariable(
-                    item=args[0],
-                    step=args[1],
-                    mutation_type=ValueMutationNew(),
-                )
-            return super().call_function(tx, args, kwargs)
+        elif self.value is itertools.count:
+            # count(start=0, step=1): let Python's own argument binding validate
+            # the call. Anything it rejects (extra args, duplicate/unknown
+            # kwargs) falls through to a graph break so eager raises the
+            # CPython TypeError.
+            def count_sig(start: Any = 0, step: Any = 1) -> tuple[Any, Any]:
+                return start, step
+
+            try:
+                item, step = count_sig(*args, **kwargs)
+            except TypeError:
+                return super().call_function(tx, args, kwargs)
+            return variables.CountIteratorVariable(
+                item, step, mutation_type=ValueMutationNew()
+            )
         else:
             return super().call_function(tx, args, kwargs)
 
@@ -515,6 +516,19 @@ class CountIteratorVariable(IteratorVariable):
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
         self.advance_count += 1
         return old_item
+
+    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
+        if not (self.item.is_python_constant() and self.step.is_python_constant()):
+            return super().repr_impl(tx)
+        cnt = self.item.as_python_constant()
+        step = self.step.as_python_constant()
+        # Suppress step in the repr when it is an integer equal to 1.
+        if isinstance(step, int) and step == 1:
+            result = f"count({cnt!r})"
+        else:
+            result = f"count({cnt!r}, {step!r})"
+        return ConstantVariable.create(result)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
