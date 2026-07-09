@@ -2242,9 +2242,8 @@ class PythonWrapperCodegen(CodeGen):
         line = f"{python_kernel_name}({','.join(map(str, inputs))}"
         if orig_python_kernel_name.startswith("aten.scatter_reduce"):
             line += ", ".join([""] + kwargs)
-        else:
-            if reduce:
-                line += f", reduce={repr(reduce)}"
+        elif reduce:
+            line += f", reduce={repr(reduce)}"
         line += ")"
         self.writeline(line)
 
