@@ -39,7 +39,7 @@ class PostTrainingDataSparsity(pl.callbacks.Callback):
     Hooks implemented:
         on_fit_end()
             1. copies the model and attaches it to the sparsifier
-            2. sparsier step() is called
+            2. sparsifier step() is called
             3. squashes the mask()
     """
 
