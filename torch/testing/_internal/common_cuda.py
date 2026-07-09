@@ -506,6 +506,20 @@ def xfailIfSM89(func):
 def xfailIfSM90(func):
     return func if not IS_SM90 else unittest.expectedFailure(func)
 
+def _has_cutedsl_device_capability():
+    if not torch.cuda.is_available():
+        return True
+
+    from torch._inductor.async_compile import _cutedsl_arch_from_device_capability
+
+    return (
+        _cutedsl_arch_from_device_capability(torch.cuda.get_device_capability())
+        is not None
+    )
+
+def xfailIfUnsupportedCuteDSLDeviceCapability(func):
+    return func if _has_cutedsl_device_capability() else unittest.expectedFailure(func)
+
 def xfailIfSM89PreCUDA13(func):
     """xfail on SM89 only for CUDA < 13. On CUDA 13+, test should pass on all architectures."""
     if IS_SM89 and _get_torch_cuda_version() < (13, 0):
