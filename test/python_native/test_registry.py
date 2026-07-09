@@ -9,6 +9,38 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
+class _CowStateWrapperTensor(torch.Tensor):
+    elem: torch.Tensor
+
+    __slots__ = ["elem"]
+
+    @staticmethod
+    def __new__(cls, elem):
+        out = torch.Tensor._make_wrapper_subclass(
+            cls,
+            elem.size(),
+            dtype=elem.dtype,
+            layout=elem.layout,
+            device=elem.device,
+            requires_grad=elem.requires_grad,
+            strides=elem.stride(),
+            storage_offset=elem.storage_offset(),
+        )
+        out.elem = elem
+        return out
+
+    def __tensor_flatten__(self):
+        return ["elem"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        return _CowStateWrapperTensor(inner_tensors["elem"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        raise AssertionError("unexpected dispatch")
+
+
 @skipIfTorchDynamo("Registry tests don't need dynamo compilation")
 class TestRegistry(TestCase):
     """Tests for the torch._native.registry module."""
@@ -573,43 +605,19 @@ class TestRegistryRuntime(TestCase):
         self.assertFalse(_cow_tensor_matches(fake, False))
         self.assertFalse(_cow_tensor_matches(fake, True))
 
+    def test_is_cow_tensor_rejects_python_tensor_subclasses(self):
+        x = _CowStateWrapperTensor(torch.tensor([2.0, 3.0]))
+        with self.assertRaisesRegex(
+            RuntimeError, "_is_cow_tensor is not defined for Python tensor subclasses"
+        ):
+            torch._C._is_cow_tensor(x)
+
     def test_dynamo_graph_breaks_on_subclass_cow_state(self):
-        class CowStateWrapperTensor(torch.Tensor):
-            elem: torch.Tensor
-
-            __slots__ = ["elem"]
-
-            @staticmethod
-            def __new__(cls, elem):
-                out = torch.Tensor._make_wrapper_subclass(
-                    cls,
-                    elem.size(),
-                    dtype=elem.dtype,
-                    layout=elem.layout,
-                    device=elem.device,
-                    requires_grad=elem.requires_grad,
-                    strides=elem.stride(),
-                    storage_offset=elem.storage_offset(),
-                )
-                out.elem = elem
-                return out
-
-            def __tensor_flatten__(self):
-                return ["elem"], None
-
-            @staticmethod
-            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
-                return CowStateWrapperTensor(inner_tensors["elem"])
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                raise AssertionError("unexpected dispatch")
-
         @torch.compile(backend="eager", fullgraph=True)
         def fn(a):
             return torch._C._is_cow_tensor(a)
 
-        x = CowStateWrapperTensor(torch.tensor([2.0, 3.0]))
+        x = _CowStateWrapperTensor(torch.tensor([2.0, 3.0]))
         with self.assertRaisesRegex(
             Exception, "COW tensor check on Python tensor subclass"
         ):
