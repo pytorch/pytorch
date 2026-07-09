@@ -87,7 +87,7 @@ class SourceLocation:
 # calls (e.g., as_python_constant on a list that contains itself). Maps
 # (id(instance), id(original_method)) tuples to track which calls are in progress.
 # We use id(original_method) rather than the method name string so that super()
-# delegation within a class hierarchy (e.g. TorchScriptObjectVariable.as_python_constant
+# delegation within a class hierarchy (e.g. CustomClassObjectVariable.as_python_constant
 # calling UserDefinedObjectVariable.as_python_constant) is not a false positive.
 _vt_active_calls: ContextVar[set[tuple[int, int]] | None] = ContextVar(
     "_vt_active_calls", default=None
