@@ -1226,16 +1226,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # _deque_iterator(deque[, index]) / _deque_reverse_iterator(deque[, index])
             # ref: dequeiter_new in Modules/_collectionsmodule.c
             name = self.value.__name__
-            if kwargs or not 1 <= len(args) <= 2:
+
+            def deque_iterator_sig(deque: Any, index: Any = 0, /) -> tuple[Any, Any]:
+                return deque, index
+
+            try:
+                deque_arg, index = deque_iterator_sig(*args, **kwargs)
+            except TypeError:
                 raise_args_mismatch(tx, name)
-            deque_arg = args[0]
             if not isinstance(deque_arg, variables.lists.DequeVariable):
                 raise_type_error(
                     tx,
                     f"{name}() argument 1 must be collections.deque, "
                     f"not {deque_arg.python_type_name()}",
                 )
-            index = args[1].as_python_constant() if len(args) == 2 else 0
+            if not isinstance(index, int):
+                index = index.as_python_constant()
             if self.value is deque_rev_iterator:
                 cls = variables.lists.DequeReverseIteratorVariable
                 snapshot = list(reversed(deque_arg.items))

@@ -278,27 +278,20 @@ class ItertoolsVariable(VariableTracker):
                 item, times=max(times_val, 0), mutation_type=ValueMutationNew()
             )
         elif self.value is itertools.count:
-            # CPython count_new: count(start=0, step=1) accepts start/step
-            # positionally or by keyword. Only bind the unambiguous forms here;
-            # anything else (extra args, duplicate/unknown kwargs) falls through
-            # to a graph break so eager raises the CPython TypeError.
-            item = args[0] if len(args) >= 1 else None
-            step = args[1] if len(args) >= 2 else None
-            bindable = len(args) <= 2 and set(kwargs).issubset({"start", "step"})
-            if bindable and "start" in kwargs:
-                bindable = item is None
-                item = kwargs["start"]
-            if bindable and "step" in kwargs:
-                bindable = step is None
-                step = kwargs["step"]
-            if bindable:
-                iter_kwargs: dict[str, Any] = {"mutation_type": ValueMutationNew()}
-                if item is not None:
-                    iter_kwargs["item"] = item
-                if step is not None:
-                    iter_kwargs["step"] = step
-                return variables.CountIteratorVariable(**iter_kwargs)
-            return super().call_function(tx, args, kwargs)
+            # count(start=0, step=1): let Python's own argument binding validate
+            # the call. Anything it rejects (extra args, duplicate/unknown
+            # kwargs) falls through to a graph break so eager raises the
+            # CPython TypeError.
+            def count_sig(start: Any = 0, step: Any = 1) -> tuple[Any, Any]:
+                return start, step
+
+            try:
+                item, step = count_sig(*args, **kwargs)
+            except TypeError:
+                return super().call_function(tx, args, kwargs)
+            return variables.CountIteratorVariable(
+                item, step, mutation_type=ValueMutationNew()
+            )
         else:
             return super().call_function(tx, args, kwargs)
 
