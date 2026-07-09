@@ -1,14 +1,15 @@
 # mypy: allow-untyped-defs
 import logging
 import os
+import re
 import shutil
-from pathlib import Path
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.cpp_builder import _set_gpu_runtime_env, _transform_cuda_paths
 from torch._inductor.utils import is_linux
+from torch.utils._ordered_set import OrderedSet
 
 
 if config.is_fbcode():
@@ -30,13 +31,15 @@ def use_re_build() -> bool:
     return False
 
 
-def _cutlass_path() -> str:
+def _cutlass_path() -> str | None:
     if config.is_fbcode():
         from libfb.py import parutil
 
         return parutil.get_dir_path("cutlass-4-headers")
     else:
-        return config.cutlass.cutlass_dir
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
+
+        return config.cutlass.cutlass_dir if try_import_cutlass() else None
 
 
 def _cutlass_paths() -> list[str]:
@@ -49,20 +52,25 @@ def _cutlass_paths() -> list[str]:
 
 
 def _clone_cutlass_paths(build_root: str) -> list[str]:
-    paths = _cutlass_paths()
     cutlass_root = _cutlass_path()
+    if cutlass_root is None:
+        return []
+    paths = []
     for path in _cutlass_paths():
         old_path = os.path.join(cutlass_root, path)
         new_path = os.path.join(build_root, path)
         shutil.copytree(old_path, new_path, dirs_exist_ok=True)
+        paths.append(new_path)
     return paths
 
 
 def _cutlass_include_paths() -> list[str]:
-    cutlass_path = _cutlass_path()
+    cutlass_root = _cutlass_path()
+    if cutlass_root is None:
+        return []
     return [
         # Use realpath to get canonical absolute paths, in order not to mess up cache keys
-        os.path.realpath(os.path.join(cutlass_path, path))
+        os.path.realpath(os.path.join(cutlass_root, path))
         for path in _cutlass_paths()
     ]
 
@@ -123,8 +131,8 @@ def _nvcc_host_compiler_options() -> list[str]:
     ]
 
 
-def _nvcc_arch_as_compile_option() -> str:
-    arch = cuda_env.get_cuda_arch()
+def _cuda_arch_with_compile_suffix(arch: str) -> str:
+    arch = _normalize_cuda_arch(arch)
     if arch == "90":
         # Required by cutlass compilation.
         return "90a"
@@ -143,8 +151,152 @@ def _nvcc_arch_as_compile_option() -> str:
     return arch
 
 
-def _nvcc_compiler_options() -> list[str]:
+def _nvcc_arch_as_compile_option() -> str | None:
+    arch = cuda_env.get_cuda_arch()
+    if arch is None:
+        return arch
+    return _cuda_arch_with_compile_suffix(arch)
+
+
+def _nvcc_arch_as_compile_option_or_raise() -> str:
     arch = _nvcc_arch_as_compile_option()
+    if arch is None:
+        raise RuntimeError("Unable to determine CUDA architecture")
+    return arch
+
+
+def _normalize_cuda_arch(arch: str) -> str:
+    arch = arch.removeprefix("sm_").removeprefix("compute_").replace(".", "")
+    if not re.fullmatch(r"\d+[a-z]?", arch):
+        raise ValueError(f"Unrecognized CUDA arch: {arch}")
+    return arch
+
+
+def _cuda_arch_number(arch: str) -> int:
+    arch = _normalize_cuda_arch(arch)
+    if arch[-1].isalpha():
+        arch = arch[:-1]
+    return int(arch)
+
+
+def _cuda_arch_suffix(arch: str) -> str:
+    arch = _normalize_cuda_arch(arch)
+    return arch[-1] if arch[-1].isalpha() else ""
+
+
+def _cuda_arch_same_generation(arch: str, other: str) -> bool:
+    arch = _normalize_cuda_arch(arch)
+    other = _normalize_cuda_arch(other)
+    if _cuda_arch_suffix(arch) or _cuda_arch_suffix(other):
+        return arch == other
+    return _cuda_arch_number(arch) == _cuda_arch_number(other)
+
+
+def _cuda_arch_is_compatible_with_current(arch: str, current_arch: str) -> bool:
+    if _cuda_arch_suffix(current_arch):
+        return _normalize_cuda_arch(arch) == _normalize_cuda_arch(current_arch)
+    return _cuda_arch_number(arch) >= _cuda_arch_number(current_arch)
+
+
+def _aoti_cuda_target_arch() -> str:
+    if config.cuda.arch is not None:
+        return _cuda_arch_with_compile_suffix(str(config.cuda.arch))
+    return _nvcc_arch_as_compile_option_or_raise()
+
+
+def _parse_gencode_options(flags: list[str]) -> OrderedSet[tuple[str, str]]:
+    options: OrderedSet[tuple[str, str]] = OrderedSet()
+    for flag in flags:
+        if flag.startswith("-gencode="):
+            option = flag.removeprefix("-gencode=")
+        elif flag.startswith("-gencode "):
+            option = flag.removeprefix("-gencode ")
+        else:
+            continue
+
+        try:
+            _, code = option.split(",code=", 1)
+        except ValueError:
+            continue
+        code = code.removeprefix("[").removesuffix("]")
+        for entry in code.split(","):
+            try:
+                kind, arch = entry.split("_", 1)
+            except ValueError:
+                continue
+            if kind in ("sm", "compute"):
+                options.add((kind, _normalize_cuda_arch(arch)))
+    return options
+
+
+def _cuda_multi_arch_gencode_options(current_arch: str | None = None) -> list[str]:
+    """
+    Return nvcc -gencode option payloads for AOTI CUDA fatbins.
+
+    AOTI captures PTX for the architecture Triton compiled on. That PTX can be
+    used for the current architecture and newer architectures, but not older
+    ones, so explicit TORCH_CUDA_ARCH_LIST entries below the current target are
+    intentionally ignored.
+    """
+    if not current_arch:
+        current_arch = _nvcc_arch_as_compile_option_or_raise()
+    current_arch = _normalize_cuda_arch(current_arch)
+    options: OrderedSet[tuple[str, str]] = OrderedSet()
+
+    arch_list = os.environ.get("TORCH_CUDA_ARCH_LIST")
+    if arch_list and arch_list != "native":
+        from torch.utils.cpp_extension import _get_cuda_arch_flags
+
+        for kind, arch in _parse_gencode_options(_get_cuda_arch_flags([])):
+            if kind == "sm" and _cuda_arch_is_compatible_with_current(
+                arch, current_arch
+            ):
+                options.add((kind, arch))
+            elif kind == "sm":
+                log.warning(
+                    "Ignoring TORCH_CUDA_ARCH_LIST entry sm_%s for AOTI CUDA "
+                    "multi-arch packaging because it is not compatible with "
+                    "target arch %s.",
+                    arch,
+                    current_arch,
+                )
+
+    if not any(
+        kind == "sm" and _cuda_arch_same_generation(arch, current_arch)
+        for kind, arch in options
+    ):
+        options.add(("sm", current_arch))
+
+    # Always keep a PTX image for the compile architecture as the fallback for
+    # GPUs newer than the generated SASS images.
+    options.add(("compute", current_arch))
+
+    def sort_key(option: tuple[str, str]) -> tuple[int, int, str]:
+        kind, arch = option
+        return (_cuda_arch_number(arch), 0 if kind == "sm" else 1, arch)
+
+    return [
+        f"arch=compute_{arch},code={kind}_{arch}"
+        for kind, arch in sorted(options, key=sort_key)
+    ]
+
+
+def _cuda_gencode_options_have_non_current_sass(
+    gencode_options: list[str], current_arch: str | None = None
+) -> bool:
+    if not current_arch:
+        current_arch = _nvcc_arch_as_compile_option_or_raise()
+    current_arch = _normalize_cuda_arch(current_arch)
+    for kind, arch in _parse_gencode_options(
+        [f"-gencode={option}" for option in gencode_options]
+    ):
+        if kind == "sm" and not _cuda_arch_same_generation(arch, current_arch):
+            return True
+    return False
+
+
+def _nvcc_compiler_options() -> list[str]:
+    arch = _nvcc_arch_as_compile_option_or_raise()
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]
@@ -156,7 +308,7 @@ def _nvcc_compiler_options() -> list[str]:
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
         config.cutlass.compile_opt_level,
-        "-std=c++17",
+        "-std=c++20",
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
@@ -228,44 +380,3 @@ def cuda_compile_command(
     else:
         autotuning_log.debug("CUDA command: %s", res)
     return res
-
-
-class CUDACompileSourceCapturingContext:
-    # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
-    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
-
-    def __init__(self):
-        self.sources = []
-        self._compile_patch = None
-
-    def __enter__(self, *args, **kwargs):
-        import unittest.mock as mock
-
-        import torch._inductor.codecache
-
-        _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
-
-        def my_compile(source_code, dst_file_ext, extra_args: list[str] | None = None):
-            self.sources.append(source_code)
-            return _compile_method_orig(source_code, dst_file_ext)
-
-        # pyrefly: ignore [bad-assignment]
-        self._compile_patch = mock.patch(
-            "torch._inductor.codecache.CUDACodeCache.compile", my_compile
-        )
-        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
-
-
-def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
-    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
-    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
-
-    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"]
-    compile_command = cuda_compile_command(
-        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
-    )
-    return compile_command

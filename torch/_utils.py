@@ -77,6 +77,8 @@ def _to(self, device, non_blocking=False):
     if device.type == "cpu":
         pin_memory = non_blocking and self.device.type in (
             "cuda",
+            "xpu",
+            "mtia",
             torch._C._get_privateuse1_backend_name(),
         )
         untyped_storage = torch.empty(
@@ -284,18 +286,26 @@ _sparse_tensors_to_validate: list["torch.Tensor"] = []
 # The same procedure must be followed by _load() in serialization.py because due
 # to Pickler semantics, we have to use the same (non-validating) function for
 # unpickling sparse tensors, regardless of the caller.
-def _validate_loaded_sparse_tensors():
-    if not torch.sparse.check_sparse_tensor_invariants().is_enabled():
-        # Skip sparse tensor invariants validation for better
-        # performance. See check_sparse_tensor_invariants
-        # documentation for how to control sparse tensor invariants
-        # checking.
-        _sparse_tensors_to_validate.clear()
-        return
+def _validate_loaded_sparse_tensors(weights_only=False):
+    # In weights_only mode we always validate: malformed sparse indices can
+    # cause out-of-bounds reads later (e.g. in to_dense()), and an untrusted
+    # checkpoint must not be able to slip those through. Otherwise we fall back
+    # to the global check_sparse_tensor_invariants setting.
     try:
+        if not _sparse_tensors_to_validate:
+            return
+        if weights_only:
+            warnings.warn(
+                "Validating sparse tensor invariants because weights_only=True; "
+                "this is an O(nnz) scan per sparse tensor and may be slow for "
+                "large checkpoints.",
+                stacklevel=2,
+            )
+        elif not torch.sparse.check_sparse_tensor_invariants().is_enabled():
+            return
         # We disable pinning check (see check_pinning=False below) to
         # avoid gh-153143. In fact, pinning check is unnecessary
-        # anywhy when loading sparse data from external sources.
+        # anyway when loading sparse data from external sources.
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
@@ -456,6 +466,24 @@ def _rebuild_qtensor(
         )
     elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
+        # The C++ constructor does not bound-check axis or the
+        # scales/zero_points length against size; values arriving from an
+        # untrusted weights_only checkpoint can otherwise be arbitrary.
+        if not 0 <= axis < len(size):
+            raise ValueError(
+                f"_rebuild_qtensor: per_channel axis {axis} out of range for size {tuple(size)}"
+            )
+        expected_len = int(size[axis])
+        scales_len = len(scales) if isinstance(scales, list) else scales.numel()
+        zero_points_len = (
+            len(zero_points) if isinstance(zero_points, list) else zero_points.numel()
+        )
+        if scales_len != expected_len or zero_points_len != expected_len:
+            raise ValueError(
+                "_rebuild_qtensor: per_channel scales/zero_points length must equal "
+                f"size[axis]={expected_len}, got scales={scales_len}, "
+                f"zero_points={zero_points_len}"
+            )
         if type(scales) is list and type(zero_points) is list:
             if qscheme == torch.per_channel_affine:
                 scales = torch.tensor(scales, dtype=torch.double, device=storage.device)
@@ -703,17 +731,6 @@ def _take_tensors(tensors, size_limit):
             yield buf
 
 
-# annotation decorator to get annotations in a way that is compatible
-# with both Python 2 and 3
-def annotate(ret, **kwargs):
-    def dec(fun):
-        fun.__annotations__ = dict(kwargs)
-        fun.__annotations__["return"] = ret
-        return fun
-
-    return dec
-
-
 def render_call(fn, args, kwargs):
     str_fn = torch.overrides.resolve_name(fn)
     if str_fn is None:
@@ -783,6 +800,19 @@ class ExceptionWrapper:
             # be constructed, don't try to instantiate since we don't know how to
             raise RuntimeError(msg) from None
         raise exception
+
+
+def cpu_count() -> int | None:
+    """Return the number of CPUs available to the current process.
+
+    Prefers ``os.sched_getaffinity`` (respects cgroups / taskset) and
+    falls back to ``os.cpu_count``.
+    """
+    # os.process_cpu_count was added in CPython 3.13, see
+    # https://docs.python.org/3/library/os.html#os.process_cpu_count
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count()
 
 
 def _get_available_device_type():
@@ -1379,3 +1409,17 @@ def _augment_memory_snapshot_stack_traces(
                 _augment_frames(trace_entry["frames"])
 
     return snapshot_dict
+
+
+def _is_privateuse1_backend_available():
+    """
+    Determines whether the privateuse1 backend is registered and available.
+
+    Returns:
+        Return True if the privateuse1 backend is registered and available.
+    """
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    privateuse1_backend_module = getattr(torch, privateuse1_backend_name, None)
+    return (
+        is_available := getattr(privateuse1_backend_module, "is_available", None)
+    ) and is_available()

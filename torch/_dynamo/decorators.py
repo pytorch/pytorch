@@ -8,15 +8,17 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated, ParamSpec
+from typing import Any, overload, Protocol, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
+from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._typing_utils import not_none
 
 from .._utils_internal import justknobs_check
 from . import trace_rules, variables
@@ -28,12 +30,21 @@ from .eval_frame import (
     innermost_fn,
     RunOnlyContext,
     skip_code,
+    StanceStr,
 )
 from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
 )
-from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
+from .utils import (
+    _get_cudagraph_override,
+    _get_error_on_graph_break,
+    _set_cudagraph_override,
+    _set_error_on_graph_break,
+    allow_lru_cache_wrapper_trace_without_warning,
+    is_function,
+    is_lru_cache_wrapped_function,
+)
 
 
 justknobs_check._dynamo_marked_constant = True  # type: ignore[attr-defined]
@@ -67,7 +78,8 @@ def run(fn: Callable[_P, _R] | None = None) -> Any:
     """Don't do any dynamic compiles, just use prior optimizations"""
     if fn is not None:
         fn = innermost_fn(fn)
-        assert callable(fn)
+        if not callable(fn):
+            raise AssertionError("fn must be callable")
         return RunOnlyContext()(fn)
     return RunOnlyContext()
 
@@ -87,14 +99,16 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
     if recursive:
         if fn is not None:
             fn = innermost_fn(fn)
-            assert callable(fn)
+            if not callable(fn):
+                raise AssertionError("fn must be callable")
             return DisableContext(msg=reason, wrapping=wrapping)(fn)
         return DisableContext(msg=reason, wrapping=wrapping)
     else:
 
         def wrap(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             fn = innermost_fn(fn)
-            assert callable(fn)
+            if not callable(fn):
+                raise AssertionError("fn must be callable")
 
             nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(fn)
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
@@ -123,7 +137,8 @@ def skip(fn: Callable[_P, _R] | None = None) -> Callable[..., Any]:
     if fn is None:
         return skip
     fn = innermost_fn(fn)
-    assert callable(fn)
+    if not callable(fn):
+        raise AssertionError("fn must be callable")
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True  # type: ignore[attr-defined]
     return fn
@@ -140,7 +155,7 @@ class set_stance(_DecoratorContextManager):
 
     def __init__(
         self,
-        stance: str = "default",
+        stance: StanceStr = "default",
         *,
         skip_guard_eval_unsafe: bool = False,
         force_backend: str | Callable[..., Any] | None = None,
@@ -178,11 +193,6 @@ def assume_constant_result(fn):  # type: ignore[no-untyped-def]
     return fn
 
 
-@deprecated(
-    "torch._dynamo.allow_in_graph is deprecated and will be removed in a future version. "
-    "Use torch._dynamo.nonstrict_trace instead.",
-    category=FutureWarning,
-)
 def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     """
     Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
@@ -193,9 +203,9 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     WARNING: this API can be a footgun, please read the documentation carefully.
     """
     if isinstance(fn, (list, tuple)):
-        # pyrefly: ignore [deprecated]
         return [allow_in_graph(x) for x in fn]
-    assert callable(fn), "allow_in_graph expects a callable"
+    if not callable(fn):
+        raise AssertionError("allow_in_graph expects a callable")
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
         fn_id = id(fn)
         trace_rules._disallowed_callable_ids.remove(fn_id)
@@ -229,67 +239,10 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator to mark a function as nonstrict-traceable for dynamo.
 
-    A nonstrict-traced function appears as an opaque call in the dynamo graph.
-    Dynamo does not trace into the function body (hence the "nonstrict"), but
-    aot_autograd will trace into it.
-
-    This is similar to ``allow_in_graph`` but with enhanced support for:
-    - User-defined classes as inputs (must be registered with pytree)
-    - ``nn.Module`` as input arguments (parameters and buffers are tracked for autograd)
-    - Global/captured tensors treated as constants (assumed not updated during execution)
-
-    Note:
-        - With ``backend="eager"``, the original Python function runs directly.
-          With ``backend="aot_eager"``, the graph traced by aot_autograd runs.
-          With ``backend="inductor"``, the traced graph is compiled with inductor.
-
-        - Training is supported: you can call ``.backward()`` on outputs and gradients
-          will flow through the nonstrict-traced function.
-
-    Dangerous patterns (may cause silent incorrectness):
-        - Side effects between nonstric_traced fn and compiled region: The function should
-          not depend on variables mutated by other code inside the compiled function, and code
-          after the call should not depend on mutations made by it.
-
-        - Implicit inputs (closures/globals): Tensors captured from enclosing scopes
-          are treated as constants. Gradients will NOT flow back to them. Pass tensors
-          as explicit arguments if gradients are needed.
-
-    Restrictions:
-        - Both inputs and outputs must use pytree-compatible types. User-defined classes
-          must be registered via :func:`torch.utils._pytree.register_pytree_node`,
-          :func:`torch.utils._pytree.register_dataclass`, or
-          :func:`torch.utils._pytree.register_constant`. Tensors, Python primitives (int, float, bool, str),
-          symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
-          tuple, dict) are already handled by default.
-        - Primitive values and container structure are specialized per call site:
-          each call site expects the same primitives and structure on every execution.
-
-    Example::
-
-        >>> import torch
-        >>> @torch._dynamo.nonstrict_trace
-        ... def traced_forward(model, x):
-        ...     # It's OK to have dynamo graph break within nonstrict_trace region
-        ...     torch._dynamo.graph_break()
-        ...     return model(x) + x
-        ...
-        >>> class MyModule(torch.nn.Module):
-        ...     def __init__(self):
-        ...         super().__init__()
-        ...         self.inner = torch.nn.Linear(10, 10)
-        ...
-        ...     def forward(self, x):
-        ...         return traced_forward(self.inner, x)
-        ...
-        >>> # Compile and run
-        >>> model = MyModule()
-        >>> opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
-        >>> out = opt_model(torch.randn(10, 10))
-        >>> out.sum().backward()  # Gradients flow through traced_forward
-
+    See :func:`torch.compiler.nonstrict_trace` for the full documentation.
     """
-    assert callable(traceable_fn), "nonstrict_trace expects a callable"
+    if not callable(traceable_fn):
+        raise AssertionError("nonstrict_trace expects a callable")
 
     _check_mutually_exclusive_decorators(traceable_fn, "nonstrict_trace")
 
@@ -321,6 +274,8 @@ def _invoke_leaf_function_python(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     mutates_args: frozenset[str] | None = None,
+    hook_fn: Callable[..., Any] | None = None,
+    hook_fake_fn: Callable[..., Any] | None = None,
 ) -> Any:
     """Call invoke_leaf_function HOP directly from Python.
 
@@ -362,6 +317,10 @@ def _invoke_leaf_function_python(
     real_fn_callable = _LeafCallable(wrapped_real)
     fake_fn_callable = _LeafCallable(wrapped_fake)
 
+    if hook_fn is not None:
+        real_fn_callable._leaf_hook_real_fn = hook_fn  # type: ignore[attr-defined]
+        real_fn_callable._leaf_hook_fake_fn = hook_fake_fn  # type: ignore[attr-defined]
+
     mutated_flat_indices = ""
     if mutates_args:
         from torch._higher_order_ops.invoke_leaf_function import (
@@ -376,7 +335,8 @@ def _invoke_leaf_function_python(
         real_fn_callable, fake_fn_callable, input_spec, mutated_flat_indices, *flat_args
     )
 
-    assert captured_out_spec[0] is not None
+    if captured_out_spec[0] is None:
+        raise AssertionError("captured_out_spec was not set by leaf function wrappers")
     return pytree.tree_unflatten(flat_out, captured_out_spec[0])
 
 
@@ -513,6 +473,36 @@ def leaf_function(
 
         To validate that your fake implementation matches the real function's outputs, set
         ``torch._dynamo.config.leaf_function_validate_outputs = True``.
+
+        **register_multi_grad_hook (optional)**:
+        You can register a backward hook via ``@fn.register_multi_grad_hook``
+        to run code when gradients have been computed for all requires_grad
+        tensor inputs during backward. The hook fires exactly once per
+        backward pass. The hook receives only the gradients of the leaf
+        function's requires_grad tensor inputs, in the order they appeared;
+        non-tensor arguments and tensors without ``requires_grad`` are not
+        forwarded to the hook. The hook must return ``None``. The hook is
+        called as a leaf function itself, so it is also opaque to the
+        compiler.
+
+        Example::
+
+            >>> @leaf_function
+            ... def debug_log(t):
+            ...     return None
+            ...
+            >>> @debug_log.register_fake
+            ... def debug_log_fake(t):
+            ...     return None
+            ...
+            >>> @debug_log.register_multi_grad_hook
+            ... def debug_log_hook(t_grad):
+            ...     print(f"[bwd] norm={t_grad.norm().item()}")
+            ...
+            >>> x = torch.randn(4, requires_grad=True)
+            >>> debug_log(x)  # no assignment needed
+            >>> (x * 2).sum().backward()
+            [bwd] norm=...
 
     Limitations:
         Currently, inductor backend and :func:`torch.export.export` are not yet supported.
@@ -715,6 +705,8 @@ def leaf_function(
             args,
             kwargs,
             mutates_args=inner._torchdynamo_leaf_mutates_args,  # pyrefly: ignore [missing-attribute]
+            hook_fn=inner._torchdynamo_leaf_hook_fn,  # type: ignore[attr-defined]
+            hook_fake_fn=inner._torchdynamo_leaf_hook_fake_fn,  # type: ignore[attr-defined]
         )  # type: ignore[attr-defined]
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
@@ -722,6 +714,8 @@ def leaf_function(
     inner._torchdynamo_leaf_mutates_args = (  # pyrefly: ignore [missing-attribute]
         frozenset(mutates_args) if mutates_args else frozenset()
     )  # type: ignore[attr-defined]
+    inner._torchdynamo_leaf_hook_fn = None  # type: ignore[attr-defined]
+    inner._torchdynamo_leaf_hook_fake_fn = None  # type: ignore[attr-defined]
 
     # Follow nonstrict_trace implementation
     wrapped_id = id(inner)
@@ -740,6 +734,13 @@ def leaf_function(
 
     inner.register_fake = register_fake_setter  # type: ignore[attr-defined]
 
+    def register_hook_setter(hook_fn: Callable[..., Any]) -> Callable[..., Any]:
+        inner._torchdynamo_leaf_hook_fn = hook_fn  # type: ignore[attr-defined]
+        inner._torchdynamo_leaf_hook_fake_fn = lambda *args, **kwargs: None  # type: ignore[attr-defined]
+        return inner
+
+    inner.register_multi_grad_hook = register_hook_setter  # type: ignore[attr-defined]
+
     return inner
 
 
@@ -747,7 +748,8 @@ def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
     def inner(fn: Any) -> Any:
         if isinstance(fn, (list, tuple)):
             return [disallow_in_graph(x) for x in fn]
-        assert callable(fn), "disallow_in_graph expects a callable"
+        if not callable(fn):
+            raise AssertionError("disallow_in_graph expects a callable")
         if (
             throw_if_not_allowed
             and trace_rules.lookup_callable(fn)
@@ -820,7 +822,8 @@ def forbid_in_graph(fn: Any) -> Any:
     """
     if isinstance(fn, (list, tuple)):
         return [forbid_in_graph(x) for x in fn]
-    assert callable(fn), "forbid_in_graph applies only to callables"
+    if not callable(fn):
+        raise AssertionError("forbid_in_graph applies only to callables")
     # pyrefly: ignore [missing-attribute]
     fn._dynamo_forbidden = True
     return fn
@@ -1005,7 +1008,8 @@ def substitute_in_graph(
             else:
                 guard_type = GuardBuilder.ID_MATCH
             guards = self.install_guards(guard_type)
-            assert guards is not None
+            if guards is None:
+                raise AssertionError("install_guards returned None")
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
@@ -1033,27 +1037,29 @@ def substitute_in_graph(
 def _apply_func_to_inner_tensors_of_same_dim(
     func: Callable[..., Any], t: object, *args: Any, **kwargs: Any
 ) -> None:
-    assert is_traceable_wrapper_subclass(t)
+    if not is_traceable_wrapper_subclass(t):
+        raise AssertionError(f"Expected a traceable wrapper subclass, got {type(t)}")
 
     attrs, _ctx = t.__tensor_flatten__()
-    assert isinstance(t, torch.Tensor)
+    if not isinstance(t, torch.Tensor):
+        raise AssertionError(f"Expected a Tensor, got {type(t)}")
     for attr in attrs:
         match getattr(t, attr):
             case torch.Tensor() as inner:
                 if inner.dim() == t.dim():
                     func(inner, *args, **kwargs)
-            case OpaqueBase():
+            case CustomClassBase():
                 pass
             case unexpected:
                 raise AssertionError(
-                    f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                 )
 
 
 @dataclass(frozen=True, slots=True)
 class _DimRange:
     """
-    This represents an dimension of a tensor and the corresponding
+    This represents a dimension of a tensor and the corresponding
     min and max values it can take.  Don't create this
     class directly; instead, use :func:`mark_dynamic`.
     """
@@ -1083,7 +1089,9 @@ def mark_unbacked(
 
     Args:
         t (Any): The tensor to mark as having an unbacked dimension.
-        index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single integer or a list/tuple of integers.
+        index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single
+            integer or a list/tuple of integers. Calls are additive: mark_unbacked(x, 0) followed
+            by mark_unbacked(x, 1) marks both dims.
         hint_override (Optional[int], default=None): An optional integer to override the size hint for this dimension.
             This is only used by the inductor backend for size hint queries, such as during autotuning.
             NOTE: changing hint_override values will cause FxGraphCache misses, since hint overrides
@@ -1110,7 +1118,8 @@ def mark_unbacked(
     else:
         # You could have copied the mark_dynamic behavior but I'm not convinced
         # it's what you want
-        assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+        if is_traceable_wrapper_subclass(t):
+            raise AssertionError("not implemented yet")
 
     if isinstance(index, int):
         if strict:
@@ -1118,6 +1127,7 @@ def mark_unbacked(
                 t._dynamo_strict_unbacked_indices = set()
 
             t._dynamo_strict_unbacked_indices.add(index)
+            t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
             return
 
         if not hasattr(t, "_specialized_on"):
@@ -1153,9 +1163,13 @@ def mark_unbacked(
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
         t._dynamo_unbacked_indices.add(index)
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
-    assert isinstance(index, (list, tuple))
+    if not isinstance(index, (list, tuple)):
+        raise AssertionError(
+            f"Expected index to be int, list, or tuple, got {type(index)}"
+        )
     for i in index:
         mark_unbacked(t, i, shape_id=shape_id, min=min, max=max)
 
@@ -1211,7 +1225,6 @@ def mark_dynamic(
     This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
     at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
     2-8x speedups depending on the specific specialization and model architecture.
-
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
@@ -1239,6 +1252,7 @@ def mark_dynamic(
 
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
@@ -1248,9 +1262,11 @@ def mark_dynamic(
 
         return
 
-    assert isinstance(index, (list, tuple))
+    if not isinstance(index, (list, tuple)):
+        raise AssertionError(
+            f"Expected index to be int, list, or tuple, got {type(index)}"
+        )
     for i in index:
-        mark_dynamic(t, i, min=min, max=max)
         mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
 
@@ -1271,9 +1287,13 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
         # TODO(voz): Should we bounds check?
 
         t._dynamo_weak_dynamic_indices.add(index)
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
         return
 
-    assert isinstance(index, (list, tuple))
+    if not isinstance(index, (list, tuple)):
+        raise AssertionError(
+            f"Expected index to be int, list, or tuple, got {type(index)}"
+        )
     for i in index:
         maybe_mark_dynamic(t, i)
 
@@ -1334,11 +1354,15 @@ def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> No
             t._dynamo_static_indices = set()  # type: ignore[attr-defined]
         # TODO(voz): Should we bounds check?
         t._dynamo_static_indices.add(index)  # type: ignore[attr-defined]
+        t._has_dynamo_dim_marking = True  # type: ignore[attr-defined]
     elif index is None:
         for i in range(t.dim()):
             mark_static(t, i)
     else:
-        assert isinstance(index, (list, tuple))
+        if not isinstance(index, (list, tuple)):
+            raise AssertionError(
+                f"Expected index to be int, list, or tuple, got {type(index)}"
+            )
         for i in index:
             mark_static(t, i)
 
@@ -1380,21 +1404,58 @@ def _patch_einops_symint_compat(einops_mod: Any) -> None:
         setattr(einops_mod, name, make_wrapper(cached, uncached))
 
 
-# One day, Dynamo will support tracing into einops directly (no allow_in_graph needed)
-# Note that PyTorch supports multiple versions of einops, so when that day comes,
-# we still need to be really careful about version matches.
+_EINOPS_DYNAMO_TRACING_MIN_VERSION = Version("0.8.2")
+# Known pure parser/shape helpers in einops 0.8.2. Keep this explicit so
+# unrelated or future lru_cache wrappers continue through the normal warning path.
+_EINOPS_LRU_CACHE_WRAPPER_ALLOWLIST = (
+    (
+        "einops.einops",
+        (
+            "_reconstruct_from_shape",
+            "_prepare_transformation_recipe",
+            "_compactify_pattern_for_einsum",
+        ),
+    ),
+    ("einops.packing", ("analyze_pattern",)),
+)
+
+
+def _einops_supports_dynamo_tracing(einops_mod: Any) -> bool:
+    try:
+        return Version(einops_mod.__version__) >= _EINOPS_DYNAMO_TRACING_MIN_VERSION
+    except InvalidVersion:
+        return False
+
+
+def _allow_lru_cache_trace_without_warning_for_einops() -> None:
+    import importlib
+
+    for module_name, attr_names in _EINOPS_LRU_CACHE_WRAPPER_ALLOWLIST:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+
+        for attr_name in attr_names:
+            obj = getattr(module, attr_name, None)
+            if is_lru_cache_wrapped_function(obj):
+                allow_lru_cache_wrapper_trace_without_warning(obj)
+
+
+# Dynamo can trace through einops 0.8.2+ directly (no allow_in_graph needed).
+# Older versions still need the allow_in_graph registration below.
 def _allow_in_graph_einops() -> None:
     import einops
 
-    # There is a lru_cache logspam issue with einops when allow_in_graph is not
-    # used. Disabling this for now until the lru_cache issue is resolved.
-    # if einops.__version__ >= "0.8.2":
-    #     if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
-    #         # trigger backend registration up front to avoid a later guard failure
-    #         # that would otherwise cause a recompilation
-    #         einops.rearrange(torch.randn(1), "i -> i")
-    #     # einops 0.8.2+ don't need explicit allow_in_graph calls
-    #     return
+    if _einops_supports_dynamo_tracing(einops):
+        if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+            # trigger backend registration up front to avoid a later guard failure
+            # that would otherwise cause a recompilation
+            einops.rearrange(torch.empty(1), "i -> i")
+        # einops uses lru_cache for pure library-internal recipe helpers. Mark
+        # only those wrappers so general lru_cache warnings are unchanged.
+        _allow_lru_cache_trace_without_warning_for_einops()
+        return
 
     try:
         # requires einops > 0.6.1, torch >= 2.0
@@ -1408,21 +1469,15 @@ def _allow_in_graph_einops() -> None:
         # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
         # so allow_in_graph works during fake tensor validation.
         _patch_einops_symint_compat(einops.einops)  # type: ignore[attr-defined]
-        # pyrefly: ignore [deprecated]
         allow_in_graph(einops.rearrange)
-        # pyrefly: ignore [deprecated]
         allow_in_graph(einops.reduce)
         if hasattr(einops, "repeat"):
-            # pyrefly: ignore [deprecated]
             allow_in_graph(einops.repeat)  # available since einops 0.2.0
         if hasattr(einops, "einsum"):
-            # pyrefly: ignore [deprecated]
             allow_in_graph(einops.einsum)  # available since einops 0.5.0
         if hasattr(einops, "pack"):
-            # pyrefly: ignore [deprecated]
             allow_in_graph(einops.pack)  # available since einops 0.6.0
         if hasattr(einops, "unpack"):
-            # pyrefly: ignore [deprecated]
             allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
@@ -1430,10 +1485,25 @@ def _allow_in_graph_einops() -> None:
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
+class _ConfigPatchProtocol(Protocol):
+    """The config.patch() context manager object wrapped by DynamoConfigPatchProxy."""
+
+    changes: dict[str, Any]
+
+    def __enter__(self) -> None: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+
 # Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
 # created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
 class DynamoConfigPatchProxy:
-    def __init__(self, config_patch: Any) -> None:
+    def __init__(self, config_patch: _ConfigPatchProtocol) -> None:
         self.config_patch = config_patch
 
     @property
@@ -1481,7 +1551,8 @@ from . import config
 
 
 for name in _allowed_config_patches:
-    assert hasattr(config, name), "nonexistent config"
+    if not hasattr(config, name):
+        raise AssertionError(f"nonexistent config: {name}")
 del config
 
 
@@ -1573,12 +1644,17 @@ def disable_nested_graph_breaks(fn: Any | None = None) -> Any:
 class ErrorOnGraphBreakDecoratorContextManager:
     def __init__(self, error_on_graph_break: bool) -> None:
         self.error_on_graph_break = error_on_graph_break
+        self.prev_error_on_graph_break: list[bool | None] = []
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        self.prev_error_on_graph_break = _get_error_on_graph_break()
-        _set_error_on_graph_break(self.error_on_graph_break)
+        current_error_on_graph_break = _get_error_on_graph_break()
+        if current_error_on_graph_break != self.error_on_graph_break:
+            self.prev_error_on_graph_break.append(current_error_on_graph_break)
+            _set_error_on_graph_break(self.error_on_graph_break)
+        else:
+            self.prev_error_on_graph_break.append(None)
 
     def __exit__(
         self,
@@ -1586,7 +1662,9 @@ class ErrorOnGraphBreakDecoratorContextManager:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        _set_error_on_graph_break(self.prev_error_on_graph_break)
+        prev_error_on_graph_break = self.prev_error_on_graph_break.pop()
+        if prev_error_on_graph_break is not None:
+            _set_error_on_graph_break(prev_error_on_graph_break)
 
 
 def error_on_graph_break(
@@ -1615,11 +1693,19 @@ class CudagraphOverrideContextManager:
     def __init__(self, fwd: bool | None = None, bwd: bool | None = None) -> None:
         self.fwd = fwd
         self.bwd = bwd
+        self.prev_cudagraph_override: list[tuple[bool | None, bool | None] | None] = []
 
     __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self) -> None:
-        pass
+        # Set the override at runtime so it follows the dynamic call stack.
+        # Dynamo handles the lexical `with` symbolically and does not run this
+        # __enter__ at trace time; it runs when the generated/resumed bytecode
+        # re-enters the context, before invoking callees that are compiled as
+        # separate frames. OutputGraph seeds its annotation from this value via
+        # _get_cudagraph_override. Mirrors ErrorOnGraphBreakDecoratorContextManager.
+        self.prev_cudagraph_override.append(_get_cudagraph_override())
+        _set_cudagraph_override((self.fwd, self.bwd))
 
     def __exit__(
         self,
@@ -1627,7 +1713,7 @@ class CudagraphOverrideContextManager:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        pass
+        _set_cudagraph_override(self.prev_cudagraph_override.pop())
 
 
 def override_cudagraphs(
@@ -1651,6 +1737,80 @@ def override_cudagraphs(
     return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
 
 
+def override_optimization_hint(x: Any, val: int) -> None:
+    """Override the optimization hint for a scalar unbacked symbol.
+
+    When the compiler or runtime needs a non-guarding integer hint for an
+    unbacked ``SymInt`` — for example during FX passes, graph partitioning,
+    or inductor autotuning — it calls
+    ``_optimization_hint_base``
+    (see ``torch/fx/experimental/_size_hinting.py``).  By default
+    that function uses internal heuristics to choose a hint and a global fixed
+    fallback;
+    this function lets user code override that choice.  This is similar to
+    the ``hint_override`` parameter in ``mark_unbacked``, but applies to
+    symbols that already exist (e.g. from ``.item()`` calls).
+
+    Typical usage::
+
+        u = x.item()  # unbacked SymInt
+        torch._dynamo.override_optimization_hint(u, 42)
+        # From now on, any call to shape_env.optimization_hint(u, ...)
+        # returns 42 instead of the default heuristic value.
+
+    This updates ``shape_env.var_to_hint_override`` so that any consumer
+    of ``_optimization_hint_base`` sees *val* as the hint for the
+    unbacked symbol behind *x*.
+
+    Works both eagerly (during FX passes or outside dynamo) and inside
+    ``torch.compile`` regions.
+
+    Behavior during compilation:
+        The dynamo handler applies the hint as a **side effect** on
+        ``shape_env.var_to_hint_override`` during tracing.  No FX graph
+        node is emitted — the call is fully consumed at trace time and
+        does not appear in the pre-grad, joint, or post-autograd graphs.
+        ``FXGraphCache`` includes ``var_to_hint_override`` in its cache
+        key, so cache hits/misses correctly reflect hint changes.
+
+    .. note::
+
+        To maximize performance, it is recommended to pass hints for
+        **all** unbacked symbols in the program to guide optimizations.
+
+    Args:
+        x: A ``torch.SymInt`` wrapping an unbacked symbol (e.g. from
+            ``.item()``), or a plain ``int``.  If *x* is a plain ``int``
+            the call is a no-op.
+        val: The integer hint value to record.
+    """
+    if not isinstance(val, int):
+        raise TypeError(
+            f"override_optimization_hint expects val to be an int, got {type(val)}"
+        )
+    if isinstance(x, int):
+        return
+    if not isinstance(x, torch.SymInt):
+        raise TypeError(
+            f"override_optimization_hint expects a torch.SymInt or int, got {type(x)}"
+        )
+    shape_env = not_none(x.node.shape_env)
+    expr = x.node.expr
+    import sympy
+
+    if not isinstance(expr, sympy.Symbol):
+        raise ValueError(
+            f"override_optimization_hint expects a single unbacked symbol, "
+            f"got derived expression: {expr}"
+        )
+    if not shape_env.is_unbacked_symint(expr):
+        raise ValueError(
+            f"override_optimization_hint expects an unbacked symbol, "
+            f"but {expr} is backed"
+        )
+    shape_env._set_unbacked_var_to_hint_override(x, val)
+
+
 def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
     """
     Check if a method is marked as `dynamo_disable` recursively. It returns:
@@ -1659,3 +1819,72 @@ def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
     - None if method is not a disable decorator
     """
     return getattr(method, "_torchdynamo_disable_recursive", None)
+
+
+_HASH_SLOTS = ("__hash__",)
+_RICHCOMPARE_SLOTS = ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+
+
+def allow_c_slot(
+    tp: type,
+    *,
+    tp_hash: bool = True,
+    tp_richcompare: bool = True,
+) -> type:
+    """Register a C extension type's slots as safe to call at trace time.
+
+    By default, ``torch.compile`` graph-breaks when it encounters ``hash()``
+    or comparison operators on a C extension type with custom C slots (e.g.,
+    types defined in C extension modules).  This function tells Dynamo that the
+    type's C slots are safe to evaluate during tracing, avoiding graph breaks.
+
+    The slot functions must satisfy these requirements:
+
+    - **Pure**: depends only on the object's value, with no observable side
+      effects (no I/O, no mutation of global state).
+    - **Deterministic**: returns the same result for the same object across
+      calls within a process.
+    - **Immutable objects**: the object's state must not change after
+      construction in a way that affects the slot's return value.
+
+    Builtin types (``int``, ``str``, etc.) and Python-level dunder methods
+    are already handled and do not need registration.  This API is only needed
+    for C extension types whose C slots Dynamo cannot trace into.
+
+    Args:
+        tp: The C extension type whose C slots should be allowed.
+        tp_hash: Register ``__hash__`` as safe (default True).
+        tp_richcompare: Register comparison dunders as safe (default True).
+
+    Returns:
+        The type, unchanged (so it can be used as a decorator).
+
+    Example::
+
+        import torch._dynamo
+        from my_extension import MyType
+
+        # Register all slots (hash + comparison)
+        torch._dynamo.allow_c_slot(MyType)
+
+        # Register only hash
+        torch._dynamo.allow_c_slot(MyType, tp_richcompare=False)
+
+        # Register only comparison
+        torch._dynamo.allow_c_slot(MyType, tp_hash=False)
+    """
+    from .variables.user_defined import _safe_c_slots
+
+    if not isinstance(tp, type):
+        raise TypeError(f"allow_c_slot expects a type, got {type(tp).__name__}")
+    safe = _safe_c_slots()
+    dunders = ()
+    if tp_hash:
+        dunders += _HASH_SLOTS
+    if tp_richcompare:
+        dunders += _RICHCOMPARE_SLOTS
+    for dunder in dunders:
+        fn = getattr(tp, dunder, None)
+        if fn is not None and fn is not getattr(object, dunder, None):
+            safe.add(fn)
+    return tp

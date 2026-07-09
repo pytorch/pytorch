@@ -1,9 +1,13 @@
 # Owner(s): ["module: functorch"]
 
+import contextlib
+import io
+
 import torch
 from functorch import make_fx
 from functorch.compile import minifier
 from torch._functorch.compile_utils import get_outputs, get_placeholders
+from torch._functorch.fx_minifier import dump_state
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -116,6 +120,28 @@ class TestMinifier(TestCase):
             )
         if len(inps) != 1:
             raise AssertionError(f"Expected 1 input, got {len(inps)}")
+
+    def test_dump_state_preserves_device_index(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        graph.output(x)
+        gm = torch.fx.GraphModule({}, graph)
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_tensor = (
+            torch._subclasses.fake_tensor.FakeTensorConverter().from_meta_and_device(
+                fake_mode,
+                torch.empty_strided((2, 3), (3, 1), device="meta"),
+                torch.device("cuda:7"),
+            )
+        )
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            dump_state(gm, [fake_tensor])
+
+        repro = buf.getvalue()
+        self.assertIn("'cuda:7'", repro)
 
 
 if __name__ == "__main__":

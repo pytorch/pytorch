@@ -8,6 +8,7 @@ from typing_extensions import deprecated
 
 import torch
 
+from . import random
 from ._utils import _device_t, _get_device_index
 from .graphs import Graph
 from .memory import (
@@ -71,7 +72,7 @@ def device_count() -> int:
 
 
 def is_available() -> bool:
-    r"""Check if the current accelerator is available at runtime: it was build, all the
+    r"""Check if the current accelerator is available at runtime: it was built, all the
     required drivers are available and at least one device is visible.
     See :ref:`accelerator<accelerators>` for details.
 
@@ -169,7 +170,10 @@ def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
 
     Returns:
         dict[str, Any]: A dictionary containing device capability information. The dictionary includes:
-            - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types supported by the device
+            - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types for which
+              tensors can be allocated on the accelerator and type conversion across
+              supported dtypes are supported. Any operator support outside of that
+              is not guaranteed
 
     Examples:
         >>> # xdoctest: +SKIP("requires cuda")

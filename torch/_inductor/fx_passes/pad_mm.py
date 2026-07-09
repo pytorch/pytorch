@@ -159,10 +159,11 @@ def can_pad(
             return False
 
     # In deterministic mode, we can't safely benchmark - disallow padding
-    # Check this after other basic checks so force_shape_pad can override
+    # Check this after other basic checks so force_shape_pad/autoheuristic can override
     if (
         torch._inductor.config.deterministic
         and not torch._inductor.config.force_shape_pad
+        and not torch._inductor.config.use_autoheuristic("pad_mm")
     ):
         return False
 
@@ -361,7 +362,7 @@ def should_pad_bench_key(
 
 
 def get_non_view_def(node: torch.fx.Node) -> torch.fx.Node:
-    if node.op is operator.getitem:
+    if node.op == "call_function" and node.target is operator.getitem:
         return get_non_view_def(node.args[0])  # type: ignore[arg-type]
 
     if (
@@ -672,6 +673,10 @@ def _should_pad(
             if ah_should_pad is not None:
                 return ah_should_pad
 
+        # AH didn't make a decision, so if we're in deterministic mode, we should return false
+        if torch._inductor.config.deterministic:
+            return False
+
         if ori_time is None:
             ori_time = do_bench(orig_bench_fn)
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
@@ -926,7 +931,7 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
         else:
             device = "cpu"
 
-    # sizes/values dont actually matter for initial trace
+    # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
 
     dim2a = functools.partial(torch.empty, (4, 4), device=device, requires_grad=True)
@@ -964,7 +969,12 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
             should_pad_addmm,
         ),
     ]:
-        assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
+        if not isinstance(
+            workaround, dict
+        ):  # mypy is unable to infer the type properly
+            raise AssertionError(
+                f"expected workaround to be a dict, got {type(workaround)}"
+            )
         name = pattern.__name__
 
         gen_register_replacement(
