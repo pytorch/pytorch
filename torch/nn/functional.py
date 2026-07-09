@@ -5388,7 +5388,7 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
 
     Args:
         input (Tensor): input
-        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial
             size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
 
