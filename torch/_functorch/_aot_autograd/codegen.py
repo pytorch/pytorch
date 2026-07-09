@@ -1,25 +1,29 @@
-"""Generic codegen substrate shared by AOTAutograd's runtime wrappers.
+"""Generic codegen surface shared by AOTAutograd's runtime wrappers.
 
-``_compile_and_exec_source`` is the single chokepoint that compiles a generated
-wrapper source string into a live function; every runtime-wrapper codegen routes
-through it (the subclass wrappers in subclass_codegen.py and the orchestration /
-alias / mutation epilogues in runtime_wrappers.py), so it knows nothing about any
-particular wrapper kind. It also hosts the optional thread-local capture sink that
-records each codegen'd wrapper's source, which AOT-to-Python lowering
+``_compile_and_exec_source`` -- the chokepoint that compiles a generated wrapper
+source string into a live function -- lives in codegen_utils.py alongside
+PySourceBuilder; it is re-exported here so importers have a stably-named
+``codegen`` module for the generic exec primitive without reaching into the
+PySourceBuilder module. This module also hosts the optional thread-local capture
+sink that records each codegen'd wrapper's source, which AOT-to-Python lowering
 (to_standalone_python.py) uses to compose the wrappers into one standalone module.
-Kept as a leaf module (stdlib + torch only) so it is safe to import anywhere.
+codegen_utils._compile_and_exec_source appends to the sink (lazy import) when one
+is installed. Kept as a leaf module (stdlib + torch only) so it is safe to import
+anywhere.
 """
 
 import contextlib
-import functools
-import logging
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 
-import torch
+from .codegen_utils import _compile_and_exec_source
 
 
-log = logging.getLogger(__name__)
+__all__ = [
+    "_compile_and_exec_source",
+    "GeneratedSource",
+    "capture_generated_sources",
+]
 
 
 # Optional sink for the source of every runtime-wrapper function codegen'd via
@@ -96,62 +100,3 @@ def capture_generated_sources(into: "list[GeneratedSource]") -> "Iterator[None]"
         yield
     finally:
         _capture_tls.sink = prev
-
-
-def _compile_and_exec_source(
-    source: str,
-    globals_dict: dict[str, object],
-    fn_name: str,
-    artifact_name: str,
-    wrapped_fn: Callable[..., object] | None = None,
-) -> Callable[..., object]:
-    """Compile generated source, exec it, and return the named function.
-
-    If wrapped_fn is provided, applies functools.update_wrapper so that
-    __wrapped__ and __dict__ (e.g. _fx_graph_cache_key) propagate to the
-    generated function.
-    """
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("Generated %s:\n%s", artifact_name, source)
-
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": artifact_name,
-            "encoding": "string",
-        },
-        payload_fn=lambda: source,
-    )
-
-    # Use a path under torch/_functorch/ so the code object is recognized by
-    # dynamo's MOD_SKIPLIST. The eval frame hook stays active during the entire
-    # torch.compile(fn)(*args) call (to handle graph breaks and resume functions),
-    # so codegen'd functions called during backward get intercepted even though
-    # no tracing is active. A real path makes them skip automatically.
-    code = compile(source, f"{__file__}:codegen({artifact_name})", "exec")
-    local_dict: dict[str, object] = {}
-    # exec() mutates ``globals_dict`` in place, injecting ``__builtins__`` (and any
-    # name the source binds at module scope). When capturing, snapshot the declared
-    # closed-over names BEFORE that happens so the captured GeneratedSource holds only
-    # the intended closure globals -- not the post-exec dict with the interpreter's
-    # ``__builtins__`` -- which is what the standalone composer reconstructs as source.
-    sink = _current_capture_sink()
-    captured_globals = dict(globals_dict) if sink is not None else globals_dict
-    exec(code, globals_dict, local_dict)
-    fn = local_dict[fn_name]
-    if wrapped_fn is not None:
-        functools.update_wrapper(fn, wrapped_fn)  # type: ignore[arg-type]
-
-    if sink is not None:
-        # Tag with the current TracingContext identity so the composer can drop any
-        # wrapper a re-entrant lowering appended during the capture window (see the
-        # origin_id note on GeneratedSource).
-        ctx = torch._guards.TracingContext.try_get()
-        origin_id = id(ctx) if ctx is not None else None
-        sink.append(
-            GeneratedSource(
-                artifact_name, fn_name, source, captured_globals, fn, origin_id
-            )
-        )
-
-    return fn  # type: ignore[return-value]

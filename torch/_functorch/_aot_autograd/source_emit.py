@@ -4,7 +4,8 @@ The composer (to_standalone_python.py) inlines AOTAutograd's runtime wrappers, w
 close over baked metadata objects (view-replay recipes, tensor-subclass specs, ...).
 This module turns such a live object into a Python expression that reconstructs an
 EQUAL value -- emitted as readable source, never a pickle / base64 blob -- or raises
-NotImplementedError if it cannot be expressed. ``_emit_value`` is the entry point;
+NotImplementedError if it cannot be expressed. ``emit_value`` is the public entry
+point; ``_emit_value`` is the internal recursion (it threads the traversal state);
 ``_emit_via_reduce`` is the pickle-reduce-as-source fallback and ``_REBUILD_HELPER`` is
 the ``_rebuild`` function it references in generated code. Kept as a leaf module so it
 is safe to import anywhere in the package.
@@ -13,7 +14,18 @@ is safe to import anywhere in the package.
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Any, NewType, TYPE_CHECKING
+
+
+# id() returns an object identity used here only as a recursion/alias key, not an
+# arbitrary int. Shadowing the builtin under TYPE_CHECKING tags every ``id(obj)`` as
+# ``_ObjId`` so ``set[_ObjId]`` propagates without wrapping each call site; the real
+# builtin runs at runtime (NewType is identity), so behavior is unchanged.
+_ObjId = NewType("_ObjId", int)
+
+if TYPE_CHECKING:
+
+    def id(obj: object, /) -> _ObjId: ...
 
 
 # The runtime helper for reduce-based metadata reconstruction (see _emit_via_reduce).
@@ -72,22 +84,58 @@ def _emit_importable(obj: Any, imports: set[str]) -> str:
     return f"{module}.{qualname}"
 
 
-def _emit_value(
-    obj: Any, imports: set[str], _in_progress: set[int] | None = None
-) -> str:
+def _reject_shared_mutable(obj: Any, _seen: set[_ObjId]) -> None:
+    """Fail loud when a mutable object is reached more than once in a single traversal:
+    it would be emitted as two independent source literals, silently dropping the
+    shared-identity aliasing (mutating one copy would no longer affect the other), which
+    is not expressible as a source literal today. Only mutable kinds are routed here
+    (list / dict / set and the opaque _emit_via_reduce value objects); immutables are
+    exempt, so a shared tuple / scalar / frozenset still emits fine. ``_seen`` is threaded
+    in place across the whole traversal (unlike the per-level in-progress cycle set), so
+    it catches shared siblings, not just self-referential ancestors."""
+    if id(obj) in _seen:
+        raise NotImplementedError(
+            f"compile_to_python cannot bake a shared mutable {type(obj).__qualname__}: "
+            "it is reached more than once in the value being baked, so emitting it as "
+            "independent source literals would silently drop the shared-identity "
+            "aliasing."
+        )
+    _seen.add(id(obj))
+
+
+def emit_value(obj: Any, imports: set[str]) -> str:
     """Emit a Python expression (valid in the generated module) that rebuilds ``obj``
     from source -- the pickle-free replacement for embedding a base64 blob.
 
-    Recurses through containers and metadata so the artifact stays auditable and
-    exec'ing it never runs ``pickle.loads``. Bottoms out for opaque value objects (e.g.
-    tensor-subclass placement objects) at the pickle reduce protocol, but EMITTED AS
-    SOURCE via ``_rebuild`` (see ``_emit_via_reduce``). Raises NotImplementedError at
-    any leaf that cannot be expressed as source (e.g. a live tensor or a lambda).
+    Public entry point: recurses through containers and metadata so the artifact stays
+    auditable and exec'ing it never runs ``pickle.loads``. Bottoms out for opaque value
+    objects (e.g. tensor-subclass placement objects) at the pickle reduce protocol, but
+    EMITTED AS SOURCE via ``_rebuild`` (see ``_emit_via_reduce``). Raises
+    NotImplementedError at any leaf that cannot be expressed as source (a live tensor, a
+    lambda, a still-symbolic Sym*), for a self-referential structure, or for a shared
+    mutable object whose aliasing a flat source literal cannot preserve.
 
-    ``_in_progress`` is an identity-keyed set of the objects currently being emitted
-    on this recursion path; revisiting one means the metadata is self-referential,
-    which cannot be expressed as a source literal, so we raise rather than recurse
-    forever (otherwise a cyclic structure would blow the stack with RecursionError)."""
+    Any import needed by the emitted expression is recorded into ``imports`` (as ``import
+    module`` statements)."""
+    return _emit_value(obj, imports, set(), set())
+
+
+def _emit_value(
+    obj: Any,
+    imports: set[str],
+    _in_progress: set[_ObjId],
+    _seen: set[_ObjId],
+) -> str:
+    """Internal recursion behind ``emit_value``; requires the traversal state its guards
+    thread. Call ``emit_value`` from outside this module.
+
+    ``_in_progress`` is an identity-keyed set of the objects currently being emitted on
+    this recursion PATH (copied per level, like a call stack): revisiting one means the
+    metadata is self-referential and cannot be a source literal, so we raise rather than
+    recurse forever. ``_seen`` is an identity-keyed set of every MUTABLE object already
+    emitted anywhere in this traversal (threaded in place, like ``imports``): revisiting
+    one means the same mutable object is shared across positions, whose aliasing a flat
+    literal cannot preserve, so we raise (see ``_reject_shared_mutable``)."""
     import dataclasses
     import enum
     import functools
@@ -117,27 +165,10 @@ def _emit_value(
             "pickle.loads at exec time. The standalone artifact bakes no weights."
         )
 
-    # Cycle / depth guard: thread an identity-keyed in-progress set down the recursion
-    # so a self-referential metadata object raises NotImplementedError naming the
-    # offending type instead of recursing until RecursionError.
-    if _in_progress is None:
-        _in_progress = set()
-    if id(obj) in _in_progress and not isinstance(
-        obj, (bool, int, float, complex, str, bytes, bytearray, type(None))
-    ):
-        raise NotImplementedError(
-            f"compile_to_python cannot bake {type(obj).__qualname__}: it is "
-            "self-referential, which is not expressible as source."
-        )
-
-    _child = _in_progress | {id(obj)}
-
-    def _emit_value(obj: Any, imports: set[str]) -> str:
-        # Shadow the module-level recursion entry point so every recursive call in
-        # this function body automatically threads the current in-progress set
-        # (with the parent ``obj`` added) without touching each call site.
-        return _emit_value_recurse(obj, imports, _child)
-
+    # Primitives first, before any cycle / alias bookkeeping: those guards never matter
+    # for immutable scalars, and returning here skips the per-level in-progress copy and
+    # the mutable-alias check for the (very common) scalar leaves.
+    #
     # Non-finite floats: repr() gives bare ``inf`` / ``-inf`` / ``nan``, which are
     # NameErrors in the generated module (it imports no such names). Emit a
     # self-contained constructor instead. Likewise for a complex with a non-finite
@@ -149,10 +180,11 @@ def _emit_value(
     if isinstance(obj, complex) and not (
         math.isfinite(obj.real) and math.isfinite(obj.imag)
     ):
-        real = _emit_value(obj.real, imports)
-        imag = _emit_value(obj.imag, imports)
+        # Use the module-level recursion directly (the in-body shadow is not defined until
+        # after the guards below); the components are floats, so they bottom out above.
+        real = _emit_value_recurse(obj.real, imports, _in_progress, _seen)
+        imag = _emit_value_recurse(obj.imag, imports, _in_progress, _seen)
         return f"complex({real}, {imag})"
-
     # Plain constants reproduce via repr (but not IntEnum/StrEnum members, whose repr
     # is not valid source -- those fall through to the enum handler below). Match EXACT
     # builtin types only: a subclass of a builtin scalar (e.g. a ``str`` subclass, or an
@@ -164,6 +196,32 @@ def _emit_value(
         and type(obj) in (bool, int, float, complex, str, bytes, bytearray)
     ):
         return repr(obj)
+
+    # Cycle guard: thread an identity-keyed in-progress set down the recursion so a
+    # self-referential metadata object raises NotImplementedError naming the offending
+    # type instead of recursing until RecursionError. Primitives already returned above,
+    # so no immutable-scalar exemption is needed here.
+    if id(obj) in _in_progress:
+        raise NotImplementedError(
+            f"compile_to_python cannot bake {type(obj).__qualname__}: it is "
+            "self-referential, which is not expressible as source."
+        )
+    # Alias guard: a mutable container reached twice anywhere in the traversal would be
+    # emitted as two independent literals, silently dropping the shared-identity aliasing.
+    # Match EXACT list/dict/set only -- those are the types the container branches below
+    # emit; a subclass falls through to _emit_via_reduce, which tracks it there (matching
+    # here too would double-count the same object and falsely reject a single subclass).
+    if type(obj) in (list, dict, set):
+        _reject_shared_mutable(obj, _seen)
+
+    _child = _in_progress | {id(obj)}
+
+    def _emit_value(obj: Any, imports: set[str]) -> str:
+        # Shadow the module-level recursion entry point so every recursive call in
+        # this function body automatically threads the current in-progress set (with
+        # the parent ``obj`` added) plus the traversal-wide seen set, without touching
+        # each call site.
+        return _emit_value_recurse(obj, imports, _child, _seen)
 
     # torch scalar singletons whose repr round-trips, plus device/Size/SymInt.
     if isinstance(obj, (torch.dtype, torch.layout, torch.memory_format)):
@@ -284,23 +342,18 @@ def _emit_value(
     if type(obj) is set or type(obj) is frozenset:
         ctor = "frozenset" if isinstance(obj, frozenset) else "set"
         # Iteration order of a set is not byte-stable across processes, so emit the
-        # elements in a canonical order: sort them when they are mutually orderable
-        # (e.g. the int dim-index sets seen here). When they are not, sort by each
-        # element's own EMITTED SOURCE EXPRESSION rather than by ``repr``: the emitted
-        # expression is the exact text that lands in the artifact, so it is the only
-        # key guaranteed to be byte-stable across processes. A ``repr``-keyed sort
-        # would silently admit a custom-but-nondeterministic ``__repr__`` (e.g. one
-        # embedding ``id(self)``), making the emitted source differ run to run.
-        # Building the key via ``_emit_value`` also forces each element through the
-        # same source-expressibility gate, so a non-source-expressible element raises
-        # here exactly as it would when finally emitted (into a throwaway imports set
-        # so the keying pass never leaks an import the final emit would not).
-        elems = list(obj)
-        try:
-            elems = sorted(elems)
-        except TypeError:
-            elems = sorted(elems, key=lambda x: _emit_value(x, set()))
-        return f"{ctor}([{', '.join(_emit_value(x, imports) for x in elems)}])"
+        # elements in a canonical order: sort them by their EMITTED SOURCE EXPRESSION --
+        # the exact text that lands in the artifact, so it is the only key guaranteed to
+        # be byte-stable across processes. A ``repr``-keyed sort would silently admit a
+        # custom-but-nondeterministic ``__repr__`` (e.g. one embedding ``id(self)``),
+        # making the emitted source differ run to run, and a numeric sort would raise on a
+        # ``nan`` element (``sorted`` does not) and does not exist for mixed types. Each
+        # element is emitted exactly once (into the real ``imports``, since every element
+        # emitted is one that lands in the output) and then the resulting expressions are
+        # sorted -- which forces each element through the same source-expressibility gate,
+        # so a non-source-expressible element raises here exactly as at final emit.
+        exprs = sorted(_emit_value(x, imports) for x in obj)
+        return f"{ctor}([{', '.join(exprs)}])"
     if type(obj) is dict:
         items = [
             f"{_emit_value(k, imports)}: {_emit_value(v, imports)}"
@@ -348,16 +401,19 @@ def _emit_value(
         kw = [f"{k}={_emit_value(v, imports)}" for k, v in init_kwargs.items()]
         return f"{cls}({', '.join(kw)})"
 
-    return _emit_via_reduce(obj, imports, _child)
+    return _emit_via_reduce(obj, imports, _child, _seen)
 
 
 # The recursion entry point used by the in-body shadow of ``_emit_value`` and by
-# ``_emit_via_reduce`` to thread the identity-keyed in-progress set (finding 4).
+# ``_emit_via_reduce`` to thread the identity-keyed in-progress + seen traversal sets.
 _emit_value_recurse = _emit_value
 
 
 def _emit_via_reduce(
-    obj: Any, imports: set[str], _in_progress: set[int] | None = None
+    obj: Any,
+    imports: set[str],
+    _in_progress: set[_ObjId],
+    _seen: set[_ObjId],
 ) -> str:
     """Last resort for opaque value objects (e.g. DTensor placements, which are C++
     objects with no source-friendly constructor): reconstruct from the pickle reduce
@@ -369,9 +425,14 @@ def _emit_via_reduce(
 
     import torch
 
+    # These reduce value objects are mutable, so the same guard the containers get in
+    # _emit_value applies: an object reached twice would be emitted as two independent
+    # reconstructions, silently dropping the shared-identity aliasing.
+    _reject_shared_mutable(obj, _seen)
+
     def _emit_value(obj: Any, imports: set[str]) -> str:
-        # Continue threading the cycle guard through the reduce-state recursion.
-        return _emit_value_recurse(obj, imports, _in_progress)
+        # Continue threading the cycle guard + seen set through the reduce-state recursion.
+        return _emit_value_recurse(obj, imports, _in_progress, _seen)
 
     try:
         reduced = obj.__reduce_ex__(2)
