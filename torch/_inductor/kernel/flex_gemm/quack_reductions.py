@@ -203,8 +203,59 @@ FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
         "clamp_max",
         "clamp_min",
         "convert_element_type",
+        "mx_e8m0_scale",
+        "nvfp4_e4m3_scale",
     )
 )
+
+
+def _cute_scale_expr(
+    op_name: str, source: Any, max_power: Any = 8, *, tensorssa: bool = False
+) -> str:
+    """Render scale encoders as numeric CuTeDSL expressions before output casting."""
+    if op_name == "mx_e8m0_scale":
+        exponent = (
+            f"(((cutlass.Float32({source}).bitcast(cutlass.Int32) >> 23) "
+            f"& 0xFF) - 127 - {max_power})"
+        )
+        clamped = f"cutlass.max(cutlass.min({exponent}, 128), -127)"
+        return f"cutlass.Float32(cute.math.exp2(cutlass.Float32({clamped})))"
+    scale = f"({source} / 6.0)"
+    if tensorssa:
+        return (
+            f"cute.where({scale} < 0.015625, 0.015625, "
+            f"cute.where({scale} > 448.0, 448.0, {scale}))"
+        )
+    return f"cutlass.Float32(cutlass.max(cutlass.min({scale}, 448.0), 0.015625))"
+
+
+def _cute_scale_call(
+    op_name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Any:
+    """Lower FlexGEMM scale custom ops for TensorSSA values and scalar finalizers."""
+    if len(args) != 1:
+        raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {op_name}")
+    if op_name == "nvfp4_e4m3_scale" and kwargs:
+        raise NotImplementedError(f"unsupported FlexGEMM epilogue op kwargs: {op_name}")
+    max_power = kwargs.get("max_power", 8)
+    if op_name == "mx_e8m0_scale" and not isinstance(max_power, (int, float)):
+        raise NotImplementedError("FlexGEMM mx_e8m0_scale requires static max_power")
+    source = args[0]
+    cse_var = CuteDSLOpOverrides._get_cse_var(source)
+    if op_name == "mx_e8m0_scale" and cse_var is not None:
+        raise NotImplementedError(
+            "FlexGEMM mx_e8m0_scale requires physical local-reduce finalization"
+        )
+    expr = _cute_scale_expr(op_name, source, max_power, tensorssa=cse_var is not None)
+    if cse_var is None:
+        return expr
+    return V.kernel.cse.generate(
+        V.kernel.body,
+        expr,
+        bounds=cse_var.bounds,
+        dtype=cse_var.dtype,
+        shape=cse_var.shape,
+    )
 
 
 def _cute_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
@@ -267,6 +318,8 @@ def _cute_call(target: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> An
     op_name = _cute_op_name(target)
     if op_name is None:
         raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {target}")
+    if op_name in ("mx_e8m0_scale", "nvfp4_e4m3_scale"):
+        return _cute_scale_call(op_name, args, kwargs)
     try:
         op = getattr(V.get_ops_handler(), op_name)
     except AttributeError:
