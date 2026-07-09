@@ -271,7 +271,9 @@ Tensor internal_new_from_data(
     bool copy_variables,
     bool copy_numpy,
     bool type_inference,
-    bool pin_memory = false) {
+    bool pin_memory = false,
+    // When false, skip the __dlpack__ conversion attempt.
+    bool try_dlpack = true) {
   TORCH_CHECK_TYPE(
       !THPUtils_checkString(data),
       "new(): invalid data type '",
@@ -345,28 +347,21 @@ Tensor internal_new_from_data(
   }
 #endif
 
-  if (PyObject_HasAttrString(data, "__dlpack__")) {
-    try {
-      py::object tensor_o =
-          py::module::import("torch").attr("utils").attr("dlpack").attr(
-              "from_dlpack")(py::handle(data));
-      Tensor tensor = py::cast<Tensor>(tensor_o);
-      const auto& inferred_scalar_type =
-          type_inference ? tensor.scalar_type() : scalar_type;
-      auto device = device_opt.has_value() ? *device_opt : tensor.device();
-      pybind11::gil_scoped_release no_gil;
-      maybe_initialize_device(device);
-      return tensor.to(
-          device,
-          inferred_scalar_type,
-          /*non_blocking=*/false,
-          /*copy=*/copy_variables);
-    } catch (py::error_already_set& e) {
-      // The producer exposes __dlpack__ but its export failed; fall through to
-      // the sequence handling below rather than propagating the error.
-      e.restore();
-      PyErr_Clear();
-    }
+  if (try_dlpack && PyObject_HasAttrString(data, "__dlpack__")) {
+    py::object tensor_o =
+        py::module::import("torch").attr("utils").attr("dlpack").attr(
+            "from_dlpack")(py::handle(data));
+    Tensor tensor = py::cast<Tensor>(tensor_o);
+    const auto& inferred_scalar_type =
+        type_inference ? tensor.scalar_type() : scalar_type;
+    auto device = device_opt.has_value() ? *device_opt : tensor.device();
+    pybind11::gil_scoped_release no_gil;
+    maybe_initialize_device(device);
+    return tensor.to(
+        device,
+        inferred_scalar_type,
+        /*non_blocking=*/false,
+        /*copy=*/copy_variables);
   }
 
   auto device = device_opt.has_value() ? *device_opt : options.device();
@@ -2052,7 +2047,9 @@ Tensor asarray(
         obj,
         /* copy_variables = */ false,
         /* copy_numpy = */ false,
-        /* type_inference = */ !dtype.has_value());
+        /* type_inference = */ !dtype.has_value(),
+        /* pin_memory = */ false,
+        /* try_dlpack = */ false);
     tensor.set_requires_grad(return_requires_grad);
   }
 
