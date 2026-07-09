@@ -44,6 +44,12 @@ struct TORCH_API FunctionPostHook {
         std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
             typeid(*this).name());
   }
+  // If true, the engine also runs this hook when the node's backward raises,
+  // passing empty grad_inputs, so cleanup hooks can restore state. See
+  // torch.autograd.graph.node_creation_hook's always_call.
+  virtual bool should_run_on_error() const {
+    return false;
+  }
 };
 
 struct TORCH_API PostAccumulateGradHook {

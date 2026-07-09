@@ -2,9 +2,11 @@
 
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/LegacyVmapMode.h>
+#include <ATen/NodeCreationHooks.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
@@ -13,6 +15,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -108,6 +111,35 @@ std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
 std::unique_ptr<SavedVariableHooks> PythonEngine::
     get_default_saved_variable_hooks() {
   return PyDefaultSavedVariableHooks::get_hooks();
+}
+
+void PythonEngine::attach_node_creation_hooks(
+    const c10::intrusive_ptr<Node>& node) {
+  const auto& state = at::impl::NodeCreationHooks::get_tls_state();
+  if (state.stack.empty()) {
+    return;
+  }
+  pybind11::gil_scoped_acquire gil;
+  auto* interpreter = getPyInterpreter();
+  // Outermost context first, mirroring registration order.
+  for (const auto& entry : state.stack) {
+    // The prehook runs before the node's backward, so an exception in backward
+    // can never skip it; reuse the standard registration path.
+    if (entry.prehook) {
+      THPObjectPtr res(
+          registerFunctionPreHook(*node, entry.prehook->ptr(interpreter)));
+      if (!res) {
+        throw python_error();
+      }
+    }
+    // The posthook needs its own single-callable hook to carry always_call.
+    if (entry.posthook) {
+      node->add_post_hook(std::make_unique<PyFunctionSinglePostHook>(
+          c10::SafePyObject(
+              Py_NewRef(entry.posthook->ptr(interpreter)), interpreter),
+          entry.always_call));
+    }
+  }
 }
 
 variable_list PythonEngine::execute(

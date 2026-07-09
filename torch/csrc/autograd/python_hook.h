@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/SafePyObject.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -38,6 +39,24 @@ struct PyFunctionPostHook : public FunctionPostHook {
   void compiled_args(
       torch::dynamo::autograd::CompiledNodeArgs& args) const override;
   PyObject* dict;
+};
+
+// A post hook wrapping a single Python callable, used by
+// torch.autograd.graph.node_creation_hook. Unlike PyFunctionPostHook (a dict of
+// hooks shared across register_hook calls), this holds one callable so it can
+// carry a per-hook always_call flag surfaced via should_run_on_error().
+struct PyFunctionSinglePostHook : public FunctionPostHook {
+  PyFunctionSinglePostHook(c10::SafePyObject hook, bool always_call);
+  variable_list operator()(
+      const variable_list& outputs,
+      const variable_list& inputs) override;
+  void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const override;
+  bool should_run_on_error() const override {
+    return always_call_;
+  }
+  c10::SafePyObject hook_;
+  bool always_call_;
 };
 
 // PyFunctionTensorPostAccGradHooks is a dictionary of PostAccumulateGradHooks,

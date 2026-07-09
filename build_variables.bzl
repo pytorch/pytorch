@@ -1244,6 +1244,7 @@ aten_cpu_source_non_codegen_list = [
     # has limited use and hence does not seem to really make sense.
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
+    "aten/src/ATen/NodeCreationHooks.cpp",
     "aten/src/ATen/vulkan/Context.cpp",
     "aten/src/ATen/native/prim_native_functions.cpp",
     "aten/src/ATen/native/verbose_wrapper.cpp",

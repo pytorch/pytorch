@@ -328,6 +328,9 @@ Edge gradient_edge(const Variable& self) {
 
 void set_gradient_edge(const Variable& self, Edge edge) {
   auto* meta = materialize_autograd_meta(self);
+  if (edge.function) {
+    fire_node_creation_hooks(edge.function);
+  }
   meta->grad_fn_ = std::move(edge.function);
   meta->output_nr_ = edge.input_nr;
   // For views, make sure this new grad_fn_ is not overwritten unless it is
@@ -717,6 +720,7 @@ const c10::intrusive_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
             self.unsafeGetTensorImpl()->is_python_dispatch(),
             self.is_nested(),
             self.grad_dtype());
+        torch::autograd::fire_node_creation_hooks(fn);
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);
