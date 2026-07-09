@@ -330,6 +330,18 @@ class _PyLibCupti:
         self._check(self._lib.cuptiGetVersion(ctypes.byref(version)), "cuptiGetVersion")
         return version.value
 
+    def get_next_record_fn_address(self) -> int:
+        """Raw address of ``cuptiActivityGetNextRecord_v2`` (the v2 record
+        iterator), for the native decode worker to call directly -- so the native
+        module needs no libcupti link, and every consumer shares the one libcupti
+        loaded here. Returns 0 if the symbol is absent (libcupti < 13.2)."""
+        if not hasattr(self._lib, "cuptiActivityGetNextRecord_v2"):
+            return 0
+        return (
+            ctypes.cast(self._lib.cuptiActivityGetNextRecord_v2, ctypes.c_void_p).value
+            or 0
+        )
+
     def get_timestamp(self, sub_handle: int) -> int:
         """CUPTI's normalized nanosecond clock for a subscriber -- the same timebase
         as activity record START/END timestamps, so a value captured here is directly
