@@ -23,7 +23,7 @@ import logging
 import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
-from enum import Enum
+from enum import Enum, IntFlag
 from typing import Any, NoReturn, TYPE_CHECKING
 
 from .. import graph_break_hints, variables
@@ -274,6 +274,72 @@ class NO_SUCH_SUBOBJ:
     """Sentinel indicating no concrete Python object is available."""
 
 
+class MethodFlags(IntFlag):
+    """Calling convention for a `Method` handler, mirroring CPython's
+    PyMethodDef ml_flags. `call_method` enforces arity from these before
+    invoking the handler, centralizing the raise_args_mismatch boilerplate."""
+
+    VARARGS = 1  # any positional args; kwargs rejected unless KEYWORDS is set
+    KEYWORDS = 2  # kwargs allowed (combine with VARARGS)
+    NOARGS = 4  # exactly zero args and zero kwargs
+    O = 8  # exactly one positional arg, no kwargs
+
+
+def _check_method_arity(
+    vt: VariableTracker,
+    tx: InstructionTranslatorBase,
+    name: str,
+    flags: MethodFlags,
+    args: Any,
+    kwargs: Any,
+) -> None:
+    # Mirror the TypeErrors CPython raises for builtin methods (see
+    # Objects/call.c and the METH_* convention in Modules/_collectionsmodule.c
+    # etc.), so a traced arity error matches eager. CPython prefixes the owning
+    # type on the positional-count errors (e.g. "set.add()") but not on the
+    # keyword error.
+    n = len(args)
+    if kwargs and not (flags & MethodFlags.KEYWORDS):
+        raise_type_error(tx, f"{name}() takes no keyword arguments")
+    if flags & (MethodFlags.NOARGS | MethodFlags.O):
+        qualname = f"{vt.python_type_name()}.{name}"
+        if flags & MethodFlags.NOARGS and args:
+            raise_type_error(tx, f"{qualname}() takes no arguments ({n} given)")
+        if flags & MethodFlags.O and n != 1:
+            raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
+
+
+class Method:
+    """Declarative entry in a VariableTracker's `tp_methods` table, analogous
+    to CPython's PyMethodDef. `flags` drives centralized arity checking.
+
+    Handlers have signature `(self, tx, args, kwargs)` and return the result
+    VariableTracker, or None to decline the call (the equivalent of the old
+    `super().call_method` fall-through) so `call_method` continues to the
+    object-protocol dispatch below."""
+
+    __slots__ = ("handler", "flags")
+
+    def __init__(
+        self,
+        handler: Callable[..., VariableTracker | None],
+        flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS,
+    ) -> None:
+        self.handler = handler
+        self.flags = flags
+
+    def invoke(
+        self,
+        vt: VariableTracker,
+        tx: Any,
+        name: str,
+        args: Any,
+        kwargs: Any,
+    ) -> VariableTracker | None:
+        _check_method_arity(vt, tx, name, self.flags, args, kwargs)
+        return self.handler(vt, tx, args, kwargs)
+
+
 # This helps users of `as_python_constant` to catch unimplemented error with
 # more information; it inherits `NotImplementedError` for backward
 # compatibility reasons.
@@ -337,6 +403,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     # Single type or tuple of types. None means no static CPython type mapping
     # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
     _cpython_type: type | tuple[type, ...] | None = None
+
+    # Declarative named-method table (analogous to CPython's tp_methods): maps a
+    # method name to a Method describing its handler and calling convention.
+    # `call_method` consults this before the object-protocol (tp_slot) dispatch.
+    # Each concrete VT declares its own complete table; there is no inheritance
+    # merge, so a VT is only driven by the base `call_method` once no class
+    # between it and VariableTracker still defines its own `call_method`.
+    tp_methods: dict[str, Method] = {}
 
     # fields to leave unmodified in apply()
     _nonvar_fields = {
@@ -901,6 +975,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Declarative named-method dispatch (tp_methods). A handler returning
+        # None declines the call and falls through to the object-protocol
+        # (tp_slot) dispatch below, mirroring the old super().call_method path.
+        method = self.tp_methods.get(name)
+        if method is not None:
+            result = method.invoke(self, tx, name, args, kwargs)
+            if result is not None:
+                return result
+
         if name == "__getitem__":
             if len(args) == 1 and not kwargs:
                 from .object_protocol import vt_getitem
