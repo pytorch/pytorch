@@ -70,7 +70,9 @@ def main() -> None:
             " sys.exit(0 if f() else 1)",
         ]
     )
-    if header_available.returncode == 0:
+    # Skip the (heavy, version-matched) libclang wheel when LIBCLANG_PATH already points the
+    # codegen at a libclang.so -- that env is expected to supply the clang bindings itself.
+    if header_available.returncode == 0 and not os.environ.get("LIBCLANG_PATH"):
         pip_install("-q", "libclang")
     # Skip when sharing build/ across Pythons in build_all.sh -- the per-Python
     # bits (libtorch_python, _C.so) are invalidated by tools/setup_helpers/cmake.py.
