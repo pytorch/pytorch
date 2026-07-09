@@ -366,7 +366,7 @@ def list_mode_options(
         >>> torch._inductor.list_mode_options()
     """
 
-    mode_options: dict[str, dict[str, bool]] = {
+    mode_options: dict[str, dict[str, Any]] = {
         "default": {},
         # lite backend for opt-in optimizations
         "lite": lite_mode_options,
@@ -385,6 +385,20 @@ def list_mode_options(
             "max_autotune": True,
             "triton.cudagraphs": True,
             "coordinate_descent_tuning": True,
+        },
+        # trade some performance for numerics closer to eager
+        "max-precision": {
+            "emulate_precision_casts": True,
+            "emulate_precision_casts_on_saved_tensors": True,
+            "eager_numerics.use_pytorch_libdevice": True,
+            "eager_numerics.disable_ftz": True,
+            "eager_numerics.division_rounding": True,
+            "use_fast_math": False,
+            "cpp.enable_unsafe_math_opt_flag": False,
+            "cpp.enable_floating_point_contract_flag": "off",
+            "rocm.use_fast_math": False,
+            "rocm.flush_denormals": False,
+            "cutlass.use_fast_math": False,
         },
     }
     try:

@@ -194,6 +194,30 @@ class TestInductorConfig(TestCase):
             max_autotune_no_cudagraphs_opts.get("triton.cudagraphs", False), False
         )
 
+        max_precision_opts = torch._inductor.list_mode_options("max-precision")
+        self.assertEqual(max_precision_opts["emulate_precision_casts"], True)
+        self.assertEqual(
+            max_precision_opts["eager_numerics.use_pytorch_libdevice"], True
+        )
+        self.assertEqual(max_precision_opts["use_fast_math"], False)
+
+    def test_accuracy_high(self):
+        opt_fn = torch.compile(dummy_fn, accuracy_high=True)
+        compiler_config = opt_fn.get_compiler_config()
+        for key, value in torch._inductor.list_mode_options("max-precision").items():
+            self.assertEqual(compiler_config[key], value)
+
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.compile(dummy_fn, accuracy_high=True, mode="max-autotune"),
+        )
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.compile(
+                dummy_fn, accuracy_high=True, options={"max_autotune": True}
+            ),
+        )
+
     def test_invalid_backend(self):
         self.assertRaises(
             torch._dynamo.exc.InvalidBackend,
