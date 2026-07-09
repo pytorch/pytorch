@@ -7,8 +7,8 @@ set -ex
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 source ${SOURCE_DIR}/set_desired_python.sh
-# shellcheck source=../pytorch/rocm_utils.sh
-source "$(dirname "${SOURCE_DIR}")/pytorch/rocm_utils.sh"
+# shellcheck source=../../pytorch/rocm_utils.sh
+source "$(dirname "$(dirname "${SOURCE_DIR}")")/pytorch/rocm_utils.sh"
 
 
 if [[ -n "$BUILD_PYTHONLESS" && -z "$LIBTORCH_VARIANT" ]]; then
