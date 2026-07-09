@@ -136,8 +136,7 @@ struct AddTensorboardFields : public MetadataBase {
   void operator()(const ExtraFields<EventType::PyCall>& py_call) {
     if (py_call.module_.has_value()) {
       addMetadata(
-          fields::kPythonModuleId,
-          static_cast<uint64_t>(py_call.module_->id_));
+          fields::kPythonModuleId, static_cast<uint64_t>(py_call.module_->id_));
     }
   }
 
@@ -261,8 +260,7 @@ struct AddGenericMetadata : public MetadataBase {
         static_cast<uint64_t>(reinterpret_cast<uintptr_t>(alloc.ptr_)));
     addMetadata(fields::kBytes, alloc.alloc_size_);
     addMetadata(
-        fields::kTotalAllocated,
-        static_cast<uint64_t>(alloc.total_allocated_));
+        fields::kTotalAllocated, static_cast<uint64_t>(alloc.total_allocated_));
     addMetadata(
         fields::kTotalReserved, static_cast<uint64_t>(alloc.total_reserved_));
   }
@@ -274,8 +272,7 @@ struct AddGenericMetadata : public MetadataBase {
     addMetadata(fields::kDeviceId, static_cast<int64_t>(alloc.device_index_));
     addMetadata(fields::kBytes, alloc.alloc_size_);
     addMetadata(
-        fields::kTotalAllocated,
-        static_cast<uint64_t>(alloc.total_allocated_));
+        fields::kTotalAllocated, static_cast<uint64_t>(alloc.total_allocated_));
     addMetadata(
         fields::kTotalReserved, static_cast<uint64_t>(alloc.total_reserved_));
   }
