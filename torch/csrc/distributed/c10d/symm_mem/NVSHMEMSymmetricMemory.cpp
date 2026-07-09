@@ -396,10 +396,8 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     initialize_nvshmem_with_store(
         group->getStore(), group->getRank(), group->getSize(), device_idx);
 
-    // Signal pad first at [0, signal_pad_size), data buffer at buffer_offset.
-    // The data buffer sits at buffer_offset past the (aligned) base and device
-    // collectives access it with int4 loads/stores, so round the signal pad
-    // size up to signal_pad_alignment to keep the buffer aligned.
+    // Signal pad first at [0, signal_pad_size), data buffer at buffer_offset,
+    // which is the signal pad size rounded up to signal_pad_alignment.
     const size_t signal_pad_size = get_signal_pad_size();
     const size_t buffer_offset =
         at::round_up(signal_pad_size, signal_pad_alignment);
