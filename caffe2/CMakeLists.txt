@@ -401,27 +401,15 @@ if(USE_CUDA AND BUILD_PYTHON)
     WORKING_DIRECTORY "${TORCH_ROOT}"
     OUTPUT_VARIABLE CUPTI_ACTIVITY_HEADER)
   if(CUPTI_ACTIVITY_HEADER)
-    # Locate libclang.so for the clang python bindings the codegen parses with --
-    # near the compiler, then common system lib dirs (only versioned sonames exist).
-    get_filename_component(_cc_prefix "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    get_filename_component(_cc_prefix "${_cc_prefix}" DIRECTORY)
-    file(GLOB _libclang_candidates
-      "${_cc_prefix}/lib/libclang.so*" "${_cc_prefix}/lib64/libclang.so*"
-      "/usr/lib64/libclang.so*" "/usr/lib/*-linux-gnu/libclang*.so*"
-      "/usr/lib/llvm-*/lib/libclang.so*")
-    set(_libclang_arg "")
-    if(_libclang_candidates)
-      list(SORT _libclang_candidates COMPARE NATURAL)
-      list(GET _libclang_candidates -1 _libclang_so)
-      set(_libclang_arg --libclang "${_libclang_so}")
-    endif()
+    # gen_cupti_stubs.py parses the header with the clang python bindings from the
+    # libclang wheel (a build dep), which bundles libclang.so and loads it
+    # automatically -- so there is no need to locate a system libclang.so here.
     set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_stubs.py")
     add_custom_command(
       COMMENT "Generating CUPTI stub module from ${CUPTI_ACTIVITY_HEADER}"
       OUTPUT "${CUPTI_STUBS_PY}"
       COMMAND "${Python_EXECUTABLE}" tools/gen_cupti_stubs.py
         --output "${CUPTI_STUBS_PY}" --header "${CUPTI_ACTIVITY_HEADER}"
-        ${_libclang_arg}
       DEPENDS
         "${TORCH_ROOT}/tools/gen_cupti_stubs.py"
         "${CUPTI_ACTIVITY_HEADER}"

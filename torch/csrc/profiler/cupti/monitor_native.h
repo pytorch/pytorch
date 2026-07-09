@@ -129,13 +129,11 @@ using CuptiLayoutKey = std::vector<std::pair<int, size_t>>;
 
 // Native decode worker for the CUPTI monitor. Runs its own thread that pulls
 // completed buffers from CuptiMonitorBuffers, iterates their records with
-// CUPTI's own v2 record iterator (cuptiActivityGetNextRecord_v2, called
-// directly but left undefined in torch_python so it binds to the
-// nvidia-cuda-cupti wheel's libcupti at runtime -- no libcupti link), and
-// accumulates every field in each buffer's captured layout into per-(kind,
-// field) columns -- all GIL-free. Python drains the accumulated columns
-// periodically (one GIL touch), so the per-buffer decode never contends with
-// the training thread.
+// CUPTI's own v2 record iterator (cuptiActivityGetNextRecord_v2, passed in as a
+// function pointer so this file needs no libcupti link), and accumulates every
+// field in each buffer's captured layout into per-(kind, field) columns -- all
+// GIL-free. Python drains the accumulated columns periodically (one GIL touch),
+// so the per-buffer decode never contends with the training thread.
 //
 // NUMERIC fields only for now (the timer's start/end/graph_node_id): each field
 // is copied as raw bytes. const char* (string) fields would need a deref during
@@ -144,13 +142,15 @@ class TORCH_API CuptiMonitorDecoder {
  public:
   static CuptiMonitorDecoder& get();
 
-  // The CUPTI subscriber handle (as an integer from the Python side, which owns
-  // the subscription). fence_kind / fence_end_field identify the
+  // The CUPTI subscriber handle and the address of
+  // cuptiActivityGetNextRecord_v2 (both as integers from the Python side, which
+  // owns the libcupti handle). fence_kind / fence_end_field identify the
   // SYNCHRONIZATION record + its END field so the decoder can track the max
   // sync timestamp for flush(sync) (the native analog of the old Python
   // _advance_decoded_clock); 0 disables it.
   void configure(
       uintptr_t subscriber,
+      uintptr_t get_next_record_fn,
       uint32_t fence_kind,
       int fence_end_field);
 
@@ -212,6 +212,7 @@ class TORCH_API CuptiMonitorDecoder {
   std::atomic<uint64_t> buffers_decoded_{0};
   std::atomic<uint64_t> valid_bytes_{0};
   uintptr_t subscriber_ = 0;
+  uintptr_t get_next_record_fn_ = 0;
   uint32_t fence_kind_ = 0;
   int fence_end_field_ = -1;
   // Noisy-cbid filter (see set_cbid_filter): the field carrying the cbid and,
