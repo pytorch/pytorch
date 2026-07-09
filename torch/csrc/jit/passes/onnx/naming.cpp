@@ -123,7 +123,7 @@ std::string NodeNameGenerator::CreateUniqueName(
     base_name_count[base_name] = 0;
   } else {
     auto count = ++base_name_count[base_name];
-    base_name += "_";
+    base_name += '_';
     base_name += std::to_string(count);
   }
   return base_name;

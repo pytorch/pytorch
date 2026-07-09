@@ -265,7 +265,7 @@ endfunction()
 #
 macro(torch_cuda_based_add_library cuda_target)
   if(USE_ROCM)
-    hip_add_library(${cuda_target} ${ARGN})
+    add_library(${cuda_target} ${ARGN})
   elseif(USE_CUDA)
     add_library(${cuda_target} ${ARGN})
   else()
@@ -337,7 +337,7 @@ endmacro()
 # Usage:
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
-  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 17)
+  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 20)
 
   # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
@@ -348,17 +348,11 @@ function(torch_compile_options libname)
       set(MSVC_DEBINFO_OPTION "/Zi")
     endif()
 
-    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 142)
-      # Add /permissive- flag for conformance mode to the compiler.
-      # This will force more strict check to the code standard.
-      # 1. From MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance?view=msvc-170#remarks
-      #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
-      #    We set the /permissive- flag from VS 2019 (MSVC_TOOLSET_VERSION 142) to avoid compiling issues for old toolkit.
-      # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
-      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
-    endif()
+    # Add /permissive- flag for conformance mode to the compiler.
+    # This will force more strict check to the code standard.
+    # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance?view=msvc-170#remarks
+    target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
     # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
-    # This option is available since VS 2017.
     # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
 
@@ -391,12 +385,17 @@ function(torch_compile_options libname)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       if(NOT USE_CUDA)
-        # NS: One can compile CUDA code with extra-semi flag as nvcc generates code like
+        # NS: One can not compile CUDA code with extra-semi flag as nvcc generates code like
         # namespace MemoryOps_cu_d8602b38_109889 __attribute__((visibility("hidden")))  { };
         list(APPEND private_compile_options -Wextra-semi)
       else()
         # NVCC + clang15  reports deprecated copies from GPU lambda instantiations
         list(APPEND private_compile_options -Wno-deprecated-copy)
+        # NVCC + clang18  reports spurious deprecated deprecated literal operator declaration when there were none
+        # I.e. failures look like torch/headeronly/util/complex.h:334:40: error: identifier '_if' preceded by whitespace in a literal operator declaration is deprecated
+        # but if one to look at the source code, there are no space there
+        list(APPEND private_compile_options -Wno-deprecated-literal-operator)
+
       endif()
       list(APPEND private_compile_options -Wmove)
     else()

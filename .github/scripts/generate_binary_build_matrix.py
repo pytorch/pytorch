@@ -13,6 +13,7 @@ architectures:
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -23,19 +24,15 @@ SCRIPT_DIR = Path(__file__).absolute().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
-CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0", "13.2"]
+CUDA_ARCHES = ["12.6", "13.0", "13.2"]
 CUDA_STABLE = "13.0"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
-    "12.8": "12.8.1",
-    "12.9": "12.9.1",
-    "13.0": "13.0.2",
-    "13.2": "13.2.0",
+    "13.0": "13.0.3",
+    "13.2": "13.2.1",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
-    "12.8": "9",
-    "12.9": "9",
     "13.0": "9",
     "13.2": "9",
 }
@@ -50,76 +47,59 @@ CPU_S390X_ARCH = ["cpu-s390x"]
 
 CUDA_AARCH64_ARCHES = [
     "12.6-aarch64",
-    "12.8-aarch64",
-    "12.9-aarch64",
     "13.0-aarch64",
     "13.2-aarch64",
 ]
 
-
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "  # noqa: B950
-        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | "
+        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
-    ),
-    "12.8": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | "  # noqa: B950
-        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
-    ),
-    "12.9": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | "  # noqa: B950
-        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.20.0.48; platform_system == 'Linux' | "
-        "nvidia-cusparselt-cu12==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.29.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
+        "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
     ),
     "13.0": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "  # noqa: B950
-        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+        "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "13.2": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' | "  # noqa: B950
-        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+        "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.3.2 | "
-        "intel-cmplr-lib-ur==2025.3.2 | "
-        "intel-cmplr-lic-rt==2025.3.2 | "
-        "intel-sycl-rt==2025.3.2 | "
-        "oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-license==2025.3.1 | "
-        "onemkl-sycl-blas==2025.3.1 | "
-        "onemkl-sycl-dft==2025.3.1 | "
-        "onemkl-sycl-lapack==2025.3.1 | "
-        "onemkl-sycl-rng==2025.3.1 | "
-        "onemkl-sycl-sparse==2025.3.1 | "
-        "dpcpp-cpp-rt==2025.3.2 | "
-        "intel-opencl-rt==2025.3.2 | "
-        "mkl==2025.3.1 | "
-        "intel-openmp==2025.3.2 | "
-        "tbb==2022.3.1 | "
-        "tcmlib==1.4.1 | "
-        "umf==1.0.3 | "
-        "intel-pti==0.16.0"
+        "intel-cmplr-lib-rt==2026.0.0 | "
+        "intel-cmplr-lib-ur==2026.0.0 | "
+        "intel-cmplr-lic-rt==2026.0.0 | "
+        "intel-sycl-rt==2026.0.0 | "
+        "oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "onemkl-license==2026.0.0 | "
+        "onemkl-sycl-blas==2026.0.0 | "
+        "onemkl-sycl-dft==2026.0.0 | "
+        "onemkl-sycl-lapack==2026.0.0 | "
+        "onemkl-sycl-rng==2026.0.0 | "
+        "onemkl-sycl-sparse==2026.0.0 | "
+        "dpcpp-cpp-rt==2026.0.0 | "
+        "intel-opencl-rt==2026.0.0 | "
+        "mkl==2026.0.0 | "
+        "intel-openmp==2026.0.0 | "
+        "tbb==2023.0.0 | "
+        "tcmlib==1.5.0 | "
+        "umf==1.1.0 | "
+        "intel-pti==0.17.0 | "
+        "pyzes==0.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
 
@@ -253,6 +233,41 @@ def validate_cudnn_version_consistency(arch_version: str) -> None:
         )
 
 
+_BUILD_ENV_SETUP = REPO_ROOT / ".ci" / "manywheel" / "build_env_setup.py"
+_RUNTIME_CUDA_INIT = REPO_ROOT / "torch" / "cuda" / "__init__.py"
+
+
+def _read_dict_constant(path: Path, name: str) -> dict[str, dict[str, set[int]]]:
+    """Parse a top-level annotated `name: dict[...] = {...}` literal from a Python file."""
+    tree = ast.parse(path.read_text())
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+            and node.value is not None
+        ):
+            return ast.literal_eval(node.value)
+    raise RuntimeError(f"{name} not found in {path}")
+
+
+def validate_runtime_release_table_consistency() -> None:
+    """Ensure torch/cuda/__init__.py's recommendation table matches the build matrix.
+
+    PYTORCH_RELEASES_CODE_CC (runtime) and TORCH_CUDA_ARCH_LIST_TABLE (build)
+    use the same {cuda_version: {host_arch: set[cc_int]}} shape, so a direct
+    dict equality check catches any drift between them.
+    """
+    runtime = _read_dict_constant(_RUNTIME_CUDA_INIT, "PYTORCH_RELEASES_CODE_CC")
+    build = _read_dict_constant(_BUILD_ENV_SETUP, "TORCH_CUDA_ARCH_LIST_TABLE")
+    if runtime != build:
+        raise RuntimeError(
+            "PYTORCH_RELEASES_CODE_CC in torch/cuda/__init__.py is out of sync "
+            "with TORCH_CUDA_ARCH_LIST_TABLE in .ci/manywheel/build_env_setup.py.\n"
+            f"runtime: {runtime}\nbuild:   {build}"
+        )
+
+
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
         return "cuda"
@@ -282,13 +297,22 @@ WHEEL_CONTAINER_IMAGES = {
     "xpu": "manylinux2_28-builder:xpu",
     "cpu": "manylinux2_28-builder:cpu",
     "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
-    "cpu-s390x": "pytorch/manylinuxs390x-builder:cpu-s390x",
+    "cpu-s390x": "manylinuxs390x-builder:cpu-s390x",
 }
 
 RELEASE = "release"
 DEBUG = "debug"
 
-FULL_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
+FULL_PYTHON_VERSIONS = [
+    "3.10",
+    "3.11",
+    "3.12",
+    "3.13",
+    "3.14",
+    "3.14t",
+    "3.15",
+    "3.15t",
+]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -316,12 +340,7 @@ def generate_libtorch_matrix(
     if arches is None:
         arches = ["cpu"]
         if os == "windows":
-            # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
-            # in 2.10
-            windows_cuda_arches = CUDA_ARCHES.copy()
-            windows_cuda_arches.remove("12.9")
-            windows_cuda_arches.remove("13.2")
-            arches += windows_cuda_arches
+            arches += CUDA_ARCHES
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -374,12 +393,7 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
-            # in 2.10
-            windows_cuda_arches = CUDA_ARCHES.copy()
-            windows_cuda_arches.remove("12.9")
-            windows_cuda_arches.remove("13.2")
-            arches += windows_cuda_arches + XPU_ARCHES
+            arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -412,10 +426,16 @@ def generate_wheels_matrix(
             ] and (python_version == "3.14" or python_version == "3.14t"):
                 continue
 
+            # TODO: Enable python 3.15 on non linux OSes
+            if os not in ["linux", "linux-aarch64"] and (
+                python_version == "3.15" or python_version == "3.15t"
+            ):
+                continue
+
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["13.2", "13.0", "12.9", "12.8", "12.6"]
+                arch_version in ["13.2", "13.0", "12.6"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
@@ -470,6 +490,9 @@ def generate_wheels_matrix(
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
                             if gpu_arch_type == "xpu"
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
+                            if gpu_arch_type == "cpu"
+                            and os in ("windows", "macos-arm64")
                             else ""
                         ),
                     }
@@ -489,6 +512,7 @@ def generate_libtorch_extraction_configs(
     uses to add an extraction job that depends on that wheel's build job.
     """
     preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+    arch = "arm64" if os == "windows-arm64" else "x86_64"
 
     # Group wheel configs by (gpu_arch_type, gpu_arch_version)
     arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
@@ -505,7 +529,10 @@ def generate_libtorch_extraction_configs(
 
         desired_cuda = source_config["desired_cuda"]
         libtorch_variant = "shared-with-deps"
-        build_name = f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
+        # Include arch in the build name so windows x86_64 and arm64 libtorch
+        # packages don't share a name and overwrite each other on upload.
+        arch_tag = f"{arch}-" if os == "windows-arm64" else ""
+        build_name = f"libtorch-{arch_tag}{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
             ".", "_"
         )
 
@@ -519,6 +546,7 @@ def generate_libtorch_extraction_configs(
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": gpu_arch_type,
                 "gpu_arch_version": gpu_arch_version,
+                "arch": arch,
             }
         )
 
@@ -530,6 +558,7 @@ for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
     validate_cudnn_version_consistency(arch_version)
 del arch_version
+validate_runtime_release_table_consistency()
 
 
 if __name__ == "__main__":

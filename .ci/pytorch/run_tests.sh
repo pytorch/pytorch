@@ -65,30 +65,17 @@ elif [[ ${#cuda_ver} -eq 5 ]]; then
     cuda_ver_majmin="${cuda_ver:2:2}.${cuda_ver:4:1}"
 fi
 
-NUMPY_PACKAGE=""
-if [[ ${py_ver} == "3.10" ]]; then
-    PROTOBUF_PACKAGE="protobuf>=3.17.2"
-    NUMPY_PACKAGE="numpy>=1.21.2"
-else
-    PROTOBUF_PACKAGE="protobuf=3.14.0"
-fi
+PROTOBUF_PACKAGE="protobuf>=3.17.2"
 
 # Environment initialization
 retry pip install -qUr requirements-build.txt
 if [[ "$(uname)" == Darwin ]]; then
-    # Install the testing dependencies
-    retry pip install -q future hypothesis ${NUMPY_PACKAGE} ${PROTOBUF_PACKAGE} pytest
+    retry pip install -q future hypothesis ${PROTOBUF_PACKAGE} pytest
 else
     retry pip install -qr requirements.txt || true
     retry pip install -q hypothesis protobuf pytest || true
-    numpy_ver=1.15
-    case "$(python --version 2>&1)" in
-      *2* | *3.5* | *3.6*)
-        numpy_ver=1.11
-        ;;
-    esac
-    retry pip install -q "numpy==${numpy_ver}" || true
 fi
+# numpy is already installed by requirements.txt; no need to pin an ancient version
 
 echo "Testing with:"
 pip freeze
@@ -101,9 +88,11 @@ pushd /
 echo "Smoke testing imports"
 python -c 'import torch'
 
-# Test that MKL is there
+# Test that MKL is there (x86_64 only; aarch64 uses OpenBLAS/ACL)
 if [[ "$(uname)" == 'Darwin' && "$package_type" == *wheel ]]; then
     echo 'Not checking for MKL on Darwin wheel packages'
+elif [[ "$(uname -m)" == 'aarch64' ]]; then
+    echo 'Not checking for MKL on aarch64 (uses OpenBLAS/ACL instead)'
 else
     echo "Checking that MKL is available"
     python -c 'import torch; exit(0 if torch.backends.mkl.is_available() else 1)'

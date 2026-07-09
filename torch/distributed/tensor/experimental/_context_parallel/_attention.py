@@ -286,7 +286,7 @@ class _AllGatherRotater(_RingRotater):
         # We only need to perform allgather once.
         self._idx += 1
         if self._aggregated_buffer is None:
-            self._aggregated_buffer = ft_c.all_gather_tensor(
+            self._aggregated_buffer = ft_c.all_gather_single(
                 curr_buffer.contiguous(), gather_dim=0, group=self._pg
             )
 
@@ -420,7 +420,7 @@ def _templated_ring_attention(
 
     sdpa_merger = _SDPAMerger(_cp_options.convert_to_f32, seq_dim=seq_dim)
 
-    rest: list[Any]
+    saved_rest: list[Any] | None = None
     out: torch.Tensor
     logsumexp: torch.Tensor
 
@@ -479,10 +479,13 @@ def _templated_ring_attention(
             is_causal=is_causal_behavior.value,
             **kwargs,
         )
+        if saved_rest is None:
+            saved_rest = rest
         sdpa_merger.step(out, logsumexp, partial)
 
-    # pyrefly: ignore [unbound-name]
-    return *sdpa_merger.results(), *rest
+    if saved_rest is None:
+        raise AssertionError("No SDPA op was executed in ring attention forward")
+    return *sdpa_merger.results(), *saved_rest
 
 
 def _templated_ring_attention_backward(
@@ -569,6 +572,13 @@ def _templated_ring_attention_backward(
                 )
 
             kwargs[grad_out_name] = dout
+            iter_kwargs = kwargs
+            if _cp_options.enable_load_balance and i > 0:
+                iter_kwargs = dict(kwargs)
+                if "max_q" in iter_kwargs:
+                    iter_kwargs["max_q"] = q.shape[seq_dim]
+                if "max_k" in iter_kwargs:
+                    iter_kwargs["max_k"] = k.shape[seq_dim]
             # See https://github.com/pytorch/pytorch/blob/release/2.4/aten/src/ATen/native/native_functions.yaml#L14695
             # for the SDPA kernel definitions.
             grad_query_, grad_key_, grad_value_, *rest = op(
@@ -578,7 +588,7 @@ def _templated_ring_attention_backward(
                 out=out_,
                 logsumexp=lse,
                 is_causal=is_causal_behavior.value,
-                **kwargs,
+                **iter_kwargs,
             )
         else:
             grad_query_ = torch.zeros_like(query, dtype=accum_dtype)
@@ -1104,7 +1114,7 @@ def _context_parallel_buffers(
             # NOTE: assuming batch dim is 0
 
             if load_balance_indices is not None:
-                # TODO: we should expclitly ask users to unsqueeze the batch dim.
+                # TODO: we should explicitly ask users to unsqueeze the batch dim.
                 # But this is a BC breaking ask.
                 # However, what we have done today is also not very safe.
                 idx_batch_size = load_balance_indices.size(0)
@@ -1577,7 +1587,9 @@ def context_parallel(
     # (:class:`_HeadTailLoadBalancer`) is used to rearrange the buffers before
     # sharding. Otherwise, we don't do any load-balance rearrange by passing
     # `None` to `_context_parallel_shard()`.
+    old_enable_load_balance = _cp_options.enable_load_balance
     load_balancer = _create_default_load_balancer(seq_length, cp_world_size, device)
+    _cp_options.enable_load_balance = load_balancer is not None
     shards = _context_parallel_buffers(
         mesh,
         cast(list[torch.Tensor | BlockMask], buffers),
@@ -1592,13 +1604,16 @@ def context_parallel(
         buffer.copy_(shard)
 
     _enable_context_parallel_dispatcher_impl(seq_dim=2, mesh=mesh)
-    yield
-    _disable_context_parallel_dispatcher_impl()
+    try:
+        yield
+    finally:
+        _disable_context_parallel_dispatcher_impl()
+        _cp_options.enable_load_balance = old_enable_load_balance
 
-    for buffer, original_buffer in zip(buffers, original_buffers):
-        if original_buffer is not None:
-            buffer.resize_(original_buffer.shape)
-            buffer.copy_(original_buffer)
+        for buffer, original_buffer in zip(buffers, original_buffers, strict=True):
+            if original_buffer is not None:
+                buffer.resize_(original_buffer.shape)
+                buffer.copy_(original_buffer)
 
 
 @torch.no_grad()
@@ -1656,7 +1671,7 @@ def context_parallel_unshard(
     unsharded_buffers = []
     for b, dim in zip(buffers, seq_dims):
         b = b.contiguous()
-        unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
+        unsharded_b = _maybe_wait(ft_c.all_gather_single(b, dim, mesh))
 
         if restore_indices is not None:
             # NOTE: assuming batch dim is 0
