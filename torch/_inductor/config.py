@@ -1847,6 +1847,12 @@ class triton:
     Config specific to codegen/triton.py
     """
 
+    # No-op unless fbtriton (a Triton fork) is installed
+    tlx_mode: Literal["default", "allow", "force"] = cast(
+        Literal["default", "allow", "force"],
+        os.environ.get("TORCHINDUCTOR_TLX_MODE", "default"),
+    )
+
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
@@ -2694,7 +2700,7 @@ class rocm:
     # reducing autotuning cost while keeping runtime within ~5% of full
     # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
     # toggling at runtime via config.patch has no effect because the rocm-origami
-    # module import is cached at template_heuristics/triton.py load time.
+    # module import is cached at heuristics/template/triton.py load time.
     #
     # Active only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
