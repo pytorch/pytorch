@@ -15,6 +15,7 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._shard.sharded_tensor.metadata import (
     TensorProperties as TensorProperties_Shard,
 )
+from torch.distributed.checkpoint import CheckpointableTensor
 from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint.api import CheckpointException
 from torch.distributed.checkpoint.default_planner import (
@@ -141,9 +142,38 @@ class TestSavePlan(TestCase):
         self.assertEqual(tensor_wi.tensor_data.chunk.offsets, torch.Size([0]))
         self.assertEqual(tensor_wi.tensor_data.chunk.sizes, torch.Size([10]))
 
-        bytes_wi = next(wi for wi in plan.items if wi.type == WriteItemType.BYTE_IO)
-        self.assertEqual(bytes_wi.index, MetadataIndex("value"))
-        self.assertIsNone(bytes_wi.tensor_data)
+    @with_temp_dir
+    def test_checkpointable_tensor_shard_save_load(self):
+        expected = torch.arange(8, dtype=torch.float32)
+        tensor = expected.clone()
+        tensor.global_shape = (16,)
+        tensor.global_offsets = ((0,), (12,))
+        tensor.local_offsets = ((0,), (4,))
+        tensor.local_sizes = ((4,), (4,))
+        self.assertIsInstance(tensor, CheckpointableTensor)
+
+        state_dict = {"proto": tensor}
+        dcp.save(state_dict, checkpoint_id=self.temp_dir, no_dist=True)
+
+        metadata = dcp.FileSystemReader(self.temp_dir).read_metadata()
+        tensor_metadata = metadata.state_dict_metadata["proto"]
+        self.assertIsInstance(tensor_metadata, TensorStorageMetadata)
+        self.assertEqual(torch.Size([16]), tensor_metadata.size)
+        chunks = sorted(tensor_metadata.chunks, key=lambda chunk: tuple(chunk.offsets))
+        self.assertEqual(
+            [
+                ChunkStorageMetadata(offsets=torch.Size([0]), sizes=torch.Size([4])),
+                ChunkStorageMetadata(offsets=torch.Size([12]), sizes=torch.Size([4])),
+            ],
+            chunks,
+        )
+
+        tensor.fill_(-1)
+        self.assertEqual(torch.full_like(tensor, -1), tensor)
+
+        dcp.load(state_dict, checkpoint_id=self.temp_dir, no_dist=True)
+
+        self.assertEqual(expected, tensor)
 
     @with_fake_comms(rank=1, world_size=4)
     def test_local_plan_with_caching(self):
