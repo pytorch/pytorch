@@ -234,6 +234,125 @@ def get_warp_size(device) -> int:
     return DeviceProperties.create(device).warp_size_or_default
 
 
+class TritonMeta(typing.TypedDict, total=False):
+    """Metadata bag threaded from Triton codegen into the runtime launcher.
+
+    total=False because the key set is populated incrementally across codegen
+    (signature/device/constants/configs first, then backend/ROCm/tlx extras)
+    and the whole bag is forwarded verbatim to external Triton APIs, which
+    tolerate and ignore keys they do not recognize. `device` is typed as the
+    codegen-time DeviceProperties; CachingAutotuner rewrites it to the integer
+    device index before reaching Triton, and the runtime read sites that expect
+    that int narrow it with an explicit cast.
+    """
+
+    signature: dict[str, typing.Any]
+    device: DeviceProperties
+    device_type: str
+    constants: dict[str, typing.Any]
+    configs: list[typing.Any]
+    native_matmul: bool
+    launch_cooperative_grid: bool
+    enable_fp_fusion: bool
+    launch_pdl: bool
+    disable_ftz: bool
+    matrix_instr_nonkdim: int
+    waves_per_eu: int
+    kpack: int
+    restore_value: tuple[str, ...]
+    reset_to_zero: tuple[str, ...]
+    backend_options: dict[str, typing.Any]
+
+
+class InductorMeta(typing.TypedDict, total=False):
+    """The inductor kernel-config / heuristics metadata bag.
+
+    Produced on the codegen side (TritonKernel.inductor_meta_common /
+    inductor_meta_per_kernel plus the codegen_kernel literal) and consumed by
+    the runtime autotuning machinery in triton_heuristics.py,
+    coordinate_descent_tuner.py, and autotune_cache.py. Every key is optional
+    (total=False): consumers read via .get(...) with defaults, and several keys
+    are injected only on specific paths (reductions, combo kernels, fixed grids).
+    Dynamically keyed nested bags (e.g. combo_grid_meta) stay typed dict[str,
+    Any] because their keys are computed at runtime. The codegen-side producers
+    still build this bag as a plain dict[str, Any], so the write side is not yet
+    checked against this TypedDict; typing the producers is left as a follow-up.
+    """
+
+    # Global inductor config snapshot (inductor_meta_common / inductor_meta_from_config)
+    backend_hash: str | None
+    assert_indirect_indexing: bool
+    autotune_local_cache: bool
+    autotune_pointwise: bool
+    autotune_remote_cache: bool | None
+    bundled_autotune_remote_cache: bool | None
+    force_disable_caches: bool
+    dynamic_scale_rblock: bool
+    incremental_autotune: bool
+    max_autotune: bool
+    max_autotune_pointwise: bool
+    min_split_scan_rblock: int
+    spill_threshold: int
+    store_cubin: bool
+    deterministic: bool
+    batch_invariant: bool
+    force_filter_reduction_configs: bool
+    mix_order_reduction_allow_multi_stages: bool
+    dynamic_disable_pipelining: bool
+    are_deterministic_algorithms_enabled: bool
+    is_hip: bool | None
+    is_fbcode: bool
+    profile_bandwidth: bool
+    profile_bandwidth_regex: str
+    profile_bandwidth_output: str
+    profile_bandwidth_with_do_bench_using_profiling: bool
+    coordinate_descent_tuning: bool
+    coordinate_descent_search_radius: int
+    coordinate_descent_check_all_directions: bool
+
+    # Per-kernel metadata (inductor_meta_per_kernel)
+    no_x_dim: bool
+    atomic_add_found: bool
+    num_load: int
+    num_store: int
+    num_reduction: int
+    autotune_hints: typing.Any
+    RSPLIT_SIZE: int
+    has_loadstore_with_contiguous_rdim: bool
+    tma_min_block_sizes: dict[str, int]
+    host_tma_descriptor_args: dict[str, dict[str, typing.Any]]
+    tiling_scores: typing.Any
+    min_xblock: int
+    min_rblock: int
+    persistent_reduction: bool
+    native_matmul_persistent_rblock: int
+    add_persistent_rblock: bool
+    max_persistent_rblock: int
+    kernel_num_gb: float
+    kernel_flop: int
+
+    # Kernel identity / launch (codegen_kernel literal)
+    grid_type: str
+    kernel_name: str
+    mutated_arg_names: typing.Any
+    optimize_mem: bool
+
+    # Injected at runtime (CachingAutotuner, reduction heuristics, combo kernels)
+    warp_size: int | None
+    max_threads_per_block: int | None
+    reduction_hint: typing.Any
+    combo_grid_meta: dict[str, typing.Any]
+    combo_tuning_groups: typing.Any
+    combo_coordesc_field_order: list[str]
+    combo_coordesc_field_limits: dict[str, int]
+    combo_warp_stage_candidates: typing.Any
+    extra_launcher_args: typing.Any
+    fixed_grid: typing.Any
+    precomputed_grids: typing.Any
+    config_args: typing.Any
+    use_fast_triton_launcher: bool
+
+
 class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str
