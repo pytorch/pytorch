@@ -46,17 +46,15 @@ _VIEW_OPS = [
 """
 The quantization.py file primarily incorporates passes related to quantization fusion
 in inductor, includes:
-1. Dequant Promotion;
-2. Conv/GEMM weight prepack with oneDNN Library;
-3. Conv/GEMM quantization fusion with output quant node (if have);
-4. Other pointwise operators' quantization fusion like: qmaxpool2d, qcat and more;
+1. Lowering of qconv/qlinear (unary and binary post-op variants) from the
+   `onednn::qconv_pointwise` / `onednn::qlinear_pointwise` ops to Inductor IR.
+2. Pointwise operators' quantization fusion like: qmaxpool2d, qcat, qreshape and more.
+3. Weight-only quantization (WOQ) int8 mm / concat-linear patterns lowered to
+   `aten._weight_int8pack_mm` and the int4 concat-linear pass for
+   `aten._weight_int4pack_mm_for_cpu`.
 
-It also involves int8-mixed-fp32 and int8-mixed-bf16 quantization. The main difference
-of patterns for int8-mixed-bf16, comparing with int8-mixed-fp32, is
-1. There is to(dtype=torch.bfloat16) node at the inputs of activation and weight for Conv/GEMM.
-2. There is to(dtype=torch.float32) node at the outputs of Conv/GEMM before inputs to next quant node.
-Refer to: https://github.com/pytorch/pytorch/issues/111640 for detail design of int8-mixed-bf16
-quantization.
+Note: the dequant promotion, qconv/qlinear weight prepack and qconv/qlinear
+fusion patterns that used to live here have been moved to TorchAO.
 """
 
 
@@ -66,17 +64,22 @@ def _get_pattern_output_dtype(match: Match):
     Assume only 1 output node in this matched pattern.
     """
     pattern_output_nodes = match.output_nodes()
-    assert len(pattern_output_nodes) == 1
+    if len(pattern_output_nodes) != 1:
+        raise AssertionError(
+            f"expected exactly 1 output node, got {len(pattern_output_nodes)}"
+        )
     output_node = pattern_output_nodes[0]
-    assert isinstance(output_node, torch.fx.Node)
+    if not isinstance(output_node, torch.fx.Node):
+        raise AssertionError(f"expected torch.fx.Node, got {type(output_node)}")
     output_dtype = output_node.meta["val"].dtype
-    assert output_dtype in [
+    if output_dtype not in [
         torch.int8,
         torch.uint8,
         torch.float32,
         torch.bfloat16,
         torch.float8_e4m3fn,
-    ]
+    ]:
+        raise AssertionError(f"unexpected output dtype {output_dtype}")
     return output_dtype
 
 
@@ -109,7 +112,8 @@ def _generate_linear_t_pattern(
     _dequant_per_channel_pattern,
     dtype,
 ):
-    assert dtype in [torch.float32, torch.bfloat16]
+    if dtype not in [torch.float32, torch.bfloat16]:
+        raise AssertionError(f"expected float32 or bfloat16, got {dtype}")
     t_pattern = CallFunction(
         aten.permute.default,
         _may_generate_pattern_with_dtype_convert(
@@ -363,7 +367,10 @@ def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_val
         actual_value = check_node.kwargs[kwarg_name]
         return actual_value == expected_value
     else:
-        assert len(check_node.args) >= (args_index + 1)
+        if len(check_node.args) < (args_index + 1):
+            raise AssertionError(
+                f"expected at least {args_index + 1} args, got {len(check_node.args)}"
+            )
         actual_value = check_node.args[args_index]
         return actual_value == expected_value
 
@@ -438,13 +445,14 @@ def _register_quantized_conv_lowering(
             kwargs["groups"],
         )
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype in [
+        if output_dtype not in [
             torch.int8,
             torch.uint8,
             torch.float8_e4m3fn,
             torch.float32,
             torch.bfloat16,
-        ]
+        ]:
+            raise AssertionError(f"unexpected output dtype {output_dtype}")
         # Output QParams
         o_inv_scale = kwargs["output_scale"]
         o_zero_point = kwargs["output_zero_point"]
@@ -589,7 +597,8 @@ def _register_quantized_linear_binary_lowering(
     )
     def qlinear_binary(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype is not None
+        if output_dtype is None:
+            raise AssertionError("expected non-None output dtype")
         # Activation QParams
         x, x_scale, x_zp = (
             kwargs["x"],
@@ -688,14 +697,16 @@ def _is_valid_quantized_op_binary_optimization_pattern(
         if len(compute_node.users) != 1:
             return False
         binary_node_inputs = next(iter(compute_node.users)).args
-        assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
+        if len(binary_node_inputs) != 2:
+            raise AssertionError("Expects binary node with 2 inputs")
         if output_dtype in [torch.float32, torch.bfloat16]:
             extra_input_of_binary_node = None
             for arg in binary_node_inputs:
                 if arg != compute_node:
                     extra_input_of_binary_node = arg
                     break
-            assert extra_input_of_binary_node is not None
+            if extra_input_of_binary_node is None:
+                raise AssertionError("expected non-None extra input of binary node")
             # Extra input of binary node comes from dequant pattern
             if extra_input_from_dequant and (
                 (not isinstance(extra_input_of_binary_node, torch.fx.Node))
@@ -760,7 +771,8 @@ def _register_quantized_conv_binary_lowering(
     )
     def qconv_binary(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype is not None
+        if output_dtype is None:
+            raise AssertionError("expected non-None output dtype")
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
         accum = kwargs["accum"]
         accum_scale = kwargs["accum_scale"]
@@ -791,9 +803,10 @@ def _register_quantized_conv_binary_lowering(
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
 
-        assert _can_be_inplace(accum), (
-            "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
-        )
+        if not _can_be_inplace(accum):
+            raise AssertionError(
+                "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
+            )
 
         computation_args = (
             x,
@@ -923,10 +936,16 @@ def _register_quantized_maxpool2d_lowering(
         padding = pad_listlike(padding, 2)
         dilation = pad_listlike(dilation, 2)
 
-        assert len(kernel_size) == 2
-        assert len(stride) == 2
-        assert len(padding) == 2
-        assert len(dilation) == 2
+        if len(kernel_size) != 2:
+            raise AssertionError(
+                f"expected kernel_size of length 2, got {len(kernel_size)}"
+            )
+        if len(stride) != 2:
+            raise AssertionError(f"expected stride of length 2, got {len(stride)}")
+        if len(padding) != 2:
+            raise AssertionError(f"expected padding of length 2, got {len(padding)}")
+        if len(dilation) != 2:
+            raise AssertionError(f"expected dilation of length 2, got {len(dilation)}")
 
         computation_args = (
             x,
@@ -1019,7 +1038,8 @@ def _is_input_output_same_scale_zp(check_node):
         quant_nodes = filter_nodes(
             match.nodes, quantized_decomposed.quantize_per_tensor.default
         )
-        assert len(quant_nodes) == 1, "expect only 1 add node at output quant pattern"
+        if len(quant_nodes) != 1:
+            raise AssertionError("expect only 1 add node at output quant pattern")
         zero_points.append(quant_nodes[0].args[2])
         if not all(zero_point == zero_points[0] for zero_point in zero_points):
             return False
@@ -1080,9 +1100,14 @@ def _register_quantized_reshape_lowering(
     pattern,
     computation_op,
 ):
+    def qreshape_output_metadata(*args, **kwargs):
+        return aten.reshape.default(kwargs["x"], kwargs["shape"])
+
     @register_lowering_pattern(
         pattern,
         extra_check=_is_input_output_same_scale_zp(aten.reshape.default),
+        output_metadata_ignores_input_storage=False,
+        output_metadata_fn=qreshape_output_metadata,
     )
     def qreshape(match: Match, *args, **kwargs):
         qx = kwargs["x"]
@@ -1110,7 +1135,8 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
     def fn(match):
         if not config.cpp.enable_concat_linear:
             return False
-        assert all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales"))
+        if not all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales")):
+            raise AssertionError("expected x, w1, w2, w3, scales in match kwargs")
         if not all(
             hasattr(match.kwargs[key], "meta")
             for key in ["x", "w1", "w2", "w3", "scales"]
@@ -1148,7 +1174,8 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
 
 def _is_valid_woq_optimization_pattern():
     def fn(match):
-        assert all(k in match.kwargs for k in ("x", "weight", "scales"))
+        if not all(k in match.kwargs for k in ("x", "weight", "scales")):
+            raise AssertionError("expected x, weight, scales in match kwargs")
         if not all(
             hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
         ):
@@ -1202,14 +1229,15 @@ def _register_concat_linear_int8_woq_lowering(
             ):
                 mm_node_of_x = candidate
                 break
-        assert mm_node_of_x is not None, "unable to find mm node"
+        if mm_node_of_x is None:
+            raise AssertionError("unable to find mm node")
         _, cat_wgt_node = mm_node_of_x._input_nodes
         scaling_node = next(iter(mm_node_of_x.users.keys()))
         user_of_scaling_node = next(iter(scaling_node.users.keys()))
         # Some other pass is making some changes that entails
         # adding a node before it's used, but it can only be found when
         # lint is run. stable_topological_sort() is being run before lint,
-        # so that error was not being being discovered.
+        # so that error was not being discovered.
         # We call stable_topological_sort here as a workaround.
         stable_topological_sort(match.graph)
         with match.graph.inserting_before(user_of_scaling_node):
@@ -1476,7 +1504,10 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
             users = list(act.users)
             if _is_valid_concat_linear_woq_int4_fusion(users):
                 with graph.inserting_before(node):
-                    assert all(user.args[1].op == "get_attr" for user in users)
+                    if not all(user.args[1].op == "get_attr" for user in users):
+                        raise AssertionError(
+                            "expected all users to have get_attr weight"
+                        )
                     computation_node_0 = users[0]
                     packed_wgts = [getattr(gm, user.args[1].target) for user in users]
                     group_size = computation_node_0.args[2]
@@ -1527,7 +1558,10 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
                         )
                     with graph.inserting_after(split_node):
                         for gemm_idx, user in enumerate(users):
-                            assert user.target == computation_op
+                            if user.target != computation_op:
+                                raise AssertionError(
+                                    f"expected target {computation_op}, got {user.target}"
+                                )
                             get_item = graph.create_node(
                                 "call_function",
                                 operator.getitem,

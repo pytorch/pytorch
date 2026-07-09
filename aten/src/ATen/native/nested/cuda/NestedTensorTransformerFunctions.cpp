@@ -64,7 +64,7 @@ Tensor nested_from_padded_cuda(
         at::cat({target_size_sizes, padded_sizes_tensor, target_offsets});
     metadata = metadata.to(at::Device(kCUDA), kInt, true, true);
 
-    auto output_size_ptr = metadata.data_ptr<int>();
+    auto output_size_ptr = metadata.const_data_ptr<int>();
     auto input_size_ptr = output_size_ptr + target_size_sizes.numel();
     auto offsets_ptr = input_size_ptr + padded_sizes_tensor.numel();
 
@@ -72,7 +72,7 @@ Tensor nested_from_padded_cuda(
     if (padded.dtype() == kFloat) {
       if (do_transform_0213) {
         remove_padding_transform0213_kernelLauncher(
-            padded_contiguous.data_ptr<float>(),
+            padded_contiguous.const_data_ptr<float>(),
             output.data_ptr<float>(),
             offsets_ptr,
             input_size_ptr,
@@ -81,7 +81,7 @@ Tensor nested_from_padded_cuda(
             padded_contiguous.sizes()[0]);
       } else {
         remove_padding_kernelLauncher(
-            padded_contiguous.data_ptr<float>(),
+            padded_contiguous.const_data_ptr<float>(),
             output.data_ptr<float>(),
             offsets_ptr,
             input_size_ptr,
@@ -92,7 +92,7 @@ Tensor nested_from_padded_cuda(
     } else if (padded.dtype() == kHalf) {
       if (do_transform_0213) {
         remove_padding_transform0213_kernelLauncher(
-            padded_contiguous.data_ptr<c10::Half>(),
+            padded_contiguous.const_data_ptr<c10::Half>(),
             output.data_ptr<c10::Half>(),
             offsets_ptr,
             input_size_ptr,
@@ -101,7 +101,7 @@ Tensor nested_from_padded_cuda(
             padded_contiguous.sizes()[0]);
       } else {
         remove_padding_kernelLauncher(
-            padded_contiguous.data_ptr<c10::Half>(),
+            padded_contiguous.const_data_ptr<c10::Half>(),
             output.data_ptr<c10::Half>(),
             offsets_ptr,
             input_size_ptr,
@@ -119,7 +119,7 @@ Tensor nested_from_padded_cuda(
 }
 
 static Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
-  int64_t* nt_sizes_ptr = ef_sizes.data_ptr<int64_t>();
+  const int64_t* nt_sizes_ptr = ef_sizes.const_data_ptr<int64_t>();
   int64_t ef_sizes_size_0 = ef_sizes.sizes()[0];
   Tensor offsets = at::empty({1 + ef_sizes_size_0}, at::kLong);
   int64_t* offsets_ptr = offsets.mutable_data_ptr<int64_t>();
@@ -200,11 +200,11 @@ Tensor NestedTensor_to_padded_tensor_cuda(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         nt_buffer.scalar_type(), "NestedTensor_to_padded_tensor_cuda", [&]() {
           add_padding_kernelLauncher(
-              nt_buffer.data_ptr<scalar_t>(),
+              nt_buffer.const_data_ptr<scalar_t>(),
               output.data_ptr<scalar_t>(),
               (scalar_t)(padding),
-              offsets.data_ptr<int>(),
-              nt_sizes.data_ptr<int>(),
+              offsets.const_data_ptr<int>(),
+              nt_sizes.const_data_ptr<int>(),
               input_dim,
               new_size,
               batch_size,

@@ -176,7 +176,7 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
         outputs.push_back(inputTensor);
         runOutputs.emplace_back(
             spec.logical_tensor(), Engine::getEngine(), inputTensor.data_ptr());
-        return std::make_tuple(runInputs, runOutputs);
+        return std::make_tuple(std::move(runInputs), std::move(runOutputs));
       }
     }
     if (useOpaqueLayout(i)) {
@@ -200,7 +200,7 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
     }
   }
 
-  return std::make_tuple(runInputs, runOutputs);
+  return std::make_tuple(std::move(runInputs), std::move(runOutputs));
 }
 
 compiled_partition LlgaKernel::compile(const partition& partition) {

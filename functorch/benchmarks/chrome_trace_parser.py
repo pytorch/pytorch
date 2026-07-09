@@ -66,7 +66,7 @@ def main():
                 filenames, total_length
             )
             print(f"{modelname}, {utilization}, {mm_conv_utilization}")
-        except BaseException:  # noqa: B036
+        except BaseException:
             log.exception("%s, ERROR", filename)
             print(f"{filename}, ERROR")
 

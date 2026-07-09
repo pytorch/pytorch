@@ -23,6 +23,7 @@ from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_co
 from torch import fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
+from torch._functorch import config as functorch_config
 from torch._inductor import utils
 from torch._logging import getArtifactLogger
 from torch._logging._internal import trace_structured
@@ -32,9 +33,9 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_leaves, tree_map
 
-from . import config, ir  # noqa: F811, this is needed
+from . import config, ir
 from .ir import ExternKernel
 from .scheduler import (
     BaseSchedulerNode,
@@ -58,11 +59,20 @@ ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
+_RAW_DOT_GRAPH_FORMATS = OrderedSet(["dot", "raw"])
 
 
 @functools.cache
 def has_dot() -> bool:
     return shutil.which("dot") is not None
+
+
+def _get_graph_output_format(fname: str | None) -> str:
+    if fname is not None:
+        _, ext = os.path.splitext(fname)
+        if ext:
+            return ext.lstrip(".")
+    return functorch_config.torch_compile_graph_format
 
 
 def draw_buffers(
@@ -71,9 +81,10 @@ def draw_buffers(
     fname: str | None = None,
 ) -> None:
     """
-    Draw a graph in fname.svg.
+    Draw a graph in fname.
     """
-    if not has_dot():
+    graph_format = _get_graph_output_format(fname)
+    if graph_format not in _RAW_DOT_GRAPH_FORMATS and not has_dot():
         log.warning("draw_buffers() requires `graphviz` package")
         return
 
@@ -242,7 +253,10 @@ def update_orig_fx_node_name_to_buf_name(
             continue
         else:
             # pyrefly: ignore [bad-argument-type, unsupported-operation]
-            assert len(children_nodes) == 1 and children_nodes[0] == node
+            if not (len(children_nodes) == 1 and children_nodes[0] == node):
+                raise AssertionError(
+                    "expected a single child node equal to the current node"
+                )
 
         ir_node = node.node
         if ir_node is None or ir_node.origins is None:
@@ -341,7 +355,34 @@ _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 _pre_grad_graph_id: int | None = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
+_kernel_information_jsons: dict[str, dict[str, Any]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
+
+
+@dataclasses.dataclass
+class _KernelExternInfo:
+    is_extern: bool = False
+    semantic_key: str | None = None
+    shapes: dict[str, Any] | None = None
+
+
+_inductor_kernel_extern_info: dict[str, _KernelExternInfo] = {}
+
+
+def get_kernel_information_jsons() -> dict[str, dict[str, Any]]:
+    return _kernel_information_jsons
+
+
+def alias_kernel_provenance(original_kernel_name: str, alias_kernel_name: str) -> None:
+    """Expose existing kernel provenance under an additional generated name."""
+    if original_kernel_name in _inductor_kernel_stack_trace:
+        _inductor_kernel_stack_trace[alias_kernel_name] = _inductor_kernel_stack_trace[
+            original_kernel_name
+        ]
+    if original_kernel_name in _inductor_triton_kernel_to_post_grad_node_info:
+        _inductor_triton_kernel_to_post_grad_node_info[alias_kernel_name] = (
+            _inductor_triton_kernel_to_post_grad_node_info[original_kernel_name]
+        )
 
 
 def reset_inductor_kernel_provenance_debug_handle() -> None:
@@ -359,6 +400,7 @@ def reset_provenance_globals() -> Iterator[None]:
     global _inductor_pre_grad_node_stack_trace
     global _inductor_kernel_stack_trace
     global _inductor_kernel_provenance_debug_handle
+    global _inductor_kernel_extern_info
 
     # Store original values
     original_pre_grad_graph_id = _pre_grad_graph_id
@@ -373,6 +415,7 @@ def reset_provenance_globals() -> Iterator[None]:
     original_inductor_kernel_provenance_debug_handle = (
         _inductor_kernel_provenance_debug_handle
     )
+    original_inductor_kernel_extern_info = dict(_inductor_kernel_extern_info)
 
     # Reset to default values
     _pre_grad_graph_id = -1
@@ -380,7 +423,11 @@ def reset_provenance_globals() -> Iterator[None]:
     _inductor_triton_kernel_to_post_grad_node_info = {}
     _inductor_pre_grad_node_stack_trace = {}
     _inductor_kernel_stack_trace = {}
+    # Kernel timeline information is populated from compile_fx_inner while this
+    # context is active.  It must outlive the reset scope so the profiler can
+    # consume it during export_chrome_trace, which then clears it.
     _inductor_kernel_provenance_debug_handle = 0
+    _inductor_kernel_extern_info = {}
 
     try:
         yield
@@ -398,6 +445,7 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_kernel_provenance_debug_handle = (
             original_inductor_kernel_provenance_debug_handle
         )
+        _inductor_kernel_extern_info = original_inductor_kernel_extern_info
 
 
 class DebugContext:
@@ -412,9 +460,13 @@ class DebugContext:
                 "torchinductor",
                 f"{folder_name}.{n}",
             )
-            if not os.path.exists(dirname):
-                os.makedirs(dirname)
+            try:
+                os.makedirs(dirname, exist_ok=False)
                 return dirname
+            except FileExistsError:
+                # Another process (e.g. a peer rank with the same debug_dir)
+                # created this counter slot first; advance to the next n.
+                continue
         return None
 
     def __init__(self) -> None:
@@ -425,7 +477,8 @@ class DebugContext:
     def copy(self, new_path: str) -> None:
         if not self._path:
             return
-        assert new_path.endswith(".debug"), new_path
+        if not new_path.endswith(".debug"):
+            raise AssertionError(new_path)
         from filelock import FileLock
 
         try:
@@ -445,7 +498,8 @@ class DebugContext:
         *args: Any,
         **kwargs: Any,
     ) -> IO[Any]:
-        assert self._path
+        if not self._path:
+            raise AssertionError("expected self._path to be set")
         return open(os.path.join(self._path, filename), write_mode, *args, **kwargs)
 
     @contextlib.contextmanager
@@ -456,19 +510,22 @@ class DebugContext:
         *args: Any,
         **kwargs: Any,
     ) -> Iterator[IO[Any]]:
-        assert self._path
+        if not self._path:
+            raise AssertionError("expected self._path to be set")
         with open(os.path.join(self._path, filename), write_mode, *args, **kwargs) as f:
             yield f
 
     def filename(self, suffix: str) -> str:
-        assert self._path
+        if not self._path:
+            raise AssertionError("expected self._path to be set")
         return os.path.join(self._path, suffix)
 
     def upload_tar(self) -> None:
         if config.trace.upload_tar is not None:
             import tarfile
 
-            assert self._path
+            if not self._path:
+                raise AssertionError("expected self._path to be set")
             tar_file = os.path.join(
                 self._path, f"{os.path.basename(self._path)}.tar.gz"
             )
@@ -531,7 +588,8 @@ class DebugContext:
         self._stack.close()
 
     def _save_profile_data(self) -> None:
-        assert self._prof
+        if not self._prof:
+            raise AssertionError("expected self._prof to be set")
         self._prof.dump_stats(self.filename("compile.prof"))
         with self.fopen("compile.stats") as fd:
             stats = pstats.Stats(self._prof, stream=fd)
@@ -574,7 +632,7 @@ class DebugFormatter:
                 inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
                 save_dir = os.path.dirname(fd.name)
 
-            # dont try to use stable hash torchinductor compilation if saving real tensors
+            # don't try to use stable hash torchinductor compilation if saving real tensors
             # and avoid recursively trying to save real tensors inside of the inductor compilation
             # regardless
             stable_hash = torch._inductor.config.trace.save_real_tensors
@@ -618,7 +676,10 @@ class DebugFormatter:
         return buf.getvalue()
 
     def graph_diagram(self, nodes: SchedulerNodeList) -> None:
-        draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
+        draw_buffers(
+            nodes,
+            fname=self.filename(f"graph_diagram.{config.trace.graph_diagram_format}"),
+        )
 
     def draw_orig_fx_graph(
         self,
@@ -628,7 +689,9 @@ class DebugFormatter:
         annotate_orig_fx_with_snodes(gm, nodes)
         draw_graph(
             gm,
-            fname=self.filename("orig_fx_graph_diagram.svg"),
+            fname=self.filename(
+                f"orig_fx_graph_diagram.{config.trace.orig_fx_graph_diagram_format}"
+            ),
             clear_meta=False,
             prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
@@ -871,6 +934,14 @@ class TensorMetadataHolder:
     device: torch.device
 
 
+@dataclasses.dataclass
+class SymExprMetadataHolder:
+    pytype: str
+    expr: Any
+    hint: int | float | bool | None
+    symbol_hints: dict[str, int | float | bool]
+
+
 save_args_cnt = itertools.count()
 
 
@@ -889,7 +960,9 @@ def create_mapping_pre_post_grad_nodes(
     }
 
     if not isinstance(post_to_pre_grad_nodes_json, dict):
-        log.error("Provenance tacking error: post_to_pre_grad_nodes_json is not a dict")
+        log.error(
+            "Provenance tracking error: post_to_pre_grad_nodes_json is not a dict"
+        )
         return empty_return
 
     if not isinstance(pre_grad_graph_id, int):
@@ -905,12 +978,12 @@ def create_mapping_pre_post_grad_nodes(
         def check_format(node: dict[str, Any]) -> bool:
             if not isinstance(node, dict):
                 log.error(
-                    "Provenance tacking error: node provenance in post_to_pre_grad_nodes_json is not a dict"
+                    "Provenance tracking error: node provenance in post_to_pre_grad_nodes_json is not a dict"
                 )
                 return False
             if "graph_id" not in node or "name" not in node or "from_node" not in node:
                 log.error(
-                    "Provenance tacking error: node provenance in post_to_pre_grad_nodes_json has wrong format"
+                    "Provenance tracking error: node provenance in post_to_pre_grad_nodes_json has wrong format"
                 )
                 return False
             return True
@@ -918,7 +991,7 @@ def create_mapping_pre_post_grad_nodes(
         for outer_key, node_array in post_to_pre_grad_nodes_json.items():
             if not isinstance(node_array, list):
                 log.error(
-                    "Provenance tacking error: post_to_pre_grad_nodes_json value is not a list"
+                    "Provenance tracking error: post_to_pre_grad_nodes_json value is not a list"
                 )
                 return empty_return
             for node in node_array:
@@ -986,7 +1059,7 @@ def create_node_mapping_kernel_to_post_grad(
 
     if not isinstance(triton_kernel_to_post_grad_json, dict):
         log.error(
-            "Provenance tacking error: triton_kernel_to_post_grad_json is not a dict"
+            "Provenance tracking error: triton_kernel_to_post_grad_json is not a dict"
         )
         return empty_return
 
@@ -996,7 +1069,7 @@ def create_node_mapping_kernel_to_post_grad(
         for outer_key, node_array in triton_kernel_to_post_grad_json.items():
             if not isinstance(node_array, list):
                 log.error(
-                    "Provenance tacking error: triton_kernel_to_post_grad_json value is not a list"
+                    "Provenance tracking error: triton_kernel_to_post_grad_json value is not a list"
                 )
                 return empty_return
             for curr_node in node_array:
@@ -1069,12 +1142,35 @@ def dump_inductor_provenance_info() -> dict[str, Any]:
         return {}
 
 
-def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
-    """Create kernel information JSON"""
+def _serialize_provenance_shape(size: Sequence[Any]) -> list[int | str]:
+    shape: list[int | str] = []
+    for dim in size:
+        if ir._is_static(dim):
+            shape.append(int(dim))
+        else:
+            shape.append(str(dim))
+    return shape
+
+
+def _get_tensor_metadata(node: ir.IRNode) -> tuple[list[int | str], str] | None:
+    if not node.has_tensor_output():
+        return None
+
+    size = node.maybe_get_size()
+    dtype = node.maybe_get_dtype()
+    if size is None or dtype is None:
+        return None
+
+    return _serialize_provenance_shape(size), str(dtype)
+
+
+def create_kernel_information_json() -> dict[str, dict[str, Any]]:
+    """Create kernel information JSON with extended metadata for cross-hardware comparison."""
     try:
         global _inductor_post_to_pre_grad_nodes
         global _inductor_kernel_stack_trace
         global _inductor_triton_kernel_to_post_grad_node_info
+        global _inductor_kernel_extern_info
 
         post_to_pre = _inductor_post_to_pre_grad_nodes.get("postToPre", {})
         all_kernels = OrderedSet(_inductor_kernel_stack_trace.keys()) | OrderedSet(
@@ -1082,20 +1178,40 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
         )
 
         result = {}
-        for kernel_name in all_kernels:
+        for kernel_key in all_kernels:
             post_grad_nodes = _inductor_triton_kernel_to_post_grad_node_info.get(
-                kernel_name, []
+                kernel_key, []
             )
 
             pre_grad_nodes: OrderedSet[str] = OrderedSet()
             for post_node in post_grad_nodes:
                 pre_grad_nodes.update(post_to_pre.get(post_node, []))
 
-            result[kernel_name] = {
-                "stack_traces": _inductor_kernel_stack_trace.get(kernel_name, []),
+            stack_traces = _inductor_kernel_stack_trace.get(kernel_key, [])
+            pre_grad_list = list(pre_grad_nodes)
+
+            # extern_semantic_key precedence:
+            # 1. Explicit annotation (e.g., FP8 bridge) — highest priority
+            # 2. Single-element pre_grad_nodes for externs — derived identity
+            # 3. None
+            info = _inductor_kernel_extern_info.get(kernel_key)
+            if info is not None and info.semantic_key is not None:
+                extern_semantic_key = info.semantic_key
+            elif info is not None and info.is_extern and len(pre_grad_list) == 1:
+                extern_semantic_key = pre_grad_list[0]
+            else:
+                extern_semantic_key = None
+
+            result[kernel_key] = {
+                "stack_traces": stack_traces,
                 "post_grad_nodes": post_grad_nodes,
-                "pre_grad_nodes": list(pre_grad_nodes),
+                "pre_grad_nodes": pre_grad_list,
+                "extern_semantic_key": extern_semantic_key,
             }
+
+            # Merge shape metadata if available (extern ops only)
+            if info is not None and info.shapes:
+                result[kernel_key].update(info.shapes)
 
         return result
     except Exception as e:
@@ -1108,6 +1224,7 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
                 "stack_trace": traceback.format_exc(),
             },
         )
+        log.warning("create_kernel_information_json: exception: %s", e)
         return {}
 
 
@@ -1122,7 +1239,7 @@ def set_kernel_post_grad_provenance_tracing(
     Returns a unique int debug handler for each call to this function.
     """
 
-    if config.trace.provenance_tracking_level == 0:
+    if config.effective_provenance_tracking_level() == 0:
         return None
 
     try:
@@ -1131,12 +1248,20 @@ def set_kernel_post_grad_provenance_tracing(
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_stack_trace
         global _inductor_kernel_provenance_debug_handle
+        global _inductor_kernel_extern_info
 
         _inductor_kernel_provenance_debug_handle += 1
         stack_traces: list[str] = []
         kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
-            assert isinstance(node_schedule, ExternKernel)
+            if not isinstance(node_schedule, ExternKernel):
+                raise AssertionError(
+                    f"expected ExternKernel, got {type(node_schedule)}"
+                )
+            extern_info = _inductor_kernel_extern_info.setdefault(
+                kernel_name, _KernelExternInfo()
+            )
+            extern_info.is_extern = True
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
                 kernel_name, []
             )
@@ -1153,9 +1278,51 @@ def set_kernel_post_grad_provenance_tracing(
                     for origin in node_schedule.origins
                     if origin.name not in curr_node_info
                 )
+            # Extract extern_semantic_key if stamped by a transform pass (e.g., FP8)
+            if node_schedule.origin_node and "extern_semantic_key" in getattr(
+                node_schedule.origin_node, "meta", {}
+            ):
+                extern_info.semantic_key = node_schedule.origin_node.meta[
+                    "extern_semantic_key"
+                ]
+            else:
+                for origin in node_schedule.origins:
+                    if "extern_semantic_key" in getattr(origin, "meta", {}):
+                        extern_info.semantic_key = origin.meta["extern_semantic_key"]
+                        break
+            # Extract input/output shapes and dtypes for extern ops
+            try:
+                input_shapes: list[list[int | str]] = []
+                input_dtypes: list[str] = []
+                for inp in tree_leaves(node_schedule.inputs):
+                    if isinstance(inp, ir.IRNode):
+                        metadata = _get_tensor_metadata(inp)
+                        if metadata is None:
+                            continue
+                        shape, dtype = metadata
+                        input_shapes.append(shape)
+                        input_dtypes.append(dtype)
+
+                shape_metadata: dict[str, Any] = {
+                    "input_shapes": input_shapes,
+                    "input_dtypes": input_dtypes,
+                }
+                output_metadata = _get_tensor_metadata(node_schedule)
+                if output_metadata is not None:
+                    output_shape, output_dtype = output_metadata
+                    shape_metadata.update(
+                        {
+                            "output_shape": output_shape,
+                            "output_dtype": output_dtype,
+                        }
+                    )
+                extern_info.shapes = shape_metadata
+            except Exception as e:
+                log.debug("Shape extraction failed for %s: %s", kernel_name, e)
             stack_traces = list(node_schedule.get_stack_traces())
         else:
-            assert isinstance(node_schedule, list)
+            if not isinstance(node_schedule, list):
+                raise AssertionError(f"expected list, got {type(node_schedule)}")
             stack_traces_set: OrderedSet[str] = OrderedSet()
             for snode in node_schedule:
                 if snode not in (EnableReduction, DisableReduction):
@@ -1202,15 +1369,62 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     if not os.path.exists(folder):
         os.mkdir(folder)
 
+    def python_value(value: Any) -> int | float | bool | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value
+        # SymPy numbers expose is_integer as a tri-state property.
+        if getattr(value, "is_integer", None) is False:
+            return float(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return float(value)
+
+    def handle_sym_expr(x: Any, pytype: str) -> SymExprMetadataHolder:
+        node = x.node
+        shape_env = node.shape_env
+        symbol_hints: dict[str, int | float | bool] = {}
+        if shape_env is not None:
+            for symbol in node.expr.free_symbols:
+                hint = shape_env.backed_var_to_val.get(symbol)
+                if hint is not None:
+                    python_hint = python_value(hint)
+                    if python_hint is not None:
+                        symbol_hints[str(symbol)] = python_hint
+        return SymExprMetadataHolder(
+            pytype,
+            node.expr,
+            python_value(node.hint),
+            symbol_hints,
+        )
+
     def handle_tensor(x: Any) -> Any:
         """
-        Pickle FakeTensor will result in error:
+        Pickle FakeTensor/SymInt will result in errors like:
         AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'
 
-        Convert all Tensor to metadata. This may also makes pickle faster.
+        Convert tensors and symbolic values to metadata. This may also make
+        pickle faster.
         """
+        if isinstance(x, GraphModule):
+            gm = copy.deepcopy(x)
+            for node in gm.graph.nodes:
+                node.meta = tree_map(handle_tensor, node.meta)
+            return gm
         if isinstance(x, torch.Tensor):
-            return TensorMetadataHolder(_extract_tensor_metadata(x), x.device)
+            return TensorMetadataHolder(
+                tree_map(handle_tensor, _extract_tensor_metadata(x)), x.device
+            )
+        elif isinstance(x, torch.SymInt):
+            return handle_sym_expr(x, "int")
+        elif isinstance(x, torch.SymFloat):
+            return handle_sym_expr(x, "float")
+        elif isinstance(x, torch.SymBool):
+            return handle_sym_expr(x, "bool")
         else:
             return x
 
@@ -1238,23 +1452,76 @@ load_args_and_run_compile_fx_inner({path!r})
 
 
 def load_args_and_run_compile_fx_inner(path: str) -> Any:
+    from torch._dynamo.source import ConstantSource
     from torch._inductor.compile_fx import compile_fx_inner
+    from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
     with open(path, "rb") as f:
         args, kwargs = pickle.load(f)
 
+    shape_env = ShapeEnv()
+    symbol_cache: dict[str, Any] = {}
+
+    def restore_sym_expr(x: SymExprMetadataHolder) -> Any:
+        expr = x.expr
+        if isinstance(expr, str):
+            import sympy
+
+            import torch.utils._sympy.functions as sympy_functions
+
+            expr = sympy.sympify(expr, locals=sympy_functions.__dict__)
+        replacements = {}
+        for symbol in expr.free_symbols:
+            symbol_name = str(symbol)
+            if symbol_name not in symbol_cache:
+                hint = x.symbol_hints.get(symbol_name)
+                if hint is None:
+                    if x.hint is not None and expr == symbol:
+                        hint = x.hint
+                    else:
+                        symbol_cache[symbol_name] = shape_env.create_unbacked_symint(
+                            ConstantSource(symbol_name)
+                        ).node.expr
+                        replacements[symbol] = symbol_cache[symbol_name]
+                        continue
+                symbol_cache[symbol_name] = shape_env.create_symbol(
+                    hint,
+                    ConstantSource(symbol_name),
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                    do_not_specialize_zero_one=True,
+                )
+            replacements[symbol] = symbol_cache[symbol_name]
+        expr = expr.xreplace(replacements)
+        if x.pytype == "int":
+            return shape_env.create_symintnode(expr, hint=x.hint)
+        elif x.pytype == "float":
+            return shape_env.create_symfloatnode(expr, hint=x.hint)
+        elif x.pytype == "bool":
+            return shape_env.create_symboolnode(expr)
+        else:
+            raise AssertionError(f"Unexpected symbolic expression type: {x.pytype}")
+
     def handle_tensor(x: Any) -> Any:
-        if isinstance(x, TensorMetadataHolder):
+        if isinstance(x, GraphModule):
+            for node in x.graph.nodes:
+                node.meta = tree_map(handle_tensor, node.meta)
+            return x
+        elif isinstance(x, TensorMetadataHolder):
+            tensor_metadata = tree_map(handle_tensor, x.tensor_metadata)
             return torch._dynamo.testing.rand_strided(
-                x.tensor_metadata.shape,
-                x.tensor_metadata.stride,
-                x.tensor_metadata.dtype,
+                tensor_metadata.shape,
+                tensor_metadata.stride,
+                tensor_metadata.dtype,
                 x.device,
             )
+        elif isinstance(x, SymExprMetadataHolder):
+            return restore_sym_expr(x)
         else:
             return x
 
-    fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+    fake_mode = torch._subclasses.FakeTensorMode(
+        allow_non_fake_inputs=True, shape_env=shape_env
+    )
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)
@@ -1275,7 +1542,8 @@ def aot_inductor_minifier_wrapper(
     use_minifier = config.aot_inductor.dump_aoti_minifier
 
     gm = exported_program.module(check_guards=False)
-    assert isinstance(gm, torch.fx.GraphModule)
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
 
     args, kwargs = exported_program.example_inputs
 

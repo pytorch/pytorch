@@ -10,4 +10,6 @@ torch.compiler_transformations.md
 torch.compiler_fake_tensor.md
 torch.compiler_custom_backends.md
 torch.compiler_dynamic_shapes
+torch.compiler_aot_compile
+torch.compiler_complex_number_support.md
 ```
