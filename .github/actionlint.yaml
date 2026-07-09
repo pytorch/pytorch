@@ -13,6 +13,7 @@ self-hosted-runner:
     - am2.linux.9xlarge.ephemeral
     - linux.12xlarge
     - linux.12xlarge.memory
+    - linux.12xlarge.memory.ephemeral
     - linux.24xlarge
     - linux.24xlarge.memory
     - linux.24xlarge.ephemeral
@@ -42,6 +43,8 @@ self-hosted-runner:
     # Organization wide AWS Windows runners
     - windows.g4dn.xlarge
     - windows.g4dn.xlarge.nonephemeral
+    - windows.12xlarge
+    - windows.12xlarge.nonephemeral
     - windows.4xlarge
     - windows.4xlarge.nonephemeral
     - windows.8xlarge.nvidia.gpu
