@@ -103,6 +103,7 @@ from .exc import (
     raise_value_error,
     ResumePrologueTracingError,
     StepUnsupported,
+    TorchRuntimeError,
     unimplemented,
     Unsupported,
     UserError,
@@ -2749,6 +2750,23 @@ class InstructionTranslatorBase(
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
                 )  # sanity check
+
+            # Internal RuntimeErrors have no python_stack
+            # exception_handler already confirmed no user handler exists.
+            if (
+                isinstance(curr_exc, variables.ExceptionVariable)
+                and curr_exc.python_stack is None
+                and curr_exc.exc_type is RuntimeError
+            ):
+                msg = curr_exc.args[0].as_python_constant() if curr_exc.args else ""
+                formatted = exc.format_graph_break_message(
+                    gb_type="RuntimeError when making fake tensor call",
+                    context="",
+                    explanation=msg,
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+                raise TorchRuntimeError(formatted, raised_exception.real_stack)
+
             unimplemented(
                 gb_type="Observed exception",
                 context=f"raised exception {curr_exc.debug_repr()}",
