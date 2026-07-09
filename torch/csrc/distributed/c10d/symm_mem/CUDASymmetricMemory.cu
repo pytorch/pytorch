@@ -350,9 +350,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
   // allocation base; the signal pad stays hidden in front and free()/rendezvous()
   // key off this returned pointer.
   // Layout: signal pad first at [0, buffer_offset), then the data buffer at
-  // buffer_offset. The data buffer sits at buffer_offset past the (aligned)
-  // allocation base and device collectives access it with int4 loads/stores, so
-  // round the signal pad size up to signal_pad_alignment to keep it aligned.
+  // buffer_offset, which is the signal pad size rounded up to
+  // signal_pad_alignment.
   size_t buffer_offset =
       at::round_up(get_signal_pad_size(), signal_pad_alignment);
   size_t block_size = buffer_offset + at::round_up(size, 16UL);
@@ -414,8 +413,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
 
   // Zero the signal pad (at the front, [0, buffer_offset)) to initialize it for
   // the CAS-based barrier() protocol; the data buffer that follows does not need
-  // zeroing. This matches the NCCL/NVSHMEM backends, which also only clear the
-  // signal pad.
+  // zeroing.
   AT_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
 
   // Hand back the data buffer pointer, not alloc_base; the signal pad stays
