@@ -8,7 +8,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, cast
 
 import numpy as np
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
@@ -26,15 +26,8 @@ ActivitiesSpec = Mapping[ActivityKind, "Iterable[int] | str"] | Iterable[Activit
 
 
 _PY_PROFILER = torch._C._profiler
-# The native CUPTI buffer-pool / layout-capture module (C++ side of the monitor). It is
-# registered only in CUDA builds (the monitor is CUDA-only), so at runtime this is None on
-# a non-CUDA build; every consumer reaches it only after a CUDA/availability check, so it
-# is never used when None. Importing this module on a non-CUDA build must not fail. Typed
-# as the module for checkers (its methods are exercised only on the CUDA path).
-if TYPE_CHECKING:
-    _cupti_monitor_native = _PY_PROFILER._cupti_monitor
-else:
-    _cupti_monitor_native = getattr(_PY_PROFILER, "_cupti_monitor", None)
+# The native CUPTI buffer-pool / layout-capture module (C++ side of the monitor).
+_cupti_monitor_native = _PY_PROFILER._cupti_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -430,15 +423,20 @@ class CuptiMonitor:
             native_now=lambda: self._cupti.get_timestamp(cast(int, self._subscriber)),
         )
         self._flush_stop.clear()
-        # Hand the native decode worker the subscriber handle plus the fence
+        # Hand the native decode worker the subscriber + cuptiActivityGetNextRecord_v2
+        # address (so it iterates records without a libcupti link) plus the fence
         # kind/field so it tracks the SYNCHRONIZATION-END clock for flush(sync). It
-        # calls cuptiActivityGetNextRecord_v2 directly (resolved at runtime to the
-        # nvidia-cuda-cupti wheel's libcupti, matching the header it compiled
-        # against), pulls completed buffers, and decodes them GIL-free; Python drains
-        # the accumulated columns at flush time, so per-buffer decode never contends
-        # with the training thread.
+        # then pulls completed buffers and decodes them GIL-free; Python drains the
+        # accumulated columns at flush time, so per-buffer decode never contends with
+        # the training thread.
+        fn_addr = self._cupti.get_next_record_fn_address()
+        if not fn_addr:
+            raise RuntimeError(
+                "libcupti is missing cuptiActivityGetNextRecord_v2 (need >= 13.2); "
+                f"loaded {cupti_python.LIBCUPTI_SONAME}"
+            )
         _cupti_monitor_native.configure_decoder(
-            cast(int, self._subscriber), int(_FENCE_KIND), _FENCE_END_FIELD
+            cast(int, self._subscriber), fn_addr, int(_FENCE_KIND), _FENCE_END_FIELD
         )
         # Drop noisy runtime/driver records in the native decoder by cbid -- CUPTI's own
         # per-cbid activity filter is NOT_COMPATIBLE under user-defined records

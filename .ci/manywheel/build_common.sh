@@ -116,15 +116,6 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
 fi
 pushd "$PYTORCH_ROOT"
 retry pip install -qUr requirements-build.txt
-if [[ "$DESIRED_CUDA" == cu13* ]]; then
-    # The CUPTI monitor is a CUDA >= 13.x feature (its CUPTI floor is 13.3): it compiles
-    # against cupti_activity.h and its field-id codegen parses it with libclang's python
-    # bindings. The header is staged into the CUDA 13.x Docker image by
-    # .ci/docker/common/install_cuda.sh, so only libclang is pip-installed here (it bundles
-    # libclang.so, so the codegen needn't locate one; not in requirements-build.txt, so
-    # non-13.x CUDA / CPU / ROCm / XPU builds don't pull it in).
-    retry pip install -q libclang
-fi
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
