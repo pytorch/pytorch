@@ -63,6 +63,14 @@ include(cmake/EnvVarForwarding.cmake)
 # unconditionally.
 include(cmake/PreBuildSteps.cmake)
 
+cmake_instrumentation(
+  API_VERSION 1
+  DATA_VERSION 1.0
+  HOOKS postCMakeBuild
+  OPTIONS trace
+  CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
+)
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()

@@ -1,3 +1,5 @@
+set_property(DIRECTORY PROPERTY RULE_LAUNCH_CUSTOM "")
+
 # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
