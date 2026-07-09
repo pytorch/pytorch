@@ -10,13 +10,16 @@ from torch.cuda._graph_annotations import (
     _get_stream_id,
     _is_tools_id_unavailable,
     _rekey_annotations,
-    clear_kernel_annotations,
-    get_kernel_annotations,
-    mark_kernels,
     mark_stream,
     resolve_pending_annotations,
 )
 from torch.cuda._utils import _check_cuda_bindings
+from torch.cuda.graph_annotations import (
+    clear_kernel_annotations,
+    get_kernel_annotations,
+    is_available,
+    mark_kernels,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -767,6 +770,14 @@ class TestRekeyAnnotations(TestCase):
         annotations = {self._tools_id(1, 10): original}
         _rekey_annotations(annotations, capture_graph_id=1, exec_graph_id=2)
         self.assertEqual(original, ["a"])
+
+
+# Runs everywhere (no capture): the public probe must agree with the private
+# gate that mark_kernels no-ops on, whatever this machine supports.
+class TestIsAvailable(TestCase):
+    def test_matches_private_gate(self):
+        expected = torch.cuda.is_available() and not _is_tools_id_unavailable()
+        self.assertEqual(is_available(), expected)
 
 
 # Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
