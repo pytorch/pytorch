@@ -731,7 +731,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager")
         self.assertEqual(model(x), compiled(x))
 
-    # --- TorchScriptObjectVariable ---
+    # --- CustomClassObjectVariable ---
 
     def test_opaque_object_getitem(self):
         class OpaqueScaler(CustomClassBase):
