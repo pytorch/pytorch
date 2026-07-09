@@ -769,9 +769,6 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8, requires_grad=True)
         # Difficult to check the results here because we random does not match
         # between eager and Triton.
-        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
-
-        torch.compiler.reset()
         backend = InductorAndRecordGraphs()
         res = torch.compile(fn, backend=backend, fullgraph=True)(x)
         res.sum().backward()
