@@ -398,16 +398,16 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     initialize_nvshmem_with_store(
         group->getStore(), group->getRank(), group->getSize(), device_idx);
 
-    // Signal pad first at [0, signal_pad_size), data buffer at buffer_offset,
+    // Signal pad first at [0, buffer_offset), data buffer at buffer_offset,
     // which is the signal pad size rounded up to signal_pad_alignment.
-    const size_t signal_pad_size = get_signal_pad_size();
     const size_t buffer_offset =
-        at::round_up(signal_pad_size, signal_pad_alignment);
+        at::round_up(get_signal_pad_size(), signal_pad_alignment);
     const size_t total_size = buffer_offset + at::round_up(size, 16UL);
     auto alloc_base = nvshmem_malloc(total_size);
     TORCH_CHECK(alloc_base != nullptr, "nvshmem_malloc failed");
-    // Zero the signal pad (at the front) for the signaling protocol.
-    AT_CUDA_CHECK(cudaMemset(alloc_base, 0, signal_pad_size));
+    // Zero the signal pad (at the front, [0, buffer_offset)) for the signaling
+    // protocol.
+    AT_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
     // Hand back the data buffer pointer, not alloc_base; the signal pad stays
     // hidden in front. Returning the data ptr is safe for free(): the whole
     // block is owned by the NVSHMEMAllocation keyed below, which nvshmem_free's

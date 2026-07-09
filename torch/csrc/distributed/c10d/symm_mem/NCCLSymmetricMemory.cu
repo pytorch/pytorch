@@ -155,14 +155,16 @@ NCCLAllocMap::iterator find_allocation_covering(
   // Recover the CUDA allocation base for interior pointers before falling back
   // to the linear scan: a MemPool hands out interior (non-base) pointers, so
   // `ptr` may not be a map key. cuMemGetAddressRange gives the allocation base
-  // in O(1); base + signal pad size is the data buffer ptr we keyed on.
+  // in O(1); base + buffer_offset is the data buffer ptr we keyed on.
   auto driver_api = c10::cuda::DriverAPI::get();
   CUdeviceptr base_ptr = 0;
   if (driver_api->cuMemGetAddressRange_(
           &base_ptr, nullptr, reinterpret_cast<CUdeviceptr>(ptr)) ==
       CUDA_SUCCESS) {
+    const size_t buffer_offset =
+        at::round_up(get_signal_pad_size(), signal_pad_alignment);
     auto buffer_ptr = reinterpret_cast<void*>(
-        static_cast<uintptr_t>(base_ptr) + get_signal_pad_size());
+        static_cast<uintptr_t>(base_ptr) + buffer_offset);
     alloc_it = allocations.find(buffer_ptr);
     if (alloc_it != allocations.end()) {
       return alloc_it;
