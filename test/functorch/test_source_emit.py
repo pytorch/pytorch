@@ -83,6 +83,14 @@ class _StatefulDC:
     extra: int = dataclasses.field(init=False, default=0)
 
 
+@dataclasses.dataclass(frozen=True)
+class _FrozenDC:
+    # Frozen -> immutable, so a shared instance has no aliasing to lose and is exempt from
+    # the shared-mutable guard, like a tuple.
+    a: int
+    b: str
+
+
 class _MyInt(int):
     def __repr__(self):
         return f"_MyInt({int(self)})"
@@ -476,6 +484,20 @@ class TestSourceEmit(TestCase):
         h = _Holder(3)
         with self.assertRaisesRegex(NotImplementedError, "shared mutable"):
             _emit([h, h])
+        # A shared non-frozen dataclass is mutable too: emitting it as two constructor
+        # calls would drop the aliasing, so the dataclass branch also routes it here.
+        dc = _PlainDC(1, "z")
+        with self.assertRaisesRegex(NotImplementedError, "shared mutable"):
+            _emit([dc, dc])
+
+    def test_shared_frozen_dataclass_is_not_a_cycle(self):
+        # A frozen dataclass is immutable, so a shared instance has no aliasing to lose and
+        # emits fine as two independent literals -- exempt from the shared-mutable guard.
+        fdc = _FrozenDC(1, "z")
+        expr, _ = _emit([fdc, fdc])
+        self.assertIn("_FrozenDC", expr)
+        rt = _roundtrip([fdc, fdc])
+        self.assertEqual(rt, [_FrozenDC(1, "z"), _FrozenDC(1, "z")])
 
     def test_repeated_leaf_is_not_a_cycle(self):
         # The cycle guard tracks only ancestors on the recursion path, not siblings, so a
