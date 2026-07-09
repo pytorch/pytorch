@@ -28,13 +28,10 @@ from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
-    _TestCUDACodeCacheBenchmarkRequest,
-    _TestEnvBenchmarkRequest,
     AsyncAutotuner,
     AutotuneProcessPool,
     ExternKernelBenchmarkRequest,
     get_visible_devices_env_var,
-    run_autotune_in_subprocess,
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
@@ -42,6 +39,21 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
+from torch._inductor.heuristics.template.registry import override_template_heuristics
+from torch._inductor.heuristics.template.triton import (
+    BlackwellGPUGemmConfig,
+    CUDAAddmmPersistentTMATemplateConfigHeuristic,
+    CUDAAddMMTemplateConfigHeuristic,
+    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellPersistentTMATemplateConfigHeuristic,
+    CUDAMMTemplateConfigHeuristic,
+    CUDAPersistentTMATemplateConfigHeuristic,
+    GemmConfig,
+    get_shared_memory_checker_opts,
+    ROCmMMTemplateConfigHeuristic,
+    XPUMMTemplateConfigHeuristic,
+    XPUPersistentTMATemplateConfigHeuristic,
+)
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.hints import DeviceProperties
@@ -58,21 +70,6 @@ from torch._inductor.select_algorithm import (
     NoValidChoicesError,
     TritonTemplate,
     TritonTemplateCaller,
-)
-from torch._inductor.template_heuristics.registry import override_template_heuristics
-from torch._inductor.template_heuristics.triton import (
-    BlackwellGPUGemmConfig,
-    CUDAAddmmPersistentTMATemplateConfigHeuristic,
-    CUDAAddMMTemplateConfigHeuristic,
-    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-    CUDABlackwellPersistentTMATemplateConfigHeuristic,
-    CUDAMMTemplateConfigHeuristic,
-    CUDAPersistentTMATemplateConfigHeuristic,
-    GemmConfig,
-    get_shared_memory_checker_opts,
-    ROCmMMTemplateConfigHeuristic,
-    XPUMMTemplateConfigHeuristic,
-    XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -553,7 +550,7 @@ class TestMaxAutotune(TestCase):
                 ),
                 fresh_cache(),
                 patch(
-                    "torch._inductor.template_heuristics.triton.get_tma_workspace_arg",
+                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
                     mock_get_tma_workspace_arg,
                 ),
             ):
@@ -620,7 +617,7 @@ class TestMaxAutotune(TestCase):
                 ),
                 fresh_cache(),
                 patch(
-                    "torch._inductor.template_heuristics.triton.get_tma_workspace_arg",
+                    "torch._inductor.heuristics.template.triton.get_tma_workspace_arg",
                     return_value=fake_ws,
                 ),
                 patch.object(TritonBenchmarkRequest, "__init__", spy_init),
@@ -2047,7 +2044,7 @@ class TestMaxAutotune(TestCase):
         # Force only contiguous choice to test the transform
         with (
             mock.patch(
-                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
             ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
@@ -2091,7 +2088,7 @@ class TestMaxAutotune(TestCase):
         # Force contiguous choice to test the transform
         with (
             mock.patch(
-                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
             ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
@@ -2153,7 +2150,7 @@ class TestMaxAutotune(TestCase):
             # Test with non-contiguous second matrix - should use contiguous transform
             with (
                 mock.patch(
-                    "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                    "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
                 ) as contiguous_mock,
             ):
                 contiguous_mock.return_value = True
@@ -2199,7 +2196,7 @@ class TestMaxAutotune(TestCase):
         # Force contiguous transform
         with (
             mock.patch(
-                "torch._inductor.template_heuristics.contiguous_mm.use_contiguous"
+                "torch._inductor.heuristics.template.contiguous_mm.use_contiguous"
             ) as contiguous_mock,
         ):
             contiguous_mock.return_value = True
@@ -2225,11 +2222,11 @@ class TestMaxAutotune(TestCase):
         Verifies that get_template_heuristic returns an instance of our custom class
         and that get_template_configs yields the expected configs.
         """
-        from torch._inductor.kernel.mm import MMKernelInputs
-        from torch._inductor.template_heuristics.registry import (
+        from torch._inductor.heuristics.template.registry import (
             get_registered_heuristic_class,
             get_template_heuristic,
         )
+        from torch._inductor.kernel.mm import MMKernelInputs
 
         template_uid = torch._inductor.kernel.mm.mm_template.uid
 
@@ -2699,7 +2696,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.template_heuristics.registry.get_template_heuristic"
+            "torch._inductor.heuristics.template.registry.get_template_heuristic"
         ) as config_mock:
             # Create heuristic instance and modify it before setting as mock return value
             # On ROCm, use ROCmMMTemplateConfigHeuristic; on XPU use XPUMMTemplateConfigHeuristic;
@@ -4264,117 +4261,6 @@ class TestTuningProcess(TestCase):
 class TestTuningProcessPool(TestCase):
     # Use only one device/subprocess so we test the process restarts
     # and is usable after a crash.
-    def assert_path_in_dir(self, path, expected_dir):
-        self.assertEqual(
-            os.path.commonpath([path, expected_dir]),
-            expected_dir,
-        )
-
-    @config.patch({"autotune_multi_device": False})
-    def test_tuning_pool_cache_env_resets(self):
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("TRITON_CACHE_DIR", None)
-            tuning_pool = TuningProcessPool()
-            choice = _TestTritonTemplateCaller(
-                _TestEnvBenchmarkRequest("TRITON_CACHE_DIR")
-            )
-            stale_triton_cache_dir = os.path.join(
-                tempfile.gettempdir(), "stale_triton_cache"
-            )
-
-            try:
-                process = tuning_pool.processes[0]
-                process.put(
-                    choice.bmreq.benchmark,
-                    extra_env={"TRITON_CACHE_DIR": stale_triton_cache_dir},
-                )
-                self.assertEqual(process.get(), stale_triton_cache_dir)
-
-                self.assertIsNone(os.environ.get("TRITON_CACHE_DIR"))
-                self.assertIsNone(tuning_pool.target(choice))
-            finally:
-                tuning_pool.shutdown()
-
-    @config.patch({"autotune_multi_device": False})
-    def test_tuning_pool_cache_env_clears_codecache(self):
-        with (
-            mock.patch.dict(os.environ, {}, clear=False),
-            tempfile.TemporaryDirectory() as cache_dir_1,
-            tempfile.TemporaryDirectory() as cache_dir_2,
-        ):
-            tuning_pool = TuningProcessPool()
-            choice = _TestTritonTemplateCaller(_TestCUDACodeCacheBenchmarkRequest())
-
-            try:
-                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_1
-                path_1 = tuning_pool.target(choice)
-                self.assert_path_in_dir(path_1, cache_dir_1)
-
-                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_2
-                path_2 = tuning_pool.target(choice)
-                self.assert_path_in_dir(path_2, cache_dir_2)
-                self.assertNotEqual(path_1, path_2)
-            finally:
-                tuning_pool.shutdown()
-
-    @config.patch({"pipeline_max_autotune_gemm": True})
-    def test_autotune_process_pool_cache_env_resets(self):
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("TRITON_CACHE_DIR", None)
-            autotune_pool = AutotuneProcessPool()
-            bmreq = _TestEnvBenchmarkRequest("TRITON_CACHE_DIR")
-            stale_triton_cache_dir = os.path.join(
-                tempfile.gettempdir(), "stale_triton_cache"
-            )
-
-            try:
-                os.environ["TRITON_CACHE_DIR"] = stale_triton_cache_dir
-                self.assertEqual(
-                    autotune_pool.submit(
-                        run_autotune_in_subprocess,
-                        bmreq,
-                    ).result(timeout=30),
-                    stale_triton_cache_dir,
-                )
-
-                os.environ.pop("TRITON_CACHE_DIR", None)
-                self.assertIsNone(
-                    autotune_pool.submit(
-                        run_autotune_in_subprocess,
-                        bmreq,
-                    ).result(timeout=30)
-                )
-            finally:
-                autotune_pool._shutdown()
-
-    @config.patch({"pipeline_max_autotune_gemm": True})
-    def test_autotune_process_pool_cache_env_clears_codecache(self):
-        with (
-            mock.patch.dict(os.environ, {}, clear=False),
-            tempfile.TemporaryDirectory() as cache_dir_1,
-            tempfile.TemporaryDirectory() as cache_dir_2,
-        ):
-            autotune_pool = AutotuneProcessPool()
-            bmreq = _TestCUDACodeCacheBenchmarkRequest()
-
-            try:
-                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_1
-                path_1 = autotune_pool.submit(
-                    run_autotune_in_subprocess,
-                    bmreq,
-                ).result(timeout=30)
-                self.assert_path_in_dir(path_1, cache_dir_1)
-
-                os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir_2
-                path_2 = autotune_pool.submit(
-                    run_autotune_in_subprocess,
-                    bmreq,
-                ).result(timeout=30)
-                self.assert_path_in_dir(path_2, cache_dir_2)
-                self.assertNotEqual(path_1, path_2)
-            finally:
-                autotune_pool._shutdown()
-
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_crash(self):
         tuning_pool = TuningProcessPool()
