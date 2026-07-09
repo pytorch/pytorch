@@ -117,6 +117,9 @@ class _OptimStateKey(NamedTuple):
     is_fsdp_managed: bool
 
 
+torch.serialization.add_safe_globals([_PosDimTensorInfo, _OptimStateKey])
+
+
 def _unflatten_optim_state(
     fsdp_param_info: FSDPParamInfo,
     flat_param_state: dict[str, Any],
@@ -1301,6 +1304,9 @@ class StateInfo:
     tensors: dict[str, _PosDimTensorInfo]
     scalar_tensors: dict[str, torch.Tensor]
     non_tensors: dict[str, Any]
+
+
+torch.serialization.add_safe_globals([StateInfo])
 
 
 def _allgather_state_info(

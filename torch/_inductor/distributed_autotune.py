@@ -320,6 +320,11 @@ class _SerializedChoice:
         return obj
 
 
+# Transmitted between ranks via all_gather_object (which deserializes with
+# weights_only=True by default).
+torch.serialization.add_safe_globals([_SerializedChoice])
+
+
 def _autotune_local_nodes(
     scheduler: torch._inductor.scheduler.Scheduler,
 ) -> list[_SerializedChoice]:

@@ -534,6 +534,9 @@ class _TensorInfo(NamedTuple):
     dtype: torch.dtype
 
 
+torch.serialization.add_safe_globals([_TensorInfo])
+
+
 def _broadcast_tensors(
     full_state_dict: dict[str, Any],
     local_state_dict: dict[str, Any],

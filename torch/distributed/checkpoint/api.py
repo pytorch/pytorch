@@ -1,6 +1,8 @@
 import traceback as tb
 from typing import Any
 
+import torch
+
 
 WRAPPED_EXCEPTION = tuple[BaseException, tb.StackSummary]
 
@@ -48,3 +50,6 @@ class CheckpointException(BaseException):
                 str += "".join(tb.format_list(trace))
             str += "".join(tb.format_exception_only(type(exc), value=exc))
         return str
+
+
+torch.serialization.add_safe_globals([CheckpointException])

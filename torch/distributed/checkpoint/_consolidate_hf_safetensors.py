@@ -62,6 +62,9 @@ class _OutputFileData:
     fqn_data: dict[str, _FqnData] = field(default_factory=dict)
 
 
+torch.serialization.add_safe_globals([_FqnData, _OutputFileData])
+
+
 @dataclass
 class _InputFileData:
     """
