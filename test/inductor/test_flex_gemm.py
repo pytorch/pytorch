@@ -873,23 +873,13 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         from torch._inductor.kernel.flex_gemm.constraints import (
             FlexGemmLocalReduceGeometry,
         )
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmLocalReduceContract,
-        )
 
-        plan_classes = (
-            lambda group, axis: FlexGemmLocalReduceContract(object(), group, axis),
-            lambda group, axis: FlexGemmLocalReduceGeometry(group, axis),
-        )
-        for make_plan in plan_classes:
-            with self.assertRaisesRegex(
-                RuntimeError, "local_reduce_group must be positive"
-            ):
-                make_plan(0, 0)
-            with self.assertRaisesRegex(
-                RuntimeError, "local_reduce_axis must be 0 or 1"
-            ):
-                make_plan(8, 2)
+        with self.assertRaisesRegex(
+            RuntimeError, "local_reduce_group must be positive"
+        ):
+            FlexGemmLocalReduceGeometry(0, 0)
+        with self.assertRaisesRegex(RuntimeError, "local_reduce_axis must be 0 or 1"):
+            FlexGemmLocalReduceGeometry(8, 2)
 
     def test_runtime_local_reduce_plan_rejects_missing_callbacks(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -975,18 +965,32 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(node, (object(),))
         with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
-            FlexGemmLocalReduceContract(object(), 8, 0)
+            FlexGemmLocalReduceContract(object(), FlexGemmLocalReduceGeometry(8, 0))
         with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
             FlexGemmOutputLocalReducePlan(FlexGemmLocalReduceGeometry(8, 0), object())
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
             tuple_output_plan(object(), ())
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
             tuple_output_plan(node, (object(),))
+        with self.assertRaisesRegex(RuntimeError, "output plans"):
+            FlexGemmOutputLocalReducePlan(
+                FlexGemmLocalReduceGeometry(8, 0), aux, store_node=aux
+            )
+        with self.assertRaisesRegex(RuntimeError, "output plans"):
+            FlexGemmOutputLocalReducePlan(
+                FlexGemmLocalReduceGeometry(8, 0),
+                aux,
+                store_node=aux,
+                aux_index=-1,
+            )
         FlexGemmOutputPlan(
             node,
             (aux,),
             FlexGemmOutputLocalReducePlan(
-                FlexGemmLocalReduceGeometry(8, 0), aux, store_node=aux
+                FlexGemmLocalReduceGeometry(8, 0),
+                aux,
+                store_node=aux,
+                aux_index=0,
             ),
         )
         FlexGemmOutputPlan(
@@ -997,18 +1001,19 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             ),
         )
 
-    def test_local_reduce_feed_main_binary_candidates_support_method_nodes(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import (
-            local_reduce_feed_main_binary_candidates,
-        )
+    def test_ordered_outputs_restore_local_reduce_position(self):
+        from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_ordered_outputs
 
-        graph = torch.fx.Graph()
-        lhs = graph.placeholder("lhs")
-        rhs = graph.placeholder("rhs")
-        for target in ("add", "div", "mul", "sub"):
-            node = graph.call_method(target, (lhs, rhs), {})
-            candidates = local_reduce_feed_main_binary_candidates(node)
-            self.assertEqual(candidates, ((lhs, rhs), (rhs, lhs)))
+        expected_outputs = (
+            ("main", "local", "aux0", "aux1"),
+            ("main", "aux0", "local", "aux1"),
+            ("main", "aux0", "aux1", "local"),
+        )
+        for index, expected in enumerate(expected_outputs):
+            self.assertEqual(
+                flex_gemm_ordered_outputs("main", ("aux0", "aux1"), ("local",), index),
+                expected,
+            )
 
     def test_local_reduce_aux_result_requires_grouped_source(self):
         from torch._inductor.kernel.flex_gemm.epilogue import local_reduce_aux_result
