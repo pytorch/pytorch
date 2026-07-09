@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -592,6 +593,10 @@ class AOTInductorModelContainer {
     // nullptr (default / on allocation failure) keeps the throttled path.
     auto staging_pool = tryMakeConstantsStagingPool();
 #endif
+    auto _update_start = std::chrono::steady_clock::now();
+    AOTI_LOG_LOADING(
+        "update_constant_buffer: starting copy of " << num_constants
+                                                    << " constants");
     for (size_t idx = 0; idx < num_constants; idx++) {
       if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
@@ -758,7 +763,23 @@ class AOTInductorModelContainer {
     }
     staging_pool.reset();
 #endif
+    auto _update_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - _update_start)
+                          .count();
+    AOTI_LOG_LOADING(
+        "update_constant_buffer: copy completed in " << _update_ms << " ms");
     target.update_array(models_[0].get());
+
+#ifdef USE_CUDA
+    // S638065: the GPU constant copies above run on the default stream (raw
+    // cudaMemcpy), while run_const_fold launches the fold on
+    // getCurrentCUDAStream(). On ROCm the default stream is not implicitly
+    // ordered with the fold's stream, so without this the fold could read
+    // not-yet-copied weights and bake stale values into the folded constants.
+    // Wait for the copies to complete before returning, so any subsequent fold
+    // (on any stream) sees the updated weights.
+    AOTI_RUNTIME_CUDA_CHECK(cudaStreamSynchronize(0));
+#endif // USE_CUDA
   }
 
   void swap_constant_buffer() {

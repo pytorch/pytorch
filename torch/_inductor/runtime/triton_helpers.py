@@ -3,9 +3,9 @@
 import math as pymath
 import warnings
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, TypeVar
-
-from torch.utils._ordered_set import OrderedSet
 
 from .triton_compat import (
     _log2,
@@ -20,6 +20,20 @@ from .triton_compat import (
 
 _T = TypeVar("_T")
 _LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
+_skip_gpu_driver_setup: ContextVar[bool] = ContextVar(
+    "_skip_gpu_driver_setup", default=False
+)
+
+
+@contextmanager
+def skip_gpu_driver_setup():
+    # Scoped no-op for set_driver_to_gpu(). ContextVar keeps nested/thread-local
+    # uses isolated.
+    token = _skip_gpu_driver_setup.set(True)
+    try:
+        yield
+    finally:
+        _skip_gpu_driver_setup.reset(token)
 
 
 def set_driver_to_cpu():
@@ -54,6 +68,9 @@ def _is_backend_active(name, backend):
 
 
 def set_driver_to_gpu():
+    if _skip_gpu_driver_setup.get():
+        return
+
     driver = triton.runtime.driver
     for name, backend in triton.backends.backends.items():
         if _is_backend_active(name, backend) and name != "cpu":
@@ -100,7 +117,7 @@ def _is_concrete_backend_option_value(value: Any) -> bool:
         ),
     ):
         return False
-    if isinstance(value, (tuple, list, OrderedSet, frozenset)):
+    if isinstance(value, (tuple, list)):
         return all(_is_concrete_backend_option_value(item) for item in value)
     if isinstance(value, dict):
         return all(
@@ -113,7 +130,7 @@ def _is_concrete_backend_option_value(value: Any) -> bool:
 
 def try_filter_backend_options_for_target(target, options, kernel_arg_names=()):
     parsed_options = get_backend_options_for_target(target)
-    kernel_arg_names = OrderedSet(kernel_arg_names)
+    kernel_arg_names = tuple(kernel_arg_names)
     filtered_options = {
         name: value for name, value in options.items() if name in parsed_options
     }

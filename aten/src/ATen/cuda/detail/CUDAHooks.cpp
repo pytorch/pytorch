@@ -485,7 +485,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - Magma " << MAGMA_VERSION_MAJOR << '.' << MAGMA_VERSION_MINOR << '.' << MAGMA_VERSION_MICRO << '\n';
 #endif
 
-  return std::move(oss).str();
+  return oss.str();
 }
 
 double CUDAHooks::batchnormMinEpsilonCuDNN() const {
@@ -554,7 +554,10 @@ const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
     "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 70000
-    "gfx950"
+    "gfx950",
+#endif
+#if ROCM_VERSION >= 71300
+    "gfx1100", "gfx1101", "gfx1151"
 #endif
   };
   return archs;

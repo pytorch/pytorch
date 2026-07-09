@@ -1929,6 +1929,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         u0_sym = shape_env.create_unbacked_symint()
         u0 = u0_sym.node._expr
         shape_env._set_replacement(u0, s0, "test")
+        u1_sym = shape_env.create_unbacked_symint()
+        u1 = u1_sym.node._expr
+        shape_env._rename_unbacked_to(u0, u1)
         derived_sym = shape_env.create_symintnode(u0 + 1, hint=None)
 
         graph = torch.fx.Graph()
@@ -1961,11 +1964,11 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self.assertEqual(
             [lowering.graph_inputs[name] for name in lowering.graph_input_names],
-            [u0, u0 + 1],
+            [u1, u1 + 1],
         )
         self.assertEqual(
             [
-                lowering.graph_inputs[name].xreplace({u0: s0})
+                lowering.graph_inputs[name].xreplace({u1: s0})
                 for name in lowering.graph_input_names
             ],
             [s0, s0 + 1],

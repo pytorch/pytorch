@@ -28,14 +28,9 @@ from torch._functorch._aot_autograd.descriptors import (
     SavedForBackwardsNoVcCheckAOTOutput,
 )
 from torch._higher_order_ops.associative_scan import associative_scan_op
-from torch._higher_order_ops.flex_gemm import (
-    _SUPPORTED_FLEX_GEMM_OP_NAMES,
-    flex_gemm_hop,
-    FLEX_GEMM_OP_INPUT_INDICES,
-)
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
@@ -294,8 +289,8 @@ def decode_dtype(dtype: int | torch.dtype) -> torch.dtype:
     return dtype
 
 
-def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
-    if isinstance(x, TensorBox):
+def is_integer_type(x: Any) -> TypeGuard[TensorBox | IRNode | sympy.Expr | int]:
+    if isinstance(x, (TensorBox, IRNode)):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
         return x.is_integer is True  # type: ignore[attr-defined]
@@ -303,8 +298,8 @@ def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
         return isinstance(x, int)
 
 
-def is_boolean_type(x: Any) -> TypeGuard[TensorBox | bool]:
-    if isinstance(x, TensorBox):
+def is_boolean_type(x: Any) -> TypeGuard[TensorBox | IRNode | bool]:
+    if isinstance(x, (TensorBox, IRNode)):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
@@ -589,7 +584,19 @@ def promote_constants(
     override_return_dtype: torch.dtype | None = None,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
     round_scalar_constants: bool = False,
+    round_scalars_to_tensor_dtype: bool = False,
 ) -> Sequence[_T | BaseView | BaseConstant]:
+    """Convert raw Python scalars and sympy expressions in inputs to IR constants.
+
+    When a tensor input is present, scalars become Constants of the tensor's
+    dtype, broadcast to its size. For bf16/fp16 tensors, the scalar value is
+    additionally rounded to the tensor dtype to match eager kernels that cast
+    scalar operands to the common dtype: always for comparison ops
+    (override_return_dtype == torch.bool) and for callers passing
+    round_scalar_constants (e.g. remainder); on CPU and MPS only for ops
+    passing round_scalars_to_tensor_dtype (e.g. add/sub, whose CUDA eager
+    kernels keep scalars at opmath precision).
+    """
     if not (override_return_dtype is None or type_promotion_kind is None):
         raise AssertionError(
             "only one of override_return_dtype or type_promotion_kind may be given"
@@ -619,12 +626,17 @@ def promote_constants(
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
 
-    # Round scalar to tensor's dtype to match eager
-    if (
-        override_return_dtype == torch.bool or round_scalar_constants
-    ) and tensor_dtype in (
+    # Round scalars to the tensor's dtype where eager does; see docstring.
+    if tensor_dtype in (
         torch.bfloat16,
         torch.float16,
+    ) and (
+        override_return_dtype == torch.bool
+        or round_scalar_constants
+        or (
+            round_scalars_to_tensor_dtype
+            and ex.get_device_or_error().type in ("cpu", "mps")
+        )
     ):
         _round_scalar = lambda v: torch.tensor(v, dtype=tensor_dtype).item()  # noqa: E731
     else:
@@ -724,6 +736,7 @@ def make_pointwise(
     allow_alpha: bool = False,
     use_fma_for_alpha: bool = False,
     triton_fallback: Callable[..., _T] | None = None,
+    round_scalars_to_tensor_dtype: bool = False,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
@@ -737,7 +750,11 @@ def make_pointwise(
             return triton_fallback(*inputs)
 
         # pyrefly: ignore [bad-assignment]
-        inputs = promote_constants(inputs, override_return_dtype)
+        inputs = promote_constants(
+            inputs,
+            override_return_dtype,
+            round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
+        )
         if allow_alpha:
             if alpha is not None and alpha != 1:
                 # Use FMA for add-with-alpha on CUDA floating-point.
@@ -1026,6 +1043,8 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
             )(x, dtype)
     src_dtype = x.get_dtype()
     low_pr_fp = (torch.bfloat16, torch.float16)
+    # In precision-emulation mode, explicit lowp casts must materialize the
+    # storage dtype. Later pointwise barriers will widen from that rounded value.
     use_compute_types = not (
         config.emulate_precision_casts
         and (src_dtype in low_pr_fp or dtype in low_pr_fp)
@@ -1089,6 +1108,7 @@ def register_pointwise(
     allow_alpha=False,
     use_fma_for_alpha=False,
     triton_fallback=None,
+    round_scalars_to_tensor_dtype=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -1108,6 +1128,7 @@ def register_pointwise(
         allow_alpha=allow_alpha,
         use_fma_for_alpha=use_fma_for_alpha,
         triton_fallback=triton_fallback,
+        round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
     )
     fn = register_lowering(
         aten_fn,
@@ -1359,7 +1380,12 @@ def trunc(x):
 
 
 @register_lowering(aten.expand, type_promotion_kind=None)
-def expand(x, sizes):
+def expand(x, sizes, *, implicit=False):
+    # `implicit` is autograd-internal metadata (see aten::expand schema); it
+    # does not affect the produced tensor, so the lowering ignores it. Without
+    # this kwarg the lowering rejects graphs produced by dynamo autograd where
+    # aten.expand.default is emitted with implicit=False.
+    del implicit
     (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -2954,6 +2980,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.normal, override_decomp=True)
 make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
@@ -2961,6 +2988,8 @@ make_fallback(torch.ops.streams.record_event.default)
 make_fallback(torch.ops.streams.wait_event.default)
 make_fallback(torch.ops.streams.synchronize_event.default)
 make_fallback(torch.ops.streams.synchronize_device.default)
+make_fallback(torch.ops.streams.synchronize_stream.default)
+make_fallback(torch.ops.streams.wait_stream.default)
 
 
 @register_lowering(aten.rand)
@@ -3358,7 +3387,7 @@ def require_channels_last(_, *args, **kwargs):
 def constrain_to_fake_tensor(arg, fake_arg):
     if fake_arg is None:
         return arg
-    if isinstance(fake_arg, FakeScriptObject) or is_opaque_value(fake_arg):
+    if isinstance(fake_arg, FakeScriptObject) or is_custom_class_obj(fake_arg):
         return arg
     if isinstance(arg, ir.IRNode):
         return ir.ExternKernel.require_exact_strides(arg, fake_arg.stride())
@@ -3699,6 +3728,8 @@ make_fallback(aten.linalg_lu)
 make_fallback(aten.linalg_lu_factor_ex)
 make_fallback(aten.linalg_lu_solve)
 make_fallback(aten.linalg_matrix_exp)
+make_fallback(aten.linalg_matrix_sqrth)
+make_fallback(aten.linalg_polar)
 make_fallback(aten.linalg_qr)
 make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
@@ -3757,6 +3788,44 @@ make_fallback(aten._efficientzerotensor)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
+
+
+@register_lowering(aten._to_dense.default, type_promotion_kind=None)
+def _to_dense(x, dtype=None, masked_grad=None):
+    x = ir.ExternKernel.realize_input(x)
+    size = x.get_size()
+    device = x.get_device()
+    if device is None:
+        raise AssertionError("realized _to_dense input must have a device")
+    output_dtype = dtype if dtype is not None else x.get_dtype()
+
+    def unflatten_args(tensor_args, non_tensor_args):
+        return [tensor_args[0], *non_tensor_args], {}
+
+    # cpp_wrapper has no direct AOTI C shim for _to_dense, so route through the
+    # proxy-executor fallback while still describing the single dense output.
+    # MultiOutput lets this single-output op force a contiguous strided output
+    # layout instead of inheriting anything from the opaque MKLDNN input.
+    packed = ir.FallbackKernel(
+        ir.MultiOutputLayout(device=device),
+        aten._to_dense.default,
+        [x],
+        [dtype, masked_grad],
+        unflatten_args,
+    )
+    out = ir.MultiOutput(
+        ir.FixedLayout(
+            device,
+            output_dtype,
+            size,
+            ir.FlexibleLayout.contiguous_strides(size),
+        ),
+        packed,
+        [],
+    )
+    packed.outputs = [out]
+    return TensorBox.create(out)
+
 
 # 6) Pattern-matched
 make_fallback(
@@ -4791,7 +4860,13 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    if accumulate and needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
+    device = self.get_device()
+    if (
+        accumulate
+        and device is not None
+        and is_gpu(device.type)
+        and needs_fallback_due_to_atomic_add_limitations(self.get_dtype())
+    ):
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])
@@ -4803,7 +4878,6 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     values = to_dtype(values, self.get_dtype())
 
     try:
-        # Note that code will only get here when dtype is uint32
         indices, tensor_indices = check_and_broadcast_indices(
             indices, self.get_device()
         )
@@ -7874,6 +7948,7 @@ add = register_pointwise(
     allow_alpha=True,
     use_fma_for_alpha=True,
     override_fn_when_input_bool="logical_or",
+    round_scalars_to_tensor_dtype=True,
 )
 
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
@@ -8152,7 +8227,7 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub, allow_alpha=True)
+sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
 
 
 @register_lowering(aten.addcmul, broadcast=True)
@@ -8681,6 +8756,13 @@ def set__source_tensor(self, source_tensor):
     return TensorBox.create(ir.SetSourceTensorKernel(self, source_tensor))
 
 
+@register_lowering(torch.ops.aten.shallow_copy_data_.default)
+def shallow_copy_data_(self, source_tensor):
+    self.realize()
+    source_tensor.realize()
+    return TensorBox.create(ir.ShallowCopyDataKernel(self, source_tensor))
+
+
 if hasattr(torch.ops.fsdp, "copy_"):
 
     @register_lowering(torch.ops.fsdp.copy_.default)
@@ -8777,7 +8859,7 @@ def triton_kernel_wrap_(
     grid,
     tma_descriptor_metadata,
     kwargs,
-    launch_kwargs,
+    launch_kwargs=None,
 ):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
@@ -8787,7 +8869,7 @@ def triton_kernel_wrap_(
         grid=grid,
         tma_descriptor_metadata=tma_descriptor_metadata,
         kernel_args={**kwargs, **constant_args},
-        launch_kwargs=launch_kwargs,
+        launch_kwargs=() if launch_kwargs is None else launch_kwargs,
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
@@ -8880,93 +8962,6 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
     return output
 
 
-@register_lowering(flex_gemm_hop, type_promotion_kind=None)
-def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
-    """Lower FlexGEMM to the regular subgraph path or the QUACK template."""
-    if kernel_options.get("backend", "TRITON") != "QUACK":
-        return process_subgraph_nodes(subgraph.graph_module, list(args))
-    if gemm_op not in FLEX_GEMM_OP_INPUT_INDICES:
-        raise NotImplementedError(
-            f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
-        )
-    tuned = kernel_options.get("tuned", False)
-    if tuned:
-        raise NotImplementedError(
-            "FlexGEMM generated epilogues do not support tuned=True yet"
-        )
-    unsupported_options = OrderedSet(kernel_options) - OrderedSet(["backend", "tuned"])
-    if unsupported_options:
-        raise NotImplementedError(
-            f"unsupported FlexGEMM kernel options: {sorted(unsupported_options)}"
-        )
-
-    from torch._inductor.kernel.flex_gemm.epilogue import (
-        gemm_node as flex_gemm_node,
-        materialize_flex_gemm_epilogue,
-        output_node as flex_gemm_output_node,
-    )
-    from torch._inductor.kernel.flex_gemm.template import flex_gemm_epilogue_template
-    from torch._inductor.select_algorithm import autotune_select_algorithm
-
-    mat1_index, _ = FLEX_GEMM_OP_INPUT_INDICES[gemm_op]
-    unsupported_gemm_kwargs = OrderedSet(gemm_kwargs) - OrderedSet(["alpha", "beta"])
-    if unsupported_gemm_kwargs:
-        raise NotImplementedError(
-            f"unsupported FlexGEMM GEMM kwargs: {sorted(unsupported_gemm_kwargs)}"
-        )
-    gemm_fx_node = flex_gemm_node(subgraph.graph_module, gemm_op)
-    placeholders = [
-        node for node in subgraph.graph_module.graph.nodes if node.op == "placeholder"
-    ]
-    placeholder_args = dict(zip(placeholders, args, strict=True))
-    gemm_args: list[TensorBox] = []
-    for arg in gemm_fx_node.args:
-        gemm_arg = placeholder_args[arg] if isinstance(arg, torch.fx.Node) else arg
-        if not isinstance(gemm_arg, TensorBox):
-            raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
-        gemm_args.append(gemm_arg)
-    alpha = gemm_fx_node.kwargs.get("alpha", gemm_kwargs.get("alpha", 1.0))
-    beta = gemm_fx_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
-    if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
-        raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
-    output_meta = flex_gemm_output_node(subgraph.graph_module).meta.get("val")
-    if output_meta is None:
-        raise NotImplementedError(
-            "FlexGEMM generated epilogues require output metadata"
-        )
-    layout = ir.FixedLayout(
-        gemm_args[mat1_index].get_device_or_error(),
-        output_meta.dtype,
-        ir.convert_shape_to_inductor(output_meta.shape),
-        ir.convert_shape_to_inductor(output_meta.stride()),
-    )
-    epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
-        subgraph.graph_module, gemm_op
-    )
-    input_nodes = [ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args]
-    choices: list[Any] = []
-    error = flex_gemm_epilogue_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=layout,
-        config=ir.FlexGemmEpilogueConfig(
-            epilogue_name=epilogue_name,
-            epilogue_source=epilogue_source,
-            gemm_op=gemm_op.name().removeprefix("aten::"),
-            alpha=float(alpha),
-            beta=float(beta),
-            tuned=tuned,
-            out_dtype=output_meta.dtype,
-        ),
-    )
-    if error is not None:
-        raise error
-    result, _ = autotune_select_algorithm(
-        "flex_gemm_epilogue", choices, input_nodes, layout
-    )
-    return (result,)
-
-
 # Import the control_deps_op HOP for lowering
 from torch._inductor.fx_passes.control_dependencies import control_deps
 
@@ -8988,7 +8983,7 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     if not (isinstance(original_dep_nodes, tuple)):
         raise AssertionError("expected: isinstance(original_dep_nodes, tuple)")
 
-    dep_names = []
+    dep_names: list[str] = []
     for dep, orig_node in zip(additional_deps, original_dep_nodes, strict=True):
         dep_ir_nodes = [
             dep_leaf
@@ -9051,53 +9046,39 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     # b = control_deps(a, mm, ...)
     # c = control_deps(b, wait, ...)
     # if c == a, then you have a cycle.
-    for op in new_ops:
+    subgraph_ops = V.graph.operations[operation_len:]
+    for op in subgraph_ops:
         for dep_name in dep_names:
             op_name = op.operation_name
             if op_name is None:
                 raise AssertionError("expected: op_name is not None")
             V.graph.additional_buffer_deps[op_name].add(dep_name)
 
-    # For void ops (e.g. wait_stream) that don't produce tensor outputs,
-    # passthrough args returned by control_deps are the same IR nodes as
-    # their inputs. This means downstream consumers have no scheduling
-    # dependency on the void op. Create MutationOutput entries to force
-    # the scheduler to order subsequent readers after the void op.
-    # Only apply this for wait_stream, which needs forward ordering on the
-    # waiting stream. Other sync ops (synchronize_stream, record_event) are
-    # full barriers or have event-based cross-sync tracking.
-    void_ops = [
-        op
-        for op in new_ops
-        if isinstance(op, ir.Buffer)
-        and op.name is not None
-        and isinstance(op.layout, ir.NoneLayout)
-        and not isinstance(op, ir.MutationOutput)
-    ]
-    if void_ops and args:
-        # Check if the subgraph contains a wait_stream call
-        has_wait_stream = any(
-            n.op == "call_function"
-            and n.target is torch.ops.streams.wait_stream.default
-            for n in subgraph_fn.graph_module.graph.nodes
-        )
-        if has_wait_stream:
-            for void_op in void_ops:
-                if not isinstance(void_op, ir.ExternKernel):
-                    raise AssertionError(
-                        f"expected void_op to be ir.ExternKernel, got {type(void_op)}"
-                    )
-                for arg in args:
-                    for arg_leaf in pytree.tree_leaves(arg):
-                        if not isinstance(arg_leaf, IRNode):
-                            continue
-                        device = arg_leaf.get_device()
-                        if device is None:
-                            continue
-                        mut_out = ir.MutationOutput(
-                            ir.NoneLayout(device=device), arg_leaf, void_op
-                        )
-                        void_op.mutation_outputs.append(mut_out)
+    # Pass-through versioning: inputs that are also outputs get an
+    # OrderingOutput so future readers are ordered after all subgraph ops.
+    # TODO: if control_deps ever wraps ops that truly mutate a pass-through
+    # (not just ordering), this needs MutationOutput instead of OrderingOutput.
+    input_names = OrderedSet()
+    for a in args:
+        if isinstance(a, IRNode):
+            a.realize()
+            input_names.add(a.get_name())
+    output_leaves = list(pytree.tree_leaves(output)) if output is not None else []
+    passthrough_vals = []
+    for v in output_leaves:
+        if isinstance(v, IRNode):
+            v.realize()
+            if v.get_name() in input_names:
+                passthrough_vals.append(v)
+    for val in passthrough_vals:
+        barrier = ir.OrderingBarrier(val)
+        barrier_op = barrier.get_operation_name()
+        for op in subgraph_ops:
+            op_name = op.operation_name
+            if op_name is not None:
+                buf_name = op.get_buffer_name()
+                if buf_name is not None:
+                    V.graph.additional_buffer_deps[barrier_op].add(buf_name)
 
     return output
 
@@ -9135,6 +9116,21 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
+
+    # combine_mode="pointwise" codegen requires a backend with scan support
+    # (e.g. Triton on CUDA/XPU). The eager wrapper no longer enforces a device
+    # requirement, so check every leaf here -- before lower_pointwise_subgraph
+    # runs -- to raise a clear device-specific error. ir.Scan.create re-checks
+    # the same feature on xs[0] below and otherwise fails with a generic "Unable
+    # to generate code" error. See https://github.com/pytorch/pytorch/issues/186594.
+    for x in xs:
+        device = x.get_device()
+        if not V.graph.has_feature(device, BackendFeature.SCAN):
+            device_str = device.type if device is not None else "unknown device"
+            raise RuntimeError(
+                "associative_scan with combine_mode='pointwise' is not supported "
+                f"on {device_str}. Try to use combine_mode='generic'."
+            )
 
     num_scan_inputs = 2 * len(xs)
     placeholders = [
@@ -9415,19 +9411,16 @@ from . import kernel
 
 import_submodule(kernel)
 
-from . import quantized_lowerings
-
-
-quantized_lowerings.register_quantized_ops()
-quantized_lowerings.register_woq_mm_ops()
-
 from . import (
     jagged_lowerings,
     mkldnn_lowerings,  # noqa: F401  # registers oneDNN fusion ops on import
+    quantized_lowerings,
 )
 
 
 jagged_lowerings.register_jagged_ops()
+quantized_lowerings.register_quantized_ops()
+quantized_lowerings.register_woq_mm_ops()
 
 
 @contextlib.contextmanager

@@ -218,14 +218,14 @@ void initPythonTracerBindings(PyObject* module) {
           [](const TracingState& s) {
             std::ostringstream ss;
             ss << "<TracingState " << (const void*)&s << '>';
-            return std::move(ss).str();
+            return ss.str();
           })
       .def(
           "__str__",
           [](const TracingState& s) -> std::string {
             std::ostringstream ss;
             ss << *s.graph;
-            return std::move(ss).str();
+            return ss.str();
           })
       .def(
           "push_scope",

@@ -168,7 +168,7 @@ std::string stacksToStr(
 #endif
         return s;
       });
-  auto rc = std::move(oss).str();
+  auto rc = oss.str();
   return "\"" + rc + "\"";
 }
 
@@ -300,7 +300,7 @@ std::string strListToStr(const std::vector<std::string>& types) {
         types.end(),
         std::ostream_iterator<std::string>(oss, ", "),
         [](const std::string& s) -> std::string { return "\"" + s + "\""; });
-    auto rc = std::move(oss).str();
+    auto rc = oss.str();
     rc.erase(rc.length() - 2); // remove last ", "
     return "[" + rc + "]";
   }

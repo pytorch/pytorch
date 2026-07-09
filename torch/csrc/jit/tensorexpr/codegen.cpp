@@ -52,7 +52,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
       index++;
     }
     oss << ']';
-    throw std::runtime_error(std::move(oss).str());
+    throw std::runtime_error(oss.str());
   }
   return iter->second;
 }

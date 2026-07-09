@@ -26,9 +26,9 @@ from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
-    is_opaque_reference_type,
-    is_opaque_type,
-    is_opaque_value_type,
+    is_custom_class,
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
 )
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
@@ -552,6 +552,7 @@ class GraphLowering(torch.fx.Interpreter):
         ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
+        self.kernel_free_cudagraph: bool = False
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -949,7 +950,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
         """
-        The rule to decide if an node prefer channels last is simple.
+        The rule to decide if a node prefers channels last is simple.
         1. if it's input/output of a convolution
         2. if one of its user prefers channels last
 
@@ -1306,7 +1307,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return gen
-        elif is_opaque_reference_type(type(example)):
+        elif is_opaque_symbolic_type(type(example)):
             opaque_obj = ir.OpaqueObjectState(name=target, value=example)
             self.graph_inputs[target] = opaque_obj  # type: ignore[assignment]
             self.graph_input_names.append(target)
@@ -1574,7 +1575,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
-        elif is_opaque_type(type(value)):
+        elif is_custom_class(type(value)):
             self.torchbind_constants[target] = value  # type: ignore[arg-type]
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)  # type: ignore[arg-type]
@@ -1628,7 +1629,9 @@ class GraphLowering(torch.fx.Interpreter):
         if not isinstance(result, (tuple, list)):
             raise AssertionError(f"Expected tuple or list, got {type(result)}")
         result = [
-            ir.OpaqueValueTypeConstant(value=x) if is_opaque_value_type(type(x)) else x
+            ir.OpaqueValueTypeConstant(value=x)
+            if is_opaque_constant_type(type(x))
+            else x
             for x in result
         ]
         _allowed_output_types = (

@@ -410,17 +410,17 @@ def register_graphsafe_rng_dispatch(dispatch_key: "DispatchKey") -> None:
 register_graphsafe_rng_dispatch(DispatchKey.CUDA)
 
 
-# Late-bind OpaqueBaseMeta as Generator's metaclass. This is done here
+# Late-bind CustomClassBaseMeta as Generator's metaclass. This is done here
 # rather than in THPGenerator_init (C++) to avoid making torch._C depend
-# on torch._opaque_base at init time.
-from torch._opaque_base import OpaqueBaseMeta
+# on torch._custom_class_base at init time.
+from torch._custom_class_base import CustomClassBaseMeta
 
 
-torch._C._set_generator_metaclass(OpaqueBaseMeta)
+torch._C._set_generator_metaclass(CustomClassBaseMeta)
 
-torch._library.opaque_object.register_opaque_type(
+torch._library.opaque_object.register_custom_class(
     torch._C.Generator,
-    typ="reference",
+    typ="symbolic",
     guard_fn=lambda gen: [gen.device],
     members={
         "device": torch._library.opaque_object.MemberType.USE_REAL,

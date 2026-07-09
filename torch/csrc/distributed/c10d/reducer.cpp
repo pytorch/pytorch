@@ -638,7 +638,7 @@ void Reducer::delay_all_reduce() {
     if (!unused_parameters_.empty()) {
       LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
                 << "Parameter(s) (in the format of {param_name, index}): "
-                << std::move(unused_params_stream).str()
+                << unused_params_stream.str()
                 << " is(are) unused during first iteration. Since"
                 << " static_graph=True is enabled for DDP, we expect"
                 << " this set of unused parameters to remain consistent"

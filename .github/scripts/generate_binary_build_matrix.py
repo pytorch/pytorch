@@ -66,7 +66,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "13.2": (
@@ -74,7 +74,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
@@ -512,6 +512,7 @@ def generate_libtorch_extraction_configs(
     uses to add an extraction job that depends on that wheel's build job.
     """
     preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+    arch = "arm64" if os == "windows-arm64" else "x86_64"
 
     # Group wheel configs by (gpu_arch_type, gpu_arch_version)
     arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
@@ -528,7 +529,10 @@ def generate_libtorch_extraction_configs(
 
         desired_cuda = source_config["desired_cuda"]
         libtorch_variant = "shared-with-deps"
-        build_name = f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
+        # Include arch in the build name so windows x86_64 and arm64 libtorch
+        # packages don't share a name and overwrite each other on upload.
+        arch_tag = f"{arch}-" if os == "windows-arm64" else ""
+        build_name = f"libtorch-{arch_tag}{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
             ".", "_"
         )
 
@@ -542,6 +546,7 @@ def generate_libtorch_extraction_configs(
                 "desired_cuda": desired_cuda,
                 "gpu_arch_type": gpu_arch_type,
                 "gpu_arch_version": gpu_arch_version,
+                "arch": arch,
             }
         )
 

@@ -34,6 +34,7 @@ from .common import (
     freeze_irnodes,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
+    is_tensor_ir_node,
     load_flex_template,
     maybe_realize,
     realize_captures_for_cutedsl,
@@ -47,14 +48,14 @@ from .flex_flash_attention import (
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
-    has_unsupported_captured_scalars,
+    has_unsupported_cpu_scalar_tensor_captures,
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
 
 
 if TYPE_CHECKING:
-    from ...template_heuristics.triton import FlexBwDConfig, FlexConfig
+    from ...heuristics.template.triton import FlexBwDConfig, FlexConfig
 
 
 log = logging.getLogger(__name__)
@@ -94,6 +95,24 @@ def raise_flex_kernel_options_error(
         f"mode='max-autotune-no-cudagraphs' can also fix this by trying more "
         f"FlexAttention configs."
     )
+
+
+def _check_flash_supported_scalar_captures(
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+    *,
+    backward: bool = False,
+) -> None:
+    if has_unsupported_cpu_scalar_tensor_captures(
+        score_mod_other_buffers, mask_mod_other_buffers
+    ):
+        direction = " backward" if backward else ""
+        raise RuntimeError(
+            f"BACKEND='FLASH' but flash attention{direction} cannot be used: "
+            "NYI: score_mod or mask_mod captures a 0-dim CPU tensor scalar. "
+            "Workarounds: use BACKEND='TRITON' or pass the value as a tensor "
+            "on device instead of capturing a CPU scalar tensor."
+        )
 
 
 @SymbolicGridFn
@@ -208,19 +227,12 @@ def flex_attention(
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
 
-    # Early check for FLASH backend: detect unsupported captured scalars before
-    # building subgraph buffers (which can trigger unbacked_bindings errors)
+    # Early check for FLASH backend: reject scalar captures that cannot be
+    # represented by flash-attn aux_scalars before building subgraph buffers.
     if backend == "FLASH":
-        if has_unsupported_captured_scalars(
+        _check_flash_supported_scalar_captures(
             score_mod_other_buffers, mask_mod_other_buffers
-        ):
-            raise RuntimeError(
-                "BACKEND='FLASH' but flash attention cannot be used: "
-                "NYI: score_mod or mask_mod captures a dynamic scalar (SymInt/SymFloat). "
-                "The FLASH backend cannot inline symbolic values into the CuteDSL template. "
-                "Workarounds: use BACKEND='TRITON', compile with dynamic=False, or pass the "
-                "value as a tensor on device instead of capturing a Python scalar."
-            )
+        )
 
     if backend == "FLASH":
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
@@ -424,7 +436,7 @@ def flex_attention(
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
-        head_dim, dtype, query.get_device().type
+        head_dim, seq_len_q, dtype, query.get_device().type
     )
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
@@ -520,6 +532,29 @@ def flex_attention(
         if error is not None and len(configs) == 1:
             raise error
 
+    # Let the active choices handler append any backend-specific flex-attention
+    # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
+    choices = V.choices.append_flex_attention_choices(
+        choices,
+        configs,
+        [
+            query,
+            key,
+            value,
+            logsumexp,
+            max_scores,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ],
+        [subgraph_buffer, mask_graph_buffer],
+        layout,
+        original_kernel_options,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+    )
+
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
             "forward",
@@ -554,9 +589,9 @@ def flex_attention(
     out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
-        # Need to filter out symbols since there is an invariant
-        # that all input_nodes are of type IRNode
-        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
+        # Autotuning materializes benchmark tensors. Scalar shape captures stay
+        # in subgraph_inps below for dependency tracking and codegen.
+        [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
         layout,
         input_gen_fns=input_gen_fns,
     )
@@ -776,6 +811,9 @@ def flex_attention_backward(*args, **kwargs):
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
     if backend == "FLASH":
+        _check_flash_supported_scalar_captures(
+            score_mod_other_buffers, mask_mod_other_buffers, backward=True
+        )
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
         mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
 
@@ -893,6 +931,7 @@ def flex_attention_backward(*args, **kwargs):
             else joint_outputs.grad_input,
             score_mod_other_buffers=list(score_mod_other_buffers),
             mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
+            mask_mod_other_buffers=list(mask_mod_other_buffers),
             q_num_blocks=q_num_blocks if needs_block_mask else None,
             q_indices=q_indices if needs_block_mask else None,
             full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,
@@ -1092,6 +1131,9 @@ def flex_attention_backward(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE,
         )
 
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
     inputs_for_autotuning = (
         [
             query,
@@ -1129,7 +1171,9 @@ def flex_attention_backward(*args, **kwargs):
     broadcasted_grad_key, _ = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
-        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
+        # Autotuning materializes benchmark tensors. Scalar shape captures stay
+        # in subgraph_inps below for dependency tracking and codegen.
+        [x for x in inputs_for_autotuning if is_tensor_ir_node(x)],
         layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]

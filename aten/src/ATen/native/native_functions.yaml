@@ -2023,6 +2023,7 @@
   dispatch:
     CPU: ctc_loss_cpu
     CUDA: ctc_loss_gpu
+    MPS: ctc_loss_mps
     Meta: ctc_loss_meta
     XPU: ctc_loss_xpu
   autogen: _ctc_loss.out
@@ -2030,7 +2031,7 @@
 
 - func: _ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   dispatch:
-    CPU, CUDA, XPU: ctc_loss_tensor
+    CPU, CUDA, XPU, MPS: ctc_loss_tensor
   autogen: _ctc_loss.Tensor_out
   tags: dynamic_output_shape  # the shape of second output is data dependent
 
@@ -2039,11 +2040,12 @@
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
     XPU: ctc_loss_backward_xpu
+    MPS: ctc_loss_backward_mps
   autogen: _ctc_loss_backward.out
 
 - func: _ctc_loss_backward.Tensor(Tensor grad, Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
-    CPU, CUDA, XPU: ctc_loss_backward_tensor
+    CPU, CUDA, XPU, MPS: ctc_loss_backward_tensor
 
 - func: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   variants: function, method
@@ -3458,43 +3460,43 @@
   dispatch:
     CompositeExplicitAutograd: ldexp_out
 
-- func: linspace(Scalar start, Scalar end, SymInt steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.Tensor_Tensor(Tensor start, Tensor end, SymInt steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace.Tensor_Tensor(Tensor start, Tensor end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.Tensor_Scalar(Tensor start, Scalar end, SymInt steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace.Tensor_Scalar(Tensor start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.Scalar_Tensor(Scalar start, Tensor end, SymInt steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace.Scalar_Tensor(Scalar start, Tensor end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.out(Scalar start, Scalar end, SymInt steps, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.out(Scalar start, Scalar end, int steps, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: linspace_out
     CUDA: linspace_cuda_out
     MPS: linspace_out_mps
     XPU: linspace_xpu_out
 
-- func: linspace.Tensor_Tensor_out(Tensor start, Tensor end, SymInt steps, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.Tensor_Tensor_out(Tensor start, Tensor end, int steps, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace_out
 
-- func: linspace.Tensor_Scalar_out(Tensor start, Scalar end, SymInt steps, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.Tensor_Scalar_out(Tensor start, Scalar end, int steps, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace_out
 
-- func: linspace.Scalar_Tensor_out(Scalar start, Tensor end, SymInt steps, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.Scalar_Tensor_out(Scalar start, Tensor end, int steps, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: linspace_out
@@ -3668,42 +3670,42 @@
     CompositeExplicitAutograd: xlogy_out
   tags: pointwise
 
-- func: logspace(Scalar start, Scalar end, SymInt steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: logspace
 
-- func: logspace.Tensor_Tensor(Tensor start, Tensor end, SymInt steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace.Tensor_Tensor(Tensor start, Tensor end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace
 
-- func: logspace.Tensor_Scalar(Tensor start, Scalar end, SymInt steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace.Tensor_Scalar(Tensor start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace
 
-- func: logspace.Scalar_Tensor(Scalar start, Tensor end, SymInt steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace.Scalar_Tensor(Scalar start, Tensor end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace
 
-- func: logspace.out(Scalar start, Scalar end, SymInt steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace.out(Scalar start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: logspace_out
     CUDA: logspace_cuda_out
     XPU: logspace_xpu_out
 
-- func: logspace.Tensor_Tensor_out(Tensor start, Tensor end, SymInt steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace.Tensor_Tensor_out(Tensor start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace_out
 
-- func: logspace.Tensor_Scalar_out(Tensor start, Scalar end, SymInt steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace.Tensor_Scalar_out(Tensor start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace_out
 
-- func: logspace.Scalar_Tensor_out(Scalar start, Tensor end, SymInt steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace.Scalar_Tensor_out(Scalar start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   category_override: factory
   dispatch:
     CompositeExplicitAutograd: logspace_out
@@ -4499,6 +4501,7 @@
 - func: ones(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: ones
+    Meta: ones_meta_symint
 
 - func: ones.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5332,14 +5335,12 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mish_out
-    MPS: mish_out_mps
+    CPU, CUDA, MPS, XPU: mish_out
 
 - func: mish_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mish_backward
-    MPS: mish_backward_mps
+    CPU, CUDA, MPS, XPU: mish_backward
     CompositeImplicitAutograd: math_mish_backward
 
 - func: sigmoid(Tensor self) -> Tensor
@@ -5762,6 +5763,7 @@
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
     CompositeExplicitAutograd: stack
+    Meta: stack_meta
 
 - func: stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6664,6 +6666,7 @@
     CPU: _s_binomial_cpu
     CUDA: _s_binomial_cuda
     XPU: _s_binomial_xpu
+    MPS: _s_binomial_mps
   tags: nondeterministic_seeded
   autogen: binomial.out
 
@@ -13023,6 +13026,7 @@
     CPU: _upsample_bilinear2d_aa_backward_out_cpu
     CUDA: _upsample_bilinear2d_aa_backward_out_cuda
     XPU: _upsample_bilinear2d_aa_backward_out_xpu
+    MPS: _upsample_bilinear2d_aa_backward_out_mps
 
 - func: _upsample_bilinear2d_aa_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -13074,6 +13078,7 @@
     CPU: _upsample_bicubic2d_aa_backward_out_cpu
     CUDA: _upsample_bicubic2d_aa_backward_out_cuda
     XPU: _upsample_bicubic2d_aa_backward_out_xpu
+    MPS: _upsample_bicubic2d_aa_backward_out_mps
 
 - func: _upsample_bicubic2d_aa_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -14304,7 +14309,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA, XPU: linalg_lu_solve_out
+    CPU, CUDA, XPU, MPS: linalg_lu_solve_out
 
 # linalg.det
 - func: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
@@ -14369,7 +14374,7 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA: linalg_lstsq_out
+    CPU, CUDA, MPS: linalg_lstsq_out
   tags: dynamic_output_shape
 
 # torch.linalg.matmul, alias for torch.matmul
@@ -14393,6 +14398,13 @@
   dispatch:
     CPU, CUDA: linalg_matrix_exp
   autogen: linalg_matrix_exp.out
+
+- func: linalg_matrix_sqrth(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_matrix_sqrth
+  autogen: linalg_matrix_sqrth.out
 
 - func: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
   structured_delegate: _linalg_slogdet.sign
@@ -14449,7 +14461,7 @@
 - func: _linalg_eigh.eigenvalues(Tensor A, str UPLO="L", bool compute_v=True, *, Tensor(a!) eigenvalues, Tensor(b!) eigenvectors) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   structured: True
   dispatch:
-    CPU, CUDA: _linalg_eigh_out
+    CPU, CUDA, MPS: _linalg_eigh_out
 
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
@@ -14573,7 +14585,7 @@
 - func: _linalg_svd.U(Tensor A, bool full_matrices=False, bool compute_uv=True, *, str? driver=None, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh)
   structured: True
   dispatch:
-    CPU, CUDA: _linalg_svd_out
+    CPU, CUDA, MPS: _linalg_svd_out
 
 - func: linalg_svd(Tensor A, bool full_matrices=True, *, str? driver=None) -> (Tensor U, Tensor S, Tensor Vh)
   python_module: linalg
@@ -14700,6 +14712,17 @@
   dispatch:
     CPU, CUDA: linalg_qr_out
     MPS: linalg_qr_out_mps
+
+- func: linalg_polar(Tensor A) -> (Tensor U, Tensor H)
+  python_module: linalg
+  variants: function
+  structured_delegate: linalg_polar.out
+
+- func: linalg_polar.out(Tensor A, *, Tensor(a!) U, Tensor(b!) H) -> (Tensor(a!) U, Tensor(b!) H)
+  python_module: linalg
+  structured: True
+  dispatch:
+    CPU, CUDA: linalg_polar_out
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg
