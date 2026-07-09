@@ -10,7 +10,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import sympy
 
@@ -662,40 +662,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
 
-        def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
-            # Deferred runtime asserts and graph input metadata can reference
-            # either side of a backed-symbol replacement. Emit aliases so both
-            # the pre-replacement and canonical names are defined.
-            def is_backed_symbol(s: sympy.Symbol) -> bool:
-                return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
-
-            def decl_type(s: sympy.Symbol) -> str:
-                if s.is_integer:
-                    return "int64_t"
-                if s.is_float:
-                    return "double"
-                raise AssertionError("Unexpected symbol type")
-
-            for src, tgt in V.graph.sizevars.shape_env.replacements.items():
-                if (
-                    tgt == sym
-                    and isinstance(src, sympy.Symbol)
-                    and src not in bound_vars
-                    and is_backed_symbol(src)
-                    and is_backed_symbol(sym)
-                ):
-                    code.writeline(f"{decl_type(src)} {src} = {sym};")
-                    bound_vars.add(src)
-                elif (
-                    src == sym
-                    and isinstance(tgt, sympy.Symbol)
-                    and tgt not in bound_vars
-                    and is_backed_symbol(sym)
-                    and is_backed_symbol(tgt)
-                ):
-                    code.writeline(f"{decl_type(tgt)} {tgt} = {sym};")
-                    bound_vars.add(tgt)
-
         def codegen_symbol(
             sym_or_exp: sympy.Symbol | sympy.Expr,
             base_name: str,
@@ -710,7 +676,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 bound_vars.add(sym_or_exp)
                 if symbol_is_type(sym_or_exp, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
                     self.unbacked_symbol_decls.add(str(sym_or_exp))
-                maybe_emit_replacement_aliases(sym_or_exp)
+                self.maybe_emit_replacement_aliases(sym_or_exp, bound_vars)
                 return True
             elif isinstance(sym_or_exp, sympy.Expr):
                 undefined_symbols = [
@@ -753,7 +719,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         free_symbol, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
                     ):
                         self.unbacked_symbol_decls.add(str(free_symbol))
-                    maybe_emit_replacement_aliases(free_symbol)
+                    self.maybe_emit_replacement_aliases(free_symbol, bound_vars)
                     return True
                 return False
             return False
@@ -761,17 +727,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
-            if value.is_integer:
-                decl = "int64_t"
-            elif value.is_float:
+            if symbol_is_type(value, (SymT.FLOAT, SymT.UNBACKED_FLOAT)):
                 decl = "double"
             else:
-                raise AssertionError("Unexpected symbol type")
+                decl = "int64_t"
             code.writeline(f"{decl} {value} = {name};")
             bound_vars.add(value)
             if symbol_is_type(value, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
                 self.unbacked_symbol_decls.add(str(value))
-            maybe_emit_replacement_aliases(value)
+            self.maybe_emit_replacement_aliases(value, bound_vars)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
                 codegen_symbol(size, name, sizeof, dim, deferred_symbol_assignments)
@@ -784,6 +748,59 @@ class CppWrapperCpu(PythonWrapperCodegen):
             pass
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
+
+    def maybe_emit_replacement_aliases(  # type: ignore[override]
+        self,
+        sym: sympy.Symbol,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        sizevars = getattr(V.graph, "sizevars", None)
+        shape_env = getattr(sizevars, "shape_env", None)
+        if shape_env is None:
+            return
+
+        def is_backed_symbol(s: sympy.Symbol) -> bool:
+            return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+
+        def decl_type(s: sympy.Symbol) -> str:
+            if symbol_is_type(s, (SymT.FLOAT, SymT.UNBACKED_FLOAT)):
+                return "double"
+            return "int64_t"
+
+        for src, tgt in shape_env.replacements.items():
+            if (
+                tgt == sym
+                and isinstance(src, sympy.Symbol)
+                and src not in bound_vars
+                and is_backed_symbol(src)
+                and is_backed_symbol(sym)
+            ):
+                self.prefix.writeline(f"{decl_type(src)} {src} = {sym};")
+                bound_vars.add(src)
+            elif (
+                src == sym
+                and isinstance(tgt, sympy.Symbol)
+                and tgt not in bound_vars
+                and is_backed_symbol(sym)
+                and is_backed_symbol(tgt)
+            ):
+                self.prefix.writeline(f"{decl_type(tgt)} {tgt} = {sym};")
+                bound_vars.add(tgt)
+
+    def bind_input_symbol(
+        self,
+        sym: sympy.Symbol,
+        input_name: str,
+        kind: Literal["size", "stride"],
+        dim: int,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        if sym in bound_vars:
+            return
+        accessor = "sizes" if kind == "size" else "strides"
+        self.prefix.writeline(f"int64_t {sym} = {input_name}.{accessor}()[{dim}];")
+        bound_vars.add(sym)
+        self.maybe_emit_replacement_aliases(sym, bound_vars)
 
     def generate_input_output_runtime_checks(self):
         """

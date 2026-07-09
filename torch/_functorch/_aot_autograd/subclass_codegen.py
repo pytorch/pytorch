@@ -46,6 +46,26 @@ def _safe_attr_access(var: str, attr: str) -> str:
     return f"getattr({var}, {attr!r})"
 
 
+class _OutputWrapState:
+    def __init__(
+        self,
+        *,
+        remaining_min_count: int,
+        remaining_max_count: int,
+        optional_symint_check: str,
+    ) -> None:
+        self.remaining_min_count = remaining_min_count
+        self.remaining_max_count = remaining_max_count
+        self.optional_symint_check = optional_symint_check
+
+    def mark_required(self) -> None:
+        self.remaining_min_count -= 1
+        self.remaining_max_count -= 1
+
+    def mark_optional(self) -> None:
+        self.remaining_max_count -= 1
+
+
 def _maybe_wait_async_collective_tensor(
     x: object,
     AsyncCollectiveTensor: type["AsyncCollectiveTensor"],
@@ -67,13 +87,50 @@ def _codegen_unwrap_subclass(
 ) -> None:
     """Emit code to recursively unwrap a single subclass input."""
     act_input_paths = act_input_paths or set()
+
+    def emit_plain_tensor_symints(var: str, meta: PlainTensorMeta) -> None:
+        if not include_symints:
+            return
+
+        if any(meta.size_symbol_placeholders):
+            size_var = state.fresh_name("_size")
+            state.emit(f"{size_var} = {var}.size()", indent=indent)
+            for i, is_sym in enumerate(meta.size_symbol_placeholders):
+                if is_sym:
+                    state.emit(f"unwrapped_args.append({size_var}[{i}])", indent=indent)
+
+        if any(meta.stride_symbol_placeholders):
+            stride_var = state.fresh_name("_stride")
+            state.emit(f"{stride_var} = {var}.stride()", indent=indent)
+            for i, is_sym in enumerate(meta.stride_symbol_placeholders):
+                if is_sym:
+                    state.emit(
+                        f"unwrapped_args.append({stride_var}[{i}])", indent=indent
+                    )
+
     for attr, attr_meta in meta.attrs.items():
         attr_expr = _safe_attr_access(var, attr)
         attr_act_input_paths = {
             path[1:] for path in act_input_paths if path and path[0] == attr
         }
         match attr_meta:
-            case PlainTensorMeta() | OpaqueMeta():
+            case PlainTensorMeta():
+                if attr_act_input_paths:
+                    if attr_act_input_paths != {()}:
+                        raise AssertionError(
+                            f"ACT path for {attr} continues past a leaf meta"
+                        )
+                    if act_wait_fn is None:
+                        raise AssertionError("missing ACT wait function")
+                    resolved_var = state.fresh_name("_resolved")
+                    state.emit(
+                        f"{resolved_var} = {act_wait_fn}({attr_expr})",
+                        indent=indent,
+                    )
+                    attr_expr = resolved_var
+                state.emit(f"unwrapped_args.append({attr_expr})", indent=indent)
+                emit_plain_tensor_symints(attr_expr, attr_meta)
+            case OpaqueMeta():
                 if attr_act_input_paths:
                     if attr_act_input_paths != {()}:
                         raise AssertionError(
@@ -141,9 +198,14 @@ def _concrete_value(val: None | int | SymInt) -> int:
     raise AssertionError(f"Expected concrete int, got {type(val)}: {val}")
 
 
+def _is_optional_symint_output(val: object) -> bool:
+    return isinstance(val, (int, SymInt))
+
+
 def _codegen_wrap_subclass(
     state: PySourceBuilder,
     meta: SubclassCreationMeta,
+    output_state: _OutputWrapState,
 ) -> str:
     """Emit code to reconstruct one subclass output. Returns the variable name."""
     inner_dict_var = state.fresh_name("_out_inner")
@@ -152,12 +214,19 @@ def _codegen_wrap_subclass(
 
     for attr, attr_meta in meta.attrs.items():
         match attr_meta:
-            case PlainTensorMeta() | OpaqueMeta():
+            case PlainTensorMeta():
                 attr_expr = state.fresh_name("_out_attr")
                 state.emit(f"{attr_expr} = unwrapped_outs[_out_idx]")
                 state.emit("_out_idx += 1")
+                output_state.mark_required()
+                _emit_optional_plain_tensor_symint_skips(state, output_state, attr_meta)
+            case OpaqueMeta():
+                attr_expr = state.fresh_name("_out_attr")
+                state.emit(f"{attr_expr} = unwrapped_outs[_out_idx]")
+                state.emit("_out_idx += 1")
+                output_state.mark_required()
             case SubclassCreationMeta():
-                attr_expr = _codegen_wrap_subclass(state, attr_meta)
+                attr_expr = _codegen_wrap_subclass(state, attr_meta, output_state)
         attr_exprs[attr] = attr_expr
         entries.append(f"{attr!r}: {attr_expr}")
 
@@ -176,6 +245,7 @@ def _codegen_wrap_subclass(
                 sym_expr = state.fresh_name("_out_sym")
                 state.emit(f"{sym_expr} = unwrapped_outs[_out_idx]")
                 state.emit("_out_idx += 1")
+                output_state.mark_required()
                 parts.append(sym_expr)
             else:
                 parts.append(repr(_concrete_value(val)))
@@ -183,23 +253,22 @@ def _codegen_wrap_subclass(
             return f"({parts[0]},)"
         return f"({', '.join(parts)})"
 
-    def _consume_placeholders(placeholders: list[bool]) -> None:
-        num_placeholders = sum(placeholders)
-        if num_placeholders:
-            state.emit("if _has_subclass_symint_outputs:")
-            state.emit(f"_out_idx += {num_placeholders}", indent=2)
+    def _consume_optional_placeholders(placeholders: list[bool]) -> None:
+        for is_sym in placeholders:
+            if is_sym:
+                _emit_optional_symint_skip(state, output_state)
 
     outer_size_from_attr = meta.outer_size_from_attr
     outer_stride_from_attr = meta.outer_stride_from_attr
     if outer_size_from_attr is not None:
         size_expr = f"{attr_exprs[outer_size_from_attr]}.size()"
-        _consume_placeholders(size_placeholders)
+        _consume_optional_placeholders(size_placeholders)
     else:
         size_expr = _build_tuple(meta.outer_size, size_placeholders)
 
     if outer_stride_from_attr is not None:
         stride_expr = f"{attr_exprs[outer_stride_from_attr]}.stride()"
-        _consume_placeholders(stride_placeholders)
+        _consume_optional_placeholders(stride_placeholders)
     else:
         stride_expr = _build_tuple(meta.outer_stride, stride_placeholders)
 
@@ -223,7 +292,7 @@ def _count_output_args(
     include_subclass_symints: bool,
 ) -> int:
     if isinstance(meta, PlainTensorMeta):
-        return 1
+        return meta.arg_count if include_subclass_symints else 1
 
     total = 0
     for attr_meta in meta.attrs.values():
@@ -237,7 +306,55 @@ def _count_output_args(
     if include_subclass_symints:
         total += sum(_compute_placeholders(meta.outer_size))
         total += sum(_compute_placeholders(meta.outer_stride))
+    else:
+        if meta.outer_size_from_attr is None:
+            total += sum(_compute_placeholders(meta.outer_size))
+        if meta.outer_stride_from_attr is None:
+            total += sum(_compute_placeholders(meta.outer_stride))
     return total
+
+
+def _emit_optional_symint_skip(
+    state: PySourceBuilder,
+    output_state: _OutputWrapState,
+) -> None:
+    remaining_var = state.fresh_name("_remaining_outs")
+    include_var = state.fresh_name("_include_symints")
+    later_min_count = output_state.remaining_min_count
+    later_max_count = output_state.remaining_max_count - 1
+    max_fits = (
+        f"{remaining_var} - 1 >= {later_min_count} and "
+        f"{remaining_var} - 1 <= {later_max_count}"
+    )
+    min_fits = (
+        f"{remaining_var} >= {later_min_count} and {remaining_var} <= {later_max_count}"
+    )
+
+    state.emit(f"{remaining_var} = _num_wrapped_outs - _out_idx")
+    state.emit(
+        f"{include_var} = ({max_fits}) and "
+        f"{output_state.optional_symint_check}(unwrapped_outs[_out_idx])"
+    )
+    state.emit(
+        f"assert {include_var} or ({min_fits}), "
+        "'could not match output layout with optional SymInt outputs'"
+    )
+    state.emit(f"if {include_var}:")
+    state.emit("_out_idx += 1", indent=2)
+    output_state.mark_optional()
+
+
+def _emit_optional_plain_tensor_symint_skips(
+    state: PySourceBuilder,
+    output_state: _OutputWrapState,
+    meta: PlainTensorMeta,
+) -> None:
+    for is_sym in meta.size_symbol_placeholders:
+        if is_sym:
+            _emit_optional_symint_skip(state, output_state)
+    for is_sym in meta.stride_symbol_placeholders:
+        if is_sym:
+            _emit_optional_symint_skip(state, output_state)
 
 
 def _emit_output_wrapping(
@@ -253,28 +370,71 @@ def _emit_output_wrapping(
     result_exprs: list[str] = []
     num_args_tallied = 0
     saved_for_bw = num_fw_outs_saved_for_bw or 0
-    expected_with_symints = (
-        sum(
-            _count_output_args(meta, include_subclass_symints=True)
-            for meta in out_metas
+    min_counts = [
+        _count_output_args(meta, include_subclass_symints=False) for meta in out_metas
+    ]
+    max_counts = [
+        _count_output_args(meta, include_subclass_symints=True) for meta in out_metas
+    ]
+    min_wrapped_outputs = sum(min_counts)
+    max_wrapped_outputs = sum(max_counts)
+
+    optional_symint_check = (
+        state.add_global(
+            state.fresh_name("_is_optional_symint_output"),
+            _is_optional_symint_output,
         )
-        + saved_for_bw
+        if min_wrapped_outputs != max_wrapped_outputs
+        else ""
     )
     state.emit("_out_idx = 0")
-    state.emit(
-        f"_has_subclass_symint_outputs = len(unwrapped_outs) == {expected_with_symints}"
-    )
+    if saved_for_bw:
+        state.emit(f"_num_wrapped_outs = len(unwrapped_outs) - {saved_for_bw}")
+    else:
+        state.emit("_num_wrapped_outs = len(unwrapped_outs)")
+    if min_wrapped_outputs != max_wrapped_outputs:
+        state.emit(
+            "assert "
+            f"{min_wrapped_outputs} <= _num_wrapped_outs <= {max_wrapped_outputs}, "
+            f"f'expected between {min_wrapped_outputs} and {max_wrapped_outputs} "
+            "wrapped outputs, got {_num_wrapped_outs}'"
+        )
+    else:
+        state.emit(
+            f"assert _num_wrapped_outs == {max_wrapped_outputs}, "
+            f"f'expected {max_wrapped_outputs} wrapped outputs, "
+            "got {_num_wrapped_outs}'"
+        )
 
+    output_state = _OutputWrapState(
+        remaining_min_count=min_wrapped_outputs,
+        remaining_max_count=max_wrapped_outputs,
+        optional_symint_check=optional_symint_check,
+    )
     for meta in out_metas:
         if isinstance(meta, PlainTensorMeta):
-            result_exprs.append(f"unwrapped_outs[{meta.unwrapped_idx}]")
-            num_args_tallied += 1
-            state.emit(f"_out_idx = max(_out_idx, {meta.unwrapped_idx + 1})")
+            out_expr = state.fresh_name("_out_plain")
+            state.emit(f"{out_expr} = unwrapped_outs[_out_idx]")
+            state.emit("_out_idx += 1")
+            output_state.mark_required()
+            _emit_optional_plain_tensor_symint_skips(state, output_state, meta)
+            result_exprs.append(out_expr)
+            num_args_tallied += meta.arg_count
         else:
-            result_var = _codegen_wrap_subclass(state, meta)
+            result_var = _codegen_wrap_subclass(state, meta, output_state)
             result_exprs.append(result_var)
             num_args_tallied += meta.arg_count
 
+    if output_state.remaining_min_count != 0 or output_state.remaining_max_count != 0:
+        raise AssertionError(
+            "output wrapping counts did not balance: "
+            f"{output_state.remaining_min_count}, "
+            f"{output_state.remaining_max_count}"
+        )
+    state.emit(
+        "assert _out_idx == _num_wrapped_outs, "
+        "f'wrapped {_out_idx} outputs, expected {_num_wrapped_outs}'"
+    )
     return result_exprs, num_args_tallied
 
 
