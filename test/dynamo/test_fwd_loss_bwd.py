@@ -46,7 +46,11 @@ class TestForwardLossBackward(TestCase):
 
         self.assertEqual(eager_result, compiled_result)
         for name, p in mod.named_parameters():
-            self.assertEqual(eager_grads[name], p.grad, f"Grad mismatch for {name}")
+            self.assertEqual(
+                eager_grads[name],
+                p.grad,
+                lambda msg: f"{msg}\nGrad mismatch for {name}",
+            )
         self.assertEqual(len(backend.graphs), 1)
 
         gm = backend.graphs[0]
@@ -89,12 +93,13 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_));  l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
         detach: "f32[]" = loss.detach();  loss = None
         return (detach, getitem, getitem_1)
-""",  # noqa: B950
+""",
         )
 
         self.assertEqual(len(backend.fw_graphs), 1)
@@ -122,8 +127,72 @@ class <lambda>(torch.nn.Module):
 
         detach: "f32[]" = torch.ops.aten.detach.default(sum_1);  sum_1 = None
         return (detach, t_3, view)
-""",  # noqa: B950
+""",
         )
+
+    @skipIfCrossRef
+    def test_autograd_grad_dict_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = dict(mod.named_parameters())
+            grads = torch.autograd.grad(loss, params)
+            return loss.detach(), grads["weight"], grads["bias"]
+
+        backend = EagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        eager_result = fn(x)
+        compiled_result = compiled_fn(x)
+
+        for e, c in zip(eager_result, compiled_result):
+            self.assertEqual(e, c)
+
+    @skipIfCrossRef
+    def test_autograd_grad_dict_inputs_kwargs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = dict(mod.named_parameters())
+            grads = torch.autograd.grad(outputs=loss, inputs=params)
+            return loss.detach(), grads["weight"], grads["bias"]
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        eager_result = fn(x)
+        compiled_result = compiled_fn(x)
+
+        for e, c in zip(eager_result, compiled_result):
+            self.assertEqual(e, c)
+
+    @skipIfCrossRef
+    def test_backward_dict_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = dict(mod.named_parameters())
+            loss.backward(inputs=params)
+            return loss.detach(), mod.weight.grad.clone(), mod.bias.grad.clone()
+
+        # Reset grads between eager and compiled runs
+        eager_result = fn(x)
+        mod.weight.grad = None
+        mod.bias.grad = None
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_result = compiled_fn(x)
+
+        for e, c in zip(eager_result, compiled_result):
+            self.assertEqual(e, c)
 
     @skipIfCrossRef
     def test_autograd_grad_with_kwargs(self):
@@ -169,7 +238,7 @@ class GraphModule(torch.nn.Module):
 
         detach: "f32[]" = loss.detach();  loss = None
         return (detach,)
-""",  # noqa: B950
+""",
         )
 
         self.assertEqual(len(backend.fw_graphs), 1)
@@ -188,7 +257,7 @@ class <lambda>(torch.nn.Module):
 
         detach: "f32[]" = torch.ops.aten.detach.default(sum_1);  sum_1 = None
         return (detach,)
-""",  # noqa: B950
+""",
         )
 
     @skipIfCrossRef
@@ -227,11 +296,12 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+
         getitem: "f32[4, 4]" = grad[0];  grad = None
 
         detach: "f32[]" = loss.detach();  loss = None
         return (detach, getitem)
-""",  # noqa: B950
+""",
         )
 
         self.assertEqual(len(backend.fw_graphs), 1)
@@ -257,7 +327,7 @@ class <lambda>(torch.nn.Module):
 
         detach: "f32[]" = torch.ops.aten.detach.default(sum_1);  sum_1 = None
         return (detach, t_3)
-""",  # noqa: B950
+""",
         )
 
     @skipIfCrossRef
@@ -345,7 +415,7 @@ autograd.grad with external grad_fn
   Hint: Otherwise, move the autograd.grad() call outside the compiled region.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: inputs with external grad_fn: ["L['external_input']"]"""  # noqa: B950
+  Developer debug context: inputs with external grad_fn: ["L['external_input']"]"""
             ),
         ):
             fn(external_computation)
@@ -402,7 +472,7 @@ autograd.grad with external grad_fn
   Hint: Otherwise, move the autograd.grad() call outside the compiled region.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: inputs with external grad_fn: ["L['ext']"]"""  # noqa: B950
+  Developer debug context: inputs with external grad_fn: ["L['ext']"]"""
             ),
         ):
             fn(external)
@@ -445,6 +515,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_), materialize_grads = False, allow_unused = True);  loss = l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+
         weight_grad: "f32[4, 4]" = grad[0]
         bias_grad: "f32[4]" = grad[1];  grad = None
 
@@ -455,7 +526,7 @@ class GraphModule(torch.nn.Module):
         detach: "f32[]" = grad_norm.detach();  grad_norm = None
         sin: "f32[2, 4]" = l_x_.sin();  l_x_ = None
         return (detach, sin)
-""",  # noqa: B950
+""",
         )
 
         self.assertEqual(len(backend.fw_graphs), 1)
@@ -488,7 +559,7 @@ class GraphModule(torch.nn.Module):
         detach: "f32[]" = torch.ops.aten.detach.default(add);  add = None
         sin: "f32[2, 4]" = torch.ops.aten.sin.default(primals_3)
         return (detach, sin, primals_3)
-""",  # noqa: B950
+""",
         )
 
         # Trigger backward to compile the backward graph
@@ -507,7 +578,7 @@ class GraphModule(torch.nn.Module):
         cos: "f32[2, 4]" = torch.ops.aten.cos.default(primals_3);  primals_3 = None
         mul: "f32[2, 4]" = torch.ops.aten.mul.Tensor(tangents_1, cos);  tangents_1 = cos = None
         return (None, None, mul)
-""",  # noqa: B950
+""",
         )
 
     @skipIfCrossRef
@@ -541,8 +612,9 @@ class GraphModule(torch.nn.Module):
                 """\
 autograd.grad consumed returned tensor's grad_fn
   Explanation: torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.
-  Hint: If you don't need to backward through the returned tensor, call .detach() before returning: `return loss.detach()`
-  Hint: If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."""  # noqa: B950
+      The following returned tensors have consumed grad_fns: loss
+  Hint: Detach the problematic tensor(s) before returning: e.g. `loss.detach()`
+  Hint: If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."""
             ),
         ):
             step_compiled_fullgraph(torch.nn.Linear(4, 4), torch.randn(2, 4))
@@ -590,17 +662,29 @@ autograd.grad consumed returned tensor's grad_fn
         torch._dynamo.reset()
         compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
 
-        msg = textwrap.dedent(
-            """\
-autograd.grad consumed returned tensor's grad_fn
-  Explanation: torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.
-  Hint: If you don't need to backward through the returned tensor, call .detach() before returning: `return loss.detach()`
-  Hint: If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."""  # noqa: B950
-        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"autograd\.grad consumed returned tensor's grad_fn",
+        ):
+            compiled_fn(torch.randn(4, requires_grad=True))
+
+    def test_autograd_grad_leaked_tensor_names_in_error(self):
+        """Test that the error message includes the names of all leaked tensors."""
+        torch._dynamo.reset()
+
+        def fn(x):
+            a = x * 2
+            b = x * 3
+            z = (a + b).sum()
+            torch.autograd.grad(z, x)
+            # Both a and b have consumed grad_fns
+            return a, b
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            re.escape(msg) + r"[\s\S]*",
+            r"Leaked output tensors:",
         ):
             compiled_fn(torch.randn(4, requires_grad=True))
 
@@ -645,7 +729,7 @@ autograd.grad with external GradientEdge
   Hint: Or use tensor inputs directly instead of GradientEdge objects.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: GradientEdge in outputs: L['edge']"""  # noqa: B950
+  Developer debug context: GradientEdge in outputs: L['edge']"""
         )
 
         with self.assertRaisesRegex(
@@ -679,7 +763,7 @@ autograd.grad with external GradientEdge
   Hint: Or use tensor inputs directly instead of GradientEdge objects.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: GradientEdge in outputs[0]: L['edges'][0]"""  # noqa: B950
+  Developer debug context: GradientEdge in outputs[0]: L['edges'][0]"""
         )
 
         with self.assertRaisesRegex(
@@ -830,7 +914,7 @@ autograd.grad with external GradientEdge
             """\
             autograd.grad with already consumed grad_fn
               Explanation: torch.autograd.grad() is trying to consume grad_fns that were already consumed by a previous autograd.grad() call. This would cause 'backward through graph a second time' errors at runtime.
-              Hint: Use retain_graph=True in the first autograd.grad() call if you need to compute gradients through the same graph multiple times."""  # noqa: B950
+              Hint: Use retain_graph=True in the first autograd.grad() call if you need to compute gradients through the same graph multiple times."""
         )
 
         with self.assertRaisesRegex(
@@ -867,6 +951,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -881,7 +966,7 @@ class GraphModule(torch.nn.Module):
 
         detach: "f32[]" = loss.detach();  loss = None
         return (detach, new_grad_strided, new_grad_strided_1)
-""",  # noqa: B950
+""",
         )
 
     @skipIfCrossRef
@@ -910,6 +995,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -955,6 +1041,7 @@ class GraphModule(torch.nn.Module):
         gradient: "f32[2, 4]" = torch.ones_like(res)
 
         grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient, allow_unused = False);  gradient = None
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -970,7 +1057,7 @@ class GraphModule(torch.nn.Module):
         detach: "f32[2, 4]" = res.detach();  res = None
         sum_1: "f32[]" = detach.sum();  detach = None
         return (sum_1, new_grad_strided, new_grad_strided_1)
-""",  # noqa: B950
+""",
         )
 
     @skipIfCrossRef
@@ -1002,6 +1089,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False, retain_graph = True)
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -1015,6 +1103,7 @@ class GraphModule(torch.nn.Module):
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
         grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+
         getitem_2: "f32[4, 4]" = grad_1[0]
         getitem_3: "f32[4]" = grad_1[1];  grad_1 = None
 
@@ -1031,8 +1120,33 @@ class GraphModule(torch.nn.Module):
 
         detach: "f32[]" = loss.detach();  loss = None
         return (detach, new_grad_strided, new_grad_strided_1)
-""",  # noqa: B950
+""",
         )
+
+    @skipIfCrossRef
+    def test_tensor_backward_preserves_existing_grad_reference(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            loss = mod(x).sum()
+            loss.backward(inputs=[mod.weight])
+            return loss.detach()
+
+        mod.weight.grad = torch.ones_like(mod.weight)
+        saved_grad = mod.weight.grad
+        eager_result = fn(x)
+        eager_grad = mod.weight.grad.clone()
+        self.assertIs(mod.weight.grad, saved_grad)
+
+        mod.weight.grad = torch.ones_like(mod.weight)
+        saved_grad = mod.weight.grad
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(mod.weight.grad, eager_grad)
+        self.assertIs(mod.weight.grad, saved_grad)
 
     @skipIfCrossRef
     def test_backward_on_no_grad_tensor(self):
@@ -1105,9 +1219,10 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = y.sum();  y = None
 
         grad = torch.autograd.grad(loss, [w]);  loss = w = None
+
         grad_1: "f32[4, 4]" = grad[0];  grad = None
         return (grad_1,)
-""",  # noqa: B950
+""",
         )
 
     @skipIfCrossRef
@@ -1131,7 +1246,7 @@ class GraphModule(torch.nn.Module):
                 """\
 backward() with in-graph created tensor
   Explanation: backward(inputs=[...]) with tensors created inside the compiled function is not yet supported.
-  Hint: Only pass tensors that are inputs to the compiled function or captured from outside"""  # noqa: B950
+  Hint: Only pass tensors that are inputs to the compiled function or captured from outside"""
             ),
         ):
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1184,7 +1299,7 @@ backward() with in-graph created tensor
                 """\
 backward() with non-leaf tensor
   Explanation: backward(inputs=[...]) with non-leaf tensors is not yet supported.
-  Hint: Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"""  # noqa: B950
+  Hint: Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"""
             ),
         ):
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1209,6 +1324,81 @@ backward() with non-leaf tensor
         act = opt_fn(a, b)
 
         self.assertTrue(ref is act)
+
+    def test_autograd_grad_lost_grad_fn_in_closure(self):
+        def f(x):
+            return (x**2).sum()
+
+        x = torch.randn(4, requires_grad=True)
+        _, vjp_fn = torch.func.vjp(f, x)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "_autograd_grad with lost grad_fn linkage",
+        ):
+            torch.compile(vjp_fn, backend="eager", fullgraph=True)(torch.ones(()))
+
+    def test_autograd_grad_transform_closure_compiled_separately(self):
+        def f(x):
+            return (x**2).sum()
+
+        x = torch.randn(4, requires_grad=True)
+        _, vjp_fn = torch.func.vjp(f, x)
+        v = torch.ones(())
+
+        eager_grad = vjp_fn(v)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_grad = torch.compile(vjp_fn, backend=cnt)(v)
+
+        self.assertEqual(compiled_grad, eager_grad)
+        self.assertEqual(cnt.frame_count, 0)
+
+    @skipIfCrossRef
+    def test_autograd_grad_transform_compiled_end_to_end(self):
+        def f(x):
+            return (x**2).sum()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            _, vjp_fn = torch.func.vjp(f, x)
+            return vjp_fn(torch.ones(()))
+
+        x = torch.randn(4, requires_grad=True)
+        result = fn(x)
+        expected = torch.func.vjp(f, x)[1](torch.ones(()))
+        self.assertEqual(result, expected)
+
+    def test_autograd_grad_multi_output_transform_closure(self):
+        def f(x):
+            return x * 2, x * 3
+
+        x = torch.randn(4, requires_grad=True)
+        _, vjp_fn = torch.func.vjp(f, x)
+        v = (torch.ones(4), torch.ones(4))
+
+        eager_grad = vjp_fn(v)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_grad = torch.compile(vjp_fn, backend=cnt)(v)
+        self.assertEqual(compiled_grad, eager_grad)
+
+    @skipIfCrossRef
+    def test_autograd_grad_inline_computation_no_graph_break(self):
+        def f(x):
+            return (x * 2).sum()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y, vjp_fn = torch.func.vjp(f, x)
+            return y, vjp_fn(torch.ones(()))
+
+        x = torch.randn(4, requires_grad=True)
+        compiled_y, compiled_grad = fn(x)
+        eager_y, eager_vjp_fn = torch.func.vjp(f, x)
+        eager_grad = eager_vjp_fn(torch.ones(()))
+        self.assertEqual(compiled_y, eager_y)
+        self.assertEqual(compiled_grad, eager_grad)
 
 
 if __name__ == "__main__":

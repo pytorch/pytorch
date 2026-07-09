@@ -32,7 +32,7 @@ class XpuProfilerTest(TestCase):
             events[event.device_type] += 1
 
         if Verbose:
-            print(f"{events = }")
+            print(f"{events=}")
 
         self.assertEqual(len(events), 2)
         self.assertTrue(DeviceType.CPU in events)
@@ -61,8 +61,8 @@ class XpuProfilerTest(TestCase):
                     count_cats[event["cat"]] += 1
 
             if Verbose:
-                print(f"{count_names = }")
-                print(f"{count_cats = }")
+                print(f"{count_names=}")
+                print(f"{count_cats=}")
 
             self.assertTrue("xpu_runtime" in count_cats)
             self.assertTrue("xpu_driver" in count_cats)

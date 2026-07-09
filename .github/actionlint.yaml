@@ -13,6 +13,7 @@ self-hosted-runner:
     - am2.linux.9xlarge.ephemeral
     - linux.12xlarge
     - linux.12xlarge.memory
+    - linux.12xlarge.memory.ephemeral
     - linux.24xlarge
     - linux.24xlarge.memory
     - linux.24xlarge.ephemeral
@@ -22,6 +23,7 @@ self-hosted-runner:
     - linux.arm64.m7g.4xlarge
     - linux.arm64.m7g.4xlarge.ephemeral
     - linux.arm64.r7g.12xlarge.memory
+    - linux.aws.a100
     - linux.aws.h100
     - linux.aws.h100.4
     - linux.aws.h100.8
@@ -41,6 +43,8 @@ self-hosted-runner:
     # Organization wide AWS Windows runners
     - windows.g4dn.xlarge
     - windows.g4dn.xlarge.nonephemeral
+    - windows.12xlarge
+    - windows.12xlarge.nonephemeral
     - windows.4xlarge
     - windows.4xlarge.nonephemeral
     - windows.8xlarge.nvidia.gpu
@@ -57,8 +61,9 @@ self-hosted-runner:
     - linux.rocm.gpu.mi250.4
     - linux.rocm.gpu.2
     - linux.rocm.gpu.4
+    - linux.rocm.gpu.mi210.1
+    - linux.rocm.gpu.mi210.2
     - linux.rocm.mi210.docker-cache
-    - linux.rocm.mi250.docker-cache
     # gfx942 runners
     - linux.rocm.gpu.gfx942.1
     - linux.rocm.gpu.gfx942.4
@@ -68,13 +73,26 @@ self-hosted-runner:
     # Org wise AWS `mac2.metal` runners (2020 Mac mini hardware powered by Apple silicon M1 processors)
     - macos-m1-stable
     - macos-m1-14
+    - macos-m2-15
+    - macos-m2-26
     # GitHub-hosted MacOS runners
     - macos-latest-xlarge
     - macos-13-xlarge
     - macos-14-xlarge
+    - macos-26
+    - macos-26-xlarge
     # Organization-wide Intel hosted XPU runners
     - linux.idc.xpu
     # Organization-wide Google Cloud TPU runners
     - linux.google.tpuv6e.1
     - linux.google.tpuv7x.1
     - linux.google.tpuv7x.4
+    # OSDC ARC (multi-tenant) runners
+    - mt-l-x86iavx512-2-4
+    - mt-l-x86iavx512-48-384
+    - mt-l-x86iavx512-94-768
+    - mt-l-x86iamx-8-16
+    - mt-rel-l-x86iavx512-8-64
+    - mt-rel-l-arm64g4-16-62
+    - mt-l-arm64g3-61-463
+    - mt-l-x86iamx-22-225-h100

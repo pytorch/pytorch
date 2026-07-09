@@ -12,7 +12,6 @@
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
-#include <ATen/NamedTensorUtils.h>
 
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
@@ -591,9 +590,7 @@ SparseTensor& copy_sparse_wrapper_(
     bool non_blocking) {
   // TODO: Once copy_ is fully migrated to use dispatcher, handle named
   // inference using dispatcher instead of doing it everywhere
-  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
-    NoNamesGuard guard;
     if (!self.is_sparse() || !src.is_sparse()) {
       TORCH_CHECK(false,
           "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
@@ -603,7 +600,6 @@ SparseTensor& copy_sparse_wrapper_(
     }
     at::copy_sparse_to_sparse_(self, src, non_blocking);
   }
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
@@ -675,7 +671,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
       values.scalar_type(), "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
-    scalar_t* values_ptr = values.data_ptr<scalar_t>();
+    const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
     scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
     for (const auto j : c10::irange(nnz)) {
       int64_t pos = indicesPermutationAccessor[j];
