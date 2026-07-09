@@ -1173,7 +1173,7 @@ _fuse_ddp_communication = False
 _fuse_ddp_bucket_size = 25
 
 # Flag to control which fusion passes to apply. Functions in the list will
-# be applied in order. There are two different different fusion passes
+# be applied in order. There are two different fusion passes
 # --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalesced_op". The default
 # one is "fuse_ddp_with_concat_op". Users can also change this to a customized
 # fusion function.
@@ -2700,7 +2700,7 @@ class rocm:
     # reducing autotuning cost while keeping runtime within ~5% of full
     # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
     # toggling at runtime via config.patch has no effect because the rocm-origami
-    # module import is cached at template_heuristics/triton.py load time.
+    # module import is cached at heuristics/template/triton.py load time.
     #
     # Active only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
