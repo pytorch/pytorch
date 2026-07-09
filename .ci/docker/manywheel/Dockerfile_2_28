@@ -154,8 +154,9 @@ RUN echo "[ROCm]" > /etc/yum.repos.d/rocm.repo && \
     echo "enabled=1" >> /etc/yum.repos.d/rocm.repo && \
     echo "gpgcheck=1" >> /etc/yum.repos.d/rocm.repo && \
     echo "gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/rocm.repo && \
-    yum install -y \
+    yum install -y --enablerepo=powertools \
         amd-smi-lib \
+        ocl-icd-devel \
         rccl \
         rocm-dev \
         rocm-libs \
