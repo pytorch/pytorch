@@ -3348,7 +3348,6 @@ class TestMaxAutotune(TestCase):
             _, code = run_and_get_code(compiled_fn, a, b, c, idx0, idx1, value)
             FileCheck().check("triton_tem_fused").run(code[0])
 
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/182093")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("use_addmm", (False, True))
     def test_triton_gemm_epilogue_fusion_truncates_accumulator(self, dtype, use_addmm):

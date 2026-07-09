@@ -140,6 +140,16 @@ def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
     return get_triton_version() >= (3, 7)
 
 
+def _can_disable_pipelining_for_launcher_error(
+    config: Config, exc: Exception | None, inductor_meta: InductorMeta
+) -> bool:
+    return (
+        isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
+        and (config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1)
+        and inductor_meta.get("dynamic_disable_pipelining", True)
+    )
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Container, Hashable
 
@@ -1017,6 +1027,7 @@ class CachingAutotuner(KernelInterface):
         device_interface = self.get_device_interface()
         launchers = []
         exc = None
+        fallback_config = None
         try:
             # DeviceGuard ensures each launcher's binary loads onto the right device.
             with DeviceGuard(device_interface, cast(int, self.triton_meta["device"])):
@@ -1024,18 +1035,15 @@ class CachingAutotuner(KernelInterface):
                     launcher, exc = self._make_launcher(result)
                     if launcher is not None:
                         launchers.append(launcher)
-                if len(launchers) == 0:
-                    result = self.compile_results[-1]
-                    config = result.config
-                    if (
-                        isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
-                        and (
-                            config.num_stages > 1
-                            or config.kwargs.get("NUM_STAGES", 1) > 1
-                        )
-                        and self.inductor_meta.get("dynamic_disable_pipelining", True)
+                    elif _can_disable_pipelining_for_launcher_error(
+                        result.config, exc, self.inductor_meta
                     ):
-                        self.launchers = [self.compile_by_disabling_pipelining(config)]
+                        fallback_config = result.config
+                if len(launchers) == 0:
+                    if fallback_config is not None:
+                        self.launchers = [
+                            self.compile_by_disabling_pipelining(fallback_config)
+                        ]
                         return
                     raise RuntimeError(
                         f"No valid triton configs. {type(exc).__name__}: {exc}"
