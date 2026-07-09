@@ -19,8 +19,6 @@
 #include <ATen/ops/softplus_backward_native.h>
 #include <ATen/ops/softplus_native.h>
 #include <ATen/ops/tanh_backward_native.h>
-#include <ATen/ops/threshold_backward_native.h>
-#include <ATen/ops/threshold_native.h>
 #endif
 
 using namespace at::mps;
@@ -156,106 +154,6 @@ TORCH_IMPL_FUNC(tanh_backward_out_mps)(const Tensor& grad_output, const Tensor& 
 
     auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, outputPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
-  }
-}
-
-TORCH_IMPL_FUNC(threshold_out_mps)
-(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {
-  using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
-  TORCH_CHECK(self.is_mps());
-
-  if (result.numel() == 0)
-    return;
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = "threshold_out_mps" + getTensorsStringKey({self}) + ":" + std::to_string(threshold.to<double>()) +
-        ":" + std::to_string(value.to<double>());
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-
-      MPSGraphTensor* thresholdTensor = [mpsGraph constantWithScalar:threshold.to<double>()
-                                                               shape:@[ @1 ]
-                                                            dataType:getMPSDataType(self)];
-
-      MPSGraphTensor* valueTensor = [mpsGraph constantWithScalar:value.to<double>()
-                                                           shape:@[ @1 ]
-                                                        dataType:getMPSDataType(self)];
-
-      // x > threshold
-      MPSGraphTensor* predicateTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
-                                                               secondaryTensor:thresholdTensor
-                                                                          name:nil];
-
-      // result = (self > threshold) ? self : value
-      MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
-                                                     truePredicateTensor:inputTensor
-                                                    falsePredicateTensor:valueTensor
-                                                                    name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
-
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-}
-
-TORCH_IMPL_FUNC(threshold_backward_out_mps)
-(const Tensor& grad, const Tensor& self, const Scalar& threshold, const Tensor& gradInput) {
-  using namespace mps;
-  using CachedGraph = MPSUnaryGradCachedGraph;
-  TORCH_CHECK(self.is_mps());
-  TORCH_CHECK(grad.is_mps());
-
-  if (gradInput.numel() == 0)
-    return;
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key =
-        "threshold_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + std::to_string(threshold.to<double>());
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      MPSGraphTensor* gradTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad);
-
-      MPSGraphTensor* thresholdTensor = [mpsGraph constantWithScalar:threshold.to<double>()
-                                                               shape:@[ @1 ]
-                                                            dataType:getMPSDataType(self)];
-
-      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
-
-      // x > threshold
-      MPSGraphTensor* predicateTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
-                                                               secondaryTensor:thresholdTensor
-                                                                          name:nil];
-
-      // result = (self > threshold) ? grad : zeroTensor
-      MPSGraphTensor* gradInputTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
-                                                        truePredicateTensor:gradTensor
-                                                       falsePredicateTensor:zeroTensor
-                                                                       name:nil];
-
-      newCachedGraph->gradOutputTensor_ = gradTensor;
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->gradInputTensor_ = gradInputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder gradPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, gradInput);
-
-    auto feeds = dictionaryFromPlaceholders(gradPlaceholder, selfPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 

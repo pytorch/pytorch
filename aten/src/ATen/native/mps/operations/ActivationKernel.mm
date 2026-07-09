@@ -83,6 +83,17 @@ static void hardswish_backward_kernel(at::TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "hardswish_backward");
 }
 
+static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
+  AT_DISPATCH_ALL_TYPES_AND3(c10::kHalf, c10::kBFloat16, c10::kBool, iter.common_dtype(), "threshold_mps", [&]() {
+    ThresholdParams<scalar_t> params{threshold.to<scalar_t>(), value.to<scalar_t>()};
+    lib.exec_binary_kernel_with_params(
+        iter,
+        "threshold",
+        params,
+        fmt::format("ThresholdParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
+  });
+}
+
 static void elu_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
   AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "elu_mps", [&]() {
     ELUParams<scalar_t> params{alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>()};
@@ -341,6 +352,7 @@ Tensor log_sigmoid_backward_mps(const Tensor& grad_output, const Tensor& self, c
   return grad_input;
 }
 
+REGISTER_DISPATCH(threshold_stub, threshold_kernel);
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, shrink_backward_kernel);

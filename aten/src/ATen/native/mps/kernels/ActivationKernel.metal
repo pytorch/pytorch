@@ -119,6 +119,33 @@ REGISTER_BINARY_OP(hardswish_backward, float, float);
 REGISTER_BINARY_OP(hardswish_backward, half, half);
 REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
 
+// Shared by threshold() and threshold_backward(): the meta function builds the
+// iterator as (self, other) with other = self (forward) or grad (backward,
+// with value = 0), computing `self <= threshold ? value : other`.
+struct threshold_functor {
+  template <typename T>
+  inline T operator()(
+      const T self,
+      const T other,
+      const ThresholdParams<T> params) {
+    return self <= params.threshold ? params.value : other;
+  }
+};
+
+#define REGISTER_THRESHOLD_OP(T)                  \
+  typedef ThresholdParams<T> ThresholdParams_##T; \
+  REGISTER_BINARY_ALPHA_OP(threshold, T, ThresholdParams_##T, T);
+
+REGISTER_THRESHOLD_OP(float);
+REGISTER_THRESHOLD_OP(half);
+REGISTER_THRESHOLD_OP(bfloat);
+REGISTER_THRESHOLD_OP(long);
+REGISTER_THRESHOLD_OP(int);
+REGISTER_THRESHOLD_OP(short);
+REGISTER_THRESHOLD_OP(char);
+REGISTER_THRESHOLD_OP(uchar);
+REGISTER_THRESHOLD_OP(bool);
+
 struct elu_functor {
   template <typename T>
   inline T operator()(const T self_, const ELUParams<T> params) {
