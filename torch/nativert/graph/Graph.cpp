@@ -53,10 +53,11 @@ size_t expectImpl(std::string_view source, char expected, size_t curPos) {
   }
   TORCH_CHECK(
       expected == source[curPos],
-      "Parser error: expected '{}' at position {}, but found '{}'.",
-      expected,
-      curPos,
-      source[curPos]);
+      fmt::format(
+          "Parser error: expected '{}' at position {}, but found '{}'.",
+          expected,
+          curPos,
+          source[curPos]));
   curPos++;
   return curPos;
 }
