@@ -458,12 +458,19 @@ def merge_base_with_main() -> str:
         )
     main_sha = result.stdout.split()[0]
 
-    have_commit = subprocess.run(
-        ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
-        capture_output=True,
-        timeout=5,
-    )
-    if have_commit.returncode != 0:
+    try:
+        have_commit = subprocess.run(
+            ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
+            capture_output=True,
+            timeout=5,
+        )
+        commit_missing = have_commit.returncode != 0
+    except subprocess.TimeoutExpired:
+        # On large or partial-clone repos the object-existence probe can take
+        # longer than 5 s.  Treat this as "not present locally" and let the
+        # fetch below retrieve it.
+        commit_missing = True
+    if commit_missing:
         result = subprocess.run(
             ["git", "fetch", "--no-write-fetch-head", "origin", main_sha],
             capture_output=True,
