@@ -37,7 +37,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
@@ -146,7 +146,7 @@ def _describe_arg_for_logging(arg: object) -> str:
         )
     elif isinstance(arg, torch.Tensor):
         return f"Tensor(shape={arg.shape}, dtype={arg.dtype}, device={arg.device})"
-    elif opaque_object.is_opaque_type(type(arg)):
+    elif opaque_object.is_custom_class(type(arg)):
         return f"Opaque: {type(arg).__name__}"
     else:
         return f"{type(arg).__name__}: {arg}"
@@ -2675,7 +2675,7 @@ class _AutogradSavedState:
             self.metadata.opaque_objects_saved_for_backwards_slice
         ]
         if not all(
-            is_opaque_type(type(obj)) or isinstance(obj, CustomClassBase)
+            is_custom_class(type(obj)) or isinstance(obj, CustomClassBase)
             for obj in opaque_object_outs
         ):
             raise AssertionError(

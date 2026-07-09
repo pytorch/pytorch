@@ -4725,42 +4725,6 @@ def python_subprocess_env() -> dict[str, str]:
     return env
 
 
-def apply_subprocess_env(extra_env: Mapping[str, str | None] | None) -> None:
-    """
-    Apply environment updates sent from a parent process to a persistent worker.
-    A None value means the variable is absent in the parent and should be
-    removed from the worker, rather than leaving a stale value behind.
-    """
-    if extra_env is None:
-        return
-
-    for key, value in extra_env.items():
-        if value is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = value
-
-
-@contextlib.contextmanager
-def patch_subprocess_env(
-    extra_env: Mapping[str, str | None] | None,
-) -> Iterator[None]:
-    """
-    Temporarily apply parent process environment updates in a persistent worker.
-    """
-    if extra_env is None:
-        yield
-        return
-
-    old_env = dict(os.environ)
-    apply_subprocess_env(extra_env)
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(old_env)
-
-
 @dataclasses.dataclass(frozen=True)
 class CUDAGraphWrapperMetadata:
     """
@@ -4868,8 +4832,15 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
 # Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
 def load_template(name: str, template_dir: Path) -> str:
     """Load a template file and return its content."""
-    with open(template_dir / f"{name}.py.jinja") as f:
-        return f.read()
+    path = template_dir / f"{name}.py.jinja"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except UnicodeDecodeError as e:
+        # Name the offending file: a bare UnicodeDecodeError hides which
+        # template is malformed, which is easy to misdiagnose when it surfaces
+        # deep inside kernel lowering.
+        raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:
@@ -4936,16 +4907,13 @@ def is_collective_op(op_name: str) -> bool:
 
 @lru_cache
 def tlx_only_cuda_options() -> list[str]:
-    if config.is_fbcode():
-        try:
-            from torch._inductor.fb.tlx_templates.registry import tlx_only_cuda_options
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
 
-            return tlx_only_cuda_options
+        return tlx_only_cuda_options
 
-        except ImportError:
-            return []
-
-    else:
+    except ImportError:
         return []
 
 
