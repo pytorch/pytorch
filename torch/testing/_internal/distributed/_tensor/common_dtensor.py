@@ -58,6 +58,7 @@ from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     run_subtests,
     skip_if_lt_x_gpu,
+    skip_if_lt_x_devices,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (

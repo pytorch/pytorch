@@ -10,7 +10,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_if_lt_x_gpu,
+    skip_if_lt_x_devices,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
@@ -34,7 +34,7 @@ class TestSaveAndLoadAPI(DTensorTestBase):
         return 2
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_devices(4)
     @with_temp_dir
     def test_auto_detect(self):
         model = FSDP(MyTestModule().to(self.device_type))
@@ -64,7 +64,7 @@ class TestSaveAndLoadAPI(DTensorTestBase):
             dcp.load(model.state_dict(), checkpoint_id="abc://abc.abc")
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_assert_same_keys(self):
         """Test the `_assert_same_keys` function."""
         model = MyTestModule()
