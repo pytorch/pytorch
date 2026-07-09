@@ -27,7 +27,15 @@ else:
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
 ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
 
-TEST_CUPTI = _check_module_exists("cupti") and not TEST_WITH_ROCM
+# The CUPTI monitor needs both the cupti-python bindings and the build-generated
+# _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
+# ran); the module hard-imports the latter, so guard on both to skip (not error) where
+# the stubs were not generated.
+TEST_CUPTI = (
+    _check_module_exists("cupti")
+    and _check_module_exists("torch.profiler._cupti._cupti_stubs")
+    and not TEST_WITH_ROCM
+)
 
 def _cupti_version():
     if not TEST_CUPTI:

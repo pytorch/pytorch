@@ -53,6 +53,7 @@ ignore-missing-imports = [
     "torch._C._xpu_XPUAllocator",
     "torch._C._XPUMemPool",
     "torch._C._StaticXpuLauncher",
+    "torch.profiler._cupti._cupti_stubs",
     "torch._C._jit_tree_views.*",
     "torch.for_onnx.onnx.*",
     "torch.ao.quantization.experimental.apot_utils.*",
