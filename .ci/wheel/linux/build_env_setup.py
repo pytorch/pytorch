@@ -193,7 +193,7 @@ def repo_root() -> Path:
     return Path(
         os.environ.get(
             "GITHUB_WORKSPACE",
-            Path(__file__).resolve().parents[2],
+            Path(__file__).resolve().parents[3],
         )
     )
 
