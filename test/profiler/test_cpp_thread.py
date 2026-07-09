@@ -1,12 +1,15 @@
 # Owner(s): ["oncall: profiler"]
 
 import os
-import unittest
-from unittest import skipIf
 
 import torch
 import torch.utils.cpp_extension
 from torch._environment import is_fbcode
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
@@ -72,16 +75,16 @@ class PythonProfilerEventHandler(cpp.ProfilerEventHandler):
             sync_func()
 
 
-class CppThreadTestCUDA(TestCase):
+class CppThreadTest(TestCase):
     ThreadCount = 20  # set to 2 for debugging
     EventHandler = None
     TraceObject = None
 
     @classmethod
     def setUpClass(cls) -> None:
-        super(TestCase, cls).setUpClass()
-        CppThreadTestCUDA.EventHandler = PythonProfilerEventHandler()
-        cpp.ProfilerEventHandler.Register(CppThreadTestCUDA.EventHandler)
+        super().setUpClass()
+        cls.EventHandler = PythonProfilerEventHandler()
+        cpp.ProfilerEventHandler.Register(cls.EventHandler)
 
     @classmethod
     def tearDownClass(cls):
@@ -90,10 +93,8 @@ class CppThreadTestCUDA(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        if not torch.cuda.is_available():
-            self.skipTest("Test machine does not have cuda")
         global device
-        device = "cuda"
+        device = self.device_type
 
         # this clears off events from initialization
         self.start_profiler(False)
@@ -112,7 +113,7 @@ class CppThreadTestCUDA(TestCase):
         )
 
     def set_trace(self, trace_obj) -> None:
-        CppThreadTestCUDA.TraceObject = trace_obj
+        type(self).TraceObject = trace_obj
 
     def assert_text(self, condition, text, msg):
         if condition:
@@ -123,31 +124,31 @@ class CppThreadTestCUDA(TestCase):
 
     def check_trace(self, expected, mem=False) -> None:
         blueprint("verifying trace")
-        event_list = CppThreadTestCUDA.TraceObject.events()
+        event_list = type(self).TraceObject.events()
         for key, values in expected.items():
             count = values[0]
             min_count = count * (ActivateIteration - 1)
-            device = values[1]
+            dev = values[1]
             filtered = filter(
                 lambda ev: ev.name == key
-                and str(ev.device_type) == f"DeviceType.{device}",
+                and str(ev.device_type) == f"DeviceType.{dev}",
                 event_list,
             )
 
             if mem:
+                mem_key = f"{self.device_type}_memory_usage"
                 actual = 0
                 for ev in filtered:
                     sev = str(ev)
-                    has_cuda_memory_usage = (
-                        sev.find("cuda_memory_usage=0 ") < 0
-                        and sev.find("cuda_memory_usage=") > 0
+                    has_device_memory_usage = (
+                        sev.find(f"{mem_key}=0 ") < 0 and sev.find(f"{mem_key}=") > 0
                     )
-                    if has_cuda_memory_usage:
+                    if has_device_memory_usage:
                         actual += 1
                 self.assert_text(
                     actual >= min_count,
                     f"{key}: {actual} >= {min_count}",
-                    "not enough event with cuda_memory_usage set",
+                    f"not enough event with {mem_key} set",
                 )
             else:
                 actual = len(list(filtered))
@@ -165,39 +166,51 @@ class CppThreadTestCUDA(TestCase):
                         "not enough event recorded",
                     )
 
-    @skipIf(
+    @skipCUDAIf(
         IS_WINDOWS,
         "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
     )
-    def test_with_enable_profiler_in_child_thread_cuda(self) -> None:
+    @skipXPUIf(
+        True,
+        "The XPU Profiler will not cover this case for now. Will support it in next period.",
+    )
+    def test_with_enable_profiler_in_child_thread(self, device) -> None:
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, True)
         self.check_trace(
             {
                 "aten::add": [self.ThreadCount, "CPU"],
-                "user_function": [self.ThreadCount, "CUDA"],
+                "user_function": [self.ThreadCount, self.device_type.upper()],
             }
         )
 
-    @skipIf(
+    @skipCUDAIf(
         IS_WINDOWS,
         "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
     )
-    def test_without_enable_profiler_in_child_thread_cuda(self) -> None:
+    @skipXPUIf(
+        True,
+        "The XPU Profiler will not cover this case for now. Will support it in next period.",
+    )
+    def test_without_enable_profiler_in_child_thread(self, device) -> None:
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, False)
         self.check_trace(
             {
                 "aten::add": [1, "CPU"],
-                "user_function": [1, "CUDA"],
+                "user_function": [1, self.device_type.upper()],
             }
         )
 
-    @skipIf(
+    @skipCUDAIf(
         IS_WINDOWS,
         "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
     )
-    def test_profile_memory_cuda(self) -> None:
+    @skipXPUIf(
+        True,
+        "The XPU Profiler will not cover this case for now. Will support it in next period.",
+    )
+    def test_profile_memory(self, device) -> None:
         self.start_profiler(True)
         cpp.start_threads(self.ThreadCount, IterationCount, True)
         self.check_trace(
@@ -208,145 +221,7 @@ class CppThreadTestCUDA(TestCase):
         )
 
 
-# Here duplicate the CppThreadTest to enable the xpu cases because the
-# instantiate_device_type_tests will call class method setUpClass.
-# In function setUpClass, the instantiated class(e.g CppThreadTestCPU, CppThreadTestXPU)
-# needs to be called to get it member EventHandler, while in this period,
-# the input class in argument cls is CppThreadTest, which is not defined any more.
-# We cannot detect which instantiated class is being created in setUpClass, so duplicate here
-# for enabling xpu test cases
-class CppThreadTestXPU(TestCase):
-    ThreadCount = 20  # set to 2 for debugging
-    EventHandler = None
-    TraceObject = None
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        super(TestCase, cls).setUpClass()
-        CppThreadTestXPU.EventHandler = PythonProfilerEventHandler()
-        cpp.ProfilerEventHandler.Register(CppThreadTestXPU.EventHandler)
-
-    @classmethod
-    def tearDownClass(cls):
-        if not is_fbcode():
-            torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
-
-    def setUp(self) -> None:
-        super().setUp()
-        if not torch.xpu.is_available():
-            self.skipTest("Test machine does not have xpu")
-        global device
-        device = "xpu"
-
-        # this clears off events from initialization
-        self.start_profiler(False)
-        cpp.start_threads(1, IterationCount, False)
-
-    def start_profiler(self, profile_memory):
-        global KinetoProfiler
-        KinetoProfiler = torch.profiler.profile(
-            schedule=torch.profiler.schedule(
-                wait=1, warmup=1, active=ActivateIteration, repeat=1
-            ),
-            on_trace_ready=self.set_trace,
-            with_stack=True,
-            profile_memory=profile_memory,
-            record_shapes=True,
-        )
-
-    def set_trace(self, trace_obj) -> None:
-        CppThreadTestXPU.TraceObject = trace_obj
-
-    def assert_text(self, condition, text, msg):
-        if condition:
-            print(f"\33[32m{text}\33[0m")
-        else:
-            print(f"\33[31m{text}\33[0m")
-        self.assertTrue(condition, msg)
-
-    def check_trace(self, expected, mem=False) -> None:
-        blueprint("verifying trace")
-        event_list = CppThreadTestXPU.TraceObject.events()
-        for key, values in expected.items():
-            count = values[0]
-            min_count = count * (ActivateIteration - 1)
-            device = values[1]
-            filtered = filter(
-                lambda ev: ev.name == key
-                and str(ev.device_type) == f"DeviceType.{device}",
-                event_list,
-            )
-
-            if mem:
-                actual = 0
-                for ev in filtered:
-                    sev = str(ev)
-                    has_cuda_memory_usage = (
-                        sev.find("xpu_memory_usage=0 ") < 0
-                        and sev.find("xpu_memory_usage=") > 0
-                    )
-                    if has_cuda_memory_usage:
-                        actual += 1
-                self.assert_text(
-                    actual >= min_count,
-                    f"{key}: {actual} >= {min_count}",
-                    "not enough event with xpu_memory_usage set",
-                )
-            else:
-                actual = len(list(filtered))
-                if count == 1:  # test_without
-                    count *= ActivateIteration
-                    self.assert_text(
-                        actual == count,
-                        f"{key}: {actual} == {count}",
-                        "baseline event count incorrect",
-                    )
-                else:
-                    self.assert_text(
-                        actual >= min_count,
-                        f"{key}: {actual} >= {min_count}",
-                        "not enough event recorded",
-                    )
-
-    @unittest.skip(
-        reason="The XPU Profiler will not cover this case for now. Will support it in next period."
-    )
-    def test_with_enable_profiler_in_child_thread_xpu(self) -> None:
-        self.start_profiler(False)
-        cpp.start_threads(self.ThreadCount, IterationCount, True)
-        self.check_trace(
-            {
-                "aten::add": [self.ThreadCount, "CPU"],
-                "user_function": [self.ThreadCount, "XPU"],
-            }
-        )
-
-    @unittest.skip(
-        reason="The XPU Profiler will not cover this case for now. Will support it in next period."
-    )
-    def test_without_enable_profiler_in_child_thread_xpu(self) -> None:
-        self.start_profiler(False)
-        cpp.start_threads(self.ThreadCount, IterationCount, False)
-        self.check_trace(
-            {
-                "aten::add": [1, "CPU"],
-                "user_function": [1, "XPU"],
-            }
-        )
-
-    @unittest.skip(
-        reason="The XPU Profiler will not cover this case for now. Will support it in next period."
-    )
-    def test_profile_memory_xpu(self) -> None:
-        self.start_profiler(True)
-        cpp.start_threads(self.ThreadCount, IterationCount, True)
-        self.check_trace(
-            {
-                "aten::add": [self.ThreadCount, "CPU"],
-            },
-            mem=True,
-        )
-
+instantiate_device_type_tests(CppThreadTest, globals(), only_for=("cuda", "xpu"))
 
 if __name__ == "__main__":
     run_tests()

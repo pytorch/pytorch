@@ -13,6 +13,7 @@
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/native/cuda/reduction_template.cuh>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <sstream>
 #include <fstream>
 #include <cstdio>
@@ -1075,14 +1076,14 @@ std::string generate_code(
     declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
                         << '[' << std::to_string(thread_work_size) << "];\n";
   }
-  env.s("declare_load_arrays", declare_load_arrays.str());
+  env.s("declare_load_arrays", std::move(declare_load_arrays).str());
 
   std::stringstream declare_store_arrays;
   for (int i = 0; i < nOutputs; i++) {
     declare_store_arrays << result_type << " out" << std::to_string(i)
                         << '[' << std::to_string(thread_work_size) << "];\n";
   }
-  env.s("declare_store_arrays", declare_store_arrays.str());
+  env.s("declare_store_arrays", std::move(declare_store_arrays).str());
 
   std::stringstream functor_args;
   if (scalar_pos == BinaryFuncVariant::NoScalar) {
@@ -1097,7 +1098,7 @@ std::string generate_code(
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(nInputs == 1);
     functor_args << "arg0[j], scalar_val";
   }
-  env.s("args", functor_args.str());
+  env.s("args", std::move(functor_args).str());
 
   std::string call_functor_template;
   if (return_by_ref) {  // return one or more outputs by reference
@@ -1114,7 +1115,7 @@ std::string generate_code(
       }
       functor_outs << "out" << std::to_string(nOutputs - 1) << "[j]";
     }
-    env.s("functor_outs", functor_outs.str());
+    env.s("functor_outs", std::move(functor_outs).str());
 
     if (need_temp_out) {
       call_functor_template += "${compute_type} ${functor_outs};\n";
@@ -1207,7 +1208,7 @@ std::string generate_code(
                   << "], input_offsets[" << i_string << "], " << i_string
                   << ");\n";
     }
-    env.s("load_inputs", load_inputs.str());
+    env.s("load_inputs", std::move(load_inputs).str());
 
     std::stringstream store_outputs;
     for (int i = 0; i < nOutputs; i++) {
@@ -1217,7 +1218,7 @@ std::string generate_code(
                     << "], output_offsets[" << i_string << "], " << i_string
                     << ");\n";
     }
-    env.s("store_outputs", store_outputs.str());
+    env.s("store_outputs", std::move(store_outputs).str());
 
     static auto cuda_template = at::jit::CodeTemplate(
       jit_preamble + jit_common_types + offset_calc_template + jit_code_template + jit_epilogue);
@@ -1236,7 +1237,7 @@ std::string generate_code(
         " = reinterpret_cast<const scalar_t*>(data[" << i_string << '+' << nOutputs << "])" <<
         " + block_work_size * idx;\n";
   }
-  env.s("vector_inputs", vector_inputs.str());
+  env.s("vector_inputs", std::move(vector_inputs).str());
 
   std::stringstream vector_outputs;
   for (const auto i : c10::irange(nOutputs)){
@@ -1245,7 +1246,7 @@ std::string generate_code(
     " = reinterpret_cast<vec_t_output*>(data[" << i_string << "])" <<
     " + block_work_size / vec_size * idx;\n";
   }
-  env.s("vector_outputs", vector_outputs.str());
+  env.s("vector_outputs", std::move(vector_outputs).str());
 
   std::stringstream load_vectorized_inputs;
   for (const auto i : c10::irange(nInputs)) {
@@ -1257,7 +1258,7 @@ std::string generate_code(
     load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = vec" << i_string << ".val[j];\n";
     load_vectorized_inputs << "}\n";
   }
-  env.s("load_vectorized_inputs", load_vectorized_inputs.str());
+  env.s("load_vectorized_inputs", std::move(load_vectorized_inputs).str());
 
   std::stringstream store_vectorized_outputs;
   for (const auto i : c10::irange(nOutputs)) {
@@ -1268,7 +1269,7 @@ std::string generate_code(
     store_vectorized_outputs << "}\n";
     store_vectorized_outputs << "to_"<< i_string << "[thread_idx] = v;\n";
   }
-  env.s("store_vectorized_outputs", store_vectorized_outputs.str());
+  env.s("store_vectorized_outputs", std::move(store_vectorized_outputs).str());
 
   std::stringstream load_unrolled_inputs;
   for (const auto i: c10::irange(nInputs)){
@@ -1276,7 +1277,7 @@ std::string generate_code(
     load_unrolled_inputs << "arg" << i_string << "[j] = load<" << f_inputs_type
       << ">(data[" << std::to_string(i + nOutputs) << "], linear_idx);\n";
   }
-  env.s("load_unrolled_inputs", load_unrolled_inputs.str());
+  env.s("load_unrolled_inputs", std::move(load_unrolled_inputs).str());
 
   std::stringstream store_unrolled_outputs;
   for (const auto i : c10::irange(nOutputs)) {
@@ -1284,7 +1285,7 @@ std::string generate_code(
     store_unrolled_outputs << "store<" << result_type << ">(out" << i_string
       << "[j], data[" << i_string << "], linear_idx);\n";
   }
-  env.s("store_unrolled_outputs", store_unrolled_outputs.str());
+  env.s("store_unrolled_outputs", std::move(store_unrolled_outputs).str());
 
   static auto cuda_template = at::jit::CodeTemplate(
     jit_preamble + jit_common_types + jit_vectorized_code_template + jit_epilogue);
@@ -1570,7 +1571,7 @@ NvrtcFunction jit_pwise_function(
     ss << (compile_to_sass ? "_sass" : "_ptx");
     ss << '_' << code.length();
     ss << '_' << hash_code;
-    file_path = ss.str();
+    file_path = std::move(ss).str();
 
     std::ifstream read_stream{file_path, std::ios::in | std::ifstream::binary};
     if (read_stream.fail()) {
@@ -1595,6 +1596,8 @@ NvrtcFunction jit_pwise_function(
   nvrtcProgram program;
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+  auto program_guard =
+      c10::make_scope_exit([&] { nvrtc.nvrtcDestroyProgram(&program); });
 
 #ifdef USE_ROCM
   std::vector<const char*> args = {"--std=c++20"};
@@ -1658,7 +1661,7 @@ NvrtcFunction jit_pwise_function(
 
   AT_CUDA_DRIVER_CHECK(
       nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-  // TODO: use guards to avoid leaking
+  program_guard.release();
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
   if (cache_dir.has_value()) {
@@ -1674,7 +1677,7 @@ NvrtcFunction jit_pwise_function(
     const auto pid = getpid();
     std::stringstream tmp_file_path_ss;
     tmp_file_path_ss << file_path << "_tmp_" << pid;
-    const std::string tmp_file_path = tmp_file_path_ss.str();
+    const std::string tmp_file_path = std::move(tmp_file_path_ss).str();
     std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
     if (cubin.fail()) {
       TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",

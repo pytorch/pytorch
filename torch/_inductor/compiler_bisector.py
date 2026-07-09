@@ -73,12 +73,6 @@ BACKENDS: dict[str, list[Subsystem]] = {
 }
 
 subsystem_call_counter: dict[str, int] = collections.Counter()
-call_counter_debug_info: dict[int, str] = {}
-
-
-def reset_counters() -> None:
-    subsystem_call_counter.clear()
-    call_counter_debug_info.clear()
 
 
 @functools.cache
@@ -133,13 +127,34 @@ class CompilerBisector:
     in_process_cache: str | None = None
 
     @classmethod
+    def clear_call_counter_debug_info(
+        cls, backend_name: str, subsystem_name: str
+    ) -> None:
+        file_path = os.path.join(
+            cls.get_dir(),
+            backend_name,
+            f"{subsystem_name}_call_counter_debug_info.txt",
+        )
+        cls.write_lines_to_file(file_path, [])
+
+    @classmethod
+    def reset_counters(cls) -> None:
+        subsystem_call_counter.clear()
+        for backend, subsystem_list in BACKENDS.items():
+            for subsystem in subsystem_list:
+                if isinstance(subsystem, BisectSubsystem):
+                    cls.clear_call_counter_debug_info(backend, subsystem.name)
+
+    @classmethod
     def get_dir(cls) -> str:
         return f"{cache_dir() if not cls.in_process_cache else cls.in_process_cache}/{SUBDIR_NAME}"
 
     @classmethod
-    def write_lines_to_file(cls, file_path: str, lines: list[str]) -> None:
+    def write_lines_to_file(
+        cls, file_path: str, lines: list[str], *, append: bool = False
+    ) -> None:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, "w") as file:
+        with open(file_path, "a" if append else "w") as file:
             file.writelines(lines)
 
     @classmethod
@@ -157,7 +172,10 @@ class CompilerBisector:
             cls.get_dir(), backend_name, f"{subsystem.name}_run_state.txt"
         )
         if isinstance(subsystem, ConfigChange):
-            assert run_state == "test_disable"
+            if run_state != "test_disable":
+                raise AssertionError(
+                    f"expected run_state == 'test_disable', got {run_state}"
+                )
             cls.set_config_values(
                 backend_name,
                 subsystem.name,
@@ -176,7 +194,10 @@ class CompilerBisector:
 
     @classmethod
     def update_bisect_status(cls, backend_name: str, subsystem_name: str) -> None:
-        assert isinstance(subsystem_name, str)
+        if not isinstance(subsystem_name, str):
+            raise AssertionError(
+                f"expected subsystem_name to be str, got {type(subsystem_name)}"
+            )
         file_path = os.path.join(cls.get_dir(), "bisect_status.txt")
         lines = [f"backend={backend_name}\n", f"subsystem={subsystem_name}\n"]
         cls.write_lines_to_file(file_path, lines)
@@ -185,12 +206,41 @@ class CompilerBisector:
     def update_bisect_range(
         cls, backend_name: str, subsystem_name: str, low: int, high: int
     ) -> None:
-        assert isinstance(subsystem_name, str)
+        if not isinstance(subsystem_name, str):
+            raise AssertionError(
+                f"expected subsystem_name to be str, got {type(subsystem_name)}"
+            )
         file_path = os.path.join(
             cls.get_dir(), backend_name, f"{subsystem_name}_bisect_range.txt"
         )
         lines = [f"low={low}\n", f"high={high}\n"]
         cls.write_lines_to_file(file_path, lines)
+
+    @classmethod
+    def add_call_counter_debug_info(
+        cls, backend_name: str, subsystem_name: str, call_counter: int, debug_info: str
+    ) -> None:
+        file_path = os.path.join(
+            cls.get_dir(), backend_name, f"{subsystem_name}_call_counter_debug_info.txt"
+        )
+        # This is only called for the last ~2 items in a bisect, so writing duplicate
+        # lines does not have performance implications later.
+        lines = [f"{call_counter}={debug_info}\n"]
+        cls.write_lines_to_file(file_path, lines, append=True)
+
+    @classmethod
+    def get_call_counter_debug_info(
+        cls, backend_name: str, subsystem_name: str, call_counter: int
+    ) -> str | None:
+        file_path = os.path.join(
+            cls.get_dir(), backend_name, f"{subsystem_name}_call_counter_debug_info.txt"
+        )
+        call_counter_str = str(call_counter)
+        for line in reversed(cls.read_lines_from_file(file_path)):
+            counter, _, debug_info = line.strip().partition("=")
+            if counter == call_counter_str:
+                return debug_info
+        return None
 
     @classmethod
     def get_backend(cls) -> str | None:
@@ -221,7 +271,7 @@ class CompilerBisector:
         for line in lines:
             if line.startswith("subsystem="):
                 out = line.strip().split("=")[1]
-                return out if out else None
+                return out or None
         return None
 
     @classmethod
@@ -240,7 +290,11 @@ class CompilerBisector:
         lines = cls.read_lines_from_file(file_path)
         if lines:
             out = lines[0].strip()
-            assert out in ("test_disable", "find_max_bounds", "bisect")
+            if out not in ("test_disable", "find_max_bounds", "bisect"):
+                raise AssertionError(
+                    f"unexpected run_state {out!r}, expected one of "
+                    "'test_disable', 'find_max_bounds', 'bisect'"
+                )
             return out
         return None
 
@@ -305,7 +359,7 @@ class CompilerBisector:
     @classmethod
     def delete_bisect_status(cls) -> None:
         # in process_cache we have created if it exists, just the subdirectory of non created dir
-        dir_name = cls.in_process_cache if cls.in_process_cache else cls.get_dir()
+        dir_name = cls.in_process_cache or cls.get_dir()
         if os.path.exists(dir_name):
             shutil.rmtree(dir_name)
             print("Bisection status deleted.")
@@ -354,7 +408,8 @@ class CompilerBisector:
             )
             return False
         else:
-            assert run_state == "bisect"
+            if run_state != "bisect":
+                raise AssertionError(f"expected run_state == 'bisect', got {run_state}")
             # If the environment variable is not set, use the bisection range midpoint
             low, high = cls.get_bisect_range(backend, subsystem)
             # if high - low <= 2:
@@ -364,10 +419,12 @@ class CompilerBisector:
             if (
                 call_counter >= low
                 and call_counter <= high
-                and (low - high) <= 2
+                and (high - low) <= 2
                 and debug_info is not None
             ):
-                call_counter_debug_info[call_counter] = debug_info()
+                cls.add_call_counter_debug_info(
+                    backend, subsystem, call_counter, debug_info()
+                )
 
             return call_counter > midpoint
 
@@ -427,10 +484,13 @@ class CompilerBisector:
         """
         Process the current subsystem. Returns True if the issue is found, False otherwise.
         """
-        assert isinstance(curr_subsystem, Subsystem)
+        if not isinstance(curr_subsystem, Subsystem):
+            raise AssertionError(
+                f"expected curr_subsystem to be Subsystem, got {type(curr_subsystem)}"
+            )
         while True:
             run_state = cls.get_run_state(curr_backend, curr_subsystem.name)
-            reset_counters()
+            cls.reset_counters()
             if run_state == "test_disable":
                 if not fn():
                     next_subsystem = cls.advance_subsystem(curr_backend, curr_subsystem)
@@ -478,7 +538,7 @@ class CompilerBisector:
                 if low == high:
                     print(
                         f"Binary search completed for {curr_backend} - {curr_subsystem.name}. The bisect number is {low}. "
-                        f"Debug info: {call_counter_debug_info.get(low, 'not found')}"
+                        f"Debug info: {cls.get_call_counter_debug_info(curr_backend, curr_subsystem.name, low) or 'not found'}"
                     )
                     return True
             else:
@@ -540,7 +600,10 @@ class CompilerBisector:
         if not curr_backend:
             cls.initialize_system()
             curr_backend = cls.get_backend()
-            assert curr_backend is not None
+            if curr_backend is None:
+                raise AssertionError(
+                    "expected curr_backend to be set after initialize_system"
+                )
             curr_subsystem_name = cls.get_subsystem()
 
         curr_subsystem = (
@@ -549,8 +612,9 @@ class CompilerBisector:
             else None
         )
         while True:
-            assert curr_backend is not None
-            reset_counters()
+            if curr_backend is None:
+                raise AssertionError("expected curr_backend to be set")
+            cls.reset_counters()
             if curr_subsystem:
                 result = cls.process_subsystem(
                     curr_backend, curr_subsystem, fn, cli_interface=cli_interface
@@ -574,7 +638,9 @@ class CompilerBisector:
                         curr_backend,
                         curr_subsystem.name,
                         low,
-                        call_counter_debug_info.get(low),
+                        cls.get_call_counter_debug_info(
+                            curr_backend, curr_subsystem.name, low
+                        ),
                     )
 
                 next_subsystem = cls.advance_subsystem(curr_backend, curr_subsystem)
@@ -582,7 +648,8 @@ class CompilerBisector:
                     print(
                         f"The issue is in the {curr_backend} system, but could not identify subsystem."
                     )
-                    assert curr_backend is not None
+                    if curr_backend is None:
+                        raise AssertionError("expected curr_backend to be set")
                     return BisectionResult(curr_backend)
 
                 curr_subsystem = next_subsystem
@@ -713,7 +780,8 @@ def command_line_usage() -> None:
                 env["TORCH_BISECT_BACKEND"] = backend
 
             if subsystem:
-                assert backend is not None  # subsystem requires a backend
+                if backend is None:  # subsystem requires a backend
+                    raise AssertionError("subsystem requires a backend")
                 env["TORCH_BISECT_SUBSYSTEM"] = subsystem
                 # Get run_state to determine TORCH_BISECT_MAX
                 run_state = bisection_manager.get_run_state(backend, subsystem)

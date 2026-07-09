@@ -62,16 +62,6 @@
 - test/test_jit_llga_fuser.py
 - test/test_mkldnn.py
 
-"ciflow/linux-aarch64":
-- third_party/ideep
-- caffe2/ideep/**
-- caffe2/python/ideep/**
-- cmake/Modules/FindMKLDNN.cmake
-- third_party/mkl-dnn.BUILD
-- torch/csrc/jit/codegen/onednn/**
-- test/test_jit_llga_fuser.py
-- test/test_mkldnn.py
-
 "module: amp (automated mixed precision)":
 - torch/amp/**
 - aten/src/ATen/autocast_mode.*
@@ -199,7 +189,14 @@
 - test/distributed/**/*mem*
 - test/distributed/**/*mem*/**
 
+"ciflow/docker":
+- .ci/docker/**
+- .github/workflows/docker-builds.yml
+- .lintrunner.toml
+
 "ciflow/torchtitan":
+# torchtitan commit pin updates
+- .github/ci_commit_pins/torchtitan.txt
 # torch.distributed (FSDP, DTensor, etc.)
 - torch/distributed/**
 # torch.compile

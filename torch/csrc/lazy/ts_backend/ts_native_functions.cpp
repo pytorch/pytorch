@@ -537,19 +537,4 @@ at::Tensor LazyNativeFunctions::slice_backward_symint(
           std::move(step));
 }
 
-// reuse the composite kernel from core, that way we don't need to provide a
-// backwards formula for native_group_norm
-std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
-    const at::Tensor& input,
-    const std::optional<at::Tensor>& weight,
-    const std::optional<at::Tensor>& bias,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
-    int64_t group,
-    double eps) {
-  return at::native::math_group_norm(
-      input, weight, bias, N, C, HxW, group, eps);
-}
-
 } // namespace torch::lazy

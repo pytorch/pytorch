@@ -15,11 +15,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
      compile
      reset
+     nonstrict_trace
      allow_in_graph
      substitute_in_graph
      assume_constant_result
      list_backends
      disable
+     set_default_backend
+     get_default_backend
      set_stance
      set_enable_guard_collectives
      cudagraph_mark_step_begin
@@ -33,4 +36,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      skip_guard_on_globals_unsafe
      skip_all_guards_unsafe
      nested_compile_region
+     load_cache_artifacts
+     load_compiled_function
+     save_cache_artifacts
+     wrap_numpy
 ```
