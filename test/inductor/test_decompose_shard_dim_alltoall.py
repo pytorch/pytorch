@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import math
+import unittest
 from unittest import mock
 
 import torch
@@ -12,6 +13,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
+@unittest.skipIf(not torch.distributed.is_available(), "requires distributed support")
 class TestDecomposeShardDimAllToAll(TestCase):
     def _reference_shard_dim_alltoall(
         self,
