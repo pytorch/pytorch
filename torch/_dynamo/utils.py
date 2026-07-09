@@ -4186,21 +4186,37 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
+
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        _wrap_graph_break_with_torch_runtime_err(
-            lambda: unimplemented(
-                gb_type="RuntimeError when making fake tensor call",
-                context="",
-                explanation=msg,
-                hints=[*graph_break_hints.USER_ERROR],
-                from_exc=cause,
+
+        has_exn_handler = (
+            sys.version_info >= (3, 11)
+            and tx.current_instruction.exn_tab_entry is not None
+            and tx.current_instruction.exn_tab_entry.target.opname == "PUSH_EXC_INFO"
+        ) or (sys.version_info < (3, 11) and len(tx.block_stack) > 0)
+
+        if has_exn_handler:
+            tx.output.graph.erase_node(node)
+            from .exc import raise_observed_exception
+
+            raise_observed_exception(RuntimeError, tx, args=[msg])
+        else:
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="RuntimeError when making fake tensor call",
+                    context="",
+                    explanation=msg,
+                    hints=[*graph_break_hints.USER_ERROR],
+                    from_exc=cause,
+                )
             )
-        )
-        raise AssertionError("should not reachable") from None
+            raise AssertionError("should not be reachable") from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
-            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+            torch.Tensor,
+            functools.partial(ensure_graph_fake, tx=tx),
+            ret_val,  # pyrefly: ignore [unbound-name]
         )
 
     if (
