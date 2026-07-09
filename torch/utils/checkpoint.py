@@ -1256,6 +1256,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     frame.x_metadatas.append(frame.metadata_fn(x))
             return holder
 
+        @torch._dynamo.dont_skip_tracing
         def unpack_hook(holder):
             # First check if we're inside a GraphExecGroup context
             gid: GraphExecGroup | None | int = GraphExecGroup._get_current_group()
@@ -1301,11 +1302,13 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             return ret
 
         if frame.unpack_error_cb is not None:
+            @torch._dynamo.dont_skip_tracing
             def unpack_hook_with_error_cb(holder):
                 try:
                     return unpack_hook(holder)
                 except CheckpointError as e:
                     frame.unpack_error_cb(e)
+
             super().__init__(pack_hook, unpack_hook_with_error_cb)
         else:
             super().__init__(pack_hook, unpack_hook)
