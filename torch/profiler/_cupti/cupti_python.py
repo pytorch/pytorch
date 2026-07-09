@@ -38,7 +38,9 @@ except ModuleNotFoundError as exc:
 
 # Generated from the CUPTI ABI header (tools/gen_cupti_stubs.py): the
 # CUpti_ActivityAttribute selectors, so their (ABI-renumbered) ints are never hardcoded.
-from torch.profiler._cupti._cupti_stubs import ActivityAttr
+from torch.profiler._cupti._cupti_stubs import (  # pyrefly: ignore[missing-import]
+    ActivityAttr,
+)
 
 
 if TYPE_CHECKING:
