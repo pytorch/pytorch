@@ -391,32 +391,40 @@ add_custom_target(
 
 # Generate torch/profiler/_cupti/_cupti_stubs.py (the CUPTI CUpti_Activity*FieldIds and
 # CUpti_ActivityAttribute enums) from the CUPTI ABI header shipped by nvidia-cuda-cupti.
-# The header is located at configure time so the rule re-runs when it changes; codegen is
-# skipped when no header is present (the torch.profiler._cupti consumer needs CUPTI at
-# runtime anyway).
+# gen_cupti_stubs.py resolves the header itself (tools.setup_helpers.cupti.find_cupti_header,
+# which applies the version floor) and writes the module only when a sufficiently-new header
+# is present -- otherwise it skips and clears any stale output. It parses the header with the
+# clang python bindings from the libclang wheel (a build dep; bundles libclang.so, loaded
+# automatically). We run it at configure time and gate on whether the stub file was produced.
 if(USE_CUDA AND BUILD_PYTHON)
+  set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_stubs.py")
+  # Re-run configure (which re-runs codegen below) when the codegen or the header resolver
+  # changes. The resolved CUPTI header is added as a dependency too, once the script reports it.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${TORCH_ROOT}/tools/gen_cupti_stubs.py"
+    "${TORCH_ROOT}/tools/setup_helpers/cupti.py")
   execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c
-      "from tools.setup_helpers.cupti import find_cupti_header as f; p = f(); print(p or '', end='')"
+    COMMAND "${Python_EXECUTABLE}" tools/gen_cupti_stubs.py --output "${CUPTI_STUBS_PY}"
     WORKING_DIRECTORY "${TORCH_ROOT}"
-    OUTPUT_VARIABLE CUPTI_ACTIVITY_HEADER)
-  if(CUPTI_ACTIVITY_HEADER)
-    # gen_cupti_stubs.py parses the header with the clang python bindings from the
-    # libclang wheel (a build dep), which bundles libclang.so and loads it
-    # automatically -- so there is no need to locate a system libclang.so here.
-    set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_stubs.py")
-    add_custom_command(
-      COMMENT "Generating CUPTI stub module from ${CUPTI_ACTIVITY_HEADER}"
-      OUTPUT "${CUPTI_STUBS_PY}"
-      COMMAND "${Python_EXECUTABLE}" tools/gen_cupti_stubs.py
-        --output "${CUPTI_STUBS_PY}" --header "${CUPTI_ACTIVITY_HEADER}"
-      DEPENDS
-        "${TORCH_ROOT}/tools/gen_cupti_stubs.py"
-        "${CUPTI_ACTIVITY_HEADER}"
-      WORKING_DIRECTORY "${TORCH_ROOT}")
-    add_custom_target(generate-cupti-stubs ALL DEPENDS "${CUPTI_STUBS_PY}")
+    RESULT_VARIABLE CUPTI_STUBS_RC
+    OUTPUT_VARIABLE CUPTI_STUBS_OUT
+    ERROR_VARIABLE CUPTI_STUBS_ERR)
+  if(NOT CUPTI_STUBS_RC EQUAL 0)
+    # A real codegen failure (e.g. header present but libclang broken); the CUPTI monitor will
+    # be unavailable, but it degrades gracefully at runtime so this is not fatal to the build.
+    message(WARNING "CUPTI stub codegen failed; the CUPTI monitor will be unavailable:\n${CUPTI_STUBS_OUT}${CUPTI_STUBS_ERR}")
+  elseif(EXISTS "${CUPTI_STUBS_PY}")
+    message(STATUS "Generated CUPTI stub module: ${CUPTI_STUBS_PY}")
+    # Regenerate when the resolved header (or its version header) changes: adding them to
+    # CMAKE_CONFIGURE_DEPENDS makes a later build auto-reconfigure and re-run the codegen.
+    string(REGEX MATCH "CUPTI_MONITOR_STUBS_HEADER=([^\r\n]+)" _ "${CUPTI_STUBS_OUT}")
+    if(CMAKE_MATCH_1)
+      get_filename_component(CUPTI_INCLUDE_DIR "${CMAKE_MATCH_1}" DIRECTORY)
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_MATCH_1}" "${CUPTI_INCLUDE_DIR}/cupti_version.h")
+    endif()
   else()
-    message(STATUS "CUPTI header not found; skipping CUPTI stub codegen")
+    message(STATUS "No sufficiently-new CUPTI header; skipping CUPTI stub codegen")
   endif()
 endif()
 
