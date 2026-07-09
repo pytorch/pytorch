@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch._C._distributed_c10d import FakeProcessGroup
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor import DeviceMesh, Shard
+from torch.distributed.tensor import Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -222,9 +222,6 @@ class TestFakePG(TestCase):
             backend="fake", rank=0, world_size=world_size, store=store
         )
 
-        device_mesh = DeviceMesh(
-            device_type, torch.arange(0, world_size).view(-1, tp_size)
-        )
         device_mesh = init_device_mesh(
             device_type, (world_size // tp_size, tp_size), mesh_dim_names=["dp", "tp"]
         )

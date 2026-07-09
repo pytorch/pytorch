@@ -1609,9 +1609,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         mod = torch.nn.Linear(4, 4)
         mod.register_forward_hook(fw_hook)
-
-        mod = torch.nn.Linear(4, 4)
-        mod.register_forward_hook(fw_hook)
         mod.weight = torch.nn.Parameter(
             DTensor.from_local(mod.weight, mesh, [Replicate()], run_check=False)
         )

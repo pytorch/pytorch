@@ -1598,8 +1598,6 @@ class AbstractLargeCommTest:
             rank=self.rank,
             store=store,
         )
-        rank = dist.get_rank()
-
         # split the world in 2 PGs
         rank = dist.get_rank()
         pg_idx = rank // 2
@@ -1634,8 +1632,6 @@ class AbstractLargeCommTest:
             rank=self.rank,
             store=store,
         )
-        rank = dist.get_rank()
-
         # split the world in 2 PGs
         rank = dist.get_rank()
         pg_idx = rank // 2
