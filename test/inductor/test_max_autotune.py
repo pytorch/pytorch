@@ -2029,7 +2029,7 @@ class TestMaxAutotune(TestCase):
                     FileCheck().check("decompose_k").check_not(
                         "aoti_torch_cuda_bmm_dtype_out"
                     ).check_regex(
-                        rf"aoti_torch_empty_strided.*, cached_torch_dtype_float16, cached_torch_device_type_{GPU_TYPE}"
+                        rf"aoti_torch_empty_strided.*, cached_torch_dtype_bfloat16, cached_torch_device_type_{GPU_TYPE}"
                     ).run(code[0])
                 else:
                     FileCheck().check_not("extern_kernels.bmm_dtype").check(
@@ -2308,7 +2308,6 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(len(configs), 1)
                 self.assertEqual(configs[0], expected_config)
 
-    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     def test_bmm_out_dtype(self):
         def f(a, b):
             return torch.bmm(a, b, out_dtype=torch.float32)
@@ -2325,7 +2324,6 @@ class TestMaxAutotune(TestCase):
             FileCheck().check("extern_kernels.bmm_dtype").run(code[0])
             self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
-    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     def test_triton_bmm_out_dtype(self):
         def f(a, b, out_dtype=torch.float32):
             return torch.bmm(a, b, out_dtype=out_dtype)
