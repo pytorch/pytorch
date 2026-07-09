@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: releng"]
 name: linux-binary-build
 
-# Reusable build workflow for linux binary (manywheel/libtorch).
+# Reusable build workflow for linux binary wheels (manywheel).
 #
 # Two execution modes selected by `use_container_directive`:
 # - true (default): launch the build container via GHA's native `container:`
@@ -142,6 +142,11 @@ jobs:
           } >> "${GITHUB_ENV}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
+      # PACKAGE_TYPE is a semantic label consumed by binary_populate_env.sh
+      # and the test/upload scripts -- never a directory. This workflow always
+      # builds through the Linux wheel pipeline; libtorch zips are produced by
+      # a separate extraction job (.ci/libtorch/extract_libtorch_from_wheel.py)
+      # from the wheels built here.
       # Container-directive path: build runs directly inside the container.
       - name: Populate binary env
         if: inputs.use_container_directive
@@ -153,7 +158,7 @@ jobs:
         shell: bash
         run: |
           source "${BINARY_ENV_FILE}"
-          bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh
+          bash .ci/wheel/linux/build.sh
 
       # Bare-runner path: spawn the build container manually.
       - name: Build PyTorch binary (docker run)
@@ -182,7 +187,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .ci/pytorch/binary_populate_env.sh"
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash .ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash .ci/wheel/linux/build.sh"
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:

@@ -3,7 +3,7 @@
 set -ex
 
 SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-PYTORCH_ROOT="${PYTORCH_ROOT:-$(cd "${SCRIPTPATH}/../.." && pwd)}"
+PYTORCH_ROOT="${PYTORCH_ROOT:-$(cd "${SCRIPTPATH}/../../.." && pwd)}"
 
 case "${GPU_ARCH_TYPE:-BLANK}" in
     cuda|cuda-aarch64|cpu|cpu-aarch64|cpu-cxx11-abi|xpu|rocm)

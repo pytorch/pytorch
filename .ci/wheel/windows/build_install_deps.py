@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install build-time dependencies for a PyTorch Windows wheel build.
 
-Windows analog of `.ci/manywheel/build_install_deps.py`. Replaces the
+Windows analog of `.ci/wheel/linux/build_install_deps.py`. Replaces the
 pip-install + libuv-extract portion of the legacy
 `.ci/pytorch/windows/setup_build.bat`. The vcvarsall / CUDA / XPU env
 configuration lives in the sibling `build_env_setup.py`; both scripts run
@@ -15,26 +15,21 @@ import argparse
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 
-# Directory containing this script (.ci/pytorch/windows). Scratch downloads
-# land here so they don't pollute PYTORCH_ROOT.
-WIN_CI_DIR = Path(__file__).resolve().parent
+# This pipeline script lives in .ci/wheel/windows; shared helpers are one
+# level up in .ci/wheel/_common.py.
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent))
+from _common import download, install_numpy, pip_install, write_env_exports
+
+
+# The Windows CD workspace (scratch downloads, libuv) stays under the general
+# Windows CI dir so it doesn't pollute PYTORCH_ROOT.
+WIN_CI_DIR = _HERE.parents[1] / "pytorch" / "windows"
 # Repo root contains pyproject.toml; spin needs to run from there.
-PYTORCH_ROOT = WIN_CI_DIR.parent.parent.parent
-
-sys.path.insert(0, str(WIN_CI_DIR))
-from _common import download, write_env_exports
-
-
-# Pin numpy by Python version. Matches the legacy table in setup_build.bat.
-NUMPY_PINS: list[tuple[str, str]] = [
-    ("cp314", "2.3.2"),
-    ("cp313", "2.1.2"),
-]
-DEFAULT_NUMPY = "2.0.2"
+PYTORCH_ROOT = _HERE.parents[2]
 
 
 # Fixed build-time pip deps from setup_build.bat. Kept hardcoded for now;
@@ -55,31 +50,6 @@ PIP_PACKAGES: list[str] = [
 
 
 LIBUV_URL = "https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2"
-
-
-def retry(cmd: list[str], delays: tuple[int, ...] = (1, 2, 4, 8)) -> None:
-    """Run cmd, retrying with backoff on failure (mirrors the Linux helper)."""
-    last_rc = 0
-    for delay in (0, *delays):
-        if delay:
-            time.sleep(delay)
-        result = subprocess.run(cmd)
-        if result.returncode == 0:
-            return
-        last_rc = result.returncode
-    sys.exit(last_rc)
-
-
-def pip_install(*args: str) -> None:
-    retry([sys.executable, "-m", "pip", "install", *args])
-
-
-def numpy_pin() -> str:
-    tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
-    for prefix, version in NUMPY_PINS:
-        if tag.startswith(prefix):
-            return version
-    return DEFAULT_NUMPY
 
 
 def install_libuv(workdir: Path, python_prefix: Path) -> Path:
@@ -109,7 +79,7 @@ def main() -> None:
     parser.add_argument("--env-out", type=Path)
     args = parser.parse_args()
 
-    pip_install("-q", f"numpy=={numpy_pin()}")
+    install_numpy()
     pip_install("-q", *PIP_PACKAGES)
 
     if not os.environ.get("SKIP_SETUP_CLEAN"):

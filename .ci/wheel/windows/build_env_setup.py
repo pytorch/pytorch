@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GPU/toolchain environment setup for Windows manywheel/wheel CD builds.
 
-Mirrors the Linux `.ci/manywheel/build_env_setup.py` pattern: install heavy
+Mirrors the Linux `.ci/wheel/linux/build_env_setup.py` pattern: install heavy
 toolchain pieces (CUDA, MAGMA, MSVC env via vcvarsall, oneAPI for XPU),
 then emit `export KEY=VALUE` lines to the file given by --env-out for the
 parent bash wrapper to source. Without that handoff, the env we configure
@@ -22,17 +22,17 @@ import sys
 from pathlib import Path
 
 
-# Allow this script to be invoked from anywhere; sibling helpers live next
-# to it on disk.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Shared helpers live one level up in .ci/wheel/_common.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _common import download, write_env_exports
 
 
-# Directory containing this script (.ci/pytorch/windows). Used as the root
-# for tmp_bin/, magma_*/, and the internal/*.bat installer scripts -- matches
-# the legacy `%~dp0` convention so the installers' own path math keeps
-# working.
-WIN_CI_DIR = Path(__file__).resolve().parent
+# The Windows CD workspace: root for tmp_bin/, magma_*/, and the shared
+# internal/*.bat installers. It stays under the general Windows CI dir
+# (.ci/pytorch/windows), matching the legacy `%~dp0` convention the installers'
+# path math relies on, even though this pipeline script now lives in
+# .ci/wheel/windows.
+WIN_CI_DIR = Path(__file__).resolve().parents[2] / "pytorch" / "windows"
 
 
 # Common env applied to every Windows wheel build. Mirrors the legacy
