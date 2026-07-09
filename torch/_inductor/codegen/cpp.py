@@ -229,8 +229,6 @@ def reduction_combine(
         return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
-    if reduction_type == "fmax":
-        return f"std::max({var}, {next_value})"
     if reduction_type == "welford_reduce":
         if helper_val:
             return f"welford_combine({var}, {next_value}, &{helper_val})"
@@ -1725,7 +1723,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def fmaximum(a, b):
-        return f"at::vec::maximum({a}, {b})"
+        return f"decltype({a})::blendv({a}, {b}, {a} < {b})"
 
     @staticmethod
     def square(a):
