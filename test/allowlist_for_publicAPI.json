@@ -463,9 +463,11 @@
     "matrix_norm",
     "matrix_power",
     "matrix_rank",
+    "matrix_sqrth",
     "multi_dot",
     "norm",
     "pinv",
+    "polar",
     "qr",
     "slogdet",
     "solve",
@@ -552,7 +554,6 @@
   "torch.multiprocessing.reductions": [
     "ForkingPickler",
     "Union",
-    "check_serializing_named_tensor",
     "register_after_fork"
   ],
   "torch.multiprocessing.spawn": [
@@ -1772,9 +1773,7 @@
     "Optional",
     "Union"
   ],
-  "torch.fx.experimental.migrate_gradual_types.constraint": [
-    "TensorType"
-  ],
+  "torch.fx.experimental.migrate_gradual_types.constraint": [],
   "torch.fx.experimental.migrate_gradual_types.constraint_generator": [
     "ApplyBroadcasting",
     "BatchNorm2d",
@@ -1830,6 +1829,7 @@
     "IndexSelect",
     "List",
     "Prod",
+    "Sequence",
     "T",
     "TGreatestUpperBound",
     "TVar",
@@ -1844,6 +1844,7 @@
     "BinConstraintD",
     "BinConstraintT",
     "Conj",
+    "Constraint",
     "ConstraintGenerator",
     "D",
     "DVar",

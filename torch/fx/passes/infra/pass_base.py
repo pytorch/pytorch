@@ -1,7 +1,7 @@
-# mypy: allow-untyped-defs
 import abc
 from collections import namedtuple
 
+import torch.nn as nn
 from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
 
@@ -18,9 +18,9 @@ class PassResult(namedtuple("PassResult", ["graph_module", "modified"])):
         modified: A flag for if the pass has modified the graph module
     """
 
-    __slots__ = ()
+    __slots__: tuple[str, ...] = ()
 
-    def __new__(cls, graph_module, modified):
+    def __new__(cls, graph_module: nn.Module, modified: bool) -> "PassResult":
         return super().__new__(cls, graph_module, modified)
 
 

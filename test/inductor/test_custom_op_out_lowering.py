@@ -26,7 +26,7 @@ class TestCustomOpOutLowering(InductorTestCase):
         lib.define("add_one(Tensor x) -> Tensor")
         lib.define(
             "add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
-            tags=(torch.Tag.out_variant,),
+            tags=(torch.Tag.out,),
         )
 
         def _add_one_impl(x: torch.Tensor) -> torch.Tensor:
@@ -64,12 +64,32 @@ class TestCustomOpOutLowering(InductorTestCase):
 
             FileCheck().check(".out(").check_not(".default(").run(code)
 
+    @parametrize("device", DEVICES)
+    def test_add_one_lowered_to_out_dynamic_shape(self, device):
+        """Out-variant lowering with symbolic output shape (see #185503)."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            self._register_add_one_ops(lib)
+
+            def f(x):
+                return torch.ops.mylib.add_one(x)
+
+            x = torch.randn(4, 8, device=device)
+            torch._dynamo.mark_dynamic(x, 0)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True, dynamic=True),
+                x,
+            )
+            self.assertEqual(compiled_out, eager_out)
+            FileCheck().check(".out(").check_not(".default(").run(code)
+
     def _register_split_add_ops(self, lib):
         """Register a split_add op returning two tensors with functional + .out overloads."""
         lib.define("split_add(Tensor x, float a, float b) -> (Tensor, Tensor)")
         lib.define(
             "split_add.out(Tensor x, float a, float b, *, Tensor(a!) out0, Tensor(b!) out1) -> (Tensor(a!), Tensor(b!))",
-            tags=(torch.Tag.out_variant,),
+            tags=(torch.Tag.out,),
         )
 
         def _split_add_impl(x, a, b):
