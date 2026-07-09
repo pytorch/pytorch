@@ -277,6 +277,16 @@ except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
+    # In-tree NCCL backend built on the torchcomms engine (selected via the
+    # "nccl2" backend / entry point). Available whenever NCCL is built.
+    from torch._C._distributed_c10d import ProcessGroupNCCL2
+
+    ProcessGroupNCCL2.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupNCCL2"]
+except ImportError:
+    pass
+
+try:
     from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
 
     ProcessGroupGloo.__module__ = "torch.distributed.distributed_c10d"
@@ -307,6 +317,7 @@ if TYPE_CHECKING:
         ProcessGroupGloo,
         ProcessGroupMPI,
         ProcessGroupNCCL,
+        ProcessGroupNCCL2,
         ProcessGroupUCC,
         ProcessGroupXCCL,
     )
@@ -470,13 +481,16 @@ class Backend(str):  # noqa: SLOT000
                                            Default: ``False``. If set to ``True``, the backend
                                            will get an instance of ``c10d::DistributedBackendOptions``, and
                                            a process group options object as defined by the backend implementation.
-            device (str or list of str, optional): device type this backend
+            devices (str or list of str, optional): device type this backend
                             supports, e.g. "cpu", "cuda", etc. If `None`,
                             assumes CPU and the current accelerator.
 
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
+        if isinstance(devices, str):
+            devices = [devices]
+
         # This takes care of CUSTOM Out-of-tree backend types, update in backend_list indicates availability
         normalized_name = name.lower()
         if not hasattr(Backend, normalized_name.upper()):
@@ -499,8 +513,6 @@ class Backend(str):  # noqa: SLOT000
             device_list = ["cpu"]
             if (acc := torch.accelerator.current_accelerator()) is not None:
                 device_list.append(acc.type)
-        elif isinstance(devices, str):
-            device_list = [devices]
         else:
             device_list = devices
 
@@ -586,6 +598,28 @@ def _create_nccl_process_group(
     return backend_class
 
 
+def _create_nccl2_process_group(
+    opts: _DistributedBackendOptions, backend_options: Any | None
+) -> C10DBackend:
+    if not is_nccl_available():
+        raise RuntimeError("Distributed package doesn't have NCCL built in")
+    # Accept a ProcessGroupNCCL2.Options if given; otherwise (None, or a
+    # ProcessGroupNCCL.Options passed through the generic path) build a fresh one.
+    if backend_options is not None and isinstance(
+        backend_options, ProcessGroupNCCL2.Options
+    ):
+        pg_options = backend_options
+    else:
+        pg_options = ProcessGroupNCCL2.Options()
+    # pyrefly: ignore [bad-argument-type]
+    pg_options._timeout = opts.timeout
+    pg_options.global_ranks_in_group = opts.global_ranks_in_group
+    pg_options.group_name = opts.group_id
+    if opts.enable_reconfigure:
+        pg_options.enable_reconfigure = True
+    return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
+
+
 def _create_ucc_process_group(
     opts: _DistributedBackendOptions, backend_options: Any | None
 ) -> C10DBackend:
@@ -646,6 +680,19 @@ def _register_builtin_nccl_backend() -> None:
         extended_api=True,
         devices=Backend.backend_capability[Backend.NCCL],
         _backend_type=ProcessGroup.BackendType.NCCL,
+    )
+
+
+def _register_builtin_nccl2_backend() -> None:
+    # In-tree torchcomms NCCL backend. CUSTOM backend type; registering with
+    # devices=["cuda"] sets capability without claiming the cuda default (which
+    # stays "nccl"), so this only takes effect when explicitly requested.
+    Backend.register_backend(
+        "nccl2",
+        _create_nccl2_process_group,
+        extended_api=True,
+        devices=["cuda"],
+        _backend_type=ProcessGroup.BackendType.CUSTOM,
     )
 
 
@@ -5829,8 +5876,8 @@ def split_group(
     """
     Create a new process group split from the given parent process group.
 
-    warning:: This is an experimental API. Only the ``NCCL``, ``Gloo`` and custom plugin
-    backends are supported. Other backends will raise an error.
+    warning:: This is an experimental API. Only the ``NCCL`` and custom plugin backends
+    are supported. Other backends will raise an error.
     Users of this API must guarantee that all ranks in the parent group enter this API call,
     and the split of the sub groups is the same across all ranks in the parent group.
 
@@ -5875,6 +5922,10 @@ def split_group(
     global _world
     default_pg = _get_default_group()
     device_id = default_pg.bound_device_id
+    if not device_id and not _use_torchcomms_enabled():
+        raise RuntimeError(
+            "No device associated with the default pg, not safe to split any process groups"
+        )
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
@@ -5896,36 +5947,22 @@ def split_group(
 
     parent_group_rank = parent_global_to_group_ranks[global_rank]
 
-    # Resolve the device whose backend drives the split: the current
-    # accelerator if the parent group has a backend for it, otherwise CPU
-    # (e.g. a cpu-only gloo parent group).
-    parent_device_types = {d.type for d in parent_pg._device_types}
-    acc = torch.accelerator.current_accelerator(check_available=True)
-    if acc is not None and acc.type in parent_device_types:
-        split_device = acc
-    elif "cpu" in parent_device_types:
-        split_device = torch.device("cpu")
+    if torch.accelerator.is_available():
+        parent_backend = parent_pg._get_backend(
+            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+        )
+    elif _use_torchcomms_enabled():
+        # torchcomms supports CPU/gloo splitting; no accelerator is required.
+        parent_backend = parent_pg._get_backend(
+            torch.device("cpu")  # pyrefly: ignore[bad-argument-type]
+        )
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
-    parent_backend = parent_pg._get_backend(split_device)
-
-    # A backend that also serves CPU (gloo, or a bare "gloo" group that
-    # registers the same backend for cpu and the accelerator) needs no bound
-    # device to split. Accelerator-only backends (e.g. NCCL) split the parent
-    # communicator eagerly, which is only safe once the default pg has
-    # initialized it -- guaranteed by a bound device id.
-    cpu_capable = "cpu" in parent_device_types and (
-        split_device.type == "cpu"
-        or parent_pg._get_backend(torch.device("cpu")) is parent_backend
-    )
-    if not device_id and not cpu_capable and not _use_torchcomms_enabled():
-        raise RuntimeError(
-            "No device associated with the default pg, not safe to split any process groups"
-        )
 
     # if the parent backend does not support splitting, raise error
+    # currently this API only support NCCL and XCCL backend
     if (
         not parent_backend or not parent_backend.supports_splitting
     ) and not _use_torchcomms_enabled():
@@ -5947,11 +5984,12 @@ def split_group(
     # loop honors this filter so unwanted backends are never split.
     device_types_filter: list[torch.device] | None = None
     if backend is not None:
+        parent_devices = {d.type for d in parent_pg._device_types}
         parent_device_backends = _parse_backend_string(
-            parent_backend_str, available_devices=parent_device_types
+            parent_backend_str, available_devices=parent_devices
         )
         requested_device_backends = _parse_backend_string(
-            str(backend), available_devices=parent_device_types
+            str(backend), available_devices=parent_devices
         )
         for device_type, requested_be in requested_device_backends.items():
             if device_type not in parent_device_backends:
@@ -6022,6 +6060,18 @@ def split_group(
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
 
+    if torch.accelerator.is_available():
+        split_backend_class = split_pg._get_backend(
+            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+        )
+    elif _use_torchcomms_enabled():
+        # torchcomms supports CPU/gloo splitting; no accelerator is required.
+        split_backend_class = split_pg._get_backend(torch.device("cpu"))
+    else:
+        raise RuntimeError(
+            "No backend for the parent process group or its backend does not support splitting"
+        )
+
     if split_pg.group_name != group_name:
         raise AssertionError(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
@@ -6041,7 +6091,6 @@ def split_group(
     )
 
     if _use_torchcomms_enabled():
-        split_backend_class = split_pg._get_backend(split_device)
         # pyrefly: ignore [missing-attribute]
         _world.comms.append(split_backend_class.get_comm())
     return split_pg
