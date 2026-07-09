@@ -419,6 +419,26 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
 
+    def test_aot_autograd_reentrant_bw_compiler(self):
+        # re-entry with an already-wrapped bw_compiler must not self-reference
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        backend = aot_autograd(fw_compiler=my_compiler)
+
+        torch.compile(lambda x: x.sin() + 1, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+        torch.compile(lambda x: x.cos() * 2, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+
+        bw_compiler = backend.kwargs["bw_compiler"]
+        self.assertFalse(hasattr(bw_compiler, "compiler_fn"))
+
     def test_lookup_backend(self):
         from torch._dynamo import lookup_backend
 

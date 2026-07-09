@@ -121,7 +121,7 @@ class AotAutograd:
         if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
             bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
         elif getattr(bw_compiler, "_is_wrapped_bw_compiler", False):
-            bw_compiler.compiler_fn = bw_compiler  # pyrefly: ignore [missing-attribute]
+            pass  # already wrapped, keep as-is
         else:
             bw_compiler = wrap_bw_compiler(bw_compiler)
 
