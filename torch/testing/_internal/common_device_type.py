@@ -460,10 +460,10 @@ class DeviceTypeTestBase(TestCase):
         Returns True if there is sufficient memory available for the given size.
 
         Device-specific test bases should override this to support
-        memory-aware tests. The default implementation skips the test
+        memory-aware tests. The default implementation raises an error
         for device types that do not implement this hook.
         """
-        raise unittest.SkipTest(
+        raise NotImplementedError(
             f"{cls.__name__}.has_sufficient_memory() is not implemented"
         )
 
@@ -754,7 +754,7 @@ class CPUTestBase(DeviceTypeTestBase):
     @classmethod
     def has_sufficient_memory(cls, size: int) -> bool:
         if not HAS_PSUTIL:
-            raise unittest.SkipTest("Need psutil to query available system memory")
+            raise RuntimeError("Need psutil to query available system memory")
 
         # The sanitizers have significant memory overheads
         if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
@@ -874,7 +874,7 @@ class MPSTestBase(DeviceTypeTestBase):
     @classmethod
     def has_sufficient_memory(cls, size: int) -> bool:
         if not HAS_PSUTIL:
-            raise unittest.SkipTest("Need psutil to query available system memory")
+            raise RuntimeError("Need psutil to query available system memory")
         if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
             size *= 10
         if IS_S390X:
