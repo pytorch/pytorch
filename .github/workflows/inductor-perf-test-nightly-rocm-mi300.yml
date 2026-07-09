@@ -89,7 +89,6 @@ jobs:
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: true
       build-environment: linux-jammy-rocm-py3.10-mi300
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |

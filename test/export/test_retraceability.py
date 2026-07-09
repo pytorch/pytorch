@@ -44,6 +44,12 @@ def _dynamic_shapes_for_retrace(mod, args, kwargs, dynamic_shapes):
     return dynamic_shapes
 
 
+def _export_args_kwargs(args, kwargs):
+    export_args = args[1] if len(args) > 1 else kwargs.get("args", ())
+    export_kwargs = args[2] if len(args) > 2 else kwargs.get("kwargs")
+    return export_args, export_kwargs
+
+
 def mocked_retraceability_export_strict(*args, **kwargs):
     if "strict" in kwargs:
         ep = export(*args, **kwargs)
@@ -51,9 +57,9 @@ def mocked_retraceability_export_strict(*args, **kwargs):
         ep = export(*args, **kwargs, strict=True)
 
     if "dynamic_shapes" in kwargs:
-        export_kwargs = args[2] if len(args) > 2 else kwargs.get("kwargs")
+        export_args, export_kwargs = _export_args_kwargs(args, kwargs)
         kwargs["dynamic_shapes"] = _dynamic_shapes_for_retrace(
-            args[0], args[1], export_kwargs, kwargs["dynamic_shapes"]
+            args[0], export_args, export_kwargs, kwargs["dynamic_shapes"]
         )
 
     if "strict" in kwargs:
@@ -66,9 +72,9 @@ def mocked_retraceability_export_strict(*args, **kwargs):
 def mocked_retraceability_export_non_strict(*args, **kwargs):
     ep = export(*args, **kwargs)
     if "dynamic_shapes" in kwargs:
-        export_kwargs = args[2] if len(args) > 2 else kwargs.get("kwargs")
+        export_args, export_kwargs = _export_args_kwargs(args, kwargs)
         kwargs["dynamic_shapes"] = _dynamic_shapes_for_retrace(
-            args[0], args[1], export_kwargs, kwargs["dynamic_shapes"]
+            args[0], export_args, export_kwargs, kwargs["dynamic_shapes"]
         )
 
     ep = export(ep.module(), *(args[1:]), **kwargs)
