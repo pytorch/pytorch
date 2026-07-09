@@ -95,8 +95,9 @@ void initCuptiMonitorBindings(py::module& m) {
 
   // Native decode worker (GIL-free): pulls completed buffers, iterates records
   // with cuptiActivityGetNextRecord_v2 and (for self-flush) drives
-  // cuptiActivityFlushAll -- both as addresses passed from Python, which owns the
-  // libcupti handle + subscriber -- and accumulates per-(kind, field) columns.
+  // cuptiActivityFlushAll -- both as addresses passed from Python, which owns
+  // the libcupti handle + subscriber -- and accumulates per-(kind, field)
+  // columns.
   using torch::profiler::impl::CuptiMonitorDecoder;
   cupti_monitor.def(
       "configure_decoder",

@@ -64,141 +64,34 @@ __all__ = [
 ]
 
 
-# kind -> the fields the v2 monitor selects for that kind, in declaration order. A curated
-# subset of each generated catalog; KIND (id 0) must lead every record (CUPTI
-# requires *_FIELD_KIND first at enable). RUNTIME and DRIVER share the Api catalog.
+def _all_fields(catalog: type) -> tuple[Field, ...]:
+    """Every :class:`Field` on a generated catalog class, in id order. ``sorted`` puts KIND
+    (id 0) first, which CUPTI requires (``*_FIELD_KIND`` must lead at enable). Selecting all
+    of them and letting the decoder drop fields whose captured size is not 1/2/4/8 yields
+    all *decodable* fields, with no hand-maintained per-field list to drift from the header."""
+    return tuple(sorted(v for v in vars(catalog).values() if isinstance(v, Field)))
+
+
+# The only curation: which activity kinds the monitor supports and their generated catalog.
+# RUNTIME and DRIVER share the Api catalog. FIELDS / CORRELATION_FIELD / GRAPH_NODE_FIELD all
+# derive from this, so adding a kind here is the single edit needed.
+_CATALOGS: dict[int, type] = {
+    ActivityKind.CONCURRENT_KERNEL: Kernel,
+    ActivityKind.MEMCPY: Memcpy,
+    ActivityKind.MEMCPY2: Memcpy2,
+    ActivityKind.MEMSET: Memset,
+    ActivityKind.RUNTIME: Api,
+    ActivityKind.DRIVER: Api,
+    ActivityKind.EXTERNAL_CORRELATION: ExternalCorrelation,
+    ActivityKind.OVERHEAD: Overhead,
+    ActivityKind.CUDA_EVENT: CudaEvent,
+    ActivityKind.SYNCHRONIZATION: Synchronization,
+}
+
+# kind -> the fields the v2 monitor selects: all decodable fields of the generated catalog
+# (struct/opaque fields are dropped at decode by their size).
 FIELDS: dict[int, tuple[Field, ...]] = {
-    ActivityKind.CONCURRENT_KERNEL: (
-        Kernel.KIND,
-        Kernel.REGISTERS_PER_THREAD,
-        Kernel.START,
-        Kernel.END,
-        Kernel.DEVICE_ID,
-        Kernel.CONTEXT_ID,
-        Kernel.STREAM_ID,
-        Kernel.GRID_X,
-        Kernel.GRID_Y,
-        Kernel.GRID_Z,
-        Kernel.BLOCK_X,
-        Kernel.BLOCK_Y,
-        Kernel.BLOCK_Z,
-        Kernel.STATIC_SHARED_MEMORY,
-        Kernel.DYNAMIC_SHARED_MEMORY,
-        Kernel.CORRELATION_ID,
-        Kernel.NAME,
-        Kernel.GRAPH_NODE_ID,
-        Kernel.GRAPH_ID,
-        Kernel.LAUNCH_PRIORITY,
-        Kernel.QUEUED,
-        Kernel.CHANNEL_ID,
-        Kernel.CHANNEL_TYPE,
-    ),
-    ActivityKind.MEMCPY: (
-        Memcpy.KIND,
-        Memcpy.COPY_KIND,
-        Memcpy.SRC_KIND,
-        Memcpy.DST_KIND,
-        Memcpy.FLAGS,
-        Memcpy.BYTES,
-        Memcpy.START,
-        Memcpy.END,
-        Memcpy.DEVICE_ID,
-        Memcpy.CONTEXT_ID,
-        Memcpy.STREAM_ID,
-        Memcpy.CORRELATION_ID,
-        Memcpy.GRAPH_NODE_ID,
-        Memcpy.GRAPH_ID,
-    ),
-    ActivityKind.MEMCPY2: (
-        Memcpy2.KIND,
-        Memcpy2.COPY_KIND,
-        Memcpy2.SRC_KIND,
-        Memcpy2.DST_KIND,
-        Memcpy2.FLAGS,
-        Memcpy2.BYTES,
-        Memcpy2.START,
-        Memcpy2.END,
-        Memcpy2.DEVICE_ID,
-        Memcpy2.CONTEXT_ID,
-        Memcpy2.STREAM_ID,
-        Memcpy2.SRC_DEVICE_ID,
-        Memcpy2.DST_DEVICE_ID,
-        Memcpy2.CORRELATION_ID,
-        Memcpy2.GRAPH_NODE_ID,
-        Memcpy2.GRAPH_ID,
-    ),
-    ActivityKind.MEMSET: (
-        Memset.KIND,
-        Memset.VALUE,
-        Memset.BYTES,
-        Memset.START,
-        Memset.END,
-        Memset.DEVICE_ID,
-        Memset.CONTEXT_ID,
-        Memset.STREAM_ID,
-        Memset.CORRELATION_ID,
-        Memset.FLAGS,
-        Memset.MEMORY_KIND,
-        Memset.GRAPH_NODE_ID,
-        Memset.GRAPH_ID,
-    ),
-    ActivityKind.RUNTIME: (
-        Api.KIND,
-        Api.CBID,
-        Api.START,
-        Api.END,
-        Api.PROCESS_ID,
-        Api.THREAD_ID,
-        Api.CORRELATION_ID,
-        Api.RETURN_VALUE,
-    ),
-    ActivityKind.DRIVER: (
-        Api.KIND,
-        Api.CBID,
-        Api.START,
-        Api.END,
-        Api.PROCESS_ID,
-        Api.THREAD_ID,
-        Api.CORRELATION_ID,
-        Api.RETURN_VALUE,
-    ),
-    ActivityKind.EXTERNAL_CORRELATION: (
-        ExternalCorrelation.KIND,
-        ExternalCorrelation.EXTERNAL_KIND,
-        ExternalCorrelation.EXTERNAL_ID,
-        ExternalCorrelation.CORRELATION_ID,
-    ),
-    ActivityKind.OVERHEAD: (
-        Overhead.KIND,
-        Overhead.OVERHEAD_KIND,
-        Overhead.PROCESS_ID,
-        Overhead.THREAD_ID,
-        Overhead.START,
-        Overhead.END,
-        Overhead.CORRELATION_ID,
-    ),
-    ActivityKind.CUDA_EVENT: (
-        CudaEvent.KIND,
-        CudaEvent.CORRELATION_ID,
-        CudaEvent.CONTEXT_ID,
-        CudaEvent.STREAM_ID,
-        CudaEvent.EVENT_ID,
-        CudaEvent.DEVICE_ID,
-        CudaEvent.DEVICE_TIMESTAMP,
-        CudaEvent.CUDA_EVENT_SYNC_ID,
-    ),
-    ActivityKind.SYNCHRONIZATION: (
-        Synchronization.KIND,
-        Synchronization.TYPE,
-        Synchronization.START,
-        Synchronization.END,
-        Synchronization.CORRELATION_ID,
-        Synchronization.CONTEXT_ID,
-        Synchronization.STREAM_ID,
-        Synchronization.CUDA_EVENT_ID,
-        Synchronization.CUDA_EVENT_SYNC_ID,
-        Synchronization.RETURN_VALUE,
-    ),
+    kind: _all_fields(cat) for kind, cat in _CATALOGS.items()
 }
 
 # kind -> frozenset of supported field ids; source of truth for validating observer
@@ -219,28 +112,21 @@ STRING_FIELDS: dict[int, frozenset[int]] = {
 }
 
 # kind -> its CORRELATION_ID field id. The launch correlation id a kernel shares with its
-# runtime call; used to join activity to external-correlation (eager annotation).
+# runtime call; used to join activity to external-correlation (eager annotation). Only kinds
+# whose catalog carries the field are included.
 CORRELATION_FIELD: dict[int, int] = {
-    ActivityKind.CONCURRENT_KERNEL: Kernel.CORRELATION_ID.id,
-    ActivityKind.MEMCPY: Memcpy.CORRELATION_ID.id,
-    ActivityKind.MEMCPY2: Memcpy2.CORRELATION_ID.id,
-    ActivityKind.MEMSET: Memset.CORRELATION_ID.id,
-    ActivityKind.RUNTIME: Api.CORRELATION_ID.id,
-    ActivityKind.DRIVER: Api.CORRELATION_ID.id,
-    ActivityKind.EXTERNAL_CORRELATION: ExternalCorrelation.CORRELATION_ID.id,
-    ActivityKind.OVERHEAD: Overhead.CORRELATION_ID.id,
-    ActivityKind.CUDA_EVENT: CudaEvent.CORRELATION_ID.id,
-    ActivityKind.SYNCHRONIZATION: Synchronization.CORRELATION_ID.id,
+    kind: cat.CORRELATION_ID.id
+    for kind, cat in _CATALOGS.items()
+    if hasattr(cat, "CORRELATION_ID")
 }
 
 
 # Per-kind graph-node-id field, for the graph annotation resolver: only the GPU-op kinds
 # carry a graph_node_id (the field the resolver maps to a region name).
 GRAPH_NODE_FIELD: dict[int, int] = {
-    ActivityKind.CONCURRENT_KERNEL: Kernel.GRAPH_NODE_ID.id,
-    ActivityKind.MEMCPY: Memcpy.GRAPH_NODE_ID.id,
-    ActivityKind.MEMCPY2: Memcpy2.GRAPH_NODE_ID.id,
-    ActivityKind.MEMSET: Memset.GRAPH_NODE_ID.id,
+    kind: cat.GRAPH_NODE_ID.id
+    for kind, cat in _CATALOGS.items()
+    if hasattr(cat, "GRAPH_NODE_ID")
 }
 
 
