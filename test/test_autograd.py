@@ -8249,6 +8249,7 @@ for shape in [(1,), ()]:
 
         torch._dynamo.reset()
 
+    @skipIfTorchDynamo("dynamo traces checkpoint saved tensor unpack hooks")
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True,
         assume_static_by_default=True,
@@ -8291,6 +8292,7 @@ for shape in [(1,), ()]:
             torch._C._dynamo.eval_frame._set_lru_cache(True)
             torch._dynamo.reset()
 
+    @skipIfTorchDynamo("dynamo traces checkpoint saved tensor unpack hooks")
     def test_access_saved_tensor_twice_without_recomputation_works(self):
         count = [0]
 
