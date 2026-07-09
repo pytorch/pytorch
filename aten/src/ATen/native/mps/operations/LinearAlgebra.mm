@@ -1895,6 +1895,8 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
 static void geqrf_kernel_mps(const Tensor& A, const Tensor& tau) {
   using namespace mps;
 
+  TORCH_CHECK(A.scalar_type() == kFloat, "geqrf: MPS currently supports float32 only");
+
   if (A.numel() == 0) {
     return;
   }
