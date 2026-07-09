@@ -114,7 +114,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     dtypesIfXPU,
     expectedFailureMPS,
-    expectedFailureMPSPre15,
     instantiate_device_type_tests,
     skipMPS,
 )
@@ -3334,7 +3333,6 @@ class TestDistributions(DistributionsTestCase):
         Wishart(torch.tensor(ndim), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPSPre15
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_log_prob(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -3613,6 +3611,31 @@ class TestDistributions(DistributionsTestCase):
                 f"Gamma(alpha={alpha}, beta={beta})",
                 failure_rate=1e-4,
             )
+
+    def test_gamma_sample_generator(self):
+        gamma = Gamma(torch.tensor(2.0), torch.tensor(1.0))
+        device = gamma.concentration.device
+        # sampling with a generator honors the requested shape
+        gen = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(gamma.sample((5,), generator=gen).size(), (5,))
+        self.assertEqual(gamma.sample((5, 3), generator=gen).size(), (5, 3))
+        # sampling without a generator still works
+        self.assertEqual(gamma.sample((5,)).size(), (5,))
+        # same seed produces identical samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(
+            gamma.sample((5,), generator=gen1), gamma.sample((5,), generator=gen2)
+        )
+        # different seeds produce different samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(99)
+        self.assertFalse(
+            torch.allclose(
+                gamma.sample((5,), generator=gen1),
+                gamma.sample((5,), generator=gen2),
+            )
+        )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto(self):
