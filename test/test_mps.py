@@ -2667,11 +2667,12 @@ class TestMPS(TestCaseMPS):
             res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
             self.assertEqual(res_mps, res_cpu)
 
-    def test_linalg_lu_factor_ex(self):
+    @parametrize("dtype", [torch.float32, torch.complex64])
+    def test_linalg_lu_factor_ex(self, dtype):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
 
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+        make_arg = partial(make_fullrank, device="cpu", dtype=dtype)
 
         def run_lu_factor_ex_test(size, *batch_dims, check_errors, atol=1e-5, rtol=1e-6):
             input_cpu = make_arg(*batch_dims, size, size)
@@ -2717,6 +2718,37 @@ class TestMPS(TestCaseMPS):
 
         with self.assertRaisesRegex(RuntimeError, "result in a division by zero"):
             torch.linalg.lu_factor(A)
+
+        # complex64 singular matrix (row 2 == 2 * row 1)
+        Ac = torch.tensor(
+            [[1.0 + 1.0j, 2.0 + 2.0j], [2.0 + 2.0j, 4.0 + 4.0j]],
+            device="mps", dtype=torch.complex64,
+        )
+        with self.assertRaisesRegex(RuntimeError, "result in a division by zero"):
+            torch.linalg.lu_factor(Ac)
+        # lu_factor_ex must not raise and must report the zero pivot in info
+        _, _, info = torch.linalg.lu_factor_ex(Ac)
+        self.assertNotEqual(info.item(), 0)
+
+        # exactly-zero pivot landing in a LATER block (col 40 >= the 32-wide
+        # panel): exercises the global 1-based info offset across separately
+        # dispatched panels. A zero column stays exactly zero through row swaps
+        # and rank updates, so CPU and MPS report the same deterministic info.
+        g = torch.Generator().manual_seed(0)
+        A_late = torch.randn(80, 80, dtype=torch.complex64, generator=g)
+        A_late[:, 40] = 0
+        _, _, info_mps = torch.linalg.lu_factor_ex(A_late.to("mps"))
+        _, _, info_cpu = torch.linalg.lu_factor_ex(A_late)
+        self.assertEqual(info_mps.cpu(), info_cpu)
+
+        # two zero columns in different panels: first-wins must report the
+        # earlier one even though the panels run as separate dispatches
+        A_two = torch.randn(80, 80, dtype=torch.complex64, generator=g)
+        A_two[:, 10] = 0
+        A_two[:, 50] = 0
+        _, _, info_mps = torch.linalg.lu_factor_ex(A_two.to("mps"))
+        _, _, info_cpu = torch.linalg.lu_factor_ex(A_two)
+        self.assertEqual(info_mps.cpu(), info_cpu)
 
     def test_linalg_solve(self):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
@@ -2869,11 +2901,12 @@ class TestMPS(TestCaseMPS):
         # multi-block (n > 32) path
         check(make_A(2, 40, 40), torch.randn(2, 40, 5), left=True, adjoint=False)
 
-    def test_linalg_det(self):
+    @parametrize("dtype", [torch.float32, torch.complex64])
+    def test_linalg_det(self, dtype):
         from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
 
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_arg = partial(make_fullrank, device="cpu", dtype=torch.float32)
+        make_arg = partial(make_fullrank, device="cpu", dtype=dtype)
 
         def run_det_test(size, *batch_dims):
             input_cpu = make_arg(*batch_dims, size, size)

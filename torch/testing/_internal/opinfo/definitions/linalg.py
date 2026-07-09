@@ -1213,13 +1213,19 @@ op_db: list[OpInfo] = [
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoLinalgsolver],
         check_batched_gradgrad=False,
         skips=(
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            # complex64 forward works on MPS; backward (needs complex solve/inv)
+            # and noncontiguous inputs are not yet supported.
             DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
+                "test_variant_consistency_eager",
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
@@ -1980,13 +1986,11 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
         skips=(
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
+            # complex64 forward works on MPS; noncontiguous inputs not yet supported.
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
+                "test_noncontiguous_samples",
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
@@ -2046,13 +2050,15 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
-            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
+            # float64/complex128 aren't supported on MPS -> test_dtypes still xfails.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
+            # complex64 forward works on MPS; noncontiguous inputs not yet supported.
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
+                "test_noncontiguous_samples",
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
@@ -2077,13 +2083,15 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
-            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
+            # float64/complex128 aren't supported on MPS -> test_dtypes still xfails.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
+            # complex64 forward works on MPS; noncontiguous inputs not yet supported.
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
+                "test_noncontiguous_samples",
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
@@ -2109,13 +2117,15 @@ op_db: list[OpInfo] = [
                 "test_compare_cpu",
                 active_if=(not TEST_XPU),
             ),
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            # float64/complex128 aren't supported on MPS -> test_dtypes still xfails.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
+            # complex64 forward works on MPS; noncontiguous inputs not yet supported.
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
+                "test_noncontiguous_samples",
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
