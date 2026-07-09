@@ -364,6 +364,29 @@ void InputBuffer::add(
     auto& ready_event = ready_events[pos];
     auto& ready_stream = ready_streams[pos];
     TORCH_INTERNAL_ASSERT(accum_stream && ready_stream);
+    // If the accumulation stream is not capturing but a stream it must sync
+    // with below is, the sync would cross the CUDA graph capture boundary
+    // and invalidate the capture. This arises when the gradient lives on a
+    // device other than the producer's and consumer's canonical devices
+    // (case C above): the accumulation then runs on that device's current
+    // stream, which on an autograd worker thread is its non-capturing
+    // default stream. No stream on that device is known to have joined the
+    // capture, so there is nothing to redirect to; raise an actionable
+    // error instead of the opaque CUDA error.
+    TORCH_CHECK(
+        !(!accum_stream->is_capturing() &&
+          (opt_producer_stream->is_capturing() ||
+           ready_stream->is_capturing()) &&
+          device != opt_consumer_stream->device() &&
+          device != opt_producer_stream->device()),
+        "During CUDA graph capture, autograd node '",
+        fn->name(),
+        "' received a gradient on device ",
+        device,
+        ", which matches neither the producer's nor the consumer's canonical "
+        "device, so it would be accumulated on that device's current stream, "
+        "which is not part of the capture. Keep gradients on the producing/"
+        "consuming devices during CUDA graph capture.");
     // 1)
     if (*accum_stream != *opt_producer_stream) {
       auto event = c10::Event{device_type};
