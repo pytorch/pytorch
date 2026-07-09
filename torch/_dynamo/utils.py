@@ -2484,9 +2484,13 @@ class CleanupHook:
     @staticmethod
     def create(scope: dict[str, Any], name: str, val: Any) -> CleanupHook:
         if name in scope:
-            raise AssertionError(f"Name {name!r} already exists in scope")
+            # if the slot already holds the exact same object (identity check),
+            # treat the call as a no-op assignment.
+            if scope[name] is not val:
+                raise AssertionError(f"Name {name!r} already exists in scope")
+        else:
+            scope[name] = val
         CleanupManager.count += 1
-        scope[name] = val
         return CleanupHook(scope, name)
 
 

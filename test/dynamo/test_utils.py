@@ -1411,6 +1411,56 @@ class TestFunctorchConfigParsingForLogging(TestCase):
         mocked_jk.assert_called_once_with("pytorch/dynamo:log_functorch_config")
 
 
+class TestCleanupHook(TestCase):
+    """Tests for CleanupHook.create idempotency."""
+
+    def test_new_name_installs_normally(self):
+        """Installing a name not in scope adds it and bumps count."""
+        scope = {}
+        val = {"key": "value"}
+        baseline = utils.CleanupManager.count
+        hook = utils.CleanupHook.create(scope, "test_name", val)
+        self.assertIs(scope["test_name"], val)
+        self.assertEqual(utils.CleanupManager.count, baseline + 1)
+        # Cleanup removes the entry.
+        hook()
+        self.assertNotIn("test_name", scope)
+        self.assertEqual(utils.CleanupManager.count, baseline)
+
+    def test_same_value_reinstall_is_idempotent(self):
+        """Re-installing the same value (identity) under the same name succeeds."""
+        val = {"key": "value"}
+        scope = {"test_name": val}
+        baseline = utils.CleanupManager.count
+        hook = utils.CleanupHook.create(scope, "test_name", val)
+        self.assertIs(scope["test_name"], val)
+        self.assertEqual(utils.CleanupManager.count, baseline + 1)
+        # Cleanup still works.
+        hook()
+        self.assertNotIn("test_name", scope)
+        self.assertEqual(utils.CleanupManager.count, baseline)
+
+    def test_different_value_raises(self):
+        """A name collision with a different value still raises AssertionError."""
+        existing = {"key": "one"}
+        different = {"key": "two"}
+        scope = {"test_name": existing}
+        with self.assertRaises(AssertionError):
+            utils.CleanupHook.create(scope, "test_name", different)
+        # Scope unchanged on failure.
+        self.assertIs(scope["test_name"], existing)
+
+    def test_equal_but_not_identical_raises(self):
+        """Two equal dicts that are not the same object still raise."""
+        val1 = {"key": "value"}
+        val2 = {"key": "value"}
+        self.assertEqual(val1, val2)
+        self.assertIsNot(val1, val2)
+        scope = {"test_name": val1}
+        with self.assertRaises(AssertionError):
+            utils.CleanupHook.create(scope, "test_name", val2)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
