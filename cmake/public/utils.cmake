@@ -348,17 +348,11 @@ function(torch_compile_options libname)
       set(MSVC_DEBINFO_OPTION "/Zi")
     endif()
 
-    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 142)
-      # Add /permissive- flag for conformance mode to the compiler.
-      # This will force more strict check to the code standard.
-      # 1. From MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance?view=msvc-170#remarks
-      #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
-      #    We set the /permissive- flag from VS 2019 (MSVC_TOOLSET_VERSION 142) to avoid compiling issues for old toolkit.
-      # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
-      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
-    endif()
+    # Add /permissive- flag for conformance mode to the compiler.
+    # This will force more strict check to the code standard.
+    # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance?view=msvc-170#remarks
+    target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
     # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
-    # This option is available since VS 2017.
     # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
 
