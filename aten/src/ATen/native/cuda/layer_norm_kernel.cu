@@ -1060,7 +1060,7 @@ void LaunchGammaBetaBackwardCUDAKernel(
       if constexpr (block_dim_x == 64) {
         // GCN/CDNA devices use warp size 64 in ROCm.
         // Cap block_dim_y at 16 to keep total threads (64*16=1024) within GPU limits.
-        // rows_per_thread_y = 256/16 = 8, still within warp size constraint.
+        // rows_per_thread_y = 128/16 = 8, still within warp size constraint.
         ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 16, 128, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
       } else {
         static_assert(block_dim_x == 32);
