@@ -302,7 +302,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             self.assertIn(
                 len(ag_entries),
                 [1, 2],
-                f"expected 1 or 2 NCCL _all_gather_base from rendezvous, "
+                lambda msg: f"{msg}\nexpected 1 or 2 NCCL _all_gather_base from rendezvous, "
                 f"got {len(ag_entries)}: {[e['profiling_name'] for e in entries]}",
             )
 
@@ -368,7 +368,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertGreaterEqual(
             len(ag_entries),
             1,
-            f"expected NCCL _all_gather_base from PG rendezvous, "
+            lambda msg: f"{msg}\nexpected NCCL _all_gather_base from PG rendezvous, "
             f"got: {[e['profiling_name'] for e in entries]}",
         )
 
@@ -1715,7 +1715,7 @@ class LoweringTest(MultiProcContinuousTest):
         self.assertGreaterEqual(
             out_calls,
             6,
-            f"Expected at least 6 out= calls (3 mm + 3 allreduce), got {out_calls}.",
+            lambda msg: f"{msg}\nExpected at least 6 out= calls (3 mm + 3 allreduce), got {out_calls}.",
         )
 
         # Output buffers should be reused across layers (ping-pong).
@@ -1723,7 +1723,7 @@ class LoweringTest(MultiProcContinuousTest):
         self.assertGreaterEqual(
             reuse_count,
             2,
-            f"Expected at least 2 buffer reuses, got {reuse_count}.",
+            lambda msg: f"{msg}\nExpected at least 2 buffer reuses, got {reuse_count}.",
         )
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
