@@ -66,9 +66,6 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual size_t getRecommendedMaxMemory() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual size_t getMaxMemory() const {
-    FAIL_MPSHOOKS_FUNC(__func__);
-  }
   virtual size_t getMaxBufferLength() const {
     return 0;
   }
