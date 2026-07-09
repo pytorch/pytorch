@@ -1611,6 +1611,12 @@ class TestIndexing(TestCase):
         ):
             torch.unravel_index(torch.tensor(0, device=device), (2, -3))
 
+        with self.assertRaisesRegex(
+            ValueError,
+            r"'shape' cannot have zero values for nonempty indices, but got \(2, 0\)",
+        ):
+            torch.unravel_index(torch.tensor(0, device=device), (2, 0))
+
     def test_invalid_index(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)
         self.assertRaisesRegex(TypeError, "slice indices", lambda: x["0":"1"])
