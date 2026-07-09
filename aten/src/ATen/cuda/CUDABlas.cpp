@@ -11,6 +11,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/env.h>
 
 #include <ATen/cuda/detail/BLASConstants.h>
 #include <ATen/cuda/detail/CublasLtUtils.h>
@@ -214,6 +215,35 @@ static void _syncCurrentWithCarveoutStream(hipStream_t stream, bool presync) {
     AT_CUDA_CHECK(hipStreamWaitEvent(current_stream, event, 0));
   }
 }
+
+// Experimental hipBLASLt StreamK "work stealing" controls (hipBLASLt 1.4.1+).
+// Env-driven so a CU-holdout benchmark needs no op/Python change:
+//   TORCH_HIPBLASLT_STREAMK_MODE = 0|1|2  -> STREAMK_TILE_SCHEDULING_EXT
+//                                           (OFF / ON / AUTO work-stealing)
+//   TORCH_HIPBLASLT_SM_TARGET    = N (>0) -> SM_COUNT_TARGET (CU hint, e.g.
+//                                           256 - CUs_held_out)
+// Both unset (default) leaves the descriptor untouched (stock behavior). The
+// attribute enum values (104, 33) are written as literals so this compiles
+// against older hipBLASLt headers; the hipBLASLt 1.4.1+ runtime honors them.
+static void _applyHipblasltWorkStealing(
+    at::cuda::blas::detail::CuBlasLtMatmulDescriptor& computeDesc) {
+  static const int streamk_mode = []() {
+    auto v = c10::utils::get_env("TORCH_HIPBLASLT_STREAMK_MODE");
+    return v.has_value() ? std::stoi(v.value()) : -1;
+  }();
+  static const int sm_target = []() {
+    auto v = c10::utils::get_env("TORCH_HIPBLASLT_SM_TARGET");
+    return v.has_value() ? std::stoi(v.value()) : 0;
+  }();
+  if (streamk_mode >= 0) {
+    computeDesc.setAttribute<int32_t>(
+        static_cast<cublasLtMatmulDescAttributes_t>(104), streamk_mode);
+  }
+  if (sm_target > 0) {
+    computeDesc.setAttribute<int32_t>(
+        static_cast<cublasLtMatmulDescAttributes_t>(33), sm_target);
+  }
+}
 #endif
 
 } // anonymous namespace
@@ -337,6 +367,8 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
         at::globalContext()._SMCarveout_EXPERIMENTAL().value());
     _syncCurrentWithCarveoutStream(stream, true);
   }
+  // Independent of the SM carveout above; no-op unless the env knobs are set.
+  _applyHipblasltWorkStealing(computeDesc);
 #endif
   CuBlasLtMatrixLayout Adesc(abType, m, k, lda, opa != CUBLAS_OP_N);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, ldb, opb != CUBLAS_OP_N);
@@ -1595,6 +1627,8 @@ bool gemm_and_bias(
         at::globalContext()._SMCarveout_EXPERIMENTAL().value());
     _syncCurrentWithCarveoutStream(stream, true);
   }
+  // Independent of the SM carveout above; no-op unless the env knobs are set.
+  _applyHipblasltWorkStealing(computeDesc);
 #endif
   const cublasLtEpilogue_t epilogue =
       detail::cublasLtEpilogue(activation, bias);
@@ -1888,6 +1922,8 @@ void scaled_gemm(
         at::globalContext()._SMCarveout_EXPERIMENTAL().value());
     _syncCurrentWithCarveoutStream(stream, true);
   }
+  // Independent of the SM carveout above; no-op unless the env knobs are set.
+  _applyHipblasltWorkStealing(computeDesc);
 #endif // ifndef USE_ROCM
 #ifndef USE_ROCM
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
@@ -2102,6 +2138,8 @@ void int8_gemm(
         at::globalContext()._SMCarveout_EXPERIMENTAL().value());
     _syncCurrentWithCarveoutStream(stream, true);
   }
+  // Independent of the SM carveout above; no-op unless the env knobs are set.
+  _applyHipblasltWorkStealing(computeDesc);
 #endif
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
