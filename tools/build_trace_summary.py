@@ -1,8 +1,8 @@
-from collections import defaultdict
 import argparse
 import enum
 import json
 import os
+from collections import defaultdict
 
 
 class Role(enum.Enum):
@@ -31,14 +31,16 @@ def log_top10(items, title):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--index", help="<build-dir>/.cmake/instrumentation/v1/data/index/index.json")
+    parser.add_argument(
+        "--index", help="<build-dir>/.cmake/instrumentation/v1/data/index/index.json"
+    )
     parser.add_argument("--root", help="Root of the repository")
     cmdargs = parser.parse_args()
 
-    with open(cmdargs.index, 'r') as index_file:
+    with open(cmdargs.index) as index_file:
         index = json.load(index_file)
-        trace_path = os.path.join(index['dataDir'], index['trace'])
-    with open(trace_path, 'r') as trace_file:
+        trace_path = os.path.join(index["dataDir"], index["trace"])
+    with open(trace_path) as trace_file:
         trace = json.load(trace_file)
 
     stage_times = {}
@@ -60,7 +62,8 @@ def main():
             case Role.COMPILE:
                 target_compile_times[args["target"]] += duration_ms
                 source_compile_times.append(
-                    (os.path.relpath(args["source"], cmdargs.root), duration_ms))
+                    (os.path.relpath(args["source"], cmdargs.root), duration_ms)
+                )
             case _ as role:
                 stage_times[role] = duration_ms
 
@@ -75,5 +78,5 @@ def main():
     print(f"\nLoad {trace_path} into ui.perfetto.dev for the complete trace")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
