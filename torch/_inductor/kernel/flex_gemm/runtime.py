@@ -4,7 +4,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import os
-from typing import Any, TypeAlias
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._vendor.quack.gemm_config as quack_gemm_config
@@ -27,7 +27,9 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._prims_common import is_expandable_to
 
 
-GemmConfigKey: TypeAlias = tuple[tuple[str, Any], ...]
+if TYPE_CHECKING:
+    from torch._inductor.template_heuristics.flex_gemm import GemmConfigKey
+
 
 # swap_ab transposes the dispatched GEMM, so a row broadcast becomes a col
 # broadcast (and vice versa) while tile broadcasts only transpose their data and
@@ -473,7 +475,9 @@ def gemm_epilogue(
             f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
         )
     expected_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
-    expected_dtype = a.dtype if out_dtype is None else out_dtype
+    expected_dtype = out_dtype
+    if expected_dtype is None:
+        expected_dtype = out.dtype if out is not None else a.dtype
     effective_C = normalize_c(C, expected_shape, beta)
     if out is not None:
         check_matrix("out", out)

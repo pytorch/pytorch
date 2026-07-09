@@ -231,11 +231,8 @@ def flex_gemm_config_keys_for_local_reduce(
     return (gemm_config_key(configs[0]),)
 
 
-@register_lowering(flex_gemm_hop, type_promotion_kind=None)
-def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
-    """Lower FlexGEMM to the regular subgraph path or the QUACK template."""
-    if kernel_options.get("backend", "TRITON") != "QUACK":
-        return process_subgraph_nodes(subgraph.graph_module, list(args))
+def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    """Lower FlexGEMM through the generated QUACK CuTeDSL template."""
     if gemm_op not in FLEX_GEMM_OP_SPECS:
         raise NotImplementedError(
             f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
@@ -374,7 +371,6 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 gemm_op=op_spec,
                 alpha=float(alpha),
                 beta=float(beta),
-                out_dtype=output_meta.dtype,
                 quack_config_key=quack_config_key,
                 epilogue_arg_indices=epilogue_arg_indices,
                 epilogue_arg_kinds=epilogue_arg_kinds,
@@ -393,3 +389,13 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         local_reduce_outs,
         outputs.local_reduce.aux_index if outputs.local_reduce is not None else None,
     )
+
+
+@register_lowering(flex_gemm_hop, type_promotion_kind=None)
+def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
+    """Dispatch FlexGEMM to ordinary Inductor lowering or the QUACK template."""
+    if kernel_options.get("backend", "TRITON") == "QUACK":
+        return lower_quack_flex_gemm(
+            gemm_op, subgraph, args, gemm_kwargs, kernel_options
+        )
+    return process_subgraph_nodes(subgraph.graph_module, list(args))
