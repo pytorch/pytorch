@@ -14,7 +14,7 @@ from typing import cast, TYPE_CHECKING
 
 from torch import SymInt
 
-from .codegen_utils import _compile_and_exec_source, PySourceBuilder
+from .codegen import _compile_and_exec_source, PySourceBuilder
 from .schemas import ActInputPaths, OpaqueMeta, PlainTensorMeta, SubclassCreationMeta
 from .utils import import_async_collective_tensor_type
 
