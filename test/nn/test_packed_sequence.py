@@ -1,11 +1,16 @@
 # Owner(s): ["module: nn"]
-
 import itertools
 import random
+import sys
+import unittest
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 
 class PackedSequenceTest(TestCase):
@@ -130,6 +135,10 @@ class PackedSequenceTest(TestCase):
                     ref_output = torch.cat([no_extra_pad, extra_pad], 0)
                 self.assertEqual(unpacked, ref_output)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
+        "Frame Handling Difference between Python versions",
+    )
     def test_to(self):
         for enforce_sorted in (True, False):
             padded, lengths = self._padded_sequence(torch.IntTensor)
