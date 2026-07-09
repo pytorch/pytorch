@@ -1890,7 +1890,7 @@ class GuardBuilder(GuardBuilderBase):
                     guard_manager_enum=guard_manager_enum,
                 )
             else:
-                # kwdefauts is a dict, so use a DictGuardManager
+                # kwdefaults is a dict, so use a DictGuardManager
                 kwdefaults = base_example_value.__kwdefaults__
                 if base_source_name is None:
                     raise AssertionError("base_source_name must not be None")

@@ -1467,7 +1467,7 @@ void Reducer::reset_bucket_counting() {
 
 // Traverse the autograd graph starting at the specified output.
 // All parameters for which we have a pointer to their gradient accumulation
-// functions, but don't show up in the autograd graph will be marked ready for
+// functions, but don't show up in the autograd graph will be marked ready
 // for reduction as soon as the first autograd hook is called. This is not
 // done immediately because the model output may be ignored, and we only
 // want to start performing reductions on `torch.autograd.backward()`.

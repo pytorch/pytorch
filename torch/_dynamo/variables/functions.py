@@ -1635,7 +1635,7 @@ class UserMethodVariable(UserFunctionVariable):
         # Be careful with `source` when delegating to UserFunctionVariable
         # (base-class) methods. In this __init__, `source` is a *bound method*
         # object, but the base class expects the underlying *function* object.
-        # One way is to simplly use `__func__` to unwrap it.
+        # One way is to simply use `__func__` to unwrap it.
         #
         # For recursive dict-tag optimizations, it can be faster to fetch the
         # function directly from `cls.__dict__`; that's why we pass on
@@ -3655,7 +3655,7 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
             ]
         element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
 
-        # to make pyrefy happy
+        # to make pyrefly happy
         if not isinstance(ptr, variables.DataPtrVariable):
             raise AssertionError(f"ptr must be a DataPtrVariable, got {type(ptr)}")
 
