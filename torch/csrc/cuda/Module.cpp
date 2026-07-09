@@ -1249,6 +1249,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
   });
 
+  m.def("_cuda_memoryMetadataSupported", []() {
+    return c10::cuda::CUDACachingAllocator::supportsUserMetadata();
+  });
+
   m.def("_cuda_setMemoryMetadata", [](const std::string& metadata) {
     c10::cuda::CUDACachingAllocator::setUserMetadata(metadata);
   });
