@@ -457,7 +457,6 @@ def merge_base_with_main() -> str:
             f"Failed to resolve main on origin. Error: {result.stderr.strip()}"
         )
     main_sha = result.stdout.split()[0]
-
     try:
         commit_missing = subprocess.run(
             ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
