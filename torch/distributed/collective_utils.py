@@ -43,9 +43,6 @@ class SyncPayload(Generic[T]):
     exception: Exception | None = None
 
 
-torch.serialization.add_safe_globals([SyncPayload])
-
-
 def broadcast(
     data_or_fn: T | Callable[[], T],
     *,

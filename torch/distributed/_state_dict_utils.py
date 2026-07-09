@@ -662,7 +662,7 @@ def _broadcast_state_dict(
                 ret[key] = _TensorInfo(value.size(), value.dtype)
 
     broadcast_list = [ret]
-    dist.broadcast_object_list(broadcast_list, src=0, group=pg)
+    dist.broadcast_object_list(broadcast_list, src=0, group=pg, weights_only=True)
     ret = broadcast_list[0]
     # Gather values
     keys = []

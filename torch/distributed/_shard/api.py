@@ -54,7 +54,9 @@ def _shard_tensor(
 
     # Validate src_rank and sharding_spec are same across all ranks.
     gathered_list = [None] * world_size
-    dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
+    dist.all_gather_object(
+        gathered_list, (src_rank, sharding_spec), group=pg, weights_only=True
+    )
 
     for idx, entry in enumerate(gathered_list):
         if src_rank != entry[0]:  # type: ignore[index]

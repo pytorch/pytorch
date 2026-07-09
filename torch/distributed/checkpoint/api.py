@@ -1,3 +1,4 @@
+import builtins
 import traceback as tb
 from typing import Any
 
@@ -18,6 +19,12 @@ def _wrap_exception(exc: BaseException) -> WRAPPED_EXCEPTION:
     for frame in summary:
         if hasattr(frame, "_code"):
             object.__setattr__(frame, "_code", None)
+    # DCP exchanges exceptions across ranks via object collectives with
+    # weights_only=True, which only deserializes allowlisted types. Downcast
+    # exception types outside builtins to a plain Exception preserving the
+    # original type name and message so the real error survives the exchange.
+    if getattr(builtins, type(exc).__name__, None) is not type(exc):
+        exc = Exception(f"{type(exc).__qualname__}: {exc}")
     return (exc, summary)
 
 

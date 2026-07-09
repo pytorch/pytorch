@@ -144,8 +144,6 @@ class Foo:
         return True
 
 
-torch.serialization.add_safe_globals([Foo])
-
 f = Foo(10)
 f.bar = 1
 
@@ -4957,8 +4955,7 @@ class DistributedTest:
                     # gradient, which should be different across ranks. Remaining params
                     # should be equal.
                     models = [None for _ in range(dist.get_world_size())]
-                    # nn.Module is not weights_only-safe, use pickle
-                    dist.all_gather_object(models, model, weights_only=False)
+                    dist.all_gather_object(models, model)
                     rank0_model, remainder = models[0], models[1:]
                     for m in remainder:
                         self.assertNotEqual(rank0_model.a.weight, m.a.weight)

@@ -233,9 +233,10 @@ def _pg_options_to_hints(pg_options: Any) -> dict[str, str] | None:
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
-# Object collectives serialize via torch.save/torch.load(weights_only=True) by
-# default. Exceptions and stack summaries are commonly transmitted for error
-# propagation (e.g. torch.distributed.checkpoint), so allowlist them.
+# Object collectives can serialize via torch.save/torch.load(weights_only=True)
+# by passing weights_only=True. Exceptions and stack summaries are commonly
+# transmitted for error propagation (e.g. torch.distributed.checkpoint), so
+# allowlist them.
 torch.serialization.add_safe_globals(
     [
         t
@@ -3765,7 +3766,7 @@ def reduce(
     # Otherwise, the backend has sync'ed at CPP level
 
 
-def _object_to_tensor(obj, device, group, weights_only=True):
+def _object_to_tensor(obj, device, group, weights_only=False):
     with _WaitCounter("pytorch.wait_counter.c10d._object_to_tensor").guard():
         f = io.BytesIO()
         if weights_only:
@@ -3790,7 +3791,7 @@ def _object_to_tensor(obj, device, group, weights_only=True):
         return byte_tensor, local_size
 
 
-def _tensor_to_object(tensor, tensor_size, group, weights_only=True):
+def _tensor_to_object(tensor, tensor_size, group, weights_only=False):
     with _WaitCounter("pytorch.wait_counter.c10d._tensor_to_object").guard():
         if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
             backend = get_backend(group)
@@ -3807,7 +3808,7 @@ def _tensor_to_object(tensor, tensor_size, group, weights_only=True):
 
 
 @_exception_logger
-def all_gather_object(object_list, obj, group=None, weights_only=True):
+def all_gather_object(object_list, obj, group=None, weights_only=False):
     """
     Gathers picklable objects from the whole group into a list.
 
@@ -3823,8 +3824,8 @@ def all_gather_object(object_list, obj, group=None, weights_only=True):
         weights_only (bool, optional): If ``True``, objects are serialized with
             ``torch.save`` and deserialized with ``torch.load(weights_only=True)``,
             which restricts deserialization to safe types. If ``False``, ``pickle``
-            is used instead, which is insecure with untrusted data. All ranks must
-            pass the same value. Default is ``True``.
+            is used, which is insecure with untrusted data. All ranks must pass
+            the same value. Default is ``False``.
 
     Returns:
         None. If the calling rank is part of this group, the output of the
@@ -3915,7 +3916,7 @@ def gather_object(
     dst: int | None = None,
     group: ProcessGroup | None = None,
     group_dst: int | None = None,
-    weights_only: bool = True,
+    weights_only: bool = False,
 ):
     """
     Gathers picklable objects from the whole group in a single process.
@@ -3937,8 +3938,8 @@ def gather_object(
         weights_only (bool, optional): If ``True``, objects are serialized with
             ``torch.save`` and deserialized with ``torch.load(weights_only=True)``,
             which restricts deserialization to safe types. If ``False``, ``pickle``
-            is used instead, which is insecure with untrusted data. All ranks must
-            pass the same value. Default is ``True``.
+            is used, which is insecure with untrusted data. All ranks must pass
+            the same value. Default is ``False``.
 
     Returns:
         None. On the ``dst`` rank, ``object_gather_list`` will contain the
@@ -4057,7 +4058,7 @@ def send_object_list(
     device: torch.device | None = None,
     group_dst: int | None = None,
     use_batch: bool = False,
-    weights_only: bool = True,
+    weights_only: bool = False,
 ):
     """
     Sends picklable objects in ``object_list`` synchronously.
@@ -4084,9 +4085,9 @@ def send_object_list(
             assumptions. Default is ``False``.
         weights_only (bool, optional): If ``True``, objects are serialized with
             ``torch.save``, which the receiver can deserialize with
-            ``torch.load(weights_only=True)``. If ``False``, ``pickle`` is used
-            instead, which is insecure with untrusted data. Must match the value
-            passed to :func:`recv_object_list` on the receiver. Default is ``True``.
+            ``torch.load(weights_only=True)``. If ``False``, ``pickle`` is used,
+            which is insecure with untrusted data. Must match the value passed
+            to :func:`recv_object_list` on the receiver. Default is ``False``.
     Returns:
         ``None``.
 
@@ -4184,7 +4185,7 @@ def recv_object_list(
     device: torch.device | None = None,
     group_src: int | None = None,
     use_batch: bool = False,
-    weights_only: bool = True,
+    weights_only: bool = False,
 ):
     """
     Receives picklable objects in ``object_list`` synchronously.
@@ -4208,9 +4209,9 @@ def recv_object_list(
             assumptions. Default is ``False``.
         weights_only (bool, optional): If ``True``, objects are deserialized with
             ``torch.load(weights_only=True)``, which restricts deserialization to
-            safe types. If ``False``, ``pickle`` is used instead, which is insecure
-            with untrusted data. Must match the value passed to
-            :func:`send_object_list` on the sender. Default is ``True``.
+            safe types. If ``False``, ``pickle`` is used, which is insecure with
+            untrusted data. Must match the value passed to
+            :func:`send_object_list` on the sender. Default is ``False``.
 
     Returns:
         Sender rank. -1 if rank is not part of the group. If rank is part of the group,
@@ -4331,7 +4332,7 @@ def broadcast_object_list(
     group: ProcessGroup | None = None,
     device: torch.device | None = None,
     group_src: int | None = None,
-    weights_only: bool = True,
+    weights_only: bool = False,
 ):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group.
@@ -4356,8 +4357,8 @@ def broadcast_object_list(
         weights_only (bool, optional): If ``True``, objects are serialized with
             ``torch.save`` and deserialized with ``torch.load(weights_only=True)``,
             which restricts deserialization to safe types. If ``False``, ``pickle``
-            is used instead, which is insecure with untrusted data. All ranks must
-            pass the same value. Default is ``True``.
+            is used, which is insecure with untrusted data. All ranks must pass
+            the same value. Default is ``False``.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -4472,7 +4473,7 @@ def scatter_object_list(
     src: int | None = None,
     group: ProcessGroup | None = None,
     group_src: int | None = None,
-    weights_only: bool = True,
+    weights_only: bool = False,
 ):
     """
     Scatters picklable objects in ``scatter_object_input_list`` to the whole group.
@@ -4497,8 +4498,8 @@ def scatter_object_list(
         weights_only (bool, optional): If ``True``, objects are serialized with
             ``torch.save`` and deserialized with ``torch.load(weights_only=True)``,
             which restricts deserialization to safe types. If ``False``, ``pickle``
-            is used instead, which is insecure with untrusted data. All ranks must
-            pass the same value. Default is ``True``.
+            is used, which is insecure with untrusted data. All ranks must pass
+            the same value. Default is ``False``.
 
     Returns:
         ``None``. If rank is part of the group, ``scatter_object_output_list``
