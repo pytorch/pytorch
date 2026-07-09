@@ -7309,6 +7309,90 @@ class AOTInductorTestsTemplate:
 
         runner.free_inactive_constant_buffer()
 
+    def test_create_with_external_constants(self):
+        # AOTInductorModelContainerCreateWithExternalConstants: a runner
+        # built from caller-supplied weights must use those weights at
+        # inference time, not the constants baked into the .so.
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M, N, K = 8, 6, 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        # Caller-allocated weights distinct from the .so-baked ones.
+        external_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
+        }
+
+        if self.device == "cpu":
+            normal_runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+            self.assertTrue(normal_runner.did_call_load_constants())
+            del normal_runner
+            runner = torch._C._aoti.AOTIModelContainerRunnerCpu(
+                so_path, 1, external_weights
+            )
+        elif self.device == "xpu":
+            normal_runner = torch._C._aoti.AOTIModelContainerRunnerXpu(
+                so_path, 1, self.device
+            )
+            self.assertTrue(normal_runner.did_call_load_constants())
+            del normal_runner
+            runner = torch._C._aoti.AOTIModelContainerRunnerXpu(
+                so_path, 1, self.device, "", external_weights
+            )
+        elif self.device == "mps":
+            raise unittest.SkipTest("external-constants ctor not bound on MPS runner")
+        else:
+            normal_runner = torch._C._aoti.AOTIModelContainerRunnerCuda(
+                so_path, 1, self.device
+            )
+            self.assertTrue(normal_runner.did_call_load_constants())
+            del normal_runner
+            runner = torch._C._aoti.AOTIModelContainerRunnerCuda(
+                so_path, 1, self.device, "", external_weights
+            )
+        self.assertFalse(runner.did_call_load_constants())
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        # If the runner ignored external_weights and used .so-baked weights,
+        # output would equal model(test_inputs) with the original (different)
+        # weights, and this assertion would fail. The external constructor also
+        # calls the release_* path after disabling blob release, so this checks
+        # that no-op release did not drop caller-owned constants.
+        expected = torch.nn.functional.linear(
+            test_inputs,
+            external_weights["L__self___weight"],
+            external_weights["L__self___bias"],
+        )
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+        self.assertFalse(runner.did_call_load_constants())
+
     def test_update_user_managed_buffer(self):
         if self.device not in ["cuda", "xpu"]:
             raise unittest.SkipTest("requires CUDA/XPU")
