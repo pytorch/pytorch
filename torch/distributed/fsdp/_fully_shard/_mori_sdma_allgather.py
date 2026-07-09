@@ -19,12 +19,17 @@ ROCm/MORI to be installed.
 
 import importlib
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 
 from ._fsdp_api import AllGather
+
+
+if TYPE_CHECKING:
+    from ._fsdp_collectives import AllGatherResult
+    from ._fsdp_param import FSDPParam
 
 
 class _MoriSdmaAllGatherWork:
@@ -132,15 +137,14 @@ class MoriSdmaAllGather(AllGather):
         world_size: int,
         dtype: torch.dtype,
         device: torch.device,
-        fsdp_params: Any,
+        fsdp_params: list["FSDPParam"],
         param_all_gather_input_dtypes: list[list[torch.dtype]],
         param_all_gather_input_numels: list[list[int]],
     ) -> object | None:
         if not self._zero_copy_output:
             return None
-        from ._fsdp_collectives import _can_use_param_contiguous_output
 
-        if not _can_use_param_contiguous_output(
+        if not self.can_use_param_contiguous_output(
             fsdp_params,
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
@@ -211,17 +215,16 @@ class MoriSdmaAllGather(AllGather):
 
     def finalize_outputs(
         self,
-        all_gather_result: Any,
-        fsdp_params: Any,
+        all_gather_result: "AllGatherResult",
+        fsdp_params: list["FSDPParam"],
         group: dist.ProcessGroup,
         default_finalize: Callable[[], None],
     ) -> None:
         if all_gather_result.output_metadata is None:
             default_finalize()
             return
-        from ._fsdp_collectives import _init_param_contiguous_outputs
 
-        _init_param_contiguous_outputs(
+        self.init_param_contiguous_outputs(
             all_gather_result.all_gather_output,
             fsdp_params,
             all_gather_result.param_all_gather_input_numels,

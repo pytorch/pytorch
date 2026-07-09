@@ -8,7 +8,6 @@ import tempfile
 import unittest
 from collections.abc import Callable, Sequence
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -30,10 +29,9 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _can_use_param_contiguous_output,
     _div_if_needed,
     _get_gradient_divide_factors,
-    _init_param_contiguous_outputs,
+    AllGatherResult,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
@@ -45,7 +43,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.fsdp._fully_shard._mori_sdma_allgather import MoriSdmaAllGather
 from torch.distributed.tensor import DTensor
@@ -169,11 +167,11 @@ class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
         world_size: int,
         dtype: torch.dtype,
         device: torch.device,
-        fsdp_params: Any,
+        fsdp_params: list[FSDPParam],
         param_all_gather_input_dtypes: list[list[torch.dtype]],
         param_all_gather_input_numels: list[list[int]],
     ) -> object | None:
-        if not _can_use_param_contiguous_output(
+        if not self.can_use_param_contiguous_output(
             fsdp_params,
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
@@ -215,15 +213,15 @@ class _ParamContiguousTestAllGather(_RankMajorTestAllGather):
 
     def finalize_outputs(
         self,
-        all_gather_result: Any,
-        fsdp_params: Any,
+        all_gather_result: AllGatherResult,
+        fsdp_params: list[FSDPParam],
         group: dist.ProcessGroup,
         default_finalize: Callable[[], None],
     ) -> None:
         if all_gather_result.output_metadata is None:
             default_finalize()
             return
-        _init_param_contiguous_outputs(
+        self.init_param_contiguous_outputs(
             all_gather_result.all_gather_output,
             fsdp_params,
             all_gather_result.param_all_gather_input_numels,
@@ -2407,7 +2405,7 @@ class TestParamContiguousEligibility(TestCase):
         )
 
     def _can_use(self, param) -> bool:
-        return _can_use_param_contiguous_output(
+        return DefaultAllGather().can_use_param_contiguous_output(
             [param], [[torch.float32]], [[8]], torch.float32
         )
 
@@ -2429,7 +2427,7 @@ class TestParamContiguousEligibility(TestCase):
             )
         )
         self.assertFalse(
-            _can_use_param_contiguous_output(
+            DefaultAllGather().can_use_param_contiguous_output(
                 [self._make_param()], [[torch.bfloat16]], [[8]], torch.float32
             )
         )

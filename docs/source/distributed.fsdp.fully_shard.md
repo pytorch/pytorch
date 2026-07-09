@@ -184,6 +184,9 @@ is sharded on dim-0, and uses no all-gather extension or DTensor
 post-processing. It also
 falls back to the rank-major copy-out under `torch.compile` / compiled autograd
 (the aliasing is not traceable today) and during a post-forward mesh reshard.
+Backends can use the default `AllGather.can_use_param_contiguous_output` and
+`AllGather.init_param_contiguous_outputs` helpers to apply this policy and
+initialize the parameter views.
 
 A backend is selected explicitly per module with `set_custom_all_gather`. For
 example, the ROCm MORI SDMA backend (`MoriSdmaAllGather`) — which produces the
