@@ -1147,6 +1147,26 @@ def jvp(
          >>> _, output = jvp(f, (x, y), (torch.ones(5), torch.ones(5)))
          >>> assert torch.allclose(output, x + y)
 
+    .. note::
+        Using PyTorch ``torch.no_grad`` together with ``jvp``.
+        ``torch.no_grad`` does not apply to
+        :ref:`forward-mode AD <forward-mode-ad>`, so a ``torch.no_grad`` block
+        inside ``func`` does not stop tangents from propagating through it:
+
+            >>> def f(x):
+            >>>     with torch.no_grad():
+            >>>         c = x ** 2  # tangents still propagate through c
+            >>>     return x - c
+
+        As a result, ``jvp(f)(x)`` may differ from what reverse-mode
+        transforms like :func:`vjp` compute for the same function. To block
+        both forward- and reverse-mode differentiation, call
+        :meth:`~torch.Tensor.detach` on the result instead:
+
+            >>> def f(x):
+            >>>     c = (x ** 2).detach()  # blocks both AD modes
+            >>>     return x - c
+
     """
 
     return _jvp_with_argnums(
@@ -1360,6 +1380,26 @@ def jacfwd(
         >>> expectedY = torch.diag(2 * y)
         >>> assert torch.allclose(jacobian[0], expectedX)
         >>> assert torch.allclose(jacobian[1], expectedY)
+
+    .. note::
+        Using PyTorch ``torch.no_grad`` together with ``jacfwd``.
+        ``jacfwd`` is computed with :ref:`forward-mode AD <forward-mode-ad>`,
+        which ``torch.no_grad`` does not apply to: a ``torch.no_grad`` block
+        inside ``func`` does not stop tangents from propagating through it.
+        Consequently ``jacfwd(f)(x)`` can differ from ``jacrev(f)(x)`` for a
+        function that uses ``torch.no_grad`` internally (:func:`jacrev` is
+        computed with reverse-mode AD, which does respect ``torch.no_grad``).
+        To block both modes of differentiation, call
+        :meth:`~torch.Tensor.detach` on the result instead:
+
+            >>> def f(x):
+            >>>     with torch.no_grad():
+            >>>         c = x ** 2  # jacfwd: tangents still propagate through c
+            >>>     return x - c
+            >>>
+            >>> def g(x):
+            >>>     c = (x ** 2).detach()  # blocks both AD modes
+            >>>     return x - c
 
     """
 
