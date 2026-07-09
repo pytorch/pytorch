@@ -63,9 +63,9 @@ from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import (
-    is_opaque_reference_type,
-    is_opaque_type,
-    is_opaque_value_type,
+    is_custom_class,
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
     should_hoist,
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
@@ -283,7 +283,7 @@ from .nn_module import (
     UnspecializedNNModuleVariable,
 )
 from .optimizer import OptimizerVariable
-from .script_object import OpaqueObjectClassVariable, TorchScriptObjectVariable
+from .script_object import CustomClassObjectVariable, CustomClassVariable
 from .sdpa import SDPAParamsVariable
 from .sets import (
     DictKeySetVariable,
@@ -885,7 +885,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
-            TorchScriptObjectVariable,
+            CustomClassObjectVariable,
         }
 
     def get_source(self) -> Source:
@@ -1956,8 +1956,8 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            if is_opaque_type(value):
-                return OpaqueObjectClassVariable(
+            if is_custom_class(value):
+                return CustomClassVariable(
                     value,
                     source=self.source,
                 )
@@ -1985,14 +1985,14 @@ class VariableBuilder:
             # tracing, but in dynamo we handle it as a regular object so that
             # trace_rules-based graph breaks (e.g. initial_seed, manual_seed)
             # work gracefully — allowing dynamo to compile code before and
-            # after the generator call. TorchScriptObjectVariable's getattro_impl
+            # after the generator call. CustomClassObjectVariable's getattro_impl
             # and call_method are decorated with @_raise_hard_error_if_graph_break,
             # which turns any graph break into a hard error that falls back to
             # eager for the entire function. Generator methods intentionally
             # graph-break (they mutate/read RNG state), so they need the
             # UserDefinedObjectVariable path which supports graceful graph breaks.
             return self.wrap_user_defined(value)
-        elif TorchScriptObjectVariable.is_matching_cls(type(value)):
+        elif CustomClassObjectVariable.is_matching_cls(type(value)):
             from ..source import (
                 FlattenScriptObjectSource,
                 ScriptObjectQualifiedNameSource,
@@ -2024,18 +2024,18 @@ class VariableBuilder:
                     False,
                     value,  # type: ignore[arg-type]
                 )
-                return TorchScriptObjectVariable.create(
+                return CustomClassObjectVariable.create(
                     proxy,
                     value,
                     source=self.source,
                     tx=self.tx,
                 )
 
-            if is_opaque_value_type(type(value)):
+            if is_opaque_constant_type(type(value)):
                 # Value-type: guard on equality (will use __eq__)
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
-            elif is_opaque_reference_type(type(value)):
-                # Reference-type: guard only on type, and registered guard_fn.
+            elif is_opaque_symbolic_type(type(value)):
+                # Symbolic-type: guard only on type, and registered guard_fn.
                 # Use FAKE_SCRIPT_TYPE_MATCH because at runtime the source may
                 # resolve to either a FakeScriptObject (during outer
                 # AOTAutograd tracing) or the underlying real opaque object.
@@ -2068,7 +2068,7 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
-            if is_opaque_value_type(type(value)) and not should_hoist(type(value)):
+            if is_opaque_constant_type(type(value)) and not should_hoist(type(value)):
                 fake_script_obj = value
                 proxy = value
 
@@ -2100,7 +2100,7 @@ class VariableBuilder:
                     fake_script_obj,  # type: ignore[arg-type]
                 )
 
-            return TorchScriptObjectVariable.create(
+            return CustomClassObjectVariable.create(
                 proxy,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
                 source=self.source,
@@ -3123,7 +3123,7 @@ class VariableBuilder:
                     inner_type = type(inner_value.real_obj)
                 if not isinstance(
                     inner_value, torch.Tensor
-                ) and not is_opaque_reference_type(inner_type):
+                ) and not is_opaque_symbolic_type(inner_type):
                     raise RuntimeError(
                         f"{type(inner_value).__name__!r} found in tensor attrs of "
                         f"{type(value).__name__}.__tensor_flatten__(). "
@@ -4137,15 +4137,15 @@ def handle_traced_output(
         # example_value is already a FakeScriptObject (e.g. returned by getitem
         # on a container whose fake kernel returns a FakeScriptObject).  No need
         # to convert it — just wrap the proxy directly.
-        return TorchScriptObjectVariable.create(
+        return CustomClassObjectVariable.create(
             proxy,
             example_value,
             tx=tx,
         )
-    elif is_opaque_type(type(example_value)):
+    elif is_custom_class(type(example_value)):
         # This is for handling opaque objects in custom ops
-        if is_opaque_value_type(type(example_value)):
-            return TorchScriptObjectVariable.create(
+        if is_opaque_constant_type(type(example_value)):
+            return CustomClassObjectVariable.create(
                 example_value,  # pyrefly: ignore[bad-argument-type]
                 example_value,
                 tx=tx,
@@ -4153,7 +4153,7 @@ def handle_traced_output(
         fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
             tx.output.fake_mode, example_value
         )
-        return TorchScriptObjectVariable.create(
+        return CustomClassObjectVariable.create(
             proxy,
             fake_script_obj,
             tx=tx,
@@ -4992,17 +4992,17 @@ class SourcelessBuilder:
             # This is always valid to call, and useful for recursive calls.
             return value
         elif (
-            is_opaque_value_type(type(value))
+            is_opaque_constant_type(type(value))
             and not isinstance(value, enum.Enum)
             and not is_pybind11_enum_member(value)
         ):
-            return TorchScriptObjectVariable.create(value, value, tx=tx)
-        elif is_opaque_reference_type(type(value)):
+            return CustomClassObjectVariable.create(value, value, tx=tx)
+        elif is_opaque_symbolic_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 tx.output.fake_mode, value
             )
-            return TorchScriptObjectVariable.create(
+            return CustomClassObjectVariable.create(
                 value,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
                 tx=tx,
