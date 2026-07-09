@@ -2922,8 +2922,10 @@ class TestOperators(TestCase):
             )
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
+only_for = ("cpu", "xpu", "cuda")
+instantiate_device_type_tests(
+    TestOperators, globals(), only_for=only_for, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
