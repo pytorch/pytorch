@@ -176,7 +176,7 @@ def capture_generated_sources(into: "list[GeneratedSource]") -> "Iterator[None]"
     orchestration wrapper this way is rejected by the composer (it requires exactly one),
     so the common case fails loudly rather than emitting an empty module.
     """
-    prev = getattr(_capture_tls, "sink", None)
+    prev = _current_capture_sink()
     _capture_tls.sink = into
     try:
         yield
