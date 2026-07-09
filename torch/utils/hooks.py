@@ -228,12 +228,13 @@ class BackwardHook:
                                   "https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook "
                                   "for more details.",
                                   stacklevel=5)
-                    grad_inputs = self._pack_with_none([], [], self.n_inputs)
-                    for user_hook in self.user_hooks:
-                        res = user_hook(self.module, grad_inputs, self.grad_outputs)
-                        if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
-                            raise RuntimeError("Backward hook for Modules where no input requires "
-                                               "gradient should always return None or None for all gradients.")
+                    if self.user_hooks:
+                        grad_inputs = self._pack_with_none([], [], self.n_inputs)
+                        for user_hook in self.user_hooks:
+                            res = user_hook(self.module, grad_inputs, self.grad_outputs)
+                            if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
+                                raise RuntimeError("Backward hook for Modules where no input requires "
+                                                    "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
 
                 if local_grad_outputs is not None:
