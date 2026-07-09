@@ -532,25 +532,7 @@ def checkpoint(
         ... )(fn)
         >>> out = checkpointed_fn(*args, **kwargs)
     """
-    if function is None and not args:
-        if kwargs:
-            raise ValueError(
-                "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
-            )
-        return functools.partial(
-            _make_checkpoint_wrapper,
-            use_reentrant=use_reentrant,
-            preserve_rng_state=preserve_rng_state,
-            context_fn=context_fn,
-            determinism_check=determinism_check,
-            debug=debug,
-            early_stop=early_stop,
-        )
-
-    return _checkpoint_impl(
-        function,
-        args,
-        kwargs,
+    checkpoint_kwargs = dict(
         use_reentrant=use_reentrant,
         preserve_rng_state=preserve_rng_state,
         context_fn=context_fn,
@@ -558,6 +540,17 @@ def checkpoint(
         debug=debug,
         early_stop=early_stop,
     )
+    if function is None and not args:
+        if kwargs:
+            raise ValueError(
+                "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
+            )
+        # Dynamo reconstructs this factory by matching the partial's func and
+        # reading its keywords (see is_checkpoint_factory), so keep the config
+        # in the partial's keywords with no bound positional args.
+        return functools.partial(_make_checkpoint_wrapper, **checkpoint_kwargs)
+
+    return _checkpoint_impl(function, args, kwargs, **checkpoint_kwargs)
 
 
 def _checkpoint_impl(
