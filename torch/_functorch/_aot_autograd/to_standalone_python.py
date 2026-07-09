@@ -8,10 +8,12 @@ This is the AOT half of the backend contract behind ``torch.compiler.precompile`
 for the post-AOTAutograd dense graph). This module wraps that with the prelude /
 epilogue (input-mutation reflection, output-alias regen, subclass wrap/unwrap,
 ...) by COMPOSING AOTAutograd's own codegen'd runtime-wrapper source -- captured
-during compile -- rather than reimplementing it. Every wrapper (the orchestration and
-any chain wrappers: subclass / dedup / functionalized-RNG) is spliced verbatim as a real
-top-level ``def``, with its closed-over globals hoisted to module-scope assignments, so
-the module reads as ordinary code. Cross-wrapper references, the inner ``call`` chain,
+during compile -- rather than reimplementing it. Every wrapper is spliced verbatim as a
+real top-level ``def``, with its closed-over globals hoisted to module-scope assignments,
+so the module reads as ordinary code. These nest in the SAME order the runtime builds:
+the INNER chain wrappers (subclass / functionalized-RNG) wrap the inner ``call`` and are
+composed inside the orchestration, while the OUTER ``CompilerWrapper``s (dedup / synthetic
+base) wrap the orchestration itself (via a single-arg adapter over it). Cross-wrapper references, the inner ``call`` chain,
 public helpers, and baked metadata objects (reconstructed as source -- see
 ``_emit_value``) are wired by name; a guard rejects the rare case where a wrapper def
 name or hoisted global would collide with another top-level name (a sibling wrapper or
@@ -86,10 +88,11 @@ _COMPILE_LOCK = threading.RLock()
 #     gen_alias_from_base, _unwrap_tensoralias, mark_dynamo_propagated_dynamic_indices,
 #     the CUDARngStateHelper staticmethods) -- ordinary importable objects;
 #   - the inner Inductor ``call`` that the chain ultimately invokes;
-#   - sibling captured wrappers -- the next link of the runtime chain (subclass /
-#     dedup / functionalized-RNG, whose body calls the link it wraps), plus the
-#     orchestration's output-alias and mutation epilogue helpers, which it closes
-#     over directly by reference;
+#   - sibling captured wrappers -- the next link of the runtime chain (an inner subclass /
+#     functionalized-RNG wrapper, or an outer dedup / synthetic-base wrapper, whose body
+#     calls the link it wraps -- the orchestration's outer closure for the innermost outer
+#     wrapper), plus the orchestration's output-alias and mutation epilogue helpers, which
+#     it closes over directly by reference;
 #   - per-graph metadata baked at compile time (e.g. a ViewMetaSequence for alias
 #     regen, tensor-subclass metadata) -- live objects with no import path.
 #
@@ -231,6 +234,8 @@ def _resolve_global(
     inner_call_id: int | None,
     fn_id_to_name: dict[int, str],
     imports: set[str],
+    orch_closure_id: int | None = None,
+    orch_entry_name: str | None = None,
 ) -> str:
     """Return a Python expression (valid in the generated module) that reproduces
     ``obj``, recording any needed import. Raises NotImplementedError if ``obj`` is
@@ -238,6 +243,12 @@ def _resolve_global(
     reconstructible (see ``_emit_value``)."""
     if inner_call_id is not None and id(obj) == inner_call_id:
         return "_inner_call"
+    # An OUTER wrapper (dedup / synthetic base) closes over the orchestration's outer
+    # closure as its inner. That closure is not a captured wrapper and has no import
+    # path, so wire it to the single-arg orchestration entry adapter the composer emits.
+    if orch_closure_id is not None and id(obj) == orch_closure_id:
+        assert orch_entry_name is not None  # noqa: S101
+        return orch_entry_name
     if id(obj) in fn_id_to_name:
         return fn_id_to_name[id(obj)]
     if id(obj) in helper_table:
@@ -281,15 +292,21 @@ def _module_level_names(tree: ast.Module) -> set[str]:
 
 
 def _compose_standalone_module(
-    inner_python: str, captured: list[GeneratedSource]
+    inner_python: str, captured: list[GeneratedSource], inner_call_obj: Any
 ) -> str:
     """Compose the inner Inductor ``call`` with AOTAutograd's captured runtime
     wrappers into one standalone module exposing ``call(flat_inputs) -> outputs``.
 
     Every wrapper (chain wrappers and the orchestration) is spliced as a real top-level
     ``def`` with its closed-over globals hoisted to module-scope assignments (resolved
-    here). They are chained by name: the orchestration is invoked with the InductorWrapper
-    chain head as its inner.
+    here). They are chained by name in the SAME nesting the runtime builds: the
+    orchestration is invoked with the INNER InductorWrapper chain head (subclass / RNG)
+    as its inner, and any OUTER ``CompilerWrapper`` (dedup / synthetic base, applied
+    AROUND the orchestration in ``graph_compile._aot_stage2c_make_inference_function``)
+    wraps a single-arg adapter over the orchestration.
+
+    ``inner_call_obj`` is the placeholder the capture pass returned for the inner call;
+    its identity is authoritative (see the note at the inner-call site below).
     """
     # The capture sink is duration-scoped over the inner inductor compile, with no
     # originating-graph id at install time, so a re-entrant on-thread AOTAutograd /
@@ -399,37 +416,85 @@ def _compose_standalone_module(
                 return g.globals_dict[nm]
         return None
 
-    # The inner Inductor call is the inner-reference that is not itself a captured
-    # wrapper (the innermost link of the chain). It may be absent (dense / alias
-    # graphs have no chain wrapper); then the orchestration is invoked with
-    # ``_inner_call`` directly.
-    inner_call_id: int | None = None
-    for g in captured:
-        cf = _inner_ref(g)
-        if cf is not None and id(cf) not in fn_id_to_name:
-            inner_call_id = id(cf)
-            break
+    # The inner Inductor call is AUTHORITATIVE: it is the placeholder object the capture
+    # pass returned (threaded in as ``inner_call_obj``), NOT inferred from capture order.
+    # This is what lets the composer tell the inner call apart from the orchestration's
+    # own outer closure -- both surface as some wrapper's inner-ref yet neither is a
+    # captured wrapper fn -- which is precisely how INNER wrappers (subclass / RNG,
+    # wrapping the inner call, composed INSIDE the orchestration) are distinguished from
+    # OUTER wrappers (dedup / synthetic base, ``CompilerWrapper``s applied AROUND the
+    # orchestration in graph_compile._aot_stage2c_make_inference_function).
+    inner_call_id: int = id(inner_call_obj)
 
-    # Chain head passed to the orchestration: the outermost InductorWrapper (last non-orch
-    # wrapper that wraps via an inner reference), else the inner call. Computed up front (a
-    # pure capture-order check) so the order-inversion guard below fires before the later
-    # name-uniqueness guard -- a mis-ordered chain is the more specific diagnosis.
+    # Name of the single-arg adapter emitted over the orchestration; the innermost outer
+    # wrapper closes over the orchestration's outer closure and is wired to this name.
+    _ORCH_ENTRY = "_orchestration_entry"
+
+    # The orchestration's outer closure is the object outer wrappers wrap. The composer
+    # never captures it directly (the captured orchestration ``fn`` is the inner
+    # ``_codegen_runtime_wrapper``), so recognize it structurally: an inner-ref that is
+    # neither the inner call nor any captured wrapper's fn can only be that closure.
+    orch_closure_ids = {
+        id(_inner_ref(g))
+        for g in non_orch
+        if _inner_ref(g) is not None
+        and id(_inner_ref(g)) != inner_call_id
+        and id(_inner_ref(g)) not in fn_id_to_name
+    }
+    if len(orch_closure_ids) > 1:
+        raise NotImplementedError(
+            "aot_autograd.compile_to_python: captured multiple wrappers whose inner "
+            "reference is neither the inner call nor a captured wrapper; cannot tell "
+            "which wraps the orchestration."
+        )
+    orch_closure_id: int | None = next(iter(orch_closure_ids), None)
+
+    # Walk the OUTER chain outward from the orchestration closure: the innermost outer
+    # wrapper wraps the closure, the next wraps that wrapper's fn, and so on. Everything
+    # else is inner-side -- the subclass / RNG chain wrappers plus the alias / mutation
+    # epilogue helpers the orchestration closes over (which reference no inner at all).
+    outer_wrappers: list[GeneratedSource] = []
+    if orch_closure_id is not None:
+        target_id: int | None = orch_closure_id
+        while target_id is not None:
+            nxt = next(
+                (
+                    g
+                    for g in non_orch
+                    if g not in outer_wrappers
+                    and _inner_ref(g) is not None
+                    and id(_inner_ref(g)) == target_id
+                ),
+                None,
+            )
+            if nxt is None:
+                break
+            outer_wrappers.append(nxt)
+            target_id = id(nxt.fn)
+    outer_ids = {id(g) for g in outer_wrappers}
+    inner_side = [g for g in non_orch if id(g) not in outer_ids]
+
+    # Chain head passed to the orchestration: the outermost INNER InductorWrapper (last
+    # inner-side wrapper that wraps via an inner reference), else the inner call. Computed
+    # up front (a pure capture-order check) so the order-inversion guard below fires
+    # before the later name-uniqueness guard -- a mis-ordered chain is the more specific
+    # diagnosis.
     chain_head = "_inner_call"
     chain_head_g: GeneratedSource | None = None
-    for g in non_orch:
+    for g in inner_side:
         if _inner_ref(g) is not None:
             chain_head = fn_id_to_name[id(g.fn)]
             chain_head_g = g
 
-    # "Last with an inner-ref == outermost" holds only when capture order is
+    # "Last with an inner-ref == outermost" holds only when INNER capture order is
     # innermost-to-outermost (it is today: subclass before functionalized-RNG). Back that
-    # assumption with a guard: the true outermost wrapper is the one NO other wrapper
-    # wraps, i.e. whose fn is not referenced as another wrapper's inner. If the chosen
-    # head is itself wrapped, capture order inverted and the chain would be mis-ordered --
-    # reject rather than silently emit a wrong chain (the wiring guard below would not
-    # catch this, since every wrapper is still referenced somewhere).
+    # assumption with a guard: the true outermost inner wrapper is the one NO other inner
+    # wrapper wraps, i.e. whose fn is not referenced as another inner wrapper's inner. If
+    # the chosen head is itself wrapped, capture order inverted and the chain would be
+    # mis-ordered -- reject rather than silently emit a wrong chain (the wiring guard
+    # below would not catch this, since every wrapper is still referenced somewhere).
     referenced_inner_ids = {
-        id(_inner_ref(g)) for g in non_orch if _inner_ref(g) is not None
+        id(_inner_ref(g)) for g in inner_side if _inner_ref(g) is not None
     }
     if chain_head_g is not None and id(chain_head_g.fn) in referenced_inner_ids:
         raise NotImplementedError(
@@ -460,6 +525,7 @@ def _compose_standalone_module(
         "_inner_call",
         "_rebuild",
         "contextlib",
+        _ORCH_ENTRY,
     }
 
     def _reserve(name: str) -> None:
@@ -486,7 +552,13 @@ def _compose_standalone_module(
             if gname == "__builtins__":
                 continue
             expr = _resolve_global(
-                gobj, helper_table, inner_call_id, fn_id_to_name, imports
+                gobj,
+                helper_table,
+                inner_call_id,
+                fn_id_to_name,
+                imports,
+                orch_closure_id,
+                _ORCH_ENTRY,
             )
             out.append((gname, expr))
         return out
@@ -505,25 +577,74 @@ def _compose_standalone_module(
             hoists.append(f"{gname} = {expr}")
         return "\n".join(hoists + [source, ""])
 
-    # Chain wrappers first (innermost-to-outermost capture order), then the orchestration --
-    # all spliced as real defs; a chain wrapper's hoisted inner-ref (``compiled_fn``)
-    # references ``_inner_call`` / a sibling, both emitted earlier, so order is satisfied.
-    wrapper_blocks = [_emit_inline(g.source, g.globals_dict) for g in non_orch]
+    # Inner-side wrappers first (subclass / RNG chain wrappers innermost-to-outermost,
+    # plus the epilogue helpers), then the orchestration, then the outer wrappers -- all
+    # spliced as real defs. An inner wrapper's hoisted inner-ref (``compiled_fn``)
+    # references ``_inner_call`` / a sibling emitted earlier; an outer wrapper's inner-ref
+    # references the orchestration entry adapter / a sibling emitted earlier -- so order
+    # is satisfied.
+    inner_blocks = [_emit_inline(g.source, g.globals_dict) for g in inner_side]
     orch_block = _emit_inline(orch.source, orch.globals_dict)
+    outer_blocks = [_emit_inline(g.source, g.globals_dict) for g in outer_wrappers]
+
+    # The final ``call`` invokes the outermost outer wrapper (else the orchestration
+    # directly). Build that line now so the wiring guard's corpus includes it -- the
+    # outermost outer wrapper is referenced ONLY there.
+    if outer_wrappers:
+        outermost_name = fn_id_to_name[id(outer_wrappers[-1].fn)]
+        final_invoke = f"    return {outermost_name}(list(flat_inputs))"
+    else:
+        final_invoke = (
+            f"    return {orch.fn_name}(\n"
+            f"        {chain_head}, contextlib.nullcontext, lambda: None, "
+            "list(flat_inputs)\n    )"
+        )
+
+    # The single-arg adapter over the orchestration (emitted only when outer wrappers
+    # wrap it). The outer wrappers call their inner as ``fn(args)``; this adapts the
+    # orchestration's positional (_compiled_fn_, _first_ctx_, _on_before_call_, args)
+    # signature to that. When there are no outer wrappers the orchestration is invoked
+    # directly in ``call`` (see final_invoke).
+    orch_invoke_comment = [
+        "    # The 2nd/3rd positional args INTENTIONALLY substitute contextlib.nullcontext",
+        "    # for the runtime's first-invocation context (_FirstInvocationContext) and a",
+        "    # no-op for the profiler-prologue exit. This drops two cold-start diagnostics:",
+        "    # the first-call custom-op aliasing analysis (_AnalyzeCustomOpInputOutputMode,",
+        "    # active when check_custom_op_aliasing is set, which can even RAISE under",
+        "    # error_on_custom_op_aliasing) and the profiler prologue. Neither affects",
+        "    # numerics, so this is not a bug -- the standalone artifact deliberately omits",
+        "    # them. (See the positional-mapping note in _compose_standalone_module.)",
+    ]
+    entry_block: list[str] = []
+    if outer_wrappers:
+        entry_block = [
+            f"def {_ORCH_ENTRY}(args):",
+            "    # Single-arg adapter so the CompilerWrappers applied AROUND the",
+            "    # orchestration (dedup / synthetic base) can invoke it as ``fn(args)``.",
+            *orch_invoke_comment,
+            f"    return {orch.fn_name}(",
+            f"        {chain_head}, contextlib.nullcontext, lambda: None, args",
+            "    )",
+            "",
+        ]
 
     # _INNER_NAMES detection is a hardcoded allowlist (see above). If AOTAutograd adds
     # a forward wrapper that names its inner via an unrecognized global, that wrapper
     # is captured but may never be wired into the module -- silently composing a
     # structurally-wrong result. Enforce that every captured non-orch wrapper is
-    # actually referenced somewhere: as the chain head, or by name in another block
-    # (another wrapper's globals, or the orchestration's -- e.g. ``_alias_fn`` /
-    # ``_apply_mutations``, the epilogue helpers the orchestration closes over). A
-    # wrapper whose name appears in no other block went unwired, so reject rather than
-    # emit a wrong module.
-    other_text = "\n".join(wrapper_blocks + [orch_block])
-    for i, g in enumerate(non_orch):
+    # actually referenced somewhere: as the inner chain head, in the final ``call``
+    # (the outermost outer wrapper), or by name in another block (another wrapper's
+    # globals, the orchestration's epilogue helpers -- e.g. ``_alias_fn`` /
+    # ``_apply_mutations`` -- or the entry adapter). A wrapper whose name appears in no
+    # other block went unwired, so reject rather than emit a wrong module.
+    block_of = {id(g): b for g, b in zip(inner_side, inner_blocks)}
+    block_of.update({id(g): b for g, b in zip(outer_wrappers, outer_blocks)})
+    other_text = "\n".join(
+        inner_blocks + [orch_block] + entry_block + outer_blocks + [final_invoke]
+    )
+    for g in non_orch:
         name = fn_id_to_name[id(g.fn)]
-        own = wrapper_blocks[i]
+        own = block_of[id(g)]
         elsewhere = other_text.replace(own, "", 1)
         # Whole-token match: ``name`` is a wrapper def name (e.g. ``inner_fn``); a raw
         # substring test would treat ``inner_fn`` as wired whenever a longer token like
@@ -559,9 +680,28 @@ def _compose_standalone_module(
         )
 
     # Only emit the _rebuild helper if a baked value actually reconstructs through it.
-    needs_rebuild = (
-        any("_rebuild(" in b for b in wrapper_blocks) or "_rebuild(" in orch_block
+    needs_rebuild = any(
+        "_rebuild(" in b for b in (*inner_blocks, orch_block, *outer_blocks)
     )
+
+    # ``call`` invokes the orchestration directly when nothing wraps it; when outer
+    # wrappers do, its body just calls the outermost of them (which drives the entry
+    # adapter, then the orchestration) -- so the orchestration-substitution comment lives
+    # on whichever site actually invokes the orchestration.
+    if outer_wrappers:
+        call_body = [
+            "    # Invokes the outer CompilerWrapper chain (dedup / synthetic base), which",
+            f"    # wraps {_ORCH_ENTRY} (the orchestration adapter).",
+            final_invoke,
+        ]
+    else:
+        call_body = [
+            "    # AOTAutograd orchestration: disables grad, invokes the inner chain,",
+            "    # bumps mutated-input versions, applies the output epilogue.",
+            "    #",
+            *orch_invoke_comment,
+            final_invoke,
+        ]
 
     parts = [
         _MODULE_HEADER,
@@ -578,27 +718,16 @@ def _compose_standalone_module(
         "",
         "# " + "=" * 70,
         "# AOTAutograd runtime wrappers (codegen'd): each inlined as a real def with its",
-        "# closed-over globals hoisted to module scope -- chain wrappers first, then the",
-        "# orchestration that the outer call invokes",
+        "# closed-over globals hoisted to module scope -- inner chain wrappers first, then",
+        "# the orchestration, then any outer wrappers (dedup / synthetic base) that wrap it",
         "# " + "=" * 70,
-        *wrapper_blocks,
+        *inner_blocks,
         orch_block,
+        *entry_block,
+        *outer_blocks,
         "",
         "def call(flat_inputs):  # noqa: F811",
-        "    # AOTAutograd orchestration: disables grad, invokes the inner chain,",
-        "    # bumps mutated-input versions, applies the output epilogue.",
-        "    #",
-        "    # The 2nd/3rd positional args INTENTIONALLY substitute contextlib.nullcontext",
-        "    # for the runtime's first-invocation context (_FirstInvocationContext) and a",
-        "    # no-op for the profiler-prologue exit. This drops two cold-start diagnostics:",
-        "    # the first-call custom-op aliasing analysis (_AnalyzeCustomOpInputOutputMode,",
-        "    # active when check_custom_op_aliasing is set, which can even RAISE under",
-        "    # error_on_custom_op_aliasing) and the profiler prologue. Neither affects",
-        "    # numerics, so this is not a bug -- the standalone artifact deliberately omits",
-        "    # them. (See the positional-mapping note in _compose_standalone_module.)",
-        f"    return {orch.fn_name}(",
-        f"        {chain_head}, contextlib.nullcontext, lambda: None, list(flat_inputs)",
-        "    )",
+        *call_body,
         "",
     ]
     return "\n".join(parts)
@@ -759,7 +888,14 @@ def compile_to_python(
                     "AOTAutograd lowering emits more than one inner forward graph."
                 )
             dense["gm"] = dense_gm
-            return make_boxed_func(dense_gm.forward)
+            # Retain the placeholder's IDENTITY: it is the authoritative inner call the
+            # runtime-wrapper chain closes over. The composer needs it to tell the inner
+            # call apart from the orchestration's own outer closure (both surface as a
+            # wrapper's inner-ref yet neither is a captured wrapper fn), which is what
+            # separates INNER wrappers from the OUTER dedup / synthetic-base wrappers.
+            placeholder = make_boxed_func(dense_gm.forward)
+            dense["placeholder"] = placeholder
+            return placeholder
 
         # Drive inductor's own ``compile_fx`` (i.e. its exact AOTAutograd invocation --
         # decomposition table + aot config) but swap in the capture inner compiler so the
@@ -801,7 +937,9 @@ def compile_to_python(
         inner_python, cache = _inductor_compile_to_python(
             dense["gm"], example_inputs, options=options
         )
-        source = _compose_standalone_module(inner_python, captured)
+        source = _compose_standalone_module(
+            inner_python, captured, dense["placeholder"]
+        )
     return source, cache
 
 

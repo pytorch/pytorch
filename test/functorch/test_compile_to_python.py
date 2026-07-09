@@ -56,6 +56,12 @@ def _exec(src):
     return ns["call"]
 
 
+# A stand-in for the authoritative inner-call placeholder that compile_to_python threads
+# into _compose_standalone_module. The guard tests below build wrappers by hand and never
+# reference the real inner call, so any distinct object serves as its identity.
+_SENTINEL_INNER_CALL = object()
+
+
 def _make_holder(value):
     # A plain importable module-level callable used by test_unwired_chain_wrapper_rejected
     # as a stand-in inner-ref global, so it resolves cleanly as source (isolating the
@@ -276,6 +282,68 @@ class TestAOTCompileToPython(TestCase):
             out.untyped_storage().data_ptr(), xc.untyped_storage().data_ptr()
         )
 
+    def test_dedup_mutated_duplicate_input_runs_like_eager(self):
+        # A mutated DUPLICATE input drives AOTDedupeWrapper -- a CompilerWrapper applied
+        # AROUND the orchestration (graph_compile._aot_stage2c_make_inference_function),
+        # NOT an inner chain wrapper. The composed module must nest it OUTSIDE the
+        # orchestration -- dedup(orchestration(inner)) -- so the orchestration sees the
+        # DEDUPED args. Composed inside-out (the pre-fix bug) the version bump / copy-back
+        # index the raw pre-dedup args and land on the wrong (duplicate) tensor, so the
+        # version-counter assertion below fails; the ``_orchestration_entry`` adapter is
+        # the structural marker of the correct outer nesting (absent pre-fix).
+        def f(a, b, c, d):
+            d.mul_(2)
+            return a + d
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+        gm = make_fx(f)(x, x, y, y)
+        src, _cache = compile_to_python(gm, [x, x, y, y])
+        self.assertIn("def call(flat_inputs):", src)
+        self.assertIn("_orchestration_entry", src)  # outer-wrapper adapter over orch
+        self.assertIn("deduped_args", src)  # the dedup wrapper is spliced
+
+        xe, ye = x.clone(), y.clone()
+        eager_out = f(xe, xe, ye, ye)
+
+        xc, yc = x.clone(), y.clone()
+        with torch.no_grad():
+            composed_out = _exec(src)([xc, xc, yc, yc])[0]
+        self.assertEqual(composed_out, eager_out)
+        self.assertEqual(yc, ye)  # mutation landed on the right tensor
+        self.assertEqual(yc._version, ye._version)  # and bumped the right version
+
+    def test_synthetic_base_aliased_mutated_input_runs_like_eager(self):
+        # Aliased + mutated inputs drive AOTSyntheticBaseWrapper, also applied AROUND the
+        # orchestration. It collapses the aliased inputs into a synthetic base BEFORE the
+        # orchestration runs, so it must be composed OUTSIDE it (same requirement as dedup):
+        # the ``_orchestration_entry`` adapter marks the correct nesting (absent pre-fix,
+        # which inverted the chain to orchestration(synthetic_base(inner))).
+        def f(a, b):
+            a.mul_(2)
+            return a + b
+
+        def make():
+            base = torch.arange(4, dtype=torch.float32) + 1
+            return base[:], base  # a aliases b
+
+        gm = make_fx(f)(*make())
+        a0, b0 = make()
+        src, _cache = compile_to_python(gm, [a0, b0])
+        self.assertIn("_orchestration_entry", src)
+        self.assertIn("_synthetic_base_wrapper", src)
+
+        ae, be = make()
+        eager_out = f(ae, be)
+
+        ac, bc = make()
+        with torch.no_grad():
+            composed_out = _exec(src)([ac, bc])[0]
+        self.assertEqual(composed_out, eager_out)
+        self.assertEqual(ac, ae)
+        self.assertEqual(bc, be)
+        self.assertEqual(bc._version, be._version)
+
     def test_tensor_subclass_wrap_unwrap_runs_like_eager(self):
         # The headline feature: a tensor-subclass input exercises AOTAutograd's subclass
         # flatten/unflatten wrapper plus baked subclass metadata. The composed module must
@@ -300,12 +368,14 @@ class TestAOTCompileToPython(TestCase):
     def test_multiple_subclass_inputs_runs_like_eager(self):
         # Two tensor-subclass inputs make the subclass wrapper flatten/unflatten more than
         # one subclass (each into its constituents), which the single-input subclass test
-        # above does not. NOTE: this stays a single chain wrapper -- a >= 2-link wrapper
+        # above does not. NOTE: this stays a single INNER chain wrapper -- a >= 2-link inner
         # chain (e.g. subclass + functionalized-RNG) is only exercised by the order-
-        # inversion guard unit test, since a supported multi-chain-wrapper forward graph is
+        # inversion guard unit test, since a supported multi-inner-chain forward graph is
         # not readily constructible (subclass+RNG hits an internal AOTAutograd assertion,
-        # duplicate subclass inputs collapse into one subclass wrapper, and plain duplicate
-        # inputs produce no captured chain wrapper).
+        # and duplicate subclass inputs collapse into one subclass wrapper). Mutated
+        # duplicate / aliased inputs DO add OUTER wrappers (dedup / synthetic base), but
+        # those wrap the orchestration rather than the inner call -- see the dedup /
+        # synthetic-base tests above.
         from torch.testing._internal.two_tensor import TwoTensor
 
         def f(a, b):
@@ -756,7 +826,11 @@ class TestAOTComposeGuards(TestCase):
         with self.assertRaisesRegex(
             NotImplementedError, "orchestration wrapper signature"
         ):
-            _compose_standalone_module("def call(args):\n    return args\n", [bad_orch])
+            _compose_standalone_module(
+                "def call(args):\n    return args\n",
+                [bad_orch],
+                _SENTINEL_INNER_CALL,
+            )
 
     def test_orchestration_extra_kwonly_param_rejected(self):
         # The 4 positional params are intact but a keyword-only param is added. The standalone
@@ -774,7 +848,9 @@ class TestAOTComposeGuards(TestCase):
             NotImplementedError, "orchestration wrapper signature"
         ):
             _compose_standalone_module(
-                "def call(args):\n    return args\n", [kwonly_orch]
+                "def call(args):\n    return args\n",
+                [kwonly_orch],
+                _SENTINEL_INNER_CALL,
             )
 
     def test_empty_capture_rejected(self):
@@ -785,7 +861,9 @@ class TestAOTComposeGuards(TestCase):
         with self.assertRaisesRegex(
             NotImplementedError, "exactly one forward orchestration wrapper"
         ):
-            _compose_standalone_module("def call(args):\n    return args\n", [])
+            _compose_standalone_module(
+                "def call(args):\n    return args\n", [], _SENTINEL_INNER_CALL
+            )
 
     def test_orchestration_global_colliding_with_inner_rejected(self):
         # The inlined orchestration hoists its globals to module scope; a hoisted name that
@@ -803,7 +881,7 @@ class TestAOTComposeGuards(TestCase):
         with self.assertRaisesRegex(
             NotImplementedError, "collides with another top-level name in the composed"
         ):
-            _compose_standalone_module(inner, [orch])
+            _compose_standalone_module(inner, [orch], _SENTINEL_INNER_CALL)
 
     def test_orchestration_def_name_colliding_with_inner_rejected(self):
         # Distinct from the hoisted-global collision above: the up-front _reserve loop
@@ -814,7 +892,26 @@ class TestAOTComposeGuards(TestCase):
         with self.assertRaisesRegex(
             NotImplementedError, "collides with another top-level name in the composed"
         ):
-            _compose_standalone_module(inner, [self._orch()])
+            _compose_standalone_module(inner, [self._orch()], _SENTINEL_INNER_CALL)
+
+    def test_compose_rejects_baked_live_tensor(self):
+        # The module's no-weights / no-pickle.loads promise: a wrapper closing over a live
+        # tensor (with no import path) must RAISE at compose time rather than embed raw
+        # bytes. This drives that rejection through the COMPOSE path (a wrapper global),
+        # not just emit_value in isolation -- the _assert_composed markers only prove no
+        # blob appears when nothing forces one, so this is what actually locks the promise.
+        orch = GeneratedSource(
+            "runtime_wrapper_orchestration",
+            "_runtime_wrapper",
+            "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):\n"
+            "    return [_baked]\n",
+            {"_baked": torch.randn(4)},
+            lambda: None,
+        )
+        with self.assertRaisesRegex(NotImplementedError, "cannot bake a live Tensor"):
+            _compose_standalone_module(
+                "def call(args):\n    return args\n", [orch], _SENTINEL_INNER_CALL
+            )
 
     def test_rebuild_helper_spliced_and_runs_in_composed_module(self):
         # When a baked global reconstructs via the pickle-reduce-as-source path (_NewObjEx
@@ -831,7 +928,9 @@ class TestAOTComposeGuards(TestCase):
             {"_baked": baked},
             lambda: None,
         )
-        src = _compose_standalone_module("def call(args):\n    return args\n", [orch])
+        src = _compose_standalone_module(
+            "def call(args):\n    return args\n", [orch], _SENTINEL_INNER_CALL
+        )
         self.assertIn("def _rebuild", src)  # helper spliced (needs_rebuild=True)
         self.assertIn("_rebuild(", src)
         out = _exec(src)(
@@ -840,9 +939,10 @@ class TestAOTComposeGuards(TestCase):
         self.assertEqual(out[0], baked)
 
     def test_chain_head_order_inversion_guard(self):
-        # Capture order is assumed innermost-to-outermost. Feed it OUTER-first (inverted):
-        # the outer wrapper (wraps the inner wrapper) is captured before the inner wrapper
-        # (wraps the dense call), so the "last with an inner-ref" head is actually wrapped.
+        # Inner-chain capture order is assumed innermost-to-outermost. Feed it OUTER-first
+        # (inverted): the outer wrapper (wraps the inner wrapper) is captured before the
+        # inner wrapper (which wraps the authoritative inner call ``inner_fn``), so the
+        # "last with an inner-ref" head is actually wrapped by an earlier sibling.
         def inner_fn(args):
             return args
 
@@ -875,7 +975,7 @@ class TestAOTComposeGuards(TestCase):
         )
         with self.assertRaisesRegex(NotImplementedError, "innermost-to-outermost"):
             _compose_standalone_module(
-                "def call(args):\n    return args\n", [outer, inner, orch]
+                "def call(args):\n    return args\n", [outer, inner, orch], inner_fn
             )
 
     def _orch(self, origin_id=None):
@@ -906,7 +1006,9 @@ class TestAOTComposeGuards(TestCase):
             NotImplementedError, "cannot yet compose these runtime"
         ):
             _compose_standalone_module(
-                "def call(args):\n    return args\n", [bwd, self._orch()]
+                "def call(args):\n    return args\n",
+                [bwd, self._orch()],
+                _SENTINEL_INNER_CALL,
             )
 
     def test_unwired_chain_wrapper_rejected(self):
@@ -930,7 +1032,9 @@ class TestAOTComposeGuards(TestCase):
         )
         with self.assertRaisesRegex(NotImplementedError, "could not wire"):
             _compose_standalone_module(
-                "def call(args):\n    return args\n", [mystery, self._orch()]
+                "def call(args):\n    return args\n",
+                [mystery, self._orch()],
+                _SENTINEL_INNER_CALL,
             )
 
     def test_multiple_orchestrations_rejected(self):
@@ -943,6 +1047,7 @@ class TestAOTComposeGuards(TestCase):
             _compose_standalone_module(
                 "def call(args):\n    return args\n",
                 [self._orch(origin_id=5), self._orch(origin_id=5)],
+                _SENTINEL_INNER_CALL,
             )
 
     def test_foreign_origin_wrapper_filtered_out(self):
@@ -962,7 +1067,9 @@ class TestAOTComposeGuards(TestCase):
             origin_id=1,
         )
         src = _compose_standalone_module(
-            "def call(args):\n    return args\n", [foreign, self._orch(origin_id=2)]
+            "def call(args):\n    return args\n",
+            [foreign, self._orch(origin_id=2)],
+            _SENTINEL_INNER_CALL,
         )
         self.assertNotIn("foreign_inner", src)
         self.assertIn("_runtime_wrapper", src)
@@ -975,7 +1082,9 @@ class TestAOTComposeGuards(TestCase):
             NotImplementedError, "does not bind a module-level 'call'"
         ):
             _compose_standalone_module(
-                "def not_call(args):\n    return args\n", [self._orch()]
+                "def not_call(args):\n    return args\n",
+                [self._orch()],
+                _SENTINEL_INNER_CALL,
             )
 
     def test_inner_call_guard_accepts_runner_assign(self):
@@ -989,7 +1098,9 @@ class TestAOTComposeGuards(TestCase):
             "runner = _R()\n"
             "call = runner.call\n"
         )
-        src = _compose_standalone_module(runner_inner, [self._orch()])
+        src = _compose_standalone_module(
+            runner_inner, [self._orch()], _SENTINEL_INNER_CALL
+        )
         # ``_inner_call = call`` is emitted for any successful compose, so it only proves the
         # guard did not raise; assert the runner-specific binding survived into the source to
         # pin that the Assign form (not just some ``call``) was the accepted one, then exec to
