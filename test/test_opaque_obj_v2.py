@@ -3935,13 +3935,13 @@ class GraphModule(torch.nn.Module):
                 self.assertIn(
                     "val",
                     node.meta,
-                    f"Node {node.name} created via reconstruct_fn is missing "
+                    lambda msg: f"{msg}\nNode {node.name} created via reconstruct_fn is missing "
                     f"meta['val']. This would cause the partitioner to fail "
                     f"with 'Expected {node.name} to be a tensor'.",
                 )
                 self.assertTrue(
                     is_opaque_node(node),
-                    f"Node {node.name} should be classified as opaque",
+                    lambda msg: f"{msg}\nNode {node.name} should be classified as opaque",
                 )
         finally:
             _OPAQUE_TYPES[OpaqueMultiplier].reconstruct_fn = original_reconstruct_fn

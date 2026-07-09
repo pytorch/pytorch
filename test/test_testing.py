@@ -385,7 +385,7 @@ if __name__ == '__main__':
         has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
-            f"Expected device assert error in stderr, got: {stderr}",
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
         if torch.version.cuda:
             # should run only 1 test because it throws unrecoverable error.
@@ -432,7 +432,7 @@ if __name__ == '__main__':
         has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
-            f"Expected device assert error in stderr, got: {stderr}",
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
         if torch.version.cuda:
             # should run only 1 test because it throws unrecoverable error.

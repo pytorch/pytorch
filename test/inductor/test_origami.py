@@ -204,7 +204,7 @@ class TestOrigami(TestCase):
                 self.assertLess(
                     origami_case["benchmark_gpu_calls"],
                     max_autotune_case["benchmark_gpu_calls"],
-                    msg=f"Origami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
+                    msg=lambda msg: f"{msg}\nOrigami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
                     f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
                 )
 
@@ -346,7 +346,7 @@ class TestOrigami(TestCase):
                 self.assertIn(
                     "topk",
                     str(e).lower(),
-                    msg=f"Error should mention topk parameter: {e}",
+                    msg=lambda msg: f"{msg}\nError should mention topk parameter: {e}",  # noqa: F821
                 )
 
         # Test case 5: Mid-range integer topk
@@ -373,7 +373,7 @@ class TestOrigami(TestCase):
                     self.assertGreaterEqual(
                         result["topk_calls"],
                         0,
-                        msg=f"origami.select_topk_configs should be callable with topk={topk_val}",
+                        msg=lambda msg: f"{msg}\norigami.select_topk_configs should be callable with topk={topk_val}",
                     )
                 except Exception as e:
                     self.fail(f"Compilation failed with valid topk={topk_val}: {e}")

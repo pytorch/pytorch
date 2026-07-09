@@ -2126,7 +2126,7 @@ def forward(self, x_1):
 
             self.assertTrue(
                 fake_out.is_contiguous(),
-                f"FakeTensor upsample output should be contiguous, got strides {fake_out.stride()}",
+                lambda msg: f"{msg}\nFakeTensor upsample output should be contiguous, got strides {fake_out.stride()}",
             )
 
     def test_export_numpy(self):

@@ -274,7 +274,7 @@ class FlexGemmTestCase(TestCase):
             actual_error.item(),
             eager_error.item() + rounding_atol,
             msg=(
-                f"actual error {actual_error.item()} exceeded low precision eager "
+                lambda msg: f"{msg}\nactual error {actual_error.item()} exceeded low precision eager "
                 f"error {eager_error.item()} with fp32_accumulation_eps="
                 f"{fp32_accumulation_eps}, result_rounding_eps="
                 f"{result_rounding_eps}, output_scale={output_scale}, "

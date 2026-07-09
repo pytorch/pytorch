@@ -745,7 +745,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     self.assertGreater(
                         embedding.weight.grad[i].abs().sum(),
                         0,
-                        f"Expected non-zero gradient for used index {i}",
+                        lambda msg: f"{msg}\nExpected non-zero gradient for used index {i}",
                     )
                 else:
                     # Unused indices should have zero gradients
@@ -827,7 +827,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 self.assertGreater(
                     embedding.weight.grad[idx].abs().sum(),
                     0,
-                    f"Expected non-zero gradient for index {idx}",
+                    lambda msg: f"{msg}\nExpected non-zero gradient for index {idx}",
                 )
 
     @onlyOn(["cuda", "xpu"])

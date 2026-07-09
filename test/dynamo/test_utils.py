@@ -282,12 +282,12 @@ class TestUtils(TestCase):
         self.assertIn(
             expected_tensor_key,
             ReinplaceCounters._values,
-            f"Expected key {expected_tensor_key} not found",
+            lambda msg: f"{msg}\nExpected key {expected_tensor_key} not found",
         )
         self.assertIn(
             expected_bytes_key,
             ReinplaceCounters._values,
-            f"Expected key {expected_bytes_key} not found",
+            lambda msg: f"{msg}\nExpected key {expected_bytes_key} not found",
         )
 
         # Verify the values are correct
@@ -305,7 +305,7 @@ class TestUtils(TestCase):
         self.assertIn(
             expected_key2,
             ReinplaceCounters._values,
-            f"Expected key {expected_key2} not found",
+            lambda msg: f"{msg}\nExpected key {expected_key2} not found",
         )
         self.assertEqual(ReinplaceCounters._values[expected_key2], 3)
 

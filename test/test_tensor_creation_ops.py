@@ -3756,7 +3756,7 @@ class TestRandomTensorCreation(TestCase):
         expected_bin = shuffled_interval.shape[0] / 10
         expected_error = math.sqrt(expected_bin) / expected_bin * 3
         error = (hist - expected_bin).abs().max() / expected_bin
-        self.assertTrue(error < expected_error, f"error {error} > {expected_error}")
+        self.assertTrue(error < expected_error, lambda msg: f"{msg}\nerror {error} > {expected_error}")
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA

@@ -1102,7 +1102,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                     tuple(output_placements),
                     mesh,
                 ),
-                f"{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
+                lambda msg: f"{msg}\n{op.name}: forward {input_placements} -> {tuple(output_placements)} failed",
             )
 
             bwd = validate_sharding_rule_sample_backward(
@@ -1115,7 +1115,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             if bwd is not None:
                 self.assertTrue(
                     bwd,
-                    f"{op.name}: backward {input_placements} failed",
+                    lambda msg: f"{msg}\n{op.name}: backward {input_placements} failed",
                 )
 
 

@@ -774,7 +774,7 @@ class TestScheduler(TestCase):
         # Verify results match (no fusion bug)
         self.assertTrue(
             torch.allclose(eager_result, compiled_result, rtol=1e-4, atol=1e-4),
-            msg=f"index_add_ fusion bug detected: "
+            msg=lambda msg: f"{msg}\nindex_add_ fusion bug detected: "
             f"eager={eager_result.mean().item():.6f}, "
             f"compiled={compiled_result.mean().item():.6f}",
         )
@@ -807,7 +807,7 @@ class TestScheduler(TestCase):
         # This test will FAIL without the fusion prevention fix
         self.assertTrue(
             torch.allclose(expected, result),
-            msg=f"Fusion bug detected! Expected {expected}, got {result}",
+            msg=lambda msg: f"{msg}\nFusion bug detected! Expected {expected}, got {result}",
         )
 
     @xfailIfNoAcceleratorTriton

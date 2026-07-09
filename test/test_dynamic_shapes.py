@@ -7103,7 +7103,7 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         self.assertGreaterEqual(
             unbacked_count,
             4,
-            f"Expected at least 4 unbacked dims but found {unbacked_count}",
+            lambda msg: f"{msg}\nExpected at least 4 unbacked dims but found {unbacked_count}",
         )
 
 

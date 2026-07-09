@@ -563,7 +563,7 @@ class TestBenchmarkUtils(TestCase):
         self.assertGreater(
             max(counts.values()),
             1,
-            f"Every instruction count total was unique: {counts}",
+            lambda msg: f"{msg}\nEvery instruction count total was unique: {counts}",
         )
 
         from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import (
