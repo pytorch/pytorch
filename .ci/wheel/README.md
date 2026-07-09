@@ -78,3 +78,9 @@ Imported by every stage via
   `requirements-build.txt` + `requirements.txt` (build-time deps),
   `tools/amd_build/build_amd.py` (Linux ROCm hipify), and `spin` /
   `tools/clean.py` (the `spin clean` step).
+- **libtorch.** There is no separate libtorch build: the nightly libtorch
+  zips are extracted from the wheels built here by
+  `.ci/libtorch/extract_libtorch_from_wheel.py` in a follow-on workflow job.
+  `PACKAGE_TYPE` (`manywheel` / `wheel` / `libtorch`) is a semantic label
+  consumed by the env-population, test, and upload scripts -- it is never
+  resolved as a directory.
