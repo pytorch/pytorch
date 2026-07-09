@@ -12,7 +12,25 @@ __all__ = ["CheckpointableTensor"]
 
 @runtime_checkable
 class CheckpointableTensor(Protocol):
-    """Protocol for tensor state-dict values with checkpoint shard metadata."""
+    """Protocol fields for checkpointing a local tensor as global tensor shards.
+
+    A tensor does not need to be wrapped or subclassed for DCP to checkpoint it
+    as a shard. It can stay a regular local ``torch.Tensor``; implementing
+    these fields is enough for DCP to map one or more slices of that tensor
+    into a logical global tensor.
+
+    Attributes:
+        global_shape: Full logical tensor shape to write into checkpoint
+            metadata; needed because ``tensor.size()`` is only the local buffer
+            size.
+        global_offsets: Global start coordinate for each local shard; needed to
+            name checkpoint chunks and match load requests by global offset.
+        local_offsets: Start coordinate for each local shard inside the local
+            tensor; needed when one tensor stores multiple shards or includes
+            padding.
+        local_sizes: Shape of each local shard; needed to build checkpoint
+            chunks and slice the local tensor during load.
+    """
 
     global_shape: tuple[int, ...]
     global_offsets: tuple[tuple[int, ...], ...]
