@@ -147,6 +147,23 @@ ARG ROCM_VERSION=6.0
 ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ARG DEVTOOLSET_VERSION=13
+# Install ROCm into the same AlmaLinux base image used by CUDA manywheel builds.
+RUN echo "[ROCm]" > /etc/yum.repos.d/rocm.repo && \
+    echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo && \
+    echo "baseurl=https://repo.radeon.com/rocm/rhel8/${ROCM_VERSION}/main" >> /etc/yum.repos.d/rocm.repo && \
+    echo "enabled=1" >> /etc/yum.repos.d/rocm.repo && \
+    echo "gpgcheck=1" >> /etc/yum.repos.d/rocm.repo && \
+    echo "gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/rocm.repo && \
+    yum install -y \
+        amd-smi-lib \
+        rccl \
+        rocm-dev \
+        rocm-libs \
+        rocm-utils \
+        rocprofiler-devel \
+        roctracer-devel && \
+    yum clean all && \
+    rm -rf /var/cache/yum
 # All rocm clang cfg files load the same rocm.cfg, make sure it points to the right toolchain.
 RUN echo "--gcc-toolchain=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr" >> /opt/rocm/llvm/bin/rocm.cfg
 # Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path,
