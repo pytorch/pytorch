@@ -342,16 +342,17 @@ using Expandable_Segments_Handle_Type =
     c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type;
 }
 
+// Allocates a symmetric-memory region laid out as [signal pad | data buffer]:
+// the signal pad occupies [0, buffer_offset) and the user data buffer starts at
+// buffer_offset. Returns the data buffer pointer (alloc_base + buffer_offset),
+// NOT the allocation base -- the signal pad stays hidden in front, and
+// free()/rendezvous() key off this returned data pointer.
 void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
     const std::optional<std::string>& group_name) {
-  // Returns the data buffer pointer (alloc_base + buffer_offset), not the
-  // allocation base; the signal pad stays hidden in front and free()/rendezvous()
-  // key off this returned pointer.
-  // Layout: signal pad first at [0, buffer_offset), then the data buffer at
-  // buffer_offset, which is the signal pad size rounded up to
-  // signal_pad_alignment.
+  // buffer_offset is the signal pad size rounded up to signal_pad_alignment so
+  // the data buffer stays aligned.
   size_t buffer_offset =
       at::round_up(get_signal_pad_size(), signal_pad_alignment);
   size_t block_size = buffer_offset + at::round_up(size, 16UL);
