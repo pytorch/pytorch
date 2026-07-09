@@ -3304,6 +3304,34 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
 
+    def test_addcdiv_complex32(self):
+        # complex32 has no CPU addcdiv, so compare against a widened complex64
+        # CPU reference (the graph path supported chalf; the Metal kernels must
+        # keep it).
+        x = torch.randn(64, dtype=torch.complex64)
+        y = torch.randn(64, dtype=torch.complex64)
+        z = torch.randn(64, dtype=torch.complex64)
+        z = torch.where(z.abs() < 0.1, z + 0.5, z)  # avoid division blowups
+        expected = torch.addcdiv(x, y, z, value=0.5)
+        actual = torch.addcdiv(x.to(torch.complex32).to('mps'),
+                               y.to(torch.complex32).to('mps'),
+                               z.to(torch.complex32).to('mps'), value=0.5)
+        self.assertEqual(actual.cpu().to(torch.complex64), expected, atol=1e-2, rtol=1e-2)
+
+    def test_addcmul_addcdiv_out_dtype(self):
+        # out= with a dtype differing from the inputs takes the cast kernel
+        # (the graph path handled this via castMPSTensor).
+        for op in (torch.addcmul, torch.addcdiv):
+            for in_dt, out_dt in ((torch.float32, torch.float16), (torch.float16, torch.float32)):
+                x = torch.randn(32, dtype=in_dt)
+                y = torch.randn(32, dtype=in_dt)
+                z = torch.randn(32, dtype=in_dt).abs().clamp_min(0.25)
+                out_mps = torch.empty(32, dtype=out_dt, device='mps')
+                out_cpu = torch.empty(32, dtype=out_dt)
+                op(x.to('mps'), y.to('mps'), z.to('mps'), value=0.5, out=out_mps)
+                op(x, y, z, value=0.5, out=out_cpu)
+                self.assertEqual(out_mps.cpu(), out_cpu, atol=2e-3, rtol=2e-3)
+
     def test_addcdiv_transpose(self):
         # Regression test for issue https://github.com/pytorch/pytorch/issues/118115
         # Testing continuity of all input tensors

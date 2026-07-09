@@ -1582,7 +1582,10 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   });
 }
 
-void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name) {
+void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
+                                             const std::string& name,
+                                             const std::optional<c10::Scalar> alpha,
+                                             const std::optional<c10::ScalarType> scalar_arg_type) {
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1593,10 +1596,11 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
     return;
   }
 
-  // Decompose 64-bit tensor into 32-bit ones
+  // Decompose 64-bit tensor into 32-bit ones (must recurse into the TERNARY
+  // exec, not the binary one: sub-iters have three inputs).
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_binary_kernel(sub_iter, name);
+      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type);
     }
     return;
   }
@@ -1622,13 +1626,20 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   convert_double_scalar(other2);
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  const auto cast_needed =
-      (input.scalar_type() != other1.scalar_type()) || (input.scalar_type() != other2.scalar_type());
+  // out= with a dtype differing from the compute dtype also takes the cast
+  // kernel: the name is keyed on out, so the out-typed instantiation reads the
+  // runtime-typed inputs and stores natively (the graph path used castMPSTensor
+  // for the same purpose).
+  const auto cast_needed = (input.scalar_type() != other1.scalar_type()) ||
+      (input.scalar_type() != other2.scalar_type()) || (out.scalar_type() != input.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  const auto alpha_type = scalar_arg_type.value_or(alpha.has_value() ? alpha->type() : iter.common_dtype());
+  const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto kernel_name = cast_needed
-      ? fmt::format("{}_{}_cast_{}", name, suffix, scalarToMetalTypeString(out))
-      : fmt::format("{}_{}_{}_{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+      ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
+      : fmt::format(
+            "{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
@@ -1638,6 +1649,11 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
       [computeEncoder setComputePipelineState:binaryPSO];
       // Set input and output tensors
       bind_iter_tensors(computeEncoder, iter);
+      // Alpha rides at buffer 4 (right after the tensors); the shape/type
+      // extras shift to 5 in the _alpha kernel variants.
+      if (alpha) {
+        mtl_setArgs<4>(computeEncoder, getMPSScalar(*alpha, alpha_type));
+      }
       // Iterator is contiguous if all of its elements are dense in storage,
       // i.e. it's true for both row-first and column-first tensors
       if (iter.is_contiguous()) {
@@ -1648,7 +1664,11 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
           std::array<int, 3> types = {static_cast<int>(input.scalar_type()),
                                       static_cast<int>(other1.scalar_type()),
                                       static_cast<int>(other2.scalar_type())};
-          mtl_setArgs<4>(computeEncoder, sizes, types);
+          if (alpha) {
+            mtl_setArgs<5>(computeEncoder, sizes, types);
+          } else {
+            mtl_setArgs<4>(computeEncoder, sizes, types);
+          }
         }
       } else {
         // Please note that shapes and strides of the iterator might be
@@ -1658,14 +1678,25 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
                                     static_cast<int>(other1.scalar_type()),
                                     static_cast<int>(other2.scalar_type()),
                                     static_cast<int>(out.scalar_type())};
-        mtl_setArgs<4>(computeEncoder,
-                       iter.shape(),
-                       iter.strides(0),
-                       iter.strides(1),
-                       iter.strides(2),
-                       iter.strides(3),
-                       iter.ndim(),
-                       types);
+        if (alpha) {
+          mtl_setArgs<5>(computeEncoder,
+                         iter.shape(),
+                         iter.strides(0),
+                         iter.strides(1),
+                         iter.strides(2),
+                         iter.strides(3),
+                         iter.ndim(),
+                         types);
+        } else {
+          mtl_setArgs<4>(computeEncoder,
+                         iter.shape(),
+                         iter.strides(0),
+                         iter.strides(1),
+                         iter.strides(2),
+                         iter.strides(3),
+                         iter.ndim(),
+                         types);
+        }
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
       getMPSProfiler().endProfileKernel(binaryPSO);

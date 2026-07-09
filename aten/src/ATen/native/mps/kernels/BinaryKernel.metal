@@ -854,3 +854,36 @@ INSTANTIATE_LERP(half);
 INSTANTIATE_LERP(bfloat);
 INSTANTIATE_LERP(float2);
 INSTANTIATE_LERP(long);
+
+struct addcmul_functor {
+  template <typename T, typename TA>
+  inline T operator()(const T a, const T b, const T c, const TA alpha) {
+    return static_cast<T>(
+        a + c10::metal::mul(static_cast<T>(alpha), c10::metal::mul(b, c)));
+  }
+};
+
+struct addcdiv_functor {
+  template <typename T, typename TA>
+  inline T operator()(const T a, const T b, const T c, const TA alpha) {
+    return static_cast<T>(
+        a + c10::metal::mul(static_cast<T>(alpha), c10::metal::div(b, c)));
+  }
+};
+
+REGISTER_OPMATH_TERNARY_ALPHA_OP(addcmul, float, float, float);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(addcmul, half, float, half);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(addcmul, bfloat, float, bfloat);
+REGISTER_TERNARY_ALPHA_OP(addcmul, long, long, long);
+REGISTER_TERNARY_ALPHA_OP(addcmul, int, int, int);
+REGISTER_TERNARY_ALPHA_OP(addcmul, short, short, short);
+REGISTER_TERNARY_ALPHA_OP(addcmul, char, char, char);
+REGISTER_TERNARY_ALPHA_OP(addcmul, uchar, uchar, uchar);
+REGISTER_TERNARY_ALPHA_OP(addcmul, float2, float2, float2);
+REGISTER_TERNARY_ALPHA_OP(addcmul, half2, half2, half2);
+
+REGISTER_OPMATH_TERNARY_ALPHA_OP(addcdiv, float, float, float);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(addcdiv, half, float, half);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(addcdiv, bfloat, float, bfloat);
+REGISTER_TERNARY_ALPHA_OP(addcdiv, float2, float2, float2);
+REGISTER_TERNARY_ALPHA_OP(addcdiv, half2, half2, half2);
