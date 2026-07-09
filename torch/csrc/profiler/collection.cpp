@@ -344,12 +344,14 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
+  bool pushed_correlation_id = false;
   if (!config_.experimental_config.disable_external_correlation) {
     if (fn.scope() == at::RecordScope::USER_SCOPE) {
       torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
     } else {
       torch::profiler::impl::kineto::pushCorrelationId(corr_id);
     }
+    pushed_correlation_id = true;
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
@@ -370,6 +372,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   auto out = std::make_unique<KinetoObserverContext>(event);
+  out->pushed_correlation_id_ = pushed_correlation_id;
   if (fn.isNcclMeta()) {
     // Record NCCL metadata for specific CPU ops, switch off output
     // introspection in this begin_op callback, we will do that in exit callback
@@ -877,6 +880,12 @@ void generateForwardBackwardLinks(
 
 static constexpr const char* indexKey = "Ev Idx";
 
+static std::string sanitizeNameForKinetoJSON(std::string name) {
+  // Kineto's Chrome trace writer quotes names itself but does not escape '"'.
+  std::replace(name.begin(), name.end(), '"', '\'');
+  return name;
+}
+
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_ns,
@@ -898,6 +907,7 @@ void passEventsToKineto(
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());
     }
+    name = sanitizeNameForKinetoJSON(std::move(name));
     auto* activity = cpu_trace.addCPUActivity(
         name,
         e->kinetoType(),
@@ -1105,7 +1115,7 @@ class TransferEvents {
                   /*start=*/activity->flowStart()};
             },
             [](auto&) {}));
-        if (config_.experimental_config.expose_kineto_event_metadata) {
+        if (config_.get().experimental_config.expose_kineto_event_metadata) {
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
                 i.metadata_json_ = activity->metadataJson();
@@ -1240,7 +1250,7 @@ class TransferEvents {
   static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
-  const ProfilerConfig& config_;
+  std::reference_wrapper<const ProfilerConfig> config_;
   std::vector<const itrace_t*> trace_activities_;
   ska::flat_hash_map<const itrace_t*, std::shared_ptr<Result>> kineto_events_;
 };
@@ -1666,7 +1676,7 @@ RecordQueue::getRecords(
   }
 
   build_tree(out);
-  return {out, std::move(trace)};
+  return {std::move(out), std::move(trace)};
 }
 
 namespace {

@@ -899,6 +899,11 @@ class Tensor(torch._C.TensorBase):
             )
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def cholesky(self, upper=False):
+        from ._linalg_utils import cholesky
+
+        return cholesky(self, upper=upper)
+
     def solve(self, other):
         from torch._linalg_utils import solve
 
@@ -1542,6 +1547,7 @@ class Tensor(torch._C.TensorBase):
         max_version: tuple[int, int] | None = None,
         dl_device: tuple[enum.IntEnum, int] | None = None,
         copy: bool | None = None,
+        read_only: bool = False,
     ):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
@@ -1573,6 +1579,12 @@ class Tensor(torch._C.TensorBase):
 
             copy (bool or None): An optional boolean indicating whether or not to copy
                 ``self``. If None, PyTorch will copy only if necessary.
+
+            read_only (bool): If True, the exported capsule is marked read-only
+                (``DLPACK_FLAG_BITMASK_READ_ONLY``) and the data is exported
+                through ``const_data_ptr()`` so a copy-on-write tensor is not
+                materialized. The consumer must not mutate the data. Requires
+                the versioned DLPack protocol (``max_version >= (1, 0)``).
         """
         if has_torch_function_unary(self):
             args = (self,)
@@ -1581,6 +1593,7 @@ class Tensor(torch._C.TensorBase):
                 "max_version": max_version,
                 "dl_device": dl_device,
                 "copy": copy,
+                "read_only": read_only,
             }
             return handle_torch_function(Tensor.__dlpack__, (self,), *args, **kwargs)
 
@@ -1661,10 +1674,18 @@ class Tensor(torch._C.TensorBase):
             return xla_dlpack.to_dlpack(self)
 
         if max_version is None or max_version[0] < 1:
-            # Fallback to the old, unversioned variant.
+            # Fallback to the old, unversioned variant, which has no flags field
+            # and therefore cannot represent read-only.
+            if read_only:
+                raise BufferError(
+                    "read_only export requires the versioned DLPack protocol; "
+                    "pass max_version=(1, 0) or higher"
+                )
             return _C._to_dlpack(self, dl_device=dl_device, copy=copy)
 
-        return _C._to_dlpack_versioned(self, dl_device=dl_device, copy=copy)
+        return _C._to_dlpack_versioned(
+            self, dl_device=dl_device, copy=copy, read_only=read_only
+        )
 
     def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):

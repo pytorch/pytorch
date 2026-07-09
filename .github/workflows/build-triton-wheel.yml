@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng"]
 name: Build Triton wheels
 
 on:
@@ -53,12 +54,6 @@ jobs:
         py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
         device: ["cuda", "rocm", "xpu", "aarch64"]
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
-        exclude:
-          # XPU builds for Python 3.15 are currently broken; skip until fixed.
-          - py_vers: "3.15"
-            device: "xpu"
-          - py_vers: "3.15t"
-            device: "xpu"
         include:
           - device: "rocm"
             rocm_version: "7.2"

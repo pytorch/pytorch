@@ -192,6 +192,9 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
 
   AT_FORALL_FP32(_KERNEL_CUDA_FP32)
 
+  // Standalone (not in AT_FORALL_FP32, which also feeds MTIA/MAIA/XPU).
+  KERNEL_CUDA(linalg_matrix_sqrth, fp32)
+
   // fp32_set_opt_dtype
 #define _KERNEL_CUDA_FP32_SET_OPT_DTYPE(...) \
   KERNEL_CUDA(__VA_ARGS__, fp32_set_opt_dtype)
@@ -378,7 +381,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(grid_sampler_3d, fp32)
   KERNEL_CPU(trace, fp32)
   KERNEL_CPU(view_as_complex, fp32)
-  KERNEL_CPU(cholesky, fp32)
   KERNEL_CPU(cholesky_inverse, fp32)
   KERNEL_CPU(cholesky_solve, fp32)
   KERNEL_CPU(inverse, fp32)
@@ -439,6 +441,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(linalg_svdvals, fp32)
   KERNEL_CPU(linalg_eigvals, fp32)
   KERNEL_CPU(linalg_eigvalsh, fp32)
+  KERNEL_CPU(linalg_matrix_sqrth, fp32)
   KERNEL_CPU(linalg_inv, fp32)
   KERNEL_CPU(linalg_householder_product, fp32)
   KERNEL_CPU(linalg_tensorinv, fp32)

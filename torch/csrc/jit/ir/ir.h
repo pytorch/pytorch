@@ -1250,6 +1250,9 @@ struct Graph : std::enable_shared_from_this<Graph> {
     const Block& block = *block_;
     return block.nodes();
   }
+  size_t numNodes() const {
+    return all_nodes.size();
+  }
   Node* param_node() {
     return block_->param_node();
   }
@@ -1465,7 +1468,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   void cloneFrom(Graph& src);
 };
 
-/** \brief An utility class for setting temporary insertion points.
+/** \brief A utility class for setting temporary insertion points.
  *
  * When an object of this class is created, it stores the current insertion
  * point, sets the new one, and restores the original insertion point when the
@@ -1485,7 +1488,7 @@ struct WithInsertPoint {
   Node* prev_;
 };
 
-/** \brief An utility class for setting temporary scopes.
+/** \brief A utility class for setting temporary scopes.
  *
  * When an object of this class is created, it stores the current scope, sets
  * the new one, and restores the original scope when the object is destroyed.

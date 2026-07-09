@@ -336,6 +336,7 @@ def get_ignored_functions() -> set[Callable]:
         Tensor.__class__,
         Tensor.__subclasshook__,
         Tensor.__hash__,
+        Tensor.cholesky,
         Tensor.as_subclass,
         Tensor.eig,
         Tensor.lstsq,
@@ -526,7 +527,6 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.celu: lambda input, alpha=1.0, inplace=False: -1,
         torch.chain_matmul: lambda *matrices, out=None: -1,
         torch.channel_shuffle: lambda input, groups: -1,
-        torch.cholesky: lambda input, upper=False, out=None: -1,
         torch.linalg.cholesky: lambda input, out=None: -1,
         torch.linalg.cholesky_ex: lambda input, check_errors=False, out=None: -1,
         torch.cholesky_inverse: lambda input, upper=False, out=None: -1,
@@ -787,6 +787,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.linalg.multi_dot: lambda tensors, out=None: -1,
         torch.matrix_exp: lambda input: -1,
         torch.linalg.matrix_exp: lambda input: -1,
+        torch.linalg.matrix_sqrth: lambda input: -1,
         torch.max: lambda input, out=None: -1,
         torch.maximum: lambda input, other, out=None: -1,
         torch.fmax: lambda input, other, out=None: -1,
@@ -878,7 +879,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
             lambda input, target, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction="mean", label_smoothing=0.0: -1
         ),
         torch.nn.functional.linear_cross_entropy: (
-            lambda input, linear_weight, target, weight=None, reduction="mean", ignore_index=None, label_smoothing=0.0: -1
+            lambda input, linear_weight, target, linear_bias=None, weight=None, reduction="mean", ignore_index=None, label_smoothing=0.0, options=None: -1
         ),
         torch.nn.functional.ctc_loss: (
             lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction="mean", zero_infinity=False: -1
@@ -1052,6 +1053,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.q_zero_point: lambda input: -1,
         torch.qr: lambda input, some=True, out=None: -1,
         torch.linalg.qr: lambda input, mode="reduced", out=None: -1,
+        torch.linalg.polar: lambda A, out=None: -1,
         torch.quantile: lambda input, q, dim=None, keepdim=False, interpolation="linear", out=None: -1,
         torch.nanquantile: lambda input, q, dim=None, keepdim=False, interpolation="linear", out=None: -1,
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
@@ -1522,7 +1524,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        Tensor.__dlpack__: lambda self, stream=None, max_version=None, dl_device=None, copy=None: -1,
+        Tensor.__dlpack__: lambda self, stream=None, max_version=None, dl_device=None, copy=None, read_only=False: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         Tensor.index: lambda self, a, b: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
@@ -1578,12 +1580,12 @@ def get_testing_overrides() -> dict[Callable, Callable]:
                 dist.reduce: lambda tensor, dst=None, op=None, group=None, async_op=False, group_dst=None: -1,
                 dist.all_reduce_coalesced: lambda tensors, op=None, group=None, async_op=False: -1,
                 dist.all_gather: lambda tensor_list, tensor, group=None, async_op=False: -1,
-                dist.all_gather_into_tensor: lambda output_tensor, input_tensor, group=None, async_op=False: -1,
+                dist.all_gather_single: lambda output_tensor, input_tensor, group=None, async_op=False: -1,
                 dist.all_gather_coalesced: lambda output_tensor_lists, input_tensor_list, group=None, async_op=False: -1,
                 dist.gather: lambda tensor, gather_list=None, dst=None, group=None, async_op=False, group_dst=None: -1,
                 dist.scatter: lambda tensor, scatter_list=None, src=None, group=None, async_op=False, group_src=None: -1,
                 dist.reduce_scatter: lambda output, input_list, op=None, group=None, async_op=False: -1,
-                dist.reduce_scatter_tensor: lambda output, input, op=None, group=None, async_op=False: -1,
+                dist.reduce_scatter_single: lambda output, input, op=None, group=None, async_op=False: -1,
                 dist.all_to_all_single: lambda output, input, output_split_sizes=None, input_split_sizes=None, group=None, async_op=False: -1,
                 dist.all_to_all: lambda output_tensor_list, input_tensor_list, group=None, async_op=False: -1,
                 dist.isend: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
@@ -1816,7 +1818,7 @@ has_torch_function = _add_docstr(
     Arguments
     ---------
     relevant_args : iterable
-        Iterable or arguments to check for __torch_function__ methods.
+        Iterable of arguments to check for __torch_function__ methods.
     Returns
     -------
     bool

@@ -77,7 +77,7 @@ std::string GetFirstUserFrameInPython() {
     if (loc.file.find("site-packages") == std::string::npos) {
       std::stringstream ss;
       ss << loc.file << ' ' << loc.function << ' ' << loc.line;
-      return ss.str();
+      return std::move(ss).str();
     }
   }
   return empty;
@@ -114,8 +114,8 @@ std::string DebugUtil::GetTensorsGraphInfo(
     }
   }
   std::stringstream ss;
-  // Call into a function pointer that may backed by python or empty depending
-  // on runtime
+  // Call into a function pointer that may be backed by python or empty
+  // depending on runtime
   std::vector<SourceLocation> frames = GetPythonFramesFunction()();
   ss << "Python Stacktrace:\n";
   for (auto& location : frames) {
@@ -144,7 +144,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
     LOG(ERROR) << "Invalid graph format: " << format;
   }
   ss << "\n## BEGIN_GRAPH\n" << graph_str << "\n## END_GRAPH\n\n";
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void DebugUtil::SaveTensorsGraphInfo(
