@@ -56,6 +56,7 @@ from torch.utils._ordered_set import OrderedSet
 from .. import graph_break_hints, variables
 from ..exc import (
     ObservedException,
+    raise_observed_exception,
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
@@ -4452,23 +4453,60 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
+
+        if not args:
+            checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(
+                kwargs
+            )
+            if gmod_kwargs:
+                raise_observed_exception(
+                    ValueError,
+                    tx,
+                    args=[
+                        "Unexpected keyword arguments: "
+                        + ",".join(arg for arg in gmod_kwargs)
+                    ],
+                )
+            return CheckpointDecoratorVariable(self, checkpoint_kwargs)
+
+        checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
+        return self.call_checkpoint(
+            tx,
+            args[0],
+            args[1:],
+            checkpoint_kwargs,
+            gmod_kwargs,
+        )
+
+    def call_checkpoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        fn: VariableTracker,
+        args: Sequence[VariableTracker],
+        checkpoint_kwargs: dict[str, VariableTracker],
+        gmod_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         from torch.utils.checkpoint import noop_context_fn
 
         context_fn = None
-        if "context_fn" in kwargs and kwargs["context_fn"] is not noop_context_fn:
-            ctx = kwargs.pop("context_fn")
+        if "context_fn" in checkpoint_kwargs:
+            ctx = checkpoint_kwargs.pop("context_fn")
             if isinstance(ctx, torch._dynamo.variables.UserFunctionVariable):
                 context_fn = ctx.fn
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
                 context_fn = ctx.guard_as_python_constant()
+            elif isinstance(
+                ctx, torch._dynamo.variables.functions.SkipFunctionVariable
+            ):
+                context_fn = ctx.value
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
                 )
-
-        checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
+            if context_fn is noop_context_fn:
+                context_fn = None
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
@@ -4483,8 +4521,8 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             _,
         ) = self.create_wrapped_node(
             tx,
-            args[0],
-            args[1:],
+            fn,
+            list(args),
             gmod_kwargs,
             "torch.utils.checkpoint.checkpoint",
         )
@@ -4501,6 +4539,68 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             example_value,
             _body_r,
             body_graph_output_vts,
+        )
+
+
+class CheckpointDecoratorVariable(VariableTracker):
+    def __init__(
+        self,
+        checkpoint: CheckpointHigherOrderVariable,
+        checkpoint_kwargs: dict[str, VariableTracker],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.checkpoint = checkpoint
+        self.checkpoint_kwargs = checkpoint_kwargs
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) == 1 and not kwargs:
+            fn = args[0]
+        elif not args and set(kwargs) == {"function"}:
+            fn = kwargs["function"]
+        else:
+            unimplemented(
+                gb_type="unsupported checkpoint decorator call",
+                context="torch.utils.checkpoint.checkpoint(...)(...)",
+                explanation=(
+                    "Configured checkpoint decorators must be called with only "
+                    "the function to checkpoint."
+                ),
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+        return CheckpointedFunctionVariable(self.checkpoint, fn, self.checkpoint_kwargs)
+
+
+class CheckpointedFunctionVariable(VariableTracker):
+    def __init__(
+        self,
+        checkpoint: CheckpointHigherOrderVariable,
+        fn: VariableTracker,
+        checkpoint_kwargs: dict[str, VariableTracker],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.checkpoint = checkpoint
+        self.fn = fn
+        self.checkpoint_kwargs = checkpoint_kwargs
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.checkpoint.call_checkpoint(
+            tx,
+            self.fn,
+            args,
+            dict(self.checkpoint_kwargs),
+            kwargs,
         )
 
 

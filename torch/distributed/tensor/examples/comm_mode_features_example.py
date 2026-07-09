@@ -687,9 +687,9 @@ class CommDebugModeExample:
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 for i, block in enumerate(self.linears):
                     if i >= 1 and self.use_ac:
-                        x = checkpoint(
-                            block, x, preserve_rng_state=True, use_reentrant=False
-                        )
+                        x = checkpoint(preserve_rng_state=True, use_reentrant=False)(
+                            block
+                        )(x)
                     else:
                         x = block(x)
                     if x is None:
