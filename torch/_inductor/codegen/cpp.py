@@ -3140,7 +3140,7 @@ class CppVecKernel(CppKernel):
         """
         Get a store line buffer that stores `value` into `var` at `index` of `dtype`. It handles
         both contiguous and non-contiguous store cases.
-        :param value: Vectorized type templaterized on `dtype`.
+        :param value: Vectorized type templatized on `dtype`.
         :param var: buffer to store into.
         :index: index into the `var`.
         """

@@ -655,7 +655,7 @@ class BaseTorchVariable(VariableTracker):
             # Actually we would like to not graph break even in the case of
             # Dynamo. But there is a weird-unsolved bug with Kineto + Dynamo
             # when there are distributed jobs that lead to NCCL timeouts. This
-            # bug is a rare edege case, but we have not been able to root cause
+            # bug is a rare edge case, but we have not been able to root cause
             # it yet. See https://www.internalfb.com/sevmanager/view/560336 for
             # more details.
             #
