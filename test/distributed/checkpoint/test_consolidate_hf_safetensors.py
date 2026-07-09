@@ -19,7 +19,7 @@ from torch.distributed.tensor import DTensor, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_if_lt_x_gpu,
+    skip_if_lt_x_devices,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
@@ -73,7 +73,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_consolidate_to_one_file(self) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
@@ -116,7 +116,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_consolidate_to_two_files(self):
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
@@ -232,7 +232,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_consolidate_with_two_ranks(self):
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
@@ -280,7 +280,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_consolidate_one_file_with_two_ranks(self):
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
