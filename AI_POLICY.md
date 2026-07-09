@@ -1,10 +1,10 @@
 We support the use of AI tools to help prepare issues, pull
-requests, reviews, or comments. We expect everyone to be responsible for
-anything they submit, including anything written with AI assistance.
+requests, reviews, or comments. We expect everyone interacting with
+this repo to follow the below policy whenever they use AI tools.
 
 *AI-generated content in comments, issues, or PRs must be clearly disclosed and
 contained* (e.g. using a code block or a quote block). AI-generated content must
-be accompanied by human commentary explaining their relevance. For example:
+be accompanied by human commentary explaining its relevance. For example:
 "Codex produced the following analysis: `<insert codex output here>`, so I
 believe that \<insert human analysis here\>". The only exceptions to this rule
 are the pytorchbot automations.
