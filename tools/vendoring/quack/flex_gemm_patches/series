@@ -10,3 +10,4 @@
 0005-flex-gemm-tuple-aux-output.patch
 0006-flex-gemm-local-reduce-aux-output.patch
 0007-flex-gemm-large-n-local-reduce.patch
+0008-flex-gemm-local-reduce-feed-main.patch
