@@ -7618,7 +7618,10 @@ class ExternKernel(InputsKernel):
                     x.get_device_or_error(), x.get_dtype(), x.get_size()
                 ).as_exact_strides(exact_strides, allow_padding=allow_padding)
             else:
-                assert order is not None
+                if order is None:
+                    raise AssertionError(
+                        "Expected order is not None when exact_strides is None"
+                    )
                 layout = FlexibleLayout(
                     x.get_device_or_error(), x.get_dtype(), x.get_size()
                 ).as_stride_order(order, allow_padding=allow_padding)
