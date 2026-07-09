@@ -932,12 +932,12 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
-        from torch._subclasses.fake_tensor import is_fake_tensor
+        from torch._subclasses.fake_tensor import FakeTensor
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
             if torch._has_compatible_shallow_copy_type(
                 tensor, tensor_applied
-            ) and not is_fake_tensor(tensor_applied):
+            ) and not isinstance(tensor_applied, FakeTensor):  # noqa-isinstance-fake: dynamo
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
@@ -968,7 +968,7 @@ class Module:
             p_should_use_swap_tensors = (
                 should_use_swap_tensors
                 or is_traceable_wrapper_subclass(param_applied)
-                or is_fake_tensor(param)
+                or isinstance(param, FakeTensor)  # noqa-isinstance-fake: dynamo
             )
 
             param_grad = param.grad
