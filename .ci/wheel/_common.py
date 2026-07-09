@@ -10,11 +10,13 @@ numpy pin) reaches every pipeline.
 Import from a sibling stage script with, e.g.:
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
-    from _common import numpy_pin, pip_install, write_env_exports
+    from _common import install_numpy, pip_install, write_env_exports
 """
 
 from __future__ import annotations
 
+import importlib.metadata
+import importlib.util
 import re
 import subprocess
 import sys
@@ -36,10 +38,11 @@ _BASH_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # -- at the newest *patch* of that minor that has been shipped in production
 # by one of the CD platforms, so no numpy bugfix is dropped for a marginal
 # floor change. Listed explicitly (rather than a prefix match with a default)
-# so an unsupported version -- e.g. a new Python without numpy wheels yet --
-# fails loudly instead of silently picking a stale fallback. Freethreaded
-# builds (e.g. 3.14t) share their base version's pin, since sys.version_info
-# does not distinguish them.
+# so an unsupported version can never silently pick a stale pin: a Python
+# with no entry (no numpy wheels on PyPI yet, e.g. 3.15) builds against a
+# numpy the CI image pre-provisioned, and fails loudly when there is none
+# (see install_numpy). Freethreaded builds (e.g. 3.14t) share their base
+# version's pin, since sys.version_info does not distinguish them.
 NUMPY_PINS: dict[str, str] = {
     "3.10": "2.0.2",
     "3.11": "2.0.2",
@@ -145,12 +148,24 @@ def pip_install(*args: str) -> None:
     retry([sys.executable, "-m", "pip", "install", *args])
 
 
-def numpy_pin() -> str:
+def install_numpy() -> None:
+    """Install the numpy build-time pin for this interpreter.
+
+    For a Python with no table entry, fall back to a numpy the build image
+    pre-provisioned (the plain manylinux and XPU images ship one for Pythons
+    newer than any numpy wheel on PyPI); fail loudly only when neither
+    exists.
+    """
     version = f"{sys.version_info.major}.{sys.version_info.minor}"
     pin = NUMPY_PINS.get(version)
-    if pin is None:
+    if pin is not None:
+        pip_install("-q", f"numpy=={pin}")
+    elif importlib.util.find_spec("numpy") is not None:
+        have = importlib.metadata.version("numpy")
+        print(f"No numpy pin for Python {version}; using preinstalled numpy {have}")
+    else:
         sys.exit(
             f"Unsupported Python version {version}: add a numpy pin to "
-            "NUMPY_PINS in .ci/wheel/_common.py"
+            "NUMPY_PINS in .ci/wheel/_common.py (no preinstalled numpy to "
+            "fall back to in this environment)"
         )
-    return pin

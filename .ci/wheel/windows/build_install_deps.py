@@ -22,7 +22,7 @@ from pathlib import Path
 # level up in .ci/wheel/_common.py.
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
-from _common import download, numpy_pin, pip_install, write_env_exports
+from _common import download, install_numpy, pip_install, write_env_exports
 
 
 # The Windows CD workspace (scratch downloads, libuv) stays under the general
@@ -79,7 +79,7 @@ def main() -> None:
     parser.add_argument("--env-out", type=Path)
     args = parser.parse_args()
 
-    pip_install("-q", f"numpy=={numpy_pin()}")
+    install_numpy()
     pip_install("-q", *PIP_PACKAGES)
 
     if not os.environ.get("SKIP_SETUP_CLEAN"):

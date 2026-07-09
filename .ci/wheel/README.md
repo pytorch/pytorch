@@ -50,10 +50,11 @@ Python stage writes and the orchestrator `source`s before the next stage:
 Imported by every stage via
 `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))`:
 
-- `numpy_pin()` / `NUMPY_PINS` -- the single build-time numpy pin table
+- `install_numpy()` / `NUMPY_PINS` -- the single build-time numpy pin table
   (oldest wheel-bearing numpy *minor* per Python, at the newest vetted
-  *patch*; an unsupported Python fails loudly rather than picking a stale
-  fallback).
+  *patch*). A Python with no entry builds against a numpy the CI image
+  pre-provisioned (e.g. cp315 before PyPI has wheels) and fails loudly when
+  there is none -- never a stale pin.
 - `retry()`, `pip_install()` -- retrying command / pip wrappers.
 - `write_env_exports()`, `shell_quote()` -- serialize env for the
   `--env-out` hand-off (POSIX PATH conversion + bash-identifier filtering).

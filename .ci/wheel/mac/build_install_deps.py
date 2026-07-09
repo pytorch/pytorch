@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
-from _common import numpy_pin, pip_install, retry
+from _common import install_numpy, pip_install, retry
 
 
 OMP_PREFIX = Path("/opt/llvm-openmp")
@@ -33,7 +33,7 @@ def main() -> None:
     # --no-isolation` (the previous shell build relied on it being preinstalled).
     pip_install("-qU", "-r", "requirements-build.txt")
     pip_install("-q", "-r", "requirements.txt")
-    pip_install("-q", f"numpy=={numpy_pin()}")
+    install_numpy()
     # Skip when sharing build/ across Pythons in the per-host loop -- the
     # per-Python bits (libtorch_python, _C.so) are invalidated by
     # tools/setup_helpers/cmake.py, so libtorch_cpu is reused. spin (from

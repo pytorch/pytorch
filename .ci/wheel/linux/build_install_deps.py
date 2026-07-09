@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
-from _common import numpy_pin, pip_install
+from _common import install_numpy, pip_install
 
 
 def main() -> None:
@@ -31,7 +31,7 @@ def main() -> None:
     if not os.environ.get("SKIP_SETUP_CLEAN"):
         subprocess.run([sys.executable, "setup.py", "clean"], check=True)
     pip_install("-q", "-r", "requirements.txt")
-    pip_install("-q", f"numpy=={numpy_pin()}")
+    install_numpy()
 
     if "rocm" in os.environ.get("DESIRED_CUDA", ""):
         print(f"Running build_amd.py at {time.strftime('%Y-%m-%d %H:%M:%S')}")
