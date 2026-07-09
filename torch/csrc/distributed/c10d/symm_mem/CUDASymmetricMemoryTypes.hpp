@@ -34,6 +34,12 @@ constexpr int symm_max_nblocks = 32;
 constexpr size_t default_signal_pad_size =
     symm_max_nblocks * max_cuda_p2p_domain_size * sizeof(uint32_t);
 
+// The data buffer starts signal_pad_size bytes past the (aligned) allocation
+// base, and device collectives access it with vectorized (int4) loads/stores.
+// Round the signal pad size up to this alignment so the data buffer is always
+// well aligned, even if signal_pad_size was overridden with an unaligned value.
+constexpr size_t signal_pad_alignment = 128;
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 using HandleType = CUmemGenericAllocationHandle;
 #elif defined(USE_ROCM)

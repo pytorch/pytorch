@@ -516,15 +516,11 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // instead. A single window is registered over the whole region at
     // rendezvous time, so only the base pointer (already granularity-aligned by
     // ncclMemAlloc) needs to satisfy NCCL's window-alignment requirement.
-    const size_t buffer_offset = get_signal_pad_size();
     // The data buffer sits at buffer_offset past the (granularity-aligned) base
-    // and must be 16-byte aligned (device collectives use int4 accesses), so
-    // buffer_offset itself must be 16-aligned.
-    TORCH_CHECK(
-        buffer_offset % 16 == 0,
-        "signal pad size must be a multiple of 16 so the data buffer is 16-byte "
-        "aligned, but got ",
-        buffer_offset);
+    // and device collectives access it with int4 loads/stores, so round the
+    // signal pad size up to signal_pad_alignment to keep the buffer aligned.
+    const size_t buffer_offset =
+        at::round_up(get_signal_pad_size(), signal_pad_alignment);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
     const size_t total_size = buffer_offset + aligned_buffer_size;
     void* alloc_base;

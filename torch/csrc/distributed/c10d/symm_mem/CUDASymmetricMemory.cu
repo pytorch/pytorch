@@ -349,16 +349,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
   // Returns the data buffer pointer (alloc_base + buffer_offset), not the
   // allocation base; the signal pad stays hidden in front and free()/rendezvous()
   // key off this returned pointer.
-  // Layout: signal pad first at [0, signal_pad_size), then the data buffer at
-  // buffer_offset = signal_pad_size. The data buffer must be 16-byte aligned
-  // (device collectives use int4 accesses); it sits at buffer_offset past the
-  // (aligned) allocation base, so buffer_offset itself must be 16-aligned.
-  size_t buffer_offset = get_signal_pad_size();
-  TORCH_CHECK(
-      buffer_offset % 16 == 0,
-      "signal pad size must be a multiple of 16 so the data buffer is 16-byte "
-      "aligned, but got ",
-      buffer_offset);
+  // Layout: signal pad first at [0, buffer_offset), then the data buffer at
+  // buffer_offset. The data buffer sits at buffer_offset past the (aligned)
+  // allocation base and device collectives access it with int4 loads/stores, so
+  // round the signal pad size up to signal_pad_alignment to keep it aligned.
+  size_t buffer_offset =
+      at::round_up(get_signal_pad_size(), signal_pad_alignment);
   size_t block_size = buffer_offset + at::round_up(size, 16UL);
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
