@@ -4,7 +4,13 @@ from contextlib import contextmanager
 
 import torch
 import torch.utils._pytree as pytree
+from torch.torch_version import TorchVersion
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+_CUDA_GRAPH_IF_ELSE_NODES_SUPPORTED = (
+    torch.version.cuda is not None and TorchVersion(torch.version.cuda) >= "12.8"
+)
 
 
 class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
@@ -227,13 +233,39 @@ def _if_body(pred: torch.Tensor) -> Generator[None, None, None]:
         current_cuda_graph.end_capture_to_conditional_node()
 
 
+@contextmanager
+def _if_else_bodies(pred: torch.Tensor):
+    current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+    current_cuda_graph.begin_capture_to_if_else_node(pred)
+    try:
+        yield current_cuda_graph
+    finally:
+        current_cuda_graph.end_capture_to_conditional_node()
+
+
+def _copy_else_branch_outputs(if_out, else_out) -> None:
+    for if_out_leaf, else_out_leaf in zip(
+        pytree.tree_iter(if_out), pytree.tree_iter(else_out)
+    ):
+        if_out_leaf.copy_(else_out_leaf)
+
+
 def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
     if not pred.is_cuda:
         raise ValueError(
             "Conditions must be on a cuda device to use conditional node in cuda graphs"
         )
-    # if-else is not supported until CUDA 12.8. Therefore, we use two
-    # if conditions, where one evaluates !pred
+
+    if _CUDA_GRAPH_IF_ELSE_NODES_SUPPORTED:
+        with _if_else_bodies(pred) as current_cuda_graph:
+            if_out = true_fn(*operands)
+            current_cuda_graph.begin_capture_to_next_conditional_body()
+            else_out = false_fn(*operands)
+            _copy_else_branch_outputs(if_out, else_out)
+        return if_out
+
+    # Before CUDA 12.8, represent IF-ELSE with two IF nodes, where one
+    # evaluates !pred.
     outs = []
 
     for lazy_pred, fn in [
@@ -249,10 +281,7 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
             # inputs, so we need to merge the two outputs into a
             # single output.
             if len(outs) == 2:
-                for if_out, else_out in zip(
-                    pytree.tree_iter(outs[0]), pytree.tree_iter(outs[1])
-                ):
-                    if_out.copy_(else_out)
+                _copy_else_branch_outputs(outs[0], outs[1])
     return outs[0]
 
 
