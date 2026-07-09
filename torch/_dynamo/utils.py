@@ -3062,6 +3062,8 @@ tuple_iterator: type[Iterator[Any]] = type(iter(()))
 # pyrefly: ignore [bad-assignment]
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
+deque_iterator = type(iter(collections.deque()))
+deque_rev_iterator = type(reversed(collections.deque()))
 object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
