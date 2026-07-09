@@ -3680,22 +3680,19 @@ class ExternKernelCaller(ChoiceCaller):
 
         # Determine if this is a GPU or CPU kernel
         if self.layout:
-            device = self.layout.device
+            self.device = self.layout.device
         else:
-            device = None
+            self.device = torch.device("cpu")
             for inp_node in self.input_nodes:
                 dev = inp_node.get_device()
                 if dev and dev.type != "cpu":
-                    device = dev
+                    self.device = dev
                     break
-
-            if not device:
-                device = torch.device("cpu")
 
         self.input_tensor_meta: list[TensorMeta] | TensorMeta
         self.output_tensor_meta: list[TensorMeta] | TensorMeta
         self.input_tensor_meta, self.output_tensor_meta = [], []
-        if device.type == "cpu":
+        if self.device.type == "cpu":
             benchmark_cls = ExternKernelCPUBenchmarkRequest
         else:
             try:
@@ -3757,6 +3754,34 @@ class ExternKernelCaller(ChoiceCaller):
             ]
         )
 
+    def get_cpp_kernel_name(self) -> str | None:
+        """In cpp_wrapper mode, the cpp_kernel_name (if present) won't match the C-shim
+        name.  Re-derive the correct cpp_kernel_name in that case."""
+        if not config.cpp_wrapper:
+            return self.choice.cpp_kernel_name
+
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+        from .codegen.cpp_wrapper_cpu import CppWrapperCpu
+
+        op_overload = self.choice.op_overload or self.choice.to_callable()
+        op_overload_name = (
+            str(op_overload)
+            if isinstance(op_overload, torch._ops.OpOverload)
+            else (
+                f"{op_overload}.default"
+                if isinstance(op_overload, torch._ops.OpOverloadPacket)
+                else ""
+            )
+        )
+        if op_overload_name in inductor_fallback_ops:
+            op_overload = cast(torch._ops.OperatorBase, op_overload)
+            return CppWrapperCpu.get_c_shim_func_name(
+                op_overload.name(), self.device.type
+            )
+
+        return self.choice.cpp_kernel_name
+
     def output_node(self):
         if self.choice.use_fallback_kernel:
             if self.choice.op_overload is None:
@@ -3774,7 +3799,7 @@ class ExternKernelCaller(ChoiceCaller):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 python_kernel_name=self.choice.call_name(),
-                cpp_kernel_name=self.choice.cpp_kernel_name,
+                cpp_kernel_name=self.get_cpp_kernel_name(),
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 op_overload=self.choice.op_overload,
                 kwargs=self.kwargs,

@@ -67,6 +67,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_avg_pool3d_backward(AtenTensorHa
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_baddbmm_out(AtenTensorHandle out, AtenTensorHandle self, AtenTensorHandle batch1, AtenTensorHandle batch2, double beta, double alpha);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_bernoulli__Tensor(AtenTensorHandle self, AtenTensorHandle p, AtenGeneratorHandle* generator);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_bernoulli__float(AtenTensorHandle self, double p, AtenGeneratorHandle* generator);
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_bmm_dtype_out(AtenTensorHandle out, AtenTensorHandle self, AtenTensorHandle mat2, int32_t out_dtype);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_bmm_out(AtenTensorHandle out, AtenTensorHandle self, AtenTensorHandle mat2);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_bucketize_Tensor(AtenTensorHandle self, AtenTensorHandle boundaries, int32_t out_int32, int32_t right, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_cat(const AtenTensorHandle* tensors, int64_t tensors_len_, int64_t dim, AtenTensorHandle* ret0);

@@ -106,6 +106,7 @@ from .lowering import (
 )
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
+from .scheduler import Scheduler
 from .sizevars import SizeVarAllocator
 from .utils import (
     gather_origins,
@@ -2888,22 +2889,11 @@ class GraphLowering(torch.fx.Interpreter):
             if params and cubin_path_name in params:
                 self.wrapper_code.additional_files.append(params[cubin_path_name])
 
-    def _update_scheduler(self) -> None:
-        """
-        (Re)initializes the scheduler member.  When initializing the scheduler, no CUBIN
-        files should be generated (to avoid biasing any benchmarks and pessimizing
-        fusion decisions).
-        """
-        from .scheduler import Scheduler
-
-        with config.patch("triton.store_cubin", False):
-            self.scheduler = Scheduler(self.operations)
-
     def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
             self.init_wrapper_code()
 
-            self._update_scheduler()
+            self.scheduler = Scheduler(self.operations)
             V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
             self.wrapper_code.push_codegened_graph(self)
@@ -2936,7 +2926,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.device_idxs = parent_graph.device_idxs
             self.device_type = parent_graph.device_type
 
-            self._update_scheduler()
+            self.scheduler = Scheduler(self.operations)
             self.scheduler.codegen()
 
     def count_bytes(

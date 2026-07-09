@@ -759,7 +759,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return False
 
         if isinstance(value, sympy.Expr):
-            if not isinstance(value, sympy.Symbol) or value in bound_vars:
+            # Sometimes this would generate lines that look like "int64_t x = x".  These
+            # are valid in Python, but obviously not C++, so manually skip them.
+            if (is_symbol := isinstance(value, sympy.Symbol)) and str(value) == name:
+                bound_vars.add(value)
+
+            if not is_symbol or value in bound_vars:
                 return
             if value.is_integer:
                 decl = "int64_t"
@@ -1850,6 +1855,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
+        # Handle explicit default overloads, and non-default overloads.
+        kernel_suffix = kernel_suffix.removesuffix(".default")
+        kernel_suffix = kernel_suffix.replace(".", "_")
 
         shim_fn = f"aoti_torch_{device}_{kernel_suffix}"
         return shim_fn
@@ -2892,6 +2900,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
         finally:
             self.pop_codegened_graph()
+
+    def codegen_subgraph_with_flattened_outputs(
+        self, subgraph, outer_inputs, outer_flattened_outputs
+    ):
+        # TODO: as with codegen_subgraph, this is the old way of supporting subgraphs.
+
+        # Callers of this function don't codegen the outputs, so do it manually.
+        for out in outer_flattened_outputs:
+            self.writeline(f"RAIIAtenTensorHandle {out};")
+
+        self.codegen_subgraph(subgraph, outer_inputs, outer_flattened_outputs)
 
     def codegen_while_loop(self, while_loop, stack_output=False):
         """Emit ABI-compatible C++ for a higher-order while_loop.

@@ -7763,7 +7763,13 @@ class TritonScheduling(SIMDScheduling):
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
         """
-        src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
+        # Explicitly disable CUBIN storage while benchmarking, to avoid pessimizing
+        # fusion decisions.
+        with config.patch("triton.store_cubin", False):
+            src_code = self.generate_kernel_code_from_nodes(
+                nodes, benchmark_kernel=True
+            )
+
         mod = PyCodeCache.load(src_code)
         return self.benchmark_codegened_module(
             mod, n_spills_threshold, node_names=OrderedSet(n.get_name() for n in nodes)
