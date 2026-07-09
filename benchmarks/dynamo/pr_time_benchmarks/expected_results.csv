@@ -18,7 +18,7 @@ add_loop_inductor_gpu,compile_time_instruction_count,28720000000,0.1
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,968100000,0.1
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,945700000,0.1
 
 
 
@@ -30,7 +30,7 @@ basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instructio
 
 
 
-basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,11090000000,0.2
+basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,11560000000,0.2
 
 
 
@@ -42,11 +42,11 @@ sum_floordiv_regression,compile_time_instruction_count,3947000000,0.1
 
 
 
-symint_sum,compile_time_instruction_count,3350000000,0.1
+symint_sum,compile_time_instruction_count,3479000000,0.1
 
 
 
-symint_sum_loop,compile_time_instruction_count,4630000000,0.1
+symint_sum_loop,compile_time_instruction_count,8614000000,0.1
 
 
 
@@ -82,7 +82,7 @@ mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,10270000000,0.1
 
 
 
-basic_NestedModule_eager,compile_time_instruction_count,5675000000,0.1
+basic_NestedModule_eager,compile_time_instruction_count,5547000000,0.1
 
 
 
@@ -118,7 +118,7 @@ dtensor_dispatch_random,instruction_count,592800,0.1
 
 
 
-dtensor_dispatch_custom_handler,instruction_count,34910,0.1
+dtensor_dispatch_custom_handler,instruction_count,35610,0.1
 
 
 
@@ -126,4 +126,4 @@ nn_module_guard_eval,instruction_count,80120,0.1
 
 
 
-nn_module_guard_eval_dynamic,instruction_count,111714,0.1
+nn_module_guard_eval_dynamic,instruction_count,115300,0.1
