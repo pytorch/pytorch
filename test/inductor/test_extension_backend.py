@@ -166,7 +166,7 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
                 ):
                     load_expr = "loadu"
                 else:
-                    load_expr = " = in_ptr0[static_cast<long>(i0)];"
+                    load_expr = " = in_ptr0[static_cast<int64_t>(x0)];"
                 FileCheck().check("void").check(load_expr).check(
                     "extension_device"
                 ).run(code)

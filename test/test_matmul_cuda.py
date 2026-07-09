@@ -521,9 +521,10 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16)
+    @parametrize("batched", [False, True])
     @unittest.skipIf(not SM100OrLater, "cuBLAS integration for batch invariance is only on Blackwell")
     @serialTest()
-    def test_cublas_batch_invariance_blackwell(self, device, dtype):
+    def test_cublas_batch_invariance_blackwell(self, device, dtype, batched):
         orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
         orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)
@@ -532,12 +533,21 @@ class TestMatmulCuda(InductorTestCase):
             N = 2048
             K = 6144
             M_max = 32
-            x = torch.randn(M_max, K, device="cuda", dtype=torch.bfloat16)
-            w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16).t()
-            full = x @ w
-            xx = x[:1]
-            out = xx @ w
-            self.assertEqual(full[:1], out, atol=0., rtol=0.)
+            if batched:
+                B = 8
+                x = torch.randn(B, M_max, K, device=device, dtype=dtype)
+                w = torch.randn(B, N, K, device=device, dtype=dtype).transpose(-2, -1)
+                full = x @ w
+                xx = x[:, :1]
+                out = xx @ w
+                self.assertEqual(full[:, :1], out, atol=0.0, rtol=0.0)
+            else:
+                x = torch.randn(M_max, K, device=device, dtype=dtype)
+                w = torch.randn(N, K, device=device, dtype=dtype).t()
+                full = x @ w
+                xx = x[:1]
+                out = xx @ w
+                self.assertEqual(full[:1], out, atol=0.0, rtol=0.0)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 

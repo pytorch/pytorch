@@ -2082,6 +2082,7 @@ class GraphModule(torch.nn.Module):
 
         getitem: "f32[8, 8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
         sin: "f32[8, 8]" = torch.ops.aten.sin.default(getitem)
+
         cos: "f32[8, 8]" = torch.ops.aten.cos.default(getitem);  getitem = None
         return (sin, getitem_6, getitem_5, getitem_4, cos)
 
@@ -3644,7 +3645,7 @@ class TestInvokeSubgraphReuse(TestCase):
         self.assertEqual(count(), 2)
 
     def test_subgraph_reuse_synthetic_source(self):
-        """Reuse must handle TorchScriptObjectVariable with SyntheticLocalSource.
+        """Reuse must handle CustomClassObjectVariable with SyntheticLocalSource.
 
         Hoisted opaque value types get a SyntheticLocalSource that can't be
         resolved via VariableBuilder. On cache hit, stamp_out_subgraph must

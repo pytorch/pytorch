@@ -459,17 +459,18 @@ class TestOrigami(TestCase):
                 torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
                 self.assertIsNotNone(compiled)
 
-    def test_origami_module_gate_when_env_var_unset(self):
-        """Verify origami is not imported/used when TORCHINDUCTOR_ORIGAMI is unset.
+    def test_origami_module_gate_when_env_var_disabled(self):
+        """Verify origami is not imported/used when TORCHINDUCTOR_ORIGAMI=0.
 
-        rocm.origami is a load-time-only knob (env-var driven). triton.py imports
+        rocm.origami is a load-time-only knob (env-var driven). origami is on by
+        default; setting TORCHINDUCTOR_ORIGAMI=0 disables it. triton.py imports
         the origami module at module load only when IS_ROCM and config.max_autotune
         and config.rocm.origami are all true; otherwise it sets ``origami = None``.
         Once cached, that decision is final for the process -- flipping
         config.rocm.origami via config.patch() after import has no effect.
 
         This subprocess test exercises the realistic disabled path: a fresh
-        Python process with TORCHINDUCTOR_ORIGAMI unset must end up with
+        Python process with TORCHINDUCTOR_ORIGAMI=0 must end up with
         ``triton.origami is None``, regardless of config.patch() calls afterward.
         """
         import subprocess
@@ -479,7 +480,7 @@ class TestOrigami(TestCase):
             "import os, torch\n"
             "from torch._inductor import config\n"
             "from torch._inductor.template_heuristics import triton as th\n"
-            "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') != '1', 'env var leaked'\n"
+            "assert os.environ.get('TORCHINDUCTOR_ORIGAMI') == '0', 'env var not set to 0'\n"
             "assert th.origami is None, f'expected None, got {th.origami!r}'\n"
             "# Even after flipping the config knob mid-process, origami stays None\n"
             "with config.patch({'rocm.origami': True, 'max_autotune': True}):\n"
@@ -488,7 +489,7 @@ class TestOrigami(TestCase):
         )
 
         env = os.environ.copy()
-        env.pop("TORCHINDUCTOR_ORIGAMI", None)
+        env["TORCHINDUCTOR_ORIGAMI"] = "0"
 
         result = subprocess.run(
             [sys.executable, "-c", snippet],
@@ -500,7 +501,7 @@ class TestOrigami(TestCase):
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
+            msg=lambda msg: f"{msg}\nsubprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
         )
         self.assertIn("OK", result.stdout)
 

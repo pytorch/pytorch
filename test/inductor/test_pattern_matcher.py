@@ -20,6 +20,8 @@ from torch._inductor.pattern_matcher import (
     CallFunction,
     fwd_only,
     gen_pattern,
+    gen_pattern_and_search_gm,
+    GetAttr,
     is_mutation_op,
     KeywordArg,
     Match,
@@ -34,9 +36,9 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch._library.opaque_object import (
+    CustomClassBase,
     get_opaque_type_name,
-    OpaqueBase,
-    register_opaque_type,
+    register_custom_class,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -55,7 +57,7 @@ from torch.utils import _pytree as pytree
 aten = torch.ops.aten
 
 
-class OpaqueScaleFactor(OpaqueBase):
+class OpaqueScaleFactor(CustomClassBase):
     def __init__(self, val):
         self.val = val
 
@@ -72,7 +74,7 @@ class OpaqueScaleFactor(OpaqueBase):
         )
 
 
-register_opaque_type(OpaqueScaleFactor, typ="value", hoist=True)
+register_custom_class(OpaqueScaleFactor, typ="constant", hoist=True)
 
 
 @instantiate_parametrized_tests
@@ -1479,6 +1481,83 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    def test_preserve_accumulator_addmm_with_pointwise(self):
+        args = [
+            torch.randn(10, 20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            inp = torch.sin(inp)
+            return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        self.assertEqual(
+            actual, torch.nn.functional.gelu(torch.addmm(torch.sin(args[0]), *args[1:]))
+        )
+        FileCheck().check("extern_kernels.addmm(").run(code[0])
+
+    def test_unfuse_same_shape_leaf_bias_addmm(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.randn(10, 20, device=GPU_TYPE))
+
+            def forward(self, a, b):
+                return (torch.mm(a, b) + self.bias).relu()
+
+        mod = Mod()
+        args = [
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+
+        actual, (code) = run_and_get_code(torch.compile(mod), args[0], args[1])
+        self.assertEqual(actual, mod(*args))
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_unfuse_expanded_bias_addmm(self):
+        args = [
+            torch.randn(20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+
+        @torch.compile()
+        def fn(bias, a, b):
+            bias = bias.unsqueeze(0).expand(10, 20)
+            return torch.ops.aten.addmm(bias, a, b).relu()
+
+        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        bias = args[0].unsqueeze(0).expand(10, 20)
+        self.assertEqual(bias.stride(0), 0)
+        self.assertEqual(actual, torch.addmm(bias, args[1], args[2]).relu())
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    @parametrize("inplace", [False, True])
+    def test_accumulator_addmm_loop_does_not_delay_pointwise(self, inplace):
+        def fn(x, ws):
+            buf = torch.zeros_like(x)
+            for w in ws:
+                if inplace:
+                    buf.addmm_(w, w)
+                else:
+                    buf = torch.addmm(buf, w, w)
+                buf = torch.cos(buf)
+            return buf
+
+        args = [
+            torch.randn(32, 32, device=GPU_TYPE),
+            [torch.randn(32, 32, device=GPU_TYPE) for _ in range(3)],
+        ]
+
+        actual, (code) = run_and_get_code(torch.compile(fn), args[0], args[1])
+        self.assertEqual(actual, fn(*args))
+        self.assertEqual(code[0].count("extern_kernels.addmm("), 3)
+        self.assertNotIn("extern_kernels.mm(", code[0])
+
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @inductor_config.patch(
         {
@@ -1682,7 +1761,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(
                     pattern_pp,
                     PatternPrettyPrinter.run(search_fn_pattern),
-                    msg=f"Found mismatched pattern {search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
+                    msg=lambda msg: f"{msg}\nFound mismatched pattern {search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
                 )
 
                 # Since we've already checked that the serialized patterns match
@@ -1701,14 +1780,15 @@ class TestPatternMatcher(TestCase):
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_original_aten_preserved_split_addmm(self):
-        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
+        # bias addmm -> elementwise should be decomposed into
+        # mm -> add -> elementwise.
         def fn(x, y, z):
             return torch.addmm(z, x, y).sin()
 
         args = [
             torch.randn(16, 24, device=GPU_TYPE),
             torch.randn(24, 32, device=GPU_TYPE),
-            torch.randn(16, 32, device=GPU_TYPE),
+            torch.randn(32, device=GPU_TYPE),
         ]
 
         counters.clear()
@@ -2616,6 +2696,189 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(result, x * 3)
         self.assertEqual(count, 1)
 
+    def test_get_attr_tensor_constant_pattern_matching(self):
+        def pattern(x):
+            y = x + 1
+            fill = torch.tensor(torch.finfo(y.dtype).min)
+            return torch.maximum(y, fill)
+
+        def different_constant(x):
+            y = x + 1
+            fill = torch.tensor(0.0)
+            return torch.maximum(y, fill)
+
+        x = torch.randn(4, 4)
+        generated_pattern = gen_pattern(pattern, [x], fwd_only)
+
+        gm = fwd_only(pattern, [x])
+        maximum = next(
+            n for n in gm.graph.nodes if n.target == torch.ops.aten.maximum.default
+        )
+        self.assertTrue(generated_pattern.match(maximum))
+
+        other_gm = fwd_only(different_constant, [x])
+        other_maximum = next(
+            n
+            for n in other_gm.graph.nodes
+            if n.target == torch.ops.aten.maximum.default
+        )
+        self.assertFalse(generated_pattern.match(other_maximum))
+
+    def test_pretty_print_get_attr_tensor_constant_under_fake_mode(self):
+        def pattern(x):
+            y = x + 1
+            fill = torch.tensor(torch.finfo(y.dtype).min)
+            return torch.maximum(y, fill)
+
+        x = torch.randn(2, 2)
+        with torch._guards.tracing(None), torch._subclasses.FakeTensorMode() as mode:
+            fx = mode.from_tensor(x)
+            generated_pattern, _ = gen_pattern_and_search_gm(pattern, [fx], fwd_only)
+            pattern_str = PatternPrettyPrinter.run(generated_pattern)
+
+        self.assertIn("GetAttr(torch.tensor(", pattern_str)
+        self.assertIn("dtype=torch.float32", pattern_str)
+
+    def test_pretty_print_get_attr_nonfinite_tensor_constant_executes(self):
+        get_attr_pattern = GetAttr(
+            torch.tensor([float("inf"), -float("inf"), float("nan")])
+        )
+        pattern_str = PatternPrettyPrinter.run(get_attr_pattern)
+        namespace = {"GetAttr": GetAttr, "torch": torch}
+
+        exec(pattern_str, namespace)
+
+        self.assertIsInstance(namespace["output"], GetAttr)
+        self.assertTrue(get_attr_pattern.pattern_eq(namespace["output"]))
+        self.assertIn("float('inf')", pattern_str)
+        self.assertIn("float('nan')", pattern_str)
+
+        complex_get_attr_pattern = GetAttr(
+            torch.tensor([complex(float("nan"), 1.0), complex(2.0, float("inf"))])
+        )
+        complex_pattern_str = PatternPrettyPrinter.run(complex_get_attr_pattern)
+        namespace = {"GetAttr": GetAttr, "torch": torch}
+
+        exec(complex_pattern_str, namespace)
+
+        self.assertIsInstance(namespace["output"], GetAttr)
+        self.assertTrue(complex_get_attr_pattern.pattern_eq(namespace["output"]))
+        self.assertIn("complex(float('nan'), 1.0)", complex_pattern_str)
+        self.assertIn("complex(2.0, float('inf'))", complex_pattern_str)
+
+    def test_pretty_print_get_attr_tensor_constant_requires_contiguous(self):
+        get_attr_pattern = GetAttr(torch.arange(6)[1:5:2])
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "non-contiguous get_attr tensor"
+        ):
+            PatternPrettyPrinter.run(get_attr_pattern)
+
+    def test_get_attr_nonfinite_tensor_constant_pattern_matching(self):
+        def make_attr_node(value):
+            graph = torch.fx.Graph()
+            attr = graph.get_attr("constant")
+            graph.output(attr)
+            mod = torch.nn.Module()
+            mod.constant = value
+            gm = torch.fx.GraphModule(mod, graph)
+            return next(n for n in gm.graph.nodes if n.op == "get_attr")
+
+        expected = torch.tensor([float("inf"), -float("inf"), float("nan")])
+
+        self.assertTrue(GetAttr(expected).match(make_attr_node(expected.clone())))
+        self.assertFalse(
+            GetAttr(expected).match(
+                make_attr_node(torch.tensor([float("inf"), -float("inf"), 0.0]))
+            )
+        )
+
+        complex_expected = torch.tensor([complex(float("nan"), 1.0)])
+        self.assertTrue(
+            GetAttr(complex_expected).match(make_attr_node(complex_expected.clone()))
+        )
+        self.assertFalse(
+            GetAttr(complex_expected).match(
+                make_attr_node(torch.tensor([complex(float("nan"), 2.0)]))
+            )
+        )
+
+    def test_get_attr_tensor_constant_metadata_must_match(self):
+        def make_attr_node(value):
+            graph = torch.fx.Graph()
+            attr = graph.get_attr("constant")
+            graph.output(attr)
+            mod = torch.nn.Module()
+            mod.constant = value
+            gm = torch.fx.GraphModule(mod, graph)
+            return next(n for n in gm.graph.nodes if n.op == "get_attr")
+
+        expected = torch.arange(6)[1:5:2]
+        same_metadata = torch.as_strided(torch.tensor([0, 1, 0, 3]), (2,), (2,), 1)
+        same_values_contiguous = expected.clone()
+        same_values_different_offset = torch.as_strided(
+            torch.tensor([1, 0, 3]), (2,), (2,), 0
+        )
+        same_values_requires_grad = torch.tensor([1.0, 3.0], requires_grad=True)
+
+        self.assertTrue(GetAttr(expected).match(make_attr_node(same_metadata)))
+        self.assertFalse(
+            GetAttr(expected).match(make_attr_node(same_values_contiguous))
+        )
+        self.assertFalse(
+            GetAttr(expected).match(make_attr_node(same_values_different_offset))
+        )
+        self.assertFalse(
+            GetAttr(expected.float()).match(make_attr_node(same_values_requires_grad))
+        )
+
+    def test_get_attr_fake_tensor_constant_requires_value(self):
+        def make_attr_node(value):
+            graph = torch.fx.Graph()
+            attr = graph.get_attr("constant")
+            graph.output(attr)
+            mod = torch.nn.Module()
+            mod.constant = value
+            gm = torch.fx.GraphModule(mod, graph)
+            return next(n for n in gm.graph.nodes if n.op == "get_attr")
+
+        expected = torch.tensor([1.0, 2.0])
+        unknown_source = torch.empty_like(expected)
+        with torch._subclasses.FakeTensorMode() as mode:
+            unknown_fake = mode.from_tensor(unknown_source)
+            known_fake = mode.fake_tensor_converter.from_real_tensor(
+                mode, expected, make_constant=True
+            )
+
+        self.assertFalse(GetAttr(expected).match(make_attr_node(unknown_fake)))
+        self.assertTrue(GetAttr(known_fake).match(make_attr_node(expected)))
+
+    def test_register_replacement_with_get_attr_tensor_constant(self):
+        def pattern(x):
+            y = x + 1
+            fill = torch.tensor(torch.finfo(y.dtype).min)
+            return torch.maximum(y, fill)
+
+        def replacement(x):
+            return x + 2
+
+        def fn(x):
+            y = x + 1
+            fill = torch.tensor(torch.finfo(y.dtype).min)
+            return torch.maximum(y, fill)
+
+        my_patterns = PatternMatcherPass()
+        x = torch.randn(4, 4)
+        register_replacement(pattern, replacement, [x], fwd_only, my_patterns)
+
+        gm = fwd_only(fn, [x])
+        self.assertEqual(my_patterns.apply(gm), 1)
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+
+        self.assertEqual(gm(x), replacement(x))
+        self.assertFalse(any(n.op == "get_attr" for n in gm.graph.nodes))
+
     def test_register_replacement_single_tensor_input(self):
         def pattern(x):
             return x + 1
@@ -2678,12 +2941,14 @@ class TestPatternMatcher(TestCase):
         ):
             node = next(node for node in gm.graph.nodes if node.target == target)
             self.assertEqual(
-                node.meta.get("stack_trace"), stack_trace, msg=f"{target}: {node.meta}"
+                node.meta.get("stack_trace"),
+                stack_trace,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
             self.assertEqual(
                 node.meta.get("source_fn_stack"),
                 source_fn_stack,
-                msg=f"{target}: {node.meta}",
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
 
         expected_metadata = {
@@ -2694,16 +2959,24 @@ class TestPatternMatcher(TestCase):
         for target, (shape, dtype) in expected_metadata.items():
             node = next(node for node in gm.graph.nodes if node.target == target)
             self.assertEqual(
-                node.meta["val"].shape, shape, msg=f"{target}: {node.meta}"
+                node.meta["val"].shape,
+                shape,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
             self.assertEqual(
-                node.meta["val"].dtype, dtype, msg=f"{target}: {node.meta}"
+                node.meta["val"].dtype,
+                dtype,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
             self.assertEqual(
-                node.meta["tensor_meta"].shape, shape, msg=f"{target}: {node.meta}"
+                node.meta["tensor_meta"].shape,
+                shape,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
             self.assertEqual(
-                node.meta["tensor_meta"].dtype, dtype, msg=f"{target}: {node.meta}"
+                node.meta["tensor_meta"].dtype,
+                dtype,
+                msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
 
     def test_metadata_propagation_register_replacement(self):
