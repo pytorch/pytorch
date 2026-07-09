@@ -350,6 +350,54 @@ class TestCompileWorkerWatchdog(TestCase):
 
         self.assertEqual(reports, [])
 
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_reports_worker_phase(self):
+        # A worker that reports a heartbeat phase should have that phase surface
+        # in the STATUS report (Phase 2: shared-memory phase heartbeat).
+        from torch._inductor.compile_worker.subproc_pool import (
+            _report_phase_and_sleep_for_test,
+        )
+        from torch._inductor.compile_worker.watchdog import Phase
+
+        reports = []
+        got_phase = Event()
+
+        def fake_trace_structured(name, *args, **kwargs):
+            if name != "artifact":
+                return
+            metadata = kwargs.get("metadata_fn", dict)()
+            if metadata.get("name") != "compile_worker_status":
+                return
+            record = json.loads(kwargs["payload_fn"]())
+            reports.append(record)
+            if record.get("phase") == "querying_cache":
+                got_phase.set()
+
+        with patch.dict(
+            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        ):
+            with patch(
+                "torch._inductor.compile_worker.subproc_pool.trace_structured",
+                fake_trace_structured,
+            ):
+                pool = SubprocPool(2)
+                try:
+                    fut = pool.submit(
+                        _report_phase_and_sleep_for_test, int(Phase.QUERYING_CACHE), 8
+                    )
+                    self.assertTrue(
+                        got_phase.wait(30),
+                        f"watchdog did not report the phase; got {reports}",
+                    )
+                    fut.result()
+                finally:
+                    pool.shutdown()
+
+        phased = [r for r in reports if r.get("phase") == "querying_cache"]
+        self.assertTrue(phased)
+        self.assertIn("phase_elapsed_s", phased[-1])
+        self.assertIn("worker_pid", phased[-1])
+
 
 class TestTimer(TestCase):
     def test_basics(self):
