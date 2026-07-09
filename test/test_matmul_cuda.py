@@ -739,7 +739,6 @@ class TestMatmulCuda(InductorTestCase):
                 start = offs_cpu[i]
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
@@ -852,6 +851,12 @@ class TestMatmulCuda(InductorTestCase):
             raise AssertionError(f"Invalid op: {op}")
 
         C_ref = f_ref(A, B.transpose(-2, -1), offs=offs)
+        if TEST_WITH_ROCM:
+            # Inductor's ROCm extern layout for grouped_mm must match ATen,
+            # which returns contiguous outputs on ROCm rather than CUDA's
+            # TMA-aligned padded strides.
+            contiguous_stride = torch.empty_like(C_ref).stride()
+            self.assertEqual(C_ref.stride(), contiguous_stride)
         if not IS_BIG_GPU and max_autotune:
             with self.assertRaisesRegex(torch._inductor.exc.InductorError, "NoValidChoicesError"):
                 C = f(A, B.transpose(-2, -1), offs=offs)

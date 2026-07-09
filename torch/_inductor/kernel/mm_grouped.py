@@ -143,6 +143,16 @@ cutedsl_grouped_mm_template = CuteDSLTemplate(
 )
 
 
+def has_grouped_mm_triton_support() -> bool:
+    if not torch.cuda.is_available():
+        return False
+    if torch.version.hip:
+        # The grouped GEMM Triton template is supported on ROCm too. ATen
+        # remains a separate autotune choice when fallback kernels are enabled.
+        return True
+    return torch.cuda.get_device_capability() >= (9, 0)
+
+
 def grouped_mm_args(
     mat1: TensorBox,
     mat2: TensorBox,
@@ -182,11 +192,20 @@ def grouped_mm_args(
                 out_size = [mat1_size[1], mat2_size[1]]
             else:
                 out_size = [mat1_size[0], mat1_size[1], mat2_size[-1]]
-        size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
-        if len(out_size) == 2:
-            out_stride = [size_padded, 1]
+        # Match the ATen extern output layout: CUDA pads grouped GEMM outputs for
+        # TMA alignment, while ROCm's ATen path returns contiguous tensors.
+        # TODO: Revisit whether 16-byte alignment would be beneficial for gfx1250.
+        if torch.version.hip:
+            if len(out_size) == 2:
+                out_stride = [out_size[1], 1]
+            else:
+                out_stride = [out_size[1] * out_size[2], out_size[2], 1]
         else:
-            out_stride = [out_size[1] * size_padded, size_padded, 1]
+            size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
+            if len(out_size) == 2:
+                out_stride = [size_padded, 1]
+            else:
+                out_stride = [out_size[1] * size_padded, size_padded, 1]
 
         layout = FixedLayout(
             mat1.get_device(),
@@ -224,11 +243,7 @@ def can_use_triton_kernel(
     bias: TensorBox | None,
     scale_result: TensorBox | None,
 ) -> bool:
-    if not (
-        torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (9, 0)
-        and not torch.version.hip
-    ):
+    if not has_grouped_mm_triton_support():
         return False
     if not has_triton():
         return False
