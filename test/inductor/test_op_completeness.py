@@ -86,10 +86,10 @@ class TestOpCompleteness(TestCase):
                 "PyTorch built with:\n  - GCC 11.5\n  - CPU capability usage: NEON\n"
             ),
         ):
-            code = CppVecOverrides.addcmul_aten("self", "value_times_t1", "t2")
-            self.assertIn('asm volatile("" : "+m"(product));', code)
-            self.assertIn("return self + product;", code)
-            self.assertNotIn("fmadd", code)
+            self.assertEqual(
+                CppVecOverrides.addcmul_aten("self", "value_times_t1", "t2"),
+                "fmadd(value_times_t1, t2, self)",
+            )
             self.assertEqual(
                 CppOverrides.addcmul_aten("self", "value_times_t1", "t2"),
                 "std::fma(value_times_t1, t2, self)",

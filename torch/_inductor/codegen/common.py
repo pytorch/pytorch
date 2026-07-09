@@ -1276,9 +1276,9 @@ class OverridesData:
 @functools.cache
 def _pytorch_cpu_vec_intrinsics_contract_addcmul() -> bool:
     # ATen's CPU addcmul vector path is written as vector intrinsics:
-    # self_vec + value_vec * t1_vec * t2_vec. x86 GCC builds contract the
-    # final multiply-add in that expression, while clang, Windows/MSVC, and
-    # aarch64 builds keep it as mul/mul/add.
+    # self_vec + value_vec * t1_vec * t2_vec. GCC builds contract the final
+    # multiply-add in that expression on both x86 and aarch64, while clang
+    # and Windows/MSVC builds keep it as mul/mul/add.
     build_config = torch.__config__.show()
     compiler_lines = [
         line.removeprefix("  - ")
@@ -1290,10 +1290,7 @@ def _pytorch_cpu_vec_intrinsics_contract_addcmul() -> bool:
     ) and not any(
         line == "clang" or line.startswith("clang ") for line in compiler_lines
     )
-    has_x86_vector_capability = any(
-        line.startswith("CPU capability usage: AVX") for line in compiler_lines
-    )
-    return has_gcc_without_clang and has_x86_vector_capability
+    return has_gcc_without_clang
 
 
 @functools.cache
