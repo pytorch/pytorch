@@ -2639,8 +2639,11 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
             idx = index.as_python_constant()
             branch_fns = branches.unpack_var_sequence(tx)
-            clamped = min(max(0, idx), len(branch_fns) - 1)
-            return branch_fns[clamped].call_function(
+            if not 0 <= idx < len(branch_fns):
+                raise AssertionError(
+                    f"switch index {idx} out of range for {len(branch_fns)} branches"
+                )
+            return branch_fns[idx].call_function(
                 tx, operands.unpack_var_sequence(tx), {}
             )
 
