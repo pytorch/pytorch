@@ -72,7 +72,6 @@ __global__ void indexing_backward_kernel_many_indices(
   int smem_offset = threadIdx.y * C10_WARP_SIZE;
 
   int laneIdx = threadIdx.x % C10_WARP_SIZE;
-  int64_t grad_row = 0;
 
   for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z) {
     // Init duplicates every time we compute a new set of entries:
@@ -992,8 +991,8 @@ static size_t getSliceSize(const Tensor & dst,
   }
 
   TORCH_CHECK(dstSliceSize == srcSliceSize,
-             "Source/destination tensor have different slice sizes (%ld vs %ld)",
-             dstSliceSize, srcSliceSize);
+             "Source/destination tensor have different slice sizes (",
+             dstSliceSize, " vs ", srcSliceSize, ")");
 
   if (mismatch) {
     TORCH_WARN_ONCE(
@@ -1028,7 +1027,6 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
   // this is a good choice (small number of chosen indices), since
   // re-accessing indices in addition to src elements can be slow.
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
-    // Lua indices begin at 1
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
     CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
@@ -1087,7 +1085,6 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       srcIndex = linearIndex % innerSize;
     }
 
-    // Lua indices begin at 1
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
     CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
