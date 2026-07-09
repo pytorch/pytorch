@@ -144,7 +144,7 @@ def _with_callable_args(cls_or_self, **kwargs):
     return r.with_callable_args(**kwargs)
 
 
-ABC: Any = ABCMeta("ABC", (object,), {})  # compatible with Python 2 *and* 3:
+ABC: Any = ABCMeta("ABC", (object,), {})
 
 
 class ObserverBase(ABC, nn.Module):
@@ -1061,7 +1061,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         self, delta_begin: torch.Tensor, delta_end: torch.Tensor, density: torch.Tensor
     ) -> torch.Tensor:
         r"""
-        Compute the norm of the values uniformaly distributed between
+        Compute the norm of the values uniformly distributed between
         delta_begin and delta_end.
         Currently only L2 norm is supported.
 
@@ -1861,7 +1861,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         self.zero_point_dtype = zero_point_dtype
         self.preserve_zero = preserve_zero
         self.zero_point_domain = zero_point_domain
-        # populatd during forward
+        # populated during forward
         self.block_size = None
         self.original_dtype = None
 

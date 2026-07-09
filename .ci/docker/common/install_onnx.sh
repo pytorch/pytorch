@@ -11,15 +11,11 @@ retry () {
 # ONNXRuntime should be installed before installing
 # onnx-weekly. Otherwise, onnx-weekly could be
 # overwritten by onnx.
+# Note: parameterized, pytest-subtests, tabulate, packaging are already
+# installed via requirements-ci.txt
 pip_install \
-  parameterized==0.8.1 \
-  pytest-cov==4.0.0 \
-  pytest-subtests==0.10.0 \
-  tabulate==0.9.0 \
-  transformers==4.36.2
-
-pip_install coloredlogs packaging
-pip_install onnxruntime==1.23.1
+  transformers==4.36.2 \
+  onnxruntime==1.23.1
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
@@ -30,8 +26,9 @@ as_jenkins echo 'import transformers; transformers.GPTJForCausalLM.from_pretrain
 pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
 # Very weird quoting behavior here https://github.com/conda/conda/issues/10972,
 # so echo the command to a file and run the file instead
-conda_run python "${IMPORT_SCRIPT_FILENAME}"
+env_run python "${IMPORT_SCRIPT_FILENAME}"
 
 # Cleaning up
-conda_run pip uninstall -y torch
+env_run pip uninstall -y torch
+env_run pip cache purge
 rm "${IMPORT_SCRIPT_FILENAME}" || true

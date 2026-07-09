@@ -11,6 +11,11 @@ import torch
 import torch._inductor.config as config
 from torch._dynamo.utils import counters
 from torch._inductor import ir
+from torch._inductor.autotune_process import (
+    SubgraphCPUBenchmarkRequest,
+    SubgraphGPUBenchmarkRequest,
+    TensorMeta,
+)
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
     Buffer,
@@ -80,8 +85,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         with V.fake_mode:
             for i, inp in enumerate(self.input_nodes):
                 # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
-                assert len(get_free_symbols(inp.get_size(), unbacked_only=True)) == 0
-                assert len(get_free_symbols(inp.get_stride(), unbacked_only=True)) == 0
+                if len(get_free_symbols(inp.get_size(), unbacked_only=True)) != 0:
+                    raise AssertionError("expected no unbacked symbols in input size")
+                if len(get_free_symbols(inp.get_stride(), unbacked_only=True)) != 0:
+                    raise AssertionError("expected no unbacked symbols in input stride")
 
                 inp.data.freeze_layout()  # type: ignore[attr-defined]
 
@@ -112,6 +119,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.config_patches: dict[str, Any] = {}
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
+        # Cache benchmark request for async autotuning
+        self._bmreq: (
+            SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest | None
+        ) = None
+
+        # Pre-compile only if using async pipelined autotuning
+        # Must happen in __init__ because compilation requires virtualized context (V.graph, V.debug)
+        if config.pipeline_max_autotune_gemm:
+            with V.fake_mode:
+                self._compiled_module = self._compile_for_benchmarking()
+                self._bmreq = self._create_benchmark_request()
 
     def _compute_sym_input_values(self) -> list[int]:
         """Extract concrete dimension values for sym_inputs from benchmark_inputs.
@@ -169,7 +187,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
         log.debug("Benchmark compile %s: sym_inputs=%s", self.name, self.sym_inputs)
 
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=compile_inputs,
@@ -193,17 +212,59 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 "max_autotune": False,
                 "max_autotune_gemm": False,
                 "max_autotune_gemm_backends": "ATEN",
+                "benchmark_fusion": False,
+                "pipeline_max_autotune_gemm": False,
                 **self.config_patches,
             }
             with config.patch(benchmark_config):
                 bm_graph_lowering.run(*compile_inputs)
                 return bm_graph_lowering.compile_to_module()
 
-    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
-        """Regular benchmarking: compile and use benchmarker with warmup/rep."""
+    def _create_benchmark_request(
+        self,
+    ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
+        """Create a benchmark request for async autotuning."""
+        if self._compiled_module is None:
+            raise AssertionError(
+                "Module must be compiled before creating benchmark request"
+            )
+        input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+        output_tensor_meta = TensorMeta.from_irnodes(self.layout)
+
+        if self.layout.device.type == "cpu":
+            bmreq_cls = SubgraphCPUBenchmarkRequest
+        else:
+            bmreq_cls = SubgraphGPUBenchmarkRequest
+
+        return bmreq_cls(
+            kernel_name=self.name,
+            input_tensor_meta=input_tensor_meta,
+            output_tensor_meta=output_tensor_meta,
+            extra_args=tuple(),
+            module_path=self._compiled_module.__file__,
+            module_cache_key=self._compiled_module.key,
+            sym_input_values=self.sym_input_values,
+        )
+
+    @property
+    def bmreq(
+        self,
+    ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
+        """Benchmark request for async autotuning. Pre-compiled when pipeline_max_autotune_gemm is enabled."""
+        if self._bmreq is None:
+            raise AssertionError(
+                "bmreq accessed but pipeline_max_autotune_gemm was not enabled during __init__"
+            )
+        return self._bmreq
+
+    def _ensure_compiled(self) -> None:
+        """Ensure the module is compiled. Used for lazy compilation in non-async path."""
         if self._compiled_module is None:
             self._compiled_module = self._compile_for_benchmarking()
 
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        """Regular benchmarking: compile if needed, then use benchmarker."""
+        self._ensure_compiled()
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
 
@@ -222,13 +283,12 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
     def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
         """Run once for collective benchmarking (barrier sync handled by caller)."""
-        if self._compiled_module is None:
-            self._compiled_module = self._compile_for_benchmarking()
-
+        self._ensure_compiled()
         self._compiled_module.call([*self.sym_input_values, *args])
 
     def hash_key(self) -> str:
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
         return "-".join(
             [
                 self.name.rsplit("_", 1)[0],
@@ -239,7 +299,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
 
     def output_node(self) -> ir.TensorBox:
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,
@@ -352,10 +413,11 @@ class SubgraphTemplate(KernelTemplate):
         if not decompositions:
             return []
 
-        assert len(decompositions) == len(non_tensor_args), (
-            f"decompositions and non_tensor_args must have same length, "
-            f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
-        )
+        if len(decompositions) != len(non_tensor_args):
+            raise AssertionError(
+                f"decompositions and non_tensor_args must have same length, "
+                f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
+            )
 
         # Default to empty config_patches if not provided
         if config_patches_list is None:
@@ -465,11 +527,12 @@ class SubgraphTemplate(KernelTemplate):
     def _validate_non_tensor_kwargs(self, kwargs: dict[str, Any]) -> None:
         """Validate that kwargs contains only non-tensor arguments."""
         for key, value in kwargs.items():
-            assert not isinstance(value, (torch.Tensor, Buffer)), (
-                f"kwargs['{key}'] contains tensor {type(value)}. "
-                f"Tensor arguments should be in input_nodes, not kwargs. "
-                f"Only scalar/non-tensor parameters should be in kwargs."
-            )
+            if isinstance(value, (torch.Tensor, Buffer)):
+                raise AssertionError(
+                    f"kwargs['{key}'] contains tensor {type(value)}. "
+                    f"Tensor arguments should be in input_nodes, not kwargs. "
+                    f"Only scalar/non-tensor parameters should be in kwargs."
+                )
 
     def _validate_layout_equivalence(
         self,
@@ -538,10 +601,11 @@ class SubgraphTemplate(KernelTemplate):
             output = fn(*example_inputs)
 
             # Assert single output
-            assert isinstance(output, torch.Tensor), (
-                f"Expected single tensor output, got {type(output)}. "
-                f"Multi-output custom ops not yet supported in autotuning."
-            )
+            if not isinstance(output, torch.Tensor):
+                raise AssertionError(
+                    f"Expected single tensor output, got {type(output)}. "
+                    f"Multi-output custom ops not yet supported in autotuning."
+                )
 
             return FixedLayout(
                 device=output.device,

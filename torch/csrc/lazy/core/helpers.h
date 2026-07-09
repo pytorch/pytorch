@@ -50,7 +50,7 @@ TORCH_API std::vector<int64_t> MakeTransposePermutation(
     int64_t dim1,
     int64_t rank);
 
-// Calculates the protomoted shape to which the input shapes should be
+// Calculates the promoted shape to which the input shapes should be
 // broadcasted for an elementwise operation. The size of the common dimensions
 // (2,3,4 for shape1, and 0,1,2 for shape2) must either match, or either one
 // of the two be 1.

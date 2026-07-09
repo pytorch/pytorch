@@ -581,6 +581,14 @@
 .. automodule:: torch.distributions.transforms
     :members:
     :member-order: bysource
+
+.. currentmodule:: torch.distributions.transforms
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    identity_transform
 ```
 
 ## `Constraints`
@@ -589,6 +597,14 @@
 .. automodule:: torch.distributions.constraints
     :members:
     :member-order: bysource
+
+.. currentmodule:: torch.distributions.constraints
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    dependent
 ```
 
 ## `Constraint Registry`
@@ -597,6 +613,15 @@
 .. automodule:: torch.distributions.constraint_registry
     :members:
     :member-order: bysource
+
+.. currentmodule:: torch.distributions.constraint_registry
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    biject_to
+    transform_to
 ```
 
 % This module needs to be documented. Adding here in the meantime
@@ -690,8 +715,11 @@
     :toctree: generated
     :nosignatures:
 
+    broadcast_all
+    clamp_probs
     logits_to_probs
     probs_to_logits
+    tril_matrix_to_vec
     vec_to_tril_matrix
 
 .. py:module:: torch.distributions.von_mises

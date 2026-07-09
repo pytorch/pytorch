@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import itertools
 import pickle
 import sys
 import tempfile
@@ -30,7 +31,12 @@ from torch._dynamo.symbolic_convert import (
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
@@ -287,7 +293,7 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
 
 
 # defines a custom __eq__() / __hash__() to be registered as a pytree constant type
-class CustomConstantType(torch._opaque_base.OpaqueBase):
+class CustomConstantType(torch._custom_class_base.CustomClassBase):
     def __init__(self, a, b):
         self.a = a
         self.b = b
@@ -309,7 +315,7 @@ class CustomConstantType(torch._opaque_base.OpaqueBase):
         }
 
 
-torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
+torch._library.opaque_object.register_custom_class(CustomConstantType, typ="constant")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
@@ -929,6 +935,35 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 15, 4))}, False
         )
 
+    def test_count_iterator_match(self):
+        def fn(x, counter):
+            return x + next(counter)
+
+        x = torch.randn(3)
+
+        def _gen_kwargs(x=x):
+            return {"x": x, "counter": itertools.count(2, 3)}
+
+        ref, loaded = self._test_serialization(
+            "COUNT_ITERATOR_MATCH", fn, _gen_fn=_gen_kwargs
+        )
+
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(2, 3)}, True
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": torch.randn(4), "counter": itertools.count(2, 3)},
+            True,
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(5, 3)}, False
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
+        )
+
     def test_dict_version(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
@@ -1507,13 +1542,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             def foo(ddp, x):
                 return ddp(x)
 
+            unsupported = frozenset(
+                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            )
             x = torch.randn(10)
             package = CompilePackage(foo)
             torch._dynamo.optimize(
                 package=package,
                 guard_filter_fn=lambda gs: [
-                    x.guard_type not in ("CLOSURE_MATCH", "ID_MATCH", "CLASS_MATCH")
-                    for x in gs
+                    x.guard_type not in unsupported for x in gs
                 ],
             )(foo)(ddp_model, x)
             self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
@@ -1645,19 +1682,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"inputs": Inputs(x, weakref.ref(x))}, True)
 
     def test_unused_stream(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA is not available")
+        if not torch.accelerator.is_available():
+            self.skipTest("Accelerator is not available")
 
         def foo(inputs):
             return inputs.x + 1
 
         x = torch.randn(3, 2)
         ref, loaded = self._test_serialization(
-            "TENSOR_MATCH", foo, Inputs(x, torch.cuda.Stream())
+            "TENSOR_MATCH", foo, Inputs(x, torch.Stream())
         )
-        self._test_check_fn(
-            ref, loaded, {"inputs": Inputs(x, torch.cuda.Stream())}, True
-        )
+        self._test_check_fn(ref, loaded, {"inputs": Inputs(x, torch.Stream())}, True)
 
     def test_unused_process_group(self):
         import torch.distributed as dist
@@ -1840,6 +1875,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         self.assertEqual(pickle.dumps(src1), pickle.dumps(src2))
 
+    def test_source_serialization_init_false_fields(self):
+        # Test that source serialization handles fields that are not initialized
+        from torch._dynamo.source import DefaultsSource, LocalSource
+
+        base = LocalSource("x")
+        source = DefaultsSource(base=base, idx_key=0, is_kw=False)
+
+        # Round-trip through pickle should work even with init=False fields
+        restored = pickle.loads(pickle.dumps(source))
+        self.assertEqual(source, restored)
+
 
 class SimpleModule(torch.nn.Module):
     def __init__(self, c):
@@ -1863,6 +1909,10 @@ if torch.distributed.is_available() and not IS_MACOS:
             TestGuardSerializationBase.setUp(self)
             FSDPTestMultiThread.setUp(self)
 
+        @unittest.skipIf(
+            TEST_WITH_ASAN or IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/162793",
+        )
         def test_guard_serialization_fsdp_module(self):
             from torch.distributed._tensor import distribute_tensor, Replicate
             from torch.distributed.device_mesh import init_device_mesh

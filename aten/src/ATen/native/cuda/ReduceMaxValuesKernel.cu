@@ -11,10 +11,6 @@
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/native/cuda/Reduce.cuh>
 
-#include <ATen/Dispatch.h>
-#include <ATen/NumericUtils.h>
-#include <ATen/cuda/NumericLimits.cuh>
-
 #include <thrust/pair.h>
 
 namespace at::native {

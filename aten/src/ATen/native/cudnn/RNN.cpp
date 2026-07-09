@@ -656,7 +656,7 @@ void add_projection_weights(
       nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
   auto elem_size = dataSize(getCudnnDataType(weight_buf));
   auto offset_bytes = static_cast<const char*>(matrix_pointer) -
-      static_cast<const char*>(weight_buf.data_ptr());
+      static_cast<const char*>(weight_buf.const_data_ptr());
   TORCH_INTERNAL_ASSERT(
       offset_bytes % elem_size == 0,
       "offset_bytes = ",
@@ -795,7 +795,7 @@ get_parameters(
             min_dim);
         auto elem_size = dataSize(getCudnnDataType(weight_buf));
         auto offset_bytes = static_cast<const char*>(matrix_pointer) -
-            static_cast<const char*>(weight_buf.data_ptr());
+            static_cast<const char*>(weight_buf.const_data_ptr());
         TORCH_INTERNAL_ASSERT(
             offset_bytes % elem_size == 0,
             "offset_bytes = ",
@@ -1367,7 +1367,7 @@ copy_weights_to_flat_buf_views(
     }
   }
 
-  return std::make_tuple(weight_buf, params_arr);
+  return std::make_tuple(std::move(weight_buf), std::move(params_arr));
 }
 
 } // namespace cudnn_rnn
@@ -1732,7 +1732,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     output.transpose_(0, 1);
   }
 
-  return std::make_tuple(output, hy, cy, reserve, weight_buf);
+  return std::make_tuple(
+      std::move(output),
+      std::move(hy),
+      std::move(cy),
+      std::move(reserve),
+      std::move(weight_buf));
 }
 
 std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
