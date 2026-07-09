@@ -506,7 +506,7 @@ class CommonDistributedDataParallelTest:
     ):
         self.assertTrue(
             len(devices) == 2 or len(devices) == 4,
-            f"unexpected devices for ddp tests {devices}",
+            lambda msg: f"{msg}\nunexpected devices for ddp tests {devices}",
         )
         if len(devices) == 2:
             model = DoubleGpuNet(devices)
@@ -2842,7 +2842,7 @@ class ThreadLocalSafetyLintTest(TestCase):
         c10d_dir = self._c10d_src_dir()
         self.assertTrue(
             c10d_dir.is_dir(),
-            f"c10d source directory not found: {c10d_dir}",
+            lambda msg: f"{msg}\nc10d source directory not found: {c10d_dir}",
         )
 
         violations = []

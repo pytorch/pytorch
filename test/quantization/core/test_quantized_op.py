@@ -3271,7 +3271,7 @@ class TestQuantizedOps(TestCase):
                 for signal, mse, power in snr:
                     self.assertTrue(
                         power > min_power or mse < max_mse,
-                        msg=(f"Error is too high: SNR(dB): {power}, "
+                        msg=(lambda msg: f"{msg}\nError is too high: SNR(dB): {power}, "
                              f"Signal: {signal}, MSE: {mse}"))
 
                 # Trace
@@ -3384,7 +3384,7 @@ class TestQuantizedOps(TestCase):
                     for signal, mse, power in snr:
                         self.assertTrue(
                             power > min_power or mse < max_mse,
-                            msg=(f"Error is too high: SNR(dB): {power}, "
+                            msg=(lambda msg: f"{msg}\nError is too high: SNR(dB): {power}, "
                                  f"Signal: {signal}, MSE: {mse}; "
                                  f"Run with bias={bias}, "
                                  f"add_bias_kv={add_bias_kv}, "
