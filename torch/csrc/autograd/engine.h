@@ -6,13 +6,13 @@
 #include <ATen/Tensor.h>
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
-#include <c10/core/SafePyObject.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/autograd/node_creation_hook.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 
@@ -176,14 +176,13 @@ struct TORCH_API Engine {
     return nullptr;
   }
 
-  // Calls a torch.autograd.graph.node_creation_hook callback on a freshly
-  // created node. Hooks can only be registered from Python, so this is only
-  // reachable when the Python engine is loaded.
-  virtual void call_node_creation_hook(
-      const c10::intrusive_ptr<Node>& /*node*/,
-      const c10::SafePyObject& /*hook*/) {
-    TORCH_INTERNAL_ASSERT(
-        false, "node creation hooks require the Python autograd engine");
+  // Wraps the currently registered torch.autograd.graph.node_creation_hook
+  // callbacks (a Python-only feature) into callable objects, outermost first.
+  // Returns empty when none are registered; only the Python engine can produce
+  // non-empty results.
+  virtual std::vector<std::unique_ptr<NodeCreationHook>>
+  get_node_creation_hooks() {
+    return {};
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows

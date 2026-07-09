@@ -51,12 +51,9 @@ void fire_node_creation_hooks(const c10::intrusive_ptr<Node>& node) {
   at::impl::NodeCreationHooks::set_is_firing(true);
   auto guard = c10::make_scope_exit(
       [] { at::impl::NodeCreationHooks::set_is_firing(false); });
-  auto& engine = Engine::get_default_engine();
-  // Index-based loop: a hook may itself push or pop hooks, reallocating the
-  // stack.
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < state.stack.size(); i++) {
-    engine.call_node_creation_hook(node, state.stack[i]);
+  auto hooks = Engine::get_default_engine().get_node_creation_hooks();
+  for (const auto& hook : hooks) {
+    (*hook)(node);
   }
 }
 

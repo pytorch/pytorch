@@ -5,7 +5,6 @@
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
@@ -14,6 +13,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_node_creation_hook.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -111,19 +111,9 @@ std::unique_ptr<SavedVariableHooks> PythonEngine::
   return PyDefaultSavedVariableHooks::get_hooks();
 }
 
-void PythonEngine::call_node_creation_hook(
-    const c10::intrusive_ptr<Node>& node,
-    const c10::SafePyObject& hook) {
-  pybind11::gil_scoped_acquire gil;
-  THPObjectPtr py_node(functionToPyObject(node));
-  if (!py_node) {
-    throw python_error();
-  }
-  THPObjectPtr result(PyObject_CallFunctionObjArgs(
-      hook.ptr(getPyInterpreter()), py_node.get(), nullptr));
-  if (!result) {
-    throw python_error();
-  }
+std::vector<std::unique_ptr<NodeCreationHook>> PythonEngine::
+    get_node_creation_hooks() {
+  return PyDefaultNodeCreationHooks::get_hooks();
 }
 
 variable_list PythonEngine::execute(

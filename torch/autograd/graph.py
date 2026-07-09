@@ -473,28 +473,30 @@ class node_creation_hook:
 
         hook(node: torch.autograd.graph.Node) -> None
 
-    The registration is thread-local and propagates to autograd engine worker
-    threads: if backward is run under this context (or graph nodes are
-    created during backward, e.g. with ``create_graph=True`` or inside
-    checkpoint recomputation), the hook also fires for those nodes.
+    The registration is thread-local. It is captured into
+    :class:`~torch.autograd.graph.saved_tensors_hooks`-style thread-local
+    state, so it propagates to any worker thread that autograd (or another
+    subsystem built on it) spins up: if backward is run under this context
+    (or graph nodes are created during backward, e.g. with
+    ``create_graph=True`` or inside checkpoint recomputation), the hook also
+    fires for those nodes.
 
     Nodes created by hooks themselves do not trigger hooks again. When
     nesting this context-manager, all active hooks are called for each node,
     outermost first.
 
-    One motivating use case is attributing memory allocated during backward
-    to the forward region that created the graph, by capturing state at node
+    One motivating use case is attributing work done during backward to the
+    forward region that created the graph, by capturing state at node
     creation time and restoring it around the node's backward execution::
 
         >>> # xdoctest: +SKIP
         >>> def creation_hook(node):
-        ...     meta = torch.cuda.memory._get_memory_metadata()
-        ...     node.register_prehook(
-        ...         lambda gO: torch.cuda.memory._set_memory_metadata(meta)
-        ...     )
-        ...     node.register_hook(
-        ...         lambda gI, gO: torch.cuda.memory._set_memory_metadata("")
-        ...     )
+        ...     # ``current_region()``/``enter_region()`` are user-defined and
+        ...     # stand in for whatever thread-local state you want to restore
+        ...     # while this node runs in backward.
+        ...     region = current_region()
+        ...     node.register_prehook(lambda gO: enter_region(region))
+        ...     node.register_hook(lambda gI, gO: enter_region(None))
         >>>
         >>> with torch.autograd.graph.node_creation_hook(creation_hook):
         ...     loss = model(inputs)

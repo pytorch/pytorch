@@ -11372,11 +11372,14 @@ for shape in [(1,), ()]:
 
     def test_node_creation_hook_multi_output_fires_once(self):
         nodes = []
-        a = torch.randn(5, requires_grad=True)
+        a = torch.randn(6, requires_grad=True)
+        # split() has multiple differentiable outputs that all share a single
+        # grad_fn, so the hook fires exactly once regardless of output count.
         with torch.autograd.graph.node_creation_hook(nodes.append):
-            values, indices = a.sort()
+            outs = a.split(2)
         self.assertEqual(len(nodes), 1)
-        self.assertIs(nodes[0], values.grad_fn)
+        for out in outs:
+            self.assertIs(nodes[0], out.grad_fn)
 
     def test_node_creation_hook_nesting(self):
         calls = []
