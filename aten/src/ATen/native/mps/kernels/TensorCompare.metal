@@ -12,6 +12,22 @@ struct clamp_functor {
   }
 };
 
+// The condition reaches the functor converted to T by the ternary cast
+// machinery (bool/byte sources become exact 0/1), so truthiness is a
+// zero-compare; complex needs the component form (vector != is not scalar).
+struct where_functor {
+  template <typename T>
+  inline T operator()(const T cond, const T a, const T b) {
+    return cond != T(0) ? a : b;
+  }
+  inline float2 operator()(const float2 cond, const float2 a, const float2 b) {
+    return (cond.x != 0.0f || cond.y != 0.0f) ? a : b;
+  }
+  inline half2 operator()(const half2 cond, const half2 a, const half2 b) {
+    return (cond.x != 0.0h || cond.y != 0.0h) ? a : b;
+  }
+};
+
 struct clamp_scalar_functor {
   template <typename T>
   inline T operator()(const T a, const ClampScalarParams<T> params) {
@@ -53,3 +69,18 @@ REGISTER_ALL_CLAMP_OPS(bool);
 REGISTER_ALL_CLAMP_OPS(float);
 REGISTER_ALL_CLAMP_OPS(half);
 REGISTER_ALL_CLAMP_OPS(bfloat);
+
+REGISTER_TERNARY_OP(where, float, float);
+REGISTER_TERNARY_OP(where, half, half);
+REGISTER_TERNARY_OP(where, bfloat, bfloat);
+REGISTER_TERNARY_OP(where, long, long);
+REGISTER_TERNARY_OP(where, int, int);
+REGISTER_TERNARY_OP(where, short, short);
+REGISTER_TERNARY_OP(where, char, char);
+REGISTER_TERNARY_OP(where, uchar, uchar);
+REGISTER_TERNARY_OP(where, ushort, ushort);
+REGISTER_TERNARY_OP(where, uint, uint);
+REGISTER_TERNARY_OP(where, ulong, ulong);
+REGISTER_TERNARY_OP(where, bool, bool);
+REGISTER_TERNARY_OP(where, float2, float2);
+REGISTER_TERNARY_OP(where, half2, half2);
