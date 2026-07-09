@@ -4839,6 +4839,27 @@ def is_utils_checkpoint(obj: Any) -> bool:
     return obj is torch.utils.checkpoint.checkpoint
 
 
+class _CheckpointWrapped(typing.Protocol):
+    function: Callable[..., Any]
+    checkpoint_kwargs: dict[str, Any]
+
+
+def is_utils_checkpoint_wrapped(obj: Any) -> TypeGuard[_CheckpointWrapped]:
+    import torch.utils.checkpoint
+
+    return isinstance(obj, torch.utils.checkpoint._CheckpointFunction)
+
+
+def is_checkpoint_factory(obj: Any) -> TypeGuard[functools.partial[Any]]:
+    import torch.utils.checkpoint
+
+    return (
+        isinstance(obj, functools.partial)
+        and obj.func is torch.utils.checkpoint._make_checkpoint_wrapper
+        and len(obj.args) == 0
+    )
+
+
 def is_invoke_subgraph(obj: Any) -> bool:
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
 
