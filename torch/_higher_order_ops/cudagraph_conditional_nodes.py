@@ -34,7 +34,7 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
 
 
 class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
-    """The purpose of this TodchDispatchMode is to "warm up" both sides of a torch.cond() statement.
+    """The purpose of this TorchDispatchMode is to "warm up" both sides of a torch.cond() statement.
 
     For data-dependent control flow code, only one side will be
     executed. Therefore, it is not safe to stream capture a

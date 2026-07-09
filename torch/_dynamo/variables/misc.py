@@ -647,7 +647,7 @@ class ExceptionVariable(VariableTracker):
             name = args[0].as_python_constant()
             val = args[1]
             if name == "__context__":
-                # Constant can be either an Exceptior or None
+                # Constant can be either an Exception or None
                 if not (
                     val.is_constant_none()
                     or isinstance(

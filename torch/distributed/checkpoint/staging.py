@@ -199,7 +199,7 @@ class DefaultStager(AsyncStager):
         **kwargs: Any,
     ) -> STATE_DICT_TYPE | Future[STATE_DICT_TYPE]:
         """
-        This function is responsible for staging staging the state_dict.
+        This function is responsible for staging the state_dict.
         See class docstring for more details on staging.
         If use_async_staging is True, it will return a Future object that will be
         fulfilled when staging is complete.
@@ -236,7 +236,7 @@ class DefaultStager(AsyncStager):
                 state_dict = self._state_dict_stager.stage(
                     state_dict, non_blocking=self._config.use_non_blocking_copy
                 )
-            # waits for the enqued copy operations to finish.
+            # waits for the enqueued copy operations to finish.
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()
         else:
             state_dict = self._state_dict_stager.stage(state_dict, non_blocking=False)

@@ -85,7 +85,7 @@ class _LazyGraphModule(GraphModule):
     the saved python code and forward method.
 
     However in some cases especially in inductor, the recompilation can be a waste since we never
-    check the python code for the graph module or call its forward method. A few more concreate
+    check the python code for the graph module or call its forward method. A few more concrete
     examples regarding pattern matching fx passes in inductor:
     1. some passes will update the graph to be compiled and then call recompile on the GraphModule.
     2. some passes will trace small pattern function to search it in the graph being compiled and
@@ -93,7 +93,7 @@ class _LazyGraphModule(GraphModule):
        replacement graph are quite small but there are large amount of them. Doing GraphModule.recompile
        for them in GraphModule.__init__ is also a waste of time.
 
-    However simply skip calling GraphModule.recompile in these scenarios is also dangeruous.
+    However simply skip calling GraphModule.recompile in these scenarios is also dangerous.
     People may want to check the python code or call the GraphModule's forward method for debugging purposes.
 
     The way _LazyGraphModule solves it is, we override the recompile method to just mark the

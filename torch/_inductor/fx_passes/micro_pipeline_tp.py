@@ -1156,7 +1156,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     #   3. Store expected potentially 3D+ mm output shape, so we can reshape the 2D mm output to the intended
     #      3D+ shape before applying reduce-scatter, and to prevent shape errors with subsequent ops.
 
-    # If 'A' was reshaped from 3D+ -> 2D for the mm, we need to determine the new scattter dim after the reshape
+    # If 'A' was reshaped from 3D+ -> 2D for the mm, we need to determine the new scatter dim after the reshape
     # for the fused matmul reduce scatter implementation to use.
     if matmul.pre_mm_reshape:
         scatter_dim_after_maybe_reshape = _scatter_dim_after_reshape(
