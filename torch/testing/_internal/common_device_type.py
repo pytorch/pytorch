@@ -379,6 +379,18 @@ class DeviceTypeTestBase(TestCase):
     # If None (default), all ops in the @ops decorator's op_list generate variants.
     op_allowlist = None  # type: Optional[Collection[str]]
 
+    # Decorators and skips to apply to tests that are parametrized by modules.
+    # Keys are ModuleInfo.name (e.g. "nn.Linear", "nn.Conv2d"). Unlike OpInfo,
+    # ModuleInfo has no variant concept, so there is no "full_name" distinction.
+    module_overrides = None  # type: Optional[dict[str, list[DecorateInfo]]]
+
+    # An optional mechanism to limit which modules generate test variants.
+    # When set, only modules whose name is in this collection will generate tests.
+    # Keys are ModuleInfo.name (e.g. "nn.Linear", "nn.Conv2d").
+    # If None (default), all modules in the @modules decorator's module_info_list
+    # generate variants.
+    module_allowlist = None  # type: Optional[Collection[str]]
+
     # An optional skip mechanism built upon instantiate_device_type_tests(),
     # designed to filter generated tests at different granularities.
     #
@@ -483,6 +495,28 @@ class DeviceTypeTestBase(TestCase):
 
         ops.op_list = list(op_dict.values())
 
+    @classmethod
+    def _apply_module_overrides(cls, modules):
+        class_overrides = cls.module_overrides or {}
+
+        if not class_overrides:
+            return
+
+        module_dict = {m.name: m for m in copy.deepcopy(modules.module_info_list)}
+
+        for module_name, decorators in class_overrides.items():
+            for decorator in decorators:
+                if cls.device_type == "privateuse1":
+                    decorator.device_type = torch._C._get_privateuse1_backend_name()
+                else:
+                    decorator.device_type = cls.device_type
+                # module_name may not be in module_dict if @modules() has restricted
+                # the ModuleInfo list to a smaller set than module_overrides covers.
+                if module_name in module_dict:
+                    module_dict[module_name].decorators += (decorator,)
+
+        modules.module_info_list = list(module_dict.values())
+
     # Returns a string representing the device that single device tests should use.
     # Note: single device tests use this device exclusively.
     @classmethod
@@ -571,6 +605,25 @@ class DeviceTypeTestBase(TestCase):
         ops.op_list = [op for op in ops.op_list if op.full_name in supported_set]
 
     @classmethod
+    def _apply_module_allowlist(cls, modules):
+        """Filters modules.module_info_list to only include modules declared in module_allowlist.
+
+        If module_allowlist is None (default), no filtering is applied.
+        If module_allowlist is set, only modules whose name is in the collection
+        will generate test variants.
+
+        Args:
+            modules: The modules decorator instance whose module_info_list will be filtered.
+        """
+        if cls.module_allowlist is None:
+            return
+
+        supported_set = set(cls.module_allowlist)
+        modules.module_info_list = [
+            m for m in modules.module_info_list if m.name in supported_set
+        ]
+
+    @classmethod
     def _init_and_get_primary_device(cls):
         try:
             return cls.get_primary_device()
@@ -627,6 +680,8 @@ class DeviceTypeTestBase(TestCase):
         *,
         op_overrides=None,
         op_allowlist=None,
+        module_overrides=None,
+        module_allowlist=None,
         test_exclusions=None,
     ):
         """
@@ -639,6 +694,8 @@ class DeviceTypeTestBase(TestCase):
         """
         cls.op_overrides = op_overrides
         cls.op_allowlist = op_allowlist
+        cls.module_overrides = module_overrides
+        cls.module_allowlist = module_allowlist
         cls.test_exclusions = test_exclusions
 
     # Creates device-specific tests.
