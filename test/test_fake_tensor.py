@@ -2223,7 +2223,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""
 # subprocess environment.
 import numpy
 import torch
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 
 fake_mode = FakeTensorMode()
 with fake_mode:
