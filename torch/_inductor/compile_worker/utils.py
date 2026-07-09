@@ -21,7 +21,17 @@ def in_toplevel_process() -> bool:
 #
 # This function cannot be an inner function since otherwise mp_context="spawn" would
 # not work for ProcessPoolExecutor since inner functions cannot be pickled.
-def _async_compile_initializer(orig_ppid: int) -> None:
+def _async_compile_initializer(orig_ppid: int, close_fds: tuple[int, ...] = ()) -> None:
+    # In fork mode a worker inherits the sidecar's entire fd table, including the
+    # sidecar<->parent pipes. The worker must not keep those open: holding the
+    # result pipe's write end would stop the parent from ever seeing EOF when the
+    # sidecar dies. Closing a missing fd (e.g. under spawn) is harmless.
+    for fd in close_fds:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
     import torch._C
 
     def run() -> None:
