@@ -8,8 +8,8 @@ import math
 import torch
 from torch._functorch._aot_autograd.source_emit import (
     _emit_importable,
-    _emit_value,
     _REBUILD_HELPER,
+    emit_value,
 )
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymIntEqByExpr
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 def _emit(obj):
     """Emit source for ``obj`` and return ``(expr, sorted_imports)``."""
     imports: set[str] = set()
-    return _emit_value(obj, imports), sorted(imports)
+    return emit_value(obj, imports), sorted(imports)
 
 
 def _roundtrip(obj):
@@ -317,7 +317,12 @@ class TestSourceEmit(TestCase):
         self.assertEqual(_emit({3, 1, 2})[0], "set([1, 2, 3])")
         self.assertEqual(_emit(frozenset({3, 1, 2}))[0], "frozenset([1, 2, 3])")
         self.assertEqual(_emit({3, 1, 2})[0], _emit({2, 3, 1})[0])
-        # Unorderable elements (int vs str) fall back to sorting by emitted source.
+        # Sorting is by EMITTED SOURCE (a lexicographic string sort), not numeric, so a
+        # multi-digit int set orders "1" < "10" < "2" -- still deterministic. Lock that
+        # order so the canonicalization key can't silently regress to numeric/iteration.
+        self.assertEqual(_emit({1, 2, 10})[0], "set([1, 10, 2])")
+        # Unorderable elements (int vs str) also sort by emitted source; a numeric sort
+        # would raise a TypeError here.
         self.assertEqual(_emit({1, "a"})[0], "set(['a', 1])")
         self.assertEqual(_emit({1, "a", "b"})[0], _emit({"b", 1, "a"})[0])
 
@@ -357,7 +362,7 @@ class TestSourceEmit(TestCase):
         self.assertIsNone(symint.node.maybe_as_int())
         static = "specializes to static shapes"
         with self.assertRaisesRegex(NotImplementedError, static):
-            _emit_value(symint, set())
+            emit_value(symint, set())
 
     def test_symbolic_view_metadata_rejected(self):
         # SymIntEqByExpr wraps a sympy expr that must be a concrete integer to bake; a
@@ -368,7 +373,7 @@ class TestSourceEmit(TestCase):
         self.assertFalse(getattr(obj.val, "is_Integer", False))
         static = "specializes to static shapes"
         with self.assertRaisesRegex(NotImplementedError, static):
-            _emit_value(obj, set())
+            emit_value(obj, set())
 
     def test_view_meta_sequence_round_trips(self):
         # The view-replay-recipe branches (a ViewMeta via as_tuple, the ViewMetaSequence
@@ -410,11 +415,11 @@ class TestSourceEmit(TestCase):
         sym_bool = shape_env.create_unbacked_symbool()
         self.assertIsNone(sym_bool.node.maybe_as_bool())
         with self.assertRaisesRegex(NotImplementedError, static):
-            _emit_value(sym_bool, set())
+            emit_value(sym_bool, set())
         sym_float = shape_env.create_unbacked_symfloat()
         self.assertIsNone(sym_float.node.maybe_as_float())
         with self.assertRaisesRegex(NotImplementedError, static):
-            _emit_value(sym_float, set())
+            emit_value(sym_float, set())
 
     def test_concrete_symbool_symfloat_baked(self):
         # A SymBool / SymFloat that folds to a concrete value IS bakeable (mirroring SymInt),
@@ -452,11 +457,32 @@ class TestSourceEmit(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "self-referential"):
             _emit(d)
 
+    def test_shared_mutable_rejected(self):
+        # A mutable object reached twice (not on the recursion path -- as siblings) would
+        # be emitted as two independent literals, silently dropping the shared-identity
+        # aliasing (mutating one reconstructed copy would no longer affect the other). Fail
+        # loud instead, consistent with the module's other reject-don't-mis-bake guards.
+        a = [1, 2]
+        with self.assertRaisesRegex(NotImplementedError, "shared mutable"):
+            _emit([a, a])
+        d = {"k": 1}
+        with self.assertRaisesRegex(NotImplementedError, "shared mutable"):
+            _emit((d, d))
+        s = {1, 2}
+        with self.assertRaisesRegex(NotImplementedError, "shared mutable"):
+            _emit([s, s])
+        # An opaque reduce value object shared across positions is caught the same way,
+        # via _emit_via_reduce's guard rather than the container guard.
+        h = _Holder(3)
+        with self.assertRaisesRegex(NotImplementedError, "shared mutable"):
+            _emit([h, h])
+
     def test_repeated_leaf_is_not_a_cycle(self):
         # The cycle guard tracks only ancestors on the recursion path, not siblings, so a
         # leaf repeated across sibling positions is not a false cycle -- for a scalar...
         self.assertEqual(_emit([0, 0, 0]), ("[0, 0, 0]", []))
-        # ...and for a shared non-scalar object repeated as siblings.
+        # ...and for a shared IMMUTABLE object repeated as siblings (only shared MUTABLE
+        # objects are rejected; an immutable tuple has no aliasing to lose).
         inner = (1, 2)
         self.assertEqual(_emit([inner, inner]), ("[(1, 2), (1, 2)]", []))
 
