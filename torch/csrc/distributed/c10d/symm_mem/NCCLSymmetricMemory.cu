@@ -496,13 +496,15 @@ std::string NCCLSymmetricMemory::get_group_name() {
 
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
+  // Allocates a symmetric-memory region laid out as [signal pad | data buffer]:
+  // the signal pad occupies [0, buffer_offset) and the user data buffer starts
+  // at buffer_offset. Returns the data buffer pointer (alloc_base +
+  // buffer_offset), NOT the allocation base -- the signal pad stays hidden in
+  // front, and free()/rendezvous() key off this returned data pointer.
   void* alloc(
       size_t size,
       int device_idx,
       const std::optional<std::string>& group_name) override {
-    // Returns the data buffer pointer (alloc_base + buffer_offset), not
-    // alloc_base; the signal pad stays hidden in front and free()/rendezvous()
-    // key off this returned pointer.
     TORCH_CHECK(
         group_name == std::nullopt,
         "NCCLSymmetricMemoryAllocator::alloc "
