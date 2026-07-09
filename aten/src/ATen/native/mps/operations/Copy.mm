@@ -1,7 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
-#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -75,25 +74,14 @@ static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* a
   return (void*)alignedAddress;
 }
 
-// Returns a retained (+1) MTLBuffer and byte offset for the host side of a
-// CPU<->MPS copy; the caller releases the buffer once the blit is encoded. A
-// pinned CPU tensor already owns a shared (unified-memory) MTLBuffer, so we retain
-// and blit from/to it directly; otherwise the host pages are wrapped with
-// newBufferWithBytesNoCopy, retaining the storage across an async copy so the pages
-// outlive the in-flight blit.
+// Returns an autoreleased MTLBuffer and byte offset for the host side of a
+// CPU<->MPS copy; it stays valid for the caller's enclosing @autoreleasepool. The
+// host pages are wrapped with newBufferWithBytesNoCopy, retaining the storage
+// across an async copy so the pages outlive the in-flight blit.
 static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const at::Tensor& cpu_tensor,
                                                                            size_t nbytes,
                                                                            bool non_blocking) {
   const auto byte_offset = cpu_tensor.storage_offset() * cpu_tensor.itemsize();
-  // Blit directly from/to the pinned tensor's own shared MTLBuffer, avoiding the
-  // newBufferWithBytesNoCopy wrapper. Metal blit offsets must be 4-byte aligned.
-  if (void* pinned = at::mps::getMPSPinnedMTLBuffer(cpu_tensor.storage().data()); pinned && byte_offset % 4 == 0) {
-    // Mark the buffer so that if it is freed while this copy's blit is still in
-    // flight, the allocator defers recycling it instead of handing it to a new
-    // allocation that could CPU-overwrite it before the GPU is done.
-    at::mps::getIMPSAllocator()->recordEvents({pinned});
-    return {[__builtin_bit_cast(id<MTLBuffer>, pinned) retain], static_cast<NSUInteger>(byte_offset)};
-  }
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   const void* host = static_cast<const char*>(cpu_tensor.storage().data()) + byte_offset;
   NSUInteger alignedLength = 0;
@@ -102,12 +90,12 @@ static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const
   // deadlock Metal's completion thread on the GIL.
   auto* storage = non_blocking ? new c10::Storage(cpu_tensor.storage()) : nullptr;
   MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
-  id<MTLBuffer> buffer = [device newBufferWithBytesNoCopy:alignedPtr
-                                                   length:alignedLength
-                                                  options:options
-                                              deallocator:^(void*, NSUInteger) {
-                                                delete storage;
-                                              }];
+  id<MTLBuffer> buffer = [[device newBufferWithBytesNoCopy:alignedPtr
+                                                    length:alignedLength
+                                                   options:options
+                                               deallocator:^(void*, NSUInteger) {
+                                                 delete storage;
+                                               }] autorelease];
   return {buffer, static_cast<NSUInteger>(uintptr_t(host) - uintptr_t(alignedPtr))};
 }
 
@@ -192,7 +180,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
       stream->copy_and_sync(
           maybeCastedSourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
     }
-    [destBuffer release];
   }
   if (!dst.is_same(dst_)) {
     dst_.copy_(dst, non_blocking);
@@ -217,7 +204,6 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
 
     stream->copy_and_sync(
         sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking, profile_id);
-    [sourceBuffer release];
   }
 }
 
