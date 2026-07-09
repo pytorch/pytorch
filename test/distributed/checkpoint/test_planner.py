@@ -146,6 +146,8 @@ class TestSavePlan(TestCase):
     def test_checkpointable_tensor_shard_save_load(self):
         expected = torch.arange(8, dtype=torch.float32)
         tensor = expected.clone()
+        # Model one rank that owns two non-contiguous chunks of a logical
+        # tensor. The global [4:12] range is intentionally not represented here.
         tensor.global_shape = (16,)
         tensor.global_offsets = ((0,), (12,))
         tensor.local_offsets = ((0,), (4,))
