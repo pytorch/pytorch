@@ -40,13 +40,14 @@ L1:
   - riseproject-dev/pytorch-ci
   - NVIDIA-dev/pytorch-oot-internal
   - NVIDIA/pytorch-windows-ci
+  - google-pytorch/torch_tpu
 
 L2:
-  # Canonical test repo for CRCR.
   - TorchedHat/pytorch-redhat-ci
   - Ascend/pytorch
   - torch-spyre/torch-spyre
 
 L3:
+  # Canonical test repos for CRCR.
   crcr-test:
     pytorch/crcr-test: [atalman, can-gaa-hou, fffrog, jewelkm89, KarhouTam, subinz1]
