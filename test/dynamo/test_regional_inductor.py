@@ -638,6 +638,81 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
         self.assertTrue(any("invoke_subgraph" in name for name in outer_target_names))
         self.assertFalse(any("aten.sin.default" in name for name in outer_target_names))
 
+    @staticmethod
+    def _generated_fn_body(code, signature):
+        # Slice one function/method body out of generated wrapper code: the
+        # signature line plus every following line indented deeper than it.
+        start = code.index(signature)
+        indent = start - (code.rfind("\n", 0, start) + 1)
+        lines = code[start:].split("\n")
+        body = [lines[0]]
+        for line in lines[1:]:
+            if line.strip() and (len(line) - len(line.lstrip())) <= indent:
+                break
+            body.append(line)
+        return "\n".join(body)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(fx_graph_cache=False, fx_graph_remote_cache=False)
+    def test_nested_region_inductor_config_multi_kernel_codegen(self):
+        # triton.multi_kernel set only on the region must change the region's
+        # generated code, not the parent's. The region body is emitted as
+        # `repeated_subgraph0` and the parent as `call`. fx_graph_cache is off to
+        # dodge a triton multi-kernel cache-reload issue unrelated to threading.
+        nested_config = get_invoke_subgraph_compile_options(
+            inductor_config_patches={"triton.multi_kernel": True}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.softmax(x, dim=-1) + 1
+
+        def fn(x):
+            y = torch.softmax(x, dim=-1) * 2
+            return g(y)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        x = torch.randn(4096, 256, device="cuda")
+        result, codes = run_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 1)
+        region_code = self._generated_fn_body(codes[0], "def repeated_subgraph0(")
+        parent_code = self._generated_fn_body(codes[0], "def call(self, args):")
+        self.assertIn("multi_kernel", region_code)
+        self.assertNotIn("multi_kernel", parent_code)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_nested_region_inductor_config_persistent_reduction_codegen(self):
+        # triton.persistent_reductions=False set only on the region forces its
+        # reduction to be looped (triton_red_*) while the parent keeps its
+        # persistent kernel (triton_per_*).
+        nested_config = get_invoke_subgraph_compile_options(
+            inductor_config_patches={"triton.persistent_reductions": False}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.softmax(x, dim=-1) + 1
+
+        def fn(x):
+            y = torch.softmax(x, dim=-1) * 2
+            return g(y)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        x = torch.randn(4096, 256, device="cuda")
+        result, codes = run_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 1)
+        region_code = self._generated_fn_body(codes[0], "def repeated_subgraph0(")
+        parent_code = self._generated_fn_body(codes[0], "def call(self, args):")
+        self.assertIn("triton_red_", region_code)
+        self.assertNotIn("triton_per_", region_code)
+        self.assertIn("triton_per_", parent_code)
+
     def test_custom_decomposition(self):
         # Test that custom decompositions are applied to the subgraph.
 
