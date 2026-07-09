@@ -382,7 +382,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
                 )
             wrapper.initialized_kernels[name] = self
             # We always originally initialize name with "KERNEL_NAME". So, we
-            # we replace with the real kernel name passed as an arg to this function.
+            # replace with the real kernel name passed as an arg to this function.
             self.signature = self.signature.replace(str(Placeholder.KERNEL_NAME), name)
             _, call_args, arg_types = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
         else:

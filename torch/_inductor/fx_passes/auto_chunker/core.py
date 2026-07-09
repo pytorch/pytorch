@@ -169,7 +169,7 @@ def reorder_nodes(graph: Graph) -> Graph:
     from .applier import is_chunking_subgraph_input
 
     # `pre_chunking_nodes` are all nodes that only depends on
-    # nodes inside `pre_chuning_nodes`
+    # nodes inside `pre_chunking_nodes`
     pre_chunking_nodes: OrderedSet[Node] = OrderedSet()
 
     for node in graph.nodes:
@@ -208,7 +208,7 @@ def reorder_nodes(graph: Graph) -> Graph:
             post_chunking_nodes.append(node)
 
     for node in post_chunking_nodes:
-        _copy_node("postchuking", node)
+        _copy_node("postchunking", node)
 
     if graph._len != new_graph._len:
         raise AssertionError(

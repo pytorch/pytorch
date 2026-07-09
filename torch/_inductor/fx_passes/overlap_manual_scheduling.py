@@ -193,7 +193,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
     """
     Buckets collective operations based on user specifications.
     The actual bucket happens in bucket_collectives, where all-gathers/reduce-scatters in
-        `nodes` will be buckted one single all-gather/reduce-scatter.
+        `nodes` will be bucketed one single all-gather/reduce-scatter.
     """
 
     def __init__(

@@ -977,14 +977,14 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             info = self._index_symbol_info.get(sym)
             if info is not None:
                 if info.expr is None:
-                    # If we dont know the semantics of the index, we cannot determine lane behavior.
+                    # If we don't know the semantics of the index, we cannot determine lane behavior.
                     # So we default to safe/pessimistic behavior: per-lane gather, no uniformity, no contiguity.
                     return False, False, None
                 contiguous_ok &= info.contiguous_ok
 
         semantic_expr = self._semantic_index_expr(expr)
         if self._has_unresolved_index_symbols(semantic_expr):
-            # ditto -> we dont know so choose safe/pessimistic behavior
+            # ditto -> we don't know so choose safe/pessimistic behavior
             return False, False, None
 
         lane_info = classify_lane_expr(

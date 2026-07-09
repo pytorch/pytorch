@@ -2030,7 +2030,7 @@ def record_compilation_metrics(
         # without making it inconsistent with compilation metrics itself, so
         # we ignore the (hopefully small) time spent logging compilation metrics
         record_logging_overhead=False,
-        # These may be runtime logs, e.g., runtime autotunning, so we provide
+        # These may be runtime logs, e.g., runtime autotuning, so we provide
         # the CompileId from the compilation metrics in case it's not available
         # in the current trace.
         compile_id=compile_id,

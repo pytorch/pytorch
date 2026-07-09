@@ -174,7 +174,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
 
         # Test the case where rpc.remote() times out, but to_here() has already
         # started blocking before.
-        # NOTE: we only test this when not sending to self, as to_here() calls
+        # NOTE: we only test this when not sending to self, as to_here()
         # calls localValue(), which does not send an RPC and thus does not have
         # a timeout. This can be supported by allowing future.wait() to
         # take in an optional timeout (https://github.com/pytorch/pytorch/issues/39280)

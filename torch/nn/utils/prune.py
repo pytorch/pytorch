@@ -166,7 +166,7 @@ class BasePruningMethod(ABC):
 
         # If this is the first time pruning is applied, take care of moving
         # the original tensor to a new parameter called name + '_orig' and
-        # and deleting the original parameter
+        # deleting the original parameter
         if not isinstance(method, PruningContainer):
             # copy `module[name]` to `module[name + '_orig']`
             module.register_parameter(name + "_orig", orig)
