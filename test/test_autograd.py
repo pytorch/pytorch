@@ -122,7 +122,7 @@ def graph_desc(fn):
 class TestAutograd(TestCase):
     def tearDown(self):
         torch.autograd._force_original_view_tracking(False)
-        super(TestCase, self).tearDown()
+        super().tearDown()
 
     def test_copy_slices_graph_task_updates(self):
         def f1(x, y):
@@ -4355,6 +4355,10 @@ class TestAutograd(TestCase):
             torch._dynamo.reset()
 
             prev = torch.get_default_device()
+            had_default_device = (
+                getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+                is not None
+            )
             try:
                 # Using torch.device("cuda") directly doesn't work here because
                 # it has some issues. In particular, unlike set_default_device or
@@ -4365,7 +4369,8 @@ class TestAutograd(TestCase):
                 out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
                 out.sum().backward()
             finally:
-                torch.set_default_device(prev)
+                # None clears the DeviceContext mode; "cpu" would leak it.
+                torch.set_default_device(prev if had_default_device else None)
 
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             if expect_fail:
@@ -4378,12 +4383,17 @@ class TestAutograd(TestCase):
     def test_checkpoint_device_context_fn(self):
         @contextlib.contextmanager
         def apply_device(device):
+            prev = torch.get_default_device()
+            had_default_device = (
+                getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+                is not None
+            )
             try:
-                prev = torch.get_default_device()
                 torch.set_default_device(device)
                 yield
             finally:
-                torch.set_default_device(prev)
+                # None clears the DeviceContext mode; "cpu" would leak it.
+                torch.set_default_device(prev if had_default_device else None)
 
         def context_fn():
             return contextlib.nullcontext(), apply_device("cuda")

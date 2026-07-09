@@ -5716,11 +5716,11 @@ hop_test_hops_in_bwd_failures = {
 
 class TestCompiledAutogradOpInfo(TestCase):
     def setUp(self) -> None:
-        super(TestCase, self).setUp()
+        super().setUp()
         reset()
 
     def tearDown(self) -> None:
-        super(TestCase, self).tearDown()
+        super().tearDown()
         reset()
 
     @ops(
