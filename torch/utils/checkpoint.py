@@ -342,7 +342,7 @@ def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
 
-class _CheckpointFunction:
+class _CheckpointedFunction:
     def __init__(self, function, **checkpoint_kwargs):
         self.function = function
         self.checkpoint_kwargs = dict(checkpoint_kwargs)
@@ -357,6 +357,10 @@ class _CheckpointFunction:
         )
 
     def __get__(self, instance, owner=None):
+        # Supports using the curried form as a method decorator. When accessed
+        # off an instance, bind the wrapped function to that instance via its
+        # own descriptor protocol and re-wrap, so the checkpoint config carries
+        # over to the bound method.
         if instance is None:
             return self
         descriptor_get = getattr(self.function, "__get__", None)
@@ -369,7 +373,7 @@ class _CheckpointFunction:
 
 
 def _make_checkpoint_wrapper(function, **checkpoint_kwargs):
-    return _CheckpointFunction(function, **checkpoint_kwargs)
+    return _CheckpointedFunction(function, **checkpoint_kwargs)
 
 
 # Note: [torch.compile and checkpoint]
@@ -531,6 +535,11 @@ def checkpoint(
         ...     preserve_rng_state=False,
         ... )(fn)
         >>> out = checkpointed_fn(*args, **kwargs)
+        >>> # The same decorator can be applied directly to a function or method.
+        >>> @torch.utils.checkpoint.checkpoint(use_reentrant=False)
+        ... def fn(*args, **kwargs):
+        ...     ...
+        >>> out = fn(*args, **kwargs)
     """
     if function is None and not args:
         if kwargs:
@@ -599,7 +608,7 @@ def _checkpoint_impl(
             )
         return CheckpointFunction.apply(function, preserve, *args)
     else:
-        gen = _checkpoint_without_reentrant_generator(
+        gen = _checkpoint_without_reentrant_generator_impl(
             function,
             args,
             kwargs,
@@ -1652,6 +1661,32 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
 #     saving/restoring of global state is handled here.
 
 def _checkpoint_without_reentrant_generator(
+    fn,
+    preserve_rng_state=True,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
+    debug: bool = False,
+    early_stop: bool = True,
+    *args,
+    **kwargs,
+):
+    # BC shim: this retains the original positional-args signature (args/kwargs
+    # trailing the config) for out-of-tree callers that invoke it positionally.
+    # New in-tree callers should use _checkpoint_without_reentrant_generator_impl,
+    # which takes args/kwargs as explicit tuple/dict parameters.
+    return _checkpoint_without_reentrant_generator_impl(
+        fn,
+        args,
+        kwargs,
+        preserve_rng_state=preserve_rng_state,
+        context_fn=context_fn,
+        determinism_check=determinism_check,
+        debug=debug,
+        early_stop=early_stop,
+    )
+
+
+def _checkpoint_without_reentrant_generator_impl(
     fn,
     args,
     kwargs,
