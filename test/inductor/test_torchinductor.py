@@ -4768,6 +4768,10 @@ for dtype in (torch.int32, torch.int64):
             return torch.dot(a, b) + torch.dot(a, b)
 
         fn = torch.vmap(dot_based)
+        is_gfx1100 = (
+            TEST_WITH_ROCM
+            and torch.cuda.get_device_properties(0).gcnArchName.split(":")[0] == "gfx1100"
+        )
         bmm_codegen_call = (
             "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
         )
@@ -4793,7 +4797,12 @@ for dtype in (torch.int32, torch.int64):
                     actual, code = run_and_get_code(
                         torch.compile(fn, fullgraph=True), a, b
                     )
-                    self.assertEqual(actual, expected)
+                    # TODO: Temporary workaround bf16 accuracy issue for gfx1100, remove once that ticket is fixed.
+                    # Issue created https://github.com/AMD-Triton/triton-tickets/issues/1909 to track the fix.
+                    if is_gfx1100 and dtype == torch.bfloat16:
+                        self.assertEqual(actual, expected, atol=0.05, rtol=0.1)
+                    else:
+                        self.assertEqual(actual, expected)
                     code_str = "\n".join(code)
                     self.assertNotIn(bmm_codegen_call, code_str)
                     self.assertNotIn(bmm_fallback_call, code_str)
