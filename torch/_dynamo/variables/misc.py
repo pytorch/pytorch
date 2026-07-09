@@ -72,7 +72,13 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    Method,
+    MethodFlags,
+    NO_SUCH_SUBOBJ,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .object_protocol import generic_str
@@ -700,14 +706,20 @@ class ExceptionVariable(VariableTracker):
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
             return variables.ConstantVariable.create(None)
-        elif name == "with_traceback":
-            [tb] = args
-            if not TracebackVariable.is_valid_traceback(tb):
-                raise_type_error(tx, "__traceback__ must be a traceback object or None")
-            self.__traceback__ = tb
-            return self
-        else:
-            return super().call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def with_traceback(self, tx, args, kwargs):
+        [tb] = args
+        if not TracebackVariable.is_valid_traceback(tb):
+            raise_type_error(tx, "__traceback__ must be a traceback object or None")
+        self.__traceback__ = tb
+        return self
+
+    tp_methods = {
+        "with_traceback": Method(
+            with_traceback, MethodFlags.VARARGS | MethodFlags.KEYWORDS
+        ),
+    }
 
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2552,6 +2564,78 @@ class RandomVariable(VariableTracker):
         RandomVariable.check_state(state_obj)
         return state_obj
 
+    def seed(self, tx, args, kwargs):
+        tx.output.side_effects.mutation(self)
+        self.random.seed(
+            *[x.as_python_constant() for x in args],
+            **{key: val.as_python_constant() for key, val in kwargs.items()},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def getstate(self, tx, args, kwargs):
+        return self.wrap_state(self.random.getstate())
+
+    def setstate(self, tx, args, kwargs):
+        tx.output.side_effects.mutation(self)
+        self.random.setstate(self.unwrap_state(args[0]))
+        return variables.ConstantVariable.create(None)
+
+    def shuffle(self, tx, args, kwargs):
+        name = "shuffle"
+        if len(args) != 1 or kwargs:
+            raise_args_mismatch(
+                tx,
+                name,
+                "1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        seq = args[0].realize()
+        tx.output.side_effects.mutation(self)
+        # shuffle's permutation depends only on the sequence length and the
+        # RNG state, not on the elements, so shuffle a list of indices to
+        # both advance the symbolic RNG and obtain the permutation to apply.
+        if not hasattr(seq, "items"):
+            raise AssertionError("shuffle only supports ListVariable and TupleVariable")
+        perm = list(range(len(seq.items)))
+        self.random.shuffle(perm)
+        tx.output.side_effects.mutation(seq)
+        seq.items[:] = [seq.items[i] for i in perm]
+        return variables.ConstantVariable.create(None)
+
+    def sample(self, tx, args, kwargs):
+        name = "sample"
+        if kwargs or len(args) != 2:
+            raise_args_mismatch(
+                tx,
+                name,
+                "2 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        elems = unpack_iterable(tx, args[0])
+        k = args[1].as_python_constant()
+        if not isinstance(k, int) or k < 0 or k > len(elems):
+            raise_value_error(
+                tx,
+                "Sample larger than population or is negative",
+            )
+        tx.output.side_effects.mutation(self)
+        # Like shuffle, sample's selected positions depend only on the
+        # population length and RNG state, so sample over an index range to
+        # advance the symbolic RNG and pick the population elements to keep.
+        indices = self.random.sample(range(len(elems)), k)
+        return variables.ListVariable(
+            [elems[i] for i in indices],
+            mutation_type=variables.base.ValueMutationNew(),
+        )
+
+    tp_methods = {
+        "seed": Method(seed, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "getstate": Method(getstate, MethodFlags.NOARGS),
+        "setstate": Method(setstate, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "shuffle": Method(shuffle, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "sample": Method(sample, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+    }
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2559,66 +2643,7 @@ class RandomVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "seed":
-            tx.output.side_effects.mutation(self)
-            self.random.seed(
-                *[x.as_python_constant() for x in args],
-                **{key: val.as_python_constant() for key, val in kwargs.items()},
-            )
-            return variables.ConstantVariable.create(None)
-        elif name == "getstate":
-            return self.wrap_state(self.random.getstate())
-        elif name == "setstate":
-            tx.output.side_effects.mutation(self)
-            self.random.setstate(self.unwrap_state(args[0]))
-            return variables.ConstantVariable.create(None)
-        elif name == "shuffle":
-            if len(args) != 1 or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            seq = args[0].realize()
-            tx.output.side_effects.mutation(self)
-            # shuffle's permutation depends only on the sequence length and the
-            # RNG state, not on the elements, so shuffle a list of indices to
-            # both advance the symbolic RNG and obtain the permutation to apply.
-            if not hasattr(seq, "items"):
-                raise AssertionError(
-                    "shuffle only supports ListVariable and TupleVariable"
-                )
-            perm = list(range(len(seq.items)))
-            self.random.shuffle(perm)
-            tx.output.side_effects.mutation(seq)
-            seq.items[:] = [seq.items[i] for i in perm]
-            return variables.ConstantVariable.create(None)
-        elif name == "sample":
-            if kwargs or len(args) != 2:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "2 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            elems = unpack_iterable(tx, args[0])
-            k = args[1].as_python_constant()
-            if not isinstance(k, int) or k < 0 or k > len(elems):
-                raise_value_error(
-                    tx,
-                    "Sample larger than population or is negative",
-                )
-            tx.output.side_effects.mutation(self)
-            # Like shuffle, sample's selected positions depend only on the
-            # population length and RNG state, so sample over an index range to
-            # advance the symbolic RNG and pick the population elements to keep.
-            indices = self.random.sample(range(len(elems)), k)
-            return variables.ListVariable(
-                [elems[i] for i in indices],
-                mutation_type=variables.base.ValueMutationNew(),
-            )
-        elif name in self._supported_fn_names:
+        if name in self._supported_fn_names:
             tx.output.side_effects.mutation(self)
             state = self.random.getstate()
 

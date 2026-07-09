@@ -18,7 +18,7 @@ from ..graph_bytecode_inputs import (
     reset_user_object_tracking,
 )
 from ..source import CurrentStreamSource
-from .base import VariableTracker
+from .base import Method, MethodFlags, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
 from .lazy import LazyVariableTracker
@@ -422,91 +422,92 @@ class StreamVariable(StreamContextVariable):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not hasattr(self.value, name):
-            raise AssertionError(f"no stream method found named {name}")
+    def wait_event(self, tx, args, kwargs):
+        event_arg = args[0]
+        if not isinstance(event_arg, EventVariable):
+            raise AssertionError(f"Expected EventVariable, got {type(event_arg)}")
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.wait_event,
+            (event_arg.user_object_index, self.user_object_index),
+            {},
+        )
+        return ConstantVariable.create(None)
 
+    def wait_stream(self, tx, args, kwargs):
+        other_stream = args[0]
+        if not isinstance(other_stream, StreamVariable):
+            raise AssertionError(f"Expected StreamVariable, got {type(other_stream)}")
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.wait_stream,
+            (self.user_object_index, other_stream.user_object_index),
+            {},
+        )
+        return ConstantVariable.create(None)
+
+    def synchronize(self, tx, args, kwargs):
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.synchronize_stream,
+            (self.user_object_index,),
+            {},
+        )
+        return ConstantVariable.create(None)
+
+    def query(self, tx, args, kwargs):
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
-        if name == "wait_event":
-            event_arg = args[0]
-            if not isinstance(event_arg, EventVariable):
-                raise AssertionError(f"Expected EventVariable, got {type(event_arg)}")
-            tx.output.create_proxy(
-                "call_function",
-                torch.ops.streams.wait_event,
-                (event_arg.user_object_index, self.user_object_index),
-                {},
-            )
-            return ConstantVariable.create(None)
-        elif name == "wait_stream":
-            other_stream = args[0]
-            if not isinstance(other_stream, StreamVariable):
-                raise AssertionError(
-                    f"Expected StreamVariable, got {type(other_stream)}"
-                )
-            tx.output.create_proxy(
-                "call_function",
-                torch.ops.streams.wait_stream,
-                (self.user_object_index, other_stream.user_object_index),
-                {},
-            )
-            return ConstantVariable.create(None)
-        elif name == "synchronize":
-            tx.output.create_proxy(
-                "call_function",
-                torch.ops.streams.synchronize_stream,
-                (self.user_object_index,),
-                {},
-            )
-            return ConstantVariable.create(None)
-        elif name == "query":
-            return wrap_fx_proxy_cls(
-                target_cls=ConstantVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
-                ),
-            )
-        elif name == "record_event":
-            from .builder import wrap_fx_proxy
+        return wrap_fx_proxy_cls(
+            target_cls=ConstantVariable,
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_method", "query", *proxy_args_kwargs([self] + args, kwargs)
+            ),
+        )
 
-            tx.output.check_event_record_after_input_mutation(id(self.value))
-            if args and isinstance(args[0], EventVariable):
-                event_var = args[0]
-                event = event_var.value
-                event_index = event_var.user_object_index
-            else:
-                event = self.value.record_event()
-                event_index = register_graph_created_object(
-                    event,
-                    EventVariable.make_construct_in_graph_event_fn(
-                        TupleVariable([]), ConstDictVariable({})
-                    ),
-                )
-            tx.output.create_proxy(
-                "call_function",
-                torch.ops.streams.record_event,
-                (event_index, self.user_object_index),
-                {},
-            )
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    get_external_object_by_index,
-                    (event_index,),
-                    {},
+    def record_event(self, tx, args, kwargs):
+        from .builder import wrap_fx_proxy
+
+        tx.output.check_event_record_after_input_mutation(id(self.value))
+        if args and isinstance(args[0], EventVariable):
+            event_var = args[0]
+            event = event_var.value
+            event_index = event_var.user_object_index
+        else:
+            event = self.value.record_event()
+            event_index = register_graph_created_object(
+                event,
+                EventVariable.make_construct_in_graph_event_fn(
+                    TupleVariable([]), ConstDictVariable({})
                 ),
             )
-        return super().call_method(tx, name, args, kwargs)
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_event,
+            (event_index, self.user_object_index),
+            {},
+        )
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                get_external_object_by_index,
+                (event_index,),
+                {},
+            ),
+        )
+
+    tp_methods = {
+        "wait_event": Method(wait_event, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "wait_stream": Method(wait_stream, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "synchronize": Method(synchronize, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "query": Method(query, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "record_event": Method(
+            record_event, MethodFlags.VARARGS | MethodFlags.KEYWORDS
+        ),
+    }
 
     def richcompare_impl(self, tx, other, op):
         from ..guards import GuardBuilder, install_guard
@@ -638,6 +639,61 @@ class EventVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
+    def wait(self, tx, args, kwargs):
+        _, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.wait_event,
+            (
+                self.user_object_index,
+                stream_index,
+            ),
+            {},
+        )
+        return ConstantVariable.create(None)
+
+    def record(self, tx, args, kwargs):
+        stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
+        tx.output.check_event_record_after_input_mutation(id(stream_arg.value))
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.record_event,
+            (
+                self.user_object_index,
+                stream_index,
+            ),
+            {},
+        )
+        return ConstantVariable.create(None)
+
+    def synchronize(self, tx, args, kwargs):
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.streams.synchronize_event,
+            (self.user_object_index,),
+            {},
+        )
+        return ConstantVariable.create(None)
+
+    def query(self, tx, args, kwargs):
+        from ..utils import proxy_args_kwargs
+        from .builder import wrap_fx_proxy_cls
+
+        return wrap_fx_proxy_cls(
+            target_cls=ConstantVariable,
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_method", "query", *proxy_args_kwargs([self] + args, kwargs)
+            ),
+        )
+
+    tp_methods = {
+        "wait": Method(wait, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "record": Method(record, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "synchronize": Method(synchronize, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "query": Method(query, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+    }
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -645,63 +701,23 @@ class EventVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from ..utils import proxy_args_kwargs
-        from .builder import wrap_fx_proxy_cls
-
-        if name == "wait":
-            _, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
-            tx.output.create_proxy(
-                "call_function",
-                torch.ops.streams.wait_event,
-                (
-                    self.user_object_index,
-                    stream_index,
-                ),
-                {},
-            )
-            return ConstantVariable.create(None)
-        elif name == "record":
-            stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
-            tx.output.check_event_record_after_input_mutation(id(stream_arg.value))
-            tx.output.create_proxy(
-                "call_function",
-                torch.ops.streams.record_event,
-                (
-                    self.user_object_index,
-                    stream_index,
-                ),
-                {},
-            )
-            return ConstantVariable.create(None)
-        elif name == "synchronize":
-            tx.output.create_proxy(
-                "call_function",
-                torch.ops.streams.synchronize_event,
-                (self.user_object_index,),
-                {},
-            )
-            return ConstantVariable.create(None)
-        elif name == "query":
-            return wrap_fx_proxy_cls(
-                target_cls=ConstantVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
-                ),
-            )
-        else:
-            method_name = (
-                f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
-            )
-            unimplemented(
-                gb_type="Unsupported event method",
-                context=str(name),
-                explanation=f"Dynamo doesn't support tracing the {method_name} method. "
-                f"We currently support wait, record, synchronize, and query.",
-                hints=[
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
+        # Event supports only the tp_methods above; every other name (including
+        # dunders) graph-breaks with an event-specific message rather than the
+        # generic "Unsupported method call".
+        if name in self.tp_methods:
+            return super().call_method(tx, name, args, kwargs)
+        method_name = (
+            f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
+        )
+        unimplemented(
+            gb_type="Unsupported event method",
+            context=str(name),
+            explanation=f"Dynamo doesn't support tracing the {method_name} method. "
+            f"We currently support wait, record, synchronize, and query.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def as_proxy(self) -> Proxy:
         return self.proxy
