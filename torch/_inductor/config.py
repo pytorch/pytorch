@@ -2103,20 +2103,30 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 32 if torch.version.hip else 16
 
-    # Generate code containing the newer tl.make_block_ptr() API for loads/store
-    use_block_ptr = False
+    # Generate code containing the tl.make_block_ptr() API for loads/store
+    use_block_ptr = Config(
+        default=False,
+        deprecated=True,
+        deprecation_message=(
+            "uses Triton block pointers, which are deprecated in favor "
+            "of tensor descriptors; migrate to triton.use_tensor_descriptor "
+            "when applicable"
+        ),
+    )
 
     # (Experimental)
-    # Generate code using the tl.make_tensor_descriptor() API for loads/store
-    # [Note: TMA API Restrictions] Currently the TMA API requires the following:
+    # Generate code using the tl.make_tensor_descriptor() API for load / store when applicable.
+    # Tensor descriptors will only be generated if read / write index expressions
+    # correspond to strided block reads / writes. Additional usage restrictions are that
+    # tensor descriptors must have an innermost stride of 1, and for CUDA the following
+    # TMA restrictions apply:
+    # [Note: TMA API Restrictions]
     # - For Nvidia GPUs, the compute capability should be >= 9.0
     # - The innermost stride of a descriptor should be 1
     # - The size of the block shape in the innermost dimension should load / store
     #   at least 16 bytes.
     # - Tensors are 16 byte aligned. Enabling this option therefore requires
     #   assume_aligned_inputs to also be enabled
-    # TMA descriptors are only going to be generated if the above conditions
-    # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
 
     # (Experimental)
