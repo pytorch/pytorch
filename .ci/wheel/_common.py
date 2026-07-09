@@ -10,11 +10,13 @@ numpy pin) reaches every pipeline.
 Import from a sibling stage script with, e.g.:
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
-    from _common import numpy_pin, pip_install, write_env_exports
+    from _common import install_numpy, pip_install, write_env_exports
 """
 
 from __future__ import annotations
 
+import importlib.metadata
+import importlib.util
 import re
 import subprocess
 import sys
@@ -37,11 +39,12 @@ _BASH_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # Picking the oldest wheel-bearing minor keeps the build off an sdist; it
 # does NOT widen the shipped wheel's runtime numpy range -- torch never
 # defines NPY_TARGET_VERSION, so that floor is identical whichever numpy 2.x
-# builds it. Listed explicitly (rather than a prefix match with a default)
-# so an unsupported version -- e.g. a new Python without numpy wheels yet --
-# fails loudly instead of silently picking a stale fallback. Freethreaded
-# builds (e.g. 3.14t) share their base version's pin, since sys.version_info
-# does not distinguish them.
+# builds it. Listed explicitly (rather than a prefix match with a default) so
+# an unsupported version can never silently pick a stale pin: a Python with
+# no entry builds against a numpy the CI image pre-provisioned, and fails
+# loudly when there is none (see install_numpy). Freethreaded builds (e.g.
+# 3.14t) share their base version's pin, since sys.version_info does not
+# distinguish them.
 #
 # Keep in sync with the numpy case in .ci/wheel/linux/build_common.sh, which
 # serves the s390x build -- the one Linux arch that does not run this
@@ -152,12 +155,51 @@ def pip_install(*args: str) -> None:
     retry([sys.executable, "-m", "pip", "install", *args])
 
 
-def numpy_pin() -> str:
+def _preexisting_numpy() -> str | None:
+    """Version of a numpy already present in this interpreter, or None.
+
+    Captured at import time, which is before any stage installs anything.
+    Probing later would be useless: on Linux and macOS the stage installs
+    `requirements-build.txt`, which lists a bare `numpy`, so a probe after
+    that point always finds one and the fail-loud branch below could never
+    fire.
+    """
+    if importlib.util.find_spec("numpy") is None:
+        return None
+    try:
+        return importlib.metadata.version("numpy")
+    except importlib.metadata.PackageNotFoundError:
+        # Importable without dist-info -- vendored into the image by hand.
+        return "unknown version"
+
+
+_IMAGE_NUMPY = _preexisting_numpy()
+
+
+def install_numpy(*pip_args: str) -> None:
+    """Install the numpy build-time pin for this interpreter.
+
+    For a Python with no table entry, fall back to a numpy the build image
+    pre-provisioned; fail loudly when the image ships none, so an unpinned
+    Python can never quietly build against whatever pip last resolved.
+
+    ``pip_args`` are passed through to the install. They exist for flags that
+    only matter when pip has to build numpy from an sdist (Windows cp315
+    passes ``--no-build-isolation``); they are inert when the pin resolves to
+    a wheel, so callers should not try to predict which case they are in.
+    """
     version = f"{sys.version_info.major}.{sys.version_info.minor}"
     pin = NUMPY_PINS.get(version)
-    if pin is None:
+    if pin is not None:
+        pip_install("-q", *pip_args, f"numpy=={pin}")
+    elif _IMAGE_NUMPY is not None:
+        print(
+            f"No numpy pin for Python {version}; "
+            f"using image-provisioned numpy {_IMAGE_NUMPY}"
+        )
+    else:
         sys.exit(
             f"Unsupported Python version {version}: add a numpy pin to "
-            "NUMPY_PINS in .ci/wheel/_common.py"
+            "NUMPY_PINS in .ci/wheel/_common.py (no preinstalled numpy to "
+            "fall back to in this environment)"
         )
-    return pin

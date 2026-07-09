@@ -22,7 +22,7 @@ from pathlib import Path
 # level up in .ci/wheel/_common.py.
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
-from _common import download, numpy_pin, pip_install, write_env_exports
+from _common import download, install_numpy, pip_install, write_env_exports
 
 
 # The Windows CD workspace (scratch downloads, libuv) stays under the general
@@ -87,8 +87,12 @@ def main() -> None:
     parser.add_argument("--env-out", type=Path)
     args = parser.parse_args()
 
+    # cp315 has no pyyaml wheel, so PIP_PACKAGES still builds an sdist here and
+    # needs the Cython pin to reach it. numpy resolves to a wheel at the current
+    # pin, which makes the flags inert for that install rather than unnecessary
+    # -- pass them anyway so a pin without a cp315 wheel stays guarded.
     build_flags = preinstall_cp315_build_deps()
-    pip_install("-q", *build_flags, f"numpy=={numpy_pin()}")
+    install_numpy(*build_flags)
     pip_install("-q", *build_flags, *PIP_PACKAGES)
 
     if not os.environ.get("SKIP_SETUP_CLEAN"):
