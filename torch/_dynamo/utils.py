@@ -4186,21 +4186,23 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
+
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        _wrap_graph_break_with_torch_runtime_err(
-            lambda: unimplemented(
-                gb_type="RuntimeError when making fake tensor call",
-                context="",
-                explanation=msg,
-                hints=[*graph_break_hints.USER_ERROR],
-                from_exc=cause,
+        from .exc import FakeTensorObservedException, raise_observed_exception
+
+        try:
+            raise_observed_exception(
+                RuntimeError, tx, args=[msg], fake_tensor_eval=True
             )
-        )
-        raise AssertionError("should not reachable") from None
+        except FakeTensorObservedException as fte:
+            fte.node = node
+            raise
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
-            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+            torch.Tensor,
+            functools.partial(ensure_graph_fake, tx=tx),
+            ret_val,  # pyrefly: ignore [unbound-name]
         )
 
     if (
