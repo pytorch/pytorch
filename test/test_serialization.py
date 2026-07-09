@@ -1202,7 +1202,6 @@ class TestSerialization(TestCase, SerializationMixin):
         with BytesIOContext() as f:
             torch.save(big_model.state_dict(), f)
             del big_model
-            gc.collect()
             f.seek(0)
             state = torch.load(f)
 
@@ -1210,7 +1209,6 @@ class TestSerialization(TestCase, SerializationMixin):
         # serialized buffer before allocating the filesystem tensor below.
         f.close()
         del state, f
-        gc.collect()
         if IS_FILESYSTEM_UTF8_ENCODING:
             with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
                 with TemporaryFileName(dir=dname) as fname:
@@ -1224,7 +1222,6 @@ class TestSerialization(TestCase, SerializationMixin):
                     data[-8:] = expected
                     torch.save(data, fname)
                     del data
-                    gc.collect()
                     loaded_data = torch.load(fname)
                     self.assertEqual(loaded_data.shape, (tensor_size,))
                     self.assertEqual(loaded_data.dtype, torch.uint8)
