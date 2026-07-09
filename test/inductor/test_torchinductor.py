@@ -77,6 +77,7 @@ from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -2476,6 +2477,9 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    # Triton CPU generates a split scan that uses tl.debug_barrier, which is
+    # not yet implemented in Triton CPU.
+    @xfail_if_triton_cpu
     def test_consecutive_split_cumsum(self):
         def fn(a, b):
             a = a.view(-1)
@@ -2497,6 +2501,9 @@ class CommonTemplate:
 
             self.common(fn, (a, b), rtol=1e-4, atol=1e-5, check_lowp=False)
 
+    # Triton CPU split scan lowering uses tl.debug_barrier, which is not yet
+    # implemented in the Triton CPU version pinned in CI.
+    @xfail_if_triton_cpu
     @config.patch(max_autotune_pointwise=True)
     def test_split_cumsum_index(self):
         # Split scan uses a workspace that needs to be zeroed before use.
@@ -2512,6 +2519,9 @@ class CommonTemplate:
         data = make_tensor((2**16,), dtype=torch.float32, device=self.device)
         self.common(fn, (lengths, data))
 
+    # Triton CPU split scan lowering uses tl.debug_barrier, which is not yet
+    # implemented in the Triton CPU version pinned in CI.
+    @xfail_if_triton_cpu
     def test_split_cumprod(self):
         def fn(a):
             return torch.cumprod(a, -1)
@@ -2546,6 +2556,9 @@ class CommonTemplate:
                 check_lowp=False,
             )
 
+    # Triton CPU generates a split scan that uses tl.debug_barrier, which is
+    # not yet implemented in Triton CPU.
+    @xfail_if_triton_cpu
     def test_consecutive_split_cumprod(self):
         def fn(a, b):
             return torch.cumprod(a, 0) + torch.cumprod(b, 0)
@@ -3341,7 +3354,6 @@ class CommonTemplate:
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
     @skip_if_halide  # different pow accuracies
-    @xfail_if_triton_cpu
     def test_norm_constant_overflow(self):
         def fn(a):
             return (
@@ -4490,6 +4502,17 @@ for dtype in (torch.int32, torch.int64):
             ), a.expand(2, -1, 5, -1)
 
         self.common(fn, (torch.randn(2, 1, 2),))
+
+    def test_expand_implicit_kwarg(self):
+        # aten::expand's schema is `expand(Tensor self, SymInt[] size, *, bool
+        # implicit=False)`. Autograd emits calls with `implicit=False` (e.g.
+        # from mean_backward and broadcast backward). The Inductor lowering
+        # must accept the kwarg or such graphs fail with
+        # `TypeError: expand() got an unexpected keyword argument 'implicit'`.
+        def fn(a):
+            return torch.ops.aten.expand.default(a, [3, 4], implicit=False) + 1
+
+        self.common(fn, (torch.randn(1, 4),))
 
     def test_squeeze1(self):
         def fn(a):
@@ -8041,7 +8064,6 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([16, 16]),),
         )
 
-    @xfail_if_triton_cpu
     def test_pow2(self):
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
@@ -9052,7 +9074,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertFalse(torch.signbit(actual_frac.cpu()[0]).item())
         self.assertEqual(actual_recip.cpu()[0].item(), float("inf"))
 
-    @xfail_if_triton_cpu
     def test_fmod(self):
         def fn(a, b):
             return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
@@ -9060,7 +9081,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         shape = [1, 2, 6, 6]
         self.common(fn, (torch.randn(shape), torch.randn(shape)))
 
-    @xfail_if_triton_cpu
     def test_fmod_zero_dim(self):
         def fn(a, b):
             return (torch.fmod(a, b),)
@@ -10900,6 +10920,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fn(x[0:]), x[16:][:16])
             self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
 
+    # Requires a Triton CPU fix for scalar tl.device_assert conditions.
+    @xfail_if_triton_cpu
     def test_index_float_zero(self):
         def fn(arg0, arg1, arg2):
             t1 = torch.tanh(arg0)
@@ -14034,7 +14056,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_triton_cpu
     def test_index_dynamic_shapes(self):
         # Repro from vision_maskrcnn
         def fn(arg0_1):
@@ -19205,7 +19226,29 @@ if RUN_GPU:
         @requires_cuda_and_triton
         @unittest.skipIf(TEST_WITH_ROCM, "no grouped_mm support")
         @config.patch(implicit_fallbacks=True)
-        def test_grouped_mm(self):
+        @parametrize("backend", ["cublaslt", "cutlass"])
+        def test_grouped_mm(self, backend):
+            if backend == "cublaslt":
+                if _get_torch_cuda_version() < (13, 2):
+                    self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+                sm_major = torch.cuda.get_device_capability()[0]
+                if sm_major < 9 or sm_major >= 12:
+                    self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
+                if sm_major == 9 and _get_torch_cuda_version() < (13, 3):
+                    self.skipTest(
+                        "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3"
+                    )
+            prev = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+            torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = (
+                backend == "cublaslt"
+            )
+            self.addCleanup(
+                setattr,
+                torch.backends.cuda.matmul,
+                "prefer_cublaslt_grouped_gemm",
+                prev,
+            )
+
             @torch.compile(fullgraph=True)
             def f(a, b, offs, out_dtype):
                 return F.grouped_mm(
