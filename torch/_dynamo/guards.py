@@ -163,6 +163,7 @@ from .source import (
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
+    UnwrapCollectiveTensorSource,
     WeakRefCallSource,
 )
 from .types import (  # noqa: F401
@@ -740,6 +741,29 @@ def from_numpy(a: Any) -> torch.Tensor:
         return torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a
 
 
+_async_collective_tensor_type: type | None = None
+
+
+def unwrap_async_collective_tensor(x: Any) -> Any:
+    # Backing callable for UnwrapCollectiveTensorSource: yield an
+    # AsyncCollectiveTensor's inner tensor and leave everything else unchanged,
+    # so a graph traced on an ACT input is guarded against the unwrapped tensor.
+    # Runs on the guard-eval hot path, so memoize the ACT type once resolved.
+    global _async_collective_tensor_type
+    if _async_collective_tensor_type is None:
+        from torch._functorch._aot_autograd.utils import (
+            get_loaded_async_collective_tensor_type,
+        )
+
+        _async_collective_tensor_type = get_loaded_async_collective_tensor_type()
+    if (
+        _async_collective_tensor_type is not None
+        and type(x) is _async_collective_tensor_type
+    ):
+        return x.elem
+    return x
+
+
 # For user stack printing
 @functools.cache
 def uninteresting_files() -> set[str]:
@@ -784,6 +808,7 @@ def _get_closure_vars() -> dict[str, object]:
             "utils_device": torch.utils._device,
             "device": torch.device,
             "___from_numpy": from_numpy,
+            "___unwrap_async_collective_tensor": unwrap_async_collective_tensor,
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
@@ -1897,6 +1922,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x.__tensor_flatten__()[0],
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, UnwrapCollectiveTensorSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=unwrap_async_collective_tensor,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

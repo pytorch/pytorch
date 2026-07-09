@@ -160,6 +160,7 @@ from ..source import (
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
+    UnwrapCollectiveTensorSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -3020,7 +3021,26 @@ class VariableBuilder:
         is_dtensor = torch.distributed.is_available() and isinstance(
             value, torch.distributed.tensor.DTensor
         )
-        if not is_dtensor:
+
+        # An AsyncCollectiveTensor (ACT) flattens to a single inner tensor whose
+        # metadata mirrors the wrapper, and the AOTAutograd runtime wrapper
+        # unwraps ACT inputs before the compiled graph. So a graph traced on an
+        # ACT is equivalent to one traced on its resolved plain Tensor. Guard on
+        # the unwrapped inner tensor (via UnwrapCollectiveTensorSource) instead
+        # of the ACT-locked type/metadata guards, so the ACT class no longer
+        # forces a recompile when the runtime value alternates between an
+        # un-awaited ACT and an awaited Tensor. Type-introspecting code stays
+        # sound because observation sites reinstall the class guard on demand
+        # (see BuiltinVariable.call_isinstance and TensorVariable.var_getattr).
+        is_polymorphic_act = False
+        if not is_dtensor and is_traceable_wrapper_subclass(value):
+            from torch._functorch._aot_autograd.utils import (
+                is_async_collective_tensor_type,
+            )
+
+            is_polymorphic_act = is_async_collective_tensor_type(type(value))
+
+        if not is_dtensor and not is_polymorphic_act:
             # We guard on the _local_tensor and the _spec, and therefore we don't
             # have to guard on the outer DTensor.
             self.install_guards(
@@ -3072,6 +3092,11 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
+            elif is_polymorphic_act:
+                # Guard only on the unwrapped inner tensor (inner_source below).
+                # Installing no type/metadata guard on the ACT wrapper is what
+                # lets the resolved plain Tensor reuse this cache entry.
+                pass
             else:
                 self.install_guards(GuardBuilder.TENSOR_SUBCLASS_METADATA_MATCH)
                 self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -3080,6 +3105,14 @@ class VariableBuilder:
                 )
 
             attrs, _ = value.__tensor_flatten__()
+            if is_polymorphic_act and attrs != ["elem"]:
+                # The unwrap accessor below assumes ACT's single inner tensor;
+                # bail out of the relaxation rather than misguard if that ever
+                # changes.
+                raise RuntimeError(
+                    f"Expected AsyncCollectiveTensor to flatten to ['elem'], "
+                    f"got {attrs}"
+                )
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 # FakeScriptObject wraps the real opaque object during
@@ -3099,7 +3132,13 @@ class VariableBuilder:
                         "Only tensors and reference-type opaques are allowed "
                         "in tensor attrs."
                     )
-                inner_source = AttrSource(self.source, attr)
+                if is_polymorphic_act:
+                    # ACT flattens to the single attr "elem"; guard it through
+                    # an unwrap accessor so a plain Tensor at runtime (the
+                    # resolved collective) matches the same guard.
+                    inner_source = UnwrapCollectiveTensorSource(self.source)
+                else:
+                    inner_source = AttrSource(self.source, attr)
                 LazyVariableTracker.realize_all(
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )

@@ -2226,6 +2226,32 @@ class BuiltinVariable(BaseBuiltinVariable):
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
         isinstance_type = isinstance_type_var.as_python_constant()
+        # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
+        # (see VariableBuilder.wrap_tensor): the cache entry does not discriminate
+        # ACT from the resolved plain Tensor. isinstance() observes the class and
+        # is constant-folded below, so reinstall the class guard -- but only when
+        # the result would actually differ between the ACT and the resolved
+        # Tensor. isinstance(w, ACT) discriminates and must recompile;
+        # isinstance(w, torch.Tensor) is True for both and must stay reusable.
+        if isinstance(arg, variables.TensorVariable) and arg.source is not None:
+            from torch._functorch._aot_autograd.utils import (
+                is_async_collective_tensor_type,
+            )
+
+            if is_async_collective_tensor_type(arg_type):
+                check_types = (
+                    isinstance_type
+                    if isinstance(isinstance_type, tuple)
+                    else (isinstance_type,)
+                )
+                # Guard if any checked type distinguishes ACT from torch.Tensor,
+                # or conservatively if a checked entry is not a plain class.
+                if any(
+                    not isinstance(ty, type)
+                    or issubclass(arg_type, ty) != issubclass(torch.Tensor, ty)
+                    for ty in check_types
+                ):
+                    install_guard(arg.source.make_guard(GuardBuilder.TYPE_MATCH))
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
 
             def _tensor_isinstance(
