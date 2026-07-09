@@ -36,6 +36,11 @@ except ModuleNotFoundError as exc:
         "Install cupti-python to use the experimental CUPTI monitor."
     ) from exc
 
+# Generated from the CUPTI ABI header (tools/gen_cupti_stubs.py): the
+# CUpti_ActivityAttribute selectors, so their (ABI-renumbered) ints are never hardcoded.
+from torch.profiler._cupti._cupti_stubs import ActivityAttr
+
+
 if TYPE_CHECKING:
     # Used only in pylibcupti method signatures (Any to pyrefly; cupti has no stub).
     from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
@@ -52,24 +57,11 @@ LIBCUPTI_SONAME = "libcupti.so.13"
 # are stable ABI values, so they are spelled out rather than resolved.
 CUPTI_SUCCESS = 0
 
-# CUpti_ActivityAttribute::CUPTI_ACTIVITY_ATTR_USER_DEFINED_RECORDS (not surfaced
-# by cupti-python); set on the subscription to turn on the v2 user-defined-record
-# path.
-_ATTR_USER_DEFINED_RECORDS = 11
-
-# CUPTI_ACTIVITY_ATTR_ENABLE_KERNEL_LATENCY_TIMESTAMPS -- per-subscriber toggle for the
-# kernel queued/submitted timestamps (not surfaced by cupti-python). Empirically 15 on
-# the runtime CUPTI ABI (the enum is renumbered vs the header, same reason the value
-# above is 11). Set via cuptiActivitySetAttribute_v2 on the subscriber; unlike the global
-# cuptiActivityEnableLatencyTimestamps it works post-CUDA-init under UDR and with HES.
-_ATTR_ENABLE_KERNEL_LATENCY_TIMESTAMPS = 15
-
-# CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK -- per-subscriber timestamp callback (not surfaced by
-# cupti-python). 22 on the runtime CUPTI ABI (sequential from USER_DEFINED_RECORDS=11 /
-# ENABLE_KERNEL_LATENCY_TIMESTAMPS=15, both confirmed). Set via cuptiActivitySetAttribute_v2 on
-# the subscriber; unlike the global cuptiActivityRegisterTimestampCallback (NOT_COMPATIBLE under
-# UDR) this per-subscriber form coexists with UDR. Still beta: usable only sole-subscriber.
-_ATTR_TIMESTAMP_CALLBACK = 22
+# CUpti_ActivityAttribute selectors the monitor sets on its subscription
+# (ActivityAttr.USER_DEFINED_RECORDS / .ENABLE_KERNEL_LATENCY_TIMESTAMPS /
+# .TIMESTAMP_CALLBACK, ...). cupti-python does not surface this enum, so the values come
+# from the generated _cupti_stubs module (tools/gen_cupti_stubs.py, straight from the ABI
+# header) rather than hardcoded ints -- they are renumbered vs cupti-python's own enum.
 
 # Minimum libcupti the monitor supports. The v2 user-defined-record API arrived in
 # 13.2, but only 13.3 populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
@@ -374,7 +366,7 @@ class _PyLibCupti:
         return (
             self._lib.cuptiActivitySetAttribute_v2(
                 ctypes.c_void_p(sub_handle),
-                _ATTR_TIMESTAMP_CALLBACK,
+                ActivityAttr.TIMESTAMP_CALLBACK,
                 ctypes.byref(size),
                 ctypes.byref(val),
             )
@@ -389,7 +381,7 @@ class _PyLibCupti:
         size = ctypes.c_size_t(ctypes.sizeof(ctypes.c_void_p))
         self._lib.cuptiActivitySetAttribute_v2(
             ctypes.c_void_p(sub_handle),
-            _ATTR_TIMESTAMP_CALLBACK,
+            ActivityAttr.TIMESTAMP_CALLBACK,
             ctypes.byref(size),
             ctypes.byref(val),
         )
@@ -466,7 +458,7 @@ class _PyLibCupti:
         self._check(
             self._lib.cuptiActivitySetAttribute_v2(
                 ctypes.c_void_p(sub_handle),
-                _ATTR_USER_DEFINED_RECORDS,
+                ActivityAttr.USER_DEFINED_RECORDS,
                 ctypes.byref(size),
                 ctypes.byref(enabled),
             ),
@@ -495,7 +487,7 @@ class _PyLibCupti:
         size = ctypes.c_size_t(1)
         rc = self._lib.cuptiActivitySetAttribute_v2(
             ctypes.c_void_p(sub_handle),
-            _ATTR_USER_DEFINED_RECORDS,
+            ActivityAttr.USER_DEFINED_RECORDS,
             ctypes.byref(size),
             ctypes.byref(disabled),
         )
@@ -516,7 +508,7 @@ class _PyLibCupti:
         return (
             self._lib.cuptiActivitySetAttribute_v2(
                 ctypes.c_void_p(sub_handle),
-                _ATTR_ENABLE_KERNEL_LATENCY_TIMESTAMPS,
+                ActivityAttr.ENABLE_KERNEL_LATENCY_TIMESTAMPS,
                 ctypes.byref(size),
                 ctypes.byref(val),
             )
