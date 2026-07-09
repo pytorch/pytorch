@@ -179,118 +179,6 @@ def {{kernel_name}}_kernel():
                     line.startswith(" "), f"Line should not be indented: '{line}'"
                 )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_cutedsl_add_e2e(self):
-        """End-to-end test with CuteDSL template including code generation verification."""
-        from torch._inductor.ir import TensorBox
-        from torch._inductor.lowering import lowerings
-        from torch._inductor.utils import run_and_get_code
-
-        template = CuteDSLTemplate(
-            name="test_add_e2e",
-            source=CUTEDSL_ADD_TEMPLATE,
-        )
-
-        def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
-            choices = []
-            error = template.maybe_append_choice(
-                choices,
-                input_nodes=[a, b],
-                layout=a.get_layout(),
-                THREADS_PER_BLOCK=256,
-            )
-
-            if error or not choices:
-                default_lowering = lowerings[torch.ops.aten.add.Tensor]
-                return default_lowering(a, b)
-
-            # Use the single choice directly (no autotuning)
-            return choices[0].output_node()
-
-        with patch.dict(lowerings, {torch.ops.aten.add.Tensor: cutedsl_add_lowering}):
-            # Test function
-            def test_add(x, y):
-                return x + y
-
-            device = "cuda"
-            x = torch.randn(128, 4, device=device, dtype=torch.float32)
-            y = torch.randn(128, 4, device=device, dtype=torch.float32)
-
-            # Compile and get generated code
-            compiled_fn = torch.compile(test_add, backend="inductor")
-            result, (code,) = run_and_get_code(compiled_fn, x, y)
-
-            # Verify CuteDSL code is present
-            self.assertIn(
-                "cute", code.lower(), "CuteDSL code should be in generated code"
-            )
-            # Verify parameter generation worked
-            self.assertIn(
-                "THREADS_PER_BLOCK", code, "Parameter should be in generated code"
-            )
-
-            # Verify correctness
-            expected = x + y
-            self.assertTrue(torch.allclose(result, expected, atol=1e-5))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_cutedsl_add_e2e_autotune(self):
-        """E2E test with multiple CuteDSL template variants for autotuning."""
-        from torch._inductor.ir import TensorBox
-        from torch._inductor.lowering import lowerings
-        from torch._inductor.select_algorithm import autotune_select_algorithm
-
-        template = CuteDSLTemplate(
-            name="test_add_autotune",
-            source=CUTEDSL_ADD_TEMPLATE,
-        )
-
-        def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
-            choices = []
-
-            # Add multiple variants with different thread counts for autotuning
-            thread_variants = [128, 256, 512]
-            for threads in thread_variants:
-                error = template.maybe_append_choice(
-                    choices,
-                    input_nodes=[a, b],
-                    layout=a.get_layout(),
-                    THREADS_PER_BLOCK=threads,
-                )
-                if error:
-                    # Skip this variant if it fails
-                    continue
-
-            if not choices:
-                default_lowering = lowerings[torch.ops.aten.add.Tensor]
-                return default_lowering(a, b)
-
-            # Use autotuning to select the best variant
-            node, _ = autotune_select_algorithm(
-                "cutedsl_add_autotune",
-                choices,
-                [a, b],
-                a.get_layout(),
-            )
-            return node
-
-        with patch.dict(lowerings, {torch.ops.aten.add.Tensor: cutedsl_add_lowering}):
-            # Test function
-            def test_add(x, y):
-                return x + y
-
-            device = "cuda"
-            x = torch.randn(128, 128, device=device, dtype=torch.float32)
-            y = torch.randn(128, 128, device=device, dtype=torch.float32)
-
-            # Compile and run
-            compiled_fn = torch.compile(test_add, backend="inductor")
-            result = compiled_fn(x, y)
-
-            # Verify correctness
-            expected = x + y
-            self.assertTrue(torch.allclose(result, expected, atol=1e-5))
-
     def test_gen_defines(self):
         """Test that gen_defines correctly generates CuteDSL parameter definitions."""
         kernel = CuteDSLTemplateKernel(
@@ -766,6 +654,126 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
     def test_can_fuse_horizontal_returns_false(self):
         sched = CuteDSLScheduling(scheduler=None)
         self.assertIs(sched.can_fuse_horizontal(MagicMock(), MagicMock()), False)
+
+
+@unittest.skipUnless(HAS_CUTLASS, "requires cutlass")
+class TestCuteDSLTemplateCUDA(TestCase):
+    """CUDA-specific end-to-end tests for CuteDSL template."""
+
+    def setUp(self):
+        super().setUp()
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+    def test_cutedsl_add_e2e(self):
+        """End-to-end test with CuteDSL template including code generation verification."""
+        from torch._inductor.ir import TensorBox
+        from torch._inductor.lowering import lowerings
+        from torch._inductor.utils import run_and_get_code
+
+        template = CuteDSLTemplate(
+            name="test_add_e2e",
+            source=CUTEDSL_ADD_TEMPLATE,
+        )
+
+        def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
+            choices = []
+            error = template.maybe_append_choice(
+                choices,
+                input_nodes=[a, b],
+                layout=a.get_layout(),
+                THREADS_PER_BLOCK=256,
+            )
+
+            if error or not choices:
+                default_lowering = lowerings[torch.ops.aten.add.Tensor]
+                return default_lowering(a, b)
+
+            # Use the single choice directly (no autotuning)
+            return choices[0].output_node()
+
+        with patch.dict(lowerings, {torch.ops.aten.add.Tensor: cutedsl_add_lowering}):
+            # Test function
+            def test_add(x, y):
+                return x + y
+
+            device = "cuda"
+            x = torch.randn(128, 4, device=device, dtype=torch.float32)
+            y = torch.randn(128, 4, device=device, dtype=torch.float32)
+
+            # Compile and get generated code
+            compiled_fn = torch.compile(test_add, backend="inductor")
+            result, (code,) = run_and_get_code(compiled_fn, x, y)
+
+            # Verify CuteDSL code is present
+            self.assertIn(
+                "cute", code.lower(), "CuteDSL code should be in generated code"
+            )
+            # Verify parameter generation worked
+            self.assertIn(
+                "THREADS_PER_BLOCK", code, "Parameter should be in generated code"
+            )
+
+            # Verify correctness
+            expected = x + y
+            self.assertTrue(torch.allclose(result, expected, atol=1e-5))
+
+    def test_cutedsl_add_e2e_autotune(self):
+        """E2E test with multiple CuteDSL template variants for autotuning."""
+        from torch._inductor.ir import TensorBox
+        from torch._inductor.lowering import lowerings
+        from torch._inductor.select_algorithm import autotune_select_algorithm
+
+        template = CuteDSLTemplate(
+            name="test_add_autotune",
+            source=CUTEDSL_ADD_TEMPLATE,
+        )
+
+        def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
+            choices = []
+
+            # Add multiple variants with different thread counts for autotuning
+            thread_variants = [128, 256, 512]
+            for threads in thread_variants:
+                error = template.maybe_append_choice(
+                    choices,
+                    input_nodes=[a, b],
+                    layout=a.get_layout(),
+                    THREADS_PER_BLOCK=threads,
+                )
+                if error:
+                    # Skip this variant if it fails
+                    continue
+
+            if not choices:
+                default_lowering = lowerings[torch.ops.aten.add.Tensor]
+                return default_lowering(a, b)
+
+            # Use autotuning to select the best variant
+            node, _ = autotune_select_algorithm(
+                "cutedsl_add_autotune",
+                choices,
+                [a, b],
+                a.get_layout(),
+            )
+            return node
+
+        with patch.dict(lowerings, {torch.ops.aten.add.Tensor: cutedsl_add_lowering}):
+            # Test function
+            def test_add(x, y):
+                return x + y
+
+            device = "cuda"
+            x = torch.randn(128, 128, device=device, dtype=torch.float32)
+            y = torch.randn(128, 128, device=device, dtype=torch.float32)
+
+            # Compile and run
+            compiled_fn = torch.compile(test_add, backend="inductor")
+            result = compiled_fn(x, y)
+
+            # Verify correctness
+            expected = x + y
+            self.assertTrue(torch.allclose(result, expected, atol=1e-5))
 
 
 if __name__ == "__main__":
