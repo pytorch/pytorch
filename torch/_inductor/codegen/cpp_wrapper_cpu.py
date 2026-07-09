@@ -395,6 +395,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ) -> str:
         """Get a pointer to an array that only exists for the duration of the C++
         statement it's used in."""
+        if len(elements) == 0:
+            return "nullptr"
+
         # If the c_type is already a pointer, return a mutable pointer to the array.
         # Otherwise, return a const pointer.  In the C-shim API, pointer types are only
         # const-qualified with respect to the underlying value, not any nested pointers.

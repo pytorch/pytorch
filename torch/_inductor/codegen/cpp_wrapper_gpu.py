@@ -1161,14 +1161,15 @@ class CppWrapperGpu(CppWrapperCpu):
         if V.graph.aot_mode and not V.graph.is_dual_wrapper_mode:
             return "stream"
 
-        # If subgraphs were generated as functions, rather than inline, we wouldn't need
-        # the graph name here.
-        name = f"stream_{graph_name}_{device_idx}"
         # In dual-wrapper mode, the JIT stream is declared at the entry function
         # prologue (see _codegen_entry_impl_prologue) so it stays in scope
         # across all kernel call sites.
         if V.graph.is_dual_wrapper_mode:
-            return name
+            return f"stream{device_idx}"
+
+        # If subgraphs were generated as functions, rather than inline, we wouldn't need
+        # the graph name here.
+        name = f"stream{device_idx}_{graph_name}"
 
         self.writeline(
             maybe_hipify_code_wrapper(
