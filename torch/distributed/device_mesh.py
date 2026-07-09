@@ -744,7 +744,7 @@ else:
                 >>>
                 >>> # Initialize a 3D mesh.
                 >>> mesh_3d = init_device_mesh(device_type="cuda", (2,2,2), mesh_dim_names=("dp", "pp", "cp"))
-                >>> # The order of the mesh_dim_names provided deteremines the order of dimensions in the submesh.
+                >>> # The order of the mesh_dim_names provided determines the order of dimensions in the submesh.
                 >>> dp_cp_mesh = mesh_3d["dp", "cp"]
                 >>> cp_dp_mesh = mesh_3d["cp", "dp"]
             """
@@ -763,7 +763,7 @@ else:
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` and `disable_proxy_modes_tracing()`
                 # will allow us to materialize the tensors within
-                # `_create_sub_mesh`, which should not affect modling.
+                # `_create_sub_mesh`, which should not affect modeling.
                 #
                 # Note that this should be orthogonal to torch.compile(). But whether
                 # we can compile device_mesh `slicing` (no graph break) is not verified
@@ -1441,7 +1441,7 @@ else:
                 # because the concatenated indices should be indexed by the same root mesh tensor.
                 if dm._flatten_rank_map != flatten_rank_map:
                     raise RuntimeError(
-                        "Cannot concatenate DeviceMeshes derived from different device meshs"
+                        "Cannot concatenate DeviceMeshes derived from different device meshes"
                     )
             concat_mesh_layout = _MeshLayout(concat_axes)
             if not concat_mesh_layout.collapse().check_orthogonal():
