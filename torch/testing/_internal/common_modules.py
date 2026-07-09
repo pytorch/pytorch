@@ -3487,6 +3487,51 @@ def module_inputs_torch_nn_ReflectionPad3d(module_info, device, dtype, requires_
         ),
     ]
 
+def module_inputs_torch_nn_SymmetricPad1d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((2, 3))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2)),
+            forward_input=FunctionInput(make_input((2, 3, 4))),
+        ),
+    ]
+
+def module_inputs_torch_nn_SymmetricPad2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 3, 4)),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
+        ),
+    ]
+
+def module_inputs_torch_nn_SymmetricPad3d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+            reference_fn=no_batch_dim_reference_fn
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 1, 2, 1, 2)),
+            forward_input=FunctionInput(make_input((3, 3, 3, 3, 3))),
+        ),
+    ]
+
 def module_inputs_torch_nn_ReplicationPad1d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5075,6 +5120,31 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ReflectionPad3d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad3d,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               skips=(
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='cuda'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
+               ),
+    ModuleInfo(torch.nn.SymmetricPad1d,
+               module_inputs_func=module_inputs_torch_nn_SymmetricPad1d,
+               ),
+    ModuleInfo(torch.nn.SymmetricPad2d,
+               module_inputs_func=module_inputs_torch_nn_SymmetricPad2d,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               skips=(
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='cuda'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
+               ),
+    ModuleInfo(torch.nn.SymmetricPad3d,
+               module_inputs_func=module_inputs_torch_nn_SymmetricPad3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',

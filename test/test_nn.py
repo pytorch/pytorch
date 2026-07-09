@@ -9477,6 +9477,142 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.complex64)
+    def test_SymmetricPad_empty(self, device, dtype):
+        for mod, inp in [
+                (torch.nn.SymmetricPad1d(2), torch.randn(0, 3, 10, device=device, dtype=dtype)),
+                (torch.nn.SymmetricPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
+                (torch.nn.SymmetricPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device, dtype=dtype))]:
+            _test_module_empty_input(self, mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
+            mod = torch.nn.SymmetricPad1d(2)
+            inp = torch.randn(3, 0, 10, device=device, dtype=dtype)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
+            mod = torch.nn.SymmetricPad2d(2)
+            inp = torch.randn(3, 0, 10, 10, device=device, dtype=dtype)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '4D or 5D'):
+            mod = torch.nn.SymmetricPad3d(3)
+            inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
+            mod(inp)
+
+    @onlyNativeDeviceTypes
+    def test_SymmetricPad_fails(self, device):
+        with self.assertRaisesRegex(RuntimeError, r'Padding size 2 is not supported for 4D input tensor'):
+            mod = torch.nn.SymmetricPad1d(2)
+            inp = torch.randn(3, 3, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
+            inp = torch.randn(3, 3, 10, 10, device=device)
+            torch.ops.aten.symmetric_pad1d(inp, (2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, r'Padding size 4 is not supported for 5D input tensor'):
+            mod = torch.nn.SymmetricPad2d(2)
+            inp = torch.randn(3, 3, 10, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
+            inp = torch.randn(3, 3, 10, 10, 10, device=device)
+            torch.ops.aten.symmetric_pad2d(inp, (2, 2, 2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, r'Padding size 6 is not supported for 6D input tensor'):
+            mod = torch.nn.SymmetricPad3d(3)
+            inp = torch.randn(3, 3, 10, 10, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '4D or 5D'):
+            inp = torch.randn(3, 3, 10, 10, 10, 10, device=device)
+            torch.ops.aten.symmetric_pad3d(inp, (2, 2, 2, 2, 2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
+            inp = torch.randn(1, 1, 3, 3, 3, device=device)
+            torch.ops.aten.symmetric_pad3d(inp, (1,))
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6, but got: 0'):
+            inp = torch.randn(1, 1, 3, 3, 3, device=device)
+            torch.ops.aten.symmetric_pad3d(inp, ())
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6, but got: 5'):
+            inp = torch.randn(1, 1, 3, 3, 3, device=device)
+            torch.ops.aten.symmetric_pad3d(inp, (1, 1, 1, 1, 1))
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6, but got: 7'):
+            inp = torch.randn(1, 1, 3, 3, 3, device=device)
+            torch.ops.aten.symmetric_pad3d(inp, (1, 1, 1, 1, 1, 1, 1))
+
+    @onlyCUDA   # Test if CPU and GPU results match
+    def test_SymmetricPad2d_large(self, device):
+        shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
+        pad = (1, 2, 3, 4)
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='symmetric')
+            ref_out = F.pad(ref_x, pad, mode='symmetric')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
+
+    @onlyCUDA   # Test if CPU and GPU results match with deterministic mode on
+    def test_SymmetricPad2d_large_deterministic(self, device):
+        original_deterministic = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(True)
+            shape = [2, 65736, 6, 6]
+            pad = (1, 2, 3, 4)
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='symmetric')
+            ref_out = F.pad(ref_x, pad, mode='symmetric')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
+        finally:
+            torch.use_deterministic_algorithms(original_deterministic)
+
+    @onlyCUDA   # Test if CPU and GPU results match
+    def test_SymmetricPad3d_large(self, device):
+        shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
+        pad = (1, 2, 3, 4, 5, 6)
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='symmetric')
+            ref_out = F.pad(ref_x, pad, mode='symmetric')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
+
     @expectedFailureMPS  # Unimplemented margin_loss
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)

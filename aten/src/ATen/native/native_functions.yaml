@@ -12881,6 +12881,87 @@
     MPS: replication_pad3d_backward_mps
     XPU: replication_pad3d_backward_xpu
 
+- func: symmetric_pad1d.out(Tensor self, SymInt[2] padding, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  structured: True
+  dispatch:
+    CPU: symmetric_pad1d_out_cpu
+    QuantizedCPU: symmetric_pad1d_out_quantized_cpu
+    CUDA: symmetric_pad1d_out_cuda
+    MPS: symmetric_pad1d_out_mps
+
+- func: symmetric_pad1d(Tensor self, SymInt[2] padding) -> Tensor
+  python_module: nn
+  structured_delegate: symmetric_pad1d.out
+  tags: core
+
+- func: symmetric_pad1d_backward.grad_input(Tensor grad_output, Tensor self, SymInt[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  structured: True
+  dispatch:
+    CPU: symmetric_pad1d_backward_out_cpu
+    CUDA: symmetric_pad1d_backward_out_cuda
+    MPS: symmetric_pad1d_backward_out_mps
+
+- func: symmetric_pad1d_backward(Tensor grad_output, Tensor self, SymInt[2] padding) -> Tensor
+  python_module: nn
+  structured_delegate: symmetric_pad1d_backward.grad_input
+
+- func: symmetric_pad2d.out(Tensor self, SymInt[4] padding, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU, QuantizedCPU: symmetric_pad2d_out_cpu
+    CUDA: symmetric_pad2d_out_cuda
+    MPS: symmetric_pad2d_out_mps
+
+- func: symmetric_pad2d(Tensor self, SymInt[4] padding) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: symmetric_pad2d_cpu
+    QuantizedCPU: symmetric_pad2d_quantized_cpu
+    CUDA: symmetric_pad2d_cuda
+    MPS: symmetric_pad2d_mps
+  tags: core
+
+- func: symmetric_pad2d_backward.grad_input(Tensor grad_output, Tensor self, SymInt[4] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU: symmetric_pad2d_backward_out_cpu
+    CUDA: symmetric_pad2d_backward_out_cuda
+    MPS: symmetric_pad2d_backward_out_mps
+
+- func: symmetric_pad2d_backward(Tensor grad_output, Tensor self, SymInt[4] padding) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: symmetric_pad2d_backward_cpu
+    CUDA: symmetric_pad2d_backward_cuda
+    MPS: symmetric_pad2d_backward_mps
+
+- func: symmetric_pad3d.out(Tensor self, SymInt[6] padding, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  structured: True
+  dispatch:
+    CPU: symmetric_pad3d_out_cpu
+    CUDA: symmetric_pad3d_out_cuda
+    MPS: symmetric_pad3d_out_mps
+
+- func: symmetric_pad3d(Tensor self, SymInt[6] padding) -> Tensor
+  python_module: nn
+  structured_delegate: symmetric_pad3d.out
+  tags: core
+
+- func: symmetric_pad3d_backward.grad_input(Tensor grad_output, Tensor self, SymInt[6] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  structured: True
+  dispatch:
+    CPU: symmetric_pad3d_backward_out_cpu
+    CUDA: symmetric_pad3d_backward_out_cuda
+    MPS: symmetric_pad3d_backward_out_mps
+
+- func: symmetric_pad3d_backward(Tensor grad_output, Tensor self, SymInt[6] padding) -> Tensor
+  python_module: nn
+  structured_delegate: symmetric_pad3d_backward.grad_input
+
 - func: _pad_circular(Tensor self, SymInt[] pad) -> Tensor
   python_module: nn
   dispatch:
