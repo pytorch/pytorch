@@ -14,7 +14,7 @@ class PythonWrapperMtia(PythonWrapperCodegen):
     def write_header(self) -> None:
         super().write_header()
 
-        # MITA specific imports
+        # MTIA specific imports
         self.imports.splice("import mtia.host_runtime.torch_mtia.dynamic_library")
 
     @override

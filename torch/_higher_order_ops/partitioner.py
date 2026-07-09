@@ -248,7 +248,7 @@ class HopJointGraph:
         have symint in the partitioning boundaries because otherwise we would need to support stacking
         the symints up, which causes more entropy in the stack.
 
-        By marking the recompute polify for complex nodes as MUST_RECOMPUTE, the partitioning boundary
+        By marking the recompute policy for complex nodes as MUST_RECOMPUTE, the partitioning boundary
         no longer contains complex expressions.
 
         Note that this pass doesn't exclude basic symbols from partitioning boundary

@@ -661,10 +661,10 @@ def _correct_storage_aliasing(func, schema_info, args, outs) -> None:
         # we **explicitly** don't want to reset the sizes on ret, if the storage implies a size change.
         # Why?
         # The purpose of this API is *not* to change the size/strides of our output- we assume it's already correct.
-        # We just want to "fix up" the storage aliasing, without modifying or output's metadata.
+        # We just want to "fix up" the storage aliasing, without modifying our output's metadata.
         # Example: out = inp.expand(inp.shape[0], inp.shape[0])
         #     This requires swapping the storage of out to be the same as inp,
-        #     but we do *not* want it to change the sizes/strides that were compute for out.
+        #     but we do *not* want it to change the sizes/strides that were computed for out.
 
         if isinstance(ret, list):
             for r in ret:

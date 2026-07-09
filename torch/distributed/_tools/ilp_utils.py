@@ -60,11 +60,11 @@ class ModStats(TypedDict):
     sac_memory: int
     # Number of piecewise-linear functions used for approximating ac tradeoff curve
     n_segments: int
-    # Slopes of the of piecewise-linear functions
+    # Slopes of the piecewise-linear functions
     slopes: list[float]
-    # Intercepts of the of piecewise-linear functions
+    # Intercepts of the piecewise-linear functions
     intercepts: list[float]
-    # X breakpoints of the of piecewise-linear functions
+    # X breakpoints of the piecewise-linear functions
     breakpoints: list[float]
     # Original trade-off curves
     tradeoff_curve: OrderedDict[float, float]
