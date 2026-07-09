@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
-from _common import numpy_pin, pip_install
+from _common import install_numpy, pip_install
 
 
 def is_rocm_py315() -> bool:
@@ -82,7 +82,7 @@ def main() -> None:
     if not os.environ.get("SKIP_SETUP_CLEAN"):
         subprocess.run([sys.executable, "-m", "spin", "clean"], check=True)
     pip_install("-q", "-r", "requirements.txt")
-    pip_install("-q", "--pre", f"numpy=={numpy_pin()}")
+    install_numpy()
     # auditwheel repacks the manywheel with a valid ZIP64 record for >4GB ROCm
     # wheels (pypa/wheel#692); imported by repair_wheel.py. CD-only, so it is
     # installed here rather than in requirements.txt, and pinned for
