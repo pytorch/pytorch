@@ -9162,7 +9162,7 @@ class TestLearnableBiases(InductorTestCase):
         self.assertLessEqual(
             comp_error,
             (ref_error * fudge_factor),
-            lambda msg: f"{msg}\n\nTensor: {tensor_name}\nCompiled error ({comp_error:.8f}) exceeds "
+            lambda msg: f"{msg}\nTensor: {tensor_name}\nCompiled error ({comp_error:.8f}) exceeds "
             f"reference error ({ref_error:.8f}) * fudge_factor ({fudge_factor})",
         )
 

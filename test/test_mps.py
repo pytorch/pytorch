@@ -14982,8 +14982,8 @@ if len(w) != 1:
                 self.assertTrue(False, "There was a warning when importing torch when PYTORCH_ENABLE_MPS_FALLBACK is set." +
                                        e.output.decode("utf-8"))
             elif e.returncode == 2:
-                self.assertTrue(False, lambda msg: f"{msg}\n" + ("There wasn't exactly one warning when running not implemented op with "
-                                f"PYTORCH_ENABLE_MPS_FALLBACK set. {e.output}"))  # noqa: F821
+                self.assertTrue(False, lambda msg: f"{msg}\nThere wasn't exactly one warning when running not implemented op with "
+                                f"PYTORCH_ENABLE_MPS_FALLBACK set. {e.output}")  # noqa: F821
             else:
                 self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set. " +
                                        e.output.decode("utf-8"))
