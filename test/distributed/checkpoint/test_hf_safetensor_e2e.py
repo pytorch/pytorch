@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_if_lt_x_gpu,
+    skip_if_lt_x_devices,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
@@ -277,7 +277,7 @@ class TestSingleRankSaveLoad(TestCase):
 class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_consolidate_to_one_file(self) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
@@ -357,7 +357,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     """
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     @with_temp_dir
     def test_1d_to_1d_reshard_placement_change(self) -> None:
         if importlib.util.find_spec("safetensors") is None:
@@ -415,7 +415,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             )
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_devices(4)
     @with_temp_dir
     def test_2d_to_2d_reshard_placement_change(self) -> None:
         if importlib.util.find_spec("safetensors") is None:
@@ -475,7 +475,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_1d_to_2d_reshard_mesh_change(self) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
@@ -526,7 +526,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_devices(4)
     def test_2d_to_1d_reshard_mesh_change(self) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
@@ -578,7 +578,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_dtensor_checkpoint_resharding_with_empty_shard(self):
         """
         Test dtensor checkpoint resharding with dtensor containing empty shards.
