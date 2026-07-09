@@ -1440,8 +1440,13 @@ IS_ARM64 = platform.machine() in ('arm64', 'aarch64', 'ARM64')
 IS_S390X = platform.machine() == "s390x"
 IS_AVX512_VNNI_SUPPORTED = torch.cpu.get_capabilities().get("avx512_vnni", False)
 IS_CPU_EXT_SVE_SUPPORTED = torch.cpu.get_capabilities().get("sve", False)
-IS_CPU_CAPABILITY_SVE = torch._C._get_cpu_capability() in ("SVE128", "SVE256")
+IS_CPU_CAPABILITY_SVE = torch._C._get_cpu_capability() in (
+    "SVE128",
+    "SVE256",
+    "SVE512",
+)
 IS_CPU_CAPABILITY_SVE256 = torch._C._get_cpu_capability() == "SVE256"
+IS_CPU_CAPABILITY_SVE512 = torch._C._get_cpu_capability() == "SVE512"
 
 if IS_WINDOWS:
     @contextmanager

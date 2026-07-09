@@ -67,6 +67,7 @@ enum class CPUCapability {
 #elif defined(HAVE_SVE_CPU_DEFINITION)
   SVE256 = 1,
   SVE128 = 2,
+  SVE512 = 3,
 #else
   AVX2 = 1,
   AVX512 = 2,
@@ -119,6 +120,7 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_SVE_CPU_DEFINITION
       , void *SVE128
       , void *SVE256
+      , void *SVE512
 #endif
   );
 
@@ -141,9 +143,9 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_SVE_CPU_DEFINITION
     , void *SVE128
     , void *SVE256
+    , void *SVE512
 #endif
   );
-
 
   void* get_call_ptr(
     c10::DeviceType device_type
@@ -163,6 +165,7 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_SVE_CPU_DEFINITION
       , void *SVE128
       , void *SVE256
+      , void *SVE512
 #endif
   );
 
@@ -188,6 +191,7 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_SVE_CPU_DEFINITION
     , void *SVE128
     , void *SVE256
+    , void *SVE512
 #endif
   );
 
@@ -246,6 +250,7 @@ private:
 #ifdef HAVE_SVE_CPU_DEFINITION
       , reinterpret_cast<void*>(SVE128)
       , reinterpret_cast<void*>(SVE256)
+      , reinterpret_cast<void*>(SVE512)
 #endif
       )
     );
@@ -308,6 +313,7 @@ public:
 #ifdef HAVE_SVE_CPU_DEFINITION
       , reinterpret_cast<void*>(SVE128)
       , reinterpret_cast<void*>(SVE256)
+      , reinterpret_cast<void*>(SVE512)
 #endif
       );
     if (std::holds_alternative<ErrorType>(result)){
@@ -332,6 +338,7 @@ public:
 #ifdef HAVE_SVE_CPU_DEFINITION
   static TORCH_API FnPtr SVE128;
   static TORCH_API FnPtr SVE256;
+  static TORCH_API FnPtr SVE512;
 #endif
 private:
   DispatchStubImpl impl;
@@ -437,9 +444,11 @@ struct RegisterPRIVATEUSE1Dispatch {
 #ifdef HAVE_SVE_CPU_DEFINITION
 #define REGISTER_SVE128_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, SVE128, fn)
 #define REGISTER_SVE256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, SVE256, fn)
+#define REGISTER_SVE512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, SVE512, fn)
 #else
 #define REGISTER_SVE128_DISPATCH(name, fn)
 #define REGISTER_SVE256_DISPATCH(name, fn)
+#define REGISTER_SVE512_DISPATCH(name, fn)
 #endif
 
 // Macro to register the same kernel for all CPU arch types. This is useful
@@ -451,7 +460,8 @@ struct RegisterPRIVATEUSE1Dispatch {
   REGISTER_VSX_DISPATCH(name, fn)                                              \
   REGISTER_ZVECTOR_DISPATCH(name, fn)                                          \
   REGISTER_SVE128_DISPATCH(name, fn)                                           \
-  REGISTER_SVE256_DISPATCH(name, fn)
+  REGISTER_SVE256_DISPATCH(name, fn) \
+  REGISTER_SVE512_DISPATCH(name, fn)
 
 #define REGISTER_NO_CPU_DISPATCH(name)                                         \
   REGISTER_ALL_CPU_DISPATCH(name, nullptr)
@@ -501,6 +511,7 @@ struct RegisterPRIVATEUSE1Dispatch {
 #define ALSO_REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #define ALSO_REGISTER_SVE128_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #define ALSO_REGISTER_SVE256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#define ALSO_REGISTER_SVE512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
 } // namespace at::native
 

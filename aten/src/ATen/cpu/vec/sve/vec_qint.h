@@ -46,7 +46,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE256)
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE512)
 
 // NOTE: These are low-performance implementations that we fall back on
 // if we are not building with SVE. This may not be an issue, because
@@ -585,7 +585,7 @@ Vectorized<c10::quint8> inline maximum(
   return a.maximum(b);
 }
 
-#endif // defined(CPU_CAPABILITY_SVE256)
+#endif // defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE512)
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

@@ -7,6 +7,9 @@
 
 // clang-format off
 #include <ATen/cpu/vec/vec_base.h>
+#if defined(CPU_CAPABILITY_SVE512)
+#include <ATen/cpu/vec/sve/vec_common_sve.h>
+#endif
 #include <ATen/cpu/vec/vec512/vec512_float.h>
 #include <ATen/cpu/vec/vec512/vec512_bfloat16.h>
 #include <ATen/cpu/vec/vec512/vec512_float8.h>

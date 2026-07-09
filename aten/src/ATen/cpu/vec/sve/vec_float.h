@@ -22,7 +22,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE128) || defined(CPU_CAPABILITY_SVE256)
+#if defined(CPU_CAPABILITY_SVE128) || defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE512)
 // Implementation copied from Arm Optimized Routines:
 // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/expf.c
 static inline svfloat32_t exp_u20_fast_path(svfloat32_t values) {
@@ -106,7 +106,7 @@ static inline svfloat32_t fexp_u20(svfloat32_t values) {
 }
 #endif
 
-#if defined(CPU_CAPABILITY_SVE256)
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE512)
 
 template <>
 struct is_vec_specialized_for<float> : std::bool_constant<true> {};
@@ -838,7 +838,7 @@ Vectorized<float> inline fnmsub(
   return svnmad_f32_x(ptrue, a, b, c);
 }
 
-#endif // defined(CPU_CAPABILITY_SVE256)
+#endif // defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE512)
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

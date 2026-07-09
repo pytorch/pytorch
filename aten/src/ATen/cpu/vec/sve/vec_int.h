@@ -15,7 +15,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE256)
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE512)
 
 #if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
     !defined(__clang__) &&                                             \
@@ -509,7 +509,7 @@ Vectorized<int8_t> inline operator>>(
 
 #undef VEC_INT_SVE_GCC_PCH_ICE_WORKAROUND
 
-#endif // defined(CPU_CAPABILITY_SVE256)
+#endif // defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE512)
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
