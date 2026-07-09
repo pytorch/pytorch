@@ -1221,6 +1221,8 @@ _PATCHED_RANDOM_FUNCTIONS: Sequence[tuple[str, str]] = (
     ("torch.initial_seed", "torch_initial_seed"),
 )
 
+_PATCHED_DIST_FUNCTIONS: Sequence[str] = ("get_rank",)
+
 
 class LocalTensorMode(TorchDispatchMode):
     """
@@ -1258,6 +1260,8 @@ class LocalTensorMode(TorchDispatchMode):
         self._old_device_mesh_methods: dict[str, Callable[..., object]] | None = None
         # Used to store the patched "random" functions
         self._old_random_functions: dict[str, Callable[..., object]] = {}
+        # Used to store the patched dist functions
+        self._old_dist_functions: dict[str, Callable[..., object]] | None = None
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
@@ -1457,6 +1461,7 @@ class LocalTensorMode(TorchDispatchMode):
 
         self._unpatch_device_mesh()
         self._unpatch_random_functions()
+        self._unpatch_dist()
         self._disable = True
 
     def enable_(self):
@@ -1465,6 +1470,7 @@ class LocalTensorMode(TorchDispatchMode):
 
         self._patch_device_mesh()
         self._patch_random_functions()
+        self._patch_dist()
         self._disable = False
 
     @contextlib.contextmanager
@@ -1560,6 +1566,27 @@ class LocalTensorMode(TorchDispatchMode):
                 mod_name, attr_name = global_name.rsplit(".", 1)
                 mod = importlib.import_module(mod_name)
                 setattr(mod, attr_name, value)
+
+    def _patch_dist(self) -> None:
+        if self._old_dist_functions is not None:
+            raise AssertionError
+        import torch.distributed as dist
+
+        saved = {}
+        for name in _PATCHED_DIST_FUNCTIONS:
+            saved[name] = getattr(dist, name)
+            local = getattr(_LocalDist, name)
+            setattr(dist, name, local)
+        self._old_dist_functions = saved
+
+    def _unpatch_dist(self) -> None:
+        saved, self._old_dist_functions = self._old_dist_functions, None
+        if saved is None:
+            raise AssertionError
+        import torch.distributed as dist
+
+        for name, value in saved.items():
+            setattr(dist, name, value)
 
 
 class _LocalRandom:
@@ -1710,6 +1737,31 @@ class _LocalDeviceMesh:
         if coords is None:
             raise AssertionError
         return coords[mesh_dim]
+
+
+class _LocalDist:
+    """
+    Holds implementations of torch.distributed functions that must be patched while
+    running under LocalTensorMode.
+    """
+
+    @staticmethod
+    def get_rank(group: "ProcessGroup | None" = None) -> "int | SymInt":
+        import torch.distributed as dist
+
+        lm = enabled_local_tensor_mode()
+        if lm is None:
+            raise AssertionError("Unexpectedly not in LocalTensorMode")
+        if group is None or group is dist.GroupMember.WORLD:
+            return torch.SymInt(LocalIntNode({r: r for r in lm.ranks}))
+        from ._c10d import _prepare_collective_groups
+
+        ranks, group_offsets, _ = _prepare_collective_groups(group)
+        mapping: dict[int, int] = {}
+        for group_offset in group_offsets:
+            for local_rank, r in enumerate(ranks):
+                mapping[group_offset + r] = local_rank
+        return torch.SymInt(LocalIntNode(mapping))
 
 
 def reconcile_args(args: Any, kwargs: dict[str, Any] | None = None) -> Any:
