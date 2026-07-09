@@ -544,21 +544,15 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     c10::cuda::CUDAGuard guard(device_idx);
     // Allocate signal pad + buffer together in one call. Layout: signal pad in
-    // [0, buffer_offset), data buffer after it. buffer_offset is the signal pad
-    // size, which is already 16-aligned, so the data buffer is aligned without
-    // extra padding; the data size is rounded up instead. A single window is
-    // registered over the whole region at rendezvous time, so only the region
+    // [0, buffer_offset), data buffer after it. The data buffer sits at
+    // buffer_offset past the base and device collectives access it with int4
+    // loads/stores, so round the signal pad size up to signal_pad_alignment to
+    // keep the buffer aligned; the data size is rounded up too. A single window
+    // is registered over the whole region at rendezvous time, so only the region
     // base (which we keep granularity-aligned) needs to satisfy NCCL's
     // window-alignment requirement.
-    const size_t buffer_offset = get_signal_pad_size();
-    // The data buffer sits at buffer_offset past the (granularity-aligned) base
-    // and must be 16-byte aligned (device collectives use int4 accesses), so
-    // buffer_offset itself must be 16-aligned.
-    TORCH_CHECK(
-        buffer_offset % 16 == 0,
-        "signal pad size must be a multiple of 16 so the data buffer is 16-byte "
-        "aligned, but got ",
-        buffer_offset);
+    const size_t buffer_offset =
+        at::round_up(get_signal_pad_size(), signal_pad_alignment);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
     const size_t total_size = buffer_offset + aligned_buffer_size;
     const bool use_expandable_segments =
