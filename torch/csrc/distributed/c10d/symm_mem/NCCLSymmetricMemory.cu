@@ -551,6 +551,14 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // base (which we keep granularity-aligned) needs to satisfy NCCL's
     // window-alignment requirement.
     const size_t buffer_offset = get_signal_pad_size();
+    // The data buffer sits at buffer_offset past the (granularity-aligned) base
+    // and must be 16-byte aligned (device collectives use int4 accesses), so
+    // buffer_offset itself must be 16-aligned.
+    TORCH_CHECK(
+        buffer_offset % 16 == 0,
+        "signal pad size must be a multiple of 16 so the data buffer is 16-byte "
+        "aligned, but got ",
+        buffer_offset);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
     const size_t total_size = buffer_offset + aligned_buffer_size;
     const bool use_expandable_segments =
