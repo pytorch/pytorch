@@ -43,7 +43,7 @@ import threading
 from typing import Any, TYPE_CHECKING
 
 from .codegen import capture_generated_sources, GeneratedSource
-from .source_emit import _emit_value, _REBUILD_HELPER
+from .source_emit import _REBUILD_HELPER, emit_value
 
 
 if TYPE_CHECKING:
@@ -247,7 +247,7 @@ def _resolve_global(
         return expr
     # Not a wired reference (inner call / sibling wrapper / helper): emit ``obj`` as
     # plain reconstruction source. Raises if it is not source-expressible.
-    return _emit_value(obj, imports)
+    return emit_value(obj, imports)
 
 
 def _module_level_names(tree: ast.Module) -> set[str]:
