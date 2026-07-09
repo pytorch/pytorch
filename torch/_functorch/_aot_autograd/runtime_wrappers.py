@@ -902,12 +902,20 @@ def _codegen_compiled_fn_invocation(
     rw_lines.append("    del args")
 
 
+# signatures mirror the _RuntimeForwardEpilogue reference methods
+# (_apply_input_mutations / _replay_output_aliases). The codegen'd _alias_fn
+# always builds and returns a list, so list[Any] is tighter than the reference's
+# -> Any (the early `return fw_outs` path does not exist in the codegen'd fn).
+_EpilogueApplyMutationsFn = Callable[[dict[int, Tensor], list[Any]], None]
+_EpilogueReplayAliasesFn = Callable[[dict[int, Tensor], list[Any]], list[Any]]
+
+
 def _codegen_epilogue(
     rw_lines: list[str],
     rw_globals: dict[str, object],
     runtime_metadata: ViewAndMutationMeta,
-    apply_mutations_fn: Callable[..., Any] | None,
-    replay_aliases_fn: Callable[..., Any] | None,
+    apply_mutations_fn: _EpilogueApplyMutationsFn | None,
+    replay_aliases_fn: _EpilogueReplayAliasesFn | None,
     num_mutated_runtime_inps: int,
     expected_outs: int,
 ) -> None:
@@ -971,8 +979,8 @@ def _create_runtime_wrapper(
     # The orchestration closes over these two codegen'd epilogue functions directly
     # (bound into rw_globals as _apply_mutations_ / _replay_aliases_ in _codegen_epilogue).
     # Each stays None when its epilogue step is absent for this graph.
-    codegen_apply_mutations: Callable[..., Any] | None = None
-    _codegen_alias_fn: Callable[..., Any] | None = None
+    codegen_apply_mutations: _EpilogueApplyMutationsFn | None = None
+    codegen_alias_fn: _EpilogueReplayAliasesFn | None = None
 
     # Codegen output alias regeneration: emit straight-line code per output
     # with all handler branches resolved at compile time.
@@ -1034,8 +1042,11 @@ def _create_runtime_wrapper(
 
         from .codegen import _compile_and_exec_source
 
-        _codegen_alias_fn = _compile_and_exec_source(
-            alias_source, alias_globals, "_alias_fn", "output_alias_wrapper"
+        codegen_alias_fn = typing.cast(
+            _EpilogueReplayAliasesFn,
+            _compile_and_exec_source(
+                alias_source, alias_globals, "_alias_fn", "output_alias_wrapper"
+            ),
         )
 
     def record_runtime_wrapper_prologue_enter() -> AbstractContextManager[None] | None:
@@ -1119,8 +1130,11 @@ def _create_runtime_wrapper(
 
         from .codegen import _compile_and_exec_source
 
-        codegen_apply_mutations = _compile_and_exec_source(
-            mut_source, mut_globals, "_apply_mutations", "mutation_epilogue"
+        codegen_apply_mutations = typing.cast(
+            _EpilogueApplyMutationsFn,
+            _compile_and_exec_source(
+                mut_source, mut_globals, "_apply_mutations", "mutation_epilogue"
+            ),
         )
 
     from .codegen import _compile_and_exec_source
@@ -1151,7 +1165,7 @@ def _create_runtime_wrapper(
         rw_globals,
         runtime_metadata,
         codegen_apply_mutations,
-        _codegen_alias_fn,
+        codegen_alias_fn,
         num_mutated_runtime_inps,
         expected_outs,
     )
