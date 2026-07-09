@@ -9113,6 +9113,46 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
     return output
 
 
+@register_lowering(torch._higher_order_ops._fuse_or_err, type_promotion_kind=None)
+def fuse_or_err(
+    subgraph_fn: ir.Subgraph, *operands, fuse_backward=False, _enforce_fusion=True
+):
+    """
+    Lowers a fuse_or_err region by inlining its subgraph into the parent graph
+    (so its ops participate in normal fusion) and, when enforcing, recording the
+    realized operations as a group that Scheduler._verify_fuse_or_err_groups
+    later requires to fuse into a single kernel.
+    """
+    from .graph import FuseOrErrGroup
+
+    hop_node = V.graph.current_node
+    op_watermark = len(V.graph.operations)
+
+    output = None
+    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
+        if node.op == "placeholder":
+            V.graph.env[node] = operands[i]  # type: ignore[assignment]
+        elif node.op == "output":
+            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            # Realize outputs so the region's ops become materialized scheduler
+            # nodes that we can look up after fusion.
+            for v in itertools.chain(args, kwargs.values()):
+                if isinstance(v, ir.IRNode):
+                    v.realize()
+            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
+        else:
+            V.graph.env[node] = V.graph.run_node(node)
+
+    if _enforce_fusion:
+        region_ops = OrderedSet(
+            op.get_operation_name() for op in V.graph.operations[op_watermark:]
+        )
+        if region_ops:
+            V.graph.fuse_or_err_groups.append(FuseOrErrGroup(region_ops, hop_node))
+
+    return output
+
+
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph

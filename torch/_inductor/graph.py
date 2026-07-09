@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import itertools
 import logging
@@ -147,6 +148,15 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 aten = torch.ops.aten
 
 _post_grad_graph_counter = itertools.count()
+
+
+@dataclasses.dataclass
+class FuseOrErrGroup:
+    # Operation names produced by lowering a single fuse_or_err region, plus the
+    # HOP fx node they originated from (used for error messages).
+    op_names: OrderedSet[str]
+    hop_node: torch.fx.Node
+
 
 if config.is_fbcode():
     from torch._inductor.fb.triton_kernel_metadata import (
@@ -584,6 +594,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.low_precision_codegen_ops: OrderedSet[str] = OrderedSet()
         # more aggressive prologue fusion
         self.invoke_quant_ops: OrderedSet[str] = OrderedSet()
+
+        # Groups of operation names produced by fuse_or_err regions that must
+        # each fuse into a single kernel. Verified after scheduling; see
+        # Scheduler._verify_fuse_or_err_groups.
+        self.fuse_or_err_groups: list[FuseOrErrGroup] = []
 
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()

@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
     from .codegen.wrapper import PythonWrapperCodegen
+    from .graph import FuseOrErrGroup
     from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
@@ -4249,6 +4250,8 @@ class Scheduler:
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
+        self._verify_fuse_or_err_groups()
+
         if any(
             isinstance(node, FusedExternTritonKernelSchedulerNode)
             for node in self.nodes
@@ -6031,6 +6034,120 @@ class Scheduler:
     def get_fused_node(self, node: BaseSchedulerNode) -> BaseSchedulerNode:
         "Look up the node in Scheduler name_to_fused_node"
         return self.name_to_fused_node[node.get_first_name()]
+
+    def _verify_fuse_or_err_groups(self) -> None:
+        """
+        Enforce the fuse_or_err contract: every region recorded in
+        V.graph.fuse_or_err_groups must have compiled into a single kernel.
+        Raises with the exact reason otherwise (warns in fbcode).
+        """
+        for group in V.graph.fuse_or_err_groups:
+            fused_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
+            for op_name in group.op_names:
+                fnode = self.name_to_fused_node.get(op_name)
+                if fnode is not None:
+                    fused_nodes.add(fnode)
+            if len(fused_nodes) > 1:
+                self._report_fuse_or_err_failure(group, fused_nodes)
+
+    def _report_fuse_or_err_failure(
+        self,
+        group: FuseOrErrGroup,
+        fused_nodes: OrderedSet[BaseSchedulerNode],
+    ) -> None:
+        import warnings
+
+        from torch._logging import trace_structured
+
+        lines = [
+            f"fuse_or_err: region did not fuse into a single kernel; it "
+            f"produced {len(fused_nodes)} separate kernels."
+        ]
+        hop_stack = group.hop_node.meta.get("stack_trace")
+        if hop_stack:
+            lines.append(f"Region call site:\n{hop_stack}")
+
+        fused_list = list(fused_nodes)
+        for i, fnode in enumerate(fused_list):
+            region_ops = sorted(
+                op for op in group.op_names if self.name_to_fused_node.get(op) is fnode
+            )
+            lines.append(f"  kernel #{i}: region ops {region_ops}")
+            targets = self._fuse_or_err_fx_targets(fnode)
+            if targets:
+                lines.append(f"    from ops: {targets}")
+            if any(
+                isinstance(sub, ExternKernelSchedulerNode) for sub in fnode.get_nodes()
+            ):
+                lines.append(
+                    "    -> this is an extern / non-Triton fallback (e.g. a "
+                    "matmul or an op with no Triton lowering); it can never be "
+                    "fused with other ops into one kernel."
+                )
+
+        for a, b in itertools.pairwise(fused_list):
+            lines.append(
+                f"  why {a.get_name()} and {b.get_name()} did not fuse: "
+                f"{self._fuse_or_err_reason(a, b)}"
+            )
+
+        msg = "\n".join(lines)
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fuse_or_err_failure",
+                "encoding": "string",
+            },
+            payload_fn=lambda: msg,
+        )
+        if config.is_fbcode():
+            warnings.warn(msg)
+        else:
+            raise RuntimeError(msg)
+
+    def _fuse_or_err_fx_targets(self, node: BaseSchedulerNode) -> list[str]:
+        targets: OrderedSet[str] = OrderedSet()
+        for sub in node.get_nodes():
+            if sub.node is None:
+                continue
+            for origin in sub.node.get_origins():
+                if origin.op == "call_function":
+                    targets.add(str(origin.target))
+        return list(targets)
+
+    def _fuse_or_err_reason(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> str:
+        # Re-run can_fuse with fusion_log captured so we can surface the exact
+        # WhyNoFuse reason the pair did not combine.
+        records: list[str] = []
+
+        class _CaptureHandler(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record.getMessage())
+
+        handler = _CaptureHandler(level=logging.DEBUG)
+        prev_level = fusion_log.level
+        prev_propagate = fusion_log.propagate
+        fusion_log.addHandler(handler)
+        fusion_log.setLevel(logging.DEBUG)
+        fusion_log.propagate = False
+        try:
+            legal = self.can_fuse(node1, node2) or self.can_fuse(node2, node1)
+        except Exception:
+            legal = False
+        finally:
+            fusion_log.removeHandler(handler)
+            fusion_log.setLevel(prev_level)
+            fusion_log.propagate = prev_propagate
+
+        if legal:
+            return (
+                "fusion is legal but Inductor's fusion heuristics/benchmarking "
+                "chose not to fuse them (e.g. exceeds a fusion size/score limit)"
+            )
+        reasons = OrderedSet(m for m in records if m.startswith("cannot fuse"))
+        return "; ".join(reasons) if reasons else "unknown (run with TORCH_LOGS=fusion)"
 
     def fuse_two_nodes(
         self,
