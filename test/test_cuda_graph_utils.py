@@ -104,7 +104,7 @@ class TestMarkKernels(TestCase):
                 annotations,
                 lambda msg: f"{msg}\nmemset toolsId {hex(tools_id)} was not annotated",
             )
-            self.assertEqual(annotations[tools_id], [{"str": "reduction"}])
+            self.assertEqual(annotations[tools_id], [{"name": "reduction"}])
 
     def test_single_scope_at_capture_start_uses_root_fallback(self):
         graph = torch.cuda.CUDAGraph()
@@ -121,7 +121,7 @@ class TestMarkKernels(TestCase):
         self.assertGreater(len(annotations), 0)
         for anns in annotations.values():
             for ann in anns:
-                self.assertEqual(ann, {"str": "phase_a"})
+                self.assertEqual(ann, {"name": "phase_a"})
 
     def test_multiple_scopes_no_overlap(self):
         graph = torch.cuda.CUDAGraph()
@@ -138,9 +138,9 @@ class TestMarkKernels(TestCase):
         scope_2_ids = set()
         for tid, anns in annotations.items():
             self.assertEqual(len(anns), 1)
-            if anns[0] == {"str": "scope_1"}:
+            if anns[0] == {"name": "scope_1"}:
                 scope_1_ids.add(tid)
-            elif anns[0] == {"str": "scope_2"}:
+            elif anns[0] == {"name": "scope_2"}:
                 scope_2_ids.add(tid)
 
         self.assertGreater(len(scope_1_ids), 0)
@@ -208,7 +208,7 @@ class TestMarkKernels(TestCase):
         self.assertGreater(total_annotated, 0)
         for anns in annotations.values():
             for ann in anns:
-                self.assertEqual(ann, {"str": "tagged"})
+                self.assertEqual(ann, {"name": "tagged"})
 
     def test_nested_scopes_innermost_wins(self):
         """With nested string scopes, the innermost name wins."""
@@ -233,9 +233,9 @@ class TestMarkKernels(TestCase):
             )
             ann = anns[0]
             self.assertIsInstance(ann, dict)
-            if ann["str"] == "outer":
+            if ann["name"] == "outer":
                 outer_ids.add(tid)
-            elif ann["str"] == "inner":
+            elif ann["name"] == "inner":
                 inner_ids.add(tid)
 
         self.assertGreater(len(outer_ids), 0, "Should have outer-only kernels")
@@ -316,6 +316,28 @@ class TestMarkKernels(TestCase):
             self.assertEqual(ann["In msg nelems"], 1024)
             self.assertEqual(ann["dtype"], "bfloat16")
 
+    def test_string_scope_in_dict_scope_contends_for_name(self):
+        """A string annotation wraps to {"name": ...}, so a string scope
+        nested inside a dict scope with a "name" key contends for the same
+        slot; the inner scope wins. This pins the wrapped-string format and
+        the merge ordering as observable pickle-format behavior."""
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(8, device="cuda")
+
+        with torch.cuda.graph(graph, enable_annotations=True):
+            with mark_kernels({"name": "outer", "dtype": "bfloat16"}):
+                with mark_kernels("inner"):
+                    _ = x + 1
+
+        annotations = get_kernel_annotations()
+        self.assertGreater(len(annotations), 0)
+        for anns in annotations.values():
+            self.assertEqual(len(anns), 1)
+            ann = anns[0]
+            # Inner string scope wins the "name" slot; outer-only keys survive.
+            self.assertEqual(ann["name"], "inner")
+            self.assertEqual(ann["dtype"], "bfloat16")
+
     def test_no_enable_records_nothing(self):
         # Without enable_annotations=True the capture is un-annotated, so
         # mark_kernels is a no-op and nothing is recorded.
@@ -343,7 +365,7 @@ class TestMarkKernels(TestCase):
         self.assertGreater(len(annotations), 0)
         for anns in annotations.values():
             for ann in anns:
-                self.assertEqual(ann, {"str": "auto"})
+                self.assertEqual(ann, {"name": "auto"})
 
     def test_enable_annotations_does_not_clear(self):
         """Annotations from a previous graph survive a second capture."""
@@ -495,7 +517,7 @@ class TestMarkKernels(TestCase):
         graph_ids_by_name: dict[str, set] = {}
         for tools_id, anns in get_kernel_annotations().items():
             self.assertEqual(len(anns), 1)
-            graph_ids_by_name.setdefault(anns[0]["str"], set()).add(tools_id >> 32)
+            graph_ids_by_name.setdefault(anns[0]["name"], set()).add(tools_id >> 32)
 
         self.assertIn("graph_a", graph_ids_by_name)
         self.assertIn("graph_b", graph_ids_by_name)
@@ -594,7 +616,7 @@ class TestMarkKernels(TestCase):
         annotations = get_kernel_annotations()
         self.assertEqual(len(annotations), 1)
         for anns in annotations.values():
-            self.assertEqual(anns, [{"str": "tagged"}])
+            self.assertEqual(anns, [{"name": "tagged"}])
 
 
 # cuda.bindings is NVIDIA-only; get_graph_data has no ROCm equivalent.
@@ -745,6 +767,52 @@ class TestRekeyAnnotations(TestCase):
         annotations = {self._tools_id(1, 10): original}
         _rekey_annotations(annotations, capture_graph_id=1, exec_graph_id=2)
         self.assertEqual(original, ["a"])
+
+
+# Pure trace-JSON logic, no CUDA needed. Pins the canonical annotation key
+# ("name") and reader tolerance for the two legacy pickle spellings: dicts
+# keyed "str" and bare unwrapped strings.
+class TestAnnotateTrace(TestCase):
+    @staticmethod
+    def _trace_with_kernel(graph_node_id):
+        return {
+            "traceEvents": [
+                {
+                    "ph": "X",
+                    "cat": "kernel",
+                    "name": "k",
+                    "pid": 0,
+                    "tid": 7,
+                    "ts": 100,
+                    "dur": 10,
+                    "args": {"graph node id": graph_node_id, "stream": 7},
+                }
+            ]
+        }
+
+    def _annotated_args(self, annotations):
+        from torch.cuda._annotate_cuda_graph_trace import annotate_trace
+
+        trace = self._trace_with_kernel(42)
+        count = annotate_trace(trace, annotations)
+        self.assertEqual(count, 1)
+        [event] = [e for e in trace["traceEvents"] if e.get("cat") == "kernel"]
+        return event["args"]
+
+    def test_canonical_name_key(self):
+        args = self._annotated_args({42: [{"name": "phase_a", "dtype": "bf16"}]})
+        self.assertEqual(args["name"], "phase_a")
+        self.assertEqual(args["dtype"], "bf16")
+
+    def test_legacy_str_key_maps_to_name(self):
+        args = self._annotated_args({42: [{"str": "phase_a"}]})
+        self.assertEqual(args["name"], "phase_a")
+        self.assertNotIn("str", args)
+
+    def test_legacy_bare_string_maps_to_name(self):
+        args = self._annotated_args({42: ["phase_a"]})
+        self.assertEqual(args["name"], "phase_a")
+        self.assertNotIn("annotation", args)
 
 
 if __name__ == "__main__":

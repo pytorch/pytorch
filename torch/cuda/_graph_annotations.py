@@ -284,7 +284,7 @@ def mark_kernels(annotation: str | dict[str, Any]):
         return
 
     if isinstance(annotation, str):
-        annotation = {"str": annotation}
+        annotation = {"name": annotation}
 
     stream = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
         init_value=torch.cuda.current_stream().cuda_stream
@@ -527,7 +527,7 @@ def mark_stream(stream: torch.cuda.Stream, annotation: str | dict[str, Any]):
             yield
     else:
         if isinstance(annotation, str):
-            annotation = {"str": annotation}
+            annotation = {"name": annotation}
         if isinstance(annotation, dict):
             annotation["stream"] = _get_stream_id(stream)
         with mark_kernels(annotation):
