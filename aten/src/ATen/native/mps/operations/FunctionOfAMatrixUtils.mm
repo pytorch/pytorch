@@ -37,7 +37,11 @@ static void _compute_linear_combination_mps_kernel(TensorIterator& iter,
   if (iter.numel() == 0) {
     return;
   }
-  TORCH_CHECK(iter.dtype() != at::kDouble, "float64 is not supported on MPS");
+  const auto dtype = iter.dtype();
+  TORCH_CHECK_TYPE(supportedFloatingType(dtype) || dtype == kComplexFloat,
+                   "_compute_linear_combination: unsupported dtype ",
+                   dtype,
+                   " on MPS, expected float32, float16, bfloat16 or complex64");
 
   // uint thread ids cap one dispatch at UINT32_MAX threads; split so numel (and
   // every operand's base offset) fits 32 bits.
@@ -54,7 +58,7 @@ static void _compute_linear_combination_mps_kernel(TensorIterator& iter,
   const bool use32 = clc_max_byte_offset(iter, 1, in_stride, num_summations) <= kMax &&
       clc_max_byte_offset(iter, 2, coeff_stride, num_summations) <= kMax;
 
-  const auto type_str = scalarToMetalTypeString(iter.dtype());
+  const auto type_str = scalarToMetalTypeString(dtype);
   const auto ndim = static_cast<uint32_t>(iter.ndim());
   auto pso = lib.getPipelineStateForFunc("compute_linear_combination_" + type_str + std::string(mtlIdxSuffix(use32)));
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {

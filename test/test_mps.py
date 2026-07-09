@@ -11319,6 +11319,34 @@ class TestLinalgMPS(TestCaseMPS):
             torch._compute_linear_combination(xm, cm, out=actual)
         self.assertEqual(actual.cpu(), expected, atol=tol[0], rtol=tol[1])
 
+    @unittest.skipIf(MACOS_VERSION < 15.0, "matrix_exp on MPS requires macOS 15+")
+    @dtypes(torch.float32, torch.complex64)
+    def test_matrix_exp_invariants(self, device, dtype):
+        # Reference-free identities catch systematic MPS bias an MPS-vs-CPU compare misses.
+        torch.manual_seed(0)
+        expm = torch.linalg.matrix_exp
+
+        for n, batch in [(8, ()), (16, ()), (32, (4,))]:
+            eye = torch.eye(n, dtype=dtype, device=device).expand(*batch, n, n)
+
+            zero = torch.zeros(*batch, n, n, dtype=dtype, device=device)
+            self.assertEqual(expm(zero), eye, atol=2e-4, rtol=2e-4)
+
+            # exp(skew-Hermitian) is unitary, and the norm sweep hits every branch
+            # plus the squaring path.
+            for scale in (1e-2, 1.0, 5.0):
+                a = torch.randn(*batch, n, n, dtype=dtype, device=device)
+                q = expm((a - a.mH) * scale)
+                self.assertEqual(torch.matmul(q, q.mH), eye, atol=2e-4, rtol=2e-4)
+
+            # det(exp(A)) == exp(tr(A)); a scalar check over the full matmul path.
+            # linalg.det has no complex MPS support, so the identity is evaluated on
+            # CPU over the MPS matrix_exp result.
+            a = torch.randn(*batch, n, n, dtype=dtype, device=device) / n
+            lhs = torch.linalg.det(expm(a).cpu())
+            rhs = torch.exp(torch.diagonal(a.cpu(), dim1=-2, dim2=-1).sum(-1))
+            self.assertEqual(lhs, rhs, atol=1e-3, rtol=1e-3)
+
     def test_matrix_rank(self, device="mps", dtype=torch.float32):
         matrix_rank = torch.linalg.matrix_rank
 
