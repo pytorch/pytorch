@@ -5452,14 +5452,9 @@ sum_pyop = construct_sum_pyop()
 
 
 @markDynamoStrictTest
-<<<<<<< HEAD
 class TestHigherOrderOperatorInteractionDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-=======
-class TestHigherOrderOperatorInteraction(TestCase):
-    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/4283")
->>>>>>> 821cd8bd1c1 (Refactor functorch XPU enable to inline tuple pattern; add test_compile_benchmark_util XPU)
     def test_basic_sum(self, device):
         x = torch.randn(2, 3, 4, device=device)
         result = sum_pyop(x, 1)
@@ -5818,35 +5813,35 @@ class TestGradTrackingTensorToList(TestCase):
         self.assertEqual(result, [2.0 + 4.0j, 6.0 + 8.0j])
 
 
-only_for = ("cpu", "cuda")
+only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
     TestGradTransformDevice,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
+    only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestVmapOfGradDevice,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
+    only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestJacDevice,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
+    only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestJvpDevice,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
+    only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestLinearizeDevice,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
+    only_for=only_for,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
@@ -5909,7 +5904,7 @@ instantiate_parametrized_tests(
 instantiate_device_type_tests(
     TestCompileTransformsDevice,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
+    only_for=only_for,
     allow_xpu=True,
 )
 
