@@ -100,12 +100,17 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   static CUDAGraph* get_currently_capturing_graph();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
   void begin_capture_to_while_node(const Tensor& scalar_cuda_pred_tensor);
+  void begin_capture_to_switch_node(
+      const Tensor& scalar_cuda_index_tensor,
+      unsigned int num_branches);
+  void begin_capture_to_next_conditional_body();
   void end_capture_to_conditional_node();
   void set_conditional_handle_for_current_node(
       const Tensor& scalar_cuda_pred_tensor);
   static void set_conditional_handle(
       cudaGraphConditionalHandle handle,
-      const Tensor& scalar_cuda_pred_tensor);
+      const Tensor& scalar_cuda_value_tensor,
+      std::optional<unsigned int> num_cases = std::nullopt);
 
  private:
   template <typename StreamType>
@@ -115,8 +120,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool has_retained_pool(MempoolId_t pool) const;
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   void begin_capture_to_conditional_node(
-      const Tensor& scalar_cuda_pred_tensor,
-      cudaGraphConditionalNodeType conditional_type);
+      const Tensor& scalar_cuda_value_tensor,
+      cudaGraphConditionalNodeType conditional_type,
+      unsigned int num_body_graphs = 1);
+  void begin_capture_to_conditional_body(cudaGraph_t body_graph);
+  bool end_capture_to_conditional_body();
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 
  protected:
@@ -193,10 +201,17 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
     }
   };
 
+  struct ConditionalNodeCaptureState {
+    cudaGraphConditionalHandle handle{};
+    cudaGraph_t* body_graphs = nullptr;
+    unsigned int num_body_graphs = 0;
+    unsigned int current_body = 0;
+  };
+
   std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
   std::stack<CaptureId_t> conditional_graph_capture_ids_;
   std::stack<OwnedCUDAStream> conditional_node_raw_streams_;
-  std::stack<cudaGraphConditionalHandle> conditional_node_handles_;
+  std::stack<ConditionalNodeCaptureState> conditional_nodes_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
 

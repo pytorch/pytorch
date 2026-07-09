@@ -19,6 +19,8 @@
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
+// Called from torch/csrc/Module.cpp.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void THCPGraph_init(PyObject* module) {
   // Pybind11 patch notes say "py::module_" is more up-to-date syntax,
   // but CI linter and some builds prefer "module".
@@ -133,6 +135,16 @@ void THCPGraph_init(PyObject* module) {
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::begin_capture_to_while_node),
           py::arg("scalar_cuda_pred_tensor"))
+      .def(
+          "begin_capture_to_switch_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_switch_node),
+          py::arg("scalar_cuda_index_tensor"),
+          py::arg("num_branches"))
+      .def(
+          "begin_capture_to_next_conditional_body",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_next_conditional_body))
       .def(
           "end_capture_to_conditional_node",
           torch::wrap_pybind_function_no_gil(
