@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import \
     (instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
      subtest, TestCase, DeterministicGuard, TEST_CUDA, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA, dtypesIfXPU,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (all_passthru_types, all_passthru_types_and, get_all_dtypes,)
@@ -42,6 +42,7 @@ class TestScatterGather(TestCase):
 
     @dtypes(*all_passthru_types())
     @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
+    @dtypesIfXPU(*all_passthru_types_and(torch.chalf))
     def test_gather(self, device, dtype):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
@@ -290,6 +291,7 @@ class TestScatterGather(TestCase):
     # FIXME: RuntimeError: "cuda_scatter_gather_base_kernel_reduce_multiply" not implemented for 'ComplexFloat'
     @toleranceOverride({torch.float16: tol(atol=1e-2, rtol=0)})
     @dtypesIfCUDA(torch.float16, torch.float32)
+    @dtypesIfXPU(torch.float16, torch.float32)
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter__reductions(self, device, dtype):
         for reduction in ("add", "multiply"):
@@ -399,6 +401,7 @@ class TestScatterGather(TestCase):
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
+    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_prod(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -407,6 +410,7 @@ class TestScatterGather(TestCase):
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
+    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_mean(self, device, dtype):
         for include_self in (True, False):
             for deterministic in [False, True]:
@@ -417,6 +421,7 @@ class TestScatterGather(TestCase):
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
+    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_amax(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -436,6 +441,7 @@ class TestScatterGather(TestCase):
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
+    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_amin(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -1167,7 +1173,7 @@ instantiate_parametrized_tests(TestScatterAddOverrideCorrectness)
 # Generic Device Test Framework instantiation, see
 #   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
 #   for details.
-instantiate_device_type_tests(TestScatterGather, globals())
+instantiate_device_type_tests(TestScatterGather, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()
