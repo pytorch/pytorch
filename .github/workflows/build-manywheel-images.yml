@@ -31,6 +31,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.repository_owner == 'pytorch'
     environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) && 'docker-build') || '' }}
     strategy:
       fail-fast: false

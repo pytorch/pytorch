@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   build-wheel:
+    if: github.repository_owner == 'pytorch'
     name: "Build FA3 Windows ${{ matrix.cuda_version }}"
     runs-on: "${{ matrix.runner }}"
     strategy:
