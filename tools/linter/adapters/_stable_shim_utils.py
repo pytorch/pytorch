@@ -458,11 +458,14 @@ def merge_base_with_main() -> str:
         )
     main_sha = result.stdout.split()[0]
     try:
-        commit_missing = subprocess.run(
-            ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
-            capture_output=True,
-            timeout=5,
-        ).returncode != 0
+        commit_missing = (
+            subprocess.run(
+                ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
+                capture_output=True,
+                timeout=5,
+            ).returncode
+            != 0
+        )
     except subprocess.TimeoutExpired:
         # On partial-clone repos (what's in CI), the git cat-file can take
         # longer than 5s due to calling the network. Treat this as "not
