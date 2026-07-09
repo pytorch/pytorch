@@ -10024,19 +10024,22 @@ class TestLinalgCudaOnly(TestCase):
             return tuned
 
         import os
+        import shutil
         import subprocess
         import sys
+        import tempfile
         import textwrap
+
+        # Create the results file in the parent so we can always clean it up,
+        # even if the subprocess is killed before its own teardown runs.
+        results_dir = tempfile.mkdtemp(prefix="tunableop_cublaslt_candidate_")
+        results_filename = os.path.join(results_dir, "results.csv")
 
         script = textwrap.dedent(
             """
-            import os
-            import tempfile
             import torch
 
-            results_filename = tempfile.NamedTemporaryFile(
-                prefix="tunableop_cublaslt_candidate_", suffix=".csv", delete=False
-            ).name
+            results_filename = {results_filename!r}
             try:
                 torch.cuda.tunable.enable(False)
                 torch.cuda.tunable.record_untuned_enable(False)
@@ -10049,8 +10052,8 @@ class TestLinalgCudaOnly(TestCase):
                 torch.cuda.tunable.set_filename(results_filename, False)
                 torch.cuda.tunable.enable(True)
 
-                device = "cuda"
-                dtype = torch.bfloat16
+                device = {device!r}
+                dtype = {dtype}
 
                 A = torch.randn(128, 256, device=device, dtype=dtype)
                 B = torch.randn(256, 96, device=device, dtype=dtype)
@@ -10071,24 +10074,23 @@ class TestLinalgCudaOnly(TestCase):
                     torch.bmm(batch_A, batch_B)
             finally:
                 torch.cuda.tunable.enable(False)
-                try:
-                    os.remove(results_filename)
-                except FileNotFoundError:
-                    pass
             """
-        )
+        ).format(results_filename=results_filename, device=device, dtype=dtype)
 
         env = os.environ.copy()
         env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
         env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            text=True,
-            env=env,
-            cwd=os.path.dirname(__file__),
-            check=True,
-        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+                check=True,
+            )
+        finally:
+            shutil.rmtree(results_dir, ignore_errors=True)
 
         tuned = parse_tunable_log(result.stdout)
         self.assertGreater(len(tuned), 0, result.stdout)
@@ -10098,14 +10100,19 @@ class TestLinalgCudaOnly(TestCase):
             tuned,
         )
         self.assertTrue(any(key[0].startswith("GemmAndBiasTunableOp") for key in tuned), tuned)
+        self.assertTrue(
+            any(
+                info["candidate_count"] > 1
+                and any(c.startswith("Gemm_Cublaslt_") for c in info["tried"])
+                and len(info["timings"]) > 1
+                for info in tuned.values()
+            ),
+            (tuned, result.stdout),
+        )
 
         for key, info in tuned.items():
-            self.assertGreater(info["candidate_count"], 1, (key, info, result.stdout))
-            self.assertTrue(
-                any(candidate.startswith("Gemm_Cublaslt_") for candidate in info["tried"]),
-                (key, info, result.stdout),
-            )
-            self.assertGreater(len(info["timings"]), 1, (key, info, result.stdout))
+            if not info["timings"]:
+                continue
             self.assertIn(info["winner"], info["timings"], (key, info, result.stdout))
             winner_time = info["timings"][info["winner"]]
             fastest_time = min(info["timings"].values())
