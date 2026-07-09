@@ -358,7 +358,7 @@ class CustomOp:
                 raise RuntimeError(
                     f"impl_backward/impl_save_for_backward: "
                     f"the operator {self._qualname} already has an Autograd kernel "
-                    f"registered to DispatchKey::{key} vi a pre-existing "
+                    f"registered to DispatchKey::{key} via a pre-existing "
                     f"torch.library or TORCH_LIBRARY registration. Please either "
                     f"remove those registrations or don't use the torch._custom_ops APIs"
                 )
@@ -397,7 +397,7 @@ class CustomOp:
         if _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "Meta"):
             raise RuntimeError(
                 f"impl_abstract(...): the operator {self._qualname} "
-                f"already has an DispatchKey::Meta implementation via a "
+                f"already has a DispatchKey::Meta implementation via a "
                 f"pre-existing torch.library or TORCH_LIBRARY registration. "
                 f"Please either remove that registration or don't call impl_abstract."
             )
@@ -556,7 +556,7 @@ def validate_function_matches_schema(
 ) -> None:
     sig = inspect.signature(func)
 
-    if not all(supported_param(p) for _, p in sig.parameters.items()):
+    if not all(supported_param(p) for p in sig.parameters.values()):
         raise ValueError(
             f"custom_op(..., manual_schema)(func): positional-only args, "
             f"varargs, and kwargs are not supported. Please rewrite `func` "
@@ -565,8 +565,7 @@ def validate_function_matches_schema(
 
     if (
         any(
-            p.annotation is not inspect.Parameter.empty
-            for _, p in sig.parameters.items()
+            p.annotation is not inspect.Parameter.empty for p in sig.parameters.values()
         )
         or sig.return_annotation is not inspect.Signature.empty
     ):

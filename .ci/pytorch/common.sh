@@ -5,7 +5,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 set -ex -o pipefail
 
-# for ROCm environment variables
+# Source ROCm environment variables (paths may vary between tarball/wheel installs)
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ -f /etc/rocm_env.sh ]]; then
   # shellcheck disable=SC1091
   source /etc/rocm_env.sh
@@ -13,6 +13,19 @@ fi
 
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
+
+# Select compiler based on build environment name. Images that have both
+# GCC and Clang installed default cc/c++ to Clang (via install_clang.sh),
+# so we need to override when a gcc build is requested.
+if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
+  export CC=clang
+  export CXX=clang++
+elif [[ "${BUILD_ENVIRONMENT}" == *gcc* ]]; then
+  export CC=gcc
+  export CXX=g++
+  sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
+  sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 100
+fi
 
 # Figure out which Python to use for ROCm
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then

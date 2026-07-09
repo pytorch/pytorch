@@ -4,9 +4,19 @@ import argparse
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime
-from distutils.util import strtobool
 from pathlib import Path
+
+
+# Because this file is run as a script, we need to add the repo root to the
+# path to be able to import tools.strtobool.
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+from tools.strtobool import strtobool
+
+
+sys.path.pop(0)
 
 
 LEADING_V_PATTERN = re.compile("^v")

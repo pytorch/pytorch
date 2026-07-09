@@ -9,7 +9,7 @@ class CondPredicate(torch.nn.Module):
       - torch.Tensor with a single element
       - boolean expression
 
-    NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
+    NOTE: If the `pred` is tested on a dim with batch size < 2, it will be specialized.
     """
 
     def forward(self, x):

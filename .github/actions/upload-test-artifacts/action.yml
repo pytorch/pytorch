@@ -19,6 +19,15 @@ inputs:
     description: S3 bucket to upload artifacts to
     required: false
     default: "gha-artifacts"
+  skip-s3:
+    description: |
+      If 'true', skip the S3 upload entirely and upload directly to GitHub
+      Actions artifacts. Set this on runners that have no credentials capable
+      of writing to the S3 bucket (e.g. ROCm runners, which only assume the
+      read-only ECR login role) to avoid noisy s3:PutObject "not authorized"
+      errors.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -37,7 +46,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         set -euo pipefail
-        rm -f test-jsons-*.zip test-reports-*.zip logs-*.zip debug-*.zip
+        rm -f test-jsons-*.zip test-reports-*.zip logs-*.zip debug-*.zip profiler-traces-*.zip tlparse-*.zip
         ZIP_CMD='
         import sys, zipfile, os
         from pathlib import Path
@@ -59,6 +68,14 @@ runs:
         if [ -d 'test/debug' ]; then
           uv run --no-project python -c "$ZIP_CMD" \
             test/debug "debug-${FILE_SUFFIX}.zip" '**/*'
+        fi
+        if [ -d 'test/test-reports/profiler_traces' ]; then
+          uv run --no-project python -c "$ZIP_CMD" \
+            test/test-reports/profiler_traces "profiler-traces-${FILE_SUFFIX}.zip" '**/*'
+        fi
+        if [ -d 'test/test-reports/tlparse_output' ]; then
+          uv run --no-project python -c "$ZIP_CMD" \
+            test/test-reports/tlparse_output "tlparse-${FILE_SUFFIX}.zip" '**/*'
         fi
 
     # Windows zip
@@ -95,6 +112,7 @@ runs:
     # ===========================================
     - name: Store Test Downloaded JSONs on S3
       id: s3-upload-jsons
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -107,6 +125,7 @@ runs:
 
     - name: Store Test Reports on S3
       id: s3-upload-reports
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -119,6 +138,7 @@ runs:
 
     - name: Store Usage Logs on S3
       id: s3-upload-logs
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -131,6 +151,7 @@ runs:
 
     - name: Store Debug Artifacts on S3
       id: s3-upload-debug
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -141,12 +162,44 @@ runs:
         if-no-files-found: ignore
         path: debug-*.zip
 
+    - name: Store Profiler Traces on S3
+      id: s3-upload-profiler-traces
+      if: ${{ inputs.skip-s3 != 'true' }}
+      uses: seemethere/upload-artifact-s3@v5
+      continue-on-error: true
+      with:
+        s3-bucket: ${{ inputs.s3-bucket }}
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: ignore
+        path: profiler-traces-*.zip
+
+    - name: Store TLParse Output on S3
+      id: s3-upload-tlparse
+      if: ${{ inputs.skip-s3 != 'true' }}
+      uses: seemethere/upload-artifact-s3@v5
+      continue-on-error: true
+      with:
+        s3-bucket: ${{ inputs.s3-bucket }}
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: ignore
+        path: tlparse-*.zip
+
     # Check if S3 upload failed (test-reports is the critical one)
     - name: Check S3 upload status
       id: check-s3
       shell: bash
+      env:
+        SKIP_S3: ${{ inputs.skip-s3 }}
+        S3_REPORTS_OUTCOME: ${{ steps.s3-upload-reports.outcome }}
       run: |
-        if [[ "${{ steps.s3-upload-reports.outcome }}" == "failure" ]]; then
+        if [[ "${SKIP_S3}" == "true" ]]; then
+          echo "S3 upload skipped, uploading to GHA"
+          echo "s3-failed=true" >> "$GITHUB_OUTPUT"
+        elif [[ "${S3_REPORTS_OUTCOME}" == "failure" ]]; then
           echo "S3 upload failed, will fallback to GHA"
           echo "s3-failed=true" >> "$GITHUB_OUTPUT"
         else
@@ -193,3 +246,21 @@ runs:
         path: |
           usage_log.txt
           test/**/*.log
+
+    - name: Store Profiler Traces on Github
+      uses: actions/upload-artifact@v4
+      continue-on-error: true
+      with:
+        name: profiler-traces-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}
+        retention-days: 14
+        if-no-files-found: ignore
+        path: test/test-reports/profiler_traces/**/*
+
+    - name: Store TLParse Output on Github
+      uses: actions/upload-artifact@v4
+      continue-on-error: true
+      with:
+        name: tlparse-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}
+        retention-days: 14
+        if-no-files-found: ignore
+        path: test/test-reports/tlparse_output/**/*

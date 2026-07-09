@@ -22,7 +22,7 @@ struct ErrorMessages {
 
 #ifdef __METAL__
 namespace detail {
-static uint strncpy(device char* dst, constant const char* src, unsigned len) {
+inline uint strncpy(device char* dst, constant const char* src, unsigned len) {
   uint i = 0;
   while (src[i] != 0 && i < len - 1) {
     dst[i] = src[i];
@@ -40,7 +40,7 @@ inline uint print_arg(
 }
 
 // Returns number length as string in base10
-static inline uint base10_length(long num) {
+constexpr uint base10_length(long num) {
   uint rc = 1;
   if (num < 0) {
     num = -num;

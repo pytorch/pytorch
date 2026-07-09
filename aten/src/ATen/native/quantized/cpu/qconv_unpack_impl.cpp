@@ -1,4 +1,5 @@
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -91,7 +92,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
             kSpatialDim>(unpacked_weights, groups);
   }
   return std::tuple<at::Tensor, std::optional<at::Tensor>>(
-      unpacked_weights, bias);
+      std::move(unpacked_weights), bias);
 }
 
 template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<

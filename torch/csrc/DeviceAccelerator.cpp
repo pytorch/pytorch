@@ -182,6 +182,12 @@ void initModule(PyObject* module) {
     c10::CachingAllocator::setAllocatorSettings(env);
   });
 
+  m.def("_accelerator_getDefaultGenerator", [](c10::DeviceIndex device_index) {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    torch::utils::maybe_initialize_device(device_type);
+    return at::accelerator::getDefaultGenerator(device_index);
+  });
+
   // Accelerator Graph class binding
   py::class_<at::accelerator::Graph, std::shared_ptr<at::accelerator::Graph>>(
       m, "_acceleratorGraph")

@@ -22,6 +22,7 @@ import functools
 import importlib
 import importlib.metadata
 import json
+import logging
 import sys
 import threading
 import types
@@ -45,6 +46,9 @@ from typing import (
 from typing_extensions import deprecated, NamedTuple, Self, TypeIs
 
 from torch.torch_version import TorchVersion as _TorchVersion
+
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -614,13 +618,27 @@ def _private_register_pytree_node(
     for the Python pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
-    from torch._library.opaque_object import is_opaque_type
+    from torch._library.opaque_object import is_custom_class
 
-    if isinstance(cls, type) and is_opaque_type(cls):
-        raise ValueError(
-            f"{cls} cannot be registered as a pytree as it has been "
-            "registered as an opaque object. Opaque objects must be pytree leaves."
-        )
+    if isinstance(cls, type) and is_custom_class(cls):
+        # TODO: remove this allowance once downstream callers stop calling
+        # register_constant on Enum subclasses. Enums are now natively
+        # supported as opaque value types and don't need pytree registration.
+        import enum
+
+        if issubclass(cls, enum.Enum):
+            log.warning(
+                "%s is an Enum subclass and is now natively supported by "
+                "torch.compile as an opaque value type. Calling "
+                "register_constant() on Enum subclasses is deprecated and "
+                "will be an error in a future release.",
+                cls,
+            )
+        else:
+            raise ValueError(
+                f"{cls} cannot be registered as a pytree as it has been "
+                "registered as an opaque object. Opaque objects must be pytree leaves."
+            )
 
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
@@ -846,7 +864,7 @@ def _namedtuple_serialize(context: Context) -> DumpableContext:
     if context not in SUPPORTED_SERIALIZED_TYPES:
         raise NotImplementedError(
             f"Can't serialize TreeSpec of namedtuple class {context} because we "
-            "didn't register a serializated_type_name. Please register using "
+            "didn't register a serialized_type_name. Please register using "
             "`_register_namedtuple`."
         )
 
@@ -856,7 +874,7 @@ def _namedtuple_serialize(context: Context) -> DumpableContext:
     if serialized_type_name == NO_SERIALIZED_TYPE_NAME_FOUND:
         raise NotImplementedError(
             f"Can't serialize TreeSpec of namedtuple class {context} because we "
-            "couldn't find a serializated_type_name. Please register using "
+            "couldn't find a serialized_type_name. Please register using "
             "`_register_namedtuple`."
         )
     return serialized_type_name
@@ -866,7 +884,7 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
         raise NotImplementedError(
             f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
-            "because we couldn't find a serializated name."
+            "because we couldn't find a serialized name."
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
@@ -1031,6 +1049,7 @@ _private_register_pytree_node(
 STANDARD_DICT_TYPES: frozenset[type] = frozenset({dict, OrderedDict, defaultdict})
 # pyrefly: ignore [no-matching-overload]
 BUILTIN_TYPES: frozenset[type] = frozenset(
+    # pyrefly: ignore [bad-argument-type]
     {
         tuple,
         list,
