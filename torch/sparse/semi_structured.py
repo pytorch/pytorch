@@ -721,8 +721,7 @@ def _ensure_cutlass_mm_registered():
 
     from torch.library import custom_op
 
-    @custom_op("semi_structured::cutlass_mm", mutates_args=())
-    def cutlass_mm(
+    def _cutlass_mm_impl(
         dense: torch.Tensor,
         packed: torch.Tensor,
         meta: torch.Tensor,
@@ -750,6 +749,10 @@ def _ensure_cutlass_mm_registered():
             return res.t().contiguous() if should_transpose_dense else res.contiguous()
         return res.t().contiguous() if should_transpose_dense else res
 
+    cutlass_mm = custom_op("semi_structured::cutlass_mm", mutates_args=())(
+        _cutlass_mm_impl
+    )
+
     @cutlass_mm.register_fake
     def _cutlass_mm_fake(
         dense: torch.Tensor,
@@ -770,6 +773,19 @@ def _ensure_cutlass_mm_registered():
             dtype=dense.dtype,
             device=dense.device,
         )
+
+    from torch._subclasses.functional_tensor import (
+        _has_unrecognized_tensor_types,
+        FunctionalTensorMode,
+    )
+
+    def _cutlass_mm_decomp(mode, op, types, args, kwargs):
+        if _has_unrecognized_tensor_types(types):
+            return NotImplemented
+        with mode:
+            return _cutlass_mm_impl(*args, **kwargs)
+
+    cutlass_mm.register_torch_dispatch(FunctionalTensorMode, _cutlass_mm_decomp)
 
 
 _cusparselt_mm_registered = False
