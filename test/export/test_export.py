@@ -1300,13 +1300,13 @@ def forward(self, x):
     v_proj_weight = self.v_proj.weight
     v_proj_bias = self.v_proj.bias
     _guards_fn = self._guards_fn(x);  _guards_fn = None
-    linear = torch.ops.aten.linear.default(x, q_proj_weight, q_proj_bias);  x = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(linear, [-1])
-    detach = torch.ops.aten.detach.default(sum_1);  sum_1 = None
     arange = torch.ops.aten.arange.start(0, 2, device = device(type='cpu'), pin_memory = False)
     arange_1 = torch.ops.aten.arange.start(0, 1, device = device(type='cpu'), pin_memory = False)
     arange_2 = torch.ops.aten.arange.start(0, 128, device = device(type='cpu'), pin_memory = False)
     arange_3 = torch.ops.aten.arange.start(0, 128, device = device(type='cpu'), pin_memory = False)
+    linear = torch.ops.aten.linear.default(x, q_proj_weight, q_proj_bias);  x = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(linear, [-1])
+    detach = torch.ops.aten.detach.default(sum_1);  sum_1 = None
     lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
     _vmap_increment_nesting = torch._functorch.predispatch._vmap_increment_nesting(2, 'error');  _vmap_increment_nesting = None
     _add_batch_dim = torch._functorch.predispatch._add_batch_dim(arange, 0, 1);  arange = None
@@ -1319,11 +1319,11 @@ def forward(self, x):
     lazy_load_decompositions_3 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_3 = None
     _vmap_increment_nesting_3 = torch._functorch.predispatch._vmap_increment_nesting(128, 'error');  _vmap_increment_nesting_3 = None
     _add_batch_dim_3 = torch._functorch.predispatch._add_batch_dim(arange_3, 0, 4);  arange_3 = None
-    remainder = torch.ops.aten.remainder.Scalar(_add_batch_dim_2, 128)
-    torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = self.torch__dynamo__trace_wrapped_higher_order_op_ModIndex0
+    le = torch.ops.aten.le.Tensor(_add_batch_dim_3, _add_batch_dim_2);  _add_batch_dim_3 = None
+    remainder = torch.ops.aten.remainder.Scalar(_add_batch_dim_2, 128);  _add_batch_dim_2 = None
     function_const_func_spec0 = self.function_const_func_spec0
+    torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = self.torch__dynamo__trace_wrapped_higher_order_op_ModIndex0
     flat_apply = torch.ops.higher_order.flat_apply(function_const_func_spec0, torch__dynamo__trace_wrapped_higher_order_op_mod_index0, 'torch._dynamo._trace_wrapped_higher_order_op.ModIndex', detach, _add_batch_dim, remainder);  function_const_func_spec0 = torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = _add_batch_dim = remainder = None
-    le = torch.ops.aten.le.Tensor(_add_batch_dim_3, _add_batch_dim_2);  _add_batch_dim_3 = _add_batch_dim_2 = None
     gt = torch.ops.aten.gt.Scalar(flat_apply, 0);  flat_apply = None
     and_1 = torch.ops.aten.__and__.Tensor(le, gt);  le = gt = None
     _remove_batch_dim = torch._functorch.predispatch._remove_batch_dim(and_1, 4, 128, 0);  and_1 = None
@@ -1350,16 +1350,16 @@ def forward(self, x):
     to_1 = torch.ops.aten.to.dtype(eq, torch.int8);  eq = None
     _assert_tensor_metadata_default_2 = torch.ops.aten._assert_tensor_metadata.default(to, dtype = torch.int8, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_2 = None
     to_2 = torch.ops.aten.to.dtype(to, torch.int32);  to = None
-    sum_3 = torch.ops.aten.sum.dim_IntList(to_2, [-1])
-    argsort = torch.ops.aten.argsort.stable(to_2, stable = True, descending = True);  to_2 = None
+    argsort = torch.ops.aten.argsort.stable(to_2, stable = True, descending = True)
+    sum_3 = torch.ops.aten.sum.dim_IntList(to_2, [-1]);  to_2 = None
     _assert_tensor_metadata_default_3 = torch.ops.aten._assert_tensor_metadata.default(sum_3, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_3 = None
     to_3 = torch.ops.aten.to.dtype(sum_3, torch.int32, False, False, torch.contiguous_format);  sum_3 = None
     _assert_tensor_metadata_default_4 = torch.ops.aten._assert_tensor_metadata.default(argsort, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_4 = None
     to_4 = torch.ops.aten.to.dtype(argsort, torch.int32, False, False, torch.contiguous_format);  argsort = None
     _assert_tensor_metadata_default_5 = torch.ops.aten._assert_tensor_metadata.default(to_1, dtype = torch.int8, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_5 = None
     to_5 = torch.ops.aten.to.dtype(to_1, torch.int32);  to_1 = None
-    sum_4 = torch.ops.aten.sum.dim_IntList(to_5, [-1])
-    argsort_1 = torch.ops.aten.argsort.stable(to_5, stable = True, descending = True);  to_5 = None
+    argsort_1 = torch.ops.aten.argsort.stable(to_5, stable = True, descending = True)
+    sum_4 = torch.ops.aten.sum.dim_IntList(to_5, [-1]);  to_5 = None
     _assert_tensor_metadata_default_6 = torch.ops.aten._assert_tensor_metadata.default(sum_4, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_6 = None
     to_6 = torch.ops.aten.to.dtype(sum_4, torch.int32, False, False, torch.contiguous_format);  sum_4 = None
     _assert_tensor_metadata_default_7 = torch.ops.aten._assert_tensor_metadata.default(argsort_1, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_7 = None
@@ -1372,14 +1372,14 @@ def forward(self, x):
     _vmap_increment_nesting_5 = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_5 = None
     _add_batch_dim_6 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_4, 0, 2);  _add_batch_dim_4 = None
     _add_batch_dim_7 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_5, 0, 2);  _add_batch_dim_5 = None
-    new_zeros = torch.ops.aten.new_zeros.default(_add_batch_dim_7, [1, 2], dtype = torch.int32, pin_memory = False)
     arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
     arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
+    new_zeros = torch.ops.aten.new_zeros.default(_add_batch_dim_7, [1, 2], dtype = torch.int32, pin_memory = False)
+    new_ones = torch.ops.aten.new_ones.default(new_zeros, [], pin_memory = False)
     unsqueeze_2 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
     lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_2);  arange_5 = unsqueeze_2 = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
     where = torch.ops.aten.where.ScalarOther(lt_1, _add_batch_dim_7, 1);  lt_1 = _add_batch_dim_7 = None
-    new_ones = torch.ops.aten.new_ones.default(new_zeros, [], pin_memory = False)
     index_put_ = torch.ops.aten.index_put_.default(new_zeros, [unsqueeze_1, where], new_ones);  new_zeros = unsqueeze_1 = where = new_ones = None
     slice_1 = torch.ops.aten.slice.Tensor(index_put_, 1, 0, 1);  index_put_ = None
     _remove_batch_dim_4 = torch._functorch.predispatch._remove_batch_dim(slice_1, 2, 1, 0);  slice_1 = None
@@ -1389,8 +1389,8 @@ def forward(self, x):
     transpose = torch.ops.aten.transpose.int(_remove_batch_dim_5, -2, -1);  _remove_batch_dim_5 = None
     _assert_tensor_metadata_default_8 = torch.ops.aten._assert_tensor_metadata.default(transpose, dtype = torch.int32, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_8 = None
     to_8 = torch.ops.aten.to.dtype(transpose, torch.int32);  transpose = None
-    sum_5 = torch.ops.aten.sum.dim_IntList(to_8, [-1])
-    argsort_2 = torch.ops.aten.argsort.stable(to_8, stable = True, descending = True);  to_8 = None
+    argsort_2 = torch.ops.aten.argsort.stable(to_8, stable = True, descending = True)
+    sum_5 = torch.ops.aten.sum.dim_IntList(to_8, [-1]);  to_8 = None
     _assert_tensor_metadata_default_9 = torch.ops.aten._assert_tensor_metadata.default(sum_5, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_9 = None
     to_9 = torch.ops.aten.to.dtype(sum_5, torch.int32, False, False, torch.contiguous_format);  sum_5 = None
     _assert_tensor_metadata_default_10 = torch.ops.aten._assert_tensor_metadata.default(argsort_2, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_10 = None
@@ -1403,14 +1403,14 @@ def forward(self, x):
     _vmap_increment_nesting_7 = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_7 = None
     _add_batch_dim_10 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_8, 0, 2);  _add_batch_dim_8 = None
     _add_batch_dim_11 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_9, 0, 2);  _add_batch_dim_9 = None
-    new_zeros_1 = torch.ops.aten.new_zeros.default(_add_batch_dim_11, [1, 2], dtype = torch.int32, pin_memory = False)
     arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_3 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
     arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
+    new_zeros_1 = torch.ops.aten.new_zeros.default(_add_batch_dim_11, [1, 2], dtype = torch.int32, pin_memory = False)
+    new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [], pin_memory = False)
     unsqueeze_4 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
     lt_2 = torch.ops.aten.lt.Tensor(arange_7, unsqueeze_4);  arange_7 = unsqueeze_4 = None
+    unsqueeze_3 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
     where_1 = torch.ops.aten.where.ScalarOther(lt_2, _add_batch_dim_11, 1);  lt_2 = _add_batch_dim_11 = None
-    new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [], pin_memory = False)
     index_put__1 = torch.ops.aten.index_put_.default(new_zeros_1, [unsqueeze_3, where_1], new_ones_1);  new_zeros_1 = unsqueeze_3 = where_1 = new_ones_1 = None
     slice_2 = torch.ops.aten.slice.Tensor(index_put__1, 1, 0, 1);  index_put__1 = None
     _remove_batch_dim_6 = torch._functorch.predispatch._remove_batch_dim(slice_2, 2, 1, 0);  slice_2 = None
@@ -1420,23 +1420,23 @@ def forward(self, x):
     transpose_1 = torch.ops.aten.transpose.int(_remove_batch_dim_7, -2, -1);  _remove_batch_dim_7 = None
     _assert_tensor_metadata_default_11 = torch.ops.aten._assert_tensor_metadata.default(transpose_1, dtype = torch.int32, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_11 = None
     to_11 = torch.ops.aten.to.dtype(transpose_1, torch.int32);  transpose_1 = None
-    sum_6 = torch.ops.aten.sum.dim_IntList(to_11, [-1])
-    argsort_3 = torch.ops.aten.argsort.stable(to_11, stable = True, descending = True);  to_11 = None
+    argsort_3 = torch.ops.aten.argsort.stable(to_11, stable = True, descending = True)
+    sum_6 = torch.ops.aten.sum.dim_IntList(to_11, [-1]);  to_11 = None
     _assert_tensor_metadata_default_12 = torch.ops.aten._assert_tensor_metadata.default(sum_6, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_12 = None
     to_12 = torch.ops.aten.to.dtype(sum_6, torch.int32, False, False, torch.contiguous_format);  sum_6 = None
     _assert_tensor_metadata_default_13 = torch.ops.aten._assert_tensor_metadata.default(argsort_3, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_13 = None
-    to_13 = torch.ops.aten.to.dtype(argsort_3, torch.int32, False, False, torch.contiguous_format);  argsort_3 = None
     linear_1 = torch.ops.aten.linear.default(linear, q_proj_weight, q_proj_bias);  q_proj_weight = q_proj_bias = None
+    linear_2 = torch.ops.aten.linear.default(linear, k_proj_weight, k_proj_bias);  k_proj_weight = k_proj_bias = None
+    linear_3 = torch.ops.aten.linear.default(linear, v_proj_weight, v_proj_bias);  linear = v_proj_weight = v_proj_bias = None
+    to_13 = torch.ops.aten.to.dtype(argsort_3, torch.int32, False, False, torch.contiguous_format);  argsort_3 = None
     view_1 = torch.ops.aten.view.default(linear_1, [2, 1, 128, 64]);  linear_1 = None
     detach_19 = torch.ops.aten.detach.default(view_1);  view_1 = None
-    linear_2 = torch.ops.aten.linear.default(linear, k_proj_weight, k_proj_bias);  k_proj_weight = k_proj_bias = None
     view_2 = torch.ops.aten.view.default(linear_2, [2, 1, 128, 64]);  linear_2 = None
     detach_20 = torch.ops.aten.detach.default(view_2);  view_2 = None
-    linear_3 = torch.ops.aten.linear.default(linear, v_proj_weight, v_proj_bias);  linear = v_proj_weight = v_proj_bias = None
     view_3 = torch.ops.aten.view.default(linear_3, [2, 1, 128, 64]);  linear_3 = None
     detach_21 = torch.ops.aten.detach.default(view_3);  view_3 = None
-    sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
+    sdpa_score0 = self.sdpa_score0
     flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
@@ -1956,10 +1956,10 @@ graph():
             str(ep.graph).strip(),
             """\
 graph():
-    %p_block_linear1_bias : [num_users=1] = placeholder[target=p_block_linear1_bias]
     %p_block_linear1_weight : [num_users=1] = placeholder[target=p_block_linear1_weight]
-    %p_block_linear2_bias : [num_users=1] = placeholder[target=p_block_linear2_bias]
+    %p_block_linear1_bias : [num_users=1] = placeholder[target=p_block_linear1_bias]
     %p_block_linear2_weight : [num_users=1] = placeholder[target=p_block_linear2_weight]
+    %p_block_linear2_bias : [num_users=1] = placeholder[target=p_block_linear2_bias]
     %x : [num_users=1] = placeholder[target=x]
     %wrap_body0 : [num_users=1] = get_attr[target=wrap_body0]
     %tag_activation_checkpoint : [num_users=1] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
@@ -1996,12 +1996,12 @@ graph():
                 """\
 def forward(self, primals, tangents):
     primals_1, primals_2, primals_3, primals_4, primals_5, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
-    t = torch.ops.aten.t.default(primals_2);  primals_2 = None
-    addmm = torch.ops.aten.addmm.default(primals_1, primals_5, t);  primals_1 = None
+    t = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    addmm = torch.ops.aten.addmm.default(primals_2, primals_5, t);  primals_2 = None
     relu = torch.ops.aten.relu.default(addmm);  addmm = None
     detach_3 = torch.ops.aten.detach.default(relu)
-    t_1 = torch.ops.aten.t.default(primals_4);  primals_4 = None
-    addmm_1 = torch.ops.aten.addmm.default(primals_3, relu, t_1);  primals_3 = None
+    t_1 = torch.ops.aten.t.default(primals_3);  primals_3 = None
+    addmm_1 = torch.ops.aten.addmm.default(primals_4, relu, t_1);  primals_4 = None
     t_2 = torch.ops.aten.t.default(t_1);  t_1 = None
     mm = torch.ops.aten.mm.default(tangents_1, t_2);  t_2 = None
     t_3 = torch.ops.aten.t.default(tangents_1)
@@ -2020,7 +2020,7 @@ def forward(self, primals, tangents):
     sum_2 = torch.ops.aten.sum.dim_IntList(threshold_backward, [0], True);  threshold_backward = None
     view_1 = torch.ops.aten.view.default(sum_2, [128]);  sum_2 = None
     t_9 = torch.ops.aten.t.default(t_8);  t_8 = None
-    return pytree.tree_unflatten([addmm_1, view_1, t_9, view, t_5, mm_2], self._out_spec)""",
+    return pytree.tree_unflatten([addmm_1, t_9, view_1, t_5, view, mm_2], self._out_spec)""",
             )
 
     def test_inline_script_class_method_recursive(self):
@@ -3145,8 +3145,8 @@ class GraphModule(torch.nn.Module):
         sum_1: "f32[]" = torch.ops.aten.sum.default(x)
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 3);  sum_1 = None
 
-        true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
+        true_graph_0 = self.true_graph_0
         cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, ());  gt = true_graph_0 = false_graph_0 = None
         getitem_1: "Sym(u0)" = cond[0];  cond = None
         ge_1: "Sym(u0 >= 0)" = getitem_1 >= 0
@@ -3157,13 +3157,13 @@ class GraphModule(torch.nn.Module):
         select: "f32[3]" = torch.ops.aten.select.int(x, 0, getitem_1);  x = getitem_1 = None
         return pytree.tree_unflatten((select,), self._out_spec)
 
-    class true_graph_0(torch.nn.Module):
-        def forward(self):
-            return (0,)
-
     class false_graph_0(torch.nn.Module):
         def forward(self):
             return (1,)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self):
+            return (0,)
 """,  # noqa: B950
             )
         self.assertEqual(m(*args), ep.module()(*args))
@@ -3217,22 +3217,22 @@ class GraphModule(torch.nn.Module):
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         _guards_fn = self._guards_fn(x);  _guards_fn = None
 
-        sum_1: "f32[]" = torch.ops.aten.sum.default(x)
+        select: "f32[3]" = torch.ops.aten.select.int(x, 0, 0)
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(x);  x = None
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 3);  sum_1 = None
 
-        true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
+        true_graph_0 = self.true_graph_0
         cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, ());  gt = true_graph_0 = false_graph_0 = None
         getitem = cond[0];  cond = getitem = None
-
-        select: "f32[3]" = torch.ops.aten.select.int(x, 0, 0);  x = None
         return pytree.tree_unflatten((select,), self._out_spec)
 
-    class true_graph_0(torch.nn.Module):
+    class false_graph_0(torch.nn.Module):
         def forward(self):
             return (0,)
 
-    class false_graph_0(torch.nn.Module):
+    class true_graph_0(torch.nn.Module):
         def forward(self):
             return (0,)
 """,  # noqa: B950
@@ -3967,17 +3967,17 @@ def forward(self, add):
             str(ep.graph_module.code).strip(),
             """\
 def forward(self, x, y):
-    bar = torch.ops.export.bar.default(y)
-    sym_size_int = torch.ops.aten.sym_size.int(bar, 0)
+    foo = torch.ops.export.foo.default(x, y);  x = None
+    sym_size_int = torch.ops.aten.sym_size.int(foo, 0)
     ge = sym_size_int >= 0;  sym_size_int = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-    foo = torch.ops.export.foo.default(x, y);  x = y = None
-    sym_size_int_1 = torch.ops.aten.sym_size.int(foo, 0)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(foo, 1)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(foo, 1)
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
     ge_1 = sym_size_int_1 >= 0;  sym_size_int_1 = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
+    bar = torch.ops.export.bar.default(y);  y = None
+    sym_size_int_2 = torch.ops.aten.sym_size.int(bar, 0)
     ge_2 = sym_size_int_2 >= 0;  sym_size_int_2 = None
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u1 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_default_2 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_default_2 = None
     return (foo, bar)""",
         )
 
@@ -4121,9 +4121,9 @@ graph():
     %add : [num_users=4] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original0), kwargs = {})
     %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original1), kwargs = {})
-    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, %add_2), kwargs = {})
     %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original2), kwargs = {})
     %add_5 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original3), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, %add_2), kwargs = {})
     %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_4, %add_5), kwargs = {})
     %add_7 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_3, %add_6), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_7,), kwargs = {})
@@ -4611,8 +4611,8 @@ graph():
                 str(ep.graph_module.code).strip(),
                 """\
 def forward(self, causal_mask, fill_value):
-    sym_size_int_4 = torch.ops.aten.sym_size.int(fill_value, 3)
     clone = torch.ops.aten.clone.default(causal_mask);  causal_mask = None
+    sym_size_int_4 = torch.ops.aten.sym_size.int(fill_value, 3)
     slice_1 = torch.ops.aten.slice.Tensor(clone, 3, 0, sym_size_int_4);  sym_size_int_4 = None
     copy_ = torch.ops.aten.copy_.default(slice_1, fill_value);  slice_1 = fill_value = copy_ = None
     return (clone,)""",
@@ -4622,8 +4622,8 @@ def forward(self, causal_mask, fill_value):
                 str(decomposed_ep.graph_module.code).strip(),
                 """\
 def forward(self, causal_mask, fill_value):
-    sym_size_int_5 = torch.ops.aten.sym_size.int(fill_value, 3)
     clone = torch.ops.aten.clone.default(causal_mask);  causal_mask = None
+    sym_size_int_5 = torch.ops.aten.sym_size.int(fill_value, 3)
     slice_1 = torch.ops.aten.slice.Tensor(clone, 3, 0, sym_size_int_5)
     copy = torch.ops.aten.copy.default(slice_1, fill_value);  slice_1 = fill_value = None
     slice_scatter = torch.ops.aten.slice_scatter.default(clone, copy, 3, 0, sym_size_int_5);  clone = copy = sym_size_int_5 = None
@@ -4906,7 +4906,6 @@ def forward(self, causal_mask, fill_value):
         ops_registered_after = set(torch.ops.mylib)
         self.assertEqual(ops_registered_after, ops_registered_before)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_export_preserve_linear_but_not_custom_op(self):
         table = torch.export.default_decompositions()
         del table[torch.ops.aten.linear.default]
@@ -4998,11 +4997,11 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                         torch_fn = node.meta.get("torch_fn")
                         print(torch_fn)
                         actual_torch_fns.append(torch_fn)
-        exp_torch_fns = [
-            ("cos_1", "method_descriptor.cos"),
+        exp_torch_fns = {
             ("sin_1", "method_descriptor.sin"),
-        ]
-        self.assertEqual(actual_torch_fns, exp_torch_fns)
+            ("cos_1", "method_descriptor.cos"),
+        }
+        self.assertEqual(set(actual_torch_fns), exp_torch_fns)
 
     def test_is_exporting(self):
         class Mod(torch.nn.Module):
@@ -5511,8 +5510,8 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             str(ep_has_linear_convd.graph_module.code).strip(),
             """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     linear = torch.ops.aten.linear.default(conv2d, c_linear_weight, c_linear_bias);  conv2d = c_linear_weight = c_linear_bias = None
     cos = torch.ops.aten.cos.default(linear);  linear = None
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
@@ -5529,14 +5528,14 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             str(ep_has_convd.graph_module.code).strip(),
             """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
-    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
     addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -5550,12 +5549,12 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
-    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
     addmm = torch.ops.aten.addmm.default(c_linear_bias, view, permute);  c_linear_bias = view = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -5595,8 +5594,8 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             str(ep_has_linear_convd.graph_module.code).strip(),
             """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     linear = torch.ops.aten.linear.default(conv2d, b_linear_weight, b_linear_bias);  conv2d = b_linear_weight = b_linear_bias = None
     cos = torch.ops.aten.cos.default(linear);  linear = None
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
@@ -5614,14 +5613,14 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
             str(ep_has_convd.graph_module.code).strip(),
             """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
-    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     permute = torch.ops.aten.permute.default(b_linear_weight, [1, 0]);  b_linear_weight = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
     addmm = torch.ops.aten.addmm.default(b_linear_bias, view, permute);  b_linear_bias = view = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -5636,12 +5635,12 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
-    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
     permute = torch.ops.aten.permute.default(b_linear_weight, [1, 0]);  b_linear_weight = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
     addmm = torch.ops.aten.addmm.default(b_linear_bias, view, permute);  b_linear_bias = view = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -8919,7 +8918,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         roundtrip_spec = treespec_loads(treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_param_util(self):
         class Basic(torch.nn.Module):
             def __init__(self) -> None:
@@ -10593,8 +10591,8 @@ def forward(self, b_a_buffer, x):
 def forward(self, b_a_buffer, x):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
-    true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
+    true_graph_0 = self.true_graph_0
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
@@ -11117,7 +11115,6 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_export_decomp_torture_case_1(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -11147,7 +11144,6 @@ def forward(self, p_lin_weight, p_lin_bias, x):
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     @testing.expectedFailureStrictV2
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_export_decomp_torture_case_2(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -11185,11 +11181,11 @@ def forward(self, p_lin_weight, p_lin_bias, x):
             str(ep_decompose_linear.graph_module.code).strip(),
             """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    mul = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
     matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
-    mul = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
     add = torch.ops.aten.add.Tensor(matmul, mul);  matmul = mul = None
     cos = torch.ops.aten.cos.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
@@ -11558,10 +11554,10 @@ graph():
 graph():
     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
     %x : [num_users=2] = placeholder[target=x]
-    %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
-    %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
     %clone : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%c_lifted_tensor_0,), kwargs = {})
     %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
+    %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
+    %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_1), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
@@ -12207,11 +12203,9 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureStrictV2
-    @testing.expectedFailureStrict
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureTrainingIRToRunDecomp
+    # TODO: unflatten assumes contiguous node ordering within module calls;
+    # canonicalization can interleave nodes from shared submodule invocations.
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_nn_module_stack_shared_submodule(self):
         class Leaf(torch.nn.Module):
             def __init__(self) -> None:
@@ -13758,6 +13752,8 @@ graph():
         if not torch.allclose(ufm(*inp), eager):
             raise AssertionError("ufm output does not match eager output")
 
+    # TODO: unflatten assumes contiguous node ordering within module calls;
+    # canonicalization can interleave nodes from shared submodule invocations.
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_unflatten_no_unroll(self):
         inp = (torch.ones(1),)
@@ -13991,6 +13987,9 @@ graph():
 
         test(export(M(), inp))
 
+    # TODO: unflatten assumes contiguous node ordering within module calls;
+    # canonicalization can interleave nodes from shared submodule invocations.
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_unflatten_multiple_graphs_state(self):
         class N(torch.nn.Module):
             def __init__(self):
@@ -14141,9 +14140,9 @@ def forward(self, c_params, x):
     add = torch.ops.aten.add.Tensor(c_params, 2)
     add_1 = torch.ops.aten.add.Tensor(c_params, 1);  c_params = None
     sub = torch.ops.aten.sub.Tensor(add, add_1);  add = add_1 = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(sub, []);  sub = None
-    sum_2 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
-    add_2 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(sub, []);  sub = None
+    add_2 = torch.ops.aten.add.Tensor(sum_2, sum_1);  sum_2 = sum_1 = None
     return (add_2,)""",
         )
 
@@ -14185,9 +14184,9 @@ def forward(self, c_submod_params, x):
     add = torch.ops.aten.add.Tensor(c_submod_params, 2)
     add_1 = torch.ops.aten.add.Tensor(c_submod_params, 1);  c_submod_params = None
     sub = torch.ops.aten.sub.Tensor(add, add_1);  add = add_1 = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(sub, []);  sub = None
-    sum_2 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
-    add_2 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(sub, []);  sub = None
+    add_2 = torch.ops.aten.add.Tensor(sum_2, sum_1);  sum_2 = sum_1 = None
     return (add_2,)""",
         )
 
@@ -14561,8 +14560,8 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     cos = torch.ops.aten.cos.default(x)
     sum_1 = torch.ops.aten.sum.default(x)
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
-    true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
+    true_graph_0 = self.true_graph_0
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (p_bar_linear_bias, p_bar_linear_weight, x));  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
@@ -14721,8 +14720,8 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             str(exported_program.graph_module.code.strip()),
             """\
 def forward(self, b_pred, b_t, x, y):
-    true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
+    true_graph_0 = self.true_graph_0
     cond = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, (b_t, x, y));  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
@@ -15497,15 +15496,15 @@ def forward(self, x):
             (torch.randn(4),),
         )
         ep = export(Foo(), inputs)
-        expected_getattr_names = [
-            "true_graph_2",
+        expected_getattr_names = {
             "false_graph_0",
-            "true_graph_3",
+            "true_graph_2",
             "false_graph_1",
-        ]
-        real_getattr_names = [
+            "true_graph_3",
+        }
+        real_getattr_names = {
             node.name for node in ep.graph.nodes if node.op == "get_attr"
-        ]
+        }
         self.assertEqual(expected_getattr_names, real_getattr_names)
 
     @testing.expectedFailureStrictV2
@@ -15561,8 +15560,8 @@ graph():
     %lazy_load_decompositions : [num_users=0] = call_function[target=torch._functorch.predispatch.lazy_load_decompositions](args = (), kwargs = {})
     %_vmap_increment_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_increment_nesting](args = (4, error), kwargs = {})
     %_add_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._add_batch_dim](args = (%indices, 0, 1), kwargs = {})
-    %torch__dynamo__trace_wrapped_higher_order_op_mod_index0 : [num_users=1] = get_attr[target=torch__dynamo__trace_wrapped_higher_order_op_ModIndex0]
     %function_const_func_spec0 : [num_users=1] = get_attr[target=function_const_func_spec0]
+    %torch__dynamo__trace_wrapped_higher_order_op_mod_index0 : [num_users=1] = get_attr[target=torch__dynamo__trace_wrapped_higher_order_op_ModIndex0]
     %flat_apply : [num_users=1] = call_function[target=torch.ops.higher_order.flat_apply](args = (%function_const_func_spec0, %torch__dynamo__trace_wrapped_higher_order_op_mod_index0, torch._dynamo._trace_wrapped_higher_order_op.ModIndex, %b_base, %_add_batch_dim), kwargs = {})
     %_remove_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._remove_batch_dim](args = (%flat_apply, 1, 4, 0), kwargs = {})
     %_vmap_decrement_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_decrement_nesting](args = (), kwargs = {})
@@ -15616,10 +15615,11 @@ def forward(self, x):
             str(ep_aot.graph_module.code).strip(),
             """\
 def forward(self, x, y):
-    sin = torch.ops.aten.sin.default(y)
-    sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
     ge_1 = _local_scalar_dense >= 3
+    sin = torch.ops.aten.sin.default(y)
+    sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
+    add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le_1 = _local_scalar_dense <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u2 <= 5 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
@@ -15628,7 +15628,6 @@ def forward(self, x, y):
     lt = _local_scalar_dense < 6;  _local_scalar_dense = None
     _assert_scalar_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u0 < 6 on node 'lt_1'");  lt = _assert_scalar_3 = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
     add_1 = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
     return (add_1,)""",
@@ -16579,7 +16578,6 @@ graph():
             )
 
     @testing.expectedFailureStrictV2
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_enum_str(self):
         class TensorDim(str, enum.Enum):
             DDP = "ddp"
@@ -16609,10 +16607,10 @@ graph():
 graph():
     %x : [num_users=4] = placeholder[target=x]
     %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
-    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
     %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
-    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
     %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %cos_1), kwargs = {})
     return (add_1,)""",
         )
@@ -17564,13 +17562,13 @@ def forward(self, x):
     to = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_6, mod_embedding_weight);  submod_6 = mod_embedding_weight = None
     getitem = to[0];  to = None
     set_ = torch.ops.aten.set_.source_Tensor(detach, getitem);  detach = getitem = None
-    view_as = torch.ops.aten.view_as.default(set_, set_);  set_ = None
     ones = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='cuda', index=0), pin_memory = False)
+    sum_2 = torch.ops.aten.sum.default(args_0);  args_0 = None
+    view_as = torch.ops.aten.view_as.default(set_, set_);  set_ = None
     embedding = torch.ops.aten.embedding.default(view_as, ones);  view_as = ones = None
-    sum_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
-    sum_2 = torch.ops.aten.sum.default(embedding);  embedding = None
-    sum_3 = torch.ops.aten.sum.default(sum_2);  sum_2 = None
-    add = torch.ops.aten.add.Tensor(sum_1, sum_3);  sum_1 = sum_3 = None
+    sum_1 = torch.ops.aten.sum.default(embedding);  embedding = None
+    sum_3 = torch.ops.aten.sum.default(sum_1);  sum_1 = None
+    add = torch.ops.aten.add.Tensor(sum_2, sum_3);  sum_2 = sum_3 = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
             )
 
@@ -18081,33 +18079,33 @@ def forward(self, args_0):
                 """\
 def forward(self, q, k, v):
     mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
+    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
     unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
     expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
     clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
-    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
     unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
     expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
     clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
-    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
+    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
     permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
     mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
-    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
-    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
     expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
     view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
     bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
     view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
     _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
     eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
     logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
     any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
     logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
-    full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
     where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
     expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
     view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
-    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
-    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
     bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
     view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
     return (view_7,)""",
@@ -18120,33 +18118,33 @@ def forward(self, q, k, v):
                 """\
 def forward(self, q, k, v):
     mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
+    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
     unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
     expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
     clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
-    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
     unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
     expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
     clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
-    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
+    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
     permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
     mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
-    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
-    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
     expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
     view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
     bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
     view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
     _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
     eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
     logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
     any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
     logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
-    full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
     where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
     expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
     view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
-    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
-    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
     bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
     view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
     permute_1 = torch.ops.aten.permute.default(view_7, [2, 0, 1, 3]);  view_7 = None

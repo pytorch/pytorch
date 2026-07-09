@@ -20,6 +20,14 @@ import torch.fx as fx
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
 
 
+def _computation_node_key(
+    node: fx.Node, canonical_idx: dict[fx.Node, int]
+) -> tuple[int, str, tuple[int, ...]]:
+    """Canonical heap key for a computation node (call_function / call_method / call_module)."""
+    input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
+    return (2, node.graph._target_to_str(node.target), input_indices)
+
+
 def rename_nodes_to_canonical(graph: fx.Graph) -> None:
     """Rename all nodes in the graph to canonical names based on their target.
 
@@ -73,6 +81,8 @@ def canonicalize_graph(
     graph: fx.Graph,
     canonical_key_fn: Callable[[fx.Node, dict[fx.Node, int]], object],
     is_safe_to_reorder: Callable[[fx.Node], bool],
+    *,
+    rename: bool = True,
 ) -> fx.Graph:
     """Reorder graph nodes into a canonical topological order and rename them.
 
@@ -92,9 +102,13 @@ def canonicalize_graph(
         is_safe_to_reorder: ``(node) -> bool``.  Nodes for which this returns
             ``False`` act as barriers: they are chained in original order, and
             pure nodes are confined to their barrier segment.
+        rename: If ``True`` (default), rename nodes after reordering via
+            ``rename_nodes_to_canonical``. Pass ``False`` to reorder only,
+            preserving existing node names (needed when names are externally
+            referenced, e.g. by an ``ExportGraphSignature``).
 
     Returns:
-        The same ``graph`` object, reordered and renamed in-place.
+        The same ``graph`` object, reordered (and optionally renamed) in-place.
     """
     indeg: dict[fx.Node, int] = {
         node: len(node.all_input_nodes) for node in graph.nodes
@@ -163,12 +177,27 @@ def canonicalize_graph(
 
     _sink_get_attr_nodes(canonical_order)
 
+    # Purge erased nodes that are still physically in the linked list.
+    # erase_node() sets _erased=True and unlinks the node, but stale
+    # _prev/_next pointers on the erased node can leave it reachable from
+    # neighbors that were inserted later.  If such a ghost node sits between
+    # `cursor` and the node being appended, cursor.append() (which goes via
+    # cursor._next._prepend()) corrupts the chain.
+    root = graph._root  # type: ignore[attr-defined]
+    node = root._next
+    while node is not root:
+        nxt = node._next
+        if node._erased:
+            node._remove_from_list()
+        node = nxt
+
     # Reorder nodes in-place to preserve node object identity.
-    cursor = graph._root  # type: ignore[attr-defined]
+    cursor = root
     for node in canonical_order:
         cursor.append(node)
         cursor = node
 
-    rename_nodes_to_canonical(graph)
+    if rename:
+        rename_nodes_to_canonical(graph)
 
     return graph
