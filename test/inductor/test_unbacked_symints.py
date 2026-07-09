@@ -1121,7 +1121,12 @@ class TestUnbackedSymints(InductorTestCase):
         shape_env.replacements[s0] = s2
         sizevars = SizeVarAllocator(shape_env)
         graph_inputs = {}
-        graph = mock.Mock(sizevars=sizevars, graph_inputs=graph_inputs)
+        graph = mock.Mock(
+            sizevars=sizevars,
+            graph_inputs=graph_inputs,
+            graph_input_names=list(graph_inputs),
+            symbolic_input_sources={},
+        )
 
         value = ir.TensorBox.create(
             ir.InputBuffer(
@@ -1135,6 +1140,7 @@ class TestUnbackedSymints(InductorTestCase):
             )
         )
         graph_inputs["arg0_1"] = value
+        graph.graph_input_names = list(graph_inputs)
 
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
         wrapper.prefix = IndentedBuffer()
@@ -1197,7 +1203,10 @@ class TestUnbackedSymints(InductorTestCase):
             ),
         }
         graph = mock.Mock(
-            sizevars=SizeVarAllocator(ShapeEnv()), graph_inputs=graph_inputs
+            sizevars=SizeVarAllocator(ShapeEnv()),
+            graph_inputs=graph_inputs,
+            graph_input_names=list(graph_inputs),
+            symbolic_input_sources={},
         )
 
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
@@ -1233,7 +1242,10 @@ class TestUnbackedSymints(InductorTestCase):
             ),
         }
         graph = mock.Mock(
-            sizevars=SizeVarAllocator(ShapeEnv()), graph_inputs=graph_inputs
+            sizevars=SizeVarAllocator(ShapeEnv()),
+            graph_inputs=graph_inputs,
+            graph_input_names=list(graph_inputs),
+            symbolic_input_sources={},
         )
 
         wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
