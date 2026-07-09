@@ -290,10 +290,10 @@ class SavePlanner(abc.ABC):
 
         Called on each rank multiple times, at least once per WriteItem in the final SavePlan.
 
-        This method should be idempotent and thread-save. StorageWriter implementations
+        This method should be idempotent and thread-safe. StorageWriter implementations
         are free to call it as frequently as they need.
 
-        Any transformation that allocates memory should be lazily done when his method
+        Any transformation that allocates memory should be lazily done when this method
         is called in order to reduce peak memory required by checkpointing.
 
         When returning tensors, they can be on any device or format, they can be views too.

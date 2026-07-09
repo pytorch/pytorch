@@ -96,7 +96,7 @@ def sac_milp(
             if graph.nodes[i]["fqn"] not in ac_units_set:
                 prob += y[i] == 0
 
-    # [Constraint] AC units cannot be supmodules of user specified FSDP units
+    # [Constraint] AC units cannot be submodules of user specified FSDP units
     if fsdp_units:
         for i in range(num_nodes):
             if any(
@@ -196,7 +196,7 @@ def sac_milp(
     # [Constraint] Peak memory should be below budget
     prob += max_m <= memory_budget
 
-    # Set Objeictive
+    # Set Objective
     prob += lpSum(rct)
 
     # Solve
@@ -239,7 +239,7 @@ def get_optimal_checkpointing_policy_per_module(
         memory_budget: a float between zero and one
 
     Returns:
-        List[int]: the decision whether each operator should be saved (1) or recomptued (0).
+        List[int]: the decision whether each operator should be saved (1) or recomputed (0).
     """
     if not (0 <= memory_budget <= 1):
         raise ValueError(

@@ -306,7 +306,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             None
 
         .. warning::
-            Note that, current implementation does not consider DTensor's continguity.
+            Note that, current implementation does not consider DTensor's contiguity.
 
         Example:
             take a DTensor of shape [8, 16] as an example. Assume that the DTensor

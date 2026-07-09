@@ -74,7 +74,7 @@ class BroadcastingTorchSaveReader(StorageReader):
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         """
         Reads torch save data on the coordinator rank, and broadcast afterwards
-        this incurrs a communication cost, but avoids having to load
+        this incurs a communication cost, but avoids having to load
         the entire checkpoint on each rank, hopefully preventing OOM issues
         """
         planner = cast(DefaultLoadPlanner, planner)
@@ -186,7 +186,7 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
         metadata: Metadata | None = None,
         is_coordinator: bool = False,
     ) -> None:
-        """Setups of the planner, extnding default behavior by creating the Metadata object from the state dict"""
+        """Setups of the planner, extending default behavior by creating the Metadata object from the state dict"""
         super().set_up_planner(state_dict, metadata, is_coordinator)
 
         state_dict_metadata: dict[str, STORAGE_TYPES] = {}
