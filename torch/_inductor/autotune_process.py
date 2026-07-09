@@ -38,8 +38,6 @@ from torch._inductor.codecache import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
-    apply_subprocess_env,
-    clear_caches,
     do_bench_using_profiling,
     get_gpu_type,
     get_ld_library_path,
@@ -94,38 +92,6 @@ class NonzeroWorkspaceNotSupportedError(Exception):
     pass
 
 
-def _cache_env_for_subprocess() -> dict[str, str | None]:
-    env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
-    return {v: os.environ.get(v) for v in env_vars}
-
-
-_last_applied_cache_env: dict[str, str | None] | None = None
-
-
-def _apply_subprocess_env_and_clear_caches(
-    extra_env: dict[str, str | None] | None,
-) -> None:
-    global _last_applied_cache_env
-
-    if extra_env is None:
-        return
-
-    if extra_env != _last_applied_cache_env:
-        clear_caches()
-        _last_applied_cache_env = extra_env.copy()
-    apply_subprocess_env(extra_env)
-
-
-def _run_with_subprocess_env(
-    fn: Callable[..., Any],
-    extra_env: dict[str, str | None],
-    *args: Any,
-    **kwargs: Any,
-) -> Any:
-    _apply_subprocess_env_and_clear_caches(extra_env)
-    return fn(*args, **kwargs)
-
-
 class TuningProcess:
     """
     Class to launch and interact with a benchmarking subprocess.
@@ -149,7 +115,8 @@ class TuningProcess:
                     # None is a sentinel for the child to shut down
                     break
                 try:
-                    _apply_subprocess_env_and_clear_caches(extra_env)
+                    if extra_env:
+                        os.environ.update(extra_env)
                     result = job()
                 except Exception as e:
                     result = e
@@ -163,7 +130,7 @@ class TuningProcess:
 
     @staticmethod
     def send(
-        obj: Any, write_pipe: IO[bytes], extra_env: dict[str, str | None] | None = None
+        obj: Any, write_pipe: IO[bytes], extra_env: dict[str, str] | None = None
     ) -> None:
         pickle.dump((obj, extra_env), write_pipe)
         write_pipe.flush()
@@ -227,7 +194,7 @@ class TuningProcess:
         """
         return self.running and self.process.poll() is None
 
-    def put(self, req: Any, extra_env: dict[str, str | None] | None = None) -> None:
+    def put(self, req: Any, extra_env: dict[str, str] | None = None) -> None:
         """
         Push a work item to the child process.
         """
@@ -382,7 +349,8 @@ class TuningProcessPool:
                 f"Expected choice.bmreq to be set, but got None for choice '{choice}'"
             )
 
-        extra_env = _cache_env_for_subprocess()
+        env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
         process = self.process_queue.get()
         process.put(choice.bmreq.benchmark, extra_env=extra_env)
         try:
@@ -646,34 +614,6 @@ class _TestBenchmarkRequest(BenchmarkRequest):
         if self.crash:
             sys.exit(1)
         return self.result
-
-
-class _TestEnvBenchmarkRequest:
-    """
-    Supports unit testing subprocess environment propagation.
-    """
-
-    def __init__(self, key: str):
-        self.key = key
-
-    def benchmark(
-        self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
-    ) -> str | None:
-        return os.environ.get(self.key)
-
-
-class _TestCUDACodeCacheBenchmarkRequest:
-    """
-    Supports unit testing subprocess codecache resets.
-    """
-
-    source_code = 'extern "C" __global__ void test_kernel() {}\n'
-
-    def benchmark(
-        self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
-    ) -> str:
-        _, input_path = CUDACodeCache.write(self.source_code, "so")
-        return input_path
 
 
 class GPUDeviceBenchmarkMixin:
@@ -1444,7 +1384,7 @@ class AutotuneProcessPool:
             with self._lock:
                 if self._warmup_future is None:
                     self._warmup_start_time = time.perf_counter()
-                    self._warmup_future = self.submit(
+                    self._warmup_future = self.pool.submit(
                         _init_autotune_subprocess,
                         fp32_precision=torch.backends.cuda.matmul.fp32_precision,
                     )
@@ -1476,13 +1416,7 @@ class AutotuneProcessPool:
 
     def submit(self, fn, *args, **kwargs) -> Future[Any]:
         """Submit a job to the pool and return a Future."""
-        future = self.pool.submit(
-            _run_with_subprocess_env,
-            fn,
-            _cache_env_for_subprocess(),
-            *args,
-            **kwargs,
-        )
+        future = self.pool.submit(fn, *args, **kwargs)
         if self._timer is not None:
             future.add_done_callback(lambda _: self._record_activity())
         return future
