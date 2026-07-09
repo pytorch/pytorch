@@ -101,7 +101,7 @@ from .functions import (
 )
 from .lists import ListVariable, TupleVariable
 from .object_protocol import vt_is_iterable
-from .script_object import TorchScriptObjectVariable
+from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -1864,7 +1864,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     if not (
                         args[0].is_python_constant()
                         or (
-                            isinstance(args[0], TorchScriptObjectVariable)
+                            isinstance(args[0], CustomClassObjectVariable)
                             and args[  # pyrefly: ignore[missing-attribute]
                                 0
                             ].value.script_class_name  # pyrefly: ignore[missing-attribute]
@@ -1894,9 +1894,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
 
                 def get_arg_value(arg: VariableTracker) -> Any:
-                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # CustomClassObjectVariable for ProcessGroup doesn't support
                     # as_python_constant(), so extract real_obj directly
-                    if isinstance(arg, TorchScriptObjectVariable):
+                    if isinstance(arg, CustomClassObjectVariable):
                         return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
                     return arg.as_python_constant()
 
