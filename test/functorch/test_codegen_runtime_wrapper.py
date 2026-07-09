@@ -31,7 +31,8 @@ class TestCodegenRuntimeWrapper(TestCase):
     def test_inference_simple(self):
         """
         Simple inference: no mutations, no aliases. Generated code should
-        use the inference path (grad disabled) with empty orig_inputs.
+        use the inference path (grad disabled). orig_inputs is omitted
+        entirely when there are no aliased outputs (Fix C optimization).
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
@@ -45,11 +46,64 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(out, x * 2)
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("orig_inputs = {}", source)
+        self.assertNotIn("orig_inputs", source)
         self.assertIn("torch._C._set_grad_enabled(False)", source)
         self.assertNotIn("_force_view_tracking_", source)
         self.assertNotIn("_is_view_replay_enabled", source)
         self.assertNotIn("_set_view_replay_enabled", source)
+
+    def test_inference_trivial_multi_output(self):
+        """
+        Trivial fast-path with multiple outputs and no aliases/mutations.
+        The generated wrapper normalizes the compiled output to a list and
+        returns it directly, skipping the epilogue (no output-arity check).
+        The returned value must preserve the multi-output contract for 2+
+        outputs.
+        """
+        with capture_codegen_source("runtime_wrapper_orchestration") as captured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x + 1, x * 2, x - 3
+
+            x = torch.randn(4)
+            out = f(x)
+
+        self.assertEqual(out, (x + 1, x * 2, x - 3))
+        self.assertEqual(len(out), 3)
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("all_outs = _compiled_fn_(args)", source)
+        self.assertIn("return all_outs", source)
+        self.assertNotIn("if len(all_outs) !=", source)
+        # Pin the list normalization: without it the trivial path could return
+        # a raw tuple/None and break the downstream subscript contract.
+        self.assertIn("if isinstance(all_outs, tuple):", source)
+        self.assertIn("elif not isinstance(all_outs, list):", source)
+
+    @torch._dynamo.config.patch(record_runtime_overhead=True)
+    def test_profiler_prologue_fires_when_profiling(self):
+        """
+        Smoke test for the profiler slow path (Fix A). When the profiler is
+        enabled, runtime_wrapper wraps the call in a RecordFunction named
+        "AOTDispatcher Runtime Wrapper Prologue"; the fast (non-profiling)
+        path skips that closure entirely. Warm up the compile outside the
+        profiler so the profiled call exercises only the runtime path.
+        """
+
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x * 2 + 1
+
+        x = torch.randn(4)
+        f(x)
+
+        with torch.profiler.profile() as prof:
+            out = f(x)
+
+        self.assertEqual(out, x * 2 + 1)
+        event_names = {e.key for e in prof.key_averages()}
+        self.assertIn("AOTDispatcher Runtime Wrapper Prologue", event_names)
 
     def test_training_simple(self):
         """
@@ -222,18 +276,25 @@ class TestCodegenRuntimeWrapper(TestCase):
         """
         The expected output arity should be baked into the generated code
         as a constant, not computed at runtime.
+
+        The function returns an aliased output (x.view(-1)) to ensure the
+        non-trivial epilogue path is taken (is_trivial=False). The compiled
+        function produces 4 outputs total (3 plain outputs plus the aliased
+        view, which still occupies a slot in all_outs before _replay_aliases_
+        reconstructs it in the epilogue). The arity check
+        `if len(all_outs) != 4:` verifies that 4 is baked as a constant.
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
-                return x + 1, x * 2, x - 1
+                return x + 1, x * 2, x - 1, x.view(-1)
 
             f(torch.randn(4))
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("if len(all_outs) != 3:", source)
+        self.assertIn("if len(all_outs) != 4:", source)
 
     @skipIfTorchDynamo("dynamo handles mutations in-graph")
     def test_split_index_baked(self):
