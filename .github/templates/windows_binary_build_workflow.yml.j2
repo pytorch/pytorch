@@ -61,30 +61,19 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-
 {%- if build_configs %}
 {%- set first = build_configs[0] %}
 
   wheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
     {%- if os == "windows-arm64" %}
     runs-on: "windows-11-arm64-preview"
     {%- else %}
     {%- if branches == "nightly" %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "windows.12xlarge"
     {%- else %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge.nonephemeral"
+    runs-on: "windows.12xlarge.nonephemeral"
     {%- endif %}
     {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
@@ -190,7 +179,7 @@ jobs:
   wheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, wheel-build]
+    needs: [wheel-build]
 {%- if os == "windows-arm64" %}
     runs-on: "windows-11-arm64-preview"
 {%- else %}
@@ -206,15 +195,15 @@ jobs:
           {%- set _runs_on = "windows-11-arm64-preview" %}
         {%- elif config['gpu_arch_type'] == "cuda" %}
           {%- if branches == "nightly" %}
-            {%- set _runs_on = "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge" %}
+            {%- set _runs_on = "windows.g4dn.xlarge" %}
           {%- else %}
-            {%- set _runs_on = "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge.nonephemeral" %}
+            {%- set _runs_on = "windows.g4dn.xlarge.nonephemeral" %}
           {%- endif %}
         {%- else %}
           {%- if branches == "nightly" %}
-            {%- set _runs_on = "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge" %}
+            {%- set _runs_on = "windows.4xlarge" %}
           {%- else %}
-            {%- set _runs_on = "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" %}
+            {%- set _runs_on = "windows.4xlarge.nonephemeral" %}
           {%- endif %}
         {%- endif %}
           - desired_python: "!{{ config['python_version'] | default('3.10') }}"
@@ -343,8 +332,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-      - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: "linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: !{{ lt_config["desired_cuda"] }}

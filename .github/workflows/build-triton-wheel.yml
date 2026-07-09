@@ -34,19 +34,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-
   build-wheel:
+    if: github.repository_owner == 'pytorch'
     name: "Build Triton Wheel"
-    needs: get-label-type
     runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
@@ -57,16 +47,16 @@ jobs:
         include:
           - device: "rocm"
             rocm_version: "7.2"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+            runs_on: "linux.4xlarge"
           - device: "cuda"
             rocm_version: ""
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+            runs_on: "linux.4xlarge"
           - device: "xpu"
             rocm_version: ""
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+            runs_on: "linux.4xlarge"
           - device: "aarch64"
             rocm_version: ""
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge"
+            runs_on: "linux.arm64.2xlarge"
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.device == 'aarch64' && 'pytorch/manylinux2_28_aarch64-builder:cpu-aarch64' || matrix.docker-image }}
@@ -184,9 +174,9 @@ jobs:
         if: always()
 
   build-wheel-win:
+    if: github.repository_owner == 'pytorch'
     name: "Build Triton Windows Wheel"
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "windows.4xlarge"
     strategy:
       fail-fast: false
       matrix:

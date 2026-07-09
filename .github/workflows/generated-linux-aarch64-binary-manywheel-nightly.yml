@@ -38,16 +38,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-
   # Computes the manylinux builder image tag suffix at runtime. On release
   # candidate tag pushes (v1.2.3-rc4) it resolves to "-<.ci/docker tree hash>",
   # pinning the build/test/upload jobs to the reproducible image published by
@@ -86,8 +76,8 @@ jobs:
   manywheel-cpu-aarch64-build:
     name: manywheel-cpu-aarch64-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.r7g.12xlarge.memory"
+    needs: get-docker-tag
+    runs-on: "linux.arm64.r7g.12xlarge.memory"
     timeout-minutes: 420
     container:
       image: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -174,8 +164,8 @@ jobs:
   manywheel-cuda-aarch64-cu126-build:
     name: manywheel-cuda-aarch64-cu126-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.r7g.12xlarge.memory"
+    needs: get-docker-tag
+    runs-on: "linux.arm64.r7g.12xlarge.memory"
     timeout-minutes: 420
     container:
       image: pytorch/manylinuxaarch64-builder:cuda12.6${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -263,8 +253,8 @@ jobs:
   manywheel-cuda-aarch64-cu130-build:
     name: manywheel-cuda-aarch64-cu130-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.r7g.12xlarge.memory"
+    needs: get-docker-tag
+    runs-on: "linux.arm64.r7g.12xlarge.memory"
     timeout-minutes: 420
     container:
       image: pytorch/manylinuxaarch64-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -352,8 +342,8 @@ jobs:
   manywheel-cuda-aarch64-cu132-build:
     name: manywheel-cuda-aarch64-cu132-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.r7g.12xlarge.memory"
+    needs: get-docker-tag
+    runs-on: "linux.arm64.r7g.12xlarge.memory"
     timeout-minutes: 420
     container:
       image: pytorch/manylinuxaarch64-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -441,7 +431,7 @@ jobs:
   manywheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, get-docker-tag, manywheel-cpu-aarch64-build, manywheel-cuda-aarch64-cu126-build, manywheel-cuda-aarch64-cu130-build, manywheel-cuda-aarch64-cu132-build]
+    needs: [get-docker-tag, manywheel-cpu-aarch64-build, manywheel-cuda-aarch64-cu126-build, manywheel-cuda-aarch64-cu130-build, manywheel-cuda-aarch64-cu132-build]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
@@ -714,7 +704,7 @@ jobs:
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: ""
       runs_on: ${{ matrix.runs_on }}
       use_container_directive: true
       ALPINE_IMAGE: "arm64v8/alpine"
