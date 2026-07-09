@@ -1637,17 +1637,20 @@ class InstructionTranslatorBase(
             try:
                 self.exception_handler(e)
             except Unsupported:
+                from .utils import _wrap_graph_break_with_torch_runtime_err
+
                 curr = self.exn_vt_stack.get_current_exception()
                 msg = ""
                 if isinstance(curr, variables.ExceptionVariable) and curr.args:
                     msg = curr.args[0].as_python_constant()
-                formatted = exc.format_graph_break_message(
-                    gb_type="RuntimeError when making fake tensor call",
-                    context="",
-                    explanation=msg,
-                    hints=[*graph_break_hints.USER_ERROR],
+                _wrap_graph_break_with_torch_runtime_err(
+                    lambda: unimplemented(
+                        gb_type="RuntimeError when making fake tensor call",
+                        context="",
+                        explanation=msg,
+                        hints=[*graph_break_hints.USER_ERROR],
+                    )
                 )
-                raise exc.TorchRuntimeError(formatted, e.real_stack) from None
             if e.node is not None:
                 self.output.graph.erase_node(e.node)
             return True
