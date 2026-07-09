@@ -192,7 +192,7 @@ def flex_gemm_config_keys_for_local_reduce(
     if not tuned:
         default_key = default_gemm_config_key(device, m, n)
         if local_reduce is None or validate_flex_gemm_local_reduce_config(
-            dict(default_key), local_reduce.group, local_reduce.axis
+            dict(default_key), local_reduce.geometry.group, local_reduce.geometry.axis
         ):
             return (default_key,)
 
@@ -204,15 +204,15 @@ def flex_gemm_config_keys_for_local_reduce(
         config
         for config in candidate_configs
         if validate_flex_gemm_local_reduce_config(
-            config, local_reduce.group, local_reduce.axis
+            config, local_reduce.geometry.group, local_reduce.geometry.axis
         )
     )
     if not local_reduce_configs:
         raise NotImplementedError(
             flex_gemm_local_reduce_config_error(
                 candidate_configs,
-                local_reduce.group,
-                local_reduce.axis,
+                local_reduce.geometry.group,
+                local_reduce.geometry.axis,
             )
         )
     if tuned:
@@ -237,9 +237,9 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
+        analyze_flex_gemm_epilogue,
         gemm_node as flex_gemm_node,
         materialize_flex_gemm_epilogue,
-        output_plan as flex_gemm_output_plan,
     )
     from torch._inductor.kernel.flex_gemm.template import (
         flex_gemm_epilogue_template,
@@ -281,7 +281,8 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     beta = gemm_fx_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
-    outputs = flex_gemm_output_plan(subgraph.graph_module)
+    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
+    outputs = epilogue_analysis.outputs
     output_meta = outputs.output.meta.get("val")
     if output_meta is None:
         raise NotImplementedError(
@@ -334,7 +335,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         outputs.local_reduce, local_reduce_out_index
     )
     epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
-        subgraph.graph_module, gemm_op, outputs, epilogue_arg_placeholders
+        subgraph.graph_module, gemm_op, epilogue_analysis, epilogue_arg_placeholders
     )
     quack_config_keys = flex_gemm_config_keys_for_local_reduce(
         layout.device,
@@ -376,5 +377,8 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         "flex_gemm_epilogue", choices, input_nodes, layout
     )
     return flex_gemm_ordered_outputs(
-        result, aux_outs, local_reduce_outs, outputs.local_reduce_aux_index
+        result,
+        aux_outs,
+        local_reduce_outs,
+        outputs.local_reduce.aux_index if outputs.local_reduce is not None else None,
     )
