@@ -202,34 +202,25 @@ def has_triton() -> bool:
     if triton_disable_device_detection:
         return False
 
-    from torch._dynamo.device_interface import get_interface_for_device
+    # Walk the registered DeviceInterface registry and query
+    # is_triton_capable() + raise_if_triton_unavailable() for each,
+    # replacing the previously hard-coded triton_supported_devices dict.
+    # is_triton_capable() is gated first so that raise_if_triton_unavailable()
+    # only surfaces missing-backend RuntimeErrors (and not, e.g., CUDA's
+    # GPUTooOldForTriton for sub-capable devices).
+    from torch._dynamo.device_interface import get_registered_device_interfaces
 
-    def cuda_extra_check(device_interface: Any) -> bool:
-        return device_interface.Worker.get_device_properties().major >= 7
-
-    def cpu_extra_check(device_interface: Any) -> bool:
-        import triton.backends
-
-        return "cpu" in triton.backends.backends
-
-    def _return_true(device_interface: Any) -> bool:
+    for name, iface in get_registered_device_interfaces():
+        if ":" in name:
+            continue
+        if not (iface.is_available() and iface.is_triton_capable()):
+            continue
+        try:
+            iface.raise_if_triton_unavailable()
+        except RuntimeError:
+            continue
         return True
-
-    triton_supported_devices = {
-        "cuda": cuda_extra_check,
-        "xpu": _return_true,
-        "cpu": cpu_extra_check,
-        "mtia": _return_true,
-    }
-
-    def is_device_compatible_with_triton() -> bool:
-        for device, extra_check in triton_supported_devices.items():
-            device_interface = get_interface_for_device(device)
-            if device_interface.is_available() and extra_check(device_interface):
-                return True
-        return False
-
-    return is_device_compatible_with_triton()
+    return False
 
 
 @functools.cache
