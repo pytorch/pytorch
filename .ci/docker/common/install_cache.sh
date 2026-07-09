@@ -3,33 +3,21 @@
 set -ex
 
 install_ubuntu() {
-  echo "Installing pkg-config and libssl-dev"
-  apt-get update && apt-get install -y pkg-config libssl-dev curl
-  echo "Installing rust"
-  curl https://sh.rustup.rs -sSf | sh -s -- -y
-  echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.16.0
-  cd sccache
+  ARCH=$(uname -m)
+  VERSION=0.16.0
+  FEATURES="sccache sccache-dist"
   if [[ "$(uname -m)" == "riscv64" ]]; then
-    # dist-server has a transient dependency on nix v0.14.1 which doesn't compile
-    # on riscv64. Support was added in nix v0.17.0 with [1], released on Feb 2020.
-    # [1] https://github.com/nix-rust/nix/commit/10e69dbc99812775ad68b30c8d20cdae2346bca2
-    features="dist-client"
-  else
-    features="dist-client dist-server"
+    # Rust's riscv64 arch is riscv64gc
+    ARCH=riscv64gc
+    # sccache-dist is not available on riscv64, so we only install sccache
+    FEATURES="sccache"
   fi
-  echo "Building sccache"
-  . "$HOME/.cargo/env" && cargo build --release --features="$features"
-  cp target/release/sccache /opt/cache/bin
-  if [[ "${features}" =~ *dist-server* ]]; then
-    cp target/release/sccache-dist /opt/cache/bin
-  fi
-  echo "Cleaning up"
-  cd ..
-  rm -rf sccache
-  rustup self uninstall -y
-  apt-get remove -y pkg-config libssl-dev
-  apt-get autoclean && apt-get clean
+  echo "Downloading sccache binaries from GitHub mozilla/sccache release"
+  for feature in $FEATURES; do
+    curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/${feature}-v${VERSION}-${ARCH}-unknown-linux-musl.tar.gz | \
+      tar -xz -C /opt/cache/bin --strip-components=1 ${feature}-v${VERSION}-${ARCH}-unknown-linux-musl/${feature}
+    chmod a+x /opt/cache/bin/${feature}
+  done
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
@@ -48,7 +36,6 @@ export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
 install_ubuntu
-chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues

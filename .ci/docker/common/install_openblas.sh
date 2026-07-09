@@ -6,12 +6,11 @@ set -ex
 OPENBLAS_VERSION=${OPENBLAS_VERSION:-"v0.3.33"}
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
 
-if [[ "$(uname -m)" == "riscv64" ]]; then
+if [[ "$(uname -m)" == "aarch64" ]]; then
+  OPENBLAS_TARGET="ARMV8"
+elif [[ "$(uname -m)" == "riscv64" ]]; then
   # FIXME: Depends on https://github.com/OpenMathLib/OpenBLAS/commit/c8dbfd74e2aa40563b11989d16aeb9b3828c16f4 getting released
   OPENBLAS_BUILD_BFLOAT16=0
-  OPENBLAS_BUILD_HFLOAT16=0
-elif [[ "$(uname -m)" == "aarch64" ]]; then
-  OPENBLAS_TARGET="ARMV8"
 fi
 
 # Clone OpenBLAS
@@ -26,14 +25,14 @@ TARGET=${OPENBLAS_TARGET:-}
 CFLAGS=-O3
 FFLAGS=-Wno-maybe-uninitialized
 BUILD_BFLOAT16=${OPENBLAS_BUILD_BFLOAT16:-1}
-BUILD_HFLOAT16=${OPENBLAS_BUILD_HFLOAT16:-1}
+BUILD_HFLOAT16=0
 BUILD_SINGLE=1
 BUILD_DOUBLE=1
 BUILD_COMPLEX=1
 BUILD_COMPLEX16=1
 "
 
-make -j8 ${OPENBLAS_BUILD_FLAGS} -C $OPENBLAS_CHECKOUT_DIR
-sudo make install ${OPENBLAS_BUILD_FLAGS} -C $OPENBLAS_CHECKOUT_DIR
+make shared -j8 ${OPENBLAS_BUILD_FLAGS} -C $OPENBLAS_CHECKOUT_DIR
+make install ${OPENBLAS_BUILD_FLAGS} -C $OPENBLAS_CHECKOUT_DIR
 
 rm -rf $OPENBLAS_CHECKOUT_DIR
