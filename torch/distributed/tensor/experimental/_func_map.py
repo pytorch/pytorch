@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor.placement_types import Placement
 
 
@@ -20,6 +20,25 @@ __all__ = ["local_map"]
 PlacementType = Sequence[Placement] | None
 InputPlacements = tuple[PlacementType, ...] | None
 OutputPlacements = PlacementType | tuple[PlacementType, ...]
+
+
+def _placements_equal(
+    actual_placements: Sequence[Placement],
+    ref_placements: Sequence[Placement],
+    tensor_ndim: int,
+) -> bool:
+    if len(actual_placements) != len(ref_placements):
+        return False
+
+    def normalize_shard(x: Placement) -> Placement:
+        if isinstance(x, Shard):
+            return Shard(x.dim if x.dim >= 0 else x.dim + tensor_ndim)
+        return x
+
+    for actual, ref in zip(actual_placements, ref_placements):
+        if normalize_shard(actual) != normalize_shard(ref):
+            return False
+    return True
 
 
 def local_map(
@@ -200,7 +219,7 @@ def _local_map_wrapped(
                 if not isinstance(spec, tuple):
                     spec = tuple(spec)
 
-                if arg.placements != spec:
+                if not _placements_equal(arg.placements, spec, arg.ndim):
                     if redistribute_inputs:
                         # redistribute to input placements
                         arg = arg.redistribute(placements=spec)

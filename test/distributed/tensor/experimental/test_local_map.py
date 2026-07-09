@@ -275,6 +275,22 @@ class TestLocalMap(DTensorTestBase):
         with self.assertRaisesRegex(AssertionError, "expects placements"):
             Y_dt = local_mm_forward(X_dt, W_dt)
 
+    @with_comms
+    def test_local_map_in_placements_normalizes_negative_shard_dim(self):
+        device_mesh = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(1, self.world_size)
+        )
+        X = torch.randn(4, 5, 6, device=self.device_type)
+        X_dt = distribute_tensor(X, device_mesh, (Replicate(), Shard(2)))
+
+        wrapped = local_map(
+            lambda x: x + 1,
+            out_placements=(Replicate(), Shard(2)),
+            in_placements=((Replicate(), Shard(-1)),),
+            device_mesh=device_mesh,
+        )
+        self.assertEqual(wrapped(X_dt).full_tensor(), X + 1)
+
     # check for `redistribute_inputs` handling
     @with_comms
     def test_local_map_redistribute(self):
