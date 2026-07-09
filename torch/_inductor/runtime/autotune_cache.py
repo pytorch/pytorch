@@ -42,7 +42,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactRecorder,
 )
-from torch.utils._triton import has_initialized_accelerator, has_triton
+from torch.utils._triton import has_triton
 
 from ..cache_key import AUTOTUNE_CACHE_KEY_STRATEGY
 from ..remote_cache import (
@@ -53,20 +53,21 @@ from ..remote_cache import (
     RemoteCache,
     RemoteCacheJsonSerde,
 )
+from .hints import InductorMeta
 from .triton_compat import Config, HAS_WARP_SPEC
 
 
 log = logging.getLogger(__name__)
 
 
-_InductorMetaTy = dict[str, object]
+_InductorMetaTy = InductorMeta
 
 
 def inductor_meta_from_config() -> _InductorMetaTy:
     from torch._inductor import config
 
     backend_hash = None
-    if has_initialized_accelerator() and has_triton():
+    if has_triton():
         try:
             backend_hash = torch.utils._triton.triton_hash_with_backend()
         except RuntimeError:
