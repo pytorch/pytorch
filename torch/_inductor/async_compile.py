@@ -86,15 +86,6 @@ size_hints_regex = re.compile(
 )
 
 
-def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
-    env_vars = [
-        "TORCHINDUCTOR_CACHE_DIR",
-        "TRITON_CACHE_DIR",
-        "TORCHINDUCTOR_CUTLASS_DIR",
-    ]
-    return {v: os.environ.get(v) for v in env_vars}
-
-
 def pre_fork_setup():
     """
     Setup that must be done prior to forking with a process pool.
@@ -475,7 +466,7 @@ class AsyncCompile:
                 "TRITON_CACHE_DIR",
                 "TRITON_LIBDEVICE_PATH",
             ]
-            extra_env = {v: os.environ.get(v) for v in env_vars}
+            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
             extra_config = {
                 "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
             }
@@ -667,7 +658,8 @@ class AsyncCompile:
         is_parallel = self.use_process_pool()
 
         if is_parallel:
-            extra_env = _pycodecache_kernel_compile_env()
+            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
+            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
 
             subprocess_task = self.process_pool().submit(
                 _worker_compile_pycodecache_kernel,
@@ -771,7 +763,8 @@ class AsyncCompile:
         is_parallel = self.use_process_pool()
 
         if is_parallel:
-            extra_env = _pycodecache_kernel_compile_env()
+            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
+            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
 
             subprocess_task = self.process_pool().submit(
                 _worker_compile_pycodecache_kernel,
@@ -837,7 +830,8 @@ class AsyncCompile:
             _worker_nvgemm_autotuning_precompile,
         )
 
-        extra_env = _pycodecache_kernel_compile_env()
+        env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TORCHINDUCTOR_CUTLASS_DIR"]
+        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
 
         return self.process_pool().submit(
             _worker_nvgemm_autotuning_precompile,
