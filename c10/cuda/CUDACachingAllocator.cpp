@@ -4702,6 +4702,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->popCompileContext();
   }
 
+  bool supportsUserMetadata() override {
+    return true;
+  }
+
   void setUserMetadata(const std::string& metadata) override {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
