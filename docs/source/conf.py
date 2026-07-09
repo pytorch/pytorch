@@ -2044,8 +2044,6 @@ coverage_ignore_classes = [
     "DLDeviceType",
     # torch.utils.file_baton
     "FileBaton",
-    # torch.utils.flop_counter
-    "FlopCounterMode",
     # torch.utils.hipify.hipify_python
     "CurrentState",
     "GeneratedFileCleaner",
