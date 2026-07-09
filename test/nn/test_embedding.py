@@ -752,7 +752,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     self.assertEqual(
                         embedding.weight.grad[i].abs().sum(),
                         0,
-                        f"Expected zero gradient for unused index {i}",
+                        lambda msg: f"{msg}\nExpected zero gradient for unused index {i}",
                     )
 
             # Test correctness by comparing with a reference computation
@@ -819,7 +819,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             self.assertEqual(
                 embedding.weight.grad[padding_idx].abs().sum(),
                 0,
-                f"Expected zero gradient for padding_idx {padding_idx}",
+                lambda msg: f"{msg}\nExpected zero gradient for padding_idx {padding_idx}",
             )
 
             # Verify other used indices have non-zero gradients
@@ -962,6 +962,29 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             raise AssertionError(
                 f"Expected grad_weight.dtype == torch.bfloat16, got {grad_weight.dtype}"
             )
+
+    # https://github.com/pytorch/pytorch/issues/188467
+    @onlyOn(["cuda"])
+    @dtypes(torch.int32, torch.int64)
+    @largeTensorTest("20GB", device="cuda")
+    def test_embedding_bag_max_backward_large_offset_overflow(self, device, dtype):
+        # chosen to guarantee an int32 overflow
+        dim = 2**16
+        r = 2**15
+
+        def grad_at_r(idx_dtype):
+            w = torch.zeros(r + 1, dim, device=device, requires_grad=True)
+
+            # make the final row contain the matrix's max value
+            with torch.no_grad():
+                w[r, :] = 1.0
+
+            idx = torch.tensor([0, r], device=device, dtype=idx_dtype)
+            off = torch.tensor([0], device=device, dtype=idx_dtype)
+            F.embedding_bag(idx, w, off, mode="max").sum().backward()
+            return w.grad[r].clone()
+
+        torch.testing.assert_close(torch.ones(dim, device=device), grad_at_r(dtype))
 
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare

@@ -4,7 +4,6 @@ import functools
 import unittest
 
 import torch
-import torch._dynamo.config
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
@@ -2045,7 +2044,6 @@ def forward(self, pred_1, x_1):
         self.assertTrue("c" in res)
         self.assertEqual(expected, res)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_simple(self):
         def f(x, y):
             return x.sin().cos() * y.cos().sin()
@@ -2060,7 +2058,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_simple_partial_grad(self):
         def f(x, y):
             return x.sin().cos() * y.cos().sin()
@@ -2076,7 +2073,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_no_grad_output(self):
         def f(x, y):
             return x[0].sin().cos() + y, y.cos().sin()
@@ -2092,7 +2088,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_nested_list(self):
         import torch.utils._pytree as pytree
 
@@ -2122,7 +2117,6 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_higher_order(self):
         from torch.autograd.functional import hessian as hes, jacobian as jac
 
@@ -4598,6 +4592,39 @@ class AssociativeScanTests(TestCase):
                 inputs=x,
             )
 
+    def test_associative_scan_pointwise_cpu_lowering_error(self):
+        def combine_fn(x, y):
+            return x + y
+
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+        from torch._inductor.exc import InductorError
+
+        xs = torch.randn(8, 4)
+        with self.assertRaisesRegex(InductorError, "is not supported on cpu"):
+            torch.compile(M(), fullgraph=True)(xs)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_pointwise_mixed_device_lowering_error(self):
+        def combine_fn(x, y):
+            return (x[0] + y[0], x[1] + y[1])
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return associative_scan(
+                    combine_fn, (a, b), dim=0, combine_mode="pointwise"
+                )
+
+        from torch._inductor.exc import InductorError
+
+        a = torch.randn(8, 4, device="cuda")
+        b = torch.randn(8, 4, device="cpu")
+        with self.assertRaisesRegex(InductorError, "is not supported on cpu"):
+            torch.compile(M(), fullgraph=True)(a, b)
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -6588,6 +6615,197 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
+    def test_while_loop_traced_cudagraphs(self):
+        def f(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc + 2, iteration + 1
+
+            return while_loop(cond_fn, body_fn, (x, init_iter))
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(3, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [x, limit])
+        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cuda_graph_replay_uses_runtime_condition(self):
+        def cond_fn(acc, iteration, limit):
+            return iteration < limit
+
+        def body_fn(acc, iteration, limit):
+            return acc + 2, iteration + 1
+
+        def f(x, iteration, limit):
+            return torch.ops.higher_order.while_loop(
+                cond_fn, body_fn, (x, iteration), (limit,)
+            )
+
+        x = torch.ones(4, device="cuda")
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        limit = torch.tensor(3, device="cuda")
+
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            f(x, iteration, limit)
+
+        graph = torch.cuda.CUDAGraph()
+        with (
+            torch.cuda.graph(graph, stream=side_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            out = f(x, iteration, limit)
+
+        torch.cuda.current_stream().wait_stream(side_stream)
+
+        for num_iters in [3, 0, 5]:
+            x.fill_(1)
+            iteration.zero_()
+            limit.fill_(num_iters)
+            graph.replay()
+            torch.cuda.synchronize()
+
+            self.assertEqual(out[0], torch.full_like(x, 1 + 2 * num_iters))
+            self.assertEqual(
+                out[1], torch.tensor(num_iters, dtype=torch.int64, device="cuda")
+            )
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(iteration, torch.zeros_like(iteration))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cudagraph_kwargs_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return (iteration + 1,)
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        args = (cond_fn, body_fn, (iteration,), ())
+        error = "CUDA graph conditional torch.while_loop does not support kwargs"
+
+        for mode_cls in (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+            ControlFlowOpWarmupDispatchMode,
+        ):
+            with (
+                self.subTest(mode=mode_cls.__name__),
+                self.assertRaisesRegex(RuntimeError, error),
+            ):
+                mode_cls().__torch_dispatch__(
+                    torch.ops.higher_order.while_loop,
+                    (),
+                    args,
+                    {"unexpected": True},
+                )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cudagraph_body_pytree_mismatch_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return {"iteration": iteration + 1}
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "body_fn should return the same pytree structure as carried_inputs",
+        ):
+            with (
+                torch.cuda.graph(graph),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                torch.ops.higher_order.while_loop(cond_fn, body_fn, (iteration,), ())
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_inside_while_loop_cudagraphs(self):
+        def f(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                pred = iteration % 2 == 0
+                acc = torch.cond(
+                    pred,
+                    lambda acc: acc + 3,
+                    lambda acc: acc - 1,
+                    [acc],
+                )
+                return acc, iteration + 1
+
+            return torch.while_loop(cond_fn, body_fn, (x, init_iter))
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(4, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [x, limit])
+        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_inside_cond_cudagraphs(self):
+        def add_loop(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc + 2, iteration + 1
+
+            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
+            return acc
+
+        def sub_loop(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc - 1, iteration + 1
+
+            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
+            return acc
+
+        def f(x, pred, limit):
+            return torch.cond(pred, add_loop, sub_loop, [x, limit])
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(3, device="cuda")
+
+        for pred in [torch.tensor(True).cuda(), torch.tensor(False).cuda()]:
+            _check_compile_cudagraph_backend(self, f, [x, pred, limit])
+            _check_compile_many_backends_with_cudagraph(self, f, [x, pred, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
     def test_cond_traced_record_stream_reuse(self):
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:True"
@@ -7922,7 +8140,6 @@ def forward(self, arg0_1):
         self.assertEqual(res, g(x, y, z))
         self.check_map_count(gm, 1)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_tracing_map_autograd_symbolic_simple(self):
         def f(x, y):
             return x + y
@@ -7940,7 +8157,6 @@ def forward(self, arg0_1):
         self.assertEqual(res, g(x, y))
         self.check_map_count(gm, 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_tracing_map_autograd_symbolic_list(self):
         import torch.utils._pytree as pytree
 
@@ -7966,7 +8182,6 @@ def forward(self, arg0_1):
         self.assertEqual(res, g(x, y))
         self.check_map_count(gm, 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_tracing_map_autograd_symbolic_dict(self):
         def f(x, y):
             return [x["a"] + y, x["b"] * y]
@@ -7996,7 +8211,6 @@ def forward(self, arg0_1):
         self.assertEqual(res, g(x, y))
         self.check_map_count(gm, 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_tracing_map_autograd_aot_functionalized(self):
         def inner(x, y):
             z = x - 1
@@ -11560,6 +11774,131 @@ class TestHopSchema(TestCase):
         self.assertExpectedInline(
             str(schema),
             """cond(SymBool pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_tensor_inputs(self):
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (lambda x: x.sin(), lambda x: x.cos(), lambda x: x.tan()),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_symint_inputs(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+            sym_int = torch.randn(3, 4).nonzero().size(0)
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            sym_int,
+            (lambda x: x.sin(), lambda x: x.cos()),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(SymInt index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_multiple_operands(self):
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(1),
+            (lambda x, y: (x + y, x * y), lambda x, y: (x - y, x / y)),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor operand0, Tensor operand1) -> (Tensor, Tensor)""",
+        )
+
+    def test_switch_gen_schema_with_input_mutation(self):
+        def branch0(x, y):
+            x.add_(1)
+            return x + y
+
+        def branch1(x, y):
+            return x - y
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor(a3!) operand0, Tensor operand1) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_with_disjoint_branch_mutation(self):
+        def branch0(x, y):
+            x.add_(1)
+            return x + y
+
+        def branch1(x, y):
+            y.sub_(1)
+            return x - y
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4), torch.randn(3, 4)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor(a3!) operand0, Tensor(a4!) operand1) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_int_index(self):
+        schema = torch.ops.higher_order.switch.gen_schema(
+            0,
+            (lambda x: x.sin(), lambda x: x.cos()),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(int index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_switch_gen_schema_differing_int_symint_outputs(self):
+        def branch0(x):
+            return x.sin(), 5
+
+        def branch1(x):
+            return x.cos(), 7
+
+        def branch2(x):
+            return x.tan(), 9
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1, branch2),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, SymInt)""",
+        )
+
+    def test_switch_gen_schema_matching_int_int_outputs(self):
+        def branch0(x):
+            return x.sin(), 5
+
+        def branch1(x):
+            return x.cos(), 5
+
+        schema = torch.ops.higher_order.switch.gen_schema(
+            torch.tensor(0),
+            (branch0, branch1),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Tensor operand0) -> (Tensor, int)""",
         )
 
     def test_while_loop_gen_schema_tensor_inputs(self):

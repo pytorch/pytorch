@@ -42,6 +42,7 @@ import importlib
 import inspect
 import itertools
 import logging
+import math
 import operator
 import os
 import re
@@ -61,7 +62,10 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
-from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.fake_tensor import (
+    maybe_get_fake_constant,
+    unset_fake_temporarily,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.fx.graph_module import _get_attr
@@ -536,6 +540,165 @@ class Ignored(PatternExpr):
 
     def pretty_print(self, pp: PatternPrettyPrinter) -> str:
         return "Ignored()"
+
+
+def _get_fake_tensor_constant(value: torch.Tensor) -> torch.Tensor | None:
+    if isinstance(value, FakeTensor):
+        return value.constant
+    return value
+
+
+def _tensor_values_equal(a: torch.Tensor, b: torch.Tensor) -> bool:
+    if torch.equal(a, b):
+        return True
+    if a.dtype.is_complex:
+        return _tensor_values_equal(a.real, b.real) and _tensor_values_equal(
+            a.imag, b.imag
+        )
+    if a.dtype.is_floating_point:
+        return bool(((a == b) | (torch.isnan(a) & torch.isnan(b))).all().item())
+    return False
+
+
+def _constant_values_equal(a: Any, b: Any) -> bool:
+    if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+        if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
+            return False
+        if (
+            a.dtype != b.dtype
+            or a.shape != b.shape
+            or a.device != b.device
+            or a.layout != b.layout
+            or a.requires_grad != b.requires_grad
+        ):
+            return False
+        if a.layout == torch.strided and (
+            a.stride() != b.stride() or a.storage_offset() != b.storage_offset()
+        ):
+            return False
+        a_constant = _get_fake_tensor_constant(a)
+        b_constant = _get_fake_tensor_constant(b)
+        if a_constant is None or b_constant is None:
+            return False
+        try:
+            with unset_fake_temporarily():
+                return _tensor_values_equal(a_constant, b_constant)
+        except (RuntimeError, TypeError, ValueError):
+            return False
+
+    try:
+        result = a == b
+    except (RuntimeError, TypeError, ValueError):
+        return False
+    return result if isinstance(result, bool) else False
+
+
+def _python_constant_repr(value: Any) -> str:
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "float('nan')"
+        if math.isinf(value):
+            return "float('inf')" if value > 0 else "-float('inf')"
+    if isinstance(value, complex):
+        return f"complex({_python_constant_repr(value.real)}, {_python_constant_repr(value.imag)})"
+    if isinstance(value, list):
+        return f"[{', '.join(map(_python_constant_repr, value))}]"
+    if isinstance(value, tuple):
+        trailing_comma = "," if len(value) == 1 else ""
+        return f"({', '.join(map(_python_constant_repr, value))}{trailing_comma})"
+    return repr(value)
+
+
+def _tensor_constant_repr(value: torch.Tensor) -> str:
+    if value.layout != torch.strided:
+        raise NotImplementedError(
+            f"NYI: serializing get_attr tensor with layout {value.layout}"
+        )
+    dtype = value.dtype
+    device = value.device
+    if isinstance(value, FakeTensor):
+        constant = value.constant
+        if constant is None:
+            raise NotImplementedError("NYI: serializing fake get_attr tensor")
+        data_value = constant
+    else:
+        data_value = value
+    if value.requires_grad:
+        raise NotImplementedError("NYI: serializing tensor that requires grad")
+    if not value.is_contiguous() or value.storage_offset() != 0:
+        raise NotImplementedError("NYI: serializing non-contiguous get_attr tensor")
+    with unset_fake_temporarily():
+        if data_value.device.type != "cpu":
+            cpu_value = data_value.detach().cpu()
+        else:
+            cpu_value = data_value.detach()
+        value_list = cpu_value.tolist()
+
+    args = [_python_constant_repr(value_list)]
+    args.append(f"dtype={dtype}")
+    if device.type != "cpu":
+        args.append(f"device={str(device)!r}")
+    return f"torch.tensor({', '.join(args)})"
+
+
+class GetAttr(PatternExpr):
+    """
+    Match a get_attr node by comparing the attribute value instead of the target
+    name, which is local to the traced GraphModule.
+    """
+
+    def __init__(self, value: Any, users: Multiple | int = 1) -> None:
+        super().__init__()
+        self.value = value
+        self.users = users
+
+    def __repr__(self) -> str:
+        if self.users is MULTIPLE:
+            comma_users = ", MULTIPLE"
+        elif self.users != 1:
+            comma_users = f", {self.users}"
+        else:
+            comma_users = ""
+        return f"{self.__class__.__name__}({self.value!r}{comma_users})"
+
+    def has_multiple_users(self) -> bool:
+        return isinstance(self.users, Multiple) or self.users > 1
+
+    def _match(self, node: NodeOrConstant, ctx: MatchContext) -> MatchResult:
+        if not isinstance(node, torch.fx.Node) or node.op != "get_attr":
+            return FailedMatch("get_attr_mismatch: node={}, pattern={}", node, self)
+        if (
+            self not in ctx.outputs
+            and self.users is not MULTIPLE
+            and len(node.users) != self.users
+        ):
+            return FailedMatch("multiple_users {}", self)
+        if node.graph.owning_module is None:
+            return FailedMatch("get_attr without owning module: {}", node)
+        if not isinstance(node.target, str):
+            return FailedMatch("get_attr target is not str: {}", node.target)
+        value = _get_attr(node.graph.owning_module, node.target)
+        if not _constant_values_equal(self.value, value):
+            return FailedMatch("get_attr_value: {} != {}", value, self.value)
+        m = Match(ctx, self)
+        m.nodes.append(node)
+        return m
+
+    def pretty_print(self, pp: PatternPrettyPrinter) -> str:
+        args = [pp.pretty_print(self.value)]
+        if self.users is MULTIPLE:
+            args.append("MULTIPLE")
+        elif self.users != 1:
+            args.append(str(self.users))
+        return f"{self.__class__.__name__}({', '.join(args)})"
+
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)
+        return (
+            super().pattern_eq(other)
+            and _constant_values_equal(self.value, other.value)
+            and self.users == other.users
+        )
 
 
 class KeywordArg(PatternExpr):
@@ -1109,6 +1272,8 @@ class PatternPrettyPrinter:
                 return memoized_name
             else:
                 return self.memoize(obj)
+        if isinstance(obj, torch.Tensor):
+            return _tensor_constant_repr(obj)
         if hasattr(obj, "pretty_print"):
             return obj.pretty_print(self)
 
@@ -2016,7 +2181,7 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if isinstance(arg, FakeTensor) and arg.constant is not None:
+        if isinstance(arg, FakeTensor) and maybe_get_fake_constant(arg) is not None:
             # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
             # hold onto their original constant value - and by stashing it here
             # will cause a memory leak if the constant value is on GPU.
@@ -2554,8 +2719,6 @@ def fx_to_pattern(
         call_method = _not_implemented
         # pyrefly: ignore [bad-override]
         call_module = _not_implemented
-        # pyrefly: ignore [bad-override]
-        get_attr = _not_implemented
 
         # pyrefly: ignore [bad-override]
         def placeholder(
@@ -2580,6 +2743,17 @@ def fx_to_pattern(
                 return ExclusiveKeywordArg(name)
             else:
                 return KeywordArg(name)
+
+        # pyrefly: ignore [bad-override]
+        def get_attr(
+            self,
+            target: str,  # type: ignore[override]
+            args: Sequence[Any],
+            kwargs: Mapping[str, Any],
+        ) -> GetAttr:
+            if args or kwargs:
+                raise AssertionError(f"unexpected get_attr args: {args}, {kwargs}")
+            return GetAttr(_get_attr(self.module, target))
 
         # pyrefly: ignore [bad-override]
         def call_function(
