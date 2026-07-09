@@ -633,7 +633,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         self.assertLess(
             fsdp_time / rep_time,
             1.5,
-            f"FSDP/replicate ratio {fsdp_time / rep_time:.2f} >= 1.5; "
+            lambda msg: f"{msg}\nFSDP/replicate ratio {fsdp_time / rep_time:.2f} >= 1.5; "
             f"per-group RS state may not be preventing cross-group stalls",
         )
 

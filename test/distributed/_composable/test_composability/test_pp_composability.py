@@ -178,7 +178,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 self.assertIn(
                     param_name,
                     sd_param_names,
-                    f"Parameter name '{param_name}' not found in state_dict.",
+                    lambda msg: f"{msg}\nParameter name '{param_name}' not found in state_dict.",
                 )
 
         _dcp_test(self)

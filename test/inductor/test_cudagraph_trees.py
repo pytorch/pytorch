@@ -3197,7 +3197,7 @@ if HAS_CUDA_AND_TRITON:
             msgs = [str(x.message) for x in w]
             self.assertTrue(
                 any("require backward" in m for m in msgs),
-                f"expected CUDAGraph pending-backward warning; got: {msgs}",
+                lambda msg: f"{msg}\nexpected CUDAGraph pending-backward warning; got: {msgs}",
             )
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 

@@ -232,7 +232,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertLessEqual(
                 mismatch_ratio,
                 1e-4,
-                msg=f"Dropout mask mismatch ratio too high: {mismatch_ratio:.8f}",
+                msg=lambda msg: f"{msg}\nDropout mask mismatch ratio too high: {mismatch_ratio:.8f}",
             )
             self.assertEqual(seed0_e, BASE_SEED)
             self.assertEqual(seed0_c, BASE_SEED)
@@ -474,7 +474,9 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         for seed in [2**33 + 1, 2**40 + 12345]:
             with self.subTest(seed=seed):
                 masks_eq, _, _ = dropout_parity((1024,), seed=seed)
-                self.assertTrue(masks_eq, f"seed={seed}: mask mismatch")
+                self.assertTrue(
+                    masks_eq, lambda msg: f"{msg}\nseed={seed}: mask mismatch"
+                )
 
 
 if __name__ == "__main__":

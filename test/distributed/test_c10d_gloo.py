@@ -868,7 +868,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 expect = torch.full((3,), expected_val)
                 self.assertTrue(
                     torch.allclose(output, expect),
-                    f"op={op}, rank={self.rank}: output={output}, expected={expect}",
+                    lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output}, expected={expect}",
                 )
 
     @requires_gloo()
@@ -921,7 +921,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 expect = torch.full((out_size,), expected_val)
                 self.assertTrue(
                     torch.allclose(output, expect),
-                    f"op={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
+                    lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
                 )
 
     @requires_gloo()
@@ -984,7 +984,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     expect = torch.full((out_size,), expected_val)
                     self.assertTrue(
                         torch.allclose(output, expect),
-                        f"op={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
+                        lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
                     )
 
     @requires_gloo()

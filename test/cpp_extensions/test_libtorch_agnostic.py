@@ -1423,7 +1423,7 @@ except RuntimeError as e:
         self.assertTrue(
             "CUDA error: invalid device ordinal" in error_message
             or "HIP error: invalid device ordinal" in error_message,
-            f"Expected 'CUDA/HIP error: invalid device ordinal' in error message, got: {error_message}",
+            lambda msg: f"{msg}\nExpected 'CUDA/HIP error: invalid device ordinal' in error message, got: {error_message}",
         )
         self.assertIn(
             "GPU device may be out of range, do you have enough GPUs?",
@@ -1599,7 +1599,7 @@ except RuntimeError as e:
         self.assertTrue(
             "CUDA error: invalid configuration argument" in error_message
             or "HIP error: invalid configuration argument" in error_message,
-            f"Expected 'CUDA|HIP error: invalid configuration argument' in error message, got: {error_message}",
+            lambda msg: f"{msg}\nExpected 'CUDA|HIP error: invalid configuration argument' in error message, got: {error_message}",
         )
 
         if show_cpp_stacktraces:

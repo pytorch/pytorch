@@ -417,9 +417,12 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         stage_module = pp_model.get_submodule(f"layers.{stage_index}")
         for name, param in stage_module.named_parameters():
             param_fqn = f"layers.{stage_index}.{name}"
-            self.assertIsNotNone(param.grad, f"Missing PP grad for {param_fqn}")
             self.assertIsNotNone(
-                ref_grads[param_fqn], f"Missing reference grad for {param_fqn}"
+                param.grad, lambda msg: f"{msg}\nMissing PP grad for {param_fqn}"
+            )
+            self.assertIsNotNone(
+                ref_grads[param_fqn],
+                lambda msg: f"{msg}\nMissing reference grad for {param_fqn}",
             )
             pp_grad = cast(torch.Tensor, param.grad)
             ref_grad = cast(torch.Tensor, ref_grads[param_fqn])

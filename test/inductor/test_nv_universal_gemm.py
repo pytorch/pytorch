@@ -865,7 +865,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 self.assertIn(
                     "in_ptr0, in_ptr1, out_ptr0, stream=None",
                     line,
-                    f"Unexpected kernel signature: {line.strip()}",
+                    lambda msg: f"{msg}\nUnexpected kernel signature: {line.strip()}",
                 )
 
     def test_epilogue_with_aux_input(self):
@@ -1012,7 +1012,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         finite = [(ms, p) for ms, p in bench_results if ms != float("inf")]
         self.assertTrue(
             finite,
-            f"All NVGEMM benchmarks returned inf — workspace handling likely "
+            lambda msg: f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
             f"broken. Results: {bench_results}",
         )
 

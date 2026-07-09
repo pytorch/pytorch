@@ -735,7 +735,7 @@ class TestProvenanceTracingStackTraces(TestCase):
             self.assertIn(
                 expected,
                 kernel_info,
-                f"Expected kernel {expected} not found in {list(kernel_info)}",
+                lambda msg: f"{msg}\nExpected kernel {expected} not found in {list(kernel_info)}",
             )
 
         for data in kernel_info.values():
@@ -779,7 +779,7 @@ class TestProvenanceTracingStackTraces(TestCase):
             )
             self.assertTrue(
                 os.path.exists(json_path),
-                f"kernel_information.json not found in extracted package at {json_path}",
+                lambda msg: f"{msg}\nkernel_information.json not found in extracted package at {json_path}",
             )
 
             with open(json_path) as f:

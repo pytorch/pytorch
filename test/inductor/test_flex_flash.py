@@ -2043,7 +2043,7 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertTrue(
             prof_result["found"],
-            f"Flash attention kernel not found. Available kernels: {prof_result['kernel_names']}",
+            lambda msg: f"{msg}\nFlash attention kernel not found. Available kernels: {prof_result['kernel_names']}",
         )
 
         with cuda_kernel_profiler("flash_attncute") as prof_result:
@@ -2053,7 +2053,7 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertFalse(
             prof_result["found"],
-            f"Flash attention kernel unexpectedly found when BACKEND='TRITON'. Kernels: {prof_result['kernel_names']}",
+            lambda msg: f"{msg}\nFlash attention kernel unexpectedly found when BACKEND='TRITON'. Kernels: {prof_result['kernel_names']}",
         )
 
     @dtypes(torch.float16, torch.bfloat16)
@@ -2144,7 +2144,7 @@ class TestFlexFlash(InductorTestCase):
 
         self.assertTrue(
             prof_result["found"],
-            f"Flash attention backward kernel not found. Kernels: {prof_result['kernel_names']}",
+            lambda msg: f"{msg}\nFlash attention backward kernel not found. Kernels: {prof_result['kernel_names']}",
         )
 
     @xfailIfSM120OrLater
@@ -3159,7 +3159,7 @@ class TestHierarchicalIndex(InductorTestCase):
         self.assertIn(
             expected_pattern,
             code_str,
-            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+            lambda msg: f"{msg}\nExpected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
@@ -3206,7 +3206,7 @@ class TestHierarchicalIndex(InductorTestCase):
         self.assertIn(
             expected_pattern,
             code_str,
-            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+            lambda msg: f"{msg}\nExpected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
     @xfailIfSM120OrLater

@@ -6853,23 +6853,23 @@ def forward(self, primals_1, tangents_1):
             # Both should be quantized nodes
             self.assertTrue(
                 pos_0_node.name.startswith("fp8_quant_"),
-                f"Position 0 should be quantized node, got: {pos_0_node.name}",
+                lambda msg: f"{msg}\nPosition 0 should be quantized node, got: {pos_0_node.name}",
             )
             self.assertTrue(
                 pos_2_node.name.startswith("fp8_quant_"),
-                f"Position 2 should be quantized node, got: {pos_2_node.name}",
+                lambda msg: f"{msg}\nPosition 2 should be quantized node, got: {pos_2_node.name}",
             )
 
             # The shared quantized node should have the first occurrence position in its name
             self.assertIn(
                 "_pos_0",
                 pos_0_node.name,
-                f"Shared quantized node should have '_pos_0' in name: {pos_0_node.name}",
+                lambda msg: f"{msg}\nShared quantized node should have '_pos_0' in name: {pos_0_node.name}",
             )
             self.assertIn(
                 "_pos_2",
                 pos_2_node.name,
-                f"Shared quantized node should have '_pos_2' in name: {pos_2_node.name}",
+                lambda msg: f"{msg}\nShared quantized node should have '_pos_2' in name: {pos_2_node.name}",
             )
             # Find scale nodes in the forward output
             fwd_scale_nodes = [
@@ -6994,7 +6994,7 @@ def forward(self, primals_1, tangents_1):
                 self.assertLessEqual(
                     len(direct_users),
                     1,
-                    f"Quantized placeholder {quant_placeholder.name} should have minimal direct users",
+                    lambda msg: f"{msg}\nQuantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")

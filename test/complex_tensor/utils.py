@@ -106,7 +106,7 @@ class TestCase(PytorchTestCase):
             self.assertIs(
                 type(exception_e),
                 type(exception_a),
-                f"\n{exception_e=}\n{exception_a=}",
+                lambda msg: f"{msg}\n{exception_e=}\n{exception_a=}",
             )
 
         if exception_e is None:

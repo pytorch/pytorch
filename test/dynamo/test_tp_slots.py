@@ -288,7 +288,7 @@ class TestTypeSlots(TestCase):
             _, _, num_slots, _ = self._get_slot_info(t)
             self.assertTrue(
                 has_slot(num_slots, PyNumberSlots.NB_INDEX),
-                f"{t.__name__} should have nb_index",
+                lambda msg: f"{msg}\n{t.__name__} should have nb_index",
             )
 
     def test_nb_index_absent(self):
@@ -297,7 +297,7 @@ class TestTypeSlots(TestCase):
             _, _, num_slots, _ = self._get_slot_info(t)
             self.assertFalse(
                 has_slot(num_slots, PyNumberSlots.NB_INDEX),
-                f"{t.__name__} should NOT have nb_index",
+                lambda msg: f"{msg}\n{t.__name__} should NOT have nb_index",
             )
 
     def test_mp_subscript_on_subscriptable_types(self):
@@ -319,7 +319,7 @@ class TestTypeSlots(TestCase):
             _, map_slots, _, _ = self._get_slot_info(t)
             self.assertTrue(
                 has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT),
-                f"{t.__name__} should have mp_subscript",
+                lambda msg: f"{msg}\n{t.__name__} should have mp_subscript",
             )
 
 

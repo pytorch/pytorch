@@ -100,7 +100,7 @@ class TestCustomOpAutoTune(TestCase):
             # Basic sanity checks
             self.assertTrue(
                 torch.isfinite(result).all(),
-                f"{op_name} {name} produced non-finite values",
+                lambda msg: f"{msg}\n{op_name} {name} produced non-finite values",
             )
 
         # Verify numerical equivalence
@@ -895,7 +895,9 @@ class TestCustomOpAutoTune(TestCase):
         # Verify we got concrete integers during benchmarking (not symbolic)
         unique_shapes = sorted(set(shapes_seen))
         for shape in unique_shapes:
-            self.assertIsInstance(shape, int, f"Expected int, got {type(shape)}")
+            self.assertIsInstance(
+                shape, int, lambda msg: f"{msg}\nExpected int, got {type(shape)}"
+            )
 
         # Verify we hit all 3 ranges during autotuning
         ranges_hit = set()
