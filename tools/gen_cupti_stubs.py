@@ -10,10 +10,11 @@ emits a Python module of the same constants -- the per-kind ``Field`` catalogs p
 *which* fields the monitor selects; this module is only the ABI source of truth.
 
 Parsing uses libclang (the ``clang`` python bindings) so the C frontend -- not a
-fragile regex -- computes every enumerator value. The shared ``libclang.so`` is
-located via ``--libclang`` / ``LIBCLANG_PATH`` (CMake passes the toolchain's), or
-auto-discovered. Field string-ness (which documented field is ``const char*``) is
-read from each enumerator's doc comment, the header's only record of the C type.
+fragile regex -- computes every enumerator value. The ``libclang`` wheel (a build
+dependency) bundles ``libclang.so`` and cindex loads it automatically; ``LIBCLANG_PATH``
+can override with a specific one. Field string-ness (which documented field is
+``const char*``) is read from each enumerator's doc comment, the header's only record
+of the C type.
 
 Run standalone for debugging:
 
@@ -23,9 +24,10 @@ Run standalone for debugging:
 from __future__ import annotations
 
 import argparse
-import glob
+import hashlib
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +47,12 @@ _ATTR_PREFIX = "CUPTI_ACTIVITY_ATTR_"
 _CHAR_PTR_DECL_RE = re.compile(r"(?:const\s+)?char\s*\*")
 # Trailing count sentinel each field enum ends with (``*_FIELD_MAX``); not a real field.
 _SENTINEL_SUFFIXES = ("MAX", "FORCE_INT")
+# CUPTI_API_VERSION lives in the sibling cupti_version.h; stamped into the generated
+# module (with the header's sha256) so its provenance -- which CUPTI ABI it came from
+# -- is self-evident.
+_CUPTI_API_VERSION_RE = re.compile(
+    r"^\s*#\s*define\s+CUPTI_API_VERSION\s+(\d+)", re.MULTILINE
+)
 
 
 def _field_ctype(raw_comment: str | None) -> str:
@@ -69,16 +77,6 @@ def _field_ctype(raw_comment: str | None) -> str:
     return "UINT"
 
 
-# Where a system libclang.so typically lives when only versioned sonames exist.
-_LIBCLANG_GLOBS = (
-    "/usr/lib64/libclang.so*",
-    "/usr/lib/x86_64-linux-gnu/libclang*.so*",
-    "/usr/lib/aarch64-linux-gnu/libclang*.so*",
-    "/usr/lib/llvm-*/lib/libclang.so*",
-    "/usr/lib/libclang.so*",
-)
-
-
 @dataclass(frozen=True)
 class _FieldDef:
     name: str  # attribute name, e.g. "REGISTERS_PER_THREAD"
@@ -86,40 +84,38 @@ class _FieldDef:
     ctype: str  # Ctype member name: "UINT" | "INT" | "FLOAT" | "CSTR"
 
 
-def _load_cindex(libclang: str | None):  # type: ignore[no-untyped-def]
-    """Import ``clang.cindex`` and point it at a usable ``libclang.so``."""
+def _load_cindex():  # type: ignore[no-untyped-def]
+    """Import ``clang.cindex`` and ensure a ``libclang.so`` is loadable. The ``libclang`` wheel
+    (a build dependency) bundles ``libclang.so`` and cindex loads it automatically; set
+    ``LIBCLANG_PATH`` to override with a specific one."""
     try:
         # pyrefly: ignore [missing-import]
         import clang.cindex as cindex
     except ImportError as e:
         raise SystemExit(
-            "the 'clang' python bindings are required to generate the CUPTI field-id "
-            "module; install the 'clang' wheel into the build environment"
+            "the CUPTI field-id codegen requires the clang python bindings; install the "
+            "'libclang' wheel into the build environment"
         ) from e
 
-    explicit = libclang or os.environ.get("LIBCLANG_PATH")
+    explicit = os.environ.get("LIBCLANG_PATH")
     if explicit and Path(explicit).exists():
         cindex.Config.set_library_file(explicit)
-        return cindex
-    try:  # default ctypes load (works when an unversioned libclang.so exists)
-        cindex.Index.create()
-        return cindex
-    except cindex.LibclangError:
-        for pattern in _LIBCLANG_GLOBS:
-            if matches := sorted(glob.glob(pattern)):
-                cindex.Config.set_library_file(matches[-1])  # highest soname
-                return cindex
+    try:
+        cindex.Index.create()  # force the load now, so failure is clean (not a mid-parse traceback)
+    except cindex.LibclangError as e:
         raise SystemExit(
-            "could not locate libclang.so; pass --libclang or set LIBCLANG_PATH"
-        ) from None
+            "CUPTI stub generation failed: libclang.so could not be loaded. Install the "
+            "'libclang' wheel (bundles libclang.so), or set LIBCLANG_PATH to a libclang.so."
+        ) from e
+    return cindex
 
 
 def parse_header(
-    header: Path, libclang: str | None = None
+    header: Path,
 ) -> tuple[dict[str, list[_FieldDef]], list[tuple[str, int]]]:
     """Parse the header via libclang. Returns (``<X>FieldIds`` class name -> its fields, in
     declaration order) and the CUpti_ActivityAttribute enumerators (name, value)."""
-    cindex = _load_cindex(libclang)
+    cindex = _load_cindex()
     args = ["-x", "c", f"-I{header.parent}"]
     if cuda_home := (os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")):
         args.append(f"-I{Path(cuda_home) / 'include'}")
@@ -180,9 +176,18 @@ def render(
     attrs: list[tuple[str, int]],
     header: Path,
 ) -> str:
+    digest = hashlib.sha256(header.read_bytes()).hexdigest()
+    version_header = header.parent / "cupti_version.h"
+    match = (
+        _CUPTI_API_VERSION_RE.search(version_header.read_text())
+        if version_header.is_file()
+        else None
+    )
+    version = match.group(1) if match else "unknown"
     lines = [
         "# @" + "generated by tools/gen_cupti_stubs.py -- do not edit.",
         f"# Source: {header.name} (CUPTI ABI; nvidia-cuda-cupti build dependency).",
+        f"# BUILD_CUPTI_API_VERSION: {version}   Source sha256: {digest}",
         '"""CUPTI ABI enum catalogs, generated from cupti_activity.h.',
         "",
         "One class per activity kind: each attribute is a :class:`Field` (its",
@@ -210,11 +215,11 @@ def render(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def generate(output: Path, header: Path, libclang: str | None = None) -> None:
-    """Write the generated module from ``header``. The caller resolves the header
-    (tools.setup_helpers.cupti.find_cupti_header); the CMake rule skips codegen
-    entirely when no header is present, so non-CUPTI builds proceed without it."""
-    fields_by_class, attrs = parse_header(header, libclang)
+def generate(output: Path, header: Path) -> None:
+    """Write the generated module from ``header`` (already resolved and version-gated by the
+    caller via find_cupti_header). ``main`` skips this call entirely when no suitable header
+    exists, so non-CUPTI builds proceed without the module."""
+    fields_by_class, attrs = parse_header(header)
     content = render(fields_by_class, attrs, header)
     output.parent.mkdir(parents=True, exist_ok=True)
     if not output.exists() or output.read_text() != content:
@@ -224,13 +229,25 @@ def generate(output: Path, header: Path, libclang: str | None = None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--header", type=Path, required=True)
-    parser.add_argument(
-        "--libclang", type=str, default=None, help="path to libclang.so"
-    )
     args = parser.parse_args()
-    generate(args.output, args.header, args.libclang)
-    print(f"Generated {args.output} from {args.header}")
+    # Run as a script, sys.path[0] is tools/, not the repo root -- add the latter so the
+    # tools.setup_helpers package (the header resolver) imports.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.setup_helpers.cupti import find_cupti_header
+
+    header = find_cupti_header()
+    if header is None:
+        # No sufficiently-new CUPTI header (find_cupti_header applies the version floor).
+        # Skip rather than error: the build gates on whether the output file exists. Clear any
+        # stale output so that gate reflects reality (the file is generated / gitignored).
+        args.output.unlink(missing_ok=True)
+        print("no sufficiently-new CUPTI header found; skipping CUPTI stub generation")
+        return
+    generate(args.output, header)
+    print(f"Generated {args.output} from {header}")
+    # Machine-readable (own stdout line) so the build can track the resolved header as a
+    # configure dependency and regenerate when it changes.
+    print(f"CUPTI_MONITOR_STUBS_HEADER={header}")
 
 
 if __name__ == "__main__":
