@@ -49,6 +49,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.torch_version import TorchVersion
+
+
+TEST_CUDA_GRAPH_SWITCH_NODES = (
+    TEST_CUDA_GRAPH_CONDITIONAL_NODES
+    and TorchVersion(torch.version.cuda or "0.0") >= "12.8"
+)
 
 
 @contextlib.contextmanager
@@ -6672,6 +6679,150 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
 
             self.assertEqual(scratch, torch.full_like(scratch, expected_scratch_value))
             self.assertEqual(out, torch.full_like(out, expected_out_value))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_SWITCH_NODES,
+        "CUDA 12.8 or greater is required for CUDA Graphs with switch nodes",
+    )
+    def test_switch_traced_cudagraphs(self):
+        def f(index, x):
+            return switch(
+                index,
+                (lambda x: x.sin(), lambda x: x.cos(), lambda x: x.abs()),
+                (x,),
+            )
+
+        index = torch.tensor([1], device="cuda")
+        x = torch.randn(4, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [index, x])
+        _check_compile_many_backends_with_cudagraph(self, f, [index, x])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_SWITCH_NODES,
+        "CUDA 12.8 or greater is required for CUDA Graphs with switch nodes",
+    )
+    def test_switch_cuda_graph_replay_uses_runtime_index(self):
+        branches = (
+            lambda x: (x + 1, {"secondary": x - 1}),
+            lambda x: (x * 2, {"secondary": x * 3}),
+            lambda x: (x.square(), {"secondary": -x}),
+        )
+
+        def f(index, x):
+            return torch.ops.higher_order.switch(index, branches, (x,))
+
+        index = torch.tensor([0], dtype=torch.int32, device="cuda")
+        x = torch.arange(1, 5, dtype=torch.float32, device="cuda")
+
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            f(index, x)
+
+        graph = torch.cuda.CUDAGraph()
+        with (
+            torch.cuda.graph(graph, stream=side_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            out = f(index, x)
+
+        torch.cuda.current_stream().wait_stream(side_stream)
+
+        for index_value, expected in (
+            (-5, branches[0](x)),
+            (0, branches[0](x)),
+            (1, branches[1](x)),
+            (2, branches[2](x)),
+            (99, branches[2](x)),
+        ):
+            index.fill_(index_value)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(out, expected)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_SWITCH_NODES,
+        "CUDA 12.8 or greater is required for CUDA Graphs with switch nodes",
+    )
+    def test_cond_inside_switch_cudagraphs(self):
+        def branch0(x, pred):
+            return torch.ops.higher_order.cond(
+                pred, lambda x: x + 1, lambda x: x + 2, (x,)
+            )
+
+        def branch1(x, pred):
+            return torch.ops.higher_order.cond(
+                pred, lambda x: x * 3, lambda x: x * 4, (x,)
+            )
+
+        branches = (branch0, branch1)
+
+        def f(index, x, pred):
+            return torch.ops.higher_order.switch(index, branches, (x, pred))
+
+        index = torch.tensor([0], device="cuda")
+        x = torch.arange(1, 5, dtype=torch.float32, device="cuda")
+        pred = torch.tensor(True, device="cuda")
+
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            f(index, x, pred)
+
+        graph = torch.cuda.CUDAGraph()
+        with (
+            torch.cuda.graph(graph, stream=side_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            out = f(index, x, pred)
+
+        torch.cuda.current_stream().wait_stream(side_stream)
+
+        for index_value, pred_value in ((0, True), (0, False), (1, True), (1, False)):
+            index.fill_(index_value)
+            pred.fill_(pred_value)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(out, branches[index_value](x, pred))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_SWITCH_NODES,
+        "CUDA 12.8 or greater is required for CUDA Graphs with switch nodes",
+    )
+    def test_switch_inside_cond_cudagraphs(self):
+        branches = (lambda x: x + 3, lambda x: x * 5)
+
+        def true_fn(index, x):
+            return torch.ops.higher_order.switch(index, branches, (x,))
+
+        def f(pred, index, x):
+            return torch.ops.higher_order.cond(
+                pred, true_fn, lambda index, x: x - 7, (index, x)
+            )
+
+        pred = torch.tensor(True, device="cuda")
+        index = torch.tensor([0], device="cuda")
+        x = torch.arange(1, 5, dtype=torch.float32, device="cuda")
+
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            f(pred, index, x)
+
+        graph = torch.cuda.CUDAGraph()
+        with (
+            torch.cuda.graph(graph, stream=side_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            out = f(pred, index, x)
+
+        torch.cuda.current_stream().wait_stream(side_stream)
+
+        for pred_value, index_value in ((True, 0), (True, 1), (False, 0)):
+            pred.fill_(pred_value)
+            index.fill_(index_value)
+            graph.replay()
+            torch.cuda.synchronize()
+            expected = branches[index_value](x) if pred_value else x - 7
+            self.assertEqual(out, expected)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,

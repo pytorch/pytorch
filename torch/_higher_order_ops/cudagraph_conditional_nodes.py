@@ -33,9 +33,14 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
                 return if_else_node(*args)
         if func is torch.ops.higher_order.while_loop:
             # Re-enter the mode to support nested control flow
-            _check_no_while_loop_kwargs(kwargs)
+            _check_while_loop_kwargs(kwargs)
             with self:
-                return while_loop_node(*args)
+                return while_loop_node(*args, **kwargs)
+        if func is torch.ops.higher_order.switch:
+            # Re-enter the mode to support nested control flow
+            _check_no_switch_kwargs(kwargs)
+            with self:
+                return switch_node(*args)
         # This case is used when torch.cond() or torch.while_loop()
         # are rewritten to accept input mutations
         if (
@@ -56,12 +61,12 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
     """Warm up control-flow subgraphs before CUDA graph capture.
 
     Data-dependent control flow does not necessarily execute every subgraph, so
-    operations in an untaken torch.cond branch or a torch.while_loop body may
-    not have been warmed up. This mode uses a relaxed stream capture, whose
-    final CUDA graph is discarded, to warm up both cond branches and execute a
-    while_loop body once. This works because stream capture does not execute GPU
-    code and the branch and body functions are FX graphs without CPU side
-    effects.
+    operations in an untaken torch.cond branch, torch.switch branch, or a
+    torch.while_loop body may not have been warmed up. This mode uses a relaxed
+    stream capture, whose final CUDA graph is discarded, to warm up all cond
+    and switch branches and execute a while_loop body once. This works because
+    stream capture does not execute GPU code and the branch and body functions
+    are FX graphs without CPU side effects.
     """
 
     @classmethod
@@ -108,12 +113,12 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
 
                 return func(*args, **kwargs)
         elif func is torch.ops.higher_order.while_loop:
-            _check_no_while_loop_kwargs(kwargs)
+            _check_while_loop_kwargs(kwargs)
             if torch.cuda.is_current_stream_capturing():
                 # This is a call to torch.while_loop() nested within another
                 # control-flow function.
                 with self:
-                    return while_loop_node(*args)
+                    return while_loop_node(*args, **kwargs)
             else:
                 with (
                     torch.cuda.graph(
@@ -124,7 +129,27 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                     ),
                     self,
                 ):
-                    while_loop_node(*args)
+                    while_loop_node(*args, **kwargs)
+
+                return func(*args, **kwargs)
+        elif func is torch.ops.higher_order.switch:
+            _check_no_switch_kwargs(kwargs)
+            if torch.cuda.is_current_stream_capturing():
+                # This is a call to torch.switch() nested within another
+                # control-flow function.
+                with self:
+                    return switch_node(*args)
+            else:
+                with (
+                    torch.cuda.graph(
+                        torch.cuda.CUDAGraph(),
+                        pool=None,
+                        stream=self.capture_stream,
+                        capture_error_mode="relaxed",
+                    ),
+                    self,
+                ):
+                    switch_node(*args)
 
                 return func(*args, **kwargs)
         elif (
@@ -143,6 +168,8 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
 
 
 def _is_control_flow_op(func: object) -> bool:
+    # torch.switch is intentionally omitted because it does not support input
+    # mutation.
     return (
         func is torch.ops.higher_order.cond or func is torch.ops.higher_order.while_loop
     )
@@ -153,10 +180,17 @@ def _check_no_cond_kwargs(kwargs) -> None:
         raise RuntimeError("CUDA graph conditional torch.cond does not support kwargs")
 
 
-def _check_no_while_loop_kwargs(kwargs) -> None:
-    if kwargs:
+def _check_while_loop_kwargs(kwargs) -> None:
+    if kwargs.keys() - {"mutated_arg_indices"}:
         raise RuntimeError(
             "CUDA graph conditional torch.while_loop does not support kwargs"
+        )
+
+
+def _check_no_switch_kwargs(kwargs) -> None:
+    if kwargs:
+        raise RuntimeError(
+            "CUDA graph conditional torch.switch does not support kwargs"
         )
 
 
@@ -166,6 +200,16 @@ def _is_boolean_scalar_cuda_tensor(pred: object) -> bool:
         and pred.size() == torch.Size([])
         and pred.dtype == torch.bool
         and pred.is_cuda
+    )
+
+
+def _is_integer_single_element_cuda_tensor(index: object) -> bool:
+    return (
+        isinstance(index, torch.Tensor)
+        and index.numel() == 1
+        and index.dtype
+        in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+        and index.is_cuda
     )
 
 
@@ -210,6 +254,55 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
                 ):
                     if_out.copy_(else_out)
     return outs[0]
+
+
+@contextmanager
+def _switch_bodies(index: torch.Tensor, num_branches: int):
+    current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+    current_cuda_graph.begin_capture_to_switch_node(index, num_branches)
+    try:
+        yield current_cuda_graph
+    finally:
+        current_cuda_graph.end_capture_to_conditional_node()
+
+
+def switch_node(index: torch.Tensor, branches, operands):
+    if not _is_integer_single_element_cuda_tensor(index):
+        raise RuntimeError(
+            "torch.switch index must be a single-element integer CUDA tensor "
+            "to use a CUDA graph switch conditional node"
+        )
+    if not isinstance(branches, (tuple, list)) or not branches:
+        raise RuntimeError(
+            "CUDA graph switch conditional nodes require a non-empty tuple or "
+            "list of branches"
+        )
+
+    with _switch_bodies(index, len(branches)) as current_cuda_graph:
+        merged_out = branches[0](*operands)
+        merged_flat_out, merged_out_spec = pytree.tree_flatten(merged_out)
+        if not all(isinstance(out, torch.Tensor) for out in merged_flat_out):
+            raise RuntimeError(
+                "CUDA graph switch conditional nodes only support tensor branch outputs"
+            )
+
+        for branch in branches[1:]:
+            current_cuda_graph.begin_capture_to_next_conditional_body()
+            branch_out = branch(*operands)
+            flat_branch_out, branch_out_spec = pytree.tree_flatten(branch_out)
+            if not all(isinstance(out, torch.Tensor) for out in flat_branch_out):
+                raise RuntimeError(
+                    "CUDA graph switch conditional nodes only support tensor "
+                    "branch outputs"
+                )
+            if branch_out_spec != merged_out_spec:
+                raise RuntimeError(
+                    "All torch.switch branches must return the same pytree structure"
+                )
+            for output, branch_output in zip(merged_flat_out, flat_branch_out):
+                output.copy_(branch_output)
+
+    return merged_out
 
 
 @contextmanager
