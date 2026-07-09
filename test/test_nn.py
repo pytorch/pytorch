@@ -9155,6 +9155,21 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
+    @onlyNativeDeviceTypes
+    @skipMPS  # MPS routes through a separate kernel (mps::pad_out_template) that does not validate the channel dim
+    def test_ReplicationPad_backward_channel_mismatch(self, device):
+        # regression test for https://github.com/pytorch/pytorch/issues/142834: a
+        # gradOutput whose channel dim doesn't match the input used to segfault in
+        # the backward pass instead of raising a clear error.
+        for backward, inp, grad_output, padding in [
+            (torch.ops.aten.replication_pad1d_backward,
+             torch.ones(2, 2, 4, device=device), torch.ones(2, 0, 8, device=device), [2, 2]),
+            (torch.ops.aten.replication_pad2d_backward,
+             torch.ones(2, 2, 4, 4, device=device), torch.ones(2, 0, 6, 8, device=device), [2, 2, 1, 1]),
+        ]:
+            with self.assertRaisesRegex(RuntimeError, "gradOutput channel unexpected"):
+                backward(grad_output, inp, padding)
+
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
