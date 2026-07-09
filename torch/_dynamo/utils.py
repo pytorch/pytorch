@@ -5626,12 +5626,6 @@ class FrameState(enum.Enum):
     FRAME_CLEARED = 4
 
 
-class PySendResult(enum.Enum):
-    PYGEN_RETURN = 0
-    PYGEN_ERROR = -1
-    PYGEN_NEXT = 1
-
-
 class CompileTimeInstructionCounter:
     _counter: int = 0
     _id: int = -1

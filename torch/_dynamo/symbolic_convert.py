@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import _warnings
 
+import collections
+import collections.abc
 import contextlib
 import copy
 import dataclasses
@@ -151,7 +153,6 @@ from .utils import (
     istype,
     LazyString,
     proxy_args_kwargs,
-    PySendResult,
     unpack_iterable,
 )
 from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
@@ -175,7 +176,7 @@ from .variables.functions import (
     SkipFunctionVariable,
     UserFunctionVariable,
 )
-from .variables.iter import MAX_ITERATOR_LIMIT
+from .variables.iter import IteratorVariable, MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
@@ -197,7 +198,6 @@ from .variables.object_protocol import (
     generic_contains,
     generic_getattr,
     generic_getiter,
-    pyiter_send,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -1274,13 +1274,6 @@ def pyexception_instance_check(val: VariableTracker) -> TypeIs[ExceptionVals]:
     return isinstance(
         val, (variables.ExceptionVariable, UserDefinedExceptionObjectVariable)
     )
-
-
-def pygen_fetch_stopiteration_value(val: ExceptionVals) -> VariableTracker:
-    # Mirror's CPython PyGen_FetchStopIterationValue
-    if issubclass(val.exc_type, StopIteration):
-        return val.args[0] if val.args else ConstantVariable.create(None)
-    return ConstantVariable.create(None)
 
 
 @dataclasses.dataclass
@@ -6491,76 +6484,94 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         return super().RETURN_CONST(inst)
 
     def YIELD_FROM(self, inst: Instruction) -> None:
-        # https://github.com/python/cpython/blob/1790e584142b5db070b74bc64777ad14e26608c2/Python/ceval.c#L2581
-        if not sys.version_info[:2] == (3, 10):
-            raise AssertionError("Python 3.10 specific")
-
         if not (len(self.stack) >= 2):
             raise AssertionError("expected len(self.stack) >= 2 to be true")
         val = self.pop()
-        receiver = self.stack[-1]
+        tos = self.stack[-1]
+        if not val.is_constant_none():
+            # invoke send
+            # Unreachable code - if you hit this, you are implementing generator support and have
+            # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
+            # subgenerator and lines up with this line in Python 3.10
+            # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L2599
+            unimplemented(
+                gb_type="Unreachable sub-generator code",
+                context="",
+                explanation="Should only be encountered while implementing generator support.",
+                hints=[],
+            )
 
-        gen_status = None
         try:
-            result = pyiter_send(self, receiver, val)
-        except exc.ObservedUserStopIteration:
-            gen_status = PySendResult.PYGEN_RETURN
-            raised = self.exn_vt_stack.get_raised_exception()
-            result = pygen_fetch_stopiteration_value(raised)
-            exc.handle_observed_exception(self)
-        except exc.ObservedException:
-            # PYGEN_ERROR
-            gen_status = PySendResult.PYGEN_ERROR
-            raise
-        else:
-            # PYGEN_NEXT
-            gen_status = PySendResult.PYGEN_NEXT
+            val = tos.next_variable(self)
+        except (StopIteration, exc.ObservedUserStopIteration) as ex:
+            if isinstance(ex, exc.ObservedUserStopIteration):
+                exc.handle_observed_exception(self)
 
-        if gen_status == PySendResult.PYGEN_RETURN:
+            # The iterator is exhausted. Stop the loop and return.
             self.pop()
-            self.push(result)
+            self.push(ConstantVariable.create(ex.value))
         else:
-            # gen_status == PYGEN_NEXT
             # Repeat the YIELD_FROM instruction in the next eval loop
-            if isinstance(self.instruction_pointer, int):
-                if not (self.instruction_pointer > 0):
-                    raise AssertionError(
-                        "expected self.instruction_pointer > 0 to be true"
-                    )
-                self.instruction_pointer -= 1
-            else:
+            if not isinstance(self.instruction_pointer, int):
                 raise AssertionError(
                     "expected isinstance(self.instruction_pointer, int) to be true"
                 )
-            self.push(result)
+            if not (self.instruction_pointer > 0):
+                raise AssertionError("expected self.instruction_pointer > 0 to be true")
+            self.instruction_pointer -= 1
+
+            self.push(val)
             # Add the value to yield into generated_items and replace the top of the stack with None
             self.YIELD_VALUE(inst)
 
     def SEND(self, inst: Instruction) -> None:
         if not (len(self.stack) >= 2):
             raise AssertionError("expected len(self.stack) >= 2 to be true")
-
         val = self.pop()
         if sys.version_info >= (3, 15):
             receiver = self.stack[-2]
         else:
             receiver = self.stack[-1]
-
-        try:
-            val = pyiter_send(self, receiver, val)
-        except exc.ObservedUserStopIteration:
-            # To implement SEND, we have to look at the implementation
-            # when the iterator returns StopIteration. This translates to this code
-            # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
-            # 3.12: https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L866
-            # The implementation is different in 3.11 and 3.12. In 3.12, we rely
-            # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
-            ex = self.exn_vt_stack.get_raised_exception()
-            val = pygen_fetch_stopiteration_value(ex)
-            self.exn_vt_stack.clear_current_exception()
-            if sys.version_info < (3, 12):
-                self.pop()  # Python 3.12 uses new opcode END_SEND
-            self.push(val)
-            self.jump(inst)
+        if isinstance(receiver, (IteratorVariable, LocalGeneratorObjectVariable)) or (
+            isinstance(receiver, UserDefinedObjectVariable)
+            and isinstance(receiver.value, collections.abc.Iterator)
+        ):
+            if val.is_constant_none():
+                try:
+                    val = receiver.next_variable(self)  # type: ignore[arg-type]
+                except (
+                    StopIteration,
+                    exc.ObservedUserStopIteration,
+                    exc.ObservedIndexError,
+                ):
+                    # To implement SEND, we have to look at the implementation
+                    # when the iterator returns StopIteration. This translates to this code
+                    # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
+                    # 3.12: https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L866
+                    # The implementation is different in 3.11 and 3.12. In 3.12, we rely
+                    # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
+                    if sys.version_info < (3, 12):
+                        self.pop()  # Python 3.12 uses new opcode END_SEND
+                    self.push(val)
+                    self.jump(inst)
+                else:
+                    self.push(val)
+            else:
+                # invoke send
+                # Unreachable code - if you hit this, you are implementing generator support and have
+                # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
+                # subgenerator and lines up with this line in Python 3.11
+                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2597
+                unimplemented(
+                    gb_type="Unreachable sub-generator code",
+                    context="",
+                    explanation="Should only be encountered while implementing generator support.",
+                    hints=[],
+                )
         else:
-            self.push(val)
+            unimplemented(
+                gb_type="SEND with bad type",
+                context=f"TOS type: {typestr(receiver)}",
+                explanation=f"Attempted to SEND with unsupported type {typestr(receiver)}.",
+                hints=[],
+            )
