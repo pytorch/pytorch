@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+    TEST_CUDA_PYTHON_BINDINGS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -52,7 +53,7 @@ from torch.testing._internal.common_utils import (
 from torch.torch_version import TorchVersion
 
 
-TEST_CUDA_GRAPH_SWITCH_NODES = (
+TEST_CUDA_GRAPH_MULTI_BODY_CONDITIONAL_NODES = (
     TEST_CUDA_GRAPH_CONDITIONAL_NODES
     and TorchVersion(torch.version.cuda or "0.0") >= "12.8"
 )
@@ -6531,6 +6532,64 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         )
 
     @unittest.skipIf(
+        not TEST_CUDA_GRAPH_MULTI_BODY_CONDITIONAL_NODES,
+        "CUDA 12.8 or greater is required for CUDA Graphs with IF-ELSE nodes",
+    )
+    def test_cond_cuda_graph_replay_uses_if_else_node(self):
+        def true_fn(x):
+            return x + 3
+
+        def false_fn(x):
+            return x - 2
+
+        def f(pred, x):
+            return torch.ops.higher_order.cond(pred, true_fn, false_fn, (x,))
+
+        pred = torch.tensor(True, device="cuda")
+        x = torch.arange(1, 5, dtype=torch.float32, device="cuda")
+
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            f(pred, x)
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with (
+            torch.cuda.graph(graph, stream=side_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            out = f(pred, x)
+
+        torch.cuda.current_stream().wait_stream(side_stream)
+
+        if TEST_CUDA_PYTHON_BINDINGS:
+            from cuda.bindings import runtime as cuda_runtime
+
+            from torch.cuda._utils import _check_cuda_bindings
+
+            raw_graph = graph.raw_cuda_graph()
+            _, num_nodes = _check_cuda_bindings(
+                cuda_runtime.cudaGraphGetNodes(raw_graph)
+            )
+            nodes, _ = _check_cuda_bindings(
+                cuda_runtime.cudaGraphGetNodes(raw_graph, numNodes=num_nodes)
+            )
+            conditional_node_type = (
+                cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeConditional
+            )
+            num_conditional_nodes = sum(
+                _check_cuda_bindings(cuda_runtime.cudaGraphNodeGetType(node))
+                == conditional_node_type
+                for node in nodes[:num_nodes]
+            )
+            self.assertEqual(num_conditional_nodes, 1)
+
+        for pred_value, expected in ((True, true_fn(x)), (False, false_fn(x))):
+            pred.fill_(pred_value)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(out, expected)
+
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
@@ -6681,7 +6740,7 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
             self.assertEqual(out, torch.full_like(out, expected_out_value))
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH_SWITCH_NODES,
+        not TEST_CUDA_GRAPH_MULTI_BODY_CONDITIONAL_NODES,
         "CUDA 12.8 or greater is required for CUDA Graphs with switch nodes",
     )
     def test_switch_traced_cudagraphs(self):
@@ -6699,7 +6758,7 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         _check_compile_many_backends_with_cudagraph(self, f, [index, x])
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH_SWITCH_NODES,
+        not TEST_CUDA_GRAPH_MULTI_BODY_CONDITIONAL_NODES,
         "CUDA 12.8 or greater is required for CUDA Graphs with switch nodes",
     )
     def test_switch_cuda_graph_replay_uses_runtime_index(self):
@@ -6741,7 +6800,7 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
             self.assertEqual(out, expected)
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH_SWITCH_NODES,
+        not TEST_CUDA_GRAPH_MULTI_BODY_CONDITIONAL_NODES,
         "CUDA 12.8 or greater is required for CUDA Graphs with switch nodes",
     )
     def test_cond_inside_switch_cudagraphs(self):
@@ -6785,7 +6844,7 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
             self.assertEqual(out, branches[index_value](x, pred))
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH_SWITCH_NODES,
+        not TEST_CUDA_GRAPH_MULTI_BODY_CONDITIONAL_NODES,
         "CUDA 12.8 or greater is required for CUDA Graphs with switch nodes",
     )
     def test_switch_inside_cond_cudagraphs(self):
