@@ -227,7 +227,7 @@ class _LazyTritonCompileKickoffLine(DeferredLineBase):
     def __call__(self) -> str | None:
         return self.line if self.lazy_kernel_names else None
 
-    def _new_line(self, line: str) -> Self:
+    def _new_line(self, line: str) -> _LazyTritonCompileKickoffLine:
         return _LazyTritonCompileKickoffLine(self.lazy_kernel_names, line)
 
 
