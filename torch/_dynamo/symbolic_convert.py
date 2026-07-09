@@ -2749,7 +2749,6 @@ class InstructionTranslatorBase(
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
                 )  # sanity check
-
             unimplemented(
                 gb_type="Observed exception",
                 context=f"raised exception {curr_exc.debug_repr()}",

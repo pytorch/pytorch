@@ -4192,6 +4192,7 @@ def _get_fake_value_impl(
         has_exn_handler = (
             sys.version_info >= (3, 11)
             and tx.current_instruction.exn_tab_entry is not None
+            and tx.current_instruction.exn_tab_entry.target.opname == "PUSH_EXC_INFO"
         ) or (sys.version_info < (3, 11) and len(tx.block_stack) > 0)
 
         if has_exn_handler:
