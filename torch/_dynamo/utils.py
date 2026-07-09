@@ -4188,15 +4188,18 @@ def _get_fake_value_impl(
             )
 
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        from .exc import FakeTensorObservedException, raise_observed_exception
+        from .exc import (
+            FakeTensorObservedException,
+            ObservedRuntimeError,
+            raise_observed_exception,
+        )
 
         try:
-            raise_observed_exception(
-                RuntimeError, tx, args=[msg], fake_tensor_eval=True
-            )
-        except FakeTensorObservedException as fte:
+            raise_observed_exception(RuntimeError, tx, args=[msg])
+        except ObservedRuntimeError as e:
+            fte = FakeTensorObservedException(*e.args, real_stack=e.real_stack)
             fte.node = node
-            raise
+            raise fte from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(

@@ -532,7 +532,6 @@ def raise_observed_exception(
     tx: InstructionTranslatorBase,
     *,
     args: list[VariableTracker] | list[str] | None = None,
-    fake_tensor_eval: bool = False,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
@@ -555,10 +554,8 @@ def raise_observed_exception(
         raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
     tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
-    if fake_tensor_eval:
-        raised_exc = FakeTensorObservedException
-    else:
-        raised_exc = get_dynamo_observed_exception(exc_type)
+    raised_exc = get_dynamo_observed_exception(exc_type)
+    # Store the original exception arguments for better error messages
     if args:
         raise raised_exc(*args_)
     raise raised_exc
