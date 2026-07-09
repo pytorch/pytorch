@@ -1555,6 +1555,38 @@ def _register_unbacked_slice_size_bindings(dim, start, end, step, size):
     return sym_size, sym_storage
 
 
+def _compute_slice_index(index, size, default=None):
+    if index is None:
+        return default
+
+    guard = V.graph.sizevars.guard_or_false
+    index = sympy.expand(index)
+    size = sympy.expand(size)
+    if guard(sympy.And(sympy.Ge(index, 0), sympy.Le(index, size))):
+        return index
+    elif guard(sympy.And(sympy.Lt(index, 0), sympy.Ge(index, -size))):
+        return index + size
+    elif guard(sympy.Gt(index, size)):
+        return size
+    elif guard(sympy.Lt(index, -size)):
+        return 0
+    elif guard(sympy.Ge(index, 0)):
+        # If index >= 0, the resolved index is at most min(index, size).
+        return Min(index, size)
+    elif guard(sympy.Lt(index, 0)):
+        # If index < 0, wrap and clamp: the resolved index is at least 0.
+        return Max(index + size, 0)
+    return None
+
+
+def _clamp_slice_end_to_start(end, start):
+    if V.graph.sizevars.statically_known_geq(end, start):
+        return end
+    if V.graph.sizevars.statically_known_leq(end, start):
+        return start
+    return Max(end, start)
+
+
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     """
@@ -1589,30 +1621,6 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     except TypeError:
         pass
 
-    # try to avoid dynamic (unbacked) slice
-    def compute_slice_index(index, size, default=None):
-        if index is None:
-            return default
-
-        fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
-        index = sympy.expand(index)
-        size = sympy.expand(size)
-        if fn(sympy.And(sympy.Ge(index, 0), sympy.Le(index, size))):
-            return index
-        elif fn(sympy.And(sympy.Lt(index, 0), sympy.Ge(index, -size))):
-            return index + size
-        elif fn(sympy.Gt(index, size)):
-            return size
-        elif fn(sympy.Lt(index, -size)):
-            return 0
-        elif fn(sympy.Ge(index, 0)):
-            # If index >= 0, the resolved index is at most min(index, size).
-            return Min(index, size)
-        elif fn(sympy.Lt(index, 0)):
-            # If index < 0, wrap and clamp: the resolved index is at least 0.
-            return Max(index + size, 0)
-        return None
-
     start_index, end_index = None, None
     # ambiguous_slice=False means we know what semantics this slice call follows,
     # and don't need to generate an extern kernel to represent the output size.
@@ -1620,7 +1628,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     # (meant to follow standard indexing semantics: 0 <= index < size)
     ambiguous_slice = clamp
     if ambiguous_slice:
-        start_index = compute_slice_index(start, size, 0)
+        start_index = _compute_slice_index(start, size, 0)
         # Special case: if end is maxsize (unbounded), use size directly
         # This matches the logic in fake_impls.py
         if end is not None and V.graph.sizevars.statically_known_equals(
@@ -1628,7 +1636,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
         ):
             end_index = size
         else:
-            end_index = compute_slice_index(end, size, size)
+            end_index = _compute_slice_index(end, size, size)
         if start_index is not None and end_index is not None:
             start, end = start_index, end_index
             ambiguous_slice = False
@@ -1661,18 +1669,25 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     if x.maybe_get_layout() is None:
         # realize tensor before accessing layout
         x.realize()
+    stride = x.maybe_get_stride()
 
     if start_index is not None:
         # we shouldn't have allocated storage offset symbol if start index was determinable
         if sym_storage is not None:
             raise AssertionError("expected: sym_storage is None")
-        new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
+        if stride is None:
+            return TensorBox(
+                ir.SliceView.create_with_size(x.data, dim, start_index, sym_size, step)
+            )
+        new_storage_offset = x.get_layout().offset + start_index * stride[dim]
     else:
+        if stride is None:
+            raise AssertionError("expected: stride is not None")
         b_storage = ir.DynamicSelectStorageOffset(
             sym_storage,
             start,
             x.get_layout().offset,
-            x.get_stride()[dim],
+            stride[dim],
             x.get_size()[dim],
             clamp=True,
         )
@@ -1681,7 +1696,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
         new_storage_offset = sym_storage
 
     new_sizes = list(x.get_size())
-    new_strides = list(x.get_stride())
+    new_strides = list(stride)
     new_sizes[dim] = sym_size
     new_strides[dim] *= step
     return as_strided(
@@ -4056,16 +4071,38 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
+    """Lower slice_scatter with exact source shape checks."""
     src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
 
-    # pyrefly: ignore [bad-argument-type]
-    start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
+    if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
+        start_index = _compute_slice_index(start, dim_size, 0)
+        if end is not None and V.graph.sizevars.statically_known_equals(
+            end, sys.maxsize
+        ):
+            end_index = dim_size
+        else:
+            end_index = _compute_slice_index(end, dim_size, dim_size)
+
+        if start_index is None or end_index is None:
+            return fallback_handler(aten.slice_scatter.default)(
+                x, src, dim, start, end, step
+            )
+
+        start = start_index
+        end = _clamp_slice_end_to_start(end_index, start)
+    else:
+        # pyrefly: ignore [bad-argument-type]
+        start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
     src_size[dim] = FloorDiv(end - start + (step - 1), step)
+    if len(src.get_size()) != len(src_size):
+        raise AssertionError("expected src and slice to have the same rank")
+    for actual, expected in zip(src.get_size(), src_size):
+        V.graph.sizevars.check_equals(actual, expected)
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
