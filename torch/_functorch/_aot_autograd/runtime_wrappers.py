@@ -616,8 +616,12 @@ class _RuntimeForwardEpilogue:
     # _create_runtime_wrapper (None until then). The orchestration binds these RAW
     # functions -- not a bound-method wrapper -- into its globals so the standalone
     # composer can wire them by object identity to their captured wrapper defs.
-    codegen_apply_mutations: Callable[..., Any] | None = field(init=False, default=None)
-    codegen_replay_aliases: Callable[..., Any] | None = field(init=False, default=None)
+    codegen_apply_mutations: Callable[[dict[int, Tensor], list[Any]], None] | None = (
+        field(init=False, default=None)
+    )
+    codegen_replay_aliases: Callable[[dict[int, Tensor], list[Any]], Any] | None = (
+        field(init=False, default=None)
+    )
 
     def __post_init__(self) -> None:
         epilogue_args_idx = list(self.runtime_metadata.mutated_inp_runtime_indices)
@@ -1035,7 +1039,11 @@ def _create_runtime_wrapper(
                     )
             buf.writeline("return ret_outs")
 
-        _codegen_alias_fn = buf.build()
+        # build() is typed Callable[..., object]; the codegen'd _alias_fn has the fixed
+        # (orig_inputs, fw_outs) signature the field declares, so narrow it here.
+        _codegen_alias_fn = typing.cast(
+            "Callable[[dict[int, Tensor], list[Any]], Any]", buf.build()
+        )
         runtime_epilogue.codegen_replay_aliases = _codegen_alias_fn
 
     def record_runtime_wrapper_prologue_enter() -> AbstractContextManager[None] | None:
@@ -1123,7 +1131,9 @@ def _create_runtime_wrapper(
             if len(buf.lines) == 1:
                 buf.writeline("pass")
 
-        runtime_epilogue.codegen_apply_mutations = buf.build()
+        runtime_epilogue.codegen_apply_mutations = typing.cast(
+            "Callable[[dict[int, Tensor], list[Any]], None]", buf.build()
+        )
 
     from .codegen import PySourceBuilder
 
