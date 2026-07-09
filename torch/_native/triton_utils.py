@@ -1,20 +1,30 @@
 import functools
 import logging
+import sys
+from typing import cast
 
-from packaging.version import Version
+from torch._vendor.packaging.version import Version
 
+from ..backends import cuda as _cuda
 from .common_utils import (
     _available_version,
     _unavailable_reason,
     check_native_jit_disabled,
     check_native_version_skip,
 )
-from .registry import _OpFn, _register_op_override
+from .dsl_registry import dsl_registry, DSLModuleProtocol
+from .registry import (
+    _OpCondFn,
+    _OpImplFn,
+    deregister_op_overrides as _deregister_op_overrides_impl,
+    register_op_override as _register_op_override_impl,
+)
 
 
 log = logging.getLogger(__name__)
 
 
+_TRITON_DSL_NAME = "triton"
 _TRITON_REQUIRED_VERSION_MAJOR = 3
 _TRITON_MINIMUM_VERSION_MINOR = 6
 
@@ -26,6 +36,9 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
 
     NOTE: must not import at this point
     """
+    # Skip all checks if running on CPU-only binary
+    if not _cuda.is_built():
+        return (False, None)
 
     deps = [
         ("triton", "triton"),
@@ -35,6 +48,9 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
         available = True
         version = _available_version("triton")
     else:
+        # info, not warning: see cutedsl_utils._check_runtime_available for
+        # rationale (missing optional deps is the common case; surface via
+        # TORCH_LOGS=+native_dsl when needed).
         log.info("triton native DSL ops require: `triton` %s", reason)
         available = False
         version = None
@@ -75,11 +91,19 @@ def _version_is_sufficient() -> bool:
     return False
 
 
+def deregister_op_overrides() -> None:
+    """
+    Deregister all ops through triton
+    """
+    _deregister_op_overrides_impl(disable_dsl_names=_TRITON_DSL_NAME)
+
+
 def register_op_override(
     lib_symbol: str,
     op_symbol: str,
     dispatch_key: str,
-    impl: _OpFn,
+    cond: _OpCondFn | None,
+    impl: _OpImplFn,
     *,
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
@@ -87,7 +111,7 @@ def register_op_override(
     """
     See torch/_native/registry.py for the underlying implementation
     and arguments. This is a thin, DSL-checking wrapper over
-    _register_op_override
+    _register_op_override_impl
     """
     available, version = _check_runtime_available()
     if (not available) or check_native_jit_disabled():
@@ -96,11 +120,18 @@ def register_op_override(
     if not _version_is_sufficient():
         return
 
-    _register_op_override(
+    _register_op_override_impl(
+        _TRITON_DSL_NAME,
         lib_symbol,
         op_symbol,
         dispatch_key,
+        cond,
         impl,
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,
     )
+
+
+# Register this DSL module with the registry
+# Note: Import-time registration ensures DSL is available when module is loaded
+dsl_registry.register_dsl("triton", cast(DSLModuleProtocol, sys.modules[__name__]))

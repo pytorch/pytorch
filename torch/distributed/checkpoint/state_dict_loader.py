@@ -93,7 +93,7 @@ def load(
 
     .. warning::
         Users must call `load_state_dict` on the root module to ensure load
-        pos-processing and non-tensor data properly propagates.
+        post-processing and non-tensor data properly propagates.
 
     .. note:
         If no process group is initialized, this function will assume the intent
@@ -244,7 +244,7 @@ def _load_state_dict(
             and "kwargs" in inspect.signature(storage_reader.read_metadata).parameters
         ):
             try:
-                metadata = storage_reader.read_metadata(rank=distW.rank)  # noqa: F841
+                metadata = storage_reader.read_metadata(rank=distW.rank)
                 use_collectives = False
             except Exception as e:
                 rank_metadata_exc = e

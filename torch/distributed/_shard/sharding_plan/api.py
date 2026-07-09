@@ -75,7 +75,7 @@ class ShardingPlanner(abc.ABC):
     @abc.abstractmethod
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         """
-        Given a nn.Module, define how to shard the module across
+        Given an nn.Module, define how to shard the module across
         ranks, return a ShardingPlan
         Args:
             module (:class:`torch.nn.Module`):

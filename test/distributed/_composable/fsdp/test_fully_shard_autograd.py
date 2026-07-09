@@ -9,7 +9,7 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -20,7 +20,7 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_HPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -279,14 +279,29 @@ class TestFullyShardPostAccGradHookMultiProcess(FSDPTest):
         """
         Tests parity of running the optimizer via the post-accumulate-grad
         hook vs. normally.
+
+        Runs with and without ``CPUOffloadPolicy``. With CPU offload, the
+        sharded grad D2H copy is async by default; the hook (running
+        optimizer-in-backward) must see the reduced grad, not in-flight
+        pinned memory. Divergence between ref and test optimizer states
+        after several iterations catches stale-grad reads.
         """
+        self.run_subtests(
+            {"use_cpu_offload": [False, True]},
+            self._test_post_acc_grad_hook_optim_parity,
+        )
+
+    def _test_post_acc_grad_hook_optim_parity(self, use_cpu_offload: bool):
+        if use_cpu_offload and TEST_HPU:
+            return  # pin_memory requires CUDA/XPU
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
         model = Transformer(model_args)
 
+        offload_policy = CPUOffloadPolicy() if use_cpu_offload else OffloadPolicy()
         ref_model = copy.deepcopy(model).to(device_type)
         for module in itertools.chain(ref_model.layers, [ref_model]):
-            fully_shard(module)
+            fully_shard(module, offload_policy=offload_policy)
         optim_kwargs = {"lr": 1e-2, "foreach": False}
         ref_optim = torch.optim.AdamW(ref_model.parameters(), **optim_kwargs)
         lr_scheduler_kwargs = {"step_size": 5}
@@ -295,7 +310,7 @@ class TestFullyShardPostAccGradHookMultiProcess(FSDPTest):
         )
 
         for module in itertools.chain(model.layers, [model]):
-            fully_shard(module)
+            fully_shard(module, offload_policy=offload_policy)
         param_to_optim = {}
         param_to_lr_scheduler = {}
         for param in model.parameters():

@@ -228,7 +228,16 @@ def max_clock_rate():
     if not torch.version.hip:
         from triton.testing import nvsmi
 
-        return nvsmi(["clocks.max.sm"])[0]
+        try:
+            return nvsmi(["clocks.max.sm"])[0]
+        except FileNotFoundError:
+            import pynvml  # type: ignore[import]
+
+            handle = torch.cuda._get_pynvml_handler()
+            try:
+                return pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
+            finally:
+                pynvml.nvmlShutdown()
     else:
         # Manually set max-clock speeds on ROCm until equivalent nvmsi
         # functionality in triton.testing or via pyamdsmi enablement. Required

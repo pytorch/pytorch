@@ -348,7 +348,10 @@ Tensor mkldnn_convolution_pointwise(
       (input_t.requires_grad() || weight_t.requires_grad() ||
        (bias_opt.has_value() && bias_opt->defined() &&
         bias_opt->requires_grad()));
-  if (!maybe_backward) {
+  // With format_tag::any on dense contiguous inputs, oneDNN may choose a
+  // forward_inference primitive with an NHWC-like layout that is slower than
+  // the forward_training primitive and still has to be converted back to dense.
+  if (!maybe_backward && use_channels_last) {
     aprop_kind = ideep::prop_kind::forward_inference;
   }
   return _mkldnn_convolution(
@@ -962,7 +965,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
     std::tie(grad_weight, grad_bias) = mkldnn_convolution_backward_weights(
       weight.sizes(), grad_output, input, padding_expanded, stride_expanded, dilation_expanded, groups, output_mask[2], is_channels_last);
   }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 }
 
@@ -1167,7 +1171,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
     std::tie(grad_weight, grad_bias) = mkldnn_convolution_transpose_backward_weights(
         weight.sizes(), grad_output, input, padding_expanded , output_padding_expanded , stride_expanded , dilation_expanded , groups, output_mask[2], is_channels_last);
   }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 }
 

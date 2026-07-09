@@ -7,8 +7,11 @@
 #include <c10/util/Exception.h>
 
 #ifdef __OBJC__
-#include <Foundation/Foundation.h>
+// Metal.h pulls in Foundation.h, which transitively includes CarbonCore
+// headers that emit a flood of -Wdeprecated-declarations on recent macOS SDKs.
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #include <Metal/Metal.h>
+C10_DIAGNOSTIC_POP()
 typedef id<MTLDevice> MTLDevice_t;
 #else
 typedef void* MTLDevice_t;
@@ -18,11 +21,22 @@ namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version
 enum class MacOSVersion : uint32_t {
-  MACOS_VER_14_4_PLUS = 0,
-  MACOS_VER_15_0_PLUS,
-  MACOS_VER_15_1_PLUS,
-  MACOS_VER_15_2_PLUS,
-  MACOS_VER_26_0_PLUS,
+  MACOS_14_4 = 0,
+  MACOS_15_0,
+  MACOS_15_1,
+  MACOS_15_2,
+  MACOS_26_0,
+  MACOS_26_2,
+  MACOS_26_4,
+  MACOS_27_0,
+};
+
+// Helper enum for GPU-family-gated workarounds
+enum class AppleGPUFamily : uint32_t {
+  APPLE_7_PLUS = 1007, // M1
+  APPLE_8_PLUS = 1008, // M2
+  APPLE_9_PLUS = 1009, // M3 / M4
+  APPLE_10_PLUS = 1010, // M5
 };
 
 //-----------------------------------------------------------------
@@ -76,7 +90,10 @@ class TORCH_API MPSDevice {
 };
 
 TORCH_API bool is_available();
-TORCH_API bool is_macos_13_or_newer(MacOSVersion version);
+TORCH_API bool is_macos_at_least(MacOSVersion version);
+TORCH_API bool is_apple_family_or_newer(AppleGPUFamily family);
+// Whether MetalPerformancePrimitives (cooperative tensors) is usable;
+TORCH_API bool has_mpp();
 TORCH_API at::Allocator* GetMPSAllocator();
 
 inline Device getDeviceFromPtr(void* ptr) {

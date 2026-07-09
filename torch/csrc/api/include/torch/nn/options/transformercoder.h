@@ -50,7 +50,7 @@ struct TORCH_API TransformerEncoderOptions {
 /// transformer_decoder(options);
 /// ```
 struct TORCH_API TransformerDecoderOptions {
-  // This constructor will keep the a ref of passed in decoder_layer,
+  // This constructor will keep a ref of passed in decoder_layer,
   // so it keeps all the data in decoder_layer.
   TransformerDecoderOptions(
       TransformerDecoderLayer decoder_layer,
