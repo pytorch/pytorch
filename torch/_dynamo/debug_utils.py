@@ -44,6 +44,7 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._config_module import ConfigModule
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
@@ -455,7 +456,10 @@ class NNModuleToString:
 
 
 @functools.cache  # subprocess is expensive
-def _initialized_cuda_system_info_comment() -> str:
+def _cuda_system_info_comment() -> str:
+    if not torch.cuda.is_available():
+        return "# torch.cuda.is_available()==False, no GPU info collected\n"
+
     model_str = "# CUDA Info: \n"
     try:
         if torch.version.hip is None:
@@ -477,19 +481,6 @@ def _initialized_cuda_system_info_comment() -> str:
         model_str += f"# {name} : {count} \n"
     model_str += "\n"
     return model_str
-
-
-def _cuda_system_info_comment() -> str:
-    if not torch.cuda._is_compiled():
-        return "# torch.cuda._is_compiled()==False, no GPU info collected\n"
-    if not torch.cuda.is_initialized():
-        return "# torch.cuda.is_initialized()==False, no GPU info collected\n"
-    return _initialized_cuda_system_info_comment()
-
-
-_cuda_system_info_comment.cache_clear = (  # type: ignore[attr-defined]
-    _initialized_cuda_system_info_comment.cache_clear
-)
 
 
 def generate_env_vars_string(*, stable_output: bool = False) -> str:
@@ -527,11 +518,24 @@ import os
 def generate_config_string(*, stable_output: bool = False) -> str:
     import torch._functorch.config
     import torch._inductor.config
+    from torch._inductor.codegen import common
 
     if stable_output:
         return "# config omitted due to stable_output=True"
 
+    # Third-party Inductor backends can register their own ConfigModule.
+    # Repros need to replay non-default values from those modules, and
+    # ConfigModule.codegen_config() emits assignments but not the module import.
+    extra_codegen_configs = []
+    for c in common.custom_backend_codegen_configs.values():
+        if isinstance(c, ConfigModule):
+            codegen_config = c.codegen_config()
+            if codegen_config:
+                extra_codegen_configs.append(f"import {c.__name__}\n{codegen_config}")
+    extra_codegen_configs_str = "\n".join(extra_codegen_configs)
+
     experimental_config = torch.fx.experimental._config.codegen_config()  # type: ignore[attr-defined]
+
     return f"""\
 import torch._dynamo.config
 import torch._inductor.config
@@ -541,6 +545,7 @@ import torch.fx.experimental._config
 {torch._inductor.config.codegen_config()}
 {torch._functorch.config.codegen_config()}
 {experimental_config}
+{extra_codegen_configs_str}
 """
 
 

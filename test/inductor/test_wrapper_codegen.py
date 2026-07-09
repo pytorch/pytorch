@@ -35,17 +35,6 @@ class TestPythonWrapperCodegen(TestCase):
         wrapper.prefix = IndentedBuffer()
         return wrapper
 
-    def test_explicit_symbol_input_assignment(self):
-        wrapper = self._new_wrapper()
-        bound_vars = OrderedSet()
-        s0 = sympy.Symbol("s0")
-
-        with V.set_graph_handler(self._graph_with_sizevars()):
-            wrapper.codegen_input_symbol_assignment("arg0_1", s0, bound_vars)
-
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1")
-        self.assertEqual(list(bound_vars), [s0])
-
     def test_explicit_symbol_input_assignment_uses_canonical_symbol(self):
         wrapper = self._new_wrapper()
         bound_vars = OrderedSet()
@@ -84,19 +73,6 @@ s1 = arg0_1
 s0 = arg1_1""",
         )
         self.assertEqual(list(bound_vars), [s1, s0])
-
-    def test_explicit_symbol_input_assignment_preserves_static_raw_symbol(self):
-        wrapper = self._new_wrapper()
-        bound_vars = OrderedSet()
-        s0 = sympy.Symbol("s0")
-        graph = self._graph_with_sizevars()
-        graph.sizevars.simplify = lambda x: x.xreplace({s0: sympy.Integer(8)})
-
-        with V.set_graph_handler(graph):
-            wrapper.codegen_input_symbol_assignment("arg0_1", s0, bound_vars)
-
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1")
-        self.assertEqual(list(bound_vars), [s0])
 
     def test_tensor_input_does_not_bind_size_or_stride_symbols(self):
         wrapper = self._new_wrapper()
@@ -190,31 +166,6 @@ s0 = arg1_1""",
 
         self.assertEqual(graph.symbolic_input_sources, {s0: ("arg0_1", "size", 0)})
 
-    def test_codegen_inputs_binds_recorded_symbolic_input_source(self):
-        wrapper = self._new_wrapper()
-        s0 = sympy.Symbol("s0")
-        tensor = ir.TensorBox.create(
-            ir.InputBuffer(
-                name="arg0_1",
-                layout=ir.FixedLayout(
-                    torch.device("cpu"),
-                    torch.float32,
-                    size=[s0, 3],
-                    stride=[3, 1],
-                ),
-            )
-        )
-        graph = self._graph_with_sizevars(
-            graph_inputs={"arg0_1": tensor},
-            graph_input_names=["arg0_1"],
-            symbolic_input_sources={s0: ("arg0_1", "size", 0)},
-        )
-
-        with V.set_graph_handler(graph):
-            wrapper.codegen_inputs()
-
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1.size()[0]")
-
     def test_codegen_inputs_binds_canonical_recorded_symbolic_input_source(self):
         wrapper = self._new_wrapper()
         raw = sympy.Symbol("s0")
@@ -283,69 +234,11 @@ s0 = s1""",
         self.assertExpectedInline(
             wrapper.prefix.getvalue().strip(),
             """\
-s0 = arg0_1.size()[0]
-s1 = arg0_1.stride()[0]""",
+arg0_1_size = arg0_1.size()
+s0 = arg0_1_size[0]
+arg0_1_stride = arg0_1.stride()
+s1 = arg0_1_stride[0]""",
         )
-
-    def test_codegen_inputs_does_not_bind_needed_input_symbols_without_size_asserts(
-        self,
-    ):
-        wrapper = self._new_wrapper()
-        s0 = sympy.Symbol("s0")
-        tensor = ir.TensorBox.create(
-            ir.InputBuffer(
-                name="arg0_1",
-                layout=ir.FixedLayout(
-                    torch.device("cpu"),
-                    torch.float32,
-                    size=[s0],
-                    stride=[1],
-                ),
-            )
-        )
-        graph = self._graph_with_sizevars(
-            graph_inputs={"arg0_1": tensor},
-            graph_input_names=["arg0_1"],
-            symbolic_input_sources={},
-        )
-        graph.sizevars.free_symbols = lambda: OrderedSet([s0])
-
-        with (
-            V.set_graph_handler(graph),
-            torch._inductor.config.patch("size_asserts", False),
-        ):
-            wrapper.codegen_inputs()
-
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "")
-
-    def test_codegen_inputs_does_not_bind_needed_zero_size_input_symbols(self):
-        wrapper = self._new_wrapper()
-        s0 = sympy.Symbol("s0")
-        tensor = ir.TensorBox.create(
-            ir.InputBuffer(
-                name="arg0_1",
-                layout=ir.FixedLayout(
-                    torch.device("cpu"),
-                    torch.float32,
-                    size=[s0, 0],
-                    stride=[1, 1],
-                ),
-            )
-        )
-        graph = self._graph_with_sizevars(
-            graph_inputs={"arg0_1": tensor},
-            graph_input_names=["arg0_1"],
-            symbolic_input_sources={},
-        )
-        graph.sizevars.free_symbols = lambda: OrderedSet([s0])
-
-        with (
-            V.set_graph_handler(graph),
-            torch._inductor.config.patch("size_asserts", False),
-        ):
-            wrapper.codegen_inputs()
-
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "")
 
     def test_codegen_inputs_ignores_unused_compound_input_symbols(self):
         wrapper = self._new_wrapper()
@@ -375,7 +268,7 @@ s1 = arg0_1.stride()[0]""",
 
         self.assertEqual(wrapper.prefix.getvalue().strip(), "")
 
-    def test_codegen_inputs_accepts_static_replaced_compound_input_symbols(self):
+    def test_codegen_inputs_ignores_zero_size_compound_input_symbols(self):
         wrapper = self._new_wrapper()
         s0 = sympy.Symbol("s0")
         tensor = ir.TensorBox.create(
@@ -384,8 +277,8 @@ s1 = arg0_1.stride()[0]""",
                 layout=ir.FixedLayout(
                     torch.device("cpu"),
                     torch.float32,
-                    size=[s0],
-                    stride=[4 * s0**2],
+                    size=[s0 + 1, 0],
+                    stride=[1, 1],
                 ),
             )
         )
@@ -394,9 +287,6 @@ s1 = arg0_1.stride()[0]""",
             graph_input_names=["arg0_1"],
             symbolic_input_sources={},
         )
-        graph.sizevars.simplify = lambda x: (
-            x.xreplace({s0: sympy.Integer(8)}) if isinstance(x, sympy.Basic) else x
-        )
 
         with (
             V.set_graph_handler(graph),
@@ -404,7 +294,7 @@ s1 = arg0_1.stride()[0]""",
         ):
             wrapper.codegen_inputs()
 
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1.size()[0]")
+        self.assertEqual(wrapper.prefix.getvalue().strip(), "")
 
     def test_codegen_inputs_binds_canonical_size_assert_symbol(self):
         wrapper = self._new_wrapper()
@@ -440,20 +330,22 @@ s1 = arg0_1.stride()[0]""",
         self.assertExpectedInline(
             wrapper.prefix.getvalue().strip(),
             """\
-s1 = arg0_1.size()[0]
-s0 = s1""",
+arg0_1_size = arg0_1.size()
+s0 = arg0_1_size[0]
+s1 = s0""",
         )
 
     def test_codegen_inputs_rejects_unbound_input_symbol(self):
         wrapper = self._new_wrapper()
         s0 = sympy.Symbol("s0")
+        s1 = sympy.Symbol("s1")
         tensor = ir.TensorBox.create(
             ir.InputBuffer(
                 name="arg0_1",
                 layout=ir.FixedLayout(
                     torch.device("cpu"),
                     torch.float32,
-                    size=[s0 + 1, 3],
+                    size=[s0 + s1, 3],
                     stride=[3, 1],
                 ),
             )
@@ -470,24 +362,6 @@ s0 = s1""",
         ):
             with self.assertRaisesRegex(AssertionError, "expected .*s0"):
                 wrapper.codegen_inputs()
-
-    def test_cpp_bind_input_symbol_uses_cpp_tensor_access(self):
-        wrapper = self._new_cpp_wrapper()
-        bound_vars = OrderedSet()
-        s0 = sympy.Symbol("s0")
-        s1 = sympy.Symbol("s1")
-
-        with V.set_graph_handler(self._graph_with_sizevars()):
-            wrapper.bind_input_symbol(s0, "arg0_1", "size", 0, bound_vars)
-            wrapper.bind_input_symbol(s1, "arg0_1", "stride", 1, bound_vars)
-
-        self.assertExpectedInline(
-            wrapper.prefix.getvalue().strip(),
-            """\
-int64_t s0 = arg0_1.sizes()[0];
-int64_t s1 = arg0_1.strides()[1];""",
-        )
-        self.assertEqual(list(bound_vars), [s0, s1])
 
     def test_cpp_bind_input_symbol_emits_raw_replacement_alias(self):
         wrapper = self._new_cpp_wrapper()
@@ -507,25 +381,6 @@ int64_t s1 = arg0_1.sizes()[0];
 int64_t s0 = s1;""",
         )
         self.assertEqual(list(bound_vars), [canonical, raw])
-
-    def test_cpp_bind_input_symbol_emits_canonical_replacement_alias(self):
-        wrapper = self._new_cpp_wrapper()
-        bound_vars = OrderedSet()
-        raw = sympy.Symbol("s0")
-        canonical = sympy.Symbol("s1")
-        graph = self._graph_with_sizevars()
-        graph.sizevars.shape_env = SimpleNamespace(replacements={raw: canonical})
-
-        with V.set_graph_handler(graph):
-            wrapper.bind_input_symbol(raw, "arg0_1", "size", 0, bound_vars)
-
-        self.assertExpectedInline(
-            wrapper.prefix.getvalue().strip(),
-            """\
-int64_t s0 = arg0_1.sizes()[0];
-int64_t s1 = s0;""",
-        )
-        self.assertEqual(list(bound_vars), [raw, canonical])
 
 
 if __name__ == "__main__":

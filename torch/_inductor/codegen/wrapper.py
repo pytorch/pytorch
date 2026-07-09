@@ -240,9 +240,9 @@ def user_defined_kernel_grid_fn_code(
         example_grid: TritonGrid | None = None,
     ):
         """
-        This function return a tuple of two values: the first one is for the real grid
+        This function returns a tuple of two values: the first one is for the real grid
         which is used in the generated code; the second one is an example grid with
-        concreate values which is used in the autotune block to run the generated
+        concrete values which is used in the autotune block to run the generated
         kernels at compile time.
         """
         if wrapper is None or callable(grid):
@@ -824,6 +824,9 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
         """Generate context switching and stream retrieval code."""
         if V.graph.cpp_wrapper:
             super().codegen(code)
+            V.graph.wrapper_code.codegen_stream_info_prologue(
+                code, self.num_streams, self.stream_idx_to_user_obj_idx
+            )
         else:
             super().codegen(code)
 
@@ -868,8 +871,12 @@ class EnterCudaStreamContextLine(WrapperLine):
     stream_idx: int
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(f"with {get_stream_name(self.stream_idx)}:")
-        code.do_indent()
+        wrapper_code = getattr(V.graph, "wrapper_code", None)
+        if wrapper_code is None:
+            code.writeline(f"with {get_stream_name(self.stream_idx)}:")
+            code.do_indent()
+        else:
+            wrapper_code.codegen_enter_cuda_stream_context(code, self.stream_idx)
 
 
 @dataclasses.dataclass
@@ -877,7 +884,11 @@ class ExitCudaStreamContextLine(WrapperLine):
     """Generate code to exit the current stream context."""
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.do_unindent()
+        wrapper_code = getattr(V.graph, "wrapper_code", None)
+        if wrapper_code is None:
+            code.do_unindent()
+        else:
+            wrapper_code.codegen_exit_cuda_stream_context(code)
 
 
 class EfficientPeakEstimate:
@@ -1942,11 +1953,12 @@ class PythonWrapperCodegen(CodeGen):
         if num_streams > 1:
             if stream_idx_to_user_obj_idx is None:
                 raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
-            import_line = (
-                "from torch._dynamo.variables.streams import _get_stream_by_index"
-            )
-            if not self.imports.contains(import_line):
-                self.imports.writeline(import_line)
+            if not V.graph.cpp_wrapper:
+                import_line = (
+                    "from torch._dynamo.variables.streams import _get_stream_by_index"
+                )
+                if not self.imports.contains(import_line):
+                    self.imports.writeline(import_line)
             setup_stream_cache = self._last_default_stream_device != device_idx
             self._last_default_stream_device = device_idx
             self.writeline(
@@ -2015,6 +2027,23 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_cuda_stream_exit(self) -> None:
         """Generate data structure for exiting a CUDA Stream context."""
         self.writeline(ExitCudaStreamContextLine())
+
+    def codegen_enter_cuda_stream_context(
+        self, code: IndentedBuffer, stream_idx: int
+    ) -> None:
+        code.writeline(f"with {get_stream_name(stream_idx)}:")
+        code.do_indent()
+
+    def codegen_exit_cuda_stream_context(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
+
+    def codegen_stream_info_prologue(
+        self,
+        code: IndentedBuffer,
+        num_streams: int,
+        stream_idx_to_user_obj_idx: dict[int, int],
+    ) -> None:
+        raise NotImplementedError
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
@@ -2629,6 +2658,72 @@ class PythonWrapperCodegen(CodeGen):
             )
         self._retry_deferred_symbol_assignments(deferred_symbol_assignments)
 
+        @functools.cache
+        def sizeof(name):
+            self.prefix.writeline(f"{name}_size = {name}.size()")
+            return f"{name}_size"
+
+        @functools.cache
+        def strideof(name):
+            self.prefix.writeline(f"{name}_stride = {name}.stride()")
+            return f"{name}_stride"
+
+        def bind_input_expr_symbols(
+            expr: sympy.Symbol | sympy.Expr,
+            input_name: str,
+            kind: Literal["size", "stride"],
+            dim: int,
+            deferred_symbol_assignments=None,
+        ) -> bool:
+            name_fn = sizeof if kind == "size" else strideof
+            if isinstance(expr, sympy.Symbol):
+                if expr in bound_vars:
+                    return False
+                self.prefix.writeline(f"{expr} = {name_fn(input_name)}[{dim}]")
+                bound_vars.add(expr)
+                self.maybe_emit_replacement_aliases(expr, bound_vars)
+                return True
+
+            if not isinstance(expr, sympy.Expr):
+                return False
+
+            undefined_symbols = [
+                sym for sym in expr.free_symbols if sym not in bound_vars
+            ]
+            if len(undefined_symbols) != 1:
+                if (
+                    len(undefined_symbols) > 1
+                    and deferred_symbol_assignments is not None
+                ):
+
+                    def retry(deferred_symbol_assignments):
+                        return bind_input_expr_symbols(
+                            expr,
+                            input_name,
+                            kind,
+                            dim,
+                            deferred_symbol_assignments,
+                        )
+
+                    deferred_symbol_assignments.append(retry)
+                return False
+
+            from torch.utils._sympy.solve import try_solve
+
+            free_symbol = undefined_symbols.pop()
+            base_name = name_fn(input_name)
+            dim_symbol = sympy.Symbol(f"{base_name}_{dim}", integer=True)
+            solution = try_solve(sympy.Eq(expr, dim_symbol), free_symbol)
+            if solution is None:
+                return False
+
+            self.prefix.writeline(f"{dim_symbol} = {base_name}[{dim}]")
+            solution_expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
+            self.prefix.writeline(f"{free_symbol} = {pexpr(solution_expr)}")
+            bound_vars.add(free_symbol)
+            self.maybe_emit_replacement_aliases(free_symbol, bound_vars)
+            return True
+
         for sym, (input_name, kind, dim) in V.graph.symbolic_input_sources.items():
             sym = V.graph.sizevars.simplify(sym)
             if not isinstance(sym, sympy.Symbol):
@@ -2647,31 +2742,42 @@ class PythonWrapperCodegen(CodeGen):
                 is_named_graph_input and sympy_product(value.get_size()) != 0
             )
             for dim, raw_size in enumerate(value.get_size()):
+                if bind_assert_symbols:
+                    bind_input_expr_symbols(
+                        raw_size,
+                        input_name,
+                        "size",
+                        dim,
+                        deferred_symbol_assignments,
+                    )
                 size = V.graph.sizevars.simplify(raw_size)
-                if isinstance(size, sympy.Symbol) and bind_assert_symbols:
-                    self.bind_input_symbol(size, input_name, "size", dim, bound_vars)
-                if (
-                    isinstance(raw_size, sympy.Symbol)
-                    and bind_assert_symbols
-                    and raw_size not in bound_vars
-                ):
-                    self.bind_input_symbol(
-                        raw_size, input_name, "size", dim, bound_vars
+                if bind_assert_symbols and size != raw_size:
+                    bind_input_expr_symbols(
+                        size,
+                        input_name,
+                        "size",
+                        dim,
+                        deferred_symbol_assignments,
                     )
             for dim, raw_stride in enumerate(value.get_stride()):
+                if bind_assert_symbols:
+                    bind_input_expr_symbols(
+                        raw_stride,
+                        input_name,
+                        "stride",
+                        dim,
+                        deferred_symbol_assignments,
+                    )
                 stride = V.graph.sizevars.simplify(raw_stride)
-                if isinstance(stride, sympy.Symbol) and bind_assert_symbols:
-                    self.bind_input_symbol(
-                        stride, input_name, "stride", dim, bound_vars
+                if bind_assert_symbols and stride != raw_stride:
+                    bind_input_expr_symbols(
+                        stride,
+                        input_name,
+                        "stride",
+                        dim,
+                        deferred_symbol_assignments,
                     )
-                if (
-                    isinstance(raw_stride, sympy.Symbol)
-                    and bind_assert_symbols
-                    and raw_stride not in bound_vars
-                ):
-                    self.bind_input_symbol(
-                        raw_stride, input_name, "stride", dim, bound_vars
-                    )
+        self._retry_deferred_symbol_assignments(deferred_symbol_assignments)
 
         def _verify_input_symbol_assignment(
             input_name: str,
@@ -2679,7 +2785,9 @@ class PythonWrapperCodegen(CodeGen):
             bound_vars: OrderedSet[sympy.Symbol],
         ):
             is_named_graph_input = input_name in V.graph.graph_input_names
-            verify_assert_symbols = config.size_asserts and (is_named_graph_input)
+            verify_assert_symbols = config.size_asserts and (
+                is_named_graph_input and sympy_product(value.get_size()) != 0
+            )
             for expr in chain.from_iterable([value.get_size(), value.get_stride()]):
                 if not isinstance(expr, Expr) or isinstance(expr, sympy.Symbol):
                     continue
