@@ -27,7 +27,7 @@ else:
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
 ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
 
-TEST_CUPTI = _check_module_exists("cupti") and not TEST_WITH_ROCM and TEST_CUDA
+TEST_CUPTI = _check_module_exists("cupti") and not TEST_WITH_ROCM
 
 def _cupti_version():
     if not TEST_CUPTI:

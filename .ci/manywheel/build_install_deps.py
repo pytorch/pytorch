@@ -56,13 +56,21 @@ def main() -> None:
 
     os.chdir(args.package_dir)
     pip_install("-qU", "-r", "requirements-build.txt")
-    # The CUPTI monitor is a CUDA >= 13.x feature (its CUPTI floor is 13.3): it compiles
-    # against cupti_activity.h and its field-id codegen parses it with libclang's python
-    # bindings. The header is staged into the CUDA 13.x Docker image by
-    # .ci/docker/common/install_cuda.sh, so only libclang is installed here (it bundles
-    # libclang.so, so the codegen needn't locate one; not in requirements-build.txt, so
-    # non-13.x CUDA / CPU / ROCm / XPU builds don't pull it in).
-    if os.environ.get("DESIRED_CUDA", "").startswith("cu13"):
+    # The CUPTI field-id codegen (tools/gen_cupti_stubs.py) parses cupti_activity.h with
+    # libclang's python bindings. Install libclang only when a sufficiently-new CUPTI header
+    # is actually resolvable (find_cupti_header applies the CUPTI_API_VERSION floor) -- so
+    # non-13.x / CPU / ROCm / XPU builds, which have no such header, don't pull it in. Run in
+    # a subprocess with cwd on sys.path (we chdir'd to the repo root above) so the import of
+    # tools.setup_helpers.cupti resolves.
+    header_available = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from tools.setup_helpers.cupti import find_cupti_header as f;"
+            " sys.exit(0 if f() else 1)",
+        ]
+    )
+    if header_available.returncode == 0:
         pip_install("-q", "libclang")
     # Skip when sharing build/ across Pythons in build_all.sh -- the per-Python
     # bits (libtorch_python, _C.so) are invalidated by tools/setup_helpers/cmake.py.
