@@ -351,7 +351,7 @@ static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
   auto rstd_ = moveBatchDimToFront(rstd, rstd_bdim);
 
   const auto bdim_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
-  grad_out_ = ensure_has_bdim(grad_out, grad_out_bdim.has_value(), bdim_size);
+  grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), bdim_size);
   input_ = ensure_has_bdim(input_, input_bdim.has_value(), bdim_size);
   mean_ = ensure_has_bdim(mean_, mean_bdim.has_value(), bdim_size);
   rstd_ = ensure_has_bdim(rstd_, rstd_bdim.has_value(), bdim_size);

@@ -1,11 +1,18 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator, Hashable
+    from typing import Literal
 
 from .dispatch import dispatch
 from .utils import hashable
 
 
-_global_logic_variables = set()  # type: ignore[var-annotated]
+_global_logic_variables: set[Hashable] = set()
 _glv = _global_logic_variables
 
 
@@ -14,39 +21,39 @@ class Var:
 
     _id = 1
 
-    def __new__(cls, *token):
+    def __new__(cls, *token: Hashable) -> Var:  # noqa: PYI034
         if len(token) == 0:
             token = f"_{Var._id}"  # type: ignore[assignment]
             Var._id += 1
         elif len(token) == 1:
-            token = token[0]
+            token = token[0]  # pyrefly: ignore[bad-assignment]
 
         obj = object.__new__(cls)
         obj.token = token  # type: ignore[attr-defined]
         return obj
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "~" + str(self.token)  # type: ignore[attr-defined]
 
     __repr__ = __str__
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return type(self) is type(other) and self.token == other.token  # type: ignore[attr-defined]
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((type(self), self.token))  # type: ignore[attr-defined]
 
 
-def var():
+def var() -> Callable[..., Var]:
     return lambda *args: Var(*args)
 
 
-def vars():
+def vars() -> Callable[[int], list[Callable[..., Var]]]:
     return lambda n: [var() for i in range(n)]
 
 
 @dispatch(Var)
-def isvar(v):
+def isvar(v: Var) -> Literal[True]:
     return True
 
 
@@ -54,12 +61,12 @@ isvar
 
 
 @dispatch(object)  # type: ignore[no-redef]
-def isvar(o):
-    return _glv and hashable(o) and o in _glv
+def isvar(o: object) -> bool:
+    return bool(_glv and hashable(o) and o in _glv)
 
 
 @contextmanager
-def variables(*variables):
+def variables(*variables: Hashable) -> Generator[None, None, None]:
     """
     Context manager for logic variables
 

@@ -1,4 +1,3 @@
-# flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
 
@@ -47,6 +46,7 @@ register_log("pp", ["torch.distributed.pipelining"])
 register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.fsdp"])
 register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
+register_log("native_dsl", "torch._native")
 register_log(
     "export",
     [
@@ -242,6 +242,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "incremental",
+    "Incremental autotuning logs.",
+    off_by_default=True,
+)
+register_artifact(
     "node_runtime_estimation",
     "Node runtime estimation for compile-time optimization decisions.",
     off_by_default=True,
@@ -249,6 +254,11 @@ register_artifact(
 register_artifact(
     "autotuning",
     "Autotuning choice logs, such as kernel source, perf, and tuning parameters.",
+    off_by_default=True,
+)
+register_artifact(
+    "autotuning_inputs",
+    "Per-kernel input tensor shapes/dtypes/strides logged during autotuning.",
     off_by_default=True,
 )
 register_artifact(

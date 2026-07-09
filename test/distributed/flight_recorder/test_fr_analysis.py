@@ -10,6 +10,7 @@ from torch.distributed.flight_recorder.components.types import (
     COLLECTIVES,
     MatchInfo,
     MatchState,
+    Op,
 )
 from torch.distributed.flight_recorder.components.utils import match_one_event
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -176,6 +177,45 @@ class FlightRecorderEventTest(TestCase):
             membership = {"0": {0, 1}}
             result = match_one_event(event, event, membership, "0").state
             self.assertEqual(result, expectedState)
+
+
+class FlightRecorderOpBackendTest(TestCase):
+    """Tests that the Op class accepts all supported backend prefixes."""
+
+    def _make_event(self, backend: str, collective: str = "all_reduce"):
+        return {
+            "profiling_name": f"{backend}:{collective}",
+            "state": "completed",
+            "process_group": ("0", "default"),
+            "input_sizes": [[4, 4]],
+            "output_sizes": [[4, 4]],
+            "input_dtypes": "float32",
+            "output_dtypes": "float32",
+            "collective_seq_id": "1",
+            "p2p_seq_id": "0",
+            "time_created_ns": 0,
+            "frames": [],
+        }
+
+    def test_nccl_backend(self):
+        op = Op(self._make_event("nccl"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_ncclx_backend(self):
+        op = Op(self._make_event("ncclx"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_gloo_backend(self):
+        op = Op(self._make_event("gloo"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_xccl_backend(self):
+        op = Op(self._make_event("xccl"), {"0": {0, 1}}, "0")
+        self.assertEqual(op.type, "all_reduce")
+
+    def test_unsupported_backend_raises(self):
+        with self.assertRaises(AssertionError):
+            Op(self._make_event("unknown_backend"), {"0": {0, 1}}, "0")
 
 
 class FlightMatchInfoTest(TestCase):

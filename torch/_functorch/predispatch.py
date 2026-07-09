@@ -14,11 +14,22 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
+from torch._C import (
+    _enter_dual_level as _enter_dual_level_impl,
+    _exit_dual_level as _exit_dual_level_impl,
+)
 from torch._C._functorch import (
     _add_batch_dim as _add_batch_dim_impl,
+    _jvp_decrement_nesting as _jvp_decrement_nesting_impl,
+    _jvp_increment_nesting as _jvp_increment_nesting_impl,
     _remove_batch_dim as _remove_batch_dim_impl,
+    _unwrap_for_grad as _unwrap_for_grad_impl,
     _vmap_decrement_nesting as _vmap_decrement_nesting_impl,
     _vmap_increment_nesting as _vmap_increment_nesting_impl,
+)
+from torch._VF import (  # type: ignore[attr-defined]
+    _make_dual as _make_dual_impl,
+    _unpack_dual as _unpack_dual_impl,
 )
 
 
@@ -167,3 +178,120 @@ def lazy_load_decompositions() -> None:
         _register_python_decomposition_vmap(torch.ops.aten.addr.default)
 
         DECOMPOSITIONS_LOADED = True
+
+
+def _make_dual(
+    tensor: torch.Tensor, tangent: torch.Tensor, *, level: int = 0
+) -> torch.Tensor:
+    """
+    Thin wrapper around torch._VF._make_dual that is used to proxy in
+    PT2 export/compile fx graph for forward-mode AD.
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(
+            _make_dual, (tensor, tangent), tensor, tangent, level=level
+        )
+
+    return _make_dual_impl(tensor, tangent, level=level)
+
+
+def _unpack_dual(
+    tensor: torch.Tensor, *, level: int = 0
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Thin wrapper around torch._VF._unpack_dual that is used to proxy in
+    PT2 export/compile fx graph for forward-mode AD.
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(
+            _unpack_dual, (tensor,), tensor, level=level
+        )
+
+    return _unpack_dual_impl(tensor, level=level)
+
+
+def _jvp_increment_nesting() -> int:
+    """
+    Thin wrapper around torch._C._functorch._jvp_increment_nesting that is
+    used to proxy in export/compile graph for forward-mode AD.
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(
+            _jvp_increment_nesting,
+            (),
+        )
+    return _jvp_increment_nesting_impl()
+
+
+def _jvp_decrement_nesting() -> int:
+    """
+    Thin wrapper around torch._C._functorch._jvp_decrement_nesting that is
+    used to proxy in export/compile graph for forward-mode AD.
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(
+            _jvp_decrement_nesting,
+            (),
+        )
+    return _jvp_decrement_nesting_impl()
+
+
+def _unwrap_for_grad(tensor: torch.Tensor, level: int) -> torch.Tensor:
+    """
+    Thin wrapper around torch._C._functorch._unwrap_for_grad that is used
+    to proxy in PT2 export/compile fx graph for functorch transforms (grad, vjp, jvp).
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(
+            _unwrap_for_grad, (tensor,), tensor, level
+        )
+
+    return _unwrap_for_grad_impl(tensor, level)
+
+
+def _enter_dual_level() -> int:
+    """
+    Thin wrapper around torch._C._enter_dual_level that is used to proxy in
+    PT2 export/compile fx graph for forward-mode AD.
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(_enter_dual_level, ())
+    return _enter_dual_level_impl()
+
+
+def _exit_dual_level(*, level: int) -> None:
+    """
+    Thin wrapper around torch._C._exit_dual_level that is used to proxy in
+    PT2 export/compile fx graph for forward-mode AD.
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(_exit_dual_level, (), level=level)
+    return _exit_dual_level_impl(level=level)
