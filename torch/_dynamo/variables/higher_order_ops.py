@@ -4480,7 +4480,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
     def call_checkpoint(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         fn: VariableTracker,
         args: Sequence[VariableTracker],
         checkpoint_kwargs: dict[str, VariableTracker],
@@ -4497,7 +4497,9 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
                 context_fn = ctx.guard_as_python_constant()
-            elif isinstance(ctx, torch._dynamo.variables.functions.SkipFunctionVariable):
+            elif isinstance(
+                ctx, torch._dynamo.variables.functions.SkipFunctionVariable
+            ):
                 context_fn = ctx.value
             else:
                 raise NotImplementedError(
@@ -4520,7 +4522,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         ) = self.create_wrapped_node(
             tx,
             fn,
-            args,
+            list(args),
             gmod_kwargs,
             "torch.utils.checkpoint.checkpoint",
         )
@@ -4553,7 +4555,7 @@ class CheckpointDecoratorVariable(VariableTracker):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -4589,7 +4591,7 @@ class CheckpointedFunctionVariable(VariableTracker):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:

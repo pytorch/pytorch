@@ -3687,20 +3687,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
-            fn_source = (
-                AttrSource(source, "function")
-                if source
-                else None
-            )
+            fn_source = AttrSource(source, "function") if source else None
             fn = variables.UserMethodVariable(
                 type_attr.function,
                 self,
                 source_fn=fn_source,
             )
 
-            kwargs_source = (
-                AttrSource(source, "checkpoint_kwargs") if source else None
-            )
+            kwargs_source = AttrSource(source, "checkpoint_kwargs") if source else None
             checkpoint_kwargs = {}
             for k, v in type_attr.checkpoint_kwargs.items():
                 checkpoint_kwargs[k] = VariableTracker.build(
