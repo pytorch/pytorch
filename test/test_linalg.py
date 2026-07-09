@@ -10109,7 +10109,7 @@ class TestLinalgCudaOnly(TestCase):
             self.assertIn(info["winner"], info["timings"], (key, info, result.stdout))
             winner_time = info["timings"][info["winner"]]
             fastest_time = min(info["timings"].values())
-            self.assertLessEqual(winner_time, fastest_time + 1e-12, (key, info))
+            self.assertEqual(winner_time, fastest_time, (key, info))
 
     @skipIfRocm
     @dtypes(torch.half)
