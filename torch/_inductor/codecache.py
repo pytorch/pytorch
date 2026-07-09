@@ -1147,14 +1147,23 @@ class CacheabilityValidator:
                 self.bypass("Unsupported _fuse_ddp_communication_pass")
 
     def _check_nested_region_inductor_config_patches(self) -> None:
+        # Nested region config patches are hashed by pickling their raw value
+        # (see _collect_nested_region_inductor_config_patches_for_hash). Unlike
+        # top-level custom passes there is no uuid() fallback, so any callable or
+        # custom-pass value is conservatively treated as uncacheable, including a
+        # CustomGraphPass that provides a stable uuid().
         for _, config_patches in _collect_nested_region_inductor_config_patches(
             self.gm
         ):
             for key, value in config_patches.items():
-                if callable(value) or (
-                    key in _NESTED_REGION_UNCACHEABLE_CONFIG_KEYS and value
-                ):
-                    self.bypass("Unsupported nested region inductor callable config")
+                if callable(value):
+                    self.bypass(
+                        f"Uncacheable nested region config '{key}': callable value"
+                    )
+                if key in _NESTED_REGION_UNCACHEABLE_CONFIG_KEYS and value:
+                    self.bypass(
+                        f"Uncacheable nested region config '{key}': custom pass"
+                    )
 
     def _check_frozen_params(self) -> None:
         # Freezing can embed constants that wouldn't be static across runs.
@@ -1316,7 +1325,7 @@ def _collect_nested_region_inductor_config_patches(
     return tuple(patches)
 
 
-def _get_nested_region_inductor_config_patches(
+def _collect_nested_region_inductor_config_patches_for_hash(
     gm: torch.fx.GraphModule,
 ) -> tuple[tuple[str, tuple[tuple[str, Any], ...]], ...]:
     return tuple(
@@ -1488,7 +1497,9 @@ class FxGraphHashDetails:
         self.example_inputs = processed_inputs
         self.cache_key_tag = cconfig.cache_key_tag
         self.nested_inductor_config_patches = (
-            _get_nested_region_inductor_config_patches(gm) if gm is not None else ()
+            _collect_nested_region_inductor_config_patches_for_hash(gm)
+            if gm is not None
+            else ()
         )
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although
