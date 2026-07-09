@@ -458,42 +458,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             raise NotImplementedError(f"{self} has no type") from None
 
     def python_type_name(self) -> str:
+        """
+        Return the type name for the Python type this VariableTracker represents.
+
+        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). In Python 3.10+,
+        type.__name__ matches CPython's tp_name exactly (e.g., "list", "NoneType").
+
+        Note: There are no external callers outside torch._dynamo that rely on this.
+        Internal uses should prefer this over hardcoded type name strings.
+        """
         try:
             return self.python_type().__name__
         except NotImplementedError:
             return "<unknown type>"
-
-    @property
-    def tp_name(self) -> str:
-        """
-        Return the CPython tp_name for the type this VariableTracker represents.
-
-        This mirrors CPython's tp_name slot, which is a string field on PyTypeObject
-        that holds the type's name as it appears in error messages and __class__.__name__.
-
-        CPython reference: Objects/typeobject.c, Objects/listobject.c, etc.
-        Each PyTypeObject has a .tp_name field with the canonical type name.
-
-        Returns:
-            str: The CPython tp_name for this type, or "object" as the default fallback.
-
-        Examples:
-            >>> ListVariable(...).tp_name
-            "list"
-            >>> ConstantVariable(None).tp_name
-            "NoneType"
-            >>> ConstantVariable(...).tp_name
-            "ellipsis"
-        """
-        try:
-            py_type = self.python_type()
-        except NotImplementedError:
-            # For VTs without a static Python type (e.g., UserDefinedObjectVariable),
-            # use "object" as the default, matching PyBaseObject_Type.tp_name
-            return "object"
-
-        # In Python 3.10+, type.__name__ matches CPython's tp_name exactly
-        return py_type.__name__
 
     def as_python_constant(self) -> Any:
         """For constants"""
