@@ -199,6 +199,25 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         result = a + b
         self.assertEqual(result, (1, 2, 3, 4))
 
+    # --- User-defined tuple subclass construction ---
+
+    @make_dynamo_test
+    def test_user_defined_tuple_construct_empty(self):
+        # tuple.__new__(cls) with no iterable arg builds an empty tuple.
+        a = UserDefinedTuple()
+        self.assertEqual(a, ())
+        self.assertEqual(len(a), 0)
+        self.assertIs(type(a), UserDefinedTuple)
+
+    @make_dynamo_test
+    def test_user_defined_tuple_construct_from_iterables(self):
+        self.assertEqual(UserDefinedTuple([]), ())
+        self.assertEqual(UserDefinedTuple(set()), ())
+        self.assertEqual(UserDefinedTuple([1, 2, 3]), (1, 2, 3))
+        self.assertEqual(UserDefinedTuple(obj for obj in [1, 2, 3]), (1, 2, 3))
+        nested = tuple(UserDefinedTuple([obj]) for obj in [1, 2, 3])
+        self.assertEqual(nested, ((1,), (2,), (3,)))
+
     # --- User-defined deque subclass concatenation ---
 
     @make_dynamo_test
