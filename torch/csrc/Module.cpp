@@ -1115,8 +1115,7 @@ static PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_sdp_use_cudnn expects a bool, "
-      "but got %s",
+      "set_sdp_use_cudnn expects a bool, but got ",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseCuDNN(Py_IsTrue(arg));
   Py_RETURN_NONE;
