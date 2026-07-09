@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/FakeStore.hpp>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
+#include <torch/csrc/distributed/c10d/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -4670,6 +4671,22 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       []() { ::c10d::reset_nccl_trace(); },
       "API to reset Flight recorder recording when it comes fault tolerance.");
 #endif
+
+  py::class_<
+      ::c10d::FlightRecorderHook,
+      std::shared_ptr<::c10d::FlightRecorderHook>>(
+      module, "_FlightRecorderHook")
+      .def_static(
+          "attach",
+          &::c10d::FlightRecorderHook::attach,
+          py::arg("pg"),
+          R"(
+Attach a FlightRecorder hook to a process group. Collectives issued through
+the group are recorded into the generic flight recorder ring buffer (dump
+with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
+backend has native FlightRecorder support. The hook detaches when remove()
+is called or the returned handle is garbage collected.)")
+      .def("remove", &::c10d::FlightRecorderHook::remove);
 
   module.def(
       "_dump_fr_trace_json",
