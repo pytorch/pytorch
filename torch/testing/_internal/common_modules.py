@@ -102,6 +102,12 @@ class modules(_TestParametrizer):
                                'context; use it with instantiate_device_type_tests() instead of '
                                'instantiate_parametrized_tests()')
 
+        # Order matters: module_allowlist filters first, then module_overrides adds
+        # decorators. This ensures module_overrides only applies to modules that
+        # passed the module_allowlist filter.
+        device_cls._apply_module_allowlist(self)
+        device_cls._apply_module_overrides(self)
+
         for module_info in self.module_info_list:
             dtypes = set(module_info.supported_dtypes(device_cls.device_type))
             if self.allowed_dtypes is not None:
@@ -215,6 +221,9 @@ class ModuleInfo:
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  dtypesIfMPS=(torch.float16, torch.float32,),  # dtypes this function is expected to work with on MPS
                  dtypesIfHpu=(torch.bfloat16, torch.float32,),
+                 dtypesIf: dict[str, tuple] | None = None,  # generic per-device-type dtype
+                                                            # overrides, e.g. dtypesIf={"xpu": (...),
+                                                            # "openreg": (...)}.
                  supports_gradgrad=True,  # whether the op supports second order gradients
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  module_memformat_affects_out=False,  # whether converting module to channels last will generate
@@ -231,6 +240,7 @@ class ModuleInfo:
         self.dtypes = dtypes
         self.dtypesIfMPS = dtypesIfMPS
         self.dtypesIfHpu = dtypesIfHpu
+        self.dtypesIf = dict(dtypesIf) if dtypesIf else {}
         self.supports_gradgrad = supports_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
         self.module_memformat_affects_out = module_memformat_affects_out
@@ -254,8 +264,9 @@ class ModuleInfo:
             return self.dtypesIfMPS
         elif device_type == 'hpu':
             return self.dtypesIfHpu
-        else:
-            return self.dtypes
+        elif device_type == 'privateuse1':
+            device_type = torch._C._get_privateuse1_backend_name()
+        return self.dtypesIf.get(device_type, self.dtypes)
 
     @property
     def name(self):
