@@ -650,7 +650,16 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
 
     # Detect subMatrix case
-    if all(item in [n, m, k] for item in [lda, ldb, ldc]):
+    # A GEMM is "tight" (not a sub-matrix) only when each leading dimension
+    # equals its expected contiguous value for the given transpose layout.
+    # Checking mere membership in {n, m, k} is wrong: a padded leading
+    # dimension can coincidentally equal one of n/m/k (e.g. lda == n), which
+    # silently rewrites the requested shape and tunes the wrong GEMM.
+    # See https://github.com/ROCm/TheRock/issues/5553
+    lda_tight = m if transA else k
+    ldb_tight = k if transB else n
+    ldc_tight = n
+    if lda == lda_tight and ldb == ldb_tight and ldc == ldc_tight:
         subMatrix = False
     else:
         subMatrix = True
