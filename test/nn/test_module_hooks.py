@@ -12,7 +12,6 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 
 import torch
-import torch._dynamo.config
 import torch.nn as nn
 from torch.testing._internal.common_nn import _create_basic_net, NNTestCase
 from torch.testing._internal.common_utils import (
@@ -187,15 +186,6 @@ class DummyContextManager:
 
 
 class TestModuleHooks(TestCase):
-    def setUp(self):
-        super().setUp()
-        self._prior_ngb = torch._dynamo.config.nested_graph_breaks
-        torch._dynamo.config.nested_graph_breaks = False
-
-    def tearDown(self):
-        torch._dynamo.config.nested_graph_breaks = self._prior_ngb
-        super().tearDown()
-
     @parametrize_test("named_tuple", (True, False))
     def test_forward_hooks(self, named_tuple):
         fired_hooks: list[int] = []
@@ -1266,15 +1256,6 @@ class TestModuleGlobalHooks(TestCase):
 class TestModuleHookNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
-
-    def setUp(self):
-        super().setUp()
-        self._prior_ngb = torch._dynamo.config.nested_graph_breaks
-        torch._dynamo.config.nested_graph_breaks = False
-
-    def tearDown(self):
-        torch._dynamo.config.nested_graph_breaks = self._prior_ngb
-        super().tearDown()
 
     def _test_hooks(self, backward_register_fn):
         module = nn.Sigmoid()

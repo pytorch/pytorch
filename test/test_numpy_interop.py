@@ -9,7 +9,6 @@ from unittest import skipIf
 import numpy as np
 
 import torch
-import torch._dynamo.config
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -318,7 +317,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(
             final_refcount,
             initial_refcount,
-            f"Memory leak detected: refcount increased from {initial_refcount} to {final_refcount}",
+            lambda msg: f"{msg}\nMemory leak detected: refcount increased from {initial_refcount} to {final_refcount}",
         )
 
     @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
@@ -528,7 +527,6 @@ class TestNumPyInterop(TestCase):
                 lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
             )  # type: ignore[call-overload]
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @onlyCPU
     def test_parse_numpy_int(self, device):
         # https://github.com/pytorch/pytorch/issues/29252

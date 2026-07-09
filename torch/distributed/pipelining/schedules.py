@@ -448,33 +448,39 @@ class _PipelineSchedule(ABC):
                 "All stages must have the same device type for RNG forking. "
                 f"Found device types: {device_types}"
             )
-        with torch.random.fork_rng(devices=devices, device_type=device_type):
-            if needs_fwd:
-                next_stage_args: Any = None
-                for stage in stages:
-                    stage_args = args if stage.is_first else next_stage_args
-                    next_stage_args = stage._prepare_forward_infra(
-                        self._n_microbatches,
-                        stage_args,
-                        kwargs,
-                        has_backward=self._has_backward,
-                    )
-                fwd_initialized = True
+        pipeline_stages = [
+            stage for stage in stages if isinstance(stage, PipelineStage)
+        ]
+        for stage in pipeline_stages:
+            stage._pre_metadata_inference_backup()
 
-            if needs_bwd:
-                prev_stage_grad_meta: Any = None
-                for stage in reversed(stages):
-                    prev_stage_grad_meta = stage._prepare_backward_infra(
-                        self._n_microbatches,
-                        loss_fn=self._loss_fn,
-                        target=target,
-                        received_grad_meta=prev_stage_grad_meta,
-                        loss_kwargs=loss_kwargs,
-                    )
-                bwd_initialized = True
+        try:
+            with torch.random.fork_rng(devices=devices, device_type=device_type):
+                if needs_fwd:
+                    next_stage_args: Any = None
+                    for stage in stages:
+                        stage_args = args if stage.is_first else next_stage_args
+                        next_stage_args = stage._prepare_forward_infra(
+                            self._n_microbatches,
+                            stage_args,
+                            kwargs,
+                            has_backward=self._has_backward,
+                        )
+                    fwd_initialized = True
 
-        for stage in stages:
-            if isinstance(stage, PipelineStage):
+                if needs_bwd:
+                    prev_stage_grad_meta: Any = None
+                    for stage in reversed(stages):
+                        prev_stage_grad_meta = stage._prepare_backward_infra(
+                            self._n_microbatches,
+                            loss_fn=self._loss_fn,
+                            target=target,
+                            received_grad_meta=prev_stage_grad_meta,
+                            loss_kwargs=loss_kwargs,
+                        )
+                    bwd_initialized = True
+        finally:
+            for stage in pipeline_stages:
                 stage._post_metadata_inference_cleanup()
 
         return fwd_initialized, bwd_initialized
