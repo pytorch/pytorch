@@ -4019,7 +4019,11 @@ Returns:
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              R"(Create a new ProcessGroupNCCL2 instance.)");
+              R"(Create a new ProcessGroupNCCL2 instance.)")
+          .def(
+              "get_error",
+              &::c10d::nccl2::ProcessGroupNCCL::getError,
+              py::call_guard<py::gil_scoped_release>());
 
   intrusive_ptr_class_<::c10d::nccl2::ProcessGroupNCCL::Options>(
       processGroupNCCL2, "Options", backendOptions)
