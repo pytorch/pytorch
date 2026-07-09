@@ -53,11 +53,7 @@ from typing_extensions import TypeIs
 import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
-from torch._dynamo.exc import (
-    FakeTensorObservedException,
-    ObservedException,
-    TensorifyScalarRestartAnalysis,
-)
+from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
 from torch._guards import InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
@@ -1633,27 +1629,6 @@ class InstructionTranslatorBase(
             return not self.output.should_exit
         except TensorifyScalarRestartAnalysis:
             raise
-        except FakeTensorObservedException as e:
-            try:
-                self.exception_handler(e)
-            except Unsupported:
-                from .utils import _wrap_graph_break_with_torch_runtime_err
-
-                curr = self.exn_vt_stack.get_current_exception()
-                msg = ""
-                if isinstance(curr, variables.ExceptionVariable) and curr.args:
-                    msg = curr.args[0].as_python_constant()
-                _wrap_graph_break_with_torch_runtime_err(
-                    lambda: unimplemented(
-                        gb_type="RuntimeError when making fake tensor call",
-                        context="",
-                        explanation=msg,
-                        hints=[*graph_break_hints.USER_ERROR],
-                    )
-                )
-            if e.node is not None:
-                self.output.graph.erase_node(e.node)
-            return True
         except exc.ObservedException as e:
             self.exception_handler(e)
             return True
@@ -2768,14 +2743,31 @@ class InstructionTranslatorBase(
 
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
+            if hasattr(raised_exception, "convert_to_TorchRuntimeError"):
+                from .exc import format_graph_break_message
+
+                curr = self.exn_vt_stack.get_current_exception()
+                raw_msg = ""
+                if isinstance(curr, variables.ExceptionVariable) and curr.args:
+                    raw_msg = curr.args[0].as_python_constant()
+                msg = format_graph_break_message(
+                    "RuntimeError when making fake tensor call",
+                    "",
+                    raw_msg,
+                    [*graph_break_hints.USER_ERROR],
+                )
+                e = exc.TorchRuntimeError(
+                    msg, getattr(raised_exception, "real_stack", None)
+                )
+                raise e.with_traceback(raised_exception.__traceback__) from None
+
             curr_exc = self.exn_vt_stack.get_current_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
-            if not isinstance(
-                raised_exception, (dynamo_exc, FakeTensorObservedException)
-            ):
+            if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
                 )  # sanity check
+
             unimplemented(
                 gb_type="Observed exception",
                 context=f"raised exception {curr_exc.debug_repr()}",

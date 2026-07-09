@@ -4186,20 +4186,20 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
             )
-
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        from .exc import (
-            FakeTensorObservedException,
-            ObservedRuntimeError,
-            raise_observed_exception,
-        )
+        from .exc import ObservedException, raise_observed_exception
 
+        # Fake eval failed after the node was inserted into the graph, so the
+        # node is dead regardless of whether user code catches the exception.
+        # Erase it and route the failure through the observed-exception channel
+        # so an enclosing try/except in user code can intercept it; if uncaught,
+        # it bubbles like eager.
+        tx.output.graph.erase_node(node)
         try:
             raise_observed_exception(RuntimeError, tx, args=[msg])
-        except ObservedRuntimeError as e:
-            fte = FakeTensorObservedException(*e.args, real_stack=e.real_stack)
-            fte.node = node
-            raise fte from None
+        except ObservedException as e:
+            e.convert_to_TorchRuntimeError = True  # type: ignore[missing-attribute]
+            raise
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
