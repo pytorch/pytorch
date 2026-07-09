@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-from torch.profiler._cupti._cupti_stubs import (  # pyrefly: ignore[missing-import]
+from torch.profiler._cupti._cupti_stubs import (
     Api,
     CudaEvent,
     ExternalCorrelation,
