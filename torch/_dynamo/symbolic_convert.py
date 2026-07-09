@@ -6320,6 +6320,15 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
 
+    @staticmethod
+    def _stop_iteration_value(
+        ex: StopIteration | exc.ObservedUserStopIteration,
+    ) -> VariableTracker:
+        value = ex.value
+        if isinstance(value, VariableTracker):
+            return value
+        return ConstantVariable.create(value)
+
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
             return super().inline_call_()
@@ -6386,7 +6395,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
             # The iterator is exhausted. Stop the loop and return.
             self.pop()
-            self.push(ConstantVariable.create(ex.value))
+            self.push(self._stop_iteration_value(ex))
         else:
             # Repeat the YIELD_FROM instruction in the next eval loop
             if not isinstance(self.instruction_pointer, int):
@@ -6420,7 +6429,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                     StopIteration,
                     exc.ObservedUserStopIteration,
                     exc.ObservedIndexError,
-                ):
+                ) as ex:
                     # To implement SEND, we have to look at the implementation
                     # when the iterator returns StopIteration. This translates to this code
                     # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
@@ -6429,7 +6438,14 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                     # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
                     if sys.version_info < (3, 12):
                         self.pop()  # Python 3.12 uses new opcode END_SEND
-                    self.push(val)
+                    if isinstance(
+                        ex, (exc.ObservedUserStopIteration, exc.ObservedIndexError)
+                    ):
+                        exc.handle_observed_exception(self)
+                    if isinstance(ex, exc.ObservedIndexError):
+                        self.push(val)
+                    else:
+                        self.push(self._stop_iteration_value(ex))
                     self.jump(inst)
                 else:
                     self.push(val)
