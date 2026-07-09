@@ -65,6 +65,13 @@ TORCH_API c10::intrusive_ptr<Node> get_current_node();
 // impl::set_gradient_edge) rather than the Node constructor: at construction
 // the node has no owning intrusive_ptr yet, so it cannot be safely wrapped in
 // a PyObject.
+//
+// Since attachment happens once per output, the per-node fired flag means the
+// hook fires on the first output bound. The node is therefore not necessarily
+// fully constructed when the hook sees it: its next_edges are wired, but for
+// multi-output nodes the remaining outputs' input_metadata, and for
+// output-saving ops the saved variables, are populated afterwards. This is why
+// the node_creation_hook docs tell users to only register (pre)hooks.
 TORCH_API void fire_node_creation_hooks(const c10::intrusive_ptr<Node>& node);
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

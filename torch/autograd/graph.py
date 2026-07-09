@@ -462,12 +462,23 @@ class node_creation_hook:
 
     In that context, ``hook`` is called once for every autograd graph node
     created by operations on tensors that require grad, with the freshly
-    created :class:`torch.autograd.graph.Node` as its only argument. At that
-    point the node's ``next_edges`` are already set up, so the hook may
-    inspect the node, record it, stash entries in ``node.metadata``, or
-    register backward hooks on it via
+    created :class:`torch.autograd.graph.Node` as its only argument. The
+    intended use is to record the node, stash entries in ``node.metadata``,
+    or register backward hooks on it via
     :meth:`~torch.autograd.graph.Node.register_hook` and
     :meth:`~torch.autograd.graph.Node.register_prehook`.
+
+    .. warning::
+
+        The node is passed to the hook as soon as it is attached to its first
+        output, which is convenient but means the node is not yet fully
+        constructed. Its ``next_functions`` are wired, but other state may
+        not be: for ops that save an output (e.g. :func:`torch.exp`) the
+        ``_saved_*`` tensors are populated after the hook runs, and for
+        multi-output ops ``_input_metadata`` only reflects the outputs bound
+        so far. Do not rely on this state from within the hook; registering
+        (pre)hooks is always safe, as they observe the node at backward time
+        when it is complete.
 
     The hook should have the following signature::
 
