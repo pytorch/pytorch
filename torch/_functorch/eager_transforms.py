@@ -1158,8 +1158,9 @@ def jvp(
             >>>         c = x ** 2  # tangents still propagate through c
             >>>     return x - c
 
-        As a result, ``jvp(f)(x)`` may differ from what reverse-mode
-        transforms like :func:`vjp` compute for the same function. To block
+        As a result, ``jvp(f, (x,), (t,))`` may differ from what
+        reverse-mode transforms like :func:`vjp` compute for the same
+        function. To block
         both forward- and reverse-mode differentiation, call
         :meth:`~torch.Tensor.detach` on the result instead:
 
