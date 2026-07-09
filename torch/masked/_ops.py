@@ -397,7 +397,7 @@ Example::
         for k, v in template_data.items()
     )
 
-    # Apply docstring templates to function doctring:
+    # Apply docstring templates to function docstring:
     if func.__doc__ is None:
         doc_template = "\n\n".join([f"{{{op_kind}_{sec}}}" for sec in doc_sections])
     else:
