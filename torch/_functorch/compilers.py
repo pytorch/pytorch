@@ -79,6 +79,10 @@ def ts_compile(fx_g: fx.GraphModule, inps: Sequence[Any]) -> torch.jit.ScriptMod
         Torch scripted model.
     """
 
+    from torch.fx._lazy_graph_module import _unwrap_lazy_graph_module
+
+    fx_g = _unwrap_lazy_graph_module(fx_g)
+
     with _disable_jit_autocast():
         strip_overloads(fx_g)
 
