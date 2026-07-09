@@ -83,6 +83,20 @@ static void hardswish_backward_kernel(at::TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "hardswish_backward");
 }
 
+// min/max convert to float (opmath) once on the host, matching the CUDA
+// kernel; the params struct is instantiated at float for every dtype. The
+// dispatch macro only enforces the supported-dtype set (scalar_t is unused).
+static void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "hardtanh_backward_mps", [&]() {
+    HardtanhBackwardParams<float> params{min.to<float>(), max.to<float>()};
+    lib.exec_binary_kernel_with_params(iter, "hardtanh_backward", params, "HardtanhBackwardParams_float");
+  });
+}
+
+static void tanh_backward_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "tanh_backward");
+}
+
 static void elu_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
   AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "elu_mps", [&]() {
     ELUParams<scalar_t> params{alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>()};
@@ -341,6 +355,8 @@ Tensor log_sigmoid_backward_mps(const Tensor& grad_output, const Tensor& self, c
   return grad_input;
 }
 
+REGISTER_DISPATCH(hardtanh_backward_stub, hardtanh_backward_kernel);
+REGISTER_DISPATCH(tanh_backward_stub, tanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, shrink_backward_kernel);

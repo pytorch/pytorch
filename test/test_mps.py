@@ -15910,6 +15910,30 @@ class TestComplex(TestCase):
                 with self.subTest(src=src_label, dst=dst_label, op="copy_"):
                     self.assertEqual(dst_mps.cpu(), dst_cpu)
 
+    def test_tanh_backward_complex(self):
+        # The MPSGraph implementation computed grad * (1 - out^2) without the
+        # conjugate, silently producing wrong complex gradients; the Metal
+        # kernel computes grad * conj(1 - out^2) like CPU/CUDA. Compare both
+        # the raw kernel and an end-to-end autograd call against CPU.
+        torch.manual_seed(0)
+        grad64 = torch.randn(64, dtype=torch.complex64)
+        out64 = torch.tanh(torch.randn(64, dtype=torch.complex64))
+        expected = torch.ops.aten.tanh_backward(grad64, out64)
+        # chalf has no CPU reference, so both dtypes compare against the
+        # complex64 CPU result on the same values (chalf at half tolerance).
+        for dtype, atol in [(torch.complex64, 1e-5), (torch.complex32, 1e-2)]:
+            grad, out = grad64.to(dtype).to("mps"), out64.to(dtype).to("mps")
+            actual = torch.ops.aten.tanh_backward(grad, out)
+            self.assertEqual(actual.cpu().to(torch.complex64), expected, atol=atol, rtol=atol)
+        # scale keeps draws away from tanh's poles at i*pi/2, where gradients
+        # blow up and float noise amplifies past any sane tolerance
+        x_cpu = (torch.randn(64, dtype=torch.complex64) * 0.5).requires_grad_()
+        x_mps = x_cpu.detach().to("mps").requires_grad_()
+        torch.tanh(x_cpu).abs().sum().backward()
+        torch.tanh(x_mps).abs().sum().backward()
+        # a missing conj produces O(1) errors; observed float noise is ~1e-6
+        self.assertEqual(x_mps.grad.cpu(), x_cpu.grad, atol=1e-4, rtol=1e-4)
+
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088
         def to_cpu(x):

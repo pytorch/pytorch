@@ -119,6 +119,28 @@ REGISTER_BINARY_OP(hardswish_backward, float, float);
 REGISTER_BINARY_OP(hardswish_backward, half, half);
 REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
 
+// min/max ride at opmath (float) precision, mirroring the CUDA kernel's
+// Scalar-to-opmath conversion.
+struct hardtanh_backward_functor {
+  template <typename T>
+  inline T operator()(
+      const T grad_output,
+      const T self,
+      const HardtanhBackwardParams<float> params) {
+    const float sf = float(self);
+    return (sf <= params.min || sf >= params.max) ? T(0) : grad_output;
+  }
+};
+
+#define REGISTER_HARDTANH_BACKWARD_OP(T) \
+  REGISTER_BINARY_ALPHA_OP(              \
+      hardtanh_backward, T, HardtanhBackwardParams_float, T);
+
+typedef HardtanhBackwardParams<float> HardtanhBackwardParams_float;
+REGISTER_HARDTANH_BACKWARD_OP(float);
+REGISTER_HARDTANH_BACKWARD_OP(half);
+REGISTER_HARDTANH_BACKWARD_OP(bfloat);
+
 struct elu_functor {
   template <typename T>
   inline T operator()(const T self_, const ELUParams<T> params) {
@@ -353,6 +375,26 @@ REGISTER_BINARY_OP(sigmoid_backward, half, half);
 REGISTER_BINARY_OP(sigmoid_backward, bfloat, bfloat);
 REGISTER_BINARY_OP(sigmoid_backward, float2, float2);
 REGISTER_BINARY_OP(sigmoid_backward, half2, half2);
+
+struct tanh_backward_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T grad_output, const T output) {
+    const float of = float(output);
+    return static_cast<T>(float(grad_output) * (1.0f - of * of));
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T grad_output, const T output) {
+    return c10::metal::mul(
+        grad_output,
+        c10::metal::conj(T(1, 0) - c10::metal::mul(output, output)));
+  }
+};
+
+REGISTER_BINARY_OP(tanh_backward, float, float);
+REGISTER_BINARY_OP(tanh_backward, half, half);
+REGISTER_BINARY_OP(tanh_backward, bfloat, bfloat);
+REGISTER_BINARY_OP(tanh_backward, float2, float2);
+REGISTER_BINARY_OP(tanh_backward, half2, half2);
 
 struct glu_functor {
   template <typename T>
