@@ -3486,7 +3486,7 @@ def broadcast(
     opts.rootRank = group_src
     opts.rootTensor = 0
     opts.asyncOp = async_op
-    sm90_or_more = not (
+    sm90_or_more = (
         tensor.is_cuda and torch.cuda.get_device_capability(tensor.device)[0] >= 9
     )
     if tensor.is_complex():
