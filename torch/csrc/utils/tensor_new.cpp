@@ -272,7 +272,12 @@ Tensor internal_new_from_data(
     bool copy_numpy,
     bool type_inference,
     bool pin_memory = false,
-    // When false, skip the __dlpack__ conversion attempt.
+    // When false, skip the __dlpack__ conversion attempt so that the caller
+    // uses only the sequence-conversion path. asarray sets this after catching
+    // a DLPack failure of its own -- a fallback introduced for backwards
+    // compatibility -- since it has already attempted __dlpack__ and must not
+    // re-attempt it here. All other callers keep the default (always try
+    // __dlpack__).
     bool try_dlpack = true) {
   TORCH_CHECK_TYPE(
       !THPUtils_checkString(data),
