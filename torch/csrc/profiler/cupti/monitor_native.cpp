@@ -288,8 +288,9 @@ void CuptiMonitorDecoder::worker_loop() {
     if (do_flush) {
       auto now = std::chrono::steady_clock::now();
       if (now - last_flush >= period) {
-        // cuptiActivityFlushAll(flag). Called via the address Python passed (see
-        // decode_buffer for the same pattern), so this TU needs no libcupti link.
+        // cuptiActivityFlushAll(flag). Called via the address Python passed
+        // (see decode_buffer for the same pattern), so this TU needs no
+        // libcupti link.
         using FlushAllFn = int (*)(uint32_t);
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         auto flush_all = reinterpret_cast<FlushAllFn>(flush_fn_);
