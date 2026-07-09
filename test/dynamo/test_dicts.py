@@ -2718,9 +2718,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d3, {"a": 1, "b": 3, "c": 4})
         self.assertEqual(d4, {"a": 1, "b": 2, "c": 4})
 
-        # Test with an iterable
-        d3, d4 = d1.copy(), d2.copy()
-
         # Test the __ior__ method
         d3, d4 = d1.copy(), d2.copy()
         d3.__ior__(d2)

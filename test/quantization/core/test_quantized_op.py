@@ -671,7 +671,6 @@ class TestQuantizedOps(TestCase):
 
         # calculate ELU(dqX) and quantize
         dqX = qX.dequantize()
-        dqY_hat = dqX.clone()
         dqY_hat = torch.nn.functional.elu(dqX, alpha)
         qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale, zero_point=output_zero_point,
                                            dtype=torch_type)

@@ -61,8 +61,6 @@ from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_
 from torch.types import _TensorOrTensors
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
-
 if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
