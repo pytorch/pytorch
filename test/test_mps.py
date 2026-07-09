@@ -855,21 +855,22 @@ class TestAvgPool(TestCaseMPS):
 
 class TestMPS(TestCaseMPS):
     def test_metalshaderlibrary_destructor_clean_exit(self):
-        # Regression for MetalShaderLibrary destructor crashes on macOS 15+
-        # where the Metal runtime tears down before __cxa_finalize fires,
-        # making ObjC messages to Metal objects during static destruction
-        # unsafe. The fix nulls every ObjC member pointer in the destructor
-        # before implicit member destructors run, so each one calls
-        # objc_release(nil) -- a guaranteed no-op even after Metal is gone.
+        # Regression for MetalShaderLibrary destructor crashes at process
+        # exit. On builds where the Metal runtime is finalized before
+        # libtorch_cpu (depends on dylib finalize order, not OS version),
+        # ObjC messages to Metal objects during static destruction are
+        # unsafe. The fix heap-allocates the bundled-library singleton and
+        # never frees it, so its destructor (which releases every cached
+        # MTLComputePipelineState/MTLFunction) never runs at process exit.
         # Without the fix, the test subprocess crashes during interpreter
         # shutdown with a non-zero return code (SIGSEGV).
         snippet = """
 import torch
-# Touch enough of the MPS kernel-library surface that MetalShaderLibrary
-# instances get instantiated and registered with the bundled-library global.
+# Touch the MPS kernel-library surface so the bundled MetalShaderLibrary
+# compiles and caches at least one pipeline state, giving its destructor
+# Metal objects to release at exit.
 x = torch.randn(8, device='mps')
 _ = x.relu()
-_ = x + 1.5
 torch.mps.synchronize()
 """
         proc = subprocess.run([sys.executable, "-c", snippet],
