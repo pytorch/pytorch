@@ -927,6 +927,45 @@ class TestScatterAddOverrideCorrectness(TestCase):
         tol = _override_tol(dtype)
         self.assertEqual(got, ref, atol=tol, rtol=tol)
 
+    @parametrize("path", ["tma", "vec"])
+    def test_inner_dim_change_no_recompile(self, path):
+        # The kernels take the slice extent N as a runtime arg, so a single
+        # compile must serve every inner-dim size. Call the kernel host entry
+        # at several N and assert the compile cache runs exactly one real
+        # compile (misses advances once, then only hits). We drive the host
+        # entry directly rather than through torch.scatter_add: TMA is
+        # registered first and strictly narrower, so on sm_90+ it would win
+        # every contiguous shape and the vec cache would never move.
+        from torch._native.ops.scatter_add import tma_kernel, vec_scatter_kernel
+        if path == "tma":
+            if not SM90OrLater:
+                self.skipTest("TMA path requires sm_90+")
+            compile_fn = tma_kernel._compile_tma_scatter
+            run = tma_kernel.tma_scatter_add_into
+        else:
+            compile_fn = vec_scatter_kernel._compile_vec_scatter
+            run = vec_scatter_kernel.vec_scatter_add_into
+
+        torch.manual_seed(0)
+        # Same dtype and contiguity across all sizes so only N varies.
+        Ns = [128, 256, 512, 1024, 2048]
+        compile_fn.cache_clear()
+        for N in Ns:
+            self_t, _, src, idx_1d = _make_override_triple(200, 100, (N,))
+            out = self_t.clone()
+            run(out, idx_1d, src)
+            self.assertEqual(out, _naive_scatter_add(self_t, idx_1d, src),
+                             atol=1e-4, rtol=1e-4)
+            misses = compile_fn.cache_info().misses
+            # Every N after the first must be served from cache: misses
+            # tops out at 1 (0 if the .o was already warm on disk). If N
+            # were still in the key, misses would climb with each size.
+            self.assertLessEqual(misses, 1, msg=f"recompiled at N={N}")
+        # The decisive invariant, independent of on-disk cache state: one
+        # in-memory entry serves every N. If N were in the key there'd be
+        # len(Ns) entries.
+        self.assertEqual(compile_fn.cache_info().currsize, 1)
+
     @parametrize("variant", ["functional", "out", "inplace"])
     def test_op_variants(self, variant):
         torch.manual_seed(0)
