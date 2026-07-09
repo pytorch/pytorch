@@ -350,10 +350,15 @@ void* CUDASymmetricMemoryAllocator::alloc(
   // allocation base; the signal pad stays hidden in front and free()/rendezvous()
   // key off this returned pointer.
   // Layout: signal pad first at [0, signal_pad_size), then the data buffer at
-  // buffer_offset = signal_pad_size. The signal pad size is already 16-aligned,
-  // so the data buffer is aligned without extra padding; round up the data
-  // size instead.
+  // buffer_offset = signal_pad_size. The data buffer must be 16-byte aligned
+  // (device collectives use int4 accesses); it sits at buffer_offset past the
+  // (aligned) allocation base, so buffer_offset itself must be 16-aligned.
   size_t buffer_offset = get_signal_pad_size();
+  TORCH_CHECK(
+      buffer_offset % 16 == 0,
+      "signal pad size must be a multiple of 16 so the data buffer is 16-byte "
+      "aligned, but got ",
+      buffer_offset);
   size_t block_size = buffer_offset + at::round_up(size, 16UL);
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
@@ -414,8 +419,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
   // Zero the signal pad (at the front, [0, buffer_offset)) to initialize it for
   // the CAS-based barrier() protocol; the data buffer that follows does not need
   // zeroing. This matches the NCCL/NVSHMEM backends, which also only clear the
-  // signal pad. Memsetting the whole (granularity-rounded) block instead fails
-  // with "invalid argument" on some devices (e.g. B200 / CUDA 13).
+  // signal pad.
   AT_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
 
   // Hand back the data buffer pointer, not alloc_base; the signal pad stays
@@ -764,10 +768,11 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   }
 
   std::vector<HandleType> handles(world_size);
-  // Per-rank mapped base (the signal pad lives at the base; also the address
-  // AllocationRef unmaps) and the data buffer pointer (base + buffer_offset).
-  std::vector<void*> bases(world_size, nullptr);
+  // signal_pads[r] is peer r's mapped base (the signal pad lives at the base,
+  // and it is the address AllocationRef unmaps); buffers[r] is the data buffer
+  // pointer (base + buffer_offset).
   std::vector<void*> buffers(world_size, nullptr);
+  std::vector<void*> signal_pads(world_size, nullptr);
 
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
@@ -775,8 +780,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       // may be an interior MemPool pointer): this pai is shared by every handle
       // on the allocation, and per-handle offsets are applied separately.
       handles[r] = block->alloc_ref->handle;
-      bases[r] = block->alloc_ref->ptr;
-      buffers[r] = static_cast<char*>(bases[r]) + block->buffer_offset;
+      signal_pads[r] = block->alloc_ref->ptr;
+      buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
       continue;
     }
     // This api imports a GPU memory allocation that was previously exported as
@@ -814,8 +819,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 #endif
     // map_block returns the mapped base (== signal pad base); the data buffer
     // follows at buffer_offset.
-    map_block(&bases[r], handles[r], block->block_size, block->device_idx);
-    buffers[r] = static_cast<char*>(bases[r]) + block->buffer_offset;
+    map_block(&signal_pads[r], handles[r], block->block_size, block->device_idx);
+    buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
     if constexpr (!use_fabric_handle) {
       close(imported_handles[r]);
     }
@@ -848,9 +853,10 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       alloc_refs.emplace_back(block->alloc_ref);
       continue;
     }
-    // bases[r] is peer r's mapped base, i.e. the address AllocationRef unmaps.
+    // signal_pads[r] is peer r's mapped base, i.e. the address AllocationRef
+    // unmaps.
     alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
-        bases[r], handles[r], block->block_size, block->device_idx));
+        signal_pads[r], handles[r], block->block_size, block->device_idx));
   }
 
   // The multicast mapping mirrors the block layout, so the data buffer lives at
@@ -862,8 +868,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   auto pai = c10::make_intrusive<CUDAPeerAllocInfo>(
       std::move(alloc_refs),
       std::move(buffers),
-      // The signal pad lives at the mapped base, so pass bases as signal_pads.
-      std::move(bases),
+      std::move(signal_pads),
       mc_handle,
       mc_buffer_addr,
       block->buffer_size,
