@@ -15814,7 +15814,6 @@ def forward(self, x):
         ):
             export(Foo(), (torch.randn(4, 4),), strict=False)
 
-    @testing.expectedFailureStrictV2
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
