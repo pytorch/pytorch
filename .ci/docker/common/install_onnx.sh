@@ -15,7 +15,7 @@ retry () {
 # installed via requirements-ci.txt
 pip_install \
   transformers==4.36.2 \
-  onnxruntime==1.23.1
+  onnxruntime==1.27.0
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
