@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
     skipIfTorchDynamo,
+    skipIfXpu,
     TestCase,
     torch_to_numpy_dtype_dict,
 )
@@ -432,6 +433,7 @@ class TestShapeOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.clamp(X)
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/2722")
     @dtypes(*all_passthru_types())
     @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
     @dtypesIfXPU(*all_passthru_types_and(torch.chalf))
