@@ -3,9 +3,11 @@
 
 FlexGEMM recognizes a narrow local-reduction contract inside the GEMM output
 tile: an epilogue reshapes the accumulator to expose contiguous groups along M
-or N, then reduces only that grouped dimension. Supported small N-axis groups
-lower as ordinary in-fragment TensorSSA reductions; larger N groups produce
-TensorSSA partials that QuACK combines physically.
+or N, then reduces only that grouped dimension. N-axis groups up to one 32-lane
+fragment lower as ordinary in-fragment TensorSSA reductions; larger N groups
+produce TensorSSA partials that QuACK combines physically, and reductions
+feeding physical-only finalize ops (mx_e8m0_scale) stay on the callback path
+regardless of group size.
 M-axis groups currently always use QuACK's physical row-lane/warp combine path,
 even when the group is small enough to fit in one fragment. Inductor owns the
 FX pattern matching and output contracts; these helpers describe the supported
@@ -36,6 +38,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
 
 def normalize_shape(shape: Any) -> Any:
@@ -207,6 +210,10 @@ FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
         "nvfp4_e4m3_scale",
     )
 )
+
+# mx_e8m0_scale's exponent bitcast/shift only lowers inside the physical scalar
+# finalizer; nvfp4_e4m3_scale has a TensorSSA clamp form and needs no callbacks.
+PHYSICAL_FINALIZE_OP_NAMES = frozenset(("mx_e8m0_scale",))
 
 
 def _cute_scale_expr(
@@ -409,6 +416,37 @@ def is_pointwise_node(node: torch.fx.Node) -> bool:
         isinstance(node.target, torch._ops.OpOverload)
         and torch.Tag.pointwise in node.target.tags
     ) or _cute_op_name(node.target) in FLEX_GEMM_POINTWISE_OP_NAMES
+
+
+def reduction_requires_physical_finalize(
+    node: torch.fx.Node, layout: GroupedTensorSSALayout
+) -> bool:
+    """Return whether a fragment-sized grouped reduce must keep QuACK callbacks.
+
+    Ops in ``PHYSICAL_FINALIZE_OP_NAMES`` only lower inside the physical scalar
+    finalizer, so reductions feeding them must stay on the combine/finalize
+    callback path even when the group fits one TensorSSA fragment. Only
+    fragment-multiple groups can use QuACK's physical partial scheme; smaller
+    groups keep the TensorSSA path and reject at the finalize-op lowering.
+    """
+    if layout.group_size % 32 != 0 or local_reduce_needs_physical_callbacks(
+        layout.axis, layout.group_size
+    ):
+        return False
+    stack = list(node.users)
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    while stack:
+        user = stack.pop()
+        if user in seen:
+            continue
+        seen.add(user)
+        if user.op == "call_function" and (
+            _cute_op_name(user.target) in PHYSICAL_FINALIZE_OP_NAMES
+        ):
+            return True
+        if is_shape_preserving_pointwise_node(user):
+            stack.extend(user.users)
+    return False
 
 
 def is_shape_preserving_pointwise_node(node: torch.fx.Node) -> bool:
@@ -676,7 +714,10 @@ def lower_tensorssa_reduce(
         f"value / {layout.group_size}.0" if reduction_type == "mean" else "value"
     )
     source = _cute_arg(input_node, env)
-    if layout.needs_physical_combine:
+    needs_physical_combine = layout.needs_physical_combine or (
+        reduction_requires_physical_finalize(node, layout)
+    )
+    if needs_physical_combine:
         if local_reduce_physical_reductions is not None:
             local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
                 desc.combine_expr, finalize_expr
@@ -689,7 +730,7 @@ def lower_tensorssa_reduce(
         f"{source}.reduce({desc.cute_op}, init_val={desc.init_val}, reduction_profile={layout.reduction_profile})",
         source,
     )
-    if reduction_type == "mean" and not layout.needs_physical_combine:
+    if reduction_type == "mean" and not needs_physical_combine:
         reduced = _generate_like(
             kernel, f"{reduced} / {float(layout.group_size)!r}", reduced
         )
