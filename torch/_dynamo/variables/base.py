@@ -296,13 +296,12 @@ def _check_method_arity(
     # Mirror the TypeErrors CPython raises for builtin methods (see
     # Objects/call.c and the METH_* convention in Modules/_collectionsmodule.c
     # etc.), so a traced arity error matches eager. CPython prefixes the owning
-    # type on the positional-count errors (e.g. "set.add()") but not on the
-    # keyword error.
+    # type on all of these (e.g. "set.add()", "dict.keys()").
     n = len(args)
+    qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
-        raise_type_error(tx, f"{name}() takes no keyword arguments")
+        raise_type_error(tx, f"{qualname}() takes no keyword arguments")
     if flags & (MethodFlags.NOARGS | MethodFlags.O):
-        qualname = f"{vt.python_type_name()}.{name}"
         if flags & MethodFlags.NOARGS and args:
             raise_type_error(tx, f"{qualname}() takes no arguments ({n} given)")
         if flags & MethodFlags.O and n != 1:
