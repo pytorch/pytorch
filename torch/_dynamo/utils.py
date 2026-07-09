@@ -4188,29 +4188,15 @@ def _get_fake_value_impl(
             )
 
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+        from .exc import FakeTensorObservedException, raise_observed_exception
 
-        has_exn_handler = (
-            sys.version_info >= (3, 11)
-            and tx.current_instruction.exn_tab_entry is not None
-            and tx.current_instruction.exn_tab_entry.target.opname == "PUSH_EXC_INFO"
-        ) or (sys.version_info < (3, 11) and len(tx.block_stack) > 0)
-
-        if has_exn_handler:
-            tx.output.graph.erase_node(node)
-            from .exc import raise_observed_exception
-
-            raise_observed_exception(RuntimeError, tx, args=[msg])
-        else:
-            _wrap_graph_break_with_torch_runtime_err(
-                lambda: unimplemented(
-                    gb_type="RuntimeError when making fake tensor call",
-                    context="",
-                    explanation=msg,
-                    hints=[*graph_break_hints.USER_ERROR],
-                    from_exc=cause,
-                )
+        try:
+            raise_observed_exception(
+                RuntimeError, tx, args=[msg], fake_tensor_eval=True
             )
-            raise AssertionError("should not be reachable") from None
+        except FakeTensorObservedException as fte:
+            fte.node = node
+            raise
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
