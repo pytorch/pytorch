@@ -14680,6 +14680,7 @@
   python_module: sparse
   dispatch:
     SparseCsrCUDA: _sparse_csr_linear_solve
+    SparseCsrXPU: _sparse_csr_linear_solve_xpu
 
 - func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
