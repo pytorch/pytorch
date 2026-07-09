@@ -2034,16 +2034,20 @@ class ProcessGroupOpaqueTypeTest(TestCase):
     """Test that ProcessGroup opaque type members are registered and exist on the class."""
 
     def test_process_group_subclasses_opaque_base(self):
-        from torch._opaque_base import OpaqueBase
+        from torch._custom_class_base import CustomClassBase
         from torch.distributed.device_mesh import _register_distributed_opaque_types
 
         _register_distributed_opaque_types()
 
-        self.assertTrue(issubclass(ProcessGroup, OpaqueBase))
-        self.assertIsInstance(ProcessGroup(0, 1), OpaqueBase)
+        self.assertTrue(issubclass(ProcessGroup, CustomClassBase))
+        self.assertEqual(ProcessGroup.__dictoffset__, 0)
+        process_group = ProcessGroup(0, 1)
+        self.assertIsInstance(process_group, CustomClassBase)
+        self.assertFalse(hasattr(process_group, "__dict__"))
+        self.assertEqual(process_group.rank(), 0)
         for _ in range(1000):
             process_group = ProcessGroup(0, 1)
-            self.assertIsInstance(process_group, OpaqueBase)
+            self.assertIsInstance(process_group, CustomClassBase)
             self.assertEqual(
                 ProcessGroup.unbox(process_group.boxed()).rank(),
                 process_group.rank(),
@@ -2051,7 +2055,7 @@ class ProcessGroupOpaqueTypeTest(TestCase):
 
         store = dist.PrefixStore("opaque_base", dist.HashStore())
         process_group = ProcessGroup(store, 0, 1)
-        self.assertIsInstance(process_group, OpaqueBase)
+        self.assertIsInstance(process_group, CustomClassBase)
         self.assertEqual(
             ProcessGroup.unbox(process_group.boxed()).rank(),
             process_group.rank(),

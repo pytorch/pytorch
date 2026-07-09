@@ -1259,10 +1259,21 @@ def forward(self, x_1, cfg_1):
         with self.assertRaisesRegex(TypeError, r"EmptyOpaque\(\) takes no arguments"):
             EmptyOpaque(1, y=2)
 
+        class NewConsumesArgsOpaque(OpaqueBase):
+            def __new__(cls, value):
+                instance = super().__new__(cls)
+                instance.value = value
+                return instance
+
+        self.assertEqual(NewConsumesArgsOpaque(3).value, 3)
+        self.assertIsInstance(NewConsumesArgsOpaque(3), OpaqueBase)
+
     def test_opaque_base_is_pybind_backed(self):
         self.assertTrue(hasattr(torch._C, "_OpaqueBase"))
         self.assertIn(torch._C._OpaqueBase, OpaqueBase.__mro__)
         self.assertIs(type(OpaqueBase), type(torch._C._OpaqueBase))
+        self.assertEqual(OpaqueBase.__dictoffset__, 0)
+        self.assertFalse(hasattr(OpaqueBase(), "__dict__"))
 
         class PyOpaque(OpaqueBase):
             def __init__(self, value):
@@ -1271,6 +1282,8 @@ def forward(self, x_1, cfg_1):
         self.assertEqual(PyOpaque(3).value, 3)
         self.assertIsInstance(PyOpaque(3), torch._C._OpaqueBase)
         self.assertIsInstance(PyOpaque(3), OpaqueBase)
+        self.assertNotEqual(PyOpaque.__dictoffset__, 0)
+        self.assertEqual(PyOpaque(3).__dict__, {"value": 3})
 
         class ChildPyOpaque(PyOpaque):
             def __init__(self, value):

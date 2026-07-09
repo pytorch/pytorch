@@ -162,6 +162,8 @@ def _is_custom_class_base_instance(cls, instance, base_instancecheck):
 
 
 def _set_constructing(instance):
+    # The instance stays alive until _restore_constructing runs, so this id
+    # cannot be reused by another live object while the guard is active.
     instance_id = id(instance)
     _constructing_instance_ids[instance_id] = (
         _constructing_instance_ids.get(instance_id, 0) + 1
@@ -184,14 +186,7 @@ def _is_custom_class_base_constructing(instance):
 
 
 def _ensure_custom_class_base_initialized(instance):
-    try:
-        initialized = object.__getattribute__(instance, "_opaque_base_initialized")
-    except AttributeError:
-        initialized = False
-    if initialized:
-        return
     _get_pybind_custom_class_base().__init__(instance)
-    object.__setattr__(instance, "_opaque_base_initialized", True)
 
 
 class CustomClassBaseMeta(type):
@@ -245,6 +240,8 @@ def _install_custom_class_base(_PybindCustomClassBase: type) -> tuple[type, type
         setattr(cls, name, wrapped)
 
     class CustomClassBase(_PybindCustomClassBase):
+        __slots__ = ()
+
         def __new__(cls, *args, **kwargs):
             # pyrefly: ignore [no-matching-overload]
             instance = _PybindCustomClassBase.__new__(cls)
@@ -258,7 +255,9 @@ def _install_custom_class_base(_PybindCustomClassBase: type) -> tuple[type, type
             init = _find_python_init_after_custom_class_base(type(self))
             if init is not None:
                 init(self, *args, **kwargs)
-            elif args or kwargs:
+            elif (args or kwargs) and not _has_python_new_before_custom_class_base(
+                type(self)
+            ):
                 raise TypeError(f"{type(self).__name__}() takes no arguments")
 
         def __init_subclass__(cls, **kwargs):
@@ -319,6 +318,14 @@ def _install_custom_class_base(_PybindCustomClassBase: type) -> tuple[type, type
             return init
         return None
 
+    def _has_python_new_before_custom_class_base(cls):
+        for base in cls.__mro__:
+            if base is CustomClassBase:
+                return False
+            if "__new__" in base.__dict__:
+                return True
+        return False
+
     def _is_pybind_init(init):
         # This is pybind11's internal method wrapper type name. PyTorch vendors
         # pybind11, so the dependency is stable and covered by opaque tests.
@@ -331,9 +338,9 @@ def _install_custom_class_base(_PybindCustomClassBase: type) -> tuple[type, type
             )
         return type.__instancecheck__(cls, instance)
 
-    type(
-        _PybindCustomClassBase
-    ).__instancecheck__ = _pybind_instancecheck  # pyrefly: ignore [bad-assignment]
+    pybind_meta = type(_PybindCustomClassBase)
+    # pyrefly: ignore [bad-assignment, missing-attribute]
+    pybind_meta.__instancecheck__ = _pybind_instancecheck
     CustomClassBase._pybind_backed = True
     CustomClassBaseMeta.__qualname__ = "CustomClassBaseMeta"
     CustomClassBase.__qualname__ = "CustomClassBase"
