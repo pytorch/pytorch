@@ -909,6 +909,78 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
+    def test_vectorized_group_per_lane_gather(self):
+        """Per-lane gather + lane-uniform load in one vec group (#188871).
+
+        The uniform scale load enables score_mod vectorization; the rel-pos
+        gather's wrapped index must still classify per-lane, not lane-uniform
+        (which silently broadcast lane 0's bias across the group).
+        """
+        seq_len = 512
+        rel_bias = torch.randn(2 * seq_len, device="cuda")
+        head_scale = torch.randn(4, device="cuda")
+        offset = seq_len - 1
+
+        def score_mod(score, _b, h, q_idx, kv_idx):
+            return score + rel_bias[q_idx - kv_idx + offset] * head_scale[h]
+
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
+    def test_vectorized_group_untraceable_index_op(self):
+        """Nonlinear index ops (abs/clamp/min/max) must keep per-lane index
+        semantics under vectorization — whether traced to sympy or treated as
+        opaque, never classified lane-uniform (#188878)."""
+        seq_len = 512
+        tbl = torch.randn(2 * seq_len, device="cuda")
+        head_scale = torch.randn(4, device="cuda")
+
+        index_fns = {
+            "abs": lambda q_idx, kv_idx: (q_idx - kv_idx).abs(),
+            "clamp": lambda q_idx, kv_idx: (q_idx - kv_idx).clamp(0, seq_len - 1),
+            "minimum": lambda q_idx, kv_idx: torch.minimum(q_idx, kv_idx),
+            "maximum": lambda q_idx, kv_idx: torch.maximum(
+                kv_idx - q_idx, torch.zeros_like(kv_idx)
+            ),
+        }
+        for name, index_fn in index_fns.items():
+            with self.subTest(index_fn=name):
+
+                def score_mod(score, _b, h, q_idx, kv_idx):
+                    return score + tbl[index_fn(q_idx, kv_idx)] * head_scale[h]
+
+                q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+                flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
+    def test_chained_kv_gather(self):
+        """Document-style chained gather: the contiguous inner load promotes
+        vectorization and the outer loaded-value index is opaque; it must stay
+        a per-lane gather (#188878)."""
+        seq_len = 512
+        doc_bias = torch.randn(8, device="cuda")
+        doc_id = torch.arange(seq_len, device="cuda") % 8
+
+        def score_mod(score, _b, _h, _q, kv_idx):
+            return score + doc_bias[doc_id[kv_idx]]
+
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
+    def test_captured_table_int64_index(self):
+        """Widening index casts must not break index-fragment materialization (#188871)."""
+        seq_len = 512
+        tbl = torch.randn(seq_len, device="cuda")
+
+        def score_mod(score, _b, _h, _q, kv_idx):
+            return score + tbl[kv_idx.to(torch.int64)]
+
+        q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+        flash_vs_triton(q, k, v, score_mod=score_mod)
+
+    @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
@@ -2445,6 +2517,24 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=alibi_score_mod)
 
     @xfailIfSM120OrLater
+    def test_dynamic_captured_table_negative_index_wrap(self):
+        """Rel-pos table gather with a shape-dependent offset (#188871).
+
+        Once shapes go dynamic, the table length and offset are rendered as Int64
+        aux scalars; the emitted negative-index wrap must cast them to the Int32
+        index dtype or cute.where rejects the mixed operands.
+        """
+        for seq_len in [512, 1024]:
+            tbl = torch.randn(2 * seq_len, device="cuda")
+            offset = seq_len - 1
+
+            def score_mod(score, _b, _h, q_idx, kv_idx):
+                return score + tbl[q_idx - kv_idx + offset]
+
+            q, k, v = create_test_tensors(seq_len=seq_len, device="cuda")
+            flash_vs_triton(q, k, v, score_mod=score_mod, dynamic=True)
+
+    @xfailIfSM120OrLater
     def test_dynamic_seq_len_with_block_mask(self):
         """Test dynamic sequence lengths with block mask."""
 
@@ -2635,7 +2725,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             model(x, lens)
 
         self.assertEqual(
-            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+            counter.frame_count,
+            1,
+            lambda msg: f"{msg}\nExpected 1 graph, got {counter.frame_count}",
         )
 
     @xfailIfSM120OrLater
@@ -2672,7 +2764,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             run(q, k, v, block_mask)
 
         self.assertEqual(
-            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+            counter.frame_count,
+            1,
+            lambda msg: f"{msg}\nExpected 1 graph, got {counter.frame_count}",
         )
 
     @xfailIfSM120OrLater

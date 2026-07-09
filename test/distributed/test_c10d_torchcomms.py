@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import unittest
 
 import torch
@@ -7,7 +8,12 @@ import torch.distributed as dist
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
-from torch.testing._internal.common_utils import parametrize, run_tests, subtest
+from torch.testing._internal.common_utils import (
+    find_free_port,
+    parametrize,
+    run_tests,
+    subtest,
+)
 
 
 @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
@@ -23,6 +29,15 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
     @property
     def _rank_value(self):
         return self.rank + 1
+
+    def _requires_cuda(self):
+        """Return True when the test variant is NOT cuda.
+
+        MultiProcContinuousTest workers wrap unittest.SkipTest as RuntimeError,
+        so @onlyCUDA / self.skipTest() poison the entire class.  Tests that
+        need NCCL should call this and ``return`` early instead.
+        """
+        return self.device_type != "cuda"
 
     def _skip_if_product_overflows(self, op):
         if op == dist.ReduceOp.PRODUCT and self.world_size > 12:
@@ -228,11 +243,131 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         with self.assertRaisesRegex(NotImplementedError, "sort_ranks"):
             dist.new_group(ranks=ranks, sort_ranks=False)
 
+    def test_new_group_backend_none_narrows_to_default_device(self):
+        ranks = list(range(self.world_size))
+        ng = dist.new_group(ranks=ranks, backend=None)
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_bare_default_backend_is_auto_qualified(self):
+        if self._requires_cuda():
+            return
+        ranks = list(range(self.world_size))
+        ng = dist.new_group(ranks=ranks, backend="nccl")
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_qualified_backend_passes_through(self):
+        if self._requires_cuda():
+            return
+        ranks = list(range(self.world_size))
+        ng = dist.new_group(ranks=ranks, backend="cuda:nccl")
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_with_pg_options(self):
+        if self._requires_cuda():
+            return
+        ranks = list(range(self.world_size))
+        opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+        opts.config.cga_cluster_size = 2
+        opts.config.max_ctas = 16
+        ng = dist.new_group(ranks=ranks, pg_options=opts)
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_sequential_pg_options_produce_distinct_groups(self):
+        if self._requires_cuda():
+            return
+        ranks = list(range(self.world_size))
+        opts_a = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+        opts_a.config.cga_cluster_size = 2
+        opts_b = dist.ProcessGroupNCCL.Options()
+        opts_b.config.cga_cluster_size = 4
+        g_a = dist.new_group(ranks=ranks, pg_options=opts_a)
+        g_b = dist.new_group(ranks=ranks, pg_options=opts_b)
+        self.assertNotEqual(g_a.group_name, g_b.group_name)
+
 
 devices = ["cpu", "cuda", "xpu"]
 instantiate_device_type_tests(
     TestC10dTorchCommsBasic, globals(), only_for=devices, allow_xpu=True
 )
+
+
+@unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
+    """Verify init_process_group auto-qualifies bare backends under torchcomms.
+
+    Overrides ``_init_pg`` to pass ``device_id`` with bare ``"nccl"`` —
+    the auto-qualify logic in ``init_process_group`` should expand it to
+    ``"cpu:gloo,cuda:nccl"`` so both CPU and CUDA backends are available.
+    """
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        torch.distributed.config.use_torchcomms = True
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        os.environ["RANK"] = str(rank)
+        os.environ["WORLD_SIZE"] = str(world_size)
+        os.environ["TORCHCOMM_STORE_PATH"] = rdvz_file
+        os.environ["LOCAL_RANK"] = str(rank)
+
+        store = dist.FileStore(rdvz_file, world_size)
+        device_id = torch.device(f"cuda:{rank}")
+        torch.cuda.set_device(rank)
+
+        dist.init_process_group(
+            backend="nccl",
+            world_size=world_size,
+            rank=rank,
+            store=store,
+            device_id=device_id,
+        )
+        cls.pg = dist.distributed_c10d._get_default_group()
+        torch.set_default_device(device_id)
+
+    @property
+    def _rank_value(self):
+        return self.rank + 1
+
+    def test_default_pg_has_cpu_backend(self):
+        default_pg = dist.distributed_c10d._get_default_group()
+        cpu_be = default_pg._get_backend(torch.device("cpu"))
+        self.assertIsNotNone(cpu_be)
+
+    def test_default_pg_has_cuda_backend(self):
+        default_pg = dist.distributed_c10d._get_default_group()
+        cuda_be = default_pg._get_backend(torch.device("cuda"))
+        self.assertIsNotNone(cuda_be)
+
+    def test_allreduce_on_auto_qualified_pg(self):
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(tensor, group=self.pg)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_from_auto_qualified_parent(self):
+        ranks = list(range(self.world_size))
+        ng = dist.new_group(ranks=ranks)
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_bound_device_id_is_set(self):
+        default_pg = dist.distributed_c10d._get_default_group()
+        self.assertIsNotNone(default_pg.bound_device_id)
+        self.assertEqual(default_pg.bound_device_id.type, "cuda")
+
+
+instantiate_device_type_tests(
+    TestC10dTorchCommsInitAutoQualify, globals(), only_for=["cuda"]
+)
+
 
 if __name__ == "__main__":
     run_tests()
