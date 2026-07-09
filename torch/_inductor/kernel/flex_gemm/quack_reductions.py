@@ -32,7 +32,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
     statically_known_equal,
-    validate_local_reduce_tensorssa_group_size,
 )
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
@@ -106,7 +105,9 @@ def _group_count_matches_selected_dim(
         case -1:
             return True
         case _:
-            return statically_known_equal(group_count * group, selected_size)
+            return statically_known_equal(
+                group_count * group, selected_size
+            ) or statically_known_equal(group_count, selected_size // group)
 
 
 def _grouped_layout_matches_source_shape(
@@ -376,6 +377,14 @@ def propagate_grouped_tensorssa_layout(
     return layout
 
 
+def shape_arg_value(value: Any) -> Any:
+    match value:
+        case torch.fx.Node(meta={"val": shape_value}):
+            return shape_value
+        case _:
+            return value
+
+
 def view_or_reshape_args(node: torch.fx.Node) -> tuple[Any, tuple[Any, ...]] | None:
     if node.op == "call_function" and node.target in (
         torch.ops.aten.view.default,
@@ -383,7 +392,7 @@ def view_or_reshape_args(node: torch.fx.Node) -> tuple[Any, tuple[Any, ...]] | N
     ):
         shape = node.args[1]
         if isinstance(shape, (tuple, list, torch.Size)):
-            return node.args[0], tuple(shape)
+            return node.args[0], tuple(shape_arg_value(arg) for arg in shape)
     return None
 
 
@@ -406,10 +415,11 @@ def lower_view_or_reshape(
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     preserve_value_layout: bool = False,
 ) -> Any | None:
+    """Emit a view using grouped provenance from the shared FX analysis."""
     view_args = view_or_reshape_args(node)
     if view_args is None:
         return None
-    source_node, shape = view_args
+    source_node, _ = view_args
     if (
         isinstance(source_node, torch.fx.Node)
         and source_node in local_reduce_store_sources
@@ -418,21 +428,17 @@ def lower_view_or_reshape(
         return _cute_arg(source_node, env)
     if not isinstance(source_node, torch.fx.Node):
         return None
-    grouped_layout = grouped_tensor_layout(shape, tensor_meta_shape(source_node))
-    if grouped_layout is None:
-        if source_node in grouped_tensors:
-            return _cute_arg(source_node, env)
-        return None
-    validate_local_reduce_tensorssa_group_size(
-        grouped_layout.axis, grouped_layout.group_size
-    )
     source = _cute_arg(source_node, env)
-    grouped_tensors[node] = grouped_layout
-    if preserve_value_layout:
+    grouped_layout = grouped_tensors.get(node)
+    if grouped_layout is not None:
+        if preserve_value_layout:
+            return source
+        return _generate_like(
+            kernel, f"{source}.reshape({grouped_layout.tensorssa_shape})", source
+        )
+    if source_node in grouped_tensors:
         return source
-    return _generate_like(
-        kernel, f"{source}.reshape({grouped_layout.tensorssa_shape})", source
-    )
+    return None
 
 
 FUNCTION_REDUCTION_TYPES = {
@@ -491,7 +497,8 @@ def lower_full_scalar(node: torch.fx.Node) -> Any | None:
     shape = normalize_shape(node.args[0])
     if shape != ():
         return None
-    return node.args[1]
+    value = node.args[1]
+    return value if isinstance(value, (bool, int, float)) else None
 
 
 def lower_squeeze(
@@ -518,6 +525,8 @@ def lower_getitem(
     if not isinstance(source_node, torch.fx.Node) or not isinstance(index, int):
         return None
     source = _cute_arg(source_node, env)
+    if not isinstance(source, (tuple, list)) or not -len(source) <= index < len(source):
+        return None
     if source_node in local_reduce_store_sources:
         local_reduce_store_sources[node] = local_reduce_store_sources[source_node][
             index
