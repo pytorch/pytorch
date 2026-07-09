@@ -1482,6 +1482,91 @@ class TestModuleHookNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "where no input requires gradient"):
             mod(inp).sum().backward()
 
+    def test_pre_hook_only_no_requires_grad(self):
+        # https://github.com/pytorch/pytorch/issues/189093
+        # Only a full backward pre-hook is registered: the full-backward-hook
+        # warning should not fire when no module inputs require gradients.
+        class MultiIn(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = nn.Linear(2, 3)
+
+            def forward(self, x, y):
+                return self.lin(x + y)
+
+        class MultiOut(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = nn.Linear(2, 3)
+
+            def forward(self, x):
+                out = self.lin(x)
+                return out, out * 2
+
+        seen_grad_outputs = []
+
+        def pre_hook(mod, grad_output):
+            seen_grad_outputs.append(grad_output)
+
+        inp = torch.rand(1, 2)
+        inp2 = torch.rand(1, 2)
+        cases = [
+            (nn.Linear(2, 3), lambda mod: mod(inp).sum().backward(), 1),
+            (MultiIn(), lambda mod: mod(inp, inp2).sum().backward(), 1),
+            (MultiOut(), lambda mod: sum(o.sum() for o in mod(inp)).backward(), 2),
+        ]
+        # Control: an input requiring grad never warned; behavior must match.
+        req_inp = torch.rand(1, 2, requires_grad=True)
+        cases.append((nn.Linear(2, 3), lambda mod: mod(req_inp).sum().backward(), 1))
+        for mod, run, n_outputs in cases:
+            seen_grad_outputs.clear()
+            with mod.register_full_backward_pre_hook(pre_hook):
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
+                    run(mod)
+            msgs = [str(x.message) for x in w]
+            fired = any("Full backward hook is firing" in m for m in msgs)
+            self.assertFalse(fired, msgs)
+            self.assertEqual(len(seen_grad_outputs), 1)
+            self.assertEqual(len(seen_grad_outputs[0]), n_outputs)
+            for gO in seen_grad_outputs[0]:
+                self.assertIsInstance(gO, torch.Tensor)
+
+    def test_hook_no_requires_grad_warns_with_pre_hook(self):
+        # The warning and the direct user-hook call must be preserved when a
+        # full backward hook is registered, with or without a pre-hook.
+        hook_called = [0]
+        pre_hook_called = [0]
+
+        def hook(mod, grad_input, grad_output):
+            hook_called[0] += 1
+            for gI in grad_input:
+                self.assertIsNone(gI)
+            for gO in grad_output:
+                self.assertIsInstance(gO, torch.Tensor)
+
+        def pre_hook(mod, grad_output):
+            pre_hook_called[0] += 1
+            for gO in grad_output:
+                self.assertIsInstance(gO, torch.Tensor)
+
+        inp = torch.rand(1, 2)
+
+        mod = nn.Linear(2, 3)
+        mod.register_full_backward_hook(hook)
+        with self.assertWarnsRegex(UserWarning, "Full backward hook is firing"):
+            mod(inp).sum().backward()
+        self.assertEqual(hook_called[0], 1)
+
+        hook_called[0] = 0
+        mod = nn.Linear(2, 3)
+        mod.register_full_backward_hook(hook)
+        mod.register_full_backward_pre_hook(pre_hook)
+        with self.assertWarnsRegex(UserWarning, "Full backward hook is firing"):
+            mod(inp).sum().backward()
+        self.assertEqual(hook_called[0], 1)
+        self.assertEqual(pre_hook_called[0], 1)
+
     def test_hook_last_arg_requires_grad(self):
         mod = nn.L1Loss()
         inp = torch.rand(1, requires_grad=True)
