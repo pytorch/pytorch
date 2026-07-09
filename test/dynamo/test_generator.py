@@ -1296,7 +1296,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
 
-    @unittest.expectedFailure
     def test_throw_with_finally(self):
         z = 0
 
@@ -1432,7 +1431,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(RuntimeError):
             fn(t)
 
-    @unittest.expectedFailure
     def test_throw_yield_finally(self):
         z = 0
 
@@ -1460,7 +1458,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(Unsupported):
             fn(t)
 
-    @unittest.expectedFailure
     def test_throw_try_except_finally(self):
         z = 0
 

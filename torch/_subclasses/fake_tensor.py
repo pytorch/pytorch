@@ -319,6 +319,24 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     return None
 
 
+def maybe_get_real_tensor(x: object) -> Tensor | None:
+    if isinstance(x, FakeTensor):
+        return x.real_tensor
+    return None
+
+
+def maybe_get_fake_device(x: object) -> torch.device | None:
+    if isinstance(x, FakeTensor):
+        return x.fake_device
+    return None
+
+
+def maybe_get_fake_constant(x: object) -> Tensor | None:
+    if isinstance(x, FakeTensor):
+        return x.constant
+    return None
+
+
 @functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
@@ -764,22 +782,25 @@ class SymNumberMemoDescriptor:
             return None
 
         # Version counter based tracking isn't 100% sound but it's close
-        # enough
-        if not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version:
-            setattr(obj, self._memo(obj), None)
-            return None
+        # enough.  Inference tensors don't track version counters, so
+        # skip that check for them.
+        if not self._is_nested_int and not obj.is_inference():
+            if getattr(obj, self._memo_vc(obj), None) != obj._version:
+                setattr(obj, self._memo(obj), None)
+                return None
 
-        # Backed SymFloats are stable across retracing epochs. Keep this after
-        # the version check so tensor mutation still invalidates the memo.
+        # Backed SymFloats are stable across retracing epochs, but tensor
+        # mutation (version counter check above) still invalidates the memo.
         if isinstance(r, torch.SymFloat) and r.node.hint is not None:
             return r
 
         if (
             not self._is_nested_int
-            and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
+            and getattr(obj, self._memo_epoch(obj), None) != obj.fake_mode.epoch
         ):
             setattr(obj, self._memo(obj), None)
             return None
+
         return r
 
     def __set__(
@@ -791,9 +812,9 @@ class SymNumberMemoDescriptor:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
             setattr(obj, self._memo_epoch(obj), None)
-        elif not obj.is_inference() or self._is_nested_int:
+        else:
             setattr(obj, self._memo(obj), value)
-            if not self._is_nested_int:
+            if not self._is_nested_int and not obj.is_inference():
                 setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
 
@@ -1632,19 +1653,16 @@ class FakeTensorMode(TorchDispatchMode):
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
     @property
     def avoid_device_init(self) -> bool:
-        def has_eagerly_available_backend() -> bool:
-            return (hasattr(torch, "hpu") and torch.hpu.is_available()) or bool(
-                _is_privateuse1_backend_available()
-            )
-
         if torch.xpu._is_compiled():
             if torch.cuda._is_compiled():
                 raise AssertionError("Cannot have both xpu and cuda compiled")
-            return not (torch.xpu.is_initialized() or has_eagerly_available_backend())
-        if torch.cuda._is_compiled():
-            return not (torch.cuda.is_initialized() or has_eagerly_available_backend())
+            return not torch.xpu.is_available()
 
-        return not (torch.cuda.is_available() or has_eagerly_available_backend())
+        return not (
+            torch.cuda.is_available()
+            or (hasattr(torch, "hpu") and torch.hpu.is_available())
+            or _is_privateuse1_backend_available()
+        )
 
     @property
     def stack(self) -> str:
@@ -3364,6 +3382,7 @@ class FakeTensorMode(TorchDispatchMode):
         aten.view_as_complex.default,
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
+        aten.stack.default,
     )
 
     _unbacked_special_fake_handling_ops = ordered_set(
