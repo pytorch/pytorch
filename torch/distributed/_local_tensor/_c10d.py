@@ -7,7 +7,7 @@ from datetime import timedelta
 import torch
 from torch._C import ScriptObject
 from torch._C._distributed_c10d import FakeWork, PythonCallbackWork
-from torch.distributed._mesh_layout import _MeshLayout
+from torch.distributed._mesh_layout import _FlatLayout
 from torch.distributed.distributed_c10d import (
     _check_op,
     _get_default_group,
@@ -27,7 +27,7 @@ from torch.distributed.distributed_c10d import (
 # modern collectives like _allgather_base_ got rid of the unnecessary list.
 # When in doubt, consult the code that dispatches to the collective on the PG
 # in distributed_c10d.py e.g., work = group.allgather([tensor_list], [tensor],
-# opts) indicates its always a list.
+# opts) indicates it's always a list.
 
 
 def _gcd_list(numbers: Sequence[int]) -> int:
@@ -74,6 +74,23 @@ def _indices_to_layout(indices: list[int]) -> tuple[tuple[int, ...], tuple[int, 
     return final_shapes, final_strides
 
 
+def _resolve_pg_or_name(
+    group: ScriptObject | ProcessGroup | str | GroupName,
+) -> ScriptObject | ProcessGroup:
+    """Accept any of the group reps that may reach a functional collective.
+
+    Under ``compile_on_one_rank=True`` the functional collective ops receive
+    the live ``ProcessGroup`` instead of a string group name, so we cannot
+    unconditionally call ``_resolve_process_group``.
+    """
+    if isinstance(group, (ProcessGroup, ScriptObject)):
+        return group
+    # ``GroupName`` is ``NewType("GroupName", str)``, so wrapping ``group`` here
+    # is a runtime no-op. The cast exists purely so pyrefly accepts the
+    # narrowed ``str | GroupName`` argument against the declared parameter type.
+    return _resolve_process_group(GroupName(group))
+
+
 def _prepare_collective_groups(
     process_group_so: ScriptObject | ProcessGroup,
 ) -> tuple[list[int], list[int], int]:
@@ -94,7 +111,7 @@ def _prepare_collective_groups(
     ranks = [r - offset for r in ranks]
 
     shape, strides = _indices_to_layout(ranks)
-    layout = _MeshLayout(shape, strides)
+    layout = _FlatLayout(shape, strides)
 
     global_pg = _get_default_group()
     group_offsets = layout.complement(global_pg.size()).all_ranks_from_zero()
@@ -107,13 +124,15 @@ def _prepare_collective_groups(
 # work object). Functional collectives expect the implementation to allocate outputs, accept
 # process group name that must be resolved and do not support async ops (return output).
 def _local_functional_all_gather_into_tensor(
-    tensor: torch.Tensor, group_size: int, group_name: GroupName
+    tensor: torch.Tensor,
+    group_size: int,
+    group_name: GroupName | ProcessGroup,
 ) -> torch.Tensor:
     # "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
     from . import LocalTensor
 
     ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_process_group(group_name)
+        _resolve_pg_or_name(group_name)
     )
 
     if not isinstance(tensor, LocalTensor):
@@ -142,13 +161,16 @@ def _local_functional_all_gather_into_tensor(
 
 
 def _local_functional_reduce_scatter_tensor(
-    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: GroupName
+    tensor: torch.Tensor,
+    reduce_op: str,
+    group_size: int,
+    group_name: GroupName | ProcessGroup,
 ) -> torch.Tensor:
     #  "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
 
     ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_process_group(group_name)
+        _resolve_pg_or_name(group_name)
     )
 
     if not isinstance(tensor, LocalTensor):
@@ -186,13 +208,16 @@ def _local_functional_reduce_scatter_tensor(
 
 
 def _local_functional_shard_dim_alltoall(
-    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: GroupName
+    tensor: torch.Tensor,
+    gather_dim: int,
+    shard_dim: int,
+    group_name: GroupName | ProcessGroup,
 ) -> torch.Tensor:
     # "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
 
     ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_process_group(group_name)
+        _resolve_pg_or_name(group_name)
     )
 
     if not isinstance(tensor, LocalTensor):
@@ -235,13 +260,13 @@ def _local_functional_all_to_all_single(
     tensor: torch.Tensor,
     output_split_sizes: list[torch.SymInt],
     input_split_sizes: list[torch.SymInt],
-    group_name: GroupName,
+    group_name: GroupName | ProcessGroup,
 ) -> torch.Tensor:
     # "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
     from . import LocalIntNode, LocalTensor
 
     ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_process_group(group_name)
+        _resolve_pg_or_name(group_name)
     )
 
     if not isinstance(tensor, LocalTensor):

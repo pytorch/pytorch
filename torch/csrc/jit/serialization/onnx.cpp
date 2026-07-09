@@ -110,7 +110,7 @@ void dump(
   } else if (attr.has_i()) {
     stream << "int, value: " << attr.i();
   } else if (attr.has_s()) {
-    stream << "string, value: '" << attr.s() << "'";
+    stream << "string, value: '" << attr.s() << '\'';
   } else if (attr.has_g()) {
     stream << "graph, value:\n";
     dump(attr.g(), stream, indent + 1);
@@ -133,7 +133,7 @@ void dump(
   } else if (attr.strings_size()) {
     stream << "strings, values: [";
     for (const auto i : c10::irange(attr.strings_size())) {
-      stream << "'" << attr.strings(i) << "'"
+      stream << '\'' << attr.strings(i) << '\''
              << (i == attr.strings_size() - 1 ? "" : " ");
     }
     stream << ']';

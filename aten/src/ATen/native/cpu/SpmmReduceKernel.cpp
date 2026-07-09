@@ -310,7 +310,7 @@ void spmm_reduce_backward_input_arg_kernel_impl(
   const scalar_t* grad_out_data = grad_out.const_data_ptr<scalar_t>();
   auto col_data = col_indices.accessor<const index_t, 1>();
   const scalar_t* other_data = other.const_data_ptr<scalar_t>();
-  index_t* arg_out_data = arg_out.data_ptr<index_t>();
+  const index_t* arg_out_data = arg_out.const_data_ptr<index_t>();
 
   int64_t M = grad_out.size(0);
   int64_t K = grad_out.size(1);
@@ -321,7 +321,7 @@ void spmm_reduce_backward_input_arg_kernel_impl(
     for (const auto m : c10::irange(begin, end)) {
       const scalar_t* grad_out_ptr = grad_out_data + m * K;
       scalar_t* grad_ptr = grad_data + m * K;
-      index_t* arg_out_ptr = arg_out_data + m * K;
+      const index_t* arg_out_ptr = arg_out_data + m * K;
 
       for (const auto k : c10::irange(K)) {
         if (arg_out_ptr[k] == index_t(nnz)) {

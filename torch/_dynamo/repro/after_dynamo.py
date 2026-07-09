@@ -26,7 +26,7 @@ import sys
 import textwrap
 from collections.abc import Callable, Sequence
 from importlib import import_module
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.fx as fx
@@ -53,6 +53,8 @@ from torch.hub import tqdm
 from .. import config
 from ..backends.registry import CompilerFn, lookup_backend, register_debug_backend
 from ..debug_utils import clone_inputs_retaining_gradness
+from ..types import CompilerConfigProvider
+from . import ReproOptions
 
 
 log = logging.getLogger(__name__)
@@ -92,13 +94,18 @@ class WrapBackendDebug:
         if hasattr(unconfigured_compiler_fn, "compiler_name"):
             self.__name__ = unconfigured_compiler_fn.compiler_name  # type: ignore[attr-defined]
         if hasattr(unconfigured_compiler_fn, "get_compiler_config"):
-            self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config  # type: ignore[attr-defined]
+            self.get_compiler_config = cast(
+                CompilerConfigProvider, unconfigured_compiler_fn
+            ).get_compiler_config
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[Any], **kwargs: Any
     ) -> torch.fx.GraphModule:
         compiler_fn = functools.partial(self._torchdynamo_orig_backend, **kwargs)
-        assert config.repro_after in ("dynamo", "aot", None)
+        if config.repro_after not in ("dynamo", "aot", None):
+            raise AssertionError(
+                f"repro_after must be 'dynamo', 'aot', or None, got {config.repro_after!r}"
+            )
 
         if config.repro_after == "dynamo":
 
@@ -279,7 +286,8 @@ def dump_backend_state(
     2) If we can't convert Fx GraphModule to a string, we use to_folder to save
     the module and save a tar file.
     """
-    assert NNModuleToString.can_convert_to_string(gm)
+    if not NNModuleToString.can_convert_to_string(gm):
+        raise AssertionError("GraphModule cannot be converted to string")
     return dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy)
     # return dump_backend_repro_as_tarfile(gm, args, compiler_name)
 
@@ -424,7 +432,9 @@ def backend_fails(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def run_load_args(options: Any, mod: torch.nn.Module, load_args: Any) -> list[Any]:
+def run_load_args(
+    options: ReproOptions, mod: torch.nn.Module, load_args: Any
+) -> list[Any]:
     if not hasattr(load_args, "_version"):
         log.warning(
             "load_args does not have a _version attribute, please file a bug to PyTorch "
@@ -450,9 +460,7 @@ def run_load_args(options: Any, mod: torch.nn.Module, load_args: Any) -> list[An
     return args
 
 
-def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
-    args = run_load_args(options, mod, load_args)
-
+def repro_minify(options: ReproOptions, mod: torch.nn.Module, load_args: Any) -> None:
     # Setup debug minifier compiler
     if not options.accuracy:
         compiler_fn = lookup_backend("dynamo_minifier_backend")
@@ -473,21 +481,39 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
-    with torch.amp.autocast("cuda", enabled=options.autocast):
+    args = run_load_args(options, mod, load_args)
+    device_type = next(
+        (
+            a.device.type
+            for a in args
+            if isinstance(a, torch.Tensor) and a.device.type != "cpu"
+        ),
+        "cpu",
+    )
+    with torch.amp.autocast(device_type, enabled=options.autocast):
         opt_mod(*args)
 
 
-def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
+def repro_run(options: ReproOptions, mod: torch.nn.Module, load_args: Any) -> None:
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
 
     if options.accuracy != "":
         mod.eval()
         opt_mod.eval()  # type: ignore[union-attr]
 
-        with torch.amp.autocast("cuda", enabled=options.autocast):
+        args = run_load_args(options, mod, load_args)
+        device_type = next(
+            (
+                a.device.type
+                for a in args
+                if isinstance(a, torch.Tensor) and a.device.type != "cpu"
+            ),
+            "cpu",
+        )
+        with torch.amp.autocast(device_type, enabled=options.autocast):
             # TODO: disable clone
-            args = run_load_args(options, mod, load_args)
-            assert same_two_models(mod, mod, args), "Eager itself failed"  # type: ignore[arg-type]
+            if not same_two_models(mod, mod, args):  # type: ignore[arg-type]
+                raise AssertionError("Eager itself failed")
             if not same_two_models(
                 mod,  # type: ignore[arg-type]
                 opt_mod,  # type: ignore[arg-type]
@@ -497,8 +523,16 @@ def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
             ):
                 raise AccuracyError("Dynamo failed")
     else:
-        with torch.amp.autocast("cuda", enabled=options.autocast):
-            args = run_load_args(options, mod, load_args)
+        args = run_load_args(options, mod, load_args)
+        device_type = next(
+            (
+                a.device.type
+                for a in args
+                if isinstance(a, torch.Tensor) and a.device.type != "cpu"
+            ),
+            "cpu",
+        )
+        with torch.amp.autocast(device_type, enabled=options.autocast):
             run_fwd_maybe_bwd(mod, args, only_fwd=options.only_fwd, disable_clone=True)  # type: ignore[arg-type]
             del args
 
@@ -589,13 +623,13 @@ default settings on this script:
             "--autocast",
             default=autocast,
             action="store_true",
-            help="use torch.cuda.amp.autocast",
+            help="use torch.amp.autocast",
         )
         parser.add_argument(
             "--no-autocast",
             dest="autocast",
             action="store_false",
-            help="don't use torch.cuda.amp.autocast",
+            help="don't use torch.amp.autocast",
         )
         parser.add_argument(
             "--backend",
@@ -629,7 +663,7 @@ default settings on this script:
     if len(sys.argv) <= 1:
         args = [command, *sys.argv[1:]]
 
-    options = parser.parse_args(args)
+    options = cast(ReproOptions, parser.parse_args(args))
     COMMAND_FNS = {
         "minify": repro_minify,
         "run": repro_run,

@@ -7,6 +7,8 @@ from __future__ import annotations
 import builtins
 import functools
 import operator
+import sys
+import typing
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar
 
@@ -20,6 +22,7 @@ if TYPE_CHECKING:
 __all__ = [
     "all",
     "any",
+    "cast",
     "enumerate",
     "sum",
 ]
@@ -61,62 +64,118 @@ def sum(iterable: Iterable[_T], /, start: _T = 0) -> _T:  # type: ignore[assignm
     return functools.reduce(operator.add, iterable, start)
 
 
+# TODO(guilhermeleobas): Implement this iterator as a VariableTracker to see if
+# it is faster than tracing through it
 class _CallableIterator:
     def __init__(self, fn, sentinel):  # type: ignore[no-untyped-def]
         self.fn = fn
         self.sentinel = sentinel
+        self.exhausted = False
 
     def __iter__(self):  # type: ignore[no-untyped-def]
         return self
 
     def __next__(self):  # type: ignore[no-untyped-def]
+        if self.exhausted:
+            raise StopIteration
+
         # The iterator created in this case will call object with no arguments
         # for each call to its __next__() method;
         r = self.fn()
 
+        # CPython calliter_iternext (Objects/iterobject.c) re-reads it_callable /
+        # it_sentinel after the call returns. If a reentrant next() exhausted
+        # this iterator during fn() (gh-101892), it_sentinel is now NULL, so the
+        # sentinel comparison is skipped and StopIteration is raised regardless
+        # of the returned value.
+        if self.exhausted:
+            raise StopIteration
+
         # If the value returned is equal to sentinel, StopIteration will be raised
         if r == self.sentinel:
+            self.exhausted = True
             raise StopIteration
 
         # otherwise the value will be returned.
         return r
 
 
-_sentinel_missing = object()
+class _SequenceIterator:
+    def __init__(self, iterable) -> None:
+        self.iterable = iterable
+        self.index = 0
+        self.exhausted = False
+
+    def __iter__(self) -> _SequenceIterator:
+        return self
+
+    def __next__(self) -> object:
+        if self.exhausted:
+            raise StopIteration
+
+        # CPython iter_iternext (Objects/iterobject.c): the index counter is a
+        # Py_ssize_t, so once it reaches PY_SSIZE_T_MAX (sys.maxsize) it cannot
+        # advance and every subsequent next() raises OverflowError.
+        if self.index == sys.maxsize:
+            raise OverflowError("iter index too large")
+
+        try:
+            result = self.iterable.__getitem__(self.index)
+            self.index += 1
+            return result
+        except (IndexError, StopIteration):
+            self.exhausted = True
+            raise StopIteration from None
+
+    def __setstate__(self, state) -> None:
+        # CPython iter_setstate (Objects/iterobject.c): a negative index is
+        # clamped to 0, and the state is only applied while the iterator is
+        # live (it_seq != NULL), i.e. not yet exhausted.
+        if not self.exhausted:
+            self.index = max(state, 0)
 
 
-# TODO(guilhermeleobas): use substitute_in_graph for iter()
-def iter_(fn_or_iterable, sentinel=_sentinel_missing, /):  # type: ignore[no-untyped-def]
-    # Without a second argument, object must be a collection object which supports
-    # the iterable (__iter__) or the sequence protocol (__getitem__ with an integer
-    # starting at 0)
-    if sentinel is _sentinel_missing:
-        iterable = fn_or_iterable
-        if hasattr(iterable, "__iter__"):
-            iterator = iterable.__iter__()
-            if hasattr(iterator, "__next__"):
-                return iterator
-            else:
-                raise TypeError(f"'{type(iterator)}' object is not iterable")
-        if hasattr(iterable, "__getitem__"):
-            # Needs to be a new function to avoid iter becoming a generator
-            def sequence_protocol(iterable):  # type: ignore[no-untyped-def]
-                i = 0
-                while True:
-                    try:
-                        yield iterable.__getitem__(i)
-                        i += 1
-                    except IndexError:
-                        break
+def sequence_iterator(iterable) -> Iterable[object]:
+    if hasattr(iterable, "__getitem__"):
+        return _SequenceIterator(iterable)
+    raise TypeError(f"'{type(iterable)}' object is not iterable")
 
-            return sequence_protocol(iterable)
-        raise TypeError(f"'{type(iterable)}' object is not iterable")
-    else:
-        # If the second argument, sentinel, is given, then object must be a
-        # callable object.
-        fn = fn_or_iterable
 
-        if not isinstance(fn, Callable):  # type: ignore[arg-type]
-            raise TypeError("iter(v, w): v must be a callable")
+class _ReversedSequenceIterator:
+    # Mirrors CPython's reversed object (Objects/enumobject.c). Walks the
+    # sequence backwards via __getitem__, starting from len(seq) - 1.
+    def __init__(self, seq) -> None:
+        self.seq = seq
+        self.index = len(seq) - 1
 
-        return _CallableIterator(fn, sentinel)
+    def __iter__(self) -> _ReversedSequenceIterator:
+        return self
+
+    def __next__(self) -> object:
+        if self.index < 0:
+            raise StopIteration
+        try:
+            result = self.seq[self.index]
+        except (IndexError, StopIteration):
+            self.index = -1
+            raise StopIteration from None
+        self.index -= 1
+        return result
+
+
+def reversed_sequence_iterator(seq) -> Iterable[object]:
+    return _ReversedSequenceIterator(seq)
+
+
+def callable_iterator(fn, sentinel, /):
+    # If the second argument, sentinel, is given, then object must be a
+    # callable object.
+    if not isinstance(fn, Callable):  # type: ignore[arg-type]
+        raise TypeError("iter(v, w): v must be a callable")
+
+    return _CallableIterator(fn, sentinel)
+
+
+@substitute_in_graph(typing.cast, can_constant_fold_through=True)
+def cast(typ: type, val: _T) -> _T:  # type: ignore[type-var]
+    return val
