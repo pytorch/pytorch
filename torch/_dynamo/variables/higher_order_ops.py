@@ -40,7 +40,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
-from torch._dynamo.variables.script_object import TorchScriptObjectVariable
+from torch._dynamo.variables.script_object import CustomClassObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._guards import Source
 from torch._higher_order_ops.flex_gemm import FLEX_GEMM_OP_ALIASES
@@ -350,15 +350,15 @@ def overwrite_tensor_vt_proxy(
             (
                 variables.SymNodeVariable,
                 variables.TensorVariable,
-                TorchScriptObjectVariable,
+                CustomClassObjectVariable,
             ),
         ):
             if not (
                 subgraph_vt.is_tensor()
-                or isinstance(subgraph_vt, (SymNodeVariable, TorchScriptObjectVariable))
+                or isinstance(subgraph_vt, (SymNodeVariable, CustomClassObjectVariable))
             ):
                 raise AssertionError(
-                    "Expected subgraph_vt to be a tensor, SymNodeVariable, or TorchScriptObjectVariable"
+                    "Expected subgraph_vt to be a tensor, SymNodeVariable, or CustomClassObjectVariable"
                 )
             orig_vt.proxy = subgraph_vt.proxy
 
@@ -1867,7 +1867,7 @@ def speculate_subgraph_with_auto_output_flattening(
 
             def visit(vt: VariableTracker) -> None:
                 if vt.is_tensor() or isinstance(
-                    vt, (SymNodeVariable, TorchScriptObjectVariable)
+                    vt, (SymNodeVariable, CustomClassObjectVariable)
                 ):
                     graph_output_vts.append(vt)
 
@@ -2876,7 +2876,7 @@ def validate_subgraph_output_types(
                     out.is_python_constant()
                     and isinstance(out.as_python_constant(), (int, bool))
                 )
-                or isinstance(out, TorchScriptObjectVariable)
+                or isinstance(out, CustomClassObjectVariable)
             ):
                 continue
             unimplemented(
