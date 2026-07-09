@@ -219,7 +219,11 @@ inline TensorIterator make_reduction(
   // product of templated kernel launches.
   const bool gpu_lowp_to_f32 = (
         (self.is_cuda() || self.is_xpu()) && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) && out_dtype == kFloat);
-  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type()
+  // MPS sum kernels widen integral inputs to long in-register; passing the
+  // original input avoids materializing a 2-8x larger casted copy.
+  const bool mps_int_to_long = self.is_mps() && out_dtype == kLong &&
+      at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
+  auto in_dtype = (gpu_lowp_to_f32 || mps_int_to_long) ? self.scalar_type()
                    : self.is_complex() ? c10::toComplexType(out_dtype)
                                        : out_dtype;
   return make_reduction(name, result, self, dim, keepdim, in_dtype, out_dtype);
@@ -450,10 +454,15 @@ inline TensorIterator make_reduction(
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
   const bool gpu_lowp_to_f32 =
-      (self.is_cuda() &&
+      ((self.is_cuda() || self.is_mps()) &&
        (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
        out_dtype == kFloat);
-  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
+  // MPS sum kernels widen integral inputs to long in-register; passing the
+  // original input avoids materializing a 2-8x larger casted copy.
+  const bool mps_int_to_long = self.is_mps() && out_dtype == kLong &&
+      at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
+  auto in_dtype =
+      (gpu_lowp_to_f32 || mps_int_to_long) ? self.scalar_type() : out_dtype;
   return make_reduction(self, result, opt_dims, keepdim, in_dtype);
 }
 
