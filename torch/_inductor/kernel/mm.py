@@ -20,7 +20,7 @@ from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config as inductor_config, distributed_autotune
+from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -380,18 +380,13 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
 
-    if _use_small_mm_pointwise(k, n, layout):
+    if _use_small_mm_pointwise(m, k, n, layout):
         counters["inductor"]["decompose_mm"] += 1
-        mat1 = lowerings[aten.unsqueeze](mat1, -1)
-        mat2 = lowerings[aten.unsqueeze](mat2, 0)
-        args, _ = transform_args(
-            args=[mat1, mat2],
-            kwargs={},
-            broadcast=True,
-            type_promotion_kind=None,
-            convert_input_to_bool=False,
-        )
-        return make_reduction("sum")(make_pointwise(ops.mul)(*args), axis=1)
+        mat1 = L.clone(mat1)
+        mat2 = L.clone(mat2)
+        mat1 = L.unsqueeze(mat1, -1)
+        mat2 = L.unsqueeze(mat2, 0)
+        return L.sum_(L.mul(mat1, mat2), axis=1)
 
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "mm"

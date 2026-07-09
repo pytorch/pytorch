@@ -138,7 +138,7 @@ class TestDecomp(NNTestCase):
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("m", [256, 4096])
-    @parametrize("k,n", [(2, 3), (3, 7), (7, 7)])
+    @parametrize("k,n", [(2, 3), (3, 4), (4, 4)])
     def test_small_mm_pointwise(self, device, dtype, m, k, n):
         if device == "cpu":
             self.skipTest("small-dim mm pointwise is GPU-only")
@@ -150,6 +150,24 @@ class TestDecomp(NNTestCase):
         run_comp_nocomp(torch_mm, t1, t2, rtol=rtol, atol=atol)
 
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("m", [256, 4096])
+    @parametrize("k,n", [(2, 3), (3, 4), (4, 4)])
+    def test_small_mm_pointwise_transposed(self, device, dtype, m, k, n):
+        if device == "cpu":
+            self.skipTest("small-dim mm pointwise is GPU-only")
+        fudge = 10
+        rtol = default_rtol[dtype] * fudge
+        atol = default_atol[dtype] * fudge
+        t1 = rand_math_tensor((m, k), dtype=dtype, device=device)
+        t2 = rand_math_tensor((n, k), dtype=dtype, device=device)
+
+        def mm_with_transpose(a, b):
+            return torch.mm(a, b.T)
+
+        run_comp_nocomp(mm_with_transpose, t1, t2, rtol=rtol, atol=atol)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     def test_small_mm_no_pointwise_for_large_dims(self, device):
         if device == "cpu":
             self.skipTest("GPU-only test")
@@ -158,8 +176,8 @@ class TestDecomp(NNTestCase):
         def fn(a, b):
             return torch.mm(a, b)
 
-        a = torch.randn(256, 16, device=device)
-        b = torch.randn(16, 16, device=device)
+        a = torch.randn(256, 5, device=device)
+        b = torch.randn(5, 5, device=device)
         _, (code,) = run_and_get_code(torch.compile(fn), a, b)
         self.assertIn("extern_kernels.mm", code)
 
