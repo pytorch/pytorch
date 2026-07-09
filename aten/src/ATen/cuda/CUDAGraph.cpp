@@ -455,6 +455,20 @@ void CUDAGraph::begin_capture_to_if_node(
 #endif
 }
 
+void CUDAGraph::begin_capture_to_if_else_node(
+    const at::Tensor& scalar_cuda_pred_tensor) {
+#if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12080)
+  begin_capture_to_conditional_node(
+      scalar_cuda_pred_tensor, cudaGraphCondTypeIf, 2);
+#else // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12080)
+  AT_ERROR(
+      __func__,
+      " CUDA Graph IF-ELSE conditional nodes are not supported for cuda "
+      "version < 12.8");
+  return;
+#endif
+}
+
 void CUDAGraph::begin_capture_to_while_node(
     const at::Tensor& scalar_cuda_pred_tensor) {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
