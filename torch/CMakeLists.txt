@@ -142,18 +142,6 @@ if(USE_CUDA)
     include(${TORCH_ROOT}/cmake/public/cuda.cmake)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
 
-    # CUPTI monitor native worker + pybind bindings. Built only for CUDA >= 13.x (the
-    # monitor's CUPTI floor is 13.3): they compile against cupti_activity.h (staged into the
-    # CUDA 13.x Docker image, or from the nvidia-cuda-cupti wheel locally), which older CUDA
-    # toolkits don't ship. CUDA-only (not via the shared cuda_core_sources filelist, which
-    # also feeds ROCM); the include dir is wired below under the same version guard.
-    if(CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
-      list(APPEND TORCH_PYTHON_SRCS
-        ${TORCH_SRC_DIR}/csrc/profiler/cupti/monitor_native.cpp
-        ${TORCH_SRC_DIR}/csrc/profiler/cupti/monitor_python.cpp
-      )
-    endif()
-
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
     if(USE_CUDNN)
         list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cudnn)
@@ -432,30 +420,6 @@ target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIO
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
-
-# The CUPTI monitor's native worker (profiler/cupti/monitor_native.cpp, a python+CUDA
-# source) compiles against the real cupti_activity.h -- staged into the CI Docker image by
-# .ci/docker/common/install_cuda.sh, or from the nvidia-cuda-cupti wheel for local builds --
-# located by tools.setup_helpers.cupti.find_cupti_header (the field-id codegen uses it too).
-# Only for CUDA >= 13.x (the monitor's CUPTI floor is 13.3; older toolkits don't ship the v2
-# header), matching the source guard above. Required there: no header means no CUPTI monitor.
-if(USE_CUDA AND CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
-  execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c
-      "from tools.setup_helpers.cupti import find_cupti_header as f; p = f(); print(p or '', end='')"
-    WORKING_DIRECTORY "${TORCH_ROOT}"
-    OUTPUT_VARIABLE CUPTI_ACTIVITY_HEADER_FOR_PY)
-  if(CUPTI_ACTIVITY_HEADER_FOR_PY)
-    get_filename_component(_cupti_include_dir "${CUPTI_ACTIVITY_HEADER_FOR_PY}" DIRECTORY)
-    target_include_directories(torch_python PRIVATE "${_cupti_include_dir}")
-    message(STATUS "CUPTI monitor: compiling against ${CUPTI_ACTIVITY_HEADER_FOR_PY}")
-  else()
-    message(FATAL_ERROR
-      "cupti_activity.h not found: the CUPTI monitor requires the CUPTI headers. CI stages "
-      "them into the Docker image via .ci/docker/common/install_cuda.sh; otherwise install "
-      "the nvidia-cuda-cupti wheel, or set CUPTI_INCLUDE_DIR to a directory with the header.")
-  endif()
-endif()
 
 if(USE_UCC)
   target_link_libraries(torch_python PRIVATE __caffe2_ucc)

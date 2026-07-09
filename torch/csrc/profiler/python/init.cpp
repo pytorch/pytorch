@@ -9,10 +9,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#ifdef USE_CUDA
-#include <cuda.h> // CUDA_VERSION, for the monitor's CUDA >= 13.x build guard
 #include <torch/csrc/profiler/cupti/monitor_python.h>
-#endif
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
@@ -720,15 +717,7 @@ void initPythonBindings(PyObject* module) {
       .def(py::init<>())
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
-  // The CUPTI monitor is built only for CUDA >= 13.x (its CUPTI floor is 13.3):
-  // the native worker + these bindings are compiled into torch_python only
-  // there (older CUDA / CPU / ROCm builds skip the monitor sources -- see
-  // torch/CMakeLists.txt), so register the _cupti_monitor submodule under the
-  // same guard, else this would reference the absent initCuptiMonitorBindings
-  // symbol.
-#if defined(USE_CUDA) && defined(CUDA_VERSION) && CUDA_VERSION >= 13000
   initCuptiMonitorBindings(m);
-#endif
   if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
     throw python_error();
   }
