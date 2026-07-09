@@ -1417,6 +1417,16 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         cpp=lambda x: f"modified_bessel_k1_forward({x})",
         name="special_modified_bessel_k1",
     ),
+    modified_bessel_i=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        cpp=lambda x, y: f"modified_bessel_i_forward({x}, {y})",
+        name="special_modified_bessel_i",
+    ),
+    modified_bessel_k=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        cpp=lambda x, y: f"modified_bessel_k_forward({x}, {y})",
+        name="special_modified_bessel_k",
+    ),
     # multigamma
     ndtr=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,

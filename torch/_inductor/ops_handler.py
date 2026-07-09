@@ -632,6 +632,12 @@ class OpsHandler(Generic[T]):
     def modified_bessel_k1(self, x: T) -> T:
         raise NotImplementedError
 
+    def modified_bessel_i(self, x: T, y: T) -> T:
+        raise NotImplementedError
+
+    def modified_bessel_k(self, x: T, y: T) -> T:
+        raise NotImplementedError
+
     def ndtr(self, x: T) -> T:
         raise NotImplementedError
 

@@ -16531,6 +16531,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "modified_bessel_i1",
             "modified_bessel_k0",
             "modified_bessel_k1",
+            "modified_bessel_i",
+            "modified_bessel_k",
             "ndtri",
             "scaled_modified_bessel_k0",
             "scaled_modified_bessel_k1",
@@ -16583,6 +16585,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "modified_bessel_i1",
                 "modified_bessel_k0",
                 "modified_bessel_k1",
+                "modified_bessel_i",
+                "modified_bessel_k",
                 "multigammaln",
                 "ndtri",
                 "polygamma",
@@ -16611,6 +16615,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "airy_ai",
             "bessel_y0",
             "bessel_y1",
+            "modified_bessel_i",
+            "modified_bessel_k",
             "modified_bessel_k0",
             "modified_bessel_k1",
             "ndtri",
@@ -16636,6 +16642,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             def fn(x, y):
                 return op(x, y)
+
+        elif name in {"modified_bessel_i", "modified_bessel_k"}:
+            args = (
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(0.5, 4),
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(0, 3),
+            )
+
+            def fn(x, nu):
+                return op(x, nu)
 
         elif name == "multigammaln":
             args = (
