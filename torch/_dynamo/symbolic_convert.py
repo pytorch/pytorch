@@ -2743,12 +2743,31 @@ class InstructionTranslatorBase(
 
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
+            if hasattr(raised_exception, "convert_to_TorchRuntimeError"):
+                from .exc import format_graph_break_message
+
+                curr = self.exn_vt_stack.get_current_exception()
+                raw_msg = ""
+                if isinstance(curr, variables.ExceptionVariable) and curr.args:
+                    raw_msg = curr.args[0].as_python_constant()
+                msg = format_graph_break_message(
+                    "RuntimeError when making fake tensor call",
+                    "",
+                    raw_msg,
+                    [*graph_break_hints.USER_ERROR],
+                )
+                e = exc.TorchRuntimeError(
+                    msg, getattr(raised_exception, "real_stack", None)
+                )
+                raise e.with_traceback(raised_exception.__traceback__) from None
+
             curr_exc = self.exn_vt_stack.get_current_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
                 )  # sanity check
+
             unimplemented(
                 gb_type="Observed exception",
                 context=f"raised exception {curr_exc.debug_repr()}",

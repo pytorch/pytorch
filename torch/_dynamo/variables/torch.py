@@ -3657,6 +3657,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             torch._dynamo.exc.Unsupported,
             # From `flat_apply` assert on output type.
             torch._dynamo.exc.TorchRuntimeError,
+            # From fake tensor eval in _get_fake_value_impl.
+            torch._dynamo.exc.ObservedRuntimeError,
         ):
             unimplemented(
                 gb_type="Unsupported output type for nonstrict_trace-ed function",

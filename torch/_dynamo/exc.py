@@ -490,6 +490,10 @@ class ObservedTypeError(ObservedException):
     pass
 
 
+class FakeTensorObservedException(ObservedException):
+    node: Any = None
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     LookupError: ObservedLookupError,

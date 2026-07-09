@@ -4187,20 +4187,25 @@ def _get_fake_value_impl(
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        _wrap_graph_break_with_torch_runtime_err(
-            lambda: unimplemented(
-                gb_type="RuntimeError when making fake tensor call",
-                context="",
-                explanation=msg,
-                hints=[*graph_break_hints.USER_ERROR],
-                from_exc=cause,
-            )
-        )
-        raise AssertionError("should not reachable") from None
+        from .exc import ObservedException, raise_observed_exception
+
+        # Fake eval failed after the node was inserted into the graph, so the
+        # node is dead regardless of whether user code catches the exception.
+        # Erase it and route the failure through the observed-exception channel
+        # so an enclosing try/except in user code can intercept it; if uncaught,
+        # it bubbles like eager.
+        tx.output.graph.erase_node(node)
+        try:
+            raise_observed_exception(RuntimeError, tx, args=[msg])
+        except ObservedException as e:
+            e.convert_to_TorchRuntimeError = True  # type: ignore[missing-attribute]
+            raise
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
-            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+            torch.Tensor,
+            functools.partial(ensure_graph_fake, tx=tx),
+            ret_val,  # pyrefly: ignore [unbound-name]
         )
 
     if (
