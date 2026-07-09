@@ -480,7 +480,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
+        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -1929,6 +1929,48 @@ class DummyProcessGroup(dist.ProcessGroup):
         self._shutdown = True
 
 
+class BackendRegistrationTest(TestCase):
+    def test_register_backend_with_single_device_string(self):
+        name = "_test_fake_backend"
+        device = "custom_device"
+        backend_attr = name.upper()
+        old_backend_attr = getattr(dist.Backend, backend_attr, None)
+        had_backend_attr = hasattr(dist.Backend, backend_attr)
+        old_backend_list = dist.Backend.backend_list.copy()
+        old_default_device_backend_map = dist.Backend.default_device_backend_map.copy()
+        old_backend_capability = dist.Backend.backend_capability.copy()
+        old_backend_type_map = dist.Backend.backend_type_map.copy()
+        old_plugins = dist.Backend._plugins.copy()
+
+        try:
+
+            def create_backend(*_args, **_kwargs):
+                return None
+
+            dist.Backend.register_backend(name, create_backend, devices=device)
+
+            self.assertEqual(dist.Backend.default_device_backend_map[device], name)
+            self.assertEqual(dist.Backend.backend_capability[name], [device])
+            self.assertEqual(
+                c10d._parse_backend_string(name, available_devices={device}),
+                {device: name},
+            )
+            for character in device:
+                self.assertNotEqual(
+                    dist.Backend.default_device_backend_map.get(character), name
+                )
+        finally:
+            if had_backend_attr:
+                setattr(dist.Backend, backend_attr, old_backend_attr)
+            elif hasattr(dist.Backend, backend_attr):
+                delattr(dist.Backend, backend_attr)
+            dist.Backend.backend_list = old_backend_list
+            dist.Backend.default_device_backend_map = old_default_device_backend_map
+            dist.Backend.backend_capability = old_backend_capability
+            dist.Backend.backend_type_map = old_backend_type_map
+            dist.Backend._plugins = old_plugins
+
+
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -2457,6 +2499,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 # Hide all GPUs
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["ONEAPI_DEVICE_SELECTOR"] = "!*:gpu"
 
 import torch
 from torch import distributed as dist
@@ -2538,7 +2581,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             store=store,
         )
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
         tensors = [torch.ones(10, 10, device=torch.device(device))]
         dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
         for tensor in tensors:
