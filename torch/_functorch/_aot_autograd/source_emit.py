@@ -88,11 +88,15 @@ def _reject_shared_mutable(obj: Any, _seen: set[_ObjId]) -> None:
     """Fail loud when a mutable object is reached more than once in a single traversal:
     it would be emitted as two independent source literals, silently dropping the
     shared-identity aliasing (mutating one copy would no longer affect the other), which
-    is not expressible as a source literal today. Only mutable kinds are routed here
-    (list / dict / set and the opaque _emit_via_reduce value objects); immutables are
-    exempt, so a shared tuple / scalar / frozenset still emits fine. ``_seen`` is threaded
-    in place across the whole traversal (unlike the per-level in-progress cycle set), so
-    it catches shared siblings, not just self-referential ancestors."""
+    is not expressible as a source literal today. Routed here are the kinds reconstructed
+    as fresh MUTABLE copies whose aliasing a flat literal cannot preserve: list / dict /
+    set, non-frozen dataclasses, and the opaque _emit_via_reduce value objects. Kinds
+    treated as immutable value objects are exempt -- scalars, tuple / frozenset, frozen
+    dataclasses, and the recipe-like value objects emitted by their own branches
+    (functools.partial, ViewMeta, ViewMetaSequence), which are never mutated after
+    reconstruction -- so a shared one of those still emits fine. ``_seen`` is threaded in
+    place across the whole traversal (unlike the per-level in-progress cycle set), so it
+    catches shared siblings, not just self-referential ancestors."""
     if id(obj) in _seen:
         raise NotImplementedError(
             f"compile_to_python cannot bake a shared mutable {type(obj).__qualname__}: "
@@ -380,6 +384,12 @@ def _emit_value(
         and not isinstance(obj, type)
         and type(obj).__eq__ is not object.__eq__
     ):
+        # A non-frozen dataclass is mutable, so it gets the same shared-alias guard as the
+        # containers: reached twice it would be emitted as two independent constructor
+        # calls, silently dropping the shared-identity aliasing. A frozen dataclass is
+        # immutable and stays exempt, like a tuple.
+        if not obj.__dataclass_params__.frozen:
+            _reject_shared_mutable(obj, _seen)
         cls = _emit_importable(type(obj), imports)
         fields = dataclasses.fields(obj)
         init_kwargs = {f.name: getattr(obj, f.name) for f in fields if f.init}
