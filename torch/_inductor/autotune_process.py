@@ -21,6 +21,7 @@ from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
 from typing import Any, IO, TYPE_CHECKING
+from typing_extensions import override
 
 import torch
 import torch._inductor.async_compile
@@ -69,6 +70,21 @@ from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
 
+
+_visible_device_env_var_maps = {
+    "cuda": "CUDA_VISIBLE_DEVICES",
+    "xpu": "ZE_AFFINITY_MASK",
+}
+
+
+def get_visible_devices_env_var(gpu_type: str | None = None) -> str:
+    if gpu_type is None:
+        gpu_type = get_gpu_type()
+    if gpu_type not in _visible_device_env_var_maps:
+        raise ValueError(f"Unsupported gpu_type: {gpu_type}")
+    return _visible_device_env_var_maps[gpu_type]
+
+
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 
 
@@ -89,7 +105,7 @@ class TuningProcess:
         autotuning_log.debug(
             "Started autotune subprocess %s. Visible devices: %s",
             os.getpid(),
-            os.environ.get(CUDA_VISIBLE_DEVICES),
+            os.environ.get(get_visible_devices_env_var()),
         )
 
         def workloop():
@@ -161,7 +177,7 @@ class TuningProcess:
             else "0",
         }
         if self.device is not None:
-            env[CUDA_VISIBLE_DEVICES] = str(self.device)
+            env[get_visible_devices_env_var()] = str(self.device)
         self.process = subprocess.Popen(
             cmd,
             env=env,
@@ -297,13 +313,14 @@ class TuningProcessPool:
         gpu_type = get_gpu_type()
         device_interface = get_interface_for_device(gpu_type)
         count = device_interface.device_count()
+        visible_devices_env_var = get_visible_devices_env_var(gpu_type)
 
         # If the user specified the visible devices in the env, use those.
-        if CUDA_VISIBLE_DEVICES in os.environ:
-            devices = [int(d) for d in os.environ[CUDA_VISIBLE_DEVICES].split(",")]
+        if visible_devices_env_var in os.environ:
+            devices = [int(d) for d in os.environ[visible_devices_env_var].split(",")]
             if not len(devices) <= count:
                 raise AssertionError(
-                    f"CUDA_VISIBLE_DEVICES specifies {len(devices)} devices, "
+                    f"{visible_devices_env_var} specifies {len(devices)} devices, "
                     f"but only {count} devices are available"
                 )
             return devices
@@ -584,10 +601,11 @@ class _TestBenchmarkRequest(BenchmarkRequest):
         self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
     ) -> float:
         if self.device is not None:
-            if not os.environ.get(CUDA_VISIBLE_DEVICES, None) == str(self.device):
+            visible_devices_env_var = get_visible_devices_env_var()
+            if os.environ.get(visible_devices_env_var, None) != str(self.device):
                 raise AssertionError(
-                    f"Expected {CUDA_VISIBLE_DEVICES}='{self.device}', "
-                    f"but got '{os.environ.get(CUDA_VISIBLE_DEVICES, None)}'"
+                    f"Expected {visible_devices_env_var}='{self.device}', "
+                    f"but got '{os.environ.get(visible_devices_env_var, None)}'"
                 )
         if self.sleep:
             time.sleep(self.sleep)
@@ -684,6 +702,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.workspace_zero_fill = workspace_zero_fill
         self._benchmark_module: Any | None = None
 
+    @override
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
@@ -729,36 +748,45 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             warmup_arg["warmup"] = False
 
         if out.device.type == "cpu":
-            stream = 0
+            device_interface = None
+            device_index = 0
         else:
             device_type = out.device.type
             device_interface = get_interface_for_device(device_type)
-            stream = device_interface.get_raw_stream(
-                self.output_tensor_meta.device.index
-            )
+            device_index = self.output_tensor_meta.device.index
 
-        if isinstance(
+        is_debug_autotuner = isinstance(
             getattr(mod, self.kernel_name),
             torch._inductor.runtime.triton_heuristics.DebugAutotuner,
-        ):
-            return functools.partial(
-                run_method,
-                *input_tensors,
-                out,
-                *extra_args,
-                **warmup_arg,
-                stream=stream,
+        )
+
+        # Resolve the stream at call time (not at closure-creation time) so that
+        # CUDA graph capture on a different stream works correctly.
+        def run_fn() -> None:
+            stream = (
+                0
+                if device_interface is None
+                else device_interface.get_raw_stream(device_index)
             )
-        else:
-            return functools.partial(
-                run_method,
-                *input_tensors,
-                out,
-                *extra_args,
-                **warmup_arg,
-                stream=stream,
-                benchmark_run=True,
-            )
+            if is_debug_autotuner:
+                run_method(
+                    *input_tensors,
+                    out,
+                    *extra_args,
+                    **warmup_arg,
+                    stream=stream,
+                )
+            else:
+                run_method(
+                    *input_tensors,
+                    out,
+                    *extra_args,
+                    **warmup_arg,
+                    stream=stream,
+                    benchmark_run=True,
+                )
+
+        return run_fn
 
     def cleanup_run_fn(self) -> None:
         # Authoritative cleanup for one benchmark module load. Higher-level
@@ -1207,8 +1235,9 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
 
-        finalized_code = source_code.finalize_all()
-        self.module_cache_key, self.module_path = PyCodeCache.write(finalized_code)
+        # Template-specific precompile hooks reuse the finalized module source in subprocesses.
+        self.source_code = source_code.finalize_all()
+        self.module_cache_key, self.module_path = PyCodeCache.write(self.source_code)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
@@ -1239,7 +1268,7 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         def run_kernel():
             device_interface = get_interface_for_device("cuda")
             stream = device_interface.get_raw_stream(out.device.index)
-            return kernel_func(*input_tensors, out, stream=stream)
+            return kernel_func(*input_tensors, out, *self.extra_args, stream=stream)
 
         return run_kernel
 

@@ -14,7 +14,7 @@
 #include <errno.h>
 #include <io.h>
 #include <sys/stat.h>
-#include <windows.h>
+#include <torch/headeronly/util/win32-headers.h>
 #include <functional> // std::function
 #else // !_WIN32
 #include <sys/mman.h>
@@ -119,7 +119,7 @@ consider rebuild your model with the latest AOTInductor.");
 
   if (c10::filesystem::exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-        json_filename, device_str == "cpu");
+        json_filename, device_str);
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
   } else {

@@ -405,7 +405,7 @@ class Partitioner:
         It uses greedy approach. The result may not be the best.
         The basic idea is:
         Step 1:
-        Find a device which has enough memory to fit the current node, create a empty partition
+        Find a device which has enough memory to fit the current node, create an empty partition
         with the size of that device.
         Then keep adding the following nodes into the partition until the partition is full.
         Step 2:
@@ -532,7 +532,7 @@ class Partitioner:
             # Temporary mapping from replicated device to original device
             temp_replicate_mapping = {}
 
-            # Find a new device to replicate all partitions on an used device
+            # Find a new device to replicate all partitions on a used device
             for used_device in used_devices:
                 # Idle devices that have enough memory
                 available_devices = [

@@ -38,6 +38,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -130,29 +131,6 @@ else:
 
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
-    def test_pytorch_np(self):
-        tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
-        for tensor in tensors:
-            # regular tensor
-            self.assertIsInstance(make_np(tensor), np.ndarray)
-
-            # CUDA tensor
-            if torch.cuda.is_available():
-                self.assertIsInstance(make_np(tensor.cuda()), np.ndarray)
-
-            # regular variable
-            self.assertIsInstance(make_np(torch.autograd.Variable(tensor)), np.ndarray)
-
-            # CUDA variable
-            if torch.cuda.is_available():
-                self.assertIsInstance(
-                    make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray
-                )
-
-        # python primitive type
-        self.assertIsInstance(make_np(0), np.ndarray)
-        self.assertIsInstance(make_np(0.1), np.ndarray)
-
     def test_pytorch_autograd_np(self):
         x = torch.autograd.Variable(torch.empty(1))
         self.assertIsInstance(make_np(x), np.ndarray)
@@ -215,6 +193,22 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
                 bucket_limits=limits.tolist(),
                 bucket_counts=counts.tolist(),
             )
+
+
+class TestTensorBoardPyTorchNumpyDevice(BaseTestCase):
+    def test_pytorch_np(self, device):
+        tensors = [
+            torch.rand(3, 10, 10, device=device),
+            torch.rand(1, device=device),
+            torch.rand(1, 2, 3, 4, 5, device=device),
+        ]
+        for tensor in tensors:
+            self.assertIsInstance(make_np(tensor), np.ndarray)
+            self.assertIsInstance(make_np(torch.autograd.Variable(tensor)), np.ndarray)
+
+        # python primitive type (device-agnostic)
+        self.assertIsInstance(make_np(0), np.ndarray)
+        self.assertIsInstance(make_np(0.1), np.ndarray)
 
 
 class TestTensorBoardUtils(BaseTestCase):
@@ -871,6 +865,12 @@ class TestTensorProtoSummary(BaseTestCase):
 
 
 instantiate_parametrized_tests(TestTensorProtoSummary)
+instantiate_device_type_tests(
+    TestTensorBoardPyTorchNumpyDevice,
+    globals(),
+    allow_mps=True,
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()

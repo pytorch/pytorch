@@ -1679,6 +1679,7 @@ def _std_var(
                 else compute_dtype
             )
             count = count.to(real_dtype)
+            # pyrefly: ignore [no-matching-overload]
             count = torch.subtract(count, correction)
             count = torch.maximum(count, count.new_zeros([]))
         output = torch.divide(total, count).to(dtype=dtype)

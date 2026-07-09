@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <limits>
 #include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
@@ -18,6 +19,10 @@
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#include <ATen/cuda/detail/CublasLtUtils.h>
+#include <ATen/native/cuda/CublasGroupedArgs.h>
+#endif
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
@@ -91,6 +96,57 @@ bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
   }
 #endif
 }
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+bool should_use_cublaslt_grouped_gemm(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const std::optional<Tensor>& offs,
+    std::optional<c10::ScalarType> out_dtype) {
+  const auto dprops = at::cuda::getCurrentDeviceProperties();
+  const bool sm90 = dprops->major == 9;
+  const bool sm10_or_sm11 =
+      dprops->major == 10 || dprops->major == 11;
+#if CUDA_VERSION >= 13030
+  const bool sm90_cublaslt_grouped_gemm_supported = sm90;
+#else
+  constexpr bool sm90_cublaslt_grouped_gemm_supported = false;
+#endif
+  const bool fp16_grouped_gemm =
+      mat_a.dtype() == at::kHalf && mat_b.dtype() == at::kHalf &&
+      out_dtype.value_or(at::kHalf) == at::kHalf;
+  const bool bf16_grouped_gemm =
+      mat_a.dtype() == at::kBFloat16 && mat_b.dtype() == at::kBFloat16 &&
+      out_dtype.value_or(at::kBFloat16) == at::kBFloat16;
+
+  // The arg-packing kernel launches one thread per group in a single block, so
+  // cuBLASLt grouped GEMM only handles [1, 1024] groups. Fall back otherwise.
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  const int64_t batchCount = (a_is_2d || b_is_2d)
+      ? (offs.has_value() ? offs->size(0) : 0)
+      : mat_a.size(0);
+  if (batchCount < 1 || batchCount > 1024) {
+    return false;
+  }
+
+  const bool use_fp16_by_default =
+      sm10_or_sm11 || sm90_cublaslt_grouped_gemm_supported;
+  if (use_fp16_by_default && fp16_grouped_gemm) {
+    return true;
+  }
+  if (sm90) {
+    if (!sm90_cublaslt_grouped_gemm_supported) {
+      return false;
+    }
+    return bf16_grouped_gemm && at::globalContext().preferCublasltGroupedGemm();
+  }
+  // Only SM 9.0-11.0 are supported; on any other arch fall back so we don't
+  // dispatch to a kernel that hard-errors on the device check.
+  return sm10_or_sm11 && bf16_grouped_gemm &&
+      at::globalContext().preferCublasltGroupedGemm();
+}
+#endif
 
 // 2d-2d and 2d-3d
 // scaling=MXFP8
@@ -414,6 +470,61 @@ void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const in
 
 } // namespace
 
+static Tensor grouped_mm_cublaslt(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype) {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  TORCH_CHECK(
+      mat_a.dtype() == at::kBFloat16 || mat_a.dtype() == at::kHalf,
+      "cublasLt grouped GEMM requires BFloat16 or Float16 input, got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == mat_a.dtype(),
+      "mat_a and mat_b must have the same dtype");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  const int64_t batchCount64 = (a_is_2d || b_is_2d)
+      ? offs->size(0) : mat_a.size(0);
+  TORCH_CHECK(batchCount64 > 0 && batchCount64 <= 1024,
+      "batchCount must be in [1, 1024], got ", batchCount64);
+  const int batchCount = static_cast<int>(batchCount64);
+
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+
+  // cuBLAS grouped GEMM packs per-group m/n/k and lda/ldb/ldd into device
+  // arrays whose width is either 32-bit or 64-bit. Switch to 64-bit if any
+  // dimension or any stride that ends up as a leading dim could overflow
+  // int32_t. Per-group deltas (jagged dim) are bounded by the corresponding
+  // total size, so checking sizes is sufficient.
+  const bool needs_int64 =
+      mat_a.size(-2) > std::numeric_limits<int32_t>::max() ||
+      mat_a.size(-1) > std::numeric_limits<int32_t>::max() ||
+      mat_b.size(-2) > std::numeric_limits<int32_t>::max() ||
+      mat_b.size(-1) > std::numeric_limits<int32_t>::max() ||
+      mat_a.stride(-2) > std::numeric_limits<int32_t>::max() ||
+      mat_a.stride(-1) > std::numeric_limits<int32_t>::max() ||
+      mat_b.stride(-2) > std::numeric_limits<int32_t>::max() ||
+      mat_b.stride(-1) > std::numeric_limits<int32_t>::max() ||
+      out.stride(-2) > std::numeric_limits<int32_t>::max();
+
+  cublasGroupedArgs args(mat_a, mat_b, offs, out, batchCount, needs_int64);
+  at::cuda::blas::grouped_gemm(args.transa, args.transb,
+                               args.mArray, args.m,
+                               args.nArray, args.n,
+                               args.kArray, args.k,
+                               args.alphaPtrArray, args.alphaScalar, mat_a.scalar_type(),
+                               args.APtrArray, args.ldaArray,
+                               args.BPtrArray, args.ldbArray,
+                               args.betaPtrArray, args.betaScalar, out.scalar_type(),
+                               args.DPtrArray, args.lddArray,
+                               args.DPtrArray, args.lddArray,
+                               args.batchCount, args.use_int64);
+  return out;
+#else
+  TORCH_CHECK(false, "cublasLt grouped GEMM requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+}
+
 Tensor
 _scaled_grouped_mm_cuda(
         const Tensor& mat_a,
@@ -517,9 +628,9 @@ _scaled_grouped_mm_cuda(
 
 namespace {
 
-using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
+using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 4> scale_grouped_kernel_dispatch = {{
+std::array<ScaleKernelDispatchEntry, 4> scale_grouped_kernel_dispatch = {{
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
   { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
@@ -602,20 +713,14 @@ _scaled_grouped_mm_cuda_v2(
   // Try to do as few steps as possible.
   // NOTE: support is deliberately sparse, can explicitly enumerate all combinations allowed.
   // Do this via a list of defined (name, acceptance, concrete_impl) tuples.
-  ScaledGemmImplementation gemm_impl = ScaledGemmImplementation::NONE;
-  for (const auto& fn_entry : scale_grouped_kernel_dispatch) {
-    const auto [name, accept_fn, scaled_gemm_impl] = fn_entry;
-    bool ok = accept_fn(mat_a.scalar_type(),
-                        scale_recipe_a_enum,
-                        scale_a,
-                        mat_b.scalar_type(),
-                        scale_recipe_b_enum,
-                        scale_b);
-    if (ok) {
-      gemm_impl = scaled_gemm_impl;
-      break;
-    }
-  }
+  ScaledGemmImplementation gemm_impl = scaled_blas::find_scaled_gemm_impl(
+      scale_grouped_kernel_dispatch,
+      mat_a.scalar_type(),
+      scale_recipe_a_enum,
+      scale_a,
+      mat_b.scalar_type(),
+      scale_recipe_b_enum,
+      scale_b);
   TORCH_CHECK_VALUE(gemm_impl != ScaledGemmImplementation::NONE,
       "No gemm implementation was found");
 
@@ -691,6 +796,11 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  if (should_use_cublaslt_grouped_gemm(mat_a, mat_b, offs, out_dtype)) {
+    return grouped_mm_cublaslt(mat_a, mat_b, offs, bias, out_dtype);
+  }
+#endif
   bool a_b_and_out_are_bf16 = (
     mat_a.dtype() == at::kBFloat16 &&
     mat_b.dtype() == at::kBFloat16 &&
