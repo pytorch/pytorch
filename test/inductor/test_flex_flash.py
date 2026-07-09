@@ -906,7 +906,7 @@ GQA_MQA_BLOCK_MASK_CASES = [
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
 )
 @xfailIfSM12X
-class TestFlexFlash(InductorTestCase):
+class TestFlexFlashCUDA(InductorTestCase):
     # `FlashAttentionForwardSm120` does not have `apply_score_mod`.
     @xfailIfSM120OrLater
     def test_vectorized_group_per_lane_gather(self):
@@ -2451,7 +2451,7 @@ class TestFlexFlash(InductorTestCase):
         flash_vs_triton(q, k, v, score_mod=score_mod_fn)
 
 
-instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFlexFlashCUDA, globals(), only_for="cuda")
 
 
 @unittest.skipIf(
@@ -3117,9 +3117,15 @@ class TestHierarchicalIndex(InductorTestCase):
             indexer([b])
         self.assertIn("Rank mismatch", str(ctx.exception))
 
+
+class TestHierarchicalIndexCUDA(InductorTestCase):
+    def setUp(self):
+        super().setUp()
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM120OrLater
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
     )
@@ -3164,7 +3170,6 @@ class TestHierarchicalIndex(InductorTestCase):
 
     # 'FlashAttentionForwardSm120' object has no attribute 'apply_score_mod'
     @xfailIfSM120OrLater
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
     )
@@ -3210,7 +3215,6 @@ class TestHierarchicalIndex(InductorTestCase):
         )
 
     @xfailIfSM120OrLater
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
     )
