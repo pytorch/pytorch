@@ -14,6 +14,7 @@ import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
@@ -752,11 +753,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 return x + 1
             return x
 
-        opt_m = torch.compile(fn, backend="eager")
+        opt_m = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(2, 3)
         ref = fn(x)
         res = opt_m(x)
         self.assertEqual(ref, res)
+
+    def test_runtime_error_graph_break(self):
+        cnt = CompileCounter()
+
+        def fn(x):
+            return torch.linalg.inv(x)
+
+        try:
+            opt_m = torch.compile(fn, backend="cnt")
+            x = torch.randn(2, 3)
+            opt_m(x)
+        except RuntimeError:
+            # Graph Break occurred, no frames compiled.
+            self.assertEqual(cnt.frame_count, 0)
 
     def test_raise_from_None(self):
         # Inspired from os.environ
