@@ -6623,7 +6623,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "MKLDNN inputs are not supported for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -6639,7 +6639,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "MKLDNN inputs are not supported for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
