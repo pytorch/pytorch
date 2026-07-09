@@ -352,6 +352,24 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     return None
 
 
+def maybe_get_real_tensor(x: object) -> Tensor | None:
+    if isinstance(x, FakeTensor):
+        return x.real_tensor
+    return None
+
+
+def maybe_get_fake_device(x: object) -> torch.device | None:
+    if isinstance(x, FakeTensor):
+        return x.fake_device
+    return None
+
+
+def maybe_get_fake_constant(x: object) -> Tensor | None:
+    if isinstance(x, FakeTensor):
+        return x.constant
+    return None
+
+
 @functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
@@ -3397,6 +3415,7 @@ class FakeTensorMode(TorchDispatchMode):
         aten.view_as_complex.default,
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
+        aten.stack.default,
     )
 
     _unbacked_special_fake_handling_ops = ordered_set(
