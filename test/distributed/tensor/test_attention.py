@@ -257,7 +257,6 @@ class RingAttentionTest(DTensorTestBase):
         set_rotate_method(rotater_enum_to_str[rotater])
         self.assertEqual(_cp_options.rotate_method, rotater)
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
-        dtype = torch.bfloat16
         bs = 8
         seq_length = 1024
         seq_dim = 2

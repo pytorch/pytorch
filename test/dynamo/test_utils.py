@@ -188,8 +188,6 @@ class TestUtils(TestCase):
             traced_code_lists.append(get_traced_code())
             return gm.forward
 
-        utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
-
         # === no inlining ===
         @torch.compile(backend=my_backend)
         def fn(x):
