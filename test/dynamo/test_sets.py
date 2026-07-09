@@ -514,6 +514,16 @@ class _FrozensetBase:
         self.assertIsInstance(p, Iterable)
 
     @make_dynamo_test
+    def test_new_or_init(self):
+        # set/frozenset constructors reject extra positional args and any
+        # keyword arguments; set().__init__ rejects keywords even with 0 args.
+        self.assertRaises(TypeError, set, [], 2)
+        self.assertRaises(TypeError, frozenset, [], 2)
+        self.assertRaises(TypeError, set, a=1)
+        self.assertRaises(TypeError, frozenset, a=1)
+        self.assertRaises(TypeError, set().__init__, a=1)
+
+    @make_dynamo_test
     def test_equality(self):
         a = self.thetype("abc")
         for typ in (self.thetype, set, frozenset):
