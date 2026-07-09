@@ -36,7 +36,11 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
-from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    statically_known_true,
+    sym_eq,
+)
 
 from . import config, inductor_prims
 from .utils import (
@@ -154,6 +158,72 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+if torch.distributed.is_available():
+
+    @register_decomposition([torch.ops._dtensor.shard_dim_alltoall.default])
+    def shard_dim_alltoall_decomp(
+        inp: torch.Tensor,
+        gather_dim: int,
+        shard_dim: int,
+        group_name: str,
+    ) -> torch.Tensor:
+        if not config.decompose_shard_dim_alltoall:
+            return NotImplemented
+        if inp.dtype.is_complex:
+            return NotImplemented
+
+        ndim = inp.dim()
+        gather_dim = gather_dim + ndim if gather_dim < 0 else gather_dim
+        shard_dim = shard_dim + ndim if shard_dim < 0 else shard_dim
+        if not (0 <= gather_dim < ndim and 0 <= shard_dim < ndim):
+            return NotImplemented
+        if gather_dim == shard_dim:
+            return NotImplemented
+
+        try:
+            from torch.distributed.distributed_c10d import (
+                _get_group_size_by_name,
+                GroupName,
+            )
+
+            group_size = _get_group_size_by_name(GroupName(group_name))
+        except (RuntimeError, ValueError):
+            return NotImplemented
+
+        input_shape = list(inp.shape)
+        shard_dim_size = input_shape[shard_dim]
+        # Match eager shard_dim_alltoall semantics. DTensor pads uneven logical
+        # shards before reaching this op, so the local shard dim should split
+        # evenly across the process group here. If the guard fails at runtime,
+        # Dynamo recompiles and may keep the original shard_dim_alltoall fallback.
+        if not guard_or_false(sym_eq(shard_dim_size % group_size, 0)):
+            return NotImplemented
+        local_shard_dim_size = shard_dim_size // group_size
+
+        pre_view_shape = list(input_shape)
+        pre_view_shape[shard_dim] = local_shard_dim_size
+        pre_view_shape.insert(shard_dim, group_size)
+
+        post_view_shape = list(input_shape)
+        post_view_shape[shard_dim] = local_shard_dim_size
+        post_view_shape[gather_dim] = post_view_shape[gather_dim] * group_size
+
+        out = aten.view.default(inp, pre_view_shape)
+        out = aten.movedim.int(out, shard_dim, 0)
+        out = aten.clone.default(out, memory_format=torch.contiguous_format)
+        out = torch.ops._c10d_functional.all_to_all_single.default(
+            out,
+            [1] * group_size,
+            [1] * group_size,
+            group_name,
+        )
+        out = torch.ops._c10d_functional.wait_tensor.default(out)
+        out = aten.movedim.int(out, 0, gather_dim)
+        out = aten.clone.default(out, memory_format=torch.contiguous_format)
+        counters["inductor"]["decompose_shard_dim_alltoall"] += 1
+        return aten.view.default(out, post_view_shape)
 
 
 @register_decomposition([aten.lerp.Scalar])
