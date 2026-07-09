@@ -667,7 +667,7 @@ def linetable_writer(
 ) -> tuple[list[int], Callable[[int, int], None], Callable[[int], None]]:
     """
     Used to create typing.CodeType.co_linetable
-    See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
+    See https://github.com/python/cpython/blob/3.10/Objects/lnotab_notes.txt
     This is the internal format of the line number table for Python 3.10
     """
     if sys.version_info[:2] != (3, 10):
