@@ -34,8 +34,8 @@ else:
     # Any operation happens on the GPU
     y = x * 2
 
-    # Move your model to mps just like any other device.
-    # (`YourFavoriteNet` is a placeholder for your own `torch.nn.Module` subclass)
+    # Move your model to mps just like any other device
+    # (YourFavoriteNet is a placeholder for your own torch.nn.Module subclass)
     model = YourFavoriteNet()
     model.to(mps_device)
 
