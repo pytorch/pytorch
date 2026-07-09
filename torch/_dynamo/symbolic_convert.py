@@ -53,11 +53,7 @@ from typing_extensions import TypeIs
 import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
-from torch._dynamo.exc import (
-    get_dynamo_observed_exception,
-    ObservedException,
-    TensorifyScalarRestartAnalysis,
-)
+from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
 from torch._guards import InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
@@ -242,11 +238,9 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 )
 
 ExceptionVals: TypeAlias = (
-    variables.ExceptionVariable | UserDefinedExceptionObjectVariable
-)
-
-ExceptionTypes: TypeAlias = (
-    variables.BuiltinVariable | UserDefinedExceptionClassVariable
+    variables.ExceptionVariable
+    | UserDefinedExceptionClassVariable
+    | UserDefinedExceptionObjectVariable
 )
 
 
@@ -1261,22 +1255,6 @@ class BytecodeDispatchTableMeta(type):
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
-def pyexception_class_check(val: VariableTracker) -> TypeIs[ExceptionTypes]:
-    # Mirror's CPython PyExceptionClass_Check
-    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L60-L62
-    if isinstance(val, variables.BuiltinVariable):
-        return issubclass(val.fn, BaseException)
-    return isinstance(val, UserDefinedExceptionClassVariable)
-
-
-def pyexception_instance_check(val: VariableTracker) -> TypeIs[ExceptionVals]:
-    # Mirror's CPython PyExceptionInstance_Check
-    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L64-L65
-    return isinstance(
-        val, (variables.ExceptionVariable, UserDefinedExceptionObjectVariable)
-    )
-
-
 @dataclasses.dataclass
 class Segment:
     """
@@ -1330,14 +1308,13 @@ class ExceptionStack:
     def clear_current_exception(self) -> None:
         self._current_exception = None
 
-    def set_raised_exception(self, val: ExceptionVals) -> None:
-        # Mirrors CPython's PyErr_SetRaisedException
+    def set_current_exception(
+        self, val: ExceptionVals, set_context: bool = True
+    ) -> None:
+        # Mirrors CPython's PyErr_SetObject
+        if set_context:
+            self._set_context_and_break_context_reference_cycle(val)
         self._current_exception = val
-
-    def get_topmost_exception(self) -> ExceptionVals:
-        if not len(self):
-            raise AssertionError("expected len(self.exn_vt_stack) to be true")
-        return self.__getitem__(-1)
 
     def move_current_exception_to_stack(self) -> None:
         if self._current_exception is None:
@@ -1347,7 +1324,7 @@ class ExceptionStack:
         self.append(self._current_exception)
         self.clear_current_exception()
 
-    def get_raised_exception(self) -> ExceptionVals:
+    def get_current_exception(self) -> ExceptionVals:
         # Mirrors CPython's PyErr_GetRaisedException()
         if self._current_exception is None:
             raise AssertionError(
@@ -2593,57 +2570,14 @@ class InstructionTranslatorBase(
                 self.pop()
             self.jump(inst)
 
-    def _create_exception_instance(
-        self, val: ExceptionTypes | ExceptionVals
-    ) -> ExceptionVals:
-        if pyexception_class_check(val):
+    def _create_exception_type(self, val: VariableTracker) -> VariableTracker:
+        if isinstance(
+            val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
+        ):
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
-            type_name = val.python_type_name()
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
-
-            if not issubclass(val.python_type(), BaseException):
-                exc.raise_type_error(
-                    self,
-                    f"calling {type_name} should have returned an instance of BaseException, not {val.python_type_name()}",
-                )
-        if not pyexception_instance_check(val):
-            exc.raise_type_error(
-                self,
-                "exceptions must derive from BaseException",
-            )
         return val
-
-    def set_exception_obj(
-        self, exception: ExceptionTypes, value: VariableTracker | None
-    ) -> ExceptionVals:
-        # Mirrors CPython PyErr_SetObject
-        # Note: This function is here rather than in ExceptionStack because we
-        # need an InstructionTranslator instance to create the exception instance
-
-        # TODO(dynamo-team): check if exception is a subclass of BaseException
-
-        # This function handles construction, normalization, implicit
-        # __context__ chaining and traceback attach.
-        # if value is specified, it can be either an exception instance or args
-        # to exception ctor
-
-        if (
-            value
-            and pyexception_instance_check(value)
-            and issubclass(value.exc_type, exception.fn)
-        ):
-            instance = value
-        else:
-            instance = exception.call_function(self, [value] if value else [], {})
-
-        if not isinstance(instance, ExceptionVals):
-            raise AssertionError("expected instance to be an instance of ExceptionVals")
-
-        self._attach_traceback_to_exception(instance)
-        self.exn_vt_stack._set_context_and_break_context_reference_cycle(instance)
-        self.exn_vt_stack.set_raised_exception(instance)
-        return instance
 
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
@@ -2665,93 +2599,105 @@ class InstructionTranslatorBase(
             {},
         )
 
-    def _raise_observed_exception(self, exc_: ExceptionVals) -> NoReturn:
-        # Propagate `exc_` as an ObservedException to unwind the tracer to the
-        # handler, preserving the original raise location via python_stack.
-        observed_exception_type = get_dynamo_observed_exception(exc_.exc_type)  # type: ignore[attr-defined, union-attr]
-        python_stack = getattr(exc_, "python_stack", None)
-        raise observed_exception_type(
-            f"raised exception {exc_.debug_repr()}", real_stack=python_stack
-        )
-
-    def do_raise(
-        self,
-        val: VariableTracker | None,
-        cause: VariableTracker | None,
+    def _raise_exception_variable(
+        self, val: VariableTracker, set_context: bool
     ) -> NoReturn:
-        # Mirrors CPython's `do_raise`
-        # https://github.com/python/cpython/blob/704c4c79e8485c20fb59cea1acec005f365a4fca/Python/ceval.c#L1900
+        # TODO(dynamo-team): Split this function into two separate functions for
+        # the two different ways users can raise exceptions, and clean up the
+        # code accordingly. Right now it's a bit convoluted since we have to
+        # handle both cases in one function.
 
-        # User can raise exception in 3 ways
-        #   1) raise
-        #   2) raise <instance>
-        #   3) raise <type>
+        # User can raise exception in 2 ways
+        #   1) raise exception type - raise NotImplementedError
+        #   2) raise exception instance - raise NotImplementedError("foo")
 
-        # bare raise
-        if val is None:
-            # reraise the exception on top of the exception stack
-            if not len(self.exn_vt_stack):
-                exc.raise_observed_exception(
-                    RuntimeError, self, args=["No active exception to reraise"]
-                )
-            val = self.exn_vt_stack.get_topmost_exception()
-            self.exn_vt_stack.set_raised_exception(val)
-            self._raise_observed_exception(val)
+        # 1) when user raises exception type
+        val = self._create_exception_type(val)
 
-        # normalize type/value
-        if pyexception_class_check(val):
-            type_ = val
-            value = self._create_exception_instance(val)
-        elif pyexception_instance_check(val):
-            value = val
-            type_ = VariableTracker.build(self, val.python_type())
-        else:
-            # not something we can raise
-            exc.raise_type_error(self, "exceptions must derive from BaseException")
-
-        # normalize cause (`raise <val> from <cause>`)
-        if cause:
-            if pyexception_class_check(cause):
-                fixed_cause = self._create_exception_instance(cause)
-            elif pyexception_instance_check(cause) or cause.is_constant_none():
-                fixed_cause = cause
-            else:
-                exc.raise_type_error(
-                    self,
-                    "exception causes must derive from BaseException",
-                )
-            value.call_method(
-                self,
-                "__setattr__",
-                [ConstantVariable.create("__cause__"), fixed_cause],
-                {},
-            )
+        # Handle https://peps.python.org/pep-0479/
+        # CPython 3.12+ has a specific bytecode instruction (CALL_INTRINSIC_1 3) for this
+        if (
+            is_generator(self.f_code)
+            and isinstance(val, variables.ExceptionVariable)
+            and val.exc_type is StopIteration
+        ):
+            val = VariableTracker.build(self, RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
         # Capture the python_stack when the exception is first raised.
         # This preserves the original exception location even if the exception
         # is later re-raised (e.g., in context manager cleanup).
         # ExceptionVariable and UserDefinedExceptionObjectVariable both have
         # a python_stack attribute.
-        if getattr(value, "python_stack", None) is None:
-            value.python_stack = torch._guards.TracingContext.extract_stack()  # type: ignore[union-attr]
+        if (
+            self._isinstance_exception(val)
+            and getattr(val, "python_stack", None) is None
+        ):
+            val.python_stack = torch._guards.TracingContext.extract_stack()  # type: ignore[union-attr]
 
-        exc_instance = self.set_exception_obj(type_, value)
-        self._raise_observed_exception(exc_instance)
+        # 2) when user raises exception instance
+        if self._isinstance_exception(val):
+            # Save the exception in a global data structure.
+            # set_context=False for re-raises (RERAISE, RAISE_VARARGS 0) to
+            # match CPython semantics: __context__ is set only at the original
+            # raise site, so user code in finally blocks can clear it.
+            self.exn_vt_stack.set_current_exception(val, set_context=set_context)  # type: ignore[arg-type]
+
+            observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
+            # Pass the stored python_stack to preserve the original exception location
+            python_stack = getattr(val, "python_stack", None)
+            raise observed_exception_type(
+                f"raised exception {val.debug_repr()}", real_stack=python_stack
+            )
+
+        exc.raise_observed_exception(
+            TypeError,
+            self,
+            args=[
+                f"exceptions must derive from BaseException, not {val.python_type_name()}",
+            ],
+        )
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
-            # bare raise; do_raise reraises the exception on top of the stack,
-            # or reports "No active exception to reraise" if the stack is empty
-            self.do_raise(None, None)
+            if not len(self.exn_vt_stack):
+                exc.raise_observed_exception(
+                    RuntimeError, self, args=["No active exception to reraise"]
+                )
+
+            # re-raise the previous exception. Here CPython refers to the exception
+            # on top of the exception stack
+            if not len(self.exn_vt_stack):
+                raise AssertionError("expected len(self.exn_vt_stack) to be true")
+            val = self.exn_vt_stack[-1]
+            if not self._isinstance_exception(val):
+                raise AssertionError(val)
+            self._raise_exception_variable(val, set_context=False)
         elif inst.arg == 1:
             # raise TOS
             val = self.stack[-1]  # type: ignore[assignment]
-            self.do_raise(val, None)
+            try:
+                self._raise_exception_variable(val, set_context=True)
+            finally:
+                # Update __traceback__ in the raised exception
+                curr_exc = self.exn_vt_stack.get_current_exception()
+                self._attach_traceback_to_exception(curr_exc)
         else:
             # raise .. from ...
-            cause = self.pop()
+            from_vt = self.pop()
             val = self.pop()  # type: ignore[assignment]
-            self.do_raise(val, cause)
+            try:
+                self._raise_exception_variable(val, set_context=True)
+            finally:
+                # Update __cause__/__suppress_context__ in the raised exception
+                curr_exc = self.exn_vt_stack.get_current_exception()
+                self._attach_traceback_to_exception(curr_exc)
+                cause = self._create_exception_type(from_vt)
+                curr_exc.call_method(
+                    self,  # pyrefly: ignore [bad-argument-type]
+                    "__setattr__",
+                    [VariableTracker.build(self, "__cause__"), cause],
+                    {},
+                )  # type: ignore[arg-type, union-attr, assignment]
 
     def CLEANUP_THROW(self, inst: Instruction) -> None:
         # https://github.com/python/cpython/pull/96010
@@ -2777,31 +2723,24 @@ class InstructionTranslatorBase(
         #   set f_lasti of the current frame.
 
         if sys.version_info >= (3, 11):
-            # Re-raise the exception on top of the stack.
+            # RERAISE is currently supported in a narrow case of `raise ... from None`
             val = self.pop()
-            if not pyexception_instance_check(val):
-                raise AssertionError(
-                    "expected _exception_instance_check(val) to be true"
-                )
             if inst.argval:
                 # RERAISE 1
                 _ = self.pop()
-                self.exn_vt_stack.set_raised_exception(val)
+                self._raise_exception_variable(val, set_context=False)
             else:
                 # RERAISE 0
                 self.push(val)
-                self.exn_vt_stack.set_raised_exception(val)
-            self._raise_observed_exception(val)
+                self._raise_exception_variable(val, set_context=False)
         else:
             _exc = self.pop()
             val = self.pop()
             _tb = self.pop()
-            if not pyexception_instance_check(val):
-                raise AssertionError(
-                    "expected _exception_instance_check(val) to be true"
-                )
-            self.exn_vt_stack.set_raised_exception(val)
-            self._raise_observed_exception(val)
+            self._raise_exception_variable(val, set_context=False)
+
+    def _isinstance_exception(self, val: VariableTracker) -> TypeIs[ExceptionVals]:
+        return isinstance(val, ExceptionVals)
 
     def WITH_EXCEPT_START(self, inst: Instruction) -> None:
         args: list[VariableTracker] = []
@@ -2820,9 +2759,9 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected len(self.stack) >= fn_loc to be true")
             fn = self.stack[-fn_loc]
             val = self.stack[-1]
-            if not pyexception_instance_check(val):
+            if not self._isinstance_exception(val):
                 raise AssertionError(
-                    "expected _exception_instance_check(val) to be true"
+                    "expected self._isinstance_exception(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
             tb = val.getattro_impl(
@@ -2838,9 +2777,9 @@ class InstructionTranslatorBase(
                 raise AssertionError("expected len(self.stack) >= 7 to be true")
             fn = self.stack[-7]
             val = self.stack[-2]
-            if not pyexception_instance_check(val):
+            if not self._isinstance_exception(val):
                 raise AssertionError(
-                    "expected _exception_instance_check(val) to be true"
+                    "expected self._isinstance_exception(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
@@ -2857,7 +2796,7 @@ class InstructionTranslatorBase(
 
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
-            curr_exc = self.exn_vt_stack.get_raised_exception()
+            curr_exc = self.exn_vt_stack.get_current_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
@@ -2891,7 +2830,7 @@ class InstructionTranslatorBase(
                     )
 
                 # 3) push the exception to the stack
-                self.push(self.exn_vt_stack.get_raised_exception())
+                self.push(self.exn_vt_stack.get_current_exception())
 
                 # 4) jump to the handler
                 self.jump(exn_tab_entry)  # type: ignore[arg-type]
@@ -2901,7 +2840,7 @@ class InstructionTranslatorBase(
                 self.stack.clear()
 
                 # attach traceback to the exception and set it as current exception
-                curr_exc = self.exn_vt_stack.get_raised_exception()
+                curr_exc = self.exn_vt_stack.get_current_exception()
                 self._attach_traceback_to_exception(curr_exc)
 
                 if type(self) is InstructionTranslator:
@@ -2935,7 +2874,7 @@ class InstructionTranslatorBase(
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
 
-                exception_var = self.exn_vt_stack.get_raised_exception()
+                exception_var = self.exn_vt_stack.get_current_exception()
                 self.exn_vt_stack.move_current_exception_to_stack()
 
                 # 1) pop values from the stack until it matches the stack depth
@@ -3076,7 +3015,7 @@ class InstructionTranslatorBase(
             )
 
         if sys.version_info >= (3, 11):
-            if not pyexception_instance_check(exc_instance):
+            if not self._isinstance_exception(exc_instance):
                 unimplemented(
                     gb_type="Caught non-Exception value",
                     context=str(exc_instance),
@@ -3106,7 +3045,7 @@ class InstructionTranslatorBase(
                     explanation=f"`except ...` expects a non-type: {expected_type}.",
                     hints=[*graph_break_hints.USER_ERROR],
                 )
-            if pyexception_instance_check(exc_instance) and issubclass(
+            if self._isinstance_exception(exc_instance) and issubclass(
                 exc_instance.exc_type,  # type: ignore[union-attr]
                 expected_type.fn,  # type: ignore[attr-defined]
             ):
@@ -4447,9 +4386,9 @@ class InstructionTranslatorBase(
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
         val = self.stack[-1]
-        if not pyexception_instance_check(val):
+        if not self._isinstance_exception(val):
             raise AssertionError(
-                f"expected _exception_instance_check(val) to be true, got {val}"
+                f"expected self._isinstance_exception(val) to be true, got {val}"
             )
         if val.exc_type is StopIteration:  # type: ignore[union-attr]
             new_val = VariableTracker.build(self, RuntimeError).call_function(
