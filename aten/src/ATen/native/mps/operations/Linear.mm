@@ -230,6 +230,11 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
               "MPS device does not support linear backward for non-float inputs");
 
   const Tensor weight_reshaped = weight.is_contiguous() ? weight : weight.contiguous();
+  // The graph below produces incorrect results for a non-contiguous
+  // grad_output (e.g. the stride-0 expanded gradient coming from
+  // sum().backward()) when the reduction dimension is 1, so make it
+  // contiguous like the weight above.
+  const Tensor grad_output_reshaped = grad_output.is_contiguous() ? grad_output : grad_output.contiguous();
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -238,25 +243,25 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
     MPSGraphTensor* outputTensor_ = nil;
   };
 
-  Tensor output = at::empty(input_size, grad_output.options());
+  Tensor output = at::empty(input_size, grad_output_reshaped.options());
   TORCH_CHECK(output.is_mps());
-  if (grad_output.numel() == 0) {
+  if (grad_output_reshaped.numel() == 0) {
     return output;
   }
 
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    std::string key = "mps_linear_backward_input" + getTensorsStringKey({grad_output, weight_reshaped});
+    std::string key = "mps_linear_backward_input" + getTensorsStringKey({grad_output_reshaped, weight_reshaped});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
       newCachedGraph->weightTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, weight_reshaped);
-      newCachedGraph->gradOutputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
+      newCachedGraph->gradOutputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, grad_output_reshaped);
 
       // MPS matrixMultiplication crashes for 5D+ tensors on 14.2.1 with `New volume should match old volume`
       // (https://github.com/pytorch/pytorch/issues/114942), so flatten >4D to 2D first. macOS 27 handles N-D
       // matmul directly and instead crashes the MLIR pass manager on the in-graph reshape -> matmul -> reshape
       // (https://github.com/pytorch/pytorch/issues/187201), so skip the reshape there.
-      bool needReshape = grad_output.dim() > 4 && !is_macos_at_least(MacOSVersion::MACOS_27_0);
+      bool needReshape = grad_output_reshaped.dim() > 4 && !is_macos_at_least(MacOSVersion::MACOS_27_0);
       auto gradOutputTensor = needReshape
           ? [mpsGraph flatten2DTensor:newCachedGraph->gradOutputTensor_ axis:-1 name:nil]
           : newCachedGraph->gradOutputTensor_;
@@ -272,7 +277,7 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
     });
 
     Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_reshaped);
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
+    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_reshaped);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     auto feeds = dictionaryFromPlaceholders(weightPlaceholder, gradOutputPlaceholder);
@@ -369,12 +374,25 @@ std::tuple<Tensor, Tensor, Tensor> mps_linear_backward(const Tensor& input,
                                                        const Tensor& grad_output,
                                                        const Tensor& weight,
                                                        std::array<bool, 3> output_mask) {
+  // A 1-D weight contracts away the last input dimension in the forward
+  // (see the unsqueeze/squeeze in _mps_linear), so grad_output arrives
+  // without that dimension. Feeding the raw 1-D tensors into the 2-D
+  // matmul graphs below makes MPSGraph verification abort the process
+  // (issue #187988). Restore the collapsed dimension, run the regular
+  // 2-D backward, and squeeze grad_weight back at the end.
+  const bool is_1d_weight = weight.dim() == 1;
+  const Tensor weight_2d = is_1d_weight ? weight.unsqueeze(0) : weight;
+  const Tensor grad_output_2d = is_1d_weight ? grad_output.unsqueeze(-1) : grad_output;
+
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = _mps_linear_backward_input(input.sizes(), grad_output, weight);
+    grad_input = _mps_linear_backward_input(input.sizes(), grad_output_2d, weight_2d);
   }
   if (output_mask[1] || output_mask[2]) {
-    std::tie(grad_weight, grad_bias) = _mps_linear_backward_weights(grad_output, input, weight, output_mask[2]);
+    std::tie(grad_weight, grad_bias) = _mps_linear_backward_weights(grad_output_2d, input, weight_2d, output_mask[2]);
+    if (is_1d_weight) {
+      grad_weight = grad_weight.squeeze(0);
+    }
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }

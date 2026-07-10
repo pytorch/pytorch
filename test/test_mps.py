@@ -1516,6 +1516,31 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(linear, linear_mps)
 
+    def test_linear_1d_weight_backward(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/187988
+        # Backward through F.linear with a 1-D weight aborted the process
+        # because the backward graphs were built from the raw 1-D operands.
+        # The batch size must span more than one 16KB page so that a
+        # regression in the non-contiguous grad_output handling (zeros past
+        # the first page) is also detected.
+        def helper(shape):
+            x_cpu = torch.randn(shape, requires_grad=True)
+            w_cpu = torch.randn(shape[-1], requires_grad=True)
+            y_cpu = F.linear(x_cpu, w_cpu)
+            y_cpu.sum().backward()
+
+            x_mps = x_cpu.detach().clone().to('mps').requires_grad_(True)
+            w_mps = w_cpu.detach().clone().to('mps').requires_grad_(True)
+            y_mps = F.linear(x_mps, w_mps)
+            self.assertEqual(y_cpu, y_mps)
+            y_mps.sum().backward()
+
+            self.assertEqual(x_cpu.grad, x_mps.grad, atol=1e-4, rtol=1e-4)
+            self.assertEqual(w_cpu.grad, w_mps.grad, atol=1e-4, rtol=1e-4)
+
+        helper((256, 33))
+        helper((4, 7, 33))
+
     def test_linear_bias(self):
         def helper(bias_shape):
             device = "cpu"
