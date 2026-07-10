@@ -501,7 +501,24 @@ class BatchLinearLHSFusion(BatchFusion):
             node
         ) and is_linear_node_can_be_fused(node):
             input = get_arg_value(node, 0, "input")
+            weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
+
+            # Skip fusion when the weight is a tensor subclass (e.g. a quantized
+            # Int8Tensor). fuse() calls torch.cat on the weight example_values,
+            # which fails for subclasses that don't implement aten.cat.
+            # Plain torch.Tensor and FakeTensor (used during tracing) are fine.
+            weight_val = weight.meta.get("example_value")
+            if weight_val is None:
+                weight_val = weight.meta.get("val")
+            if (
+                weight_val is not None
+                and isinstance(weight_val, torch.Tensor)
+                and not isinstance(weight_val, torch._subclasses.fake_tensor.FakeTensor)
+                and type(weight_val) is not torch.Tensor
+            ):
+                return None
+
             bias_tensor = None
             if bias is not None:
                 bias_tensor = bias.meta.get("val")
