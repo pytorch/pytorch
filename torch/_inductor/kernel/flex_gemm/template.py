@@ -48,12 +48,15 @@ class FlexGemmEpilogueLocalReduceConfig:
             if not local_reduce.feeds_main:
                 raise RuntimeError(LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR)
             return FlexGemmEpilogueLocalReduceConfig(
-                local_reduce.geometry, feeds_main=True
+                local_reduce.geometry,
+                feeds_main=True,
             )
         if out_index is None:
             raise RuntimeError(LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR)
         return FlexGemmEpilogueLocalReduceConfig(
-            local_reduce.geometry, out_index, local_reduce.feeds_main
+            local_reduce.geometry,
+            out_index,
+            local_reduce.feeds_main,
         )
 
     @property
