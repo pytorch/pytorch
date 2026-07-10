@@ -63,6 +63,7 @@ from .dicts import (
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedItemsDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
@@ -217,6 +218,7 @@ __all__ = [
     "CellVariable",
     "ConstantVariable",
     "ConstDictVariable",
+    "OrderedItemsDictVariable",
     "ContextWrappingVariable",
     "ChainVariable",
     "CountIteratorVariable",
