@@ -118,7 +118,6 @@ if TYPE_CHECKING:
         TritonKernelType,
     )
 
-    from .dicts import DunderDictVariable
     from .lists import BaseListVariable, ListVariable
     from .tensor import TensorVariable
 
@@ -142,6 +141,8 @@ class ClosureConversionError(NotImplementedError):
 
 @functools.lru_cache
 def get_pytree_SUPPORTED_NODES_source() -> AttrSource:
+    # Cached, so callers are responsible for installing the ID_MATCH guard on the
+    # embedded ImportSource("torch") themselves.
     return AttrSource(
         AttrSource(AttrSource(ImportSource("torch"), "utils"), "_pytree"),
         "SUPPORTED_NODES",
@@ -397,12 +398,6 @@ def fn_getattro_impl(
 
 
 class BaseUserFunctionVariable(VariableTracker):
-    def __init__(
-        self, dict_vt: "DunderDictVariable | None" = None, **kwargs: Any
-    ) -> None:
-        super().__init__(**kwargs)
-        self.dict_vt: DunderDictVariable | None = dict_vt
-
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -413,11 +408,6 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def get_source(self) -> Source | None:
         return self.source
-
-    def get_dict_vt(self, tx: "InstructionTranslatorBase") -> "DunderDictVariable":
-        if self.dict_vt is None:
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
-        return self.dict_vt
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
@@ -747,12 +737,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             )
         source = self.get_source()
         return fn_getattro_impl(tx, self.fn, source, name)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        result = hasattr(self.fn, name)
-        return VariableTracker.build(tx, result)
 
     def tp_descr_get_impl(
         self,
@@ -1150,6 +1134,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.code = code
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
+        self.remaining_items: list[VariableTracker] = []
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -1187,9 +1172,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
         temp = temporarely_allow_writes_to_output_graph(tx)
 
         with save, disallow, temp:
-            tracer = self.inline_tracer
-            if not tracer.generator_exhausted:
-                self.remaining_items = unpack_iterable(tx, self)  # type: ignore[bad-argument-type]
+            if not self.remaining_items:
+                tracer = self.inline_tracer
+                if not tracer.generator_exhausted:
+                    self.remaining_items = unpack_iterable(tx, self)  # type: ignore[bad-argument-type]
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
 
     def get_globals(self) -> dict[str, Any]:
@@ -2522,11 +2508,6 @@ class SkipFunctionVariable(VariableTracker):
             "Python codegen not implemented for sourceless SkipFunctionVariable"
         )
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.value, name))
-
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -3724,7 +3705,9 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
-            type_source = AttrSource(ImportSource("collections"), "namedtuple")
+            collections_source = ImportSource("collections")
+            install_guard(collections_source.make_guard(GuardBuilder.ID_MATCH))
+            type_source = AttrSource(collections_source, "namedtuple")
             return VariableTracker.build(
                 tx, vars(collections)["namedtuple"], type_source
             )
@@ -3776,6 +3759,9 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
 
         # If the SUPPORTED_NODES was seen earlier and mutated, there would be a
         # source and that will give us the mutated SUPPORTED_NODES.
+        # get_pytree_SUPPORTED_NODES_source is cached, so install its
+        # ImportSource("torch") ID_MATCH guard here.
+        install_guard(ImportSource("torch").make_guard(GuardBuilder.ID_MATCH))
         supported_nodes_var = VariableTracker.build(
             tx,
             torch.utils._pytree.SUPPORTED_NODES,

@@ -405,6 +405,7 @@ aten::normal.float_float
 aten::normal.float_float_out
 aten::normal.out
 aten::normal_
+aten::normal_functional
 aten::permute
 aten::permute_copy
 aten::permute_copy.out

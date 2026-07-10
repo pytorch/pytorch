@@ -261,6 +261,7 @@ exclude_patterns = [
     'c10/util/signal_handler.cpp',
     'c10/util/StringUtil.cpp',
     'c10/util/typeid.h',
+    'torch/csrc/dynamo/guards.cpp',
     'torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp',
     'torch/headeronly/util/bit_cast.h',
     'torch/headeronly/util/complex.h',
@@ -834,6 +835,7 @@ exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
     'c10/cuda/CUDACachingAllocator.cpp',
+    'c10/cuda/CUDAMallocAsyncAllocator.cpp',
     '**/fb/**',
 ]
 command = [
