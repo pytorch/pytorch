@@ -229,7 +229,7 @@ _MODULE_HEADER = """\
 
 
 def _resolve_global(
-    obj: Any,
+    obj: object,
     helper_table: dict[int, tuple[str, str]],
     inner_call_id: int | None,
     fn_id_to_name: dict[int, str],
@@ -587,6 +587,23 @@ def _compose_standalone_module(
     orch_block = _emit_inline(orch.source, orch.globals_dict)
     outer_blocks = [_emit_inline(g.source, g.globals_dict) for g in outer_wrappers]
 
+    # Imports (helper table + whatever emit_value added) are emitted BEFORE the inner
+    # module and the wrapper blocks, so a later top-level binding of the same name -- an
+    # inner-module binding or a hoisted wrapper global -- would shadow the import. And
+    # _emit_inline skips hoisting a global whose resolved expr already equals its own name
+    # (an imported helper referenced as ``gname == expr``), so such a wrapper would then
+    # silently bind to the shadowing object instead of the helper. ``from X import Y``
+    # names bind a specific (non-module) object and are the ones at risk; plain ``import
+    # mod`` names resolve to the same singleton module no matter who imports them, so a
+    # duplicate binding is benign and is left unchecked (else ``import torch`` -- which the
+    # inner module also emits -- would trip a spurious collision). ``_reserve`` fails loudly
+    # if an inner-module name or a hoisted global collides with one of these import names.
+    for stmt in sorted(imports):
+        node = ast.parse(stmt).body[0]
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                _reserve(alias.asname or alias.name)
+
     # The final ``call`` invokes the outermost outer wrapper (else the orchestration
     # directly). Build that line now so the wiring guard's corpus includes it -- the
     # outermost outer wrapper is referenced ONLY there.
@@ -734,7 +751,13 @@ def _compose_standalone_module(
 
 
 def _find_effectful_op(gm: GraphModule, get_effect: Any) -> Any:
-    """Return the first effectful OpOverload target reachable from ``gm``, or None.
+    """Return the first effectful op target reachable from ``gm``, or None.
+
+    The target may be an ``OpOverload`` (e.g. ``aten::_print``) or a
+    ``HigherOrderOperator`` -- ``call_torchbind`` / ``hop_print`` /
+    ``invoke_leaf_function`` are registered ``_EffectType.ORDERED`` HOPs, not
+    OpOverloads -- so both are checked (``get_effect`` returns None for a
+    non-effectful HOP like ``cond``).
 
     Walks the graph and descends into any child GraphModule a node references -- a
     HOP (cond/while_loop/scan) holds its body as a get_attr'd submodule or passes it
@@ -752,7 +775,10 @@ def _find_effectful_op(gm: GraphModule, get_effect: Any) -> Any:
         for node in g.graph.nodes:
             if (
                 node.op == "call_function"
-                and isinstance(node.target, torch._ops.OpOverload)
+                and isinstance(
+                    node.target,
+                    (torch._ops.OpOverload, torch._ops.HigherOrderOperator),
+                )
                 and get_effect(node.target) is not None
             ):
                 return node.target
@@ -793,20 +819,30 @@ def _find_effectful_op(gm: GraphModule, get_effect: Any) -> Any:
 
 
 def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
-    """True if any placeholder carries a symbolic (SymInt) shape or is itself a SymInt --
-    i.e. the graph was traced with dynamic dims. Drives the shapes mode for the capture
-    pass: dynamic graphs stay dynamic, static graphs specialize so the composer can bake
-    their (static) view metadata."""
+    """True if any placeholder is itself a SymInt or carries symbolic (SymInt) size,
+    stride, or storage-offset metadata -- i.e. the graph was traced with dynamic dims.
+    Drives the shapes mode for the capture pass: dynamic graphs stay dynamic, static
+    graphs specialize so the composer can bake their (static) view metadata. Strides and
+    storage offset are checked too, not just sizes: a graph dynamic solely via symbolic
+    strides has static sizes, and treating it as static would silently specialize the
+    artifact to the example strides. (Unbacked symints appearing only in intermediates,
+    not on any placeholder, are still missed here, but such a graph fails loudly
+    downstream when emit_value rejects the still-symbolic metadata.)"""
     import torch
+
+    def _is_symbolic(v: Any) -> bool:
+        return isinstance(v, torch.SymInt)
 
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
         val = node.meta.get("val")
-        if isinstance(val, torch.SymInt):
+        if _is_symbolic(val):
             return True
-        if isinstance(val, torch.Tensor) and any(
-            isinstance(s, torch.SymInt) for s in val.shape
+        if isinstance(val, torch.Tensor) and (
+            any(_is_symbolic(s) for s in val.shape)
+            or any(_is_symbolic(s) for s in val.stride())
+            or _is_symbolic(val.storage_offset())
         ):
             return True
     return False
