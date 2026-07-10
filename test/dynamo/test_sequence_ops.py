@@ -200,6 +200,25 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         result = a + b
         self.assertEqual(result, (1, 2, 3, 4))
 
+    # --- User-defined tuple subclass construction ---
+
+    @make_dynamo_test
+    def test_user_defined_tuple_construct_empty(self):
+        # tuple.__new__(cls) with no iterable arg builds an empty tuple.
+        a = UserDefinedTuple()
+        self.assertEqual(a, ())
+        self.assertEqual(len(a), 0)
+        self.assertIs(type(a), UserDefinedTuple)
+
+    @make_dynamo_test
+    def test_user_defined_tuple_construct_from_iterables(self):
+        self.assertEqual(UserDefinedTuple([]), ())
+        self.assertEqual(UserDefinedTuple(set()), ())
+        self.assertEqual(UserDefinedTuple([1, 2, 3]), (1, 2, 3))
+        self.assertEqual(UserDefinedTuple(obj for obj in [1, 2, 3]), (1, 2, 3))
+        nested = tuple(UserDefinedTuple([obj]) for obj in [1, 2, 3])
+        self.assertEqual(nested, ((1,), (2,), (3,)))
+
     # --- User-defined deque subclass concatenation ---
 
     @make_dynamo_test
@@ -415,6 +434,102 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d = collections.deque([1, 2])
         with self.assertRaises(TypeError):
             d.copy(1)
+
+    # --- deque iterator mutation detection ---
+
+    @make_dynamo_test
+    def test_deque_iter_mutated_pop_raises(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.pop()
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_iter_mutated_append_raises(self):
+        d = collections.deque()
+        it = iter(d)
+        d.append(10)
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_reversed_iter_mutated_raises(self):
+        d = collections.deque("abc")
+        it = reversed(d)
+        d.appendleft("z")
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_iter_unmutated_ok(self):
+        d = collections.deque("abc")
+        self.assertEqual(list(iter(d)), ["a", "b", "c"])
+        self.assertEqual(list(reversed(d)), ["c", "b", "a"])
+
+    @make_dynamo_test
+    def test_deque_reverse_iterator_type(self):
+        klass = type(reversed(collections.deque()))
+        self.assertEqual(list(klass(collections.deque("abcd"))), list(reversed("abcd")))
+
+    @make_dynamo_test
+    def test_deque_forward_iterator_type(self):
+        klass = type(iter(collections.deque()))
+        self.assertEqual(list(klass(collections.deque("abcd"))), list("abcd"))
+
+    @make_dynamo_test
+    def test_deque_reverse_iterator_bad_arg(self):
+        klass = type(reversed(collections.deque()))
+        with self.assertRaises(TypeError):
+            klass([1, 2, 3])
+
+    # Eager parity: only mutations that bump CPython's deque->state invalidate
+    # an active iterator. reverse() and setitem do NOT bump; delitem and a
+    # non-empty extend do.
+
+    @make_dynamo_test
+    def test_deque_iter_reverse_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.reverse()
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_setitem_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d[0] = "Z"
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_delitem_raises(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        del d[0]
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_iter_extend_empty_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.extend([])
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_extendleft_empty_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.extendleft([])
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_extend_nonempty_raises(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.extend([1])
+        with self.assertRaises(RuntimeError):
+            next(it)
 
     # --- torch.Size concatenation ---
 
@@ -1227,6 +1342,54 @@ class TestRangeDynamicBounds(torch._dynamo.test_case.TestCase):
             return list(keys)
 
         self.assertEqual(fn(), [0, 1, 2, 3, 4])
+
+
+class TestRangeContains(torch._dynamo.test_case.TestCase):
+    # range.__contains__ uses the arithmetic fast path only for exact int/bool
+    # operands; everything else falls back to an __eq__ linear scan, matching
+    # CPython range_contains / _PySequence_IterSearch.
+    def test_non_int_members(self):
+        class AlwaysEq:
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                return 0
+
+        class IntSubclassEq(int):
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                return 0
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                1.0 in range(3),
+                True in range(3),
+                (1 + 0j) in range(3),
+                AlwaysEq() in range(3),
+                IntSubclassEq(11) in range(10),
+                5 in range(3),
+                2.5 in range(3),
+            )
+
+        self.assertEqual(fn(), (True, True, True, True, True, False, False))
+
+    def test_negative_step_and_strided(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                -1 in range(0, -20, -1),
+                1.0 in range(0, -20, -1),
+                2 in range(0, 101, 2),
+                1 in range(0, 101, 2),
+                2.0 in range(0, 101, 2),
+                100.0 in range(0, 101, 2),
+            )
+
+        self.assertEqual(fn(), (True, False, True, False, True, True))
 
 
 if __name__ == "__main__":
