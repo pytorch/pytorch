@@ -956,7 +956,7 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     if t.shape[dim] == 0:
         shape = list(t.shape)
         del shape[dim]
-        return t.new_empty(shape)
+        return t.new_zeros(shape)
     return torch.select_copy(t, dim, 0)
 
 

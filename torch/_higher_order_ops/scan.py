@@ -383,10 +383,6 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         ]
 
         if num_elems == 0:
-            # outs: list[Tensor] = [
-            #     torch.empty([0] + list(e.size()), dtype=e.dtype, device=e.device)
-            #     for e in out_0_masked
-            # ]
             outs_expanded = [
                 outs.pop(0) if out_m else None for out_m in out_tensor_mask
             ]
