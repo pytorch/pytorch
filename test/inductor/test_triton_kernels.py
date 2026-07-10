@@ -48,8 +48,8 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
-    TRITON_HAS_CPU,
     HAS_XPU_AND_TRITON,
+    TRITON_HAS_CPU,
 )
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
@@ -4632,6 +4632,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
         "requires gpu or triton cpu",
     )
     def test_custom_tma_descriptor_ops_keep_triton_launcher(self):
+        import triton
+
         from torch._higher_order_ops import triton_kernel_wrap as tkw
         from torch._higher_order_ops.triton_kernel_wrap import (
             identify_accessed_tensors,
@@ -4639,7 +4641,6 @@ class MutationTests(torch._inductor.test_case.TestCase):
             Op,
             Param,
         )
-        import triton
 
         custom_store = "custom_tma.descriptor_store"
         custom_load = "custom_tma.descriptor_load"

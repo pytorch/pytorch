@@ -898,44 +898,42 @@ class TensorAccesses:
     read_writes: "ReadWrites"
     can_fuse_epilogue: bool
 
+
 class IgnoreUnknownOp(Protocol):
     """If return True: skip the op, otherwise raise an error."""
-    def __call__(
-        self,
-        op : Op
-    ) -> bool: ...
+
+    def __call__(self, op: Op) -> bool: ...
+
 
 class ReadWriteIndexes(Protocol):
     """Return the list of argument indexes read / written"""
-    def __call__(
-        self,
-        op : Op
-    ) -> list[int]: ...
+
+    def __call__(self, op: Op) -> list[int]: ...
+
 
 def _safe_at_least_one_arg(op: Op) -> list[int]:
     if len(op.args) < 1:
-        raise AssertionError(
-            f"{op.name} expected at least 1 arg, got {len(op.args)}"
-        )
+        raise AssertionError(f"{op.name} expected at least 1 arg, got {len(op.args)}")
     return [0]
+
 
 # Name of mutation op to mutated parameter indices
 # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
 # All the OPs that have MemWrite trait.
 # What if Triton exposed this?
-TMA_STORE_OPS : dict[str,ReadWriteIndexes] = {
+TMA_STORE_OPS: dict[str, ReadWriteIndexes] = {
     "tt.experimental_descriptor_store": _safe_at_least_one_arg,
     "tt.descriptor_store": _safe_at_least_one_arg,
 }
 
-WRITE_OPS : dict[str,ReadWriteIndexes] = {
+WRITE_OPS: dict[str, ReadWriteIndexes] = {
     "tt.store": lambda op: [0],
     "tt.atomic_cas": lambda op: [0],
     "tt.atomic_rmw": lambda op: [0],
-    **TMA_STORE_OPS, # TMA stores are write ops
+    **TMA_STORE_OPS,  # TMA stores are write ops
 }
 
-READ_OPS : dict[str,ReadWriteIndexes]= {
+READ_OPS: dict[str, ReadWriteIndexes] = {
     "tt.load": lambda op: [0],
     "tt.load_tensor_descriptor": lambda op: [0],
     "tt.descriptor_load": lambda op: [0],
@@ -943,6 +941,7 @@ READ_OPS : dict[str,ReadWriteIndexes]= {
 UNKNOWN_OPS: dict[str, IgnoreUnknownOp] = {
     "tt.elementwise_inline_asm": lambda op: op.is_pure
 }
+
 
 @MemoizeWithCycleCheck
 def analyze_kernel_access(
