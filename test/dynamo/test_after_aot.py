@@ -60,7 +60,7 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             ),
             functorch_config.patch({"enable_autograd_cache": False}),
         ):
-            opt_fn = torch.compile(fn, dynamic=True)  # noqa: UNSPECIFIED_BACKEND
+            opt_fn = torch.compile(fn, dynamic=True)
             inp = torch.randn(4)
             self.assertEqual(opt_fn(inp), fn(inp))
 
