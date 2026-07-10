@@ -24,7 +24,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -398,6 +398,12 @@ def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMod
             max(xs),  # type: ignore[type-var]
         )
         return merged_out
+
+    # cond_merge_output requires FakeTensors to merge divergent metadata into
+    # unbacked symints. xs[0] is correct here because the branches are assumed to agree on tensor
+    # metadata (dtype/device/dim).
+    if any(isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor) for x in xs):
+        return xs[0]
 
     return functools.reduce(lambda a, b: cond_merge_output(a, b, mode), xs)
 
