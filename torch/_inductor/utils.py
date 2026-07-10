@@ -1313,6 +1313,8 @@ FORBIDDEN_CUDAGRAPH_OPS = frozenset(
         "run_and_save_rng_state",
         "run_with_rng_state",
         "aten._local_scalar_dense",
+        # cuSOLVER-backed linalg.eigh is not CUDA graph capturable.
+        "aten._linalg_eigh.default",
         # Technically, it's not necessary to ban this, because an
         # assert_scalar with constant arguments can be validly run
         # with CUDA graphs, but the operator is also pointless with
