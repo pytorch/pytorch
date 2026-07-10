@@ -23,7 +23,6 @@ import sympy
 
 import torch
 from torch.fx import GraphModule
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Max, Min
 
 from ...codegen.cutedsl.lane_analysis import decompose_affine_lane_expr
@@ -35,7 +34,7 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 # Fall back to scalar mask lowering before interval expansion makes generated CuTe too large.
-MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE = 16
+MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE = 8
 LANE_UNIFORM_BINARY_OPS: Mapping[object, str] = {
     torch.ops.aten.add.Tensor: "+",
     torch.ops.aten.add.Scalar: "+",
@@ -124,6 +123,20 @@ def _simplify_expr(expr: sympy.Expr) -> sympy.Expr:
     return V.graph.sizevars.simplify(expr)
 
 
+def render_sympy_args(
+    args: Sequence[sympy.Expr],
+    symbol_codes: Mapping[sympy.Symbol, str] | None,
+) -> list[str] | None:
+    """Render every child expression, returning ``None`` if any is unsupported."""
+    rendered = []
+    for arg in args:
+        cute_arg = sympy_to_cute_index(arg, symbol_codes)
+        if cute_arg is None:
+            return None
+        rendered.append(cute_arg)
+    return rendered
+
+
 def sympy_to_cute_index(
     expr: sympy.Expr, symbol_codes: Mapping[sympy.Symbol, str] | None = None
 ) -> str | None:
@@ -140,41 +153,25 @@ def sympy_to_cute_index(
             if expr.name == "kv_idx":
                 return "kv_idx[0]"
         case FloorDiv():
-            lhs, rhs = (sympy_to_cute_index(arg, symbol_codes) for arg in expr.args)
-            if lhs is not None and rhs is not None:
-                return f"({lhs} // {rhs})"
-        case sympy.Add():
-            args = []
-            for arg in expr.args:
-                cute_arg = sympy_to_cute_index(arg, symbol_codes)
-                if cute_arg is None:
-                    return None
-                args.append(cute_arg)
-            return "(" + " + ".join(args) + ")"
-        case sympy.Mul():
-            args = []
-            for arg in expr.args:
-                cute_arg = sympy_to_cute_index(arg, symbol_codes)
-                if cute_arg is None:
-                    return None
-                args.append(cute_arg)
-            return "(" + " * ".join(args) + ")"
+            args = render_sympy_args(expr.args, symbol_codes)
+            if args is not None:
+                return f"({args[0]} // {args[1]})"
+        case sympy.Add() | sympy.Mul():
+            args = render_sympy_args(expr.args, symbol_codes)
+            if args is None:
+                return None
+            separator = " + " if isinstance(expr, sympy.Add) else " * "
+            return "(" + separator.join(args) + ")"
         case Min() | Max():
-            args = []
-            for arg in expr.args:
-                cute_arg = sympy_to_cute_index(arg, symbol_codes)
-                if cute_arg is None:
-                    return None
-                args.append(cute_arg)
+            args = render_sympy_args(expr.args, symbol_codes)
+            if args is None:
+                return None
             op = "min" if isinstance(expr, Min) else "max"
             return f"{op}(" + ", ".join(args) + ")"
     if isinstance(expr, (sympy.Min, sympy.Max)):
-        args = []
-        for arg in expr.args:
-            cute_arg = sympy_to_cute_index(arg, symbol_codes)
-            if cute_arg is None:
-                return None
-            args.append(cute_arg)
+        args = render_sympy_args(expr.args, symbol_codes)
+        if args is None:
+            return None
         op = "min" if isinstance(expr, sympy.Min) else "max"
         return f"{op}(" + ", ".join(args) + ")"
     return None
@@ -221,21 +218,20 @@ class PackedMaskAnalyzer:
     is analyzed over the packed lane expression ``kv_idx + mask_lane`` and
     becomes the interval ``[doc_offsets[b_idx] - kv_idx, q_idx + 128 - kv_idx)``.
 
-    placeholders: FX placeholders for the mask_mod ABI and captured inputs.
+    nonnegative_indices: FX index placeholders that do not need wraparound handling.
     q_idx: FX placeholder for the scalar query index.
     kv_idx: FX placeholder for the first KV index in the packed 32-lane window.
     q_symbol: SymPy symbol used for q_idx during interval analysis.
     kv_symbol: SymPy symbol used for the packed window base KV index.
     lane_symbol: SymPy symbol for the lane offset within the packed window.
     symbol_codes: CuTe renderings for temporary symbols introduced for aux loads.
-    placeholder_codes: CuTe renderings for captured scalar and tensor placeholders.
+    placeholder_codes: CuTe renderings for lane-uniform ABI and captured placeholders.
     placeholder_exprs: SymPy expressions for captured scalar placeholders.
     aux_load_symbols: Stable symbols assigned to supported lane-uniform aux loads.
-    expression_overrides: Branch substitutions for piecewise integer expressions.
     next_symbol_id: Counter for naming temporary aux-load symbols.
     """
 
-    placeholders: Sequence[torch.fx.Node]
+    nonnegative_indices: tuple[torch.fx.Node, ...]
     q_idx: torch.fx.Node
     kv_idx: torch.fx.Node
     q_symbol: sympy.Symbol = dataclasses.field(
@@ -256,94 +252,13 @@ class PackedMaskAnalyzer:
     placeholder_exprs: Mapping[torch.fx.Node, sympy.Expr] = dataclasses.field(
         default_factory=dict
     )
-    aux_load_symbols: dict[tuple[torch.fx.Node, str], sympy.Symbol] = dataclasses.field(
-        default_factory=dict
-    )
-    expression_overrides: Mapping[torch.fx.Node, torch.fx.Node] = dataclasses.field(
+    aux_load_symbols: dict[torch.fx.Node, sympy.Symbol] = dataclasses.field(
         default_factory=dict
     )
     next_symbol_id: int = 0
 
-    def node_to_intervals_with_piecewise(
-        self,
-        node: torch.fx.Node,
-        expression_overrides: Mapping[torch.fx.Node, torch.fx.Node] | None = None,
-        split_depth: int = 0,
-    ) -> MaybeIntervalSet:
-        """Lower boolean graphs after splitting piecewise expressions."""
-        overrides = expression_overrides or {}
-        where = self.find_piecewise_where(node, overrides)
-        if where is not None:
-            return self.split_piecewise_where(node, where, overrides, split_depth)
-        self.expression_overrides = overrides
-        return self.node_to_intervals(node)
-
-    def find_piecewise_where(
-        self,
-        value: object,
-        expression_overrides: Mapping[torch.fx.Node, torch.fx.Node],
-    ) -> torch.fx.Node | None:
-        """Find the first reachable unresolved ``aten.where`` node."""
-        visited = OrderedSet()
-        pending = [value]
-        while pending:
-            current = pending.pop()
-            if not isinstance(current, torch.fx.Node) or current in visited:
-                continue
-            visited.add(current)
-            if current in expression_overrides:
-                pending.append(expression_overrides[current])
-            elif current.target is torch.ops.aten.where.self:
-                return current
-            else:
-                pending.extend(reversed(current.all_input_nodes))
-        return None
-
-    def split_piecewise_where(
-        self,
-        node: torch.fx.Node,
-        where: torch.fx.Node,
-        expression_overrides: Mapping[torch.fx.Node, torch.fx.Node],
-        split_depth: int,
-    ) -> MaybeIntervalSet:
-        """Analyze both arms of one ``where`` under its interval guard."""
-        if 1 << (split_depth + 1) > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE:
-            return None
-        condition, true_value, false_value = where.args
-        if not isinstance(condition, torch.fx.Node):
-            return None
-        if not isinstance(true_value, torch.fx.Node):
-            return None
-        if not isinstance(false_value, torch.fx.Node):
-            return None
-        if self.find_piecewise_where(condition, expression_overrides) is not None:
-            return None
-
-        # P(where(C, T, F)) == (C & P(T)) | (~C & P(F)). Splitting the whole
-        # predicate keeps repeated uses of the same where on the same branch.
-        branches = []
-        for branch_value, condition_is_true in (
-            (true_value, True),
-            (false_value, False),
-        ):
-            branch_overrides = dict(expression_overrides)
-            branch_overrides[where] = branch_value
-            intervals = self.node_to_intervals_with_piecewise(
-                node, branch_overrides, split_depth + 1
-            )
-            guard = self.node_to_intervals_with_piecewise(
-                condition, branch_overrides, split_depth + 1
-            )
-            if not condition_is_true:
-                guard = self.complement_intervals(guard)
-            branches.append(self.intersect_interval_sets(intervals, guard))
-
-        return self.union_interval_sets(*branches)
-
     def node_to_intervals(self, node: torch.fx.Node) -> MaybeIntervalSet:
         """Lower one supported boolean FX node into packed mask intervals."""
-        if node in self.expression_overrides:
-            return self.node_to_intervals(self.expression_overrides[node])
         if is_bool_full_node(node, True):
             return (PackedMaskInterval.full(),)
         if is_bool_full_node(node, False):
@@ -526,22 +441,17 @@ class PackedMaskAnalyzer:
         rhs_base, rhs_divisor = rhs_expr.args
         if lhs_divisor != rhs_divisor:
             return None
-        block_start = None
         if lhs_base == self.q_symbol and rhs_base == self.kv_symbol + self.lane_symbol:
-            block_start = V.graph.sizevars.simplify(
-                lhs_expr * lhs_divisor - self.kv_symbol
-            )
+            q_block = lhs_expr
         elif (
             rhs_base == self.q_symbol and lhs_base == self.kv_symbol + self.lane_symbol
         ):
-            block_start = V.graph.sizevars.simplify(
-                rhs_expr * rhs_divisor - self.kv_symbol
-            )
-        if block_start is None:
+            q_block = rhs_expr
+        else:
             return None
-        lower = V.graph.sizevars.simplify(block_start)
-        upper = V.graph.sizevars.simplify(block_start + lhs_divisor)
-        return self.interval_if_renderable(lower, upper)
+        block_start = V.graph.sizevars.simplify(q_block * lhs_divisor - self.kv_symbol)
+        block_end = V.graph.sizevars.simplify(block_start + lhs_divisor)
+        return self.interval_if_renderable(block_start, block_end)
 
     def interval_if_renderable(
         self, lower: sympy.Expr, upper: sympy.Expr
@@ -553,69 +463,50 @@ class PackedMaskAnalyzer:
             return (PackedMaskInterval(lower, upper),)
         return None
 
-    def normalize_interval_union(self, intervals: MaybeIntervalSet) -> MaybeIntervalSet:
-        """Drop exact empty/duplicate intervals and enforce the code-size cap."""
-        if intervals is None:
-            return None
-        result = []
-        for interval in intervals:
-            lower = V.graph.sizevars.simplify(interval.lower_lane)
-            upper = V.graph.sizevars.simplify(interval.upper_lane_exclusive)
-            if lower == upper:
-                continue
-            normalized = PackedMaskInterval(lower, upper)
-            if normalized not in result:
-                result.append(normalized)
-            if len(result) > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE:
-                return None
-        return tuple(result)
-
-    def union_interval_sets(self, *interval_sets: MaybeIntervalSet) -> MaybeIntervalSet:
-        """Union interval sets, propagating unsupported analysis."""
-        result = []
-        for intervals in interval_sets:
-            if intervals is None:
-                return None
-            result.extend(intervals)
-        return self.normalize_interval_union(tuple(result))
-
-    def intersect_interval_sets(
-        self, intervals: MaybeIntervalSet, new_intervals: MaybeIntervalSet
-    ) -> MaybeIntervalSet:
-        """Intersect interval sets, propagating unsupported analysis."""
-        intervals = self.normalize_interval_union(intervals)
-        new_intervals = self.normalize_interval_union(new_intervals)
-        if intervals is None or new_intervals is None:
-            return None
-        return self.normalize_interval_union(
-            self.merge_intersection(intervals, new_intervals)
-        )
-
     def complement_intervals(self, intervals: MaybeIntervalSet) -> MaybeIntervalSet:
         """Complement a keep-set within the 32-lane window via De Morgan.
 
         The complement of a union of intervals is the intersection of each
         interval's two complement pieces, which stays interval-representable.
         Interval bounds may be symbolic, so this composes existing renderable
-        bounds instead of sorting; merge_intersection caps the blowup.
+        bounds instead of sorting; intersect_interval_sets caps the blowup.
         """
         if intervals is None:
             return None
         result: MaybeIntervalSet = (PackedMaskInterval.full(),)
         for interval in intervals:
-            pieces = (
-                PackedMaskInterval(sympy.Integer(0), interval.lower_lane),
-                PackedMaskInterval(interval.upper_lane_exclusive, sympy.Integer(32)),
+            result = self.intersect_interval_sets(
+                result,
+                (
+                    PackedMaskInterval(sympy.Integer(0), interval.lower_lane),
+                    PackedMaskInterval(
+                        interval.upper_lane_exclusive, sympy.Integer(32)
+                    ),
+                ),
             )
-            result = self.intersect_interval_sets(result, pieces)
         return result
 
-    def merge_intersection(
-        self,
-        intervals: IntervalSet,
-        new_intervals: IntervalSet,
+    def union_interval_sets(
+        self, intervals: MaybeIntervalSet, new_intervals: MaybeIntervalSet
     ) -> MaybeIntervalSet:
-        """Intersect two interval sets, falling back if code size would grow too much."""
+        """Union supported interval sets while enforcing the code-size cap."""
+        if intervals is None or new_intervals is None:
+            return None
+        if (
+            len(intervals) + len(new_intervals)
+            > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE
+        ):
+            return None
+        return intervals + new_intervals
+
+    def intersect_interval_sets(
+        self,
+        intervals: MaybeIntervalSet,
+        new_intervals: MaybeIntervalSet,
+    ) -> MaybeIntervalSet:
+        """Intersect supported interval sets while enforcing the code-size cap."""
+        if intervals is None or new_intervals is None:
+            return None
         if (
             len(intervals) * len(new_intervals)
             > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE
@@ -633,35 +524,26 @@ class PackedMaskAnalyzer:
 
     def fx_mask_expr_to_sympy(self, expr: object) -> sympy.Expr | None:
         """Translate a mask expression with kv_idx expanded by mask_lane."""
-        if isinstance(expr, torch.fx.Node) and expr in self.expression_overrides:
-            expr = self.expression_overrides[expr]
         index_symbols = {
             self.q_idx: self.q_symbol,
             self.kv_idx: self.kv_symbol + self.lane_symbol,
         }
         index_symbols.update(self.placeholder_exprs)
-        return fx_aux_index_to_sympy(expr, index_symbols, self.mask_node_to_sympy)
-
-    def mask_node_to_sympy(self, node: torch.fx.Node) -> sympy.Expr | None:
-        """Resolve branch substitutions before translating supported aux loads."""
-        if node in self.expression_overrides:
-            return self.fx_mask_expr_to_sympy(self.expression_overrides[node])
-        return self.mask_aux_load_to_symbol(node)
+        return fx_aux_index_to_sympy(expr, index_symbols, self.mask_aux_load_to_symbol)
 
     def mask_aux_load_to_symbol(self, node: torch.fx.Node) -> sympy.Expr | None:
         """Assign a temporary SymPy symbol to a supported aux tensor load."""
         if not is_aten_index_node(node):
             return None
+        if node in self.aux_load_symbols:
+            return self.aux_load_symbols[node]
         lane_uniform_code = self.render_lane_uniform_scalar_expr(node)
         if lane_uniform_code is None:
             return None
-        cache_key = (node, lane_uniform_code)
-        if cache_key in self.aux_load_symbols:
-            return self.aux_load_symbols[cache_key]
         symbol = sympy.Symbol(f"mask_bound_{self.next_symbol_id}", integer=True)
         self.next_symbol_id += 1
         self.symbol_codes[symbol] = lane_uniform_code
-        self.aux_load_symbols[cache_key] = symbol
+        self.aux_load_symbols[node] = symbol
         return symbol
 
     def render_lane_uniform_scalar_expr(
@@ -681,22 +563,9 @@ class PackedMaskAnalyzer:
             return f"cutlass.Int32({index})"
         if not isinstance(expr, torch.fx.Node):
             return None
-        if expr in self.expression_overrides:
-            return self.render_lane_uniform_scalar_expr(
-                self.expression_overrides[expr],
-                for_index=for_index,
-                index_dim_size=index_dim_size,
-            )
 
         if expr is self.kv_idx:
             return None
-        if expr is self.q_idx:
-            return "q_idx[0]"
-        if len(self.placeholders) >= 2:
-            if expr is self.placeholders[0]:
-                return "b_idx[0]"
-            if expr is self.placeholders[1]:
-                return "h_idx[0]"
         if expr in self.placeholder_codes:
             return self.placeholder_codes[expr]
 
@@ -758,8 +627,7 @@ class PackedMaskAnalyzer:
             if (
                 dim_size is not None
                 and isinstance(index, torch.fx.Node)
-                and index
-                not in (self.q_idx, self.placeholders[0], self.placeholders[1])
+                and index not in self.nonnegative_indices
             ):
                 if not isinstance(dim_size, int | sympy.Integer):
                     return None
@@ -796,7 +664,7 @@ class PackedMaskAuxPlaceholderMap:
         codes: dict[torch.fx.Node, str] = {}
         exprs: dict[torch.fx.Node, sympy.Expr] = {}
         tensor_idx = 0
-        for placeholder, buffer in zip(placeholders[4:], other_buffers):
+        for placeholder, buffer in zip(placeholders, other_buffers):
             if isinstance(buffer, sympy.Expr):
                 rendered = sympy_to_cute_index(buffer, symbol_codes)
                 if rendered is None:
@@ -806,7 +674,7 @@ class PackedMaskAuxPlaceholderMap:
             else:
                 codes[placeholder] = f"aux_tensors[{tensor_idx}]"
                 tensor_idx += 1
-        for placeholder in placeholders[4 + len(other_buffers) :]:
+        for placeholder in placeholders[len(other_buffers) :]:
             codes[placeholder] = f"aux_tensors[{tensor_idx}]"
             tensor_idx += 1
         return cls(codes, exprs)
@@ -830,27 +698,32 @@ def select_packed_mask_intervals(
     if len(placeholders) < 4 or len(output) != 1:
         return None
 
-    q_idx, kv_idx = placeholders[2], placeholders[3]
+    b_idx, h_idx, q_idx, kv_idx, *aux_placeholders = placeholders
     output_val = output[0].args[0]
     if not isinstance(output_val, torch.fx.Node):
         return None
 
     symbol_codes = dict(aux_scalar_symbol_codes or {})
     placeholder_map = PackedMaskAuxPlaceholderMap.from_placeholders(
-        placeholders, other_buffers, symbol_codes
+        aux_placeholders, other_buffers, symbol_codes
     )
     if placeholder_map is None:
         return None
 
     analyzer = PackedMaskAnalyzer(
-        placeholders=placeholders,
+        nonnegative_indices=(b_idx, h_idx, q_idx),
         q_idx=q_idx,
         kv_idx=kv_idx,
         symbol_codes=symbol_codes,
-        placeholder_codes=placeholder_map.codes,
+        placeholder_codes={
+            b_idx: "b_idx[0]",
+            h_idx: "h_idx[0]",
+            q_idx: "q_idx[0]",
+            **placeholder_map.codes,
+        },
         placeholder_exprs=placeholder_map.exprs,
     )
-    intervals = analyzer.node_to_intervals_with_piecewise(output_val)
+    intervals = analyzer.node_to_intervals(output_val)
     if intervals is None:
         perf_hint_log.info(
             "flex FLASH: mask_mod could not be lowered to packed 32-lane intervals; "
