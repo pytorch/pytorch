@@ -118,7 +118,7 @@ class TestFP8Types(TestCase):
         import torch._inductor.codegen.triton_utils as triton_utils
         from torch._inductor.graph import GraphLowering
 
-        def force_uint8_storage(dtype, arg_name=None):
+        def force_uint8_storage(dtype, arg_name=None, *, device=None):
             return dtype == torch.float8_e4m3fn and (
                 arg_name is None or arg_name.startswith("in_ptr")
             )
