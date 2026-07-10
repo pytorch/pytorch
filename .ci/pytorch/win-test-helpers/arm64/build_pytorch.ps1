@@ -43,6 +43,25 @@ if ($env:ENABLE_APL -eq "1") {
     $env:OpenBLAS_HOME = Join-Path $env:DEPENDENCIES_DIR "OpenBLAS\install"
 }
 
+if ($env:USE_CUDA -eq "1") {
+    $env:USE_CUDNN = "1"
+    if (-not $env:CUDA_PATH) { $env:CUDA_PATH = $env:CUDA_HOME }
+    $env:CUDA_HOME = $env:CUDA_PATH
+    $env:CUDACXX = Join-Path $env:CUDA_PATH "bin\nvcc.exe"
+    $env:CUDNN_ROOT_DIR = $env:CUDNN_HOME
+    $env:CUDNN_INCLUDE_DIR = Join-Path $env:CUDNN_HOME "include"
+    $env:CUDNN_LIB_DIR = Join-Path $env:CUDNN_HOME "lib\arm64"
+    $env:TORCH_CUDA_ARCH_LIST = "TODO"
+    $env:CMAKE_CUDA_ARCHITECTURES = "TODO"
+    $env:USE_MAGMA = "1"
+    # TH_BINARY_BUILD=1 links BLAS (ArmPL, which also carries LAPACK) INTO torch_cuda so magma's Fortran
+    # BLAS/LAPACK externals resolve (aten/src/ATen/CMakeLists.txt); else torch_cuda fails LNK2019/LNK1120.
+    $env:TH_BINARY_BUILD = "1"
+    $env:CMAKE_CUDA_FLAGS = "$($env:CMAKE_CUDA_FLAGS) -Xcompiler /Zc:preprocessor"
+    $env:CFLAGS = "/Zc:preprocessor /EHsc"
+    $env:CXXFLAGS = "/Zc:preprocessor /EHsc"
+}
+
 # Change to source directory
 Set-Location $env:PYTORCH_ROOT
 

@@ -24,6 +24,25 @@ if %ENABLE_APL% == 1 (
 call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
 where cl.exe
 
+if "%USE_CUDA%" == "1" (
+    set USE_CUDNN=1
+    if not defined CUDA_PATH set "CUDA_PATH=%CUDA_HOME%"
+    set "CUDA_HOME=%CUDA_PATH%"
+    set "CUDACXX=%CUDA_PATH%\bin\nvcc.exe"
+    set "CUDNN_ROOT_DIR=%CUDNN_HOME%"
+    set "CUDNN_INCLUDE_DIR=%CUDNN_HOME%\include"
+    set "CUDNN_LIB_DIR=%CUDNN_HOME%\lib\arm64"
+    set TORCH_CUDA_ARCH_LIST=TODO
+    set CMAKE_CUDA_ARCHITECTURES=TODO
+    set USE_MAGMA=1
+    rem TH_BINARY_BUILD=1 links BLAS (ArmPL, which also carries LAPACK) INTO torch_cuda so magma's
+    rem Fortran BLAS/LAPACK externals resolve (aten/src/ATen/CMakeLists.txt); else torch_cuda LNK2019.
+    set TH_BINARY_BUILD=1
+    set "CMAKE_CUDA_FLAGS=%CMAKE_CUDA_FLAGS% -Xcompiler /Zc:preprocessor"
+    set "CFLAGS=/Zc:preprocessor /EHsc"
+    set "CXXFLAGS=/Zc:preprocessor /EHsc"
+)
+
 :: change to source directory
 cd %PYTORCH_ROOT%
 
