@@ -95,29 +95,6 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   }
 }
 
-static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
-  if (iter.numel() == 0) {
-    return;
-  }
-  const auto& self = iter.input(0);
-  auto& out = iter.output(0);
-  @autoreleasepool {
-    auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(
-        __func__ + std::to_string(is_neg) + getTensorsStringKey(self), [&](auto mpsGraph, auto newCachedGraph) {
-          auto infTensor = [mpsGraph constantWithScalar:is_neg ? -std::numeric_limits<float>::infinity()
-                                                               : std::numeric_limits<float>::infinity()
-                                               dataType:getMPSScalarType(self)];
-          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          newCachedGraph->outputTensor_ = [mpsGraph equalWithPrimaryTensor:newCachedGraph->inputTensor_
-                                                           secondaryTensor:infTensor
-                                                                      name:nil];
-        });
-    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-    runMPSGraph(
-        getCurrentMPSStream(), cachedGraph->graph(), dictionaryFromPlaceholders(selfPlaceholder), outputPlaceholder);
-  }
-}
 } // namespace mps
 
 // APIs exposed to at::native scope
@@ -315,11 +292,13 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
 }
 
 static void isneginf_kernel_mps(TensorIteratorBase& iter) {
-  mps::is_posneginf_helper(iter, true);
+  // bool output is non-floating, so ILP is opt-in (logical_not precedent);
+  // the check is trivial ALU and bandwidth-bound at large sizes.
+  lib.exec_unary_kernel(iter, "isneginf", std::nullopt, std::nullopt, /*ilp_threshold=*/1u << 18);
 }
 
 static void isposinf_kernel_mps(TensorIteratorBase& iter) {
-  mps::is_posneginf_helper(iter, false);
+  lib.exec_unary_kernel(iter, "isposinf", std::nullopt, std::nullopt, /*ilp_threshold=*/1u << 18);
 }
 
 static void clamp_kernel_mps(TensorIteratorBase& iter) {
