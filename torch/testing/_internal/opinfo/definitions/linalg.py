@@ -2656,6 +2656,7 @@ op_db: list[OpInfo] = [
                         torch._inductor.cpu_vec_isa.VecAMX,
                     )
                 ),
+            ),
         ),
     ),
     OpInfo(
