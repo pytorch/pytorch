@@ -5179,6 +5179,44 @@ class TestLinalg(TestCase):
                 y = make_arg(size_y, noncontiguous=nctg_y)
                 self.check_single_matmul(x, y)
 
+    @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
+    @dtypes(torch.int64, torch.float, torch.complex64)
+    def test_matmul_broadcast_no_materialize(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/154128: batched
+        # matmul that broadcasts batch dims must not materialize the expanded operands
+        # (the issue's [4096, 256, 1, 100] @ [256, 100, 100] allocated ~40GB).
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        def reference(a, b):
+            batch = torch.broadcast_shapes(a.shape[:-2], b.shape[:-2])
+            a_f = a.expand(*batch, *a.shape[-2:]).reshape(-1, *a.shape[-2:])
+            b_f = b.expand(*batch, *b.shape[-2:]).reshape(-1, *b.shape[-2:])
+            prod = torch.stack([a_f[i] @ b_f[i] for i in range(a_f.shape[0])])
+            return prod.reshape(*batch, a.shape[-2], b.shape[-1])
+
+        cases = [
+            ((5, 1, 5, 2, 3), (4, 5, 3, 9)),   # broadcast dims from both operands
+            ((7, 5, 1, 6, 8), (5, 8, 9)),      # 5D @ 3D
+            ((3, 1, 4, 2, 3), (1, 4, 3, 5)),
+            ((2, 3, 4, 5), (3, 5, 6)),         # 4D @ 3D
+            ((1, 1, 2, 3), (7, 8, 3, 4)),      # left operand fully broadcast
+        ]
+        for size_x, size_y in cases:
+            x = make_arg(size_x)
+            y = make_arg(size_y)
+            res = torch.matmul(x, y)
+            self.assertTrue(res.is_contiguous())
+            self.assertEqual(res, reference(x, y), atol=1e-4, rtol=1e-4)
+
+        if self.device_type == "cuda" and dtype == torch.float:
+            # Expanding the operands would need ~9GB; folding keeps the peak far lower.
+            x = make_arg((2048, 128, 1, 64))
+            y = make_arg((128, 64, 64))
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+            res = torch.matmul(x, y)
+            self.assertEqual(res.shape, torch.Size((2048, 128, 1, 64)))
+            self.assertLess(torch.cuda.max_memory_allocated(), 2 * 1024 ** 3)
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):

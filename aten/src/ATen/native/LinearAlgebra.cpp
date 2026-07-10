@@ -1981,6 +1981,149 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
   return true;
 }
 
+// Batched matmul whose batch dims broadcast: the generic path below expands both operands
+// to the common batch shape and flattens for bmm, materializing a copy of the fully
+// broadcasted tensor (issue #154128: [4096, 256, 1, 100] @ [256, 100, 100] allocates 40GB).
+// Instead, fold the broadcast batch dims into the matrix dims: matched dims form the bmm
+// batch, tensor2's broadcast dims fold into tensor1's rows, tensor1's broadcast dims fold
+// into tensor2's columns. One bmm then suffices and any copy is bounded by an operand's
+// real size. Returns nullopt (caller uses the generic path) when a batch dim cannot be
+// classified statically or nothing broadcasts.
+static std::optional<Tensor> _matmul_batched_fold(
+    const Tensor& tensor1,
+    const Tensor& tensor2) {
+  const int64_t dim_tensor1 = tensor1.dim();
+  const int64_t dim_tensor2 = tensor2.dim();
+  TORCH_INTERNAL_ASSERT(dim_tensor1 >= 2 && dim_tensor2 >= 2);
+
+  const auto s1 = tensor1.sym_sizes();
+  const auto s2 = tensor2.sym_sizes();
+  const int64_t b1n = dim_tensor1 - 2;
+  const int64_t b2n = dim_tensor2 - 2;
+  const int64_t B = std::max(b1n, b2n);
+
+  // Left-pad the shorter batch shape with 1s so both have length B.
+  c10::SymDimVector bs1(B, c10::SymInt(1));
+  c10::SymDimVector bs2(B, c10::SymInt(1));
+  for (int64_t i = 0; i < b1n; ++i) {
+    bs1[B - b1n + i] = s1[i];
+  }
+  for (int64_t i = 0; i < b2n; ++i) {
+    bs2[B - b2n + i] = s2[i];
+  }
+  const c10::SymInt n = s1[dim_tensor1 - 2];
+  const c10::SymInt k1 = s1[dim_tensor1 - 1];
+  const c10::SymInt k2 = s2[dim_tensor2 - 2];
+  const c10::SymInt p = s2[dim_tensor2 - 1];
+
+  std::vector<int64_t> matched;
+  std::vector<int64_t> bcast;
+  std::vector<bool> t1_is_real; // for each bcast dim: is tensor1 the non-broadcast side?
+  bool has_bcast = false;
+  for (int64_t i = 0; i < B; ++i) {
+    const auto& a = bs1[i];
+    const auto& b = bs2[i];
+    if (TORCH_GUARD_OR_FALSE(a.sym_eq(b))) {
+      matched.push_back(i);
+    } else if (TORCH_GUARD_OR_FALSE(a.sym_eq(1))) {
+      bcast.push_back(i);
+      t1_is_real.push_back(false);
+      has_bcast = true;
+    } else if (TORCH_GUARD_OR_FALSE(b.sym_eq(1))) {
+      bcast.push_back(i);
+      t1_is_real.push_back(true);
+      has_bcast = true;
+    } else {
+      return std::nullopt;
+    }
+  }
+  if (!has_bcast) {
+    return std::nullopt;
+  }
+
+  c10::SymInt m(1);
+  for (auto i : matched) {
+    m = m * bs1[i];
+  }
+  c10::SymInt b1(1);
+  c10::SymInt b2(1);
+  for (auto i : bcast) {
+    b1 = b1 * bs1[i];
+    b2 = b2 * bs2[i];
+  }
+
+  // Adding the padded leading 1s is a free view.
+  c10::SymDimVector full1(bs1);
+  full1.push_back(n);
+  full1.push_back(k1);
+  c10::SymDimVector full2(bs2);
+  full2.push_back(k2);
+  full2.push_back(p);
+  const auto t1v = at::reshape_symint(tensor1, full1);
+  const auto t2v = at::reshape_symint(tensor2, full2);
+
+  // tensor1: (matched..., bcast..., n, k) -> (m, b1 * n, k)
+  // tensor2: (matched..., k, p, bcast...) -> (m, k, p * b2)
+  std::vector<int64_t> perm1(matched);
+  perm1.insert(perm1.end(), bcast.begin(), bcast.end());
+  perm1.push_back(B);
+  perm1.push_back(B + 1);
+  std::vector<int64_t> perm2(matched);
+  perm2.push_back(B);
+  perm2.push_back(B + 1);
+  perm2.insert(perm2.end(), bcast.begin(), bcast.end());
+
+  const auto t1p = at::reshape_symint(t1v.permute(perm1), {m, b1 * n, k1});
+  const auto t2p = at::reshape_symint(t2v.permute(perm2), {m, k2, p * b2});
+  const auto prod = at::bmm(t1p, t2p);
+
+  // Split the folded dims back out: (matched..., t1-bcast..., n, p, t2-bcast...).
+  c10::SymDimVector unfolded;
+  for (auto i : matched) {
+    unfolded.push_back(bs1[i]);
+  }
+  std::vector<int64_t> t1_br_dims;
+  std::vector<int64_t> t2_br_dims;
+  for (size_t j = 0; j < bcast.size(); ++j) {
+    if (t1_is_real[j]) {
+      unfolded.push_back(bs1[bcast[j]]);
+      t1_br_dims.push_back(bcast[j]);
+    }
+  }
+  unfolded.push_back(n);
+  unfolded.push_back(p);
+  for (size_t j = 0; j < bcast.size(); ++j) {
+    if (!t1_is_real[j]) {
+      unfolded.push_back(bs2[bcast[j]]);
+      t2_br_dims.push_back(bcast[j]);
+    }
+  }
+  const auto prod_unfolded = at::reshape_symint(prod, unfolded);
+  const int64_t ndim = static_cast<int64_t>(unfolded.size());
+
+  // Permute back to broadcast order: batch axes keep their original index, matrix axes last.
+  std::vector<int64_t> effective;
+  effective.insert(effective.end(), matched.begin(), matched.end());
+  effective.insert(effective.end(), t1_br_dims.begin(), t1_br_dims.end());
+  effective.push_back(ndim - 2);
+  effective.push_back(ndim - 1);
+  effective.insert(effective.end(), t2_br_dims.begin(), t2_br_dims.end());
+
+  std::vector<std::pair<int64_t, int64_t>> order;
+  order.reserve(ndim);
+  for (int64_t i = 0; i < ndim; ++i) {
+    order.emplace_back(effective[i], i);
+  }
+  std::sort(order.begin(), order.end());
+  std::vector<int64_t> inverse_perm;
+  inverse_perm.reserve(ndim);
+  for (const auto& pr : order) {
+    inverse_perm.push_back(pr.second);
+  }
+  // matmul returns a contiguous result; the permutation above is only a view.
+  return prod_unfolded.permute(inverse_perm).contiguous();
+}
+
 /*
 Matrix product of two Tensors.
 The behavior depends on the dimensionality of the Tensors as follows:
@@ -2124,6 +2267,20 @@ static Tensor _matmul_impl(
       if (TORCH_GUARD_OR_FALSE(batch_tensor2[0].sym_eq(1)) &&
           (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
         return _matmul_impl(out, tensor1, tensor2.squeeze(0));
+      }
+    }
+
+    // Fold broadcast batch dims into the matrix dims to avoid materializing the expanded
+    // operands (see _matmul_batched_fold); nullopt falls through to the generic path.
+    if (dim_tensor1 >= 2 && dim_tensor2 >= 2) {
+      auto folded = _matmul_batched_fold(tensor1, tensor2);
+      if (folded.has_value()) {
+        if (!has_out) {
+          return *folded;
+        }
+        at::native::resize_output_symint(out, folded->sym_sizes());
+        out.copy_(*folded);
+        return out;
       }
     }
 
