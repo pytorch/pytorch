@@ -338,6 +338,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
     _cpython_type: type | tuple[type, ...] | None = None
 
+    # Type name and docstring, analogous to CPython's tp_name / tp_doc slots on PyTypeObject
+    tp_name: str | None = None
+    tp_doc: str | None = None
+
     # fields to leave unmodified in apply()
     _nonvar_fields = {
         "value",
@@ -437,6 +441,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             raise NotImplementedError(f"{self} has no type") from None
 
     def python_type_name(self) -> str:
+        if self.tp_name is not None:
+            return self.tp_name
         try:
             return self.python_type().__name__
         except NotImplementedError:
@@ -571,6 +577,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def const_getattr(self, tx: InstructionTranslatorBase, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
+        # An instance's `__doc__` resolves to its type's tp_doc in CPython.
+        if name == "__doc__" and self.tp_doc is not None:
+            return self.tp_doc
         raise NotImplementedError
 
     def is_symnode_like(self) -> bool:

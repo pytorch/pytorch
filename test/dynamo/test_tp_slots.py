@@ -20,6 +20,20 @@ from torch._C._dynamo import (
     PyTypeSlots,
 )
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.variables.base import VariableTracker
+from torch._dynamo.variables.dicts import ConstDictVariable, OrderedItemsDictVariable
+from torch._dynamo.variables.lists import ListVariable, SizeVariable, TupleVariable
+from torch._dynamo.variables.sets import (
+    DictKeySetVariable,
+    FrozensetVariable,
+    OrderedSetVariable,
+    SetVariable,
+)
+from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class TestTypeSlots(TestCase):
@@ -321,6 +335,72 @@ class TestTypeSlots(TestCase):
                 has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT),
                 f"{t.__name__} should have mp_subscript",
             )
+
+
+# Builtin VTs whose type is fixed by the VT class, so tp_name is a static slot
+# and must equal what python_type().__name__ returns.
+_TP_NAME_CASES = {
+    "list": lambda: ListVariable([]),
+    "tuple": lambda: TupleVariable([]),
+    "Size": lambda: SizeVariable([]),
+    "set": lambda: SetVariable([]),
+    "frozenset": lambda: FrozensetVariable([]),
+    "OrderedSet": lambda: OrderedSetVariable([]),
+    "dict_keys": lambda: DictKeySetVariable([]),
+    "dict": lambda: ConstDictVariable({}),
+    "OrderedDict": lambda: OrderedItemsDictVariable({}),
+}
+
+
+class VariableTrackerTpNameDocTests(TestCase):
+    """tp_name / tp_doc slots on VariableTracker (analogous to CPython's
+    PyTypeObject tp_name / tp_doc): describe the type a VT represents, not a
+    per-instance attribute. tp_name backs python_type_name(); tp_doc backs
+    __doc__ reads. Both default to None (derive from python_type())."""
+
+    @parametrize("name", list(_TP_NAME_CASES))
+    def test_tp_name_matches_python_type_name(self, name):
+        vt = _TP_NAME_CASES[name]()
+        self.assertEqual(vt.tp_name, name)
+        self.assertEqual(vt.python_type_name(), name)
+
+    def test_base_slots_default_to_none(self):
+        self.assertIsNone(VariableTracker.tp_name)
+        self.assertIsNone(VariableTracker.tp_doc)
+
+    def test_dynamic_vt_derives_name_from_python_type(self):
+        # UserDefinedObjectVariable represents arbitrary classes, so its type is
+        # per instance: tp_name stays None and python_type_name() derives the
+        # name from python_type() (value_type).
+        class Foo:
+            pass
+
+        self.assertIsNone(UserDefinedObjectVariable.tp_name)
+        self.assertEqual(UserDefinedObjectVariable(Foo()).python_type_name(), "Foo")
+        self.assertEqual(
+            UserDefinedObjectVariable(object()).python_type_name(), "object"
+        )
+
+    def test_tp_doc_absent_is_not_a_constant(self):
+        # No tp_doc declared: const_getattr does not treat __doc__ as a constant
+        # and falls through to NotImplementedError.
+        vt = ConstDictVariable({})
+        self.assertIsNone(vt.tp_doc)
+        with self.assertRaises(NotImplementedError):
+            vt.const_getattr(None, "__doc__")
+
+    def test_tp_doc_backs_dunder_doc(self):
+        # A VT that declares tp_doc answers __doc__ from it (CPython: an
+        # instance's __doc__ resolves to its type's tp_doc).
+        class DocDictVariable(ConstDictVariable):
+            tp_doc = "my docstring"
+
+        self.assertEqual(
+            DocDictVariable({}).const_getattr(None, "__doc__"), "my docstring"
+        )
+
+
+instantiate_parametrized_tests(VariableTrackerTpNameDocTests)
 
 
 if __name__ == "__main__":

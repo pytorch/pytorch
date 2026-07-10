@@ -99,6 +99,7 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
 class ConstDictVariable(VariableTracker):
     # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
     _cpython_type = dict
+    tp_name = "dict"
 
     CONTAINS_GUARD = GuardBuilder.DICT_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.DICT_NOT_CONTAINS
@@ -855,6 +856,7 @@ class OrderedItemsDictVariable(ConstDictVariable):
     # (via _cpython_type) provides move_to_end / popitem(last=), and reconstruct
     # emits `OrderedDict(...)` rather than a bare dict literal.
     _cpython_type = collections.OrderedDict
+    tp_name = "OrderedDict"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # emit `OrderedDict(constructed_dict)`

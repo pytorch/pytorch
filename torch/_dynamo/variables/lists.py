@@ -1047,6 +1047,7 @@ class CommonListMethodsVariable(BaseListVariable):
 class ListVariable(CommonListMethodsVariable):
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
+    tp_name = "list"
     _has_instance_dict = False
 
     def richcompare_impl(
@@ -1687,6 +1688,7 @@ class DequeVariable(CommonListMethodsVariable):
 class TupleVariable(BaseListVariable):
     # PyTuple_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L846
     _cpython_type = tuple
+    tp_name = "tuple"
 
     def richcompare_impl(
         self,
@@ -1783,6 +1785,7 @@ class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
     _cpython_type = torch.Size
+    tp_name = "Size"
 
     _nonvar_fields = {
         "proxy",
