@@ -10634,6 +10634,34 @@ class TestSmoothL1Loss(TestCaseMPS):
         helper((3, ))
         helper((3, 3, 0))
 
+    def test_smooth_l1_huber_broadcast(self):
+        # CPU broadcasts input/target through a TensorIterator, and the old
+        # MPSGraph backward inherited numpy-style broadcast from the graph.
+        # The Metal host path must match, sizing grad_input from the broadcast
+        # common shape (never from target alone).
+        cases = [((64, 10), (10,)), ((64, 10), (64, 1)), ((64, 10), ())]
+        for fn, kw in ((F.smooth_l1_loss, {'beta': 1.0}), (F.smooth_l1_loss, {'beta': 0.0}),
+                       (F.huber_loss, {'delta': 1.0})):
+            for reduction in ('none', 'mean', 'sum'):
+                for in_shape, tgt_shape in cases:
+                    x = torch.randn(in_shape, requires_grad=True)
+                    t = (torch.randn(tgt_shape) if tgt_shape else torch.tensor(0.5)).requires_grad_()
+                    xm = x.detach().to('mps').requires_grad_()
+                    tm = t.detach().to('mps').requires_grad_()
+                    lc = fn(x, t, reduction=reduction, **kw)
+                    lm = fn(xm, tm, reduction=reduction, **kw)
+                    self.assertEqual(lm.cpu(), lc)
+                    g = torch.randn(lc.shape)
+                    lc.backward(g)
+                    lm.backward(g.to('mps'))
+                    self.assertEqual(xm.grad.cpu(), x.grad)
+                    self.assertEqual(tm.grad.cpu(), t.grad)
+        # grad_input shape must be the common shape, not target's
+        x = torch.randn(64, 10, device='mps', requires_grad=True)
+        t = torch.randn(10, device='mps')
+        F.smooth_l1_loss(x, t).backward()
+        self.assertEqual(tuple(x.grad.shape), (64, 10))
+
 class TestNLLLoss(TestCaseMPS):
     def test_nll_loss_mismatched_batch(self, device='mps'):
         x = torch.randn((10, 3), requires_grad=True, device=device)
