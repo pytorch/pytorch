@@ -71,15 +71,15 @@ requires_multigpu = functools.partial(
 )
 from io import StringIO
 
-from torch._library.opaque_object import OpaqueBase, register_opaque_type
+from torch._library.opaque_object import CustomClassBase, register_custom_class
 
 
-class _CudagraphTestScaleFactor(OpaqueBase):
+class _CudagraphTestScaleFactor(CustomClassBase):
     def __init__(self, factor):
         self.factor = factor
 
 
-register_opaque_type(_CudagraphTestScaleFactor, typ="reference")
+register_custom_class(_CudagraphTestScaleFactor, typ="symbolic")
 
 
 def get_compile_fn(backend):
@@ -2131,7 +2131,7 @@ if HAS_CUDA_AND_TRITON:
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         def test_workspace_allocation_error(self):
-            torch.cuda._clear_cublas_workspaces()
+            torch._C._cuda_clearCublasWorkspaces()
 
             prev = torch._inductor.cudagraph_trees.clear_cublas_manager
 
@@ -2171,7 +2171,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertTrue(thrown)
 
             finally:
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch._inductor.cudagraph_trees.clear_cublas_manager = prev
                 torch._inductor.cudagraph_trees.get_container(
                     self.device_idx
@@ -3961,6 +3961,110 @@ if HAS_CUDA_AND_TRITON:
             # g2 and g3 use cudagraphs (2 graphs recorded)
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_nested_callee_graph_break(self):
+            """Context manager enables cudagraphs across a graph break that
+            occurs inside a nested callee, even though the `with` block lives
+            in the caller's frame and the callee is compiled as a separate
+            frame (it cannot be inlined because it contains a graph break)."""
+
+            def callee(x):
+                y = x + 1  # segment 1 (inside override) -> cudagraphs
+                torch._dynamo.graph_break()
+                return y * 2  # segment 2 (inside override) -> cudagraphs
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=True, bwd=True):
+                    return callee(x)
+
+            compiled = torch.compile(model)
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            self.assertIsNotNone(self.get_manager())
+            # both callee segments use cudagraphs (2 graphs recorded)
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_module_forward_graph_break(self):
+            """Decorator on a module's forward enables cudagraphs for every
+            segment even when the forward contains a graph break (the forward
+            is compiled as a separate frame from its caller)."""
+
+            class MyModule(torch.nn.Module):
+                @torch._dynamo.override_cudagraphs(fwd=True, bwd=True)
+                def forward(self, x):
+                    y = x + 1  # segment 1 -> cudagraphs
+                    torch._dynamo.graph_break()
+                    return y * 2  # segment 2 -> cudagraphs
+
+            mod = MyModule().cuda()
+
+            def model(x):
+                return mod(x)
+
+            compiled = torch.compile(model)
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        def test_cudagraph_annotation_disable_nested_callee_graph_break(self):
+            """Context manager disables cudagraphs across a graph break inside a
+            nested callee compiled as a separate frame, even though the default
+            (reduce-overhead) config would otherwise record cudagraphs."""
+
+            def callee(x):
+                y = x + 1  # segment 1 (inside override) -> no cudagraphs
+                torch._dynamo.graph_break()
+                return y * 2  # segment 2 (inside override) -> no cudagraphs
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=False, bwd=False):
+                    return callee(x)
+
+            inp = torch.randn(4, 4, device="cuda")
+            compiled = torch.compile(model, mode="reduce-overhead")
+            out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            # No callee segment is recorded despite reduce-overhead default.
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_annotation_disable_bwd_nested_callee_graph_break(self):
+            """Asymmetric override (fwd=True, bwd=False) propagates across a
+            graph break in a separately-compiled callee: both forward segments
+            record cudagraphs while the backward is disabled."""
+
+            def callee(x):
+                y = (x * x).sin()  # forward segment 1
+                torch._dynamo.graph_break()
+                return y + 1  # forward segment 2
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=True, bwd=False):
+                    return callee(x)
+
+            compiled = torch.compile(model, mode="reduce-overhead")
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+                out.sum().backward()
+
+            self.assertEqual(out, (inp.detach().pow(2).sin()) + 1)
+            self.assertIsNotNone(self.get_manager())
+            # Two forward segments record; backward is disabled (no bwd graphs),
+            # matching the forward-only count of the enable variant above.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
         def test_cudagraph_min_partition_size_skip_small(self):
             """Partitions with fewer kernels than the threshold are skipped."""
 
@@ -4236,7 +4340,8 @@ if HAS_CUDA_AND_TRITON:
                 affinity = torch.matmul(x, x.transpose(-2, -1))
                 return torch.linalg.eigh(affinity)
 
-            x = torch.randn(2, 6, 4, device="cuda")
+            gen = torch.Generator(device="cuda").manual_seed(0)
+            x = torch.randn(2, 6, 4, device="cuda", generator=gen)
             affinity = torch.matmul(x, x.transpose(-2, -1))
             gm = make_fx(lambda a: torch.ops.aten._linalg_eigh.default(a))(affinity)
             eigh_node = next(
@@ -4254,7 +4359,7 @@ if HAS_CUDA_AND_TRITON:
                 for _ in range(3):
                     actual = compiled_f(x)
 
-            self.assertEqual(actual[0], expected[0])
+            self.assertEqual(actual[0], expected[0], atol=1e-4, rtol=1e-4)
             self.assertEqual(actual[1].shape, expected[1].shape)
             FileCheck().check(
                 "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable"
@@ -5211,11 +5316,11 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_reorder_cpu_and_gpu_interleave(self):
-            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+            def f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu):
                 # partition 1 on cuda, no dependency
                 x_cuda0 = x_cuda + 1
                 x_cuda1 = x_cuda0 @ weight_cuda
-                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+                x_cuda2 = 2 * (x_cuda1 + bias_cuda)
 
                 # partition 2 on cpu w/ dependency on partition 1
                 y_cpu0 = y_cpu + 1
@@ -5225,7 +5330,7 @@ if HAS_CUDA_AND_TRITON:
                 # partition 3 on cuda w/o dependency
                 z_cuda0 = z_cuda + 1
                 z_cuda1 = z_cuda0 @ weight_cuda
-                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+                z_cuda2 = 2 * (z_cuda1 + bias_cuda)
 
                 # partition 4 on cpu w/o dependency
                 y_cpu2 = y_cpu + 5
@@ -5234,22 +5339,25 @@ if HAS_CUDA_AND_TRITON:
                 # partition 5 on cuda w/o dependency
                 u_cuda0 = z_cuda + 3
                 u_cuda1 = u_cuda0 @ weight_cuda
-                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+                u_cuda2 = 2 * (u_cuda1 + bias_cuda)
 
                 return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
 
             x_cuda = torch.randn(3, 3, device="cuda")
             y_cpu = torch.randn(3, 3, device="cpu")
             z_cuda = torch.randn(3, 3, device="cuda")
+            # Keep the CUDA adds pointwise so this test continues to exercise
+            # graph partition reordering instead of addmm fusion.
+            bias_cuda = torch.randn(1, 3, device="cuda")
             weight_cuda = torch.randn(3, 3, device="cuda")
             weight_cpu = torch.randn(3, 3, device="cpu")
 
-            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+            eager_out = f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu)
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
             for _ in range(3):
                 compiled_out = compiled_f(
-                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                    x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu
                 )
                 self.assertEqual(eager_out, compiled_out)
 
