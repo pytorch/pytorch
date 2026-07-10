@@ -2137,6 +2137,14 @@ def generic_getattr(
         if not hasattr_var.as_python_constant():
             return default  # type: ignore[return-value]
 
+    # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
+    # tp_getattro so a getattro_impl override need not repeat the consult.
+    getset = obj.tp_getset.get(name) or obj.tp_members.get(name)
+    if getset is not None:
+        result = getset.getter(obj, tx)
+        if result is not None:
+            return result
+
     # Core dispatch: call the VT's getattro_impl (tp_getattro).
     source = obj.source and AttrSource(obj.source, name)
     try:
