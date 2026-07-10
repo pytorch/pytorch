@@ -223,6 +223,10 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
+    TORCH_CHECK(
+      xstep != 0,
+      "step must be nonzero and representable in the target dtype");
+
     arange_check_bounds(start, end, step);
 
     int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
@@ -254,6 +258,10 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
+
+    TORCH_CHECK(
+      xstep != 0,
+      "step must be nonzero and representable in the target dtype");
 
     arange_check_bounds(start, end, step);
 
