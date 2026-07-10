@@ -12,7 +12,7 @@ It does so by:
 
 import typing
 import warnings
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -491,8 +491,8 @@ def create_joint(
     def joint_helper(
         primals: list[FxValue], tangents: list[FxValue]
     ) -> tuple[
-        tuple[list[FxValue], list[Tensor | None]],
-        tuple[list[AOTOutput], list[AOTOutput | None]],
+        tuple[Sequence[FxValue], list[Tensor | None]],
+        tuple[Sequence[AOTOutput], list[AOTOutput | None]],
     ]:
         return inner_fn_with_anomaly(primals, tangents)
 
@@ -1187,7 +1187,7 @@ def create_functionalized_fn(
 def handle_effect_tokens_fn(
     fn: Callable[..., Any],
     args: Any,
-    args_descs: list[AOTInput],
+    args_descs: Sequence[Any],
     *,
     meta: ViewAndMutationMeta,
     trace_joint: bool,

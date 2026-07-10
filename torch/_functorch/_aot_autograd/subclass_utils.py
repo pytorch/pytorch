@@ -51,7 +51,7 @@ T = TypeVar("T", bound=torch.Tensor)
 
 
 def requires_subclass_dispatch(
-    args: FakifiedFlatArgs, fw_metadata: ViewAndMutationMeta
+    args: FakifiedFlatArgs | tuple[Any, ...], fw_metadata: ViewAndMutationMeta
 ) -> bool:
     args_flattened = pytree.arg_tree_leaves(*args)
     any_subclass_args = any(
