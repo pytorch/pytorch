@@ -164,23 +164,8 @@ class _KinetoProfile:
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
             The same activity group must not appear more than once.
-            The valid activity type names for each group are the per-device
-            default sets defined in ``torch/csrc/profiler/kineto_shim.cpp``.
-
-            For ``ProfilerActivity.XPU``, names in the list that are not XPU
-            activity types are interpreted as Intel XPU hardware metric names
-            and enable the per-kernel scope profiler, e.g.
-            ``{ProfilerActivity.XPU: ["GpuTime", "GpuCoreClocks"]}``. The metric
-            values are attached to each kernel as Perfetto counters. Hardware
-            metric collection requires ``ZET_ENABLE_METRICS=1`` and access to
-            the GPU performance counters (``perf_stream_paranoid``/
-            ``observation_paranoid`` set to ``0``). Metric names are
-            device-specific and defined by the driver, not by PyTorch.
-            Because a ``dict`` entry collects exactly what it lists,
-            requesting only metrics (e.g. ``{ProfilerActivity.XPU: ["GpuTime"]}``)
-            does not also collect the default XPU activities; list the desired
-            activity type names alongside the metrics to keep tracing them, e.g.
-            ``{ProfilerActivity.XPU: ["CONCURRENT_KERNEL", "XPU_RUNTIME", "GpuTime"]}``.
+            See :class:`~torch.profiler.ProfilerActivity` for the valid
+            activity type names and device-specific behavior.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -865,23 +850,8 @@ class profile(_KinetoProfile):
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
             The same activity group must not appear more than once.
-            The valid activity type names for each group are the per-device
-            default sets defined in ``torch/csrc/profiler/kineto_shim.cpp``.
-
-            For ``ProfilerActivity.XPU``, names in the list that are not XPU
-            activity types are interpreted as Intel XPU hardware metric names
-            and enable the per-kernel scope profiler, e.g.
-            ``{ProfilerActivity.XPU: ["GpuTime", "GpuCoreClocks"]}``. The metric
-            values are attached to each kernel as Perfetto counters. Hardware
-            metric collection requires ``ZET_ENABLE_METRICS=1`` and access to
-            the GPU performance counters (``perf_stream_paranoid``/
-            ``observation_paranoid`` set to ``0``). Metric names are
-            device-specific and defined by the driver, not by PyTorch.
-            Because a ``dict`` entry collects exactly what it lists,
-            requesting only metrics (e.g. ``{ProfilerActivity.XPU: ["GpuTime"]}``)
-            does not also collect the default XPU activities; list the desired
-            activity type names alongside the metrics to keep tracing them, e.g.
-            ``{ProfilerActivity.XPU: ["CONCURRENT_KERNEL", "XPU_RUNTIME", "GpuTime"]}``.
+            See :class:`~torch.profiler.ProfilerActivity` for the valid
+            activity type names and device-specific behavior.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable invoked at the end of each profiling cycle

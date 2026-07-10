@@ -138,8 +138,7 @@ XpuActivityRequest splitXpuRequest(
 // reserved channel for a future PTI_METRICS_SCOPE_USER mode.
 std::string buildXpuScopeConfig(const std::vector<std::string>& metrics) {
   std::stringstream configss;
-  configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
-           << "XPUPTI_PROFILER_METRICS=";
+  configss << "XPUPTI_PROFILER_METRICS=";
   bool first = true;
   for (const auto& metric : metrics) {
     if (!first) {
@@ -310,9 +309,7 @@ void prepareTrace(
   }
 
   std::set<libkineto::ActivityType> k_activities;
-  // Config fragment for the XPUPTI scope profiler, populated when the XPU
-  // group requests hardware metrics. Empty means no scope profiling.
-  std::string xpuScopeConfig;
+  std::string extraConfig;
 
   // Helper: insert activity types for a group, applying the filter if present.
   auto insertActivities = [&](torch::autograd::profiler::ActivityType group,
@@ -350,7 +347,7 @@ void prepareTrace(
         // timestamps; without it the metrics would land on synthetic
         // timestamps. Enabling metrics therefore implies collecting kernels.
         k_activities.insert(libkineto::ActivityType::CONCURRENT_KERNEL);
-        xpuScopeConfig = buildXpuScopeConfig(request.metrics);
+        extraConfig = buildXpuScopeConfig(request.metrics);
         // A dict request collects exactly what it lists (see #176351), so
         // asking only for metrics drops the default XPU activities (memcpy,
         // runtime, driver, overhead). Warn since this is rarely intended.
@@ -420,7 +417,7 @@ void prepareTrace(
   const std::string traceIdStr = setTraceID(trace_id);
   const std::string configStr =
       appendCustomConfig(traceIdStr, config.custom_profiler_config) +
-      xpuScopeConfig;
+      extraConfig;
 
   libkineto::api().activityProfiler().prepareTrace(k_activities, configStr);
 #endif // USE_KINETO
