@@ -96,11 +96,13 @@ from .object_protocol import (
     binary_iop,
     binary_op,
     generic_abs,
+    generic_add,
     generic_bool,
     generic_float,
     generic_getattr,
     generic_getiter,
     generic_hash,
+    generic_inplace_add,
     generic_inplace_multiply,
     generic_int,
     generic_invert,
@@ -117,10 +119,8 @@ from .object_protocol import (
     ternary_op,
     type_implements_mp_length,
     type_implements_sq_length,
-    vt_add,
     vt_getitem,
     vt_identity_compare,
-    vt_inplace_add,
 )
 from .sets import FrozensetVariable, SetVariable
 from .tensor import (
@@ -2797,12 +2797,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_add(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return vt_add(tx, a, b)
+        return generic_add(tx, a, b)
 
     def call_iadd(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        return vt_inplace_add(tx, a, b)
+        return generic_inplace_add(tx, a, b)
 
     def call_and_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
