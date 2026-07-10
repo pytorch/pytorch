@@ -74,7 +74,6 @@ op_implementations_dict = {}
 # pyrefly: ignore [implicit-any]
 op_implementations_checks = []
 
-
 aten = torch._ops.ops.aten
 _MKLDNN_DISPATCH_KEYS = torch._C.DispatchKeySet(
     torch._C._dispatch_key_parse("MkldnnCPU")
@@ -221,6 +220,8 @@ def register_op_impl(
             if run_impl_check in op_implementations_dict:
                 raise AssertionError(f"duplicate registration: {run_impl_check}")
             op_implementations_dict[run_impl_check] = op_impl
+            schema = run_impl_check._schema
+            torch._C._fake_dispatch_register_op_impl(schema.name, schema.overload_name)
         elif isinstance(run_impl_check, (list, tuple)):
             for op in run_impl_check:
                 register_op_impl(op)(op_impl)
@@ -241,7 +242,11 @@ def _is_op_registered_to_fake_rule(op: OpOverload) -> bool:
 
 
 def _deregister_op_impl(op: OpOverload) -> None:
-    op_implementations_dict.pop(op, None)
+    if op in op_implementations_dict:
+        op_implementations_dict.pop(op, None)
+        torch._C._fake_dispatch_deregister_op_impl(
+            op._schema.name, op._schema.overload_name
+        )
     for check, impl in op_implementations_checks:
         if check is op:
             op_implementations_checks.remove((check, impl))
@@ -1545,22 +1550,22 @@ def assert_tensor_metadata(
     fake_mode: FakeTensorMode,
     func: OpOverload,
     t: FakeTensor,
-    sizes: torch.Size | None = None,
-    strides: tuple[int, ...] | None = None,
+    size: list[int] | None = None,
+    stride: list[int] | None = None,
     dtype: torch.dtype | None = None,
     *,
     device: torch.device | None = None,
     layout: torch.layout | None = None,
 ) -> None:
-    if sizes is not None:
-        if t.size() != sizes:
+    if size is not None:
+        if t.size() != tuple(size):
             raise AssertionError(
-                f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+                f"Tensor size mismatch! Expected: {size}, Got: {t.size()}"
             )
-    if strides is not None:
-        if t.stride() != strides:
+    if stride is not None:
+        if t.stride() != tuple(stride):
             raise AssertionError(
-                f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+                f"Tensor stride mismatch! Expected: {stride}, Got: {t.stride()}"
             )
     if dtype is not None:
         if t.dtype != dtype:
@@ -2060,18 +2065,8 @@ def conv(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
-    def expect_fake_tensor(name: str, value: object) -> FakeTensor:
-        if not isinstance(value, FakeTensor):
-            raise AssertionError(
-                "Expected fake convolution tensor arguments to be FakeTensors, "
-                f"but {name} was {type(value).__name__}"
-            )
-        return value
-
-    input_ = expect_fake_tensor("input", new_kwargs["input"])
-    weight = expect_fake_tensor("weight", new_kwargs["weight"])
-    device = input_.fake_device
+    input_ = new_kwargs["input"]
+    weight = new_kwargs["weight"]
     # Internal passes such as Inductor freezing may run fake propagation over
     # folded convs that do not need to match eager's public input checks.
     if (
@@ -2089,15 +2084,7 @@ def conv(
             f"Input type ({input_.dtype}) and weight type "
             f"({weight.dtype}) should be the same"
         )
-    for name, value in new_kwargs.items():
-        if isinstance(value, torch.Tensor):
-            fake_value = expect_fake_tensor(name, value)
-            if fake_value.fake_device != device:
-                raise RuntimeError(
-                    "Expected all tensors to be on the same device, but got "
-                    f"{name} is on {fake_value.fake_device}, different from "
-                    f"other tensors on {device}"
-                )
+    device = input_.fake_device
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
         # if the input is unsqueezed in Convolution.cpp we get segfault

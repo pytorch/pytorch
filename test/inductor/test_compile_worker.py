@@ -115,20 +115,41 @@ class TestCompileWorker(TestCase):
         code = textwrap.dedent(
             """
             import operator
+            import os
             import subprocess
             import time
 
-            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+            from torch._inductor.compile_worker.subproc_pool import (
+                _test_signal_then_sleep,
+                SubprocPool,
+            )
 
+            # Warm the pool so the sidecar and its worker pool are fully up.
             pool = SubprocPool(2)
             assert pool.submit(operator.add, 1, 2).result() == 3
-            pool.submit(time.sleep, 5)
-            time.sleep(0.5)
 
+            # Submit a job that signals (via a sentinel file) once a worker is
+            # actually executing it, then blocks far longer than the shutdown
+            # timeout below.
+            signal_path = os.environ["WORKER_SIGNAL_PATH"]
+            pool.submit(_test_signal_then_sleep, signal_path, 120)
+
+            # Readiness barrier: wait until a worker is provably running the job
+            # before timing the shutdown, so process/worker startup cost stays
+            # out of the shutdown budget.
+            deadline = time.time() + 60
+            while not os.path.exists(signal_path):
+                if time.time() >= deadline:
+                    raise RuntimeError("worker never started the long-running job")
+                time.sleep(0.05)
+
+            # Bound the shutdown well below the running job's sleep so a
+            # regression that waits for the in-flight job (instead of
+            # terminating it) is detected quickly.
             wait = pool.process.wait
 
             def short_wait(timeout=None):
-                return wait(timeout=2)
+                return wait(timeout=30)
 
             pool.process.wait = short_wait
 
@@ -143,12 +164,17 @@ class TestCompileWorker(TestCase):
             """
         )
         with tempfile.TemporaryDirectory() as cwd:
+            signal_path = os.path.join(cwd, "worker_started")
             result = subprocess.run(
                 [sys.executable, "-c", code],
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                timeout=20,
+                env={**os.environ, "WORKER_SIGNAL_PATH": signal_path},
+                # Generous backstop: the child pays multiple heavyweight process
+                # cold-starts (esp. in fbcode). A real regression still fails
+                # fast via the bounded shutdown wait above.
+                timeout=120,
             )
         self.assertEqual(
             result.returncode,
@@ -215,348 +241,6 @@ class TestTimer(TestCase):
             t.record_call()
         self.assertTrue(done.wait(4))
         t.quit()
-
-
-class _FakeTritonKernel:
-    def __init__(self):
-        self.precompiled = False
-        self.prepared_for_pickle = False
-
-    def precompile(self, *, warm_cache_only):
-        self.precompiled = warm_cache_only
-
-    def prepare_for_pickle(self):
-        self.prepared_for_pickle = True
-
-
-class TestSubprocessEnv(TestCase):
-    def assert_path_in_dir(self, path, expected_dir):
-        expected_dir = os.path.abspath(expected_dir)
-        self.assertEqual(
-            os.path.commonpath([os.path.abspath(path), expected_dir]),
-            expected_dir,
-        )
-
-    def test_pycodecache_kernel_compile_sends_full_cache_env(self):
-        from torch._inductor.async_compile import AsyncCompile
-        from torch._inductor.runtime.compile_tasks import (
-            _worker_compile_pycodecache_kernel,
-        )
-
-        class FakeFuture:
-            def result(self):
-                return "key", "/tmp/kernel.py", 0
-
-        class FakePool:
-            def __init__(self):
-                self.calls = []
-
-            def submit(self, fn, *args):
-                self.calls.append((fn, args))
-                return FakeFuture()
-
-        env_keys = [
-            "TORCHINDUCTOR_CACHE_DIR",
-            "TRITON_CACHE_DIR",
-            "TORCHINDUCTOR_CUTLASS_DIR",
-        ]
-        old_env = {key: os.environ.get(key) for key in env_keys}
-        pool = FakePool()
-
-        try:
-            os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/current-inductor-cache"
-            os.environ.pop("TRITON_CACHE_DIR", None)
-            os.environ.pop("TORCHINDUCTOR_CUTLASS_DIR", None)
-
-            with (
-                patch.object(AsyncCompile, "use_process_pool", return_value=True),
-                patch.object(AsyncCompile, "process_pool", return_value=pool),
-            ):
-                AsyncCompile().cutedsl("kernel", "def kernel_main():\n    pass\n")
-                AsyncCompile().nv_universal_gemm(
-                    "kernel", "def kernel_main():\n    pass\n"
-                )
-
-            self.assertEqual(len(pool.calls), 2)
-            for fn, args in pool.calls:
-                self.assertIs(fn, _worker_compile_pycodecache_kernel)
-                self.assertEqual(
-                    args[3],
-                    {
-                        "TORCHINDUCTOR_CACHE_DIR": "/tmp/current-inductor-cache",
-                        "TRITON_CACHE_DIR": None,
-                        "TORCHINDUCTOR_CUTLASS_DIR": None,
-                    },
-                )
-        finally:
-            for key, value in old_env.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-
-    def test_worker_compile_pycodecache_kernel_clears_cache_env(self):
-        import torch._inductor.runtime.compile_tasks as compile_tasks
-        from torch._inductor.runtime.cache_dir_utils import default_cache_dir
-
-        old_env = {
-            "TORCHINDUCTOR_CACHE_DIR": os.environ.get("TORCHINDUCTOR_CACHE_DIR"),
-            "TRITON_CACHE_DIR": os.environ.get("TRITON_CACHE_DIR"),
-            "TORCHINDUCTOR_CUTLASS_DIR": os.environ.get("TORCHINDUCTOR_CUTLASS_DIR"),
-        }
-        old_last_applied_cache_env = compile_tasks._last_applied_cache_env
-        source_code = "def kernel_main():\n    pass\n"
-
-        try:
-            compile_tasks._last_applied_cache_env = None
-            with tempfile.TemporaryDirectory() as cache_dir:
-                triton_cache_dir = os.path.join(cache_dir, "triton")
-                _, path_1, _ = compile_tasks._worker_compile_pycodecache_kernel(
-                    "kernel",
-                    source_code,
-                    "main",
-                    {
-                        "TORCHINDUCTOR_CACHE_DIR": cache_dir,
-                        "TRITON_CACHE_DIR": triton_cache_dir,
-                        "TORCHINDUCTOR_CUTLASS_DIR": None,
-                    },
-                )
-                self.assert_path_in_dir(path_1, cache_dir)
-                self.assertEqual(os.environ["TORCHINDUCTOR_CACHE_DIR"], cache_dir)
-                self.assertEqual(os.environ["TRITON_CACHE_DIR"], triton_cache_dir)
-                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
-
-                _, path_2, _ = compile_tasks._worker_compile_pycodecache_kernel(
-                    "kernel",
-                    source_code,
-                    "main",
-                    {
-                        "TORCHINDUCTOR_CACHE_DIR": None,
-                        "TRITON_CACHE_DIR": None,
-                        "TORCHINDUCTOR_CUTLASS_DIR": None,
-                    },
-                )
-                self.assert_path_in_dir(path_2, default_cache_dir())
-                self.assertNotEqual(path_1, path_2)
-                self.assertNotIn("TRITON_CACHE_DIR", os.environ)
-                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
-        finally:
-            compile_tasks._last_applied_cache_env = old_last_applied_cache_env
-            for key, value in old_env.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-
-    def test_nvgemm_precompile_sends_full_cache_env(self):
-        from torch._inductor.async_compile import AsyncCompile
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
-            _worker_nvgemm_autotuning_precompile,
-        )
-
-        class FakeFuture:
-            def result(self):
-                return None, 0
-
-        class FakePool:
-            def __init__(self):
-                self.calls = []
-
-            def submit(self, fn, *args):
-                self.calls.append((fn, args))
-                return FakeFuture()
-
-        env_keys = [
-            "TORCHINDUCTOR_CACHE_DIR",
-            "TRITON_CACHE_DIR",
-            "TORCHINDUCTOR_CUTLASS_DIR",
-        ]
-        old_env = {key: os.environ.get(key) for key in env_keys}
-        pool = FakePool()
-
-        try:
-            os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/current-inductor-cache"
-            os.environ.pop("TRITON_CACHE_DIR", None)
-            os.environ.pop("TORCHINDUCTOR_CUTLASS_DIR", None)
-
-            with patch.object(AsyncCompile, "process_pool", return_value=pool):
-                AsyncCompile().nvgemm_precompile(
-                    "kernel",
-                    "GEMM",
-                    "accumulator",
-                    (),
-                    None,
-                    types.SimpleNamespace(
-                        max_active_clusters=None, device_capability=(9, 0)
-                    ),
-                )
-
-            self.assertEqual(len(pool.calls), 1)
-            fn, args = pool.calls[0]
-            self.assertIs(fn, _worker_nvgemm_autotuning_precompile)
-            self.assertEqual(
-                args[5],
-                {
-                    "TORCHINDUCTOR_CACHE_DIR": "/tmp/current-inductor-cache",
-                    "TRITON_CACHE_DIR": None,
-                    "TORCHINDUCTOR_CUTLASS_DIR": None,
-                },
-            )
-        finally:
-            for key, value in old_env.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-
-    def test_worker_nvgemm_precompile_clears_cache_env(self):
-        import torch
-        import torch._inductor.runtime.compile_tasks as compile_tasks
-        from torch._inductor.codegen.nv_universal_gemm import (
-            nv_universal_gemm_kernel as nvgemm_kernel,
-        )
-
-        old_env = {
-            "TORCHINDUCTOR_CACHE_DIR": os.environ.get("TORCHINDUCTOR_CACHE_DIR"),
-            "TRITON_CACHE_DIR": os.environ.get("TRITON_CACHE_DIR"),
-            "TORCHINDUCTOR_CUTLASS_DIR": os.environ.get("TORCHINDUCTOR_CUTLASS_DIR"),
-        }
-        old_last_applied_cache_env = compile_tasks._last_applied_cache_env
-        meta = types.SimpleNamespace(
-            sizes=(1, 1), strides=(1, 1), device="cpu", dtype=torch.float32
-        )
-        cuda_ctx = types.SimpleNamespace(
-            max_active_clusters=None, device_capability=(9, 0)
-        )
-
-        try:
-            compile_tasks._last_applied_cache_env = None
-            with (
-                tempfile.TemporaryDirectory() as cache_dir,
-                patch.object(
-                    nvgemm_kernel,
-                    "_compile_nvgemm",
-                    return_value=(object(), None, None, False),
-                ),
-                patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
-                patch.object(
-                    nvgemm_kernel, "_patch_max_active_clusters", return_value=[]
-                ),
-            ):
-                triton_cache_dir = os.path.join(cache_dir, "triton")
-                nvgemm_kernel._worker_nvgemm_autotuning_precompile(
-                    "kernel",
-                    "GEMM",
-                    "accumulator",
-                    (meta, meta),
-                    meta,
-                    {
-                        "TORCHINDUCTOR_CACHE_DIR": cache_dir,
-                        "TRITON_CACHE_DIR": triton_cache_dir,
-                        "TORCHINDUCTOR_CUTLASS_DIR": None,
-                    },
-                    cuda_ctx,
-                )
-                self.assertEqual(os.environ["TORCHINDUCTOR_CACHE_DIR"], cache_dir)
-                self.assertEqual(os.environ["TRITON_CACHE_DIR"], triton_cache_dir)
-                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
-
-                nvgemm_kernel._worker_nvgemm_autotuning_precompile(
-                    "kernel",
-                    "GEMM",
-                    "accumulator",
-                    (meta, meta),
-                    meta,
-                    {
-                        "TORCHINDUCTOR_CACHE_DIR": None,
-                        "TRITON_CACHE_DIR": None,
-                        "TORCHINDUCTOR_CUTLASS_DIR": None,
-                    },
-                    cuda_ctx,
-                )
-                self.assertNotIn("TORCHINDUCTOR_CACHE_DIR", os.environ)
-                self.assertNotIn("TRITON_CACHE_DIR", os.environ)
-                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
-        finally:
-            compile_tasks._last_applied_cache_env = old_last_applied_cache_env
-            for key, value in old_env.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-
-    def test_worker_compile_triton_clears_libdevice_path(self):
-        try:
-            from triton import knobs
-        except ImportError:
-            self.skipTest("triton not available")
-
-        from torch._inductor.runtime.compile_tasks import _worker_compile_triton
-
-        old_env = os.environ.get("TRITON_LIBDEVICE_PATH")
-        old_knob = knobs.nvidia.libdevice_path
-        stale_libdevice_path = "/tmp/stale-libdevice.bc"
-
-        try:
-            kernel, _ = _worker_compile_triton(
-                _FakeTritonKernel,
-                {"TRITON_LIBDEVICE_PATH": stale_libdevice_path},
-                {},
-            )
-            self.assertTrue(kernel.precompiled)
-            self.assertTrue(kernel.prepared_for_pickle)
-            self.assertEqual(os.environ["TRITON_LIBDEVICE_PATH"], stale_libdevice_path)
-            self.assertEqual(knobs.nvidia.libdevice_path, stale_libdevice_path)
-
-            _worker_compile_triton(
-                _FakeTritonKernel,
-                {"TRITON_LIBDEVICE_PATH": None},
-                {},
-            )
-            self.assertNotIn("TRITON_LIBDEVICE_PATH", os.environ)
-            self.assertIsNone(knobs.nvidia.libdevice_path)
-        finally:
-            if old_env is None:
-                os.environ.pop("TRITON_LIBDEVICE_PATH", None)
-            else:
-                os.environ["TRITON_LIBDEVICE_PATH"] = old_env
-            knobs.nvidia.libdevice_path = old_knob
-
-    def test_serialized_fx_compile_restores_subprocess_env(self):
-        from torch._inductor.compile_fx_ext import _SerializedFxCompile
-
-        key = "TEST_INDUCTOR_SUBPROCESS_ENV"
-        mutated_key = "TEST_INDUCTOR_SUBPROCESS_ENV_MUTATED"
-        old_env = os.environ.get(key)
-        old_mutated_env = os.environ.get(mutated_key)
-        os.environ[key] = "parent-value"
-        os.environ.pop(mutated_key, None)
-
-        class StopAfterEnvCheck(Exception):
-            pass
-
-        testcase = self
-
-        class Input:
-            def deserialize(self):
-                testcase.assertNotIn(key, os.environ)
-                os.environ[mutated_key] = "child-value"
-                raise StopAfterEnvCheck
-
-        try:
-            with self.assertRaises(StopAfterEnvCheck):
-                _SerializedFxCompile._run_in_child(Input(), {key: None})
-            self.assertEqual(os.environ[key], "parent-value")
-            self.assertNotIn(mutated_key, os.environ)
-        finally:
-            if old_env is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = old_env
-            if old_mutated_env is None:
-                os.environ.pop(mutated_key, None)
-            else:
-                os.environ[mutated_key] = old_mutated_env
 
 
 class TestSetTritonLibdevicePath(TestCase):

@@ -39,7 +39,7 @@ from torch.profiler._cupti.records import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 
 def _current_thread_resource_tuple() -> tuple[int, int, int]:
@@ -201,6 +201,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         metadata_resolver: Callable[[int], str | None] | None = None,
         enable_cuda_sync: bool = False,
         defer_export: bool = True,
+        enable_pm_sampling: bool = False,
+        pm_metrics: Iterable[str] | None = None,
     ) -> None:
         self._lock = threading.Lock()
         # Decoded activity kept COLUMNAR (frames of named numpy columns, not per-record
@@ -244,11 +246,28 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 thread_name="cupti-profiler-export",
                 auto_start_poller=defer_export,
             )
+        # Opt-in PM sampling (true SM-active % + DRAM-throughput %) is a feature of the CUPTI
+        # monitor: it registers us as a consumer (with our metrics) of the current device's shared
+        # session, delivering decoded frames to on_pm_samples (they render as GPU counter tracks).
+        # Off by default; also a no-op when no metrics are configured (pm_metrics).
+        self._pm_metrics = list(pm_metrics or [])
+        self._pm_enabled = (
+            enable_pm_sampling
+            and bool(self._pm_metrics)
+            and self.available
+            and torch.cuda.is_available()
+        )
+        # PM samples are timestamped, so they bucket into windows exactly like the activity
+        # records (via _timed_frames); no separate buffer. Per-device max start_ns delivered:
+        # a monotonic guard so each sample is enqueued at most once.
+        self._pm_last_ns: dict[int, int] = {}
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
 
     def _boundary_clock_ns(self) -> int:
         # Stamp the boundary in the converted clock the events' start_ns use (convert_time
         # is monotonic, so the comparison stays order-equivalent).
-        return self.convert_time(self.now_native_ns())
+        return self.convert_time(self.now_record_ns())
 
     def _on_activities(self, columns: dict[Any, dict[int, Any]]) -> None:
         # Worker thread: build a named-column frame per kind (convert/demangle/resolve while
@@ -319,6 +338,28 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 
     # --- async window API (the cupti_monitor profiler backend drives these) ----
 
+    def on_pm_samples(self, frame: dict[str, Any]) -> None:
+        # Monitor flush-thread hook: enqueue the frame as a timed frame so each finalized window
+        # slices its [start, boundary) samples (a frame spanning a boundary is split like any other
+        # timed frame -- see _finalize_window). Keep only samples newer than the last per device:
+        # decode drains (each delivered once, in increasing start_ns), so this is a cheap monotonic
+        # guard against any duplicate or out-of-order delivery.
+        ts = frame.get("start_ns")
+        if ts is None or not len(ts):
+            return
+        dev = frame["device_id"]
+        with self._lock:
+            keep = np.zeros(len(ts), dtype=bool)
+            for d in np.unique(dev):
+                keep |= (dev == d) & (ts > self._pm_last_ns.get(int(d), -1))
+            if not keep.any():
+                return
+            kept = _slice_frame(frame, keep)
+            kts, kdev = kept["start_ns"], kept["device_id"]
+            for d in np.unique(kdev):
+                self._pm_last_ns[int(d)] = int(kts[kdev == d].max())
+            self._timed_frames.append(("pm_sampling", kept))
+
     def open_window(self) -> None:
         """Start a trace window; records before this are excluded (no prepare-phase leak)."""
         # Capture the starting thread so its RUNTIME/DRIVER records map to the OS tid
@@ -374,6 +415,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         (default) sync-flushes the tail, for use on the training thread. ``force=False`` (an
         off-thread finalize) must NOT flush, so it waits up to ``timeout_s`` for the poller to
         cover the windows, force-draining only if it stalls."""
+        # Release PM sampling first: its final tail decode must land in _timed_frames BEFORE the
+        # windows finalize, so those samples can be sliced into the closing window.
+        if self._pm_enabled and self._monitor is not None:
+            self._monitor.release_pm_sampling(self.on_pm_samples)
         if getattr(self, "_boundaries", None) is not None:
             sync = force
             if not force:
