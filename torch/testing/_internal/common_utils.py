@@ -3691,6 +3691,8 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         outcome = self._outcome
                         expecting_failure = outcome.expecting_failure
+                        # Let unittest route failing subTests through expectedFailure
+                        # so the Dynamo expected-failure wrapper can skip them.
                         outcome.expecting_failure = True
                         try:
                             f(*args, **kwargs)
@@ -4626,6 +4628,12 @@ class TestCase(expecttest.TestCase):
                        atol: float | None = None, rtol: float | None = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
+
+    def _formatMessage(self, msg, standardMsg) -> str:  # type: ignore[override]
+        # Allow a callable msg, invoked lazily on failure to build the message.
+        if callable(msg):
+            return msg(standardMsg)
+        return super()._formatMessage(msg, standardMsg)
 
     def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() is y.type()
