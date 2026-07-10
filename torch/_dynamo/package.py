@@ -147,6 +147,7 @@ def load_guard_manager(
         OutputGraphCommon(guards_state.output_graph),
         shape_code_parts=guards_state.shape_code_parts,
         runtime_global_scope=runtime_global_scope,
+        guard_build_local_state=getattr(guards_state, "local_state", None),
     ).guard_manager
 
 

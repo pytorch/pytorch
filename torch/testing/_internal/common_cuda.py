@@ -6,6 +6,7 @@ import functools
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
 import os
@@ -26,6 +27,28 @@ else:
 TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
 ROCM_VERSION = LazyVal(lambda : tuple(int(v) for v in torch.version.hip.split('.')[:2]) if torch.version.hip else (0, 0))
 
+# The CUPTI monitor needs both the cupti-python bindings and the build-generated
+# _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
+# ran); the module hard-imports the latter, so guard on both to skip (not error) where
+# the stubs were not generated.
+TEST_CUPTI = (
+    _check_module_exists("cupti")
+    and _check_module_exists("torch.profiler._cupti._cupti_stubs")
+    and not TEST_WITH_ROCM
+)
+
+def _cupti_version():
+    if not TEST_CUPTI:
+        return 0
+    try:
+        from torch.profiler._cupti.cupti_python import pylibcupti
+        return pylibcupti().get_version()
+    except Exception:
+        return 0
+
+
+TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
+
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
 SM70OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 0))
@@ -43,6 +66,7 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+IS_SM103 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 3))
 IS_SM10X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
 
@@ -64,14 +88,38 @@ def evaluate_gfx_arch_within(arch_list):
     # Hence the matching should be done reversely
     return any(arch in effective_arch for arch in arch_list)
 
+# Per-generation gfx targets, ordered oldest -> newest. Each "OrLater" helper
+# below unions its own generation with every newer one, so the predicates are
+# nested by construction: CDNA5OrLater => CDNA3OrLater => CDNA2OrLater.
+_CDNA2_ARCHS = ["gfx90a"]
+_CDNA3_ARCHS = ["gfx942", "gfx950"]
+# GFX1250 (CDNA 5)
+_CDNA5_ARCHS = ["gfx1250"]
+
+def CDNA5OrLater():
+    return evaluate_gfx_arch_within(_CDNA5_ARCHS)
+
 def CDNA3OrLater():
-    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
+    return evaluate_gfx_arch_within(_CDNA3_ARCHS + _CDNA5_ARCHS)
 
 def CDNA2OrLater():
-    return evaluate_gfx_arch_within(["gfx90a", "gfx942", "gfx950"])
+    return evaluate_gfx_arch_within(_CDNA2_ARCHS + _CDNA3_ARCHS + _CDNA5_ARCHS)
+
+# Archs that take the opportunistic_fastAtomicAdd path (packed 2x16 atomics + DPP
+# lane coalescing) in ScatterGatherKernel.cu. Keep in sync with that kernel's arch
+# gate; this is intentionally not CDNA3OrLater (gfx1250 uses plain fastAtomicAdd).
+def gfx_arch_supports_opportunistic_fastatomics():
+    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
+        # NOTE: gfx1250 is omitted until flash-attention artifacts ship for it.
+        # The AOTriton path needs the gfx1250 GPU image from AOTriton 0.12.1b,
+        # which is wired up by PR #188242 (which also adds gfx1250 to this list);
+        # this gate-only PR leaves it out so the two changes do not conflict
+        # (see cmake/External/aotriton.cmake). The CK FAv3/AITER codegen is
+        # separately not yet wired for gfx1250
+        # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
@@ -90,6 +138,11 @@ def evaluate_platform_supports_ck_sdpa():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
+        # NOTE: gfx1250 is omitted until mem-efficient-attention artifacts ship
+        # for it. The AOTriton gfx1250 image (from AOTriton 0.12.1b) is wired up
+        # by PR #188242, which also adds gfx1250 here; this gate-only PR leaves
+        # it out to avoid conflicting with that change. The CK FAv3/AITER codegen
+        # is separately not yet wired for gfx1250.
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
@@ -173,6 +226,8 @@ def evaluate_platform_supports_fp8():
                 archs.extend(['gfx120'])
             if ROCM_VERSION >= (6, 5):
                 archs.append('gfx95')
+            if ROCM_VERSION >= (7, 14):
+                archs.append('gfx1250')
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
@@ -189,6 +244,8 @@ def evaluate_platform_supports_fp8_grouped_gemm():
         if torch.version.hip:
             if "USE_MSLK" not in torch.__config__.show():
                 return False
+            # gfx1250 omitted: MSLK only builds gfx942/gfx950 kernels (see the arch
+            # filter in aten/src/ATen/CMakeLists.txt). Add gfx1250 here once MSLK does.
             archs = ['gfx942', 'gfx950']
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
@@ -201,7 +258,8 @@ def evaluate_platform_supports_mx_gemm():
     if torch.cuda.is_available():
         if torch.version.hip:
             if ROCM_VERSION >= (7, 0):
-                return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+                gcn_name = torch.cuda.get_device_properties(0).gcnArchName
+                return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
         else:
             return SM100OrLater
     return False
@@ -475,6 +533,11 @@ def xfailIfSM120OrLater(func):
     if TEST_WITH_ROCM:
         return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
+
+def skipIfSM103(func):
+    if TEST_WITH_ROCM:
+        return func
+    return unittest.skip("Test skipped on SM103")(func) if IS_SM103 else func
 
 def xfailIfSM12X(func):
     return func if not IS_SM12X else unittest.expectedFailure(func)
