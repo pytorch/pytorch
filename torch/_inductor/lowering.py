@@ -30,7 +30,7 @@ from torch._functorch._aot_autograd.descriptors import (
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
@@ -1043,6 +1043,8 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
             )(x, dtype)
     src_dtype = x.get_dtype()
     low_pr_fp = (torch.bfloat16, torch.float16)
+    # In precision-emulation mode, explicit lowp casts must materialize the
+    # storage dtype. Later pointwise barriers will widen from that rounded value.
     use_compute_types = not (
         config.emulate_precision_casts
         and (src_dtype in low_pr_fp or dtype in low_pr_fp)
@@ -1378,7 +1380,12 @@ def trunc(x):
 
 
 @register_lowering(aten.expand, type_promotion_kind=None)
-def expand(x, sizes):
+def expand(x, sizes, *, implicit=False):
+    # `implicit` is autograd-internal metadata (see aten::expand schema); it
+    # does not affect the produced tensor, so the lowering ignores it. Without
+    # this kwarg the lowering rejects graphs produced by dynamo autograd where
+    # aten.expand.default is emitted with implicit=False.
+    del implicit
     (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -2973,6 +2980,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.normal, override_decomp=True)
 make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
@@ -2980,6 +2988,8 @@ make_fallback(torch.ops.streams.record_event.default)
 make_fallback(torch.ops.streams.wait_event.default)
 make_fallback(torch.ops.streams.synchronize_event.default)
 make_fallback(torch.ops.streams.synchronize_device.default)
+make_fallback(torch.ops.streams.synchronize_stream.default)
+make_fallback(torch.ops.streams.wait_stream.default)
 
 
 @register_lowering(aten.rand)
@@ -3377,7 +3387,7 @@ def require_channels_last(_, *args, **kwargs):
 def constrain_to_fake_tensor(arg, fake_arg):
     if fake_arg is None:
         return arg
-    if isinstance(fake_arg, FakeScriptObject) or is_opaque_value(fake_arg):
+    if isinstance(fake_arg, FakeScriptObject) or is_custom_class_obj(fake_arg):
         return arg
     if isinstance(arg, ir.IRNode):
         return ir.ExternKernel.require_exact_strides(arg, fake_arg.stride())
@@ -3718,6 +3728,8 @@ make_fallback(aten.linalg_lu)
 make_fallback(aten.linalg_lu_factor_ex)
 make_fallback(aten.linalg_lu_solve)
 make_fallback(aten.linalg_matrix_exp)
+make_fallback(aten.linalg_matrix_sqrth)
+make_fallback(aten.linalg_polar)
 make_fallback(aten.linalg_qr)
 make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
@@ -3776,6 +3788,44 @@ make_fallback(aten._efficientzerotensor)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
+
+
+@register_lowering(aten._to_dense.default, type_promotion_kind=None)
+def _to_dense(x, dtype=None, masked_grad=None):
+    x = ir.ExternKernel.realize_input(x)
+    size = x.get_size()
+    device = x.get_device()
+    if device is None:
+        raise AssertionError("realized _to_dense input must have a device")
+    output_dtype = dtype if dtype is not None else x.get_dtype()
+
+    def unflatten_args(tensor_args, non_tensor_args):
+        return [tensor_args[0], *non_tensor_args], {}
+
+    # cpp_wrapper has no direct AOTI C shim for _to_dense, so route through the
+    # proxy-executor fallback while still describing the single dense output.
+    # MultiOutput lets this single-output op force a contiguous strided output
+    # layout instead of inheriting anything from the opaque MKLDNN input.
+    packed = ir.FallbackKernel(
+        ir.MultiOutputLayout(device=device),
+        aten._to_dense.default,
+        [x],
+        [dtype, masked_grad],
+        unflatten_args,
+    )
+    out = ir.MultiOutput(
+        ir.FixedLayout(
+            device,
+            output_dtype,
+            size,
+            ir.FlexibleLayout.contiguous_strides(size),
+        ),
+        packed,
+        [],
+    )
+    packed.outputs = [out]
+    return TensorBox.create(out)
+
 
 # 6) Pattern-matched
 make_fallback(
@@ -4810,7 +4860,13 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    if accumulate and needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
+    device = self.get_device()
+    if (
+        accumulate
+        and device is not None
+        and is_gpu(device.type)
+        and needs_fallback_due_to_atomic_add_limitations(self.get_dtype())
+    ):
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])
@@ -4822,7 +4878,6 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     values = to_dtype(values, self.get_dtype())
 
     try:
-        # Note that code will only get here when dtype is uint32
         indices, tensor_indices = check_and_broadcast_indices(
             indices, self.get_device()
         )
@@ -7262,10 +7317,8 @@ def use_two_step_variance(x, axis, keepdim, input_dtype):
     # Welford does more work per element. Preserve the old tiny-reduction
     # two-step path, keep Welford for the rest of the small reductions where
     # the speedup is limited and training gradients are more sensitive to the
-    # different accumulation order. It is also faster for L2-sized CUDA inputs,
-    # where the second pass usually reloads from L2 instead of DRAM. Keep
-    # Welford for split reductions where avoiding another full pass over the
-    # data is profitable.
+    # different accumulation order, and keep Welford for larger or split
+    # reductions where avoiding another full pass over the data is profitable.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -7274,56 +7327,32 @@ def use_two_step_variance(x, axis, keepdim, input_dtype):
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     device = x.get_device()
-    has_multiple_outputs = sympy_product(ranges) != 1
-    if not (isinstance(reduction_numel, sympy.Integer) and has_multiple_outputs):
-        return False
-
-    reduction_numel = int(reduction_numel)
+    check_for_split = False
+    min_numel = 0
+    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
     if device and device.type == "cpu":
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-        return reduction_numel <= threshold
+    elif device and device.type == "cuda" and is_triton(x) and is_cuda_two_step_dtype:
+        min_numel = config.triton.use_two_step_variance_min_numel
+        threshold = config.triton.use_two_step_variance_threshold
+        check_for_split = True
+    else:
+        threshold = config.unroll_reductions_threshold
 
-    if reduction_numel <= config.unroll_reductions_threshold:
+    if not isinstance(reduction_numel, sympy.Integer):
+        return False
+
+    reduction_numel = int(reduction_numel)
+    if reduction_numel > threshold or sympy_product(ranges) == 1:
+        return False
+
+    if min_numel and config.unroll_reductions_threshold < reduction_numel < min_numel:
+        return False
+
+    if not check_for_split:
         return True
-
-    if not (device and device.type == "cuda" and is_triton(x)):
-        return False
-
-    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
-    threshold = config.triton.use_two_step_variance_threshold
-    min_numel = config.triton.use_two_step_variance_min_numel
-    small_lowp_reduction = (
-        is_cuda_two_step_dtype
-        and config.unroll_reductions_threshold < reduction_numel < min_numel
-    )
-    use_two_step_cuda_threshold = (
-        is_cuda_two_step_dtype
-        and reduction_numel <= threshold
-        and not small_lowp_reduction
-    )
-
-    use_two_step_l2 = False
-    if (
-        config.triton.two_pass_variance_l2_fraction
-        and not small_lowp_reduction
-        and torch.version.hip is None
-    ):
-        input_numel = x.get_numel()
-        if isinstance(input_numel, sympy.Integer):
-            device_idx = (
-                device.index
-                if device.index is not None
-                else torch.cuda.current_device()
-            )
-            input_dtype = input_dtype or x.get_dtype()
-            l2_cache_size = torch.cuda.get_device_properties(device_idx).L2_cache_size
-            l2_threshold = l2_cache_size * config.triton.two_pass_variance_l2_fraction
-            use_two_step_l2 = int(input_numel) * input_dtype.itemsize <= l2_threshold
-
-    if not (use_two_step_cuda_threshold or use_two_step_l2):
-        return False
 
     _, split = ir.Reduction.num_splits(
         reduction_numel=reduction_numel,
@@ -7563,6 +7592,36 @@ def _div_rn(a, b):
     return ops.div_rn(a, b)
 
 
+def _floor_div_floating(a, b):
+    nan = constant_like(float("nan"))(a)
+    neg_one = constant_like(-1.0)(a)
+    zero = constant_like(0.0)(a)
+
+    def fn(a, b, nan, neg_one, zero):
+        quotient = ops.div_rn(a, b)
+        result = ops.floor(quotient)
+        a_is_inf = ops.isinf(a)
+        a_is_finite = ops.logical_and(
+            ops.logical_not(a_is_inf), ops.logical_not(ops.isnan(a))
+        )
+        # Eager floor division uses a fmod-based implementation. For +/-inf
+        # divided by a nonzero divisor, fmod produces NaN. Keep divisor == 0
+        # unchanged because eager returns a / b directly.
+        a_inf_nonzero_b = ops.logical_and(a_is_inf, ops.ne(b, zero))
+
+        # For finite nonzero a divided by +/-inf, floor(a / b) can produce
+        # signed zero. Eager applies Python-style floor-division sign correction,
+        # so negative zero direction results become -1.
+        finite_nonzero_a_inf_b = ops.logical_and(
+            ops.logical_and(a_is_finite, ops.ne(a, zero)),
+            ops.logical_and(ops.isinf(b), ops.ne(ops.lt(a, zero), ops.lt(b, zero))),
+        )
+        result = ops.where(finite_nonzero_a_inf_b, neg_one, result)
+        return ops.where(a_inf_nonzero_b, nan, result)
+
+    return make_pointwise(fn)(a, b, nan, neg_one, zero)
+
+
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -7579,7 +7638,7 @@ def div_mode(a, b, rounding_mode=None):
         # Triton's default division uses an approximate reciprocal, which can
         # produce a result slightly below the true quotient and cause floor()
         # to round down by one.
-        return floordiv(a, b) if both_integer else floor(_div_rn(a, b))
+        return floordiv(a, b) if both_integer else _floor_div_floating(a, b)
     if rounding_mode == "trunc":
         if both_boolean:
             raise AssertionError(
@@ -8954,7 +9013,7 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     if not (isinstance(original_dep_nodes, tuple)):
         raise AssertionError("expected: isinstance(original_dep_nodes, tuple)")
 
-    dep_names = []
+    dep_names: list[str] = []
     for dep, orig_node in zip(additional_deps, original_dep_nodes, strict=True):
         dep_ir_nodes = [
             dep_leaf
@@ -9017,53 +9076,39 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     # b = control_deps(a, mm, ...)
     # c = control_deps(b, wait, ...)
     # if c == a, then you have a cycle.
-    for op in new_ops:
+    subgraph_ops = V.graph.operations[operation_len:]
+    for op in subgraph_ops:
         for dep_name in dep_names:
             op_name = op.operation_name
             if op_name is None:
                 raise AssertionError("expected: op_name is not None")
             V.graph.additional_buffer_deps[op_name].add(dep_name)
 
-    # For void ops (e.g. wait_stream) that don't produce tensor outputs,
-    # passthrough args returned by control_deps are the same IR nodes as
-    # their inputs. This means downstream consumers have no scheduling
-    # dependency on the void op. Create MutationOutput entries to force
-    # the scheduler to order subsequent readers after the void op.
-    # Only apply this for wait_stream, which needs forward ordering on the
-    # waiting stream. Other sync ops (synchronize_stream, record_event) are
-    # full barriers or have event-based cross-sync tracking.
-    void_ops = [
-        op
-        for op in new_ops
-        if isinstance(op, ir.Buffer)
-        and op.name is not None
-        and isinstance(op.layout, ir.NoneLayout)
-        and not isinstance(op, ir.MutationOutput)
-    ]
-    if void_ops and args:
-        # Check if the subgraph contains a wait_stream call
-        has_wait_stream = any(
-            n.op == "call_function"
-            and n.target is torch.ops.streams.wait_stream.default
-            for n in subgraph_fn.graph_module.graph.nodes
-        )
-        if has_wait_stream:
-            for void_op in void_ops:
-                if not isinstance(void_op, ir.ExternKernel):
-                    raise AssertionError(
-                        f"expected void_op to be ir.ExternKernel, got {type(void_op)}"
-                    )
-                for arg in args:
-                    for arg_leaf in pytree.tree_leaves(arg):
-                        if not isinstance(arg_leaf, IRNode):
-                            continue
-                        device = arg_leaf.get_device()
-                        if device is None:
-                            continue
-                        mut_out = ir.MutationOutput(
-                            ir.NoneLayout(device=device), arg_leaf, void_op
-                        )
-                        void_op.mutation_outputs.append(mut_out)
+    # Pass-through versioning: inputs that are also outputs get an
+    # OrderingOutput so future readers are ordered after all subgraph ops.
+    # TODO: if control_deps ever wraps ops that truly mutate a pass-through
+    # (not just ordering), this needs MutationOutput instead of OrderingOutput.
+    input_names = OrderedSet()
+    for a in args:
+        if isinstance(a, IRNode):
+            a.realize()
+            input_names.add(a.get_name())
+    output_leaves = list(pytree.tree_leaves(output)) if output is not None else []
+    passthrough_vals = []
+    for v in output_leaves:
+        if isinstance(v, IRNode):
+            v.realize()
+            if v.get_name() in input_names:
+                passthrough_vals.append(v)
+    for val in passthrough_vals:
+        barrier = ir.OrderingBarrier(val)
+        barrier_op = barrier.get_operation_name()
+        for op in subgraph_ops:
+            op_name = op.operation_name
+            if op_name is not None:
+                buf_name = op.get_buffer_name()
+                if buf_name is not None:
+                    V.graph.additional_buffer_deps[barrier_op].add(buf_name)
 
     return output
 
@@ -9101,6 +9146,21 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 @register_lowering(associative_scan_op, type_promotion_kind=None)
 def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
+
+    # combine_mode="pointwise" codegen requires a backend with scan support
+    # (e.g. Triton on CUDA/XPU). The eager wrapper no longer enforces a device
+    # requirement, so check every leaf here -- before lower_pointwise_subgraph
+    # runs -- to raise a clear device-specific error. ir.Scan.create re-checks
+    # the same feature on xs[0] below and otherwise fails with a generic "Unable
+    # to generate code" error. See https://github.com/pytorch/pytorch/issues/186594.
+    for x in xs:
+        device = x.get_device()
+        if not V.graph.has_feature(device, BackendFeature.SCAN):
+            device_str = device.type if device is not None else "unknown device"
+            raise RuntimeError(
+                "associative_scan with combine_mode='pointwise' is not supported "
+                f"on {device_str}. Try to use combine_mode='generic'."
+            )
 
     num_scan_inputs = 2 * len(xs)
     placeholders = [
@@ -9381,19 +9441,16 @@ from . import kernel
 
 import_submodule(kernel)
 
-from . import quantized_lowerings
-
-
-quantized_lowerings.register_quantized_ops()
-quantized_lowerings.register_woq_mm_ops()
-
 from . import (
     jagged_lowerings,
     mkldnn_lowerings,  # noqa: F401  # registers oneDNN fusion ops on import
+    quantized_lowerings,
 )
 
 
 jagged_lowerings.register_jagged_ops()
+quantized_lowerings.register_quantized_ops()
+quantized_lowerings.register_woq_mm_ops()
 
 
 @contextlib.contextmanager
