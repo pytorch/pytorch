@@ -75,7 +75,7 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, GetSet, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import CustomClassObjectVariable
@@ -3081,13 +3081,29 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
+    # NB: ndim/itemsize are ALWAYS specialized constants (numpy exposes them via
+    # PyGetSetDef on ndarray), unlike size/shape which may carry free symbols.
+    def _get_ndim(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        example_value = self.as_proxy().node.meta["example_value"]
+        return VariableTracker.build(tx, tnp.ndarray(example_value).ndim)
+
+    def _get_itemsize(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        example_value = self.as_proxy().node.meta["example_value"]
+        return VariableTracker.build(tx, tnp.ndarray(example_value).itemsize)
+
+    tp_getset = {
+        "ndim": GetSet(_get_ndim, None),
+        "itemsize": GetSet(_get_itemsize, None),
+    }
+
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # NB: This INTENTIONALLY does not call super(), because there is
         # no intrinsic reason ndarray properties are related to Tensor
         # properties.  The inheritance here is for implementation sharing.
-
+        # tp_getset (ndim/itemsize) is resolved by generic_getattr before this
+        # method is reached, so it is not consulted here.
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy
 
@@ -3126,8 +3142,6 @@ class NumpyNdarrayVariable(TensorVariable):
         #
         # NB: only ALWAYS specialized attributes can go here; notably,
         # size/shape not allowed!
-        elif name in ("ndim", "itemsize"):
-            return VariableTracker.build(tx, getattr(example_ndarray, name))
         elif name in ("shape", "stride"):
             if not has_free_symbols(r := getattr(example_ndarray, name)):
                 return VariableTracker.build(tx, tuple(int(r) for r in r))
