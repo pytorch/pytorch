@@ -5816,7 +5816,10 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestGradTrackingTensorToList, globals(), only_for=("cpu", "cuda")
+    TestGradTrackingTensorToList,
+    globals(),
+    only_for=only_for,
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
