@@ -1369,6 +1369,29 @@ class GraphModule(torch.nn.Module):
         x_clone = x.clone()
         self.assertEqual(opt_fn(x, y), fn(x_clone, y))
 
+    def test_input_mutation_with_e8m0_arg(self):
+        # https://github.com/pytorch/pytorch/issues/189522
+        # An e8m0 arg made decompose_auto_functionalized skip the
+        # auto_functionalized_v2(invoke_subgraph) node, tripping its
+        # "auto_functionalized_v2 was not removed" assertion.
+        @nested_compile_region
+        def gn(x, y, scale_e8m0):
+            x.add_(1)
+            return torch.mul(x, y) * scale_e8m0.to(torch.float32)
+
+        def fn(x, y, scale_e8m0):
+            return gn(x, y, scale_e8m0) + gn(x, y, scale_e8m0)
+
+        x = torch.randn(8)
+        y = torch.randn(8)
+        scale = torch.full((8,), 127, dtype=torch.uint8).view(torch.float8_e8m0fnu)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x_clone = x.clone()
+        self.assertEqual(opt_fn(x, y, scale), fn(x_clone, y, scale))
+        self.assertEqual(x, x_clone)
+
     def test_input_mutation_mutiple_times(self):
         @nested_compile_region
         def gn(x, y):
