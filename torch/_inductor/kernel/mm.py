@@ -845,20 +845,27 @@ def _is_blockwise1xTILESIZE_scaling(
     )
 
 
-def _is_blockwise128x128_scaling(sz: Any, tensor_sz: Any, transpose: bool = False) -> bool:
+def _is_blockwise128x128_scaling(
+    sz: Any, tensor_sz: Any, transpose: bool = False
+) -> bool:
     # Triton expects [out_blocks, k_blocks] (output blocks as rows, K blocks as cols).
     # cuBLAS produces transposed+padded [k_blocks_padded_to_4, out_blocks] for 128x128.
     # Accept both; lowering normalizes cuBLAS -> Triton before kernel launch.
     if transpose:
         out_blocks = ceildiv(tensor_sz[1], 128)  # N/128
-        k_blocks = ceildiv(tensor_sz[0], 128)    # K/128
+        k_blocks = ceildiv(tensor_sz[0], 128)  # K/128
     else:
         out_blocks = ceildiv(tensor_sz[0], 128)  # M/128
-        k_blocks = ceildiv(tensor_sz[1], 128)    # K/128
+        k_blocks = ceildiv(tensor_sz[1], 128)  # K/128
+    sizevars = V.graph.sizevars
     # Case 1: Triton layout [out_blocks, k_blocks] (with possible padding on k_blocks)
-    triton_ok = V.graph.sizevars.statically_known_equals(sz[0], out_blocks) and                 V.graph.sizevars.statically_known_geq(sz[1], k_blocks)
+    triton_ok = sizevars.statically_known_equals(
+        sz[0], out_blocks
+    ) and sizevars.statically_known_geq(sz[1], k_blocks)
     # Case 2: cuBLAS transposed layout [k_blocks_padded, out_blocks]
-    cublas_ok = V.graph.sizevars.statically_known_equals(sz[1], out_blocks) and                 V.graph.sizevars.statically_known_geq(sz[0], k_blocks)
+    cublas_ok = sizevars.statically_known_equals(
+        sz[1], out_blocks
+    ) and sizevars.statically_known_geq(sz[0], k_blocks)
     return triton_ok or cublas_ok
 
 
