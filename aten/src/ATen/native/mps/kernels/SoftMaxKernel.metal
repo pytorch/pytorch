@@ -198,6 +198,7 @@ kernel void softmax_forward_looped(
 
   float local_max = -INFINITY;
   float local_sum = 0.0f;
+  bool found_nan = false;
   for (uint r = 0; r < axis_size; r += lsize * N_READS) {
     uint base = r + tid * N_READS;
     if (base + N_READS <= axis_size) {
@@ -211,6 +212,7 @@ kernel void softmax_forward_looped(
             x[(base + 2) * sa],
             x[(base + 3) * sa]);
       }
+      found_nan = found_nan || metal::any(metal::isnan(v));
       float chunk_max = fmax(fmax(v.x, v.y), fmax(v.z, v.w));
       float new_max = fmax(local_max, chunk_max);
       local_sum = (new_max > -INFINITY)
@@ -224,6 +226,7 @@ kernel void softmax_forward_looped(
     } else {
       for (uint i = base; i < min(base + uint(N_READS), axis_size); i++) {
         float val = contiguous ? float(x[i]) : float(x[i * sa]);
+        found_nan = found_nan || metal::isnan(val);
         float new_max = fmax(local_max, val);
         local_sum = (new_max > -INFINITY)
             ? local_sum * metal::precise::exp(local_max - new_max) +
@@ -234,8 +237,21 @@ kernel void softmax_forward_looped(
     }
   }
 
+  // A NaN input must poison the whole row (CPU semantics): fmax() drops NaNs,
+  // so a NaN seen while the running max was still -INFINITY never entered
+  // local_sum. Applied after the scan so it is order-independent.
+  if (found_nan) {
+    local_sum = NAN;
+  }
+
   float sg_max = simd_max(local_max);
-  local_sum *= metal::precise::exp(local_max - sg_max);
+  // Only rescale when this thread saw a finite max: if the whole simdgroup
+  // saw just -inf, local_max == sg_max == -INFINITY and exp(-inf - -inf) is
+  // NaN, turning the correct local_sum (0, or NaN from a NaN input) into
+  // 0 * NaN == NaN. local_sum needs no rescale in that case.
+  if (local_max > -INFINITY) {
+    local_sum *= metal::precise::exp(local_max - sg_max);
+  }
   float sg_sum = simd_sum(local_sum);
 
   threadgroup float shared_max[simdgroup_size];
@@ -252,9 +268,14 @@ kernel void softmax_forward_looped(
     float m =
         (simd_lane_id < num_simdgroups) ? shared_max[simd_lane_id] : -INFINITY;
     float global_max = simd_max(m);
-    float s = (simd_lane_id < num_simdgroups)
-        ? shared_sum[simd_lane_id] * metal::precise::exp(m - global_max)
-        : 0.0f;
+    // Same rescale guard as above: a fully masked simdgroup has
+    // m == -INFINITY with a 0 (or NaN-poisoned) sum that must pass through
+    // unscaled; exp(m - global_max) is exp(nan) when global_max is also
+    // -INFINITY (fully masked chunk/row).
+    float s = (simd_lane_id < num_simdgroups) ? shared_sum[simd_lane_id] : 0.0f;
+    if (m > -INFINITY) {
+      s *= metal::precise::exp(m - global_max);
+    }
     float global_sum = simd_sum(s);
     if (simd_lane_id == 0) {
       tg_result[0] = global_max;
@@ -332,6 +353,7 @@ kernel void softmax_forward_2pass_reduce(
 
   float local_max = -INFINITY;
   float local_sum = 0.0f;
+  bool found_nan = false;
   for (uint r = start; r < end; r += lsize * N_READS) {
     uint base = r + tid * N_READS;
     if (base + N_READS <= end) {
@@ -345,6 +367,7 @@ kernel void softmax_forward_2pass_reduce(
             x[(base + 2) * sa],
             x[(base + 3) * sa]);
       }
+      found_nan = found_nan || metal::any(metal::isnan(v));
       float chunk_max = fmax(fmax(v.x, v.y), fmax(v.z, v.w));
       float new_max = fmax(local_max, chunk_max);
       local_sum = (new_max > -INFINITY)
@@ -358,6 +381,7 @@ kernel void softmax_forward_2pass_reduce(
     } else {
       for (uint i = base; i < min(base + uint(N_READS), end); i++) {
         float val = contiguous ? float(x[i]) : float(x[i * sa]);
+        found_nan = found_nan || metal::isnan(val);
         float new_max = fmax(local_max, val);
         local_sum = (new_max > -INFINITY)
             ? local_sum * metal::precise::exp(local_max - new_max) +
@@ -368,8 +392,21 @@ kernel void softmax_forward_2pass_reduce(
     }
   }
 
+  // A NaN input must poison the whole row (CPU semantics): fmax() drops NaNs,
+  // so a NaN seen while the running max was still -INFINITY never entered
+  // local_sum. Applied after the scan so it is order-independent.
+  if (found_nan) {
+    local_sum = NAN;
+  }
+
   float sg_max = simd_max(local_max);
-  local_sum *= metal::precise::exp(local_max - sg_max);
+  // Only rescale when this thread saw a finite max: if the whole simdgroup
+  // saw just -inf, local_max == sg_max == -INFINITY and exp(-inf - -inf) is
+  // NaN, turning the correct local_sum (0, or NaN from a NaN input) into
+  // 0 * NaN == NaN. local_sum needs no rescale in that case.
+  if (local_max > -INFINITY) {
+    local_sum *= metal::precise::exp(local_max - sg_max);
+  }
   float sg_sum = simd_sum(local_sum);
 
   threadgroup float shared_max[simdgroup_size];
@@ -386,9 +423,14 @@ kernel void softmax_forward_2pass_reduce(
     float m =
         (simd_lane_id < num_simdgroups) ? shared_max[simd_lane_id] : -INFINITY;
     float global_max = simd_max(m);
-    float s = (simd_lane_id < num_simdgroups)
-        ? shared_sum[simd_lane_id] * metal::precise::exp(m - global_max)
-        : 0.0f;
+    // Same rescale guard as above: a fully masked simdgroup has
+    // m == -INFINITY with a 0 (or NaN-poisoned) sum that must pass through
+    // unscaled; exp(m - global_max) is exp(nan) when global_max is also
+    // -INFINITY (fully masked chunk/row).
+    float s = (simd_lane_id < num_simdgroups) ? shared_sum[simd_lane_id] : 0.0f;
+    if (m > -INFINITY) {
+      s *= metal::precise::exp(m - global_max);
+    }
     float global_sum = simd_sum(s);
     if (simd_lane_id == 0) {
       partials[(row_id * num_chunks + chunk_id) * 2] = global_max;
@@ -425,10 +467,14 @@ kernel void softmax_forward_2pass_write(
     float chunk_max = partials[(row_id * num_chunks + i) * 2];
     float chunk_sum = partials[(row_id * num_chunks + i) * 2 + 1];
     float new_max = fmax(global_max, chunk_max);
+    // new_max == -INFINITY means every chunk seen so far was fully masked;
+    // both sums are then 0, or NaN when a chunk contained a NaN input. Add
+    // them (instead of zeroing) so NaN poisoning survives; the exp rescales
+    // are unusable here (exp(-inf - -inf) is NaN).
     global_sum = (new_max > -INFINITY)
         ? global_sum * metal::precise::exp(global_max - new_max) +
             chunk_sum * metal::precise::exp(chunk_max - new_max)
-        : 0.0f;
+        : global_sum + chunk_sum;
     global_max = new_max;
   }
   // log_softmax: subtract log(sum_exp); softmax: multiply by 1/sum_exp.
@@ -858,14 +904,22 @@ kernel void softmax_forward_tiled(
 
   float local_max = -INFINITY;
   float local_sum = 0.0f;
+  bool found_nan = false;
   for (uint b = 0; b < axis_size; b++) {
     float val = float(input[base_a + ulong(b) * sa]);
+    found_nan = found_nan || metal::isnan(val);
     float new_max = fmax(local_max, val);
     local_sum = (new_max > -INFINITY)
         ? local_sum * metal::precise::exp(local_max - new_max) +
             metal::precise::exp(val - new_max)
         : 0.0f;
     local_max = new_max;
+  }
+  // A NaN input must poison the whole row (CPU semantics): fmax() drops NaNs,
+  // so a NaN seen while the running max was still -INFINITY never entered
+  // local_sum. Applied after the scan so it is order-independent.
+  if (found_nan) {
+    local_sum = NAN;
   }
   // log_softmax: subtract log(sum_exp); softmax: multiply by 1/sum_exp.
   float norm = IS_LOG ? metal::precise::log(local_sum) : (1.0f / local_sum);
@@ -982,9 +1036,11 @@ kernel void softmax_forward_blocked(
   ulong col_base_a = ulong(batch_idx) * axis_size * sa + ulong(col_global);
   float local_max = -INFINITY;
   float local_sum = 0.0f;
+  bool found_nan = false;
   if (active) {
     for (uint b = axis_tid; b < axis_size; b += num_axis_threads) {
       float val = float(input[col_base_a + ulong(b) * sa]);
+      found_nan = found_nan || metal::isnan(val);
       float new_max = fmax(local_max, val);
       local_sum = (new_max > -INFINITY)
           ? local_sum * metal::precise::exp(local_max - new_max) +
@@ -992,6 +1048,12 @@ kernel void softmax_forward_blocked(
           : 0.0f;
       local_max = new_max;
     }
+  }
+  // A NaN input must poison the whole column (CPU semantics): fmax() drops
+  // NaNs, so a NaN seen while the running max was still -INFINITY never
+  // entered local_sum. Applied after the scan so it is order-independent.
+  if (found_nan) {
+    local_sum = NAN;
   }
 
   // Tree reduction across the num_axis_threads sharing each column.
@@ -1005,9 +1067,13 @@ kernel void softmax_forward_blocked(
       uint o = tid + s * cols_per_tg;
       float om = mx[o], os = sm[o], mm = mx[tid], ms = sm[tid];
       float nm = fmax(mm, om);
+      // nm == -INFINITY means both halves were fully masked; their sums are
+      // then 0, or NaN when a NaN input was seen. Add them (instead of
+      // zeroing) so NaN poisoning survives; the exp rescales are unusable
+      // here (exp(-inf - -inf) is NaN).
       sm[tid] = (nm > -INFINITY) ? ms * metal::precise::exp(mm - nm) +
               os * metal::precise::exp(om - nm)
-                                 : 0.0f;
+                                 : ms + os;
       mx[tid] = nm;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1131,9 +1197,11 @@ kernel void softmax_forward_blocked2_reduce(
   ulong col_base_a = ulong(batch_idx) * axis_size * sa + ulong(col_global);
   float local_max = -INFINITY;
   float local_sum = 0.0f;
+  bool found_nan = false;
   if (active) {
     for (uint b = start + axis_tid; b < end; b += num_axis_threads) {
       float val = float(input[col_base_a + ulong(b) * sa]);
+      found_nan = found_nan || metal::isnan(val);
       float new_max = fmax(local_max, val);
       local_sum = (new_max > -INFINITY)
           ? local_sum * metal::precise::exp(local_max - new_max) +
@@ -1141,6 +1209,12 @@ kernel void softmax_forward_blocked2_reduce(
           : 0.0f;
       local_max = new_max;
     }
+  }
+  // A NaN input must poison the whole column (CPU semantics): fmax() drops
+  // NaNs, so a NaN seen while the running max was still -INFINITY never
+  // entered local_sum. Applied after the scan so it is order-independent.
+  if (found_nan) {
+    local_sum = NAN;
   }
 
   threadgroup float* mx = smem;
@@ -1153,9 +1227,13 @@ kernel void softmax_forward_blocked2_reduce(
       uint o = tid + s * cols_per_tg;
       float om = mx[o], os = sm[o], mm = mx[tid], ms = sm[tid];
       float nm = fmax(mm, om);
+      // nm == -INFINITY means both halves were fully masked; their sums are
+      // then 0, or NaN when a NaN input was seen. Add them (instead of
+      // zeroing) so NaN poisoning survives; the exp rescales are unusable
+      // here (exp(-inf - -inf) is NaN).
       sm[tid] = (nm > -INFINITY) ? ms * metal::precise::exp(mm - nm) +
               os * metal::precise::exp(om - nm)
-                                 : 0.0f;
+                                 : ms + os;
       mx[tid] = nm;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1204,10 +1282,14 @@ kernel void softmax_forward_blocked2_write(
       float cm = partials[(pbase + i) * 2];
       float cs = partials[(pbase + i) * 2 + 1];
       float nm = fmax(global_max, cm);
+      // nm == -INFINITY means every chunk seen so far was fully masked; both
+      // sums are then 0, or NaN when a chunk contained a NaN input. Add them
+      // (instead of zeroing) so NaN poisoning survives; the exp rescales are
+      // unusable here (exp(-inf - -inf) is NaN).
       global_sum = (nm > -INFINITY)
           ? global_sum * metal::precise::exp(global_max - nm) +
               cs * metal::precise::exp(cm - nm)
-          : 0.0f;
+          : global_sum + cs;
       global_max = nm;
     }
   }
@@ -1368,14 +1450,22 @@ kernel void softmax_forward_coalesced(
 
   float local_max = -INFINITY;
   float local_sum = 0.0f;
+  bool found_nan = false;
   for (uint off = tid; off < total; off += lsize) {
     float val = float(input[base_a + ulong(off)]);
+    found_nan = found_nan || metal::isnan(val);
     float new_max = fmax(local_max, val);
     local_sum = (new_max > -INFINITY)
         ? local_sum * metal::precise::exp(local_max - new_max) +
             metal::precise::exp(val - new_max)
         : 0.0f;
     local_max = new_max;
+  }
+  // A NaN input must poison the whole column (CPU semantics): fmax() drops
+  // NaNs, so a NaN seen while the running max was still -INFINITY never
+  // entered local_sum. Applied after the scan so it is order-independent.
+  if (found_nan) {
+    local_sum = NAN;
   }
 
   threadgroup float* mx = smem;
@@ -1389,9 +1479,13 @@ kernel void softmax_forward_coalesced(
       uint o = tid + s * sa;
       float om = mx[o], os = sm[o], mm = mx[tid], ms = sm[tid];
       float nm = fmax(mm, om);
+      // nm == -INFINITY means both halves were fully masked; their sums are
+      // then 0, or NaN when a NaN input was seen. Add them (instead of
+      // zeroing) so NaN poisoning survives; the exp rescales are unusable
+      // here (exp(-inf - -inf) is NaN).
       sm[tid] = (nm > -INFINITY) ? ms * metal::precise::exp(mm - nm) +
               os * metal::precise::exp(om - nm)
-                                 : 0.0f;
+                                 : ms + os;
       mx[tid] = nm;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
