@@ -67,7 +67,7 @@ from operator import length_hint
 n = 10
 
 
-class TestInvariantWithoutMutations:
+class __TestInvariantWithoutMutations:
 
     def test_invariant(self):
         it = self.it
@@ -78,7 +78,7 @@ class TestInvariantWithoutMutations:
         self.assertRaises(StopIteration, next, it)
         self.assertEqual(length_hint(it), 0)
 
-class TestTemporarilyImmutable(TestInvariantWithoutMutations):
+class __TestTemporarilyImmutable(__TestInvariantWithoutMutations):
 
     def test_immutable_during_iteration(self):
         # objects such as deques, sets, and dictionaries enforce
@@ -94,25 +94,25 @@ class TestTemporarilyImmutable(TestInvariantWithoutMutations):
 
 ## ------- Concrete Type Tests -------
 
-class TestRepeat(TestInvariantWithoutMutations, CPythonTestCase):
+class TestRepeat(__TestInvariantWithoutMutations, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
         self.it = repeat(None, n)
 
-class TestXrange(TestInvariantWithoutMutations, CPythonTestCase):
+class TestXrange(__TestInvariantWithoutMutations, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
         self.it = iter(range(n))
 
-class TestXrangeCustomReversed(TestInvariantWithoutMutations, CPythonTestCase):
+class TestXrangeCustomReversed(__TestInvariantWithoutMutations, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
         self.it = reversed(range(n))
 
-class TestTuple(TestInvariantWithoutMutations, CPythonTestCase):
+class TestTuple(__TestInvariantWithoutMutations, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
@@ -120,7 +120,7 @@ class TestTuple(TestInvariantWithoutMutations, CPythonTestCase):
 
 ## ------- Types that should not be mutated during iteration -------
 
-class TestDeque(TestTemporarilyImmutable, CPythonTestCase):
+class TestDeque(__TestTemporarilyImmutable, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
@@ -128,7 +128,7 @@ class TestDeque(TestTemporarilyImmutable, CPythonTestCase):
         self.it = iter(d)
         self.mutate = d.pop
 
-class TestDequeReversed(TestTemporarilyImmutable, CPythonTestCase):
+class TestDequeReversed(__TestTemporarilyImmutable, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
@@ -136,7 +136,7 @@ class TestDequeReversed(TestTemporarilyImmutable, CPythonTestCase):
         self.it = reversed(d)
         self.mutate = d.pop
 
-class TestDictKeys(TestTemporarilyImmutable, CPythonTestCase):
+class TestDictKeys(__TestTemporarilyImmutable, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
@@ -144,7 +144,7 @@ class TestDictKeys(TestTemporarilyImmutable, CPythonTestCase):
         self.it = iter(d)
         self.mutate = d.popitem
 
-class TestDictItems(TestTemporarilyImmutable, CPythonTestCase):
+class TestDictItems(__TestTemporarilyImmutable, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
@@ -152,7 +152,7 @@ class TestDictItems(TestTemporarilyImmutable, CPythonTestCase):
         self.it = iter(d.items())
         self.mutate = d.popitem
 
-class TestDictValues(TestTemporarilyImmutable, CPythonTestCase):
+class TestDictValues(__TestTemporarilyImmutable, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
@@ -160,7 +160,7 @@ class TestDictValues(TestTemporarilyImmutable, CPythonTestCase):
         self.it = iter(d.values())
         self.mutate = d.popitem
 
-class TestSet(TestTemporarilyImmutable, CPythonTestCase):
+class TestSet(__TestTemporarilyImmutable, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
@@ -170,7 +170,7 @@ class TestSet(TestTemporarilyImmutable, CPythonTestCase):
 
 ## ------- Types that can mutate during iteration -------
 
-class TestList(TestInvariantWithoutMutations, CPythonTestCase):
+class TestList(__TestInvariantWithoutMutations, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
@@ -191,7 +191,7 @@ class TestList(TestInvariantWithoutMutations, CPythonTestCase):
         self.assertEqual(length_hint(it), 0)
 
 
-class TestListReversed(TestInvariantWithoutMutations, CPythonTestCase):
+class TestListReversed(__TestInvariantWithoutMutations, CPythonTestCase):
 
     def setUp(self):
         super().setUp()
