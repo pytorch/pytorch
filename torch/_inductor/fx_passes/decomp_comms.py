@@ -41,8 +41,8 @@ def _get_fake_mode(node: fx.Node) -> torch._subclasses.fake_tensor.FakeTensorMod
     # Standalone call (tests) -- extract from node metadata
     for inp in node.all_input_nodes:
         val = inp.meta.get("val")
-        if torch._subclasses.fake_tensor.is_fake_tensor(val):
-            return torch._subclasses.fake_tensor.maybe_get_fake_mode(val)
+        if isinstance(val, torch._subclasses.fake_tensor.FakeTensor):
+            return val.fake_mode
     raise RuntimeError(f"No FakeTensorMode available for {node.name}")
 
 
