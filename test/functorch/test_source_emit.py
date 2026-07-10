@@ -479,6 +479,11 @@ class TestSourceEmit(TestCase):
         s = {1, 2}
         with self.assertRaisesRegex(NotImplementedError, "shared mutable"):
             _emit([s, s])
+        # A bytearray is emitted as a repr literal but is mutable, so a shared one is
+        # rejected too rather than emitted as two independent literals.
+        ba = bytearray(b"xy")
+        with self.assertRaisesRegex(NotImplementedError, "shared mutable"):
+            _emit([ba, ba])
         # An opaque reduce value object shared across positions is caught the same way,
         # via _emit_via_reduce's guard rather than the container guard.
         h = _Holder(3)
