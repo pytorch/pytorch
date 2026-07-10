@@ -581,6 +581,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_all_to_all_nd.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -1849,6 +1850,10 @@ if(USE_ROCM)
 
   if(TARGET ck_sdpa)
     target_link_libraries(torch_hip PRIVATE ck_sdpa)
+  endif()
+
+  if(TARGET ck_gemm)
+    target_link_libraries(torch_hip PRIVATE ck_gemm)
   endif()
 
   if(USE_MSLK)

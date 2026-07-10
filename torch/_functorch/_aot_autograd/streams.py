@@ -498,6 +498,12 @@ def _wrap_sync_node(
                 args=(control_deps_node, i + 1),  # +1 because index 0 is sync result
             )
             getitem_node.meta.update(dep.meta)
+            # The getitem is a passthrough projection of an existing value, not
+            # a node that *produces* an unbacked symbol - the original ``dep``
+            # (still inside the subgraph) is the binding site. Leaving the
+            # binding on the getitem trips Inductor's run_node assertion that
+            # ``new_unbacked_defs >= renamed_unbacked_bindings``.
+            getitem_node.meta.pop("unbacked_bindings", None)
             replacements[dep] = getitem_node
             visited.add(getitem_node)
 
@@ -725,6 +731,23 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     # implicitly on that stream.
                     if None in stream_to_nodes and sync_stream is not None:
                         deps_before_sync.extend(stream_to_nodes[None])
+                    # Order this sync op after the prior sync on its own stream
+                    # (and after any full barrier, keyed under None). Without this,
+                    # a record/wait whose stream_to_nodes was reset by an earlier
+                    # sync would have no deps, stay unwrapped, and float as a bare
+                    # side-effectful node -- capturing nothing, the same failure as
+                    # an unanchored synchronize_stream.
+                    prior_syncs = [
+                        *stream_sync_deps.get(sync_stream, ()),
+                        *stream_sync_deps.get(None, ()),
+                    ]
+                    # A backward sync must anchor only on backward sync nodes:
+                    # depending on a forward control_deps node crosses the fwd/bwd
+                    # boundary onto a node that is neither saveable nor
+                    # recomputable, which makes the min-cut partitioner infeasible.
+                    if is_bwd_node(node):
+                        prior_syncs = [n for n in prior_syncs if is_bwd_node(n)]
+                    deps_before_sync.extend(prior_syncs)
 
                 # For wait_event and synchronize_event, depend on the matching
                 # record_event's control_deps node (ordering) and thread its
@@ -779,12 +802,14 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                 # fresh. Ordering with prior ops is already enforced because
                 # their uses were rewired through getitems from control_deps.
                 # synchronize_event is a full barrier, so its own passthrough
-                # subsumes all prior per-stream data: clear then re-seed.
+                # subsumes all prior per-stream data: clear then re-seed. Key the
+                # reseed under None (like synchronize_stream/device) so a later
+                # record/wait on any stream chains after it.
                 if node.target is torch.ops.streams.synchronize_event.default:
                     stream_to_nodes.clear()
                     stream_sync_deps.clear()
                     if ctrl_node is not None:
-                        stream_sync_deps[sync_stream] = [ctrl_node, *passthrough]
+                        stream_sync_deps[None] = [ctrl_node, *passthrough]
                 else:
                     stream_to_nodes[sync_stream] = []
                     if None in stream_to_nodes:
