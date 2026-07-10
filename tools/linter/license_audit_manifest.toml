@@ -96,6 +96,7 @@ paths = [
   'third_party/ideep/mkl-dnn/LICENSE',
   'third_party/ideep/mkl-dnn/third_party/opencl/LICENSE',
   'third_party/onnx/LICENSE',
+  'third_party/perfetto/LICENSE',
   'third_party/tensorpipe/third_party/libnop/LICENSE',
 ]
 

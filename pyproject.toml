@@ -102,6 +102,7 @@ license-files = [
     "third_party/mslk/mslk/attention/flash_attn/LICENSE",
     "third_party/nlohmann/LICENSE.MIT",
     "third_party/onnx/LICENSE",
+    "third_party/perfetto/LICENSE",
     "third_party/protobuf/LICENSE",
     "third_party/psimd/LICENSE",
     "third_party/pthreadpool/LICENSE",
