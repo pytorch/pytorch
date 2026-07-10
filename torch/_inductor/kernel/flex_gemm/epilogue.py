@@ -42,6 +42,8 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_arg,
     _cute_call,
+    _cute_op_name,
+    _keepdim_and_broadcast,
     _local_reduce_store_arg,
     FlexGemmPhysicalReduction,
     grouped_tensor_layout,
@@ -57,7 +59,6 @@ from torch._inductor.kernel.flex_gemm.quack_reductions import (
     lower_view_or_reshape,
     propagate_grouped_tensorssa_layout,
     reduction_from_node,
-    reduction_requires_physical_finalize,
     squeeze_source_node,
     tensor_meta_shape,
     unsupported_reduction_from_node,
@@ -155,7 +156,6 @@ class FlexGemmOutputLocalReducePlan:
     store_node: torch.fx.Node | None = None
     aux_index: int | None = None
     feeds_main: bool = False
-    requires_physical_finalize: bool = False
 
     def __post_init__(self) -> None:
         """Reject invalid local-reduce output nodes."""
@@ -194,7 +194,6 @@ class FlexGemmLocalReduceContract:
 
     value_node: torch.fx.Node
     geometry: FlexGemmLocalReduceGeometry
-    requires_physical_finalize: bool = False
 
     def __post_init__(self) -> None:
         """Reject invalid local-reduce source nodes."""
@@ -215,7 +214,6 @@ class FlexGemmLocalReduceContract:
             store_node=store_node,
             aux_index=aux_index,
             feeds_main=feeds_main,
-            requires_physical_finalize=self.requires_physical_finalize,
         )
 
 
@@ -746,9 +744,7 @@ def local_reduce_contract_from_grouped_input(
             return None
         raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
     return FlexGemmLocalReduceContract(
-        node,
-        FlexGemmLocalReduceGeometry(layout.group_size, layout.axis),
-        requires_physical_finalize=reduction_requires_physical_finalize(node, layout),
+        node, FlexGemmLocalReduceGeometry(layout.group_size, layout.axis)
     )
 
 
@@ -1126,6 +1122,35 @@ def materialize_flex_gemm_epilogue(
                         )
                         if physical_finalize is not None:
                             env[node] = physical_finalize
+                            continue
+                    if (
+                        local_reduce_feed_main is None
+                        and is_shape_preserving
+                        and _cute_op_name(node.target) == "mx_e8m0_scale"
+                        and node.args
+                        and isinstance(node.args[0], torch.fx.Node)
+                    ):
+                        reduction = reduction_from_node(node.args[0])
+                        if (
+                            reduction is not None
+                            and isinstance(reduction[0], torch.fx.Node)
+                            and reduction[0] in grouped_tensors
+                        ):
+                            node_args = tuple(_cute_arg(arg, env) for arg in node.args)
+                            node_kwargs = {
+                                key: _cute_arg(value, env)
+                                for key, value in node.kwargs.items()
+                            }
+                            env[node] = _cute_call(node.target, node_args, node_kwargs)
+                            reduction_input = reduction[0]
+                            _, local_reduce_store_sources[node] = (
+                                _keepdim_and_broadcast(
+                                    kernel,
+                                    env[node],
+                                    grouped_tensors[reduction_input],
+                                    _cute_arg(reduction_input, env),
+                                )
+                            )
                             continue
                     if (
                         local_reduce_feed_main is None

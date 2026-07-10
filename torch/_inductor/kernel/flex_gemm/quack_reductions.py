@@ -5,9 +5,7 @@ FlexGEMM recognizes a narrow local-reduction contract inside the GEMM output
 tile: an epilogue reshapes the accumulator to expose contiguous groups along M
 or N, then reduces only that grouped dimension. N-axis groups up to one 32-lane
 fragment lower as ordinary in-fragment TensorSSA reductions; larger N groups
-produce TensorSSA partials that QuACK combines physically, and reductions
-feeding physical-only finalize ops (mx_e8m0_scale) stay on the callback path
-regardless of group size.
+produce TensorSSA partials that QuACK combines physically.
 M-axis groups currently always use QuACK's physical row-lane/warp combine path,
 even when the group is small enough to fit in one fragment. Inductor owns the
 FX pattern matching and output contracts; these helpers describe the supported
@@ -211,22 +209,23 @@ FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
     )
 )
 
-# mx_e8m0_scale's exponent bitcast/shift only lowers inside the physical scalar
-# finalizer; nvfp4_e4m3_scale has a TensorSSA clamp form and needs no callbacks.
-PHYSICAL_FINALIZE_OP_NAMES = frozenset(("mx_e8m0_scale",))
-
 
 def _cute_scale_expr(
     op_name: str, source: Any, max_power: Any = 8, *, tensorssa: bool = False
 ) -> str:
     """Render scale encoders as numeric CuTeDSL expressions before output casting."""
     if op_name == "mx_e8m0_scale":
-        exponent = (
-            f"(((cutlass.Float32({source}).bitcast(cutlass.Int32) >> 23) "
-            f"& 0xFF) - 127 - {max_power})"
-        )
+        bits = f"cutlass.Float32({source}).bitcast(cutlass.Int32)"
+        exponent = f"((({bits} >> 23) & 0xFF) - 127 - {max_power})"
         clamped = f"cutlass.max(cutlass.min({exponent}, 128), -127)"
-        return f"cutlass.Float32(cute.math.exp2(cutlass.Float32({clamped})))"
+        biased = f"({clamped} + 127)"
+        normal_bits = f"(({biased} << 23) | (cutlass.Int32({biased} == 0) << 22))"
+        invalid = (
+            f"cutlass.Int32((cutlass.Int32(({bits} & 0x7FFFFFFF) > 0x7F800000) "
+            f"+ cutlass.Int32({biased} == 255)) > 0)"
+        )
+        encoded_bits = f"({normal_bits} + {invalid} * (0x7FC00000 - {normal_bits}))"
+        return f"{encoded_bits}.bitcast(cutlass.Float32)"
     scale = f"({source} / 6.0)"
     if tensorssa:
         return (
@@ -236,23 +235,73 @@ def _cute_scale_expr(
     return f"cutlass.Float32(cutlass.max(cutlass.min({scale}, 448.0), 0.015625))"
 
 
+def generate_tensorssa_like(expr: str, ref: Any, dtype: torch.dtype) -> Any:
+    """Emit a TensorSSA expression with a reference value's logical shape."""
+    return V.kernel.cse.generate(V.kernel.body, expr, dtype=dtype, shape=ref.shape)
+
+
+def lower_mx_e8m0_scale_tensorssa(source: Any, cse_var: Any, max_power: int) -> Any:
+    """Encode E8M0 scales elementwise while preserving TensorSSA shape."""
+    source_f32 = generate_tensorssa_like(
+        f"{source}.to(cutlass.Float32)", cse_var, torch.float32
+    )
+    bits = generate_tensorssa_like(
+        f"{source_f32}.bitcast(cutlass.Int32).reshape({source_f32}.shape)",
+        cse_var,
+        torch.int32,
+    )
+    exponent = generate_tensorssa_like(
+        f"(({bits}.apply_op(operator.rshift, 23) & 0xFF) - 127 - {max_power})",
+        cse_var,
+        torch.int32,
+    )
+    clamped = generate_tensorssa_like(
+        f"cute.where({exponent} < -127, -127, "
+        f"cute.where({exponent} > 128, 128, {exponent}))",
+        cse_var,
+        torch.int32,
+    )
+    biased = generate_tensorssa_like(f"({clamped} + 127)", cse_var, torch.int32)
+    scale_bits = generate_tensorssa_like(
+        f"{biased}.apply_op(operator.lshift, 23)", cse_var, torch.int32
+    )
+    scale = generate_tensorssa_like(
+        f"{scale_bits}.bitcast(cutlass.Float32).reshape({scale_bits}.shape)",
+        cse_var,
+        torch.float32,
+    )
+    return generate_tensorssa_like(
+        f"cute.where(({source_f32} != {source_f32}) | ({biased} == 255), "
+        f"cute.full_like({source_f32}, float('nan')), "
+        f"cute.where({biased} == 0, "
+        f"cute.full_like({source_f32}, {2.0**-127!r}), {scale}))",
+        cse_var,
+        torch.float32,
+    )
+
+
 def _cute_scale_call(
     op_name: str, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Any:
     """Lower FlexGEMM scale custom ops for TensorSSA values and scalar finalizers."""
-    if len(args) != 1:
-        raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {op_name}")
-    if op_name == "nvfp4_e4m3_scale" and kwargs:
-        raise NotImplementedError(f"unsupported FlexGEMM epilogue op kwargs: {op_name}")
-    max_power = kwargs.get("max_power", 8)
-    if op_name == "mx_e8m0_scale" and not isinstance(max_power, (int, float)):
-        raise NotImplementedError("FlexGEMM mx_e8m0_scale requires static max_power")
+    if op_name == "mx_e8m0_scale":
+        if len(args) not in (1, 2) or kwargs.keys() - OrderedSet(["max_power"]):
+            raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {op_name}")
+        if len(args) == 2 and "max_power" in kwargs:
+            raise NotImplementedError("FlexGEMM mx_e8m0_scale received max_power twice")
+        max_power = args[1] if len(args) == 2 else kwargs.get("max_power", 8)
+    else:
+        if len(args) != 1 or kwargs:
+            raise NotImplementedError(f"unsupported FlexGEMM epilogue op: {op_name}")
+        max_power = 8
+    if op_name == "mx_e8m0_scale" and not isinstance(max_power, int):
+        raise NotImplementedError(
+            "FlexGEMM mx_e8m0_scale requires static integer max_power"
+        )
     source = args[0]
     cse_var = CuteDSLOpOverrides._get_cse_var(source)
     if op_name == "mx_e8m0_scale" and cse_var is not None:
-        raise NotImplementedError(
-            "FlexGEMM mx_e8m0_scale requires physical local-reduce finalization"
-        )
+        return lower_mx_e8m0_scale_tensorssa(source, cse_var, max_power)
     expr = _cute_scale_expr(op_name, source, max_power, tensorssa=cse_var is not None)
     if cse_var is None:
         return expr
@@ -416,37 +465,6 @@ def is_pointwise_node(node: torch.fx.Node) -> bool:
         isinstance(node.target, torch._ops.OpOverload)
         and torch.Tag.pointwise in node.target.tags
     ) or _cute_op_name(node.target) in FLEX_GEMM_POINTWISE_OP_NAMES
-
-
-def reduction_requires_physical_finalize(
-    node: torch.fx.Node, layout: GroupedTensorSSALayout
-) -> bool:
-    """Return whether a fragment-sized grouped reduce must keep QuACK callbacks.
-
-    Ops in ``PHYSICAL_FINALIZE_OP_NAMES`` only lower inside the physical scalar
-    finalizer, so reductions feeding them must stay on the combine/finalize
-    callback path even when the group fits one TensorSSA fragment. Only
-    fragment-multiple groups can use QuACK's physical partial scheme; smaller
-    groups keep the TensorSSA path and reject at the finalize-op lowering.
-    """
-    if layout.group_size % 32 != 0 or local_reduce_needs_physical_callbacks(
-        layout.axis, layout.group_size
-    ):
-        return False
-    stack = list(node.users)
-    seen: OrderedSet[torch.fx.Node] = OrderedSet()
-    while stack:
-        user = stack.pop()
-        if user in seen:
-            continue
-        seen.add(user)
-        if user.op == "call_function" and (
-            _cute_op_name(user.target) in PHYSICAL_FINALIZE_OP_NAMES
-        ):
-            return True
-        if is_shape_preserving_pointwise_node(user):
-            stack.extend(user.users)
-    return False
 
 
 def is_shape_preserving_pointwise_node(node: torch.fx.Node) -> bool:
@@ -714,9 +732,7 @@ def lower_tensorssa_reduce(
         f"value / {layout.group_size}.0" if reduction_type == "mean" else "value"
     )
     source = _cute_arg(input_node, env)
-    needs_physical_combine = layout.needs_physical_combine or (
-        reduction_requires_physical_finalize(node, layout)
-    )
+    needs_physical_combine = layout.needs_physical_combine
     if needs_physical_combine:
         if local_reduce_physical_reductions is not None:
             local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(

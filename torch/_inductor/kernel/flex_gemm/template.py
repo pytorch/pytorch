@@ -35,7 +35,6 @@ class FlexGemmEpilogueLocalReduceConfig:
     geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
     feeds_main: bool = False
-    requires_physical_finalize: bool = False
 
     @classmethod
     def from_output_plan(
@@ -52,7 +51,6 @@ class FlexGemmEpilogueLocalReduceConfig:
             return FlexGemmEpilogueLocalReduceConfig(
                 local_reduce.geometry,
                 feeds_main=True,
-                requires_physical_finalize=local_reduce.requires_physical_finalize,
             )
         if out_index is None:
             raise RuntimeError(LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR)
@@ -60,7 +58,6 @@ class FlexGemmEpilogueLocalReduceConfig:
             local_reduce.geometry,
             out_index,
             local_reduce.feeds_main,
-            local_reduce.requires_physical_finalize,
         )
 
     @property
@@ -73,7 +70,7 @@ class FlexGemmEpilogueLocalReduceConfig:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.requires_physical_finalize or self.geometry.needs_physical_callbacks
+        return self.geometry.needs_physical_callbacks
 
 
 @dataclasses.dataclass(frozen=True)
