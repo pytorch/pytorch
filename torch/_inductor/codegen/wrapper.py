@@ -338,7 +338,10 @@ def user_defined_kernel_grid_fn_code(
 
 
 def user_defined_triton_kernel_transitive_closure_source_code(
-    kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
+    kernel,
+    epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None,
+    *,
+    include_root: bool = True,
 ) -> str:
     """
     Given a triton kernel function pointer collect the transitive closure of
@@ -350,7 +353,6 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     kernel_src = kernel.src
     if epilogue_fusion:
         kernel_src = epilogue_fusion[1]
-    compile_wrapper.splice(kernel_src, strip=True)
 
     # Also include any possible kernel being called indirectly
     import triton
@@ -378,11 +380,11 @@ def user_defined_triton_kernel_transitive_closure_source_code(
             if symbol_name in cur_kernel.fn.__globals__:
                 symbol = cur_kernel.fn.__globals__[symbol_name]
                 if isinstance(symbol, JITFunction):
+                    symbols_included.add(symbol_name)
+                    traverse(symbol)
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
                     compile_wrapper.splice(symbol.src, strip=True)
-                    symbols_included.add(symbol_name)
-                    traverse(symbol)
                 elif hasattr(triton, "constexpr_function") and isinstance(
                     symbol,
                     triton.runtime.jit.ConstexprFunction,
@@ -450,7 +452,20 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                     symbols_included.add(symbol_name)
 
     traverse(kernel)
+    if include_root:
+        compile_wrapper.newline()
+        compile_wrapper.splice(kernel_src, strip=True)
     return compile_wrapper.getvalue()
+
+
+def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
+    src = src.replace("\\", "\\\\")
+    if config.cpp_wrapper:
+        # With cpp_wrapper + autotune_at_compile_time=False, the source is
+        # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
+        # So we need to add backslash here.
+        src = src.replace('"""', '\\"\\"\\"')
+    return src.replace("'''", "\\'\\'\\'")
 
 
 @dataclasses.dataclass
@@ -3581,6 +3596,12 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
+        dependency_src = user_defined_triton_kernel_transitive_closure_source_code(
+            kernel, epilogue_fusion, include_root=False
+        )
+        dependency_src = _escape_triton_kernel_source_for_wrapper(dependency_src)
+        compile_wrapper.splice(dependency_src)
+
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
@@ -3593,19 +3614,13 @@ class PythonWrapperCodegen(CodeGen):
             @triton.jit
             """
         )
-        kernel_src = user_defined_triton_kernel_transitive_closure_source_code(
-            kernel, epilogue_fusion
-        )
+        kernel_src = kernel.src
+        if epilogue_fusion:
+            kernel_src = epilogue_fusion[1]
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
-        kernel_src = kernel_src.replace("\\", "\\\\")
-        if config.cpp_wrapper:
-            # With cpp_wrapper + autotune_at_compile_time=False, the source is
-            # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
-            # So we need to add backslash here.
-            kernel_src = kernel_src.replace('"""', '\\"\\"\\"')
-        kernel_src = kernel_src.replace("'''", "\\'\\'\\'")
+        kernel_src = _escape_triton_kernel_source_for_wrapper(kernel_src)
         compile_wrapper.splice(kernel_src)
 
         current_device = V.graph.get_current_device_or_throw()

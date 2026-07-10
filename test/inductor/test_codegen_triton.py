@@ -20,6 +20,7 @@ from torch._inductor.codegen.triton import (
     TritonKernelOverrides,
     TritonSymbols,
 )
+from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
@@ -39,6 +40,23 @@ from torch.testing._internal.inductor_utils import (
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
+
+
+if has_triton_package():
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def helper_for_dependency_order(x):
+        return x + 1
+
+    @triton.jit
+    def root_for_dependency_order(x, out, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        values = helper_for_dependency_order(tl.load(x + offsets, mask=mask))
+        tl.store(out + offsets, values, mask=mask)
 
 
 class TestCodegenTriton(InductorTestCase):
@@ -101,6 +119,28 @@ class TestCodegenTriton(InductorTestCase):
                 )
             finally:
                 kernel.range_trees = saved_range_trees
+
+    def test_escape_triton_kernel_source_for_wrapper(self):
+        source = """\
+@triton.jit
+def helper(x):
+    s = "slash \\\\"
+    t = '''quoted'''
+    \"\"\"doc\"\"\"
+    return x
+"""
+
+        with inductor_config.patch("cpp_wrapper", False):
+            escaped = _escape_triton_kernel_source_for_wrapper(source)
+            self.assertIn("slash \\\\\\\\", escaped)
+            self.assertIn("\\'\\'\\'quoted\\'\\'\\'", escaped)
+            self.assertIn('"""doc"""', escaped)
+
+        with inductor_config.patch("cpp_wrapper", True):
+            escaped = _escape_triton_kernel_source_for_wrapper(source)
+            self.assertIn("slash \\\\\\\\", escaped)
+            self.assertIn("\\'\\'\\'quoted\\'\\'\\'", escaped)
+            self.assertIn('\\"\\"\\"doc\\"\\"\\"', escaped)
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
@@ -626,6 +666,25 @@ class TestCodegenTriton(InductorTestCase):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_dependency_before_root(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        source = user_defined_triton_kernel_transitive_closure_source_code(
+            root_for_dependency_order
+        )
+        helper_idx = source.index("def helper_for_dependency_order")
+        root_idx = source.index("def root_for_dependency_order")
+        self.assertLess(helper_idx, root_idx)
+
+        dependency_source = user_defined_triton_kernel_transitive_closure_source_code(
+            root_for_dependency_order, include_root=False
+        )
+        self.assertIn("def helper_for_dependency_order", dependency_source)
+        self.assertNotIn("def root_for_dependency_order", dependency_source)
 
 
 if __name__ == "__main__":
