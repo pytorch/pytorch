@@ -19,7 +19,9 @@
 // only the registration call gains a subscriber handle.
 
 #include <c10/macros/Macros.h>
+#include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -27,24 +29,16 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace torch::profiler::impl {
 
-struct CompletedCuptiBuffer {
-  uint8_t* ptr;
-  size_t valid_size;
-  uint64_t ctx;
-  uint32_t stream;
-  // Layout epoch active when this buffer completed; selects which captured v2
-  // record layout decodes it. 0 for v1 (no user-defined layout).
-  uint64_t layout_epoch;
-};
-
-// Snapshot of a CUPTI v2 user-defined record layout. The layout is fixed by the
-// field selection in effect, which changes when activities are reconfigured, so
-// it is captured per epoch (see next_layout_epoch). byte offset / size of one
-// selected field within a record:
+// Byte offset / size of one selected field within a user-defined record.
 struct CuptiRecordFieldLayout {
   int field_id;
   size_t offset;
@@ -59,9 +53,22 @@ struct CuptiRecordLayout {
   std::vector<CuptiRecordFieldLayout> fields;
 };
 
-// Process-wide singleton. The v1 Activity-API buffer callbacks carry no user
-// data, so the callbacks reach the pool through a global; there is at most one
-// CUPTI monitor per process.
+struct CompletedCuptiBuffer {
+  uint8_t* ptr;
+  size_t valid_size;
+  uint64_t ctx;
+  uint32_t stream;
+  // The v2 user-defined record layout CUPTI reported for THIS buffer
+  // (pBufferCompleteInfo->ppRecordLayouts), parsed at completion. Travels with
+  // the buffer so the decoder parses it against the exact field selection
+  // active when the buffer was filled -- no epochs, no shared layout state.
+  // Empty for v1 (classic records carry no user-defined layout).
+  std::vector<CuptiRecordLayout> layouts;
+};
+
+// Process-wide singleton. The Activity-API buffer callbacks carry no user data,
+// so the callbacks reach the pool through a global; there is at most one CUPTI
+// monitor per process.
 class TORCH_API CuptiMonitorBuffers {
  public:
   static CuptiMonitorBuffers& get();
@@ -70,17 +77,11 @@ class TORCH_API CuptiMonitorBuffers {
 
   // CUPTI buffer-requested / buffer-completed callback bodies. GIL-free.
   void on_request(uint8_t** buffer, size_t* size, size_t* max_records);
+  // Completion: parses the user-defined record layout from a CUPTI
+  // CUpti_BufferCallbackCompleteInfo* (taken as void*) and enqueues the buffer
+  // with that layout attached, so the decoder reads each buffer against its own
+  // captured layout.
   void on_complete(
-      uint64_t ctx,
-      uint32_t stream,
-      uint8_t* buffer,
-      size_t size,
-      size_t valid_size);
-  // v2 completion: snapshots the user-defined record layout from a CUPTI
-  // CUpti_BufferCallbackCompleteInfo* (taken as void*) into the current epoch
-  // if not yet captured, then enqueues the buffer tagged with that epoch -- all
-  // under one lock so the layout and the buffer's epoch tag stay consistent.
-  void on_complete_v2(
       void* complete_info,
       uint8_t* buffer,
       size_t size,
@@ -96,22 +97,8 @@ class TORCH_API CuptiMonitorBuffers {
   void shutdown();
   void reset();
 
-  // Open a new layout epoch and return its id. The reconfigure path calls this
-  // after flushing the old config and before enabling the new one; the next v2
-  // completion then captures the new layout under this epoch. The flush ensures
-  // all old-config buffers are already queued (tagged with the prior epoch), so
-  // epochs never mix configs even though the decode thread lags.
-  uint64_t next_layout_epoch();
-  // Copy of the layout captured for a given epoch (as returned in a completed
-  // buffer's layout_epoch). Empty if that epoch has no captured layout.
-  std::vector<CuptiRecordLayout> record_layouts(uint64_t epoch);
-
  private:
   CuptiMonitorBuffers() = default;
-
-  // Capture the layout for current_epoch_ from complete_info if not already
-  // captured. Caller must hold mutex_.
-  void capture_layouts_locked(void* complete_info);
 
   std::mutex mutex_;
   std::condition_variable cv_;
@@ -122,39 +109,206 @@ class TORCH_API CuptiMonitorBuffers {
   size_t buffer_size_ = 4UL * 1024 * 1024;
   size_t allocated_ = 0;
   bool shutdown_ = false;
-  uint64_t current_epoch_ = 0;
-  std::map<uint64_t, std::vector<CuptiRecordLayout>> layouts_;
 };
 
-// Free functions matching the CUPTI v1 buffer-callback signatures. CUcontext is
-// an opaque pointer, taken as void* to avoid a CUPTI header dependency.
-TORCH_API void cuptiMonitorBufferRequested(
-    uint8_t** buffer,
-    size_t* size,
-    size_t* max_num_records);
-TORCH_API void cuptiMonitorBufferCompleted(
-    void* context,
-    uint32_t stream_id,
-    uint8_t* buffer,
-    size_t size,
-    size_t valid_size);
+// One accumulated column: the raw little-endian bytes of a single record field
+// concatenated across all decoded records of its kind. field_size is the per-
+// record width, so count == bytes.size() / field_size; Python views the bytes
+// as the field's dtype at drain (the native side stays dtype-agnostic).
+struct CuptiColumn {
+  size_t field_size = 0;
+  std::vector<uint8_t> bytes;
+};
 
-// Free functions matching the CUPTI v2 (subscriber-scoped, user-defined
-// record) buffer-callback signatures, registered via
-// cuptiActivityRegisterCallbacks_v2. They feed the same pool/queue as v1; only
-// the CUPTI-side argument lists differ. The trailing info pointers
-// (CUpti_BufferCallbackRequestInfo* / CUpti_BufferCallbackCompleteInfo*) are
-// taken as void* to avoid a CUPTI v2 header dependency. v2 does not pass
-// CUcontext/streamId to the completion callback (they become selectable record
-// fields), so buffers completed on this path carry ctx and stream of 0; the
-// record-layout descriptor in the complete info is snapshotted once via
-// capture_layouts() so the decoder can parse records after the callback.
-TORCH_API void cuptiMonitorBufferRequestedV2(
+// A record layout's grouping key: its sorted (field_id, size) pairs. Records
+// sharing this key share an identical column layout, so they accumulate
+// together; a different key (a kind whose layout changed mid-session) groups
+// separately, keeping every group's columns length-aligned. Used only as a map
+// key -- never serialized -- so the sorted pairs are the key directly.
+using CuptiLayoutKey = std::vector<std::pair<int, size_t>>;
+
+// Native decode worker for the CUPTI monitor. Runs its own thread that pulls
+// completed buffers from CuptiMonitorBuffers, iterates their records with
+// CUPTI's own v2 record iterator (cuptiActivityGetNextRecord_v2, passed in as a
+// function pointer so this file needs no libcupti link), and accumulates every
+// field in each buffer's captured layout into per-(kind, field) columns -- all
+// GIL-free. Python drains the accumulated columns periodically (one GIL touch),
+// so the per-buffer decode never contends with the training thread.
+//
+// NUMERIC fields only for now (the timer's start/end/graph_node_id): each field
+// is copied as raw bytes. const char* (string) fields would need a deref during
+// decode and are a follow-up (the profiler's NAME field).
+class TORCH_API CuptiMonitorDecoder {
+ public:
+  static CuptiMonitorDecoder& get();
+
+  // The CUPTI subscriber handle and the address of
+  // cuptiActivityGetNextRecord_v2 (both as integers from the Python side, which
+  // owns the libcupti handle). fence_kind / fence_end_field identify the
+  // SYNCHRONIZATION record + its END field so the decoder can track the max
+  // sync timestamp for flush(sync) (the native analog of the old Python
+  // _advance_decoded_clock); 0 disables it.
+  void configure(
+      uintptr_t subscriber,
+      uintptr_t get_next_record_fn,
+      uint32_t fence_kind,
+      int fence_end_field);
+
+  // Drop noisy RUNTIME/DRIVER records by cbid during decode, so the noise (e.g.
+  // cudaGetDevice / cuDevicePrimaryCtxGetState) never reaches the columns.
+  // CUPTI's own per-cbid activity filter is NOT_COMPATIBLE under user-defined
+  // records, so it is done here. ``cbid_field_id`` is the field carrying the
+  // cbid; ``filters`` maps a kind to (keep_mode, cbids): keep_mode true keeps
+  // only the listed cbids (the driver allowlist), false drops the listed cbids
+  // (the runtime blocklist).
+  void set_cbid_filter(
+      int cbid_field_id,
+      std::unordered_map<
+          uint32_t,
+          std::pair<bool, std::unordered_set<uint32_t>>> filters);
+  void start();
+  void stop();
+
+  // Move out the accumulated column groups and reset, so the next drain covers
+  // only records decoded after this call. Each group is one (kind,
+  // field-layout): records are accumulated per layout signature, so a kind
+  // whose record layout changed mid-session (e.g. a field-selection
+  // reconfigure, or buffers in flight from before an observer enabled a field)
+  // yields SEPARATE groups rather than a single set of mismatched-length
+  // columns. Within a group every field column is length-aligned (one entry per
+  // record), which the columnar consumers require.
+  std::vector<std::pair<uint32_t, std::map<int, CuptiColumn>>> drain();
+
+  // Max SYNCHRONIZATION-END timestamp decoded so far (CUPTI native clock);
+  // flush(sync) waits on this reaching its fence point.
+  uint64_t max_sync_ns() const {
+    return max_sync_ns_.load();
+  }
+
+  // Cumulative buffers decoded and valid bytes processed since configure() (for
+  // stats()).
+  uint64_t buffers_decoded() const {
+    return buffers_decoded_.load();
+  }
+  uint64_t valid_bytes() const {
+    return valid_bytes_.load();
+  }
+
+ private:
+  CuptiMonitorDecoder() = default;
+  ~CuptiMonitorDecoder();
+  void worker_loop();
+  void decode_buffer(const CompletedCuptiBuffer& buf);
+
+  std::mutex mutex_; // guards columns_
+  // kind -> layout-key -> {field_id -> column}. Grouping by layout key keeps
+  // records decoded against different layouts in separate, internally
+  // length-consistent groups (see drain()).
+  std::map<uint32_t, std::map<CuptiLayoutKey, std::map<int, CuptiColumn>>>
+      columns_;
+  std::thread thread_;
+  std::atomic<bool> running_{false};
+  std::atomic<uint64_t> max_sync_ns_{0};
+  std::atomic<uint64_t> buffers_decoded_{0};
+  std::atomic<uint64_t> valid_bytes_{0};
+  uintptr_t subscriber_ = 0;
+  uintptr_t get_next_record_fn_ = 0;
+  uint32_t fence_kind_ = 0;
+  int fence_end_field_ = -1;
+  // Noisy-cbid filter (see set_cbid_filter): the field carrying the cbid and,
+  // per kind, (keep_mode, cbids). Read-only during decode after configure, so
+  // unguarded.
+  int cbid_field_id_ = -1;
+  std::unordered_map<uint32_t, std::pair<bool, std::unordered_set<uint32_t>>>
+      cbid_filters_;
+};
+
+// Process-global store of per-annotation metadata. A producer on the training
+// thread -- e.g. an in-process NCCL profiler plugin -- puts a JSON object; it
+// is keyed by the current external-correlation id on this thread's stack
+// (cuptiMonitorCurrentExternalId), which the producer/caller pushed around the
+// op
+// -- so the producer never passes an id. Repeated puts under the same id MERGE
+// (recursive object merge), so several producers can each contribute fields
+// (including nested objects) for one op. The Python side drains it (folded into
+// drain_decoded's return) and
+// joins the metadata onto the monitor's kernel-timing records by id. Keyed only
+// by external id -- graph_node_ids surface only retroactively in replayed
+// kernel records, so node-id keying is a consumer-side cache the resolver
+// builds at first replay. Mutex-guarded; put per op on the training thread,
+// drain on the flushing thread. See the colltrace-replacement design.
+class TORCH_API CuptiMetadataStore {
+ public:
+  static CuptiMetadataStore& get();
+
+  // Recursively merge a JSON object into the metadata entry for external_id
+  // (nested objects combine; on a leaf conflict the later put wins). No-op when
+  // external_id is 0. Callers resolve which collective: the NCCL plugin passes
+  // the id it read; the Python binding defaults a 0 to the most-recently-pushed
+  // id. Several producers can each contribute fields to the same id (e.g. the
+  // plugin's descriptor plus a backend's extra schema fields).
+  void put_external(nlohmann::json blob, uint64_t external_id);
+
+  // Move out the accumulated (merged) objects and reset, so the next drain
+  // covers only ops recorded after this call (mirrors the decoder's drain).
+  std::map<uint64_t, nlohmann::json> drain_external();
+
+ private:
+  CuptiMetadataStore() = default;
+
+  std::mutex mutex_;
+  std::map<uint64_t, nlohmann::json> by_external_;
+};
+
+// Parse a CUpti_BufferCallbackCompleteInfo* (taken as void*) into per-kind
+// record layouts. ppRecordLayouts is indexed by activity kind, null for kinds
+// without a user-defined layout. Returns empty if complete_info /
+// ppRecordLayouts is null.
+std::vector<CuptiRecordLayout> cuptiMonitorParseRecordLayouts(
+    void* complete_info);
+
+// Benchmark helper (benchmarks/profiler_benchmark/bench_decode.py): run the
+// native per-buffer decode -- stride-walk the records and accumulate every
+// field into per-(kind, field_id) byte columns, exactly as the decode worker
+// does, but with a stride iterator instead of CUPTI's record iterator (so it
+// runs on a synthetic buffer, no GPU/CUPTI) -- `iters` times over
+// `buffer_addr`, returning the total wall-clock seconds. The columns are
+// discarded each iter.
+TORCH_API double cuptiMonitorBenchDecode(
+    uintptr_t buffer_addr,
+    size_t valid_size,
+    const std::vector<CuptiRecordLayout>& layouts,
+    size_t iters);
+
+// Host-side mirror of CUPTI's per-thread external-correlation id stack. CUPTI
+// offers push/pop but no peek, so the monitor records each push/pop here (next
+// to the CUPTI call) to make the CURRENT id readable. An in-process consumer on
+// the same thread -- e.g. an NCCL profiler plugin tagging a collective's
+// metadata with the annotation the Python side pushed -- reads it via
+// cuptiMonitorCurrentExternalId instead of managing its own ids. Thread-local:
+// only valid on the pushing thread (collectives launch on the training thread,
+// the same one that pushes). Ids are monotonic from 1, so 0 means "no id on
+// this thread's stack".
+TORCH_API void cuptiMonitorNoteExternalPush(uint64_t external_id);
+TORCH_API uint64_t
+cuptiMonitorNoteExternalPop(); // returns popped id, 0 if empty
+TORCH_API uint64_t cuptiMonitorCurrentExternalId(); // top of stack, 0 if empty
+
+// Free functions matching the CUPTI subscriber-scoped (user-defined record)
+// buffer-callback signatures, registered via cuptiActivityRegisterCallbacks_v2.
+// The trailing info pointers (CUpti_BufferCallbackRequestInfo* /
+// CUpti_BufferCallbackCompleteInfo*) are taken as void* to avoid a CUPTI header
+// dependency. The completion callback does not receive CUcontext/streamId (they
+// become selectable record fields), so completed buffers carry ctx and stream
+// of 0; the record-layout descriptor in the complete info is parsed and
+// attached to the completed buffer so the decoder can parse records after the
+// callback.
+TORCH_API void cuptiMonitorBufferRequested(
     uint8_t** buffer,
     size_t* size,
     size_t* max_num_records,
     void* request_info);
-TORCH_API void cuptiMonitorBufferCompletedV2(
+TORCH_API void cuptiMonitorBufferCompleted(
     uint8_t* buffer,
     size_t size,
     size_t valid_size,

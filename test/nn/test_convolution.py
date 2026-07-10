@@ -4091,6 +4091,7 @@ class TestConvolutionNNCUDA(NNTestCase):
         m(x)
 
     @skipCUDAIfNoCudnn
+    @tf32_on_and_off(0.015)
     def test_cudnn_not_mutate_stride(self, device):
         weight = torch.randn(64, 64, 1, 1, device=device)
         x = torch.randn(2, 64, 10, 10, device=device).to(

@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -226,10 +227,13 @@ class GraphPartitionMap:
     # a unique id of graph partition
     id: int
 
-    # map partition input/output indices to graph input/output indices. None indicates
-    # a partition input/output is not a graph input/output.
+    # map partition input indices to graph input indices. None indicates a
+    # partition input is not a graph input.
     input_index_mapping: list[int | None]
-    output_index_mapping: list[int | None]
+    # map partition output indices to graph output indices. Empty indicates a
+    # partition output is not a graph output. Multiple graph outputs can map to
+    # the same partition output when graph outputs alias the same buffer.
+    output_index_mapping: list[list[int]]
 
     # name of constants read/written by the graph partition
     constant_names: list[str]
@@ -959,7 +963,15 @@ def get_fused_kernel_name(
         ]
     else:
         raise NotImplementedError
-    return "_".join(["fused"] + sources)
+    name = "_".join(["fused"] + sources)
+    # On Windows the default MAX_PATH (260) limit means a long descriptive
+    # kernel name can push the Triton cache path past the limit, making the
+    # generated .ttir unopenable. Cap the name and append a hash to keep it
+    # both short and unique.
+    if is_windows() and len(name) > 50:
+        h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+        name = f"{name[:41].rstrip('_')}_{h}"
+    return name
 
 
 def get_kernel_metadata(
@@ -2680,6 +2692,14 @@ def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
+@functools.lru_cache
+def using_rocm_rdna3() -> bool:
+    """Returns true if the device is based on RDNA3, otherwise returns false."""
+    return torch.cuda.is_available() and _rocm_native_device_arch_name(
+        "cuda"
+    ).startswith("gfx11")
+
+
 @functools.cache
 def try_import_ck_lib() -> tuple[
     str | None, Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
@@ -3164,9 +3184,10 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = datasheet_tops(
-        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32"
-    )
+    is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    if torch.xpu.is_available():
+        is_tf32 = torch.backends.mkldnn.allow_tf32
+    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
     if ds_tops is not None:
         return ds_tops
 
@@ -4811,8 +4832,15 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
 # Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
 def load_template(name: str, template_dir: Path) -> str:
     """Load a template file and return its content."""
-    with open(template_dir / f"{name}.py.jinja") as f:
-        return f.read()
+    path = template_dir / f"{name}.py.jinja"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except UnicodeDecodeError as e:
+        # Name the offending file: a bare UnicodeDecodeError hides which
+        # template is malformed, which is easy to misdiagnose when it surfaces
+        # deep inside kernel lowering.
+        raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:
@@ -4879,16 +4907,13 @@ def is_collective_op(op_name: str) -> bool:
 
 @lru_cache
 def tlx_only_cuda_options() -> list[str]:
-    if config.is_fbcode():
-        try:
-            from torch._inductor.fb.tlx_templates.registry import tlx_only_cuda_options
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
 
-            return tlx_only_cuda_options
+        return tlx_only_cuda_options
 
-        except ImportError:
-            return []
-
-    else:
+    except ImportError:
         return []
 
 

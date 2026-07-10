@@ -239,7 +239,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertEqual(
                 delta_e,
                 delta_c,
-                msg=f"RNG offset delta mismatch: eager={delta_e}, compiled={delta_c}",
+                msg=lambda msg: f"{msg}\nRNG offset delta mismatch: eager={delta_e}, compiled={delta_c}",
             )
 
     # ───────────────────────────────────────────────────────────
