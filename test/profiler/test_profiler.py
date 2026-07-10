@@ -4922,7 +4922,6 @@ class TestMetadataJsonFormat(TestCase):
         # The first profiled iteration(s) can drop CUDA kernels while CUPTI
         # warms up, so retry a few times before giving up.
         activities = []
-        prof = None
         for _ in range(3):
             with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
