@@ -244,6 +244,16 @@ Amazon S3 or any S3-compatible object store (for example Backblaze B2,
 Cloudflare R2, or MinIO) by setting credentials and, for a non-AWS store, a
 custom endpoint. Install the matching backend first (`pip install s3fs`).
 
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.FsspecReader
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.FsspecWriter
+  :members:
+```
+
 s3fs reads credentials from the standard AWS environment variables:
 
 ```bash
