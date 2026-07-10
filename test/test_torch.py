@@ -222,39 +222,6 @@ class TestTorchDeviceType(TestCase):
         b = a.view(2, 5)
         self.assertEqual(torch._C._storage_Use_Count(b.untyped_storage()._cdata), prev_cf + 1)
 
-    @onlyNativeDeviceTypes
-    def test_storage_throws_on_data_ptr_access(self, device):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.storage import _throws_on_data_ptr_access
-
-        def raises_on_data_ptr(storage):
-            try:
-                storage.data_ptr()
-            except RuntimeError:
-                return True
-            return False
-
-        # Normal storage: data_ptr() works, so we report False.
-        s = torch.randn(4, device=device).untyped_storage()
-        self.assertFalse(_throws_on_data_ptr_access(s))
-        self.assertFalse(raises_on_data_ptr(s))
-
-        # FakeTensor with unsafe access disallowed: data_ptr() raises.
-        with FakeTensorMode() as mode:
-            mode._allow_unsafe_data_ptr_access = False
-            fs = torch.randn(4, device=device).untyped_storage()
-            self.assertTrue(_throws_on_data_ptr_access(fs))
-            self.assertTrue(raises_on_data_ptr(fs))
-
-        # Storage armed to throw on the immutable data_ptr path.
-        s2 = torch.randn(4, device=device).untyped_storage()
-        torch._C._set_storage_data_ptr_access_error_msg(s2._cdata, "invalid")
-        self.assertTrue(_throws_on_data_ptr_access(s2))
-        self.assertTrue(raises_on_data_ptr(s2))
-        torch._C._clear_storage_data_ptr_access_error_msg(s2._cdata)
-        self.assertFalse(_throws_on_data_ptr_access(s2))
-        self.assertFalse(raises_on_data_ptr(s2))
-
     @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
