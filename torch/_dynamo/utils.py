@@ -151,12 +151,7 @@ try:
 
         # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
-    from torch._subclasses.fake_tensor import (
-        FakeTensor,
-        is_fake,
-        is_fake_tensor,
-        maybe_get_fake_mode,
-    )
+    from torch._subclasses.fake_tensor import is_fake
 except ImportError:
     pass
 
