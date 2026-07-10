@@ -489,6 +489,21 @@ class ViewMetaSequence:
 
         return self.metadata == other.metadata
 
+    @classmethod
+    def _from_parts(
+        cls, sequence: list[_functionalization.ViewMeta], metadata: MetadataKey
+    ) -> ViewMetaSequence:
+        # Rebuild a ViewMetaSequence directly from its parts, bypassing the
+        # FunctionalTensor-based __init__. This lets the recipe be reconstructed from
+        # plain values rather than from a live FunctionalTensor or an embedded pickle.
+        # Sole caller: torch._functorch._aot_autograd.source_emit, when baking a
+        # ViewMetaSequence into standalone source; keep the attributes set here in sync
+        # with __init__ (sequence, metadata) or the reconstructed object diverges.
+        self = cls.__new__(cls)
+        self.sequence = sequence
+        self.metadata = metadata
+        return self
+
 
 # new_arg and arg here are either:
 # (1) both a FakeTensor
