@@ -80,6 +80,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM100OrLater,
     SM80OrLater,
@@ -89,6 +90,7 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
+    e4m3_type,
     expectedFailureXPU,
     largeTensorTest,
 )
@@ -3628,6 +3630,19 @@ class CommonTemplate:
             for a, b in zip(out, ref):
                 self.assertTrue(torch.allclose(a, b))
 
+    def test_softshrink_reduced_float_lambd_type_promotion(self):
+        for dtype in [torch.bfloat16, torch.float16]:
+            x = torch.tensor([-10.0625], dtype=dtype, device=self.device)
+            lambd = 9.99
+
+            def fn(x):
+                return torch.nn.functional.softshrink(x, lambd=lambd)
+
+            self.assertEqual(fn(x), torch.nn.functional.softshrink(x, lambd=lambd))
+            self.assertEqual(
+                torch.compile(fn)(x), torch.nn.functional.softshrink(x, lambd=lambd)
+            )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -4133,6 +4148,48 @@ for dtype in (torch.int32, torch.int64):
                 a = torch.full((8,), a_val, dtype=dtype, device=self.device)
                 b = torch.full((8,), b_val, dtype=dtype, device=self.device)
                 self.common(fn, (a, b))
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])
+    def test_div_floor_float_nonfinite(self, dtype):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only validated on CPU/CUDA")
+
+        def fn(a, b):
+            return torch.div(a, b, rounding_mode="floor")
+
+        a = torch.tensor(
+            [
+                float("nan"),
+                float("inf"),
+                -float("inf"),
+                float("inf"),
+                -float("inf"),
+                1.0,
+                -1.0,
+                1.0,
+                -1.0,
+                0.0,
+            ],
+            dtype=dtype,
+            device=self.device,
+        )
+        b = torch.tensor(
+            [
+                1.0,
+                1.0,
+                1.0,
+                0.0,
+                -0.0,
+                float("inf"),
+                -float("inf"),
+                float("-inf"),
+                float("inf"),
+                float("-inf"),
+            ],
+            dtype=dtype,
+            device=self.device,
+        )
+        self.common(fn, (a, b))
 
     def test_minimum_signed_zero(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/185610
@@ -7710,6 +7767,7 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0.0, 1.0, -1.0])])
 
+    @config.patch(fallback_random=True)
     def test_uniform(self):
         def fn(x):
             return aten.uniform.default(x, 0, 1)
@@ -7722,6 +7780,27 @@ for dtype in (torch.int32, torch.int64):
             exact_stride=True,
             reference_in_float=False,
         )
+
+    @config.patch(fallback_random=False)
+    def test_uniform_no_fallback(self):
+        def fn(x):
+            return aten.uniform.default(x, 0, 1)
+
+        a = torch.randn([5, 3]).permute(1, 0)
+
+        compiled = torch.compile(fn, fullgraph=True)
+        res = compiled(a)
+        self.assertEqual(res.shape, a.shape)
+        self.assertEqual(res.dtype, a.dtype)
+        self.assertEqual(res.device.type, a.device.type)
+        self.assertEqual(res.stride(), a.stride())
+
+        # Confirm non-eager compilation
+        torch.manual_seed(0)
+        eager_out = fn(a)
+        torch.manual_seed(0)
+        compiled_out = compiled(a)
+        self.assertNotEqual(eager_out, compiled_out)
 
     def test_complex_from_real_imag(self):
         def fn(x, y):
@@ -18876,6 +18955,32 @@ if RUN_GPU or HAS_MPS:
                 )
                 self.common(fn, (x,), check_lowp=False)
 
+        @requires_cuda_and_triton
+        def test_modified_bessel_i_inf_matches_eager(self):
+            ops = (
+                ("i0", torch.special.i0),
+                ("modified_bessel_i0", torch.special.modified_bessel_i0),
+                ("i1", torch.special.i1),
+                ("modified_bessel_i1", torch.special.modified_bessel_i1),
+            )
+
+            for name, op in ops:
+                for dtype in (torch.float32, torch.float64):
+                    with self.subTest(name=name, dtype=dtype):
+                        x = torch.tensor(
+                            [float("inf"), float("-inf"), float("nan"), 0.5],
+                            device=self.device,
+                            dtype=dtype,
+                        )
+
+                        def fn(x):
+                            return op(x)
+
+                        actual = torch.compile(fn, fullgraph=True)(x)
+                        expected = fn(x)
+                        torch.testing.assert_close(actual, expected, equal_nan=True)
+                        self.assertTrue(torch.isnan(actual[:3]).all())
+
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_TPU:
@@ -19224,7 +19329,6 @@ if RUN_GPU:
 
         @skipCUDAIf(not SM90OrLater, "Requires sm90")
         @requires_cuda_and_triton
-        @unittest.skipIf(TEST_WITH_ROCM, "no grouped_mm support")
         @config.patch(implicit_fallbacks=True)
         @parametrize("backend", ["cublaslt", "cutlass"])
         def test_grouped_mm(self, backend):
@@ -20438,7 +20542,10 @@ if RUN_GPU:
                 "'XBLOCK': 'constexpr'"
             ).run(code[0])
 
-        @unittest.skipIf(TEST_WITH_ROCM or not IS_SM90, "no scaled_grouped_mm support")
+        @unittest.skipIf(
+            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)),
+            "no scaled_grouped_mm support",
+        )
         def test_respect_scaled_grouped_mm_layout_tag(self):
             # scaled_grouped_mm needs `mat2` to be column-major
             M, K, N = 128, 64, 32  # K and N must be divisible by 16
@@ -20473,11 +20580,11 @@ if RUN_GPU:
             def fn():
                 A_scales = torch.ones(M, dtype=torch.float32, device=GPU_TYPE)
                 A_scaled = A.to(torch.float32) * A_scales.unsqueeze(-1)
-                A_fp8_row_major = A_scaled.to(torch.float8_e4m3fn)
+                A_fp8_row_major = A_scaled.to(e4m3_type)
 
                 B_t_scales = torch.ones(E, N, dtype=torch.float32, device=GPU_TYPE)
                 B_t_scaled = B_t.to(torch.float32) * B_t_scales.unsqueeze(1)
-                B_t_fp8_col_major = B_t_scaled.to(torch.float8_e4m3fn)
+                B_t_fp8_col_major = B_t_scaled.to(e4m3_type)
 
                 A_scales_reciprocal = A_scales.reciprocal()
                 B_t_scales_reciprocal = B_t_scales.reciprocal()
