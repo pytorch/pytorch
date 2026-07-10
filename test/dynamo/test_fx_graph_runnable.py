@@ -191,7 +191,7 @@ class FxGraphRunnableTest(TestCase):
             self.assertEqual(
                 res.returncode,
                 0,
-                f"Standalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
+                lambda msg: f"{msg}\nStandalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
             )
 
     # basic tests
@@ -204,7 +204,6 @@ class FxGraphRunnableTest(TestCase):
 
     @unittest.skipUnless(has_triton(), "Triton not available")
     @requires_gpu
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_user_defined_triton_kernel_autotune(self):
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
@@ -643,7 +642,7 @@ class TestFxGraphRunnableMultiProcessGroup(TestCase):
             self.assertEqual(
                 result.returncode,
                 0,
-                f"Generated repro failed to execute:\nSTDERR:\n{result.stderr}",
+                lambda msg: f"{msg}\nGenerated repro failed to execute:\nSTDERR:\n{result.stderr}",
             )
 
         finally:

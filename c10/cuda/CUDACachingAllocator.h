@@ -81,6 +81,8 @@ struct SnapshotInfo {
   std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
   std::vector<CachingDeviceAllocator::AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
+  std::vector<CachingDeviceAllocator::HostSegmentInfo> host_segments;
+  std::vector<CachingDeviceAllocator::TraceEntry> host_traces;
 };
 
 // returns the pointers freed in the pool
@@ -172,7 +174,7 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void createOrIncrefPool(
       c10::DeviceIndex /*device*/,
       MempoolId_t /*mempool_id*/,
-      const std::shared_ptr<CUDAAllocator>& allocator = nullptr) {
+      std::shared_ptr<CUDAAllocator> allocator = nullptr) {
     TORCH_CHECK(
         false,
         name(),
@@ -476,8 +478,8 @@ inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 inline void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    const std::shared_ptr<CUDAAllocator>& allocator_ptr = nullptr) {
-  get()->createOrIncrefPool(device, mempool_id, allocator_ptr);
+    std::shared_ptr<CUDAAllocator> allocator_ptr = nullptr) {
+  get()->createOrIncrefPool(device, mempool_id, std::move(allocator_ptr));
 }
 inline void setUseOnOOM(
     c10::DeviceIndex device,
