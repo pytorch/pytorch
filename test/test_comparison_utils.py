@@ -52,6 +52,7 @@ class TestComparisonUtilsDevice(TestCase):
             torch._assert_tensor_metadata(t, device=device)
 
 
+instantiate_device_type_tests(TestComparisonUtils, globals(), only_for="cpu")
 instantiate_device_type_tests(TestComparisonUtilsDevice, globals())
 
 if __name__ == "__main__":

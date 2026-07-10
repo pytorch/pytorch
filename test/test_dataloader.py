@@ -3482,6 +3482,10 @@ if __name__ == '__main__':
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223",
+)
 class TestDataLoaderCUDA(TestCase):
     def setUp(self):
         super().setUp()
