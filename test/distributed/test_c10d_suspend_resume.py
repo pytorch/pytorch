@@ -23,17 +23,6 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
-# The "nccl2" backend is normally discovered via the torch.distributed.backends
-# entry point. Register it explicitly so the test is self-contained under
-# editable installs (see test_c10d_nccl2.py).
-try:
-    from torch.distributed.distributed_c10d import _register_builtin_nccl2_backend
-
-    _register_builtin_nccl2_backend()
-except Exception:
-    pass
-
-
 SUSPEND_RESUME_BACKENDS = [
     ("nccl", "cuda"),
     ("nccl2", "cuda"),
@@ -80,9 +69,7 @@ class AbstractSuspendResumeTest:
             store=store,
             timeout=timedelta(seconds=60),
         )
-        self.backend = dist.distributed_c10d._get_default_group()._get_backend(
-            self.device
-        )
+        self.backend = dist.get_backend_impl(device=self.device)
         # Run a large collective so the communicator allocates internal
         # (suspendable) memory.
         dist.all_reduce(torch.zeros(1024 * 1024 * 64, device=self.device))
