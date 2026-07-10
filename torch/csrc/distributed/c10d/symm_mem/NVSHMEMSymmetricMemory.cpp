@@ -75,10 +75,10 @@ struct NVSHMEMAllocation {
     ptr = nullptr;
   }
 
-  ~NVSHMEMAllocation() {
-    // nvshmem_free is collective. Storage destruction is not, so the allocator
-    // defers actual frees to rank-synchronized allocation boundaries.
-  }
+  // nvshmem_free is collective. Storage destruction is not, so the allocator
+  // defers actual frees to rank-synchronized allocation boundaries.
+  
+  ~NVSHMEMAllocation() = default;
 };
 
 // A map from group name to rank-to-global rank mapping
@@ -424,15 +424,9 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       return;
     }
 
-    std::vector<SymmMemKey> stale_keys;
-    for (const auto& entry : symm_mems_) {
-      if (entry.first.first == ptr) {
-        stale_keys.push_back(entry.first);
-      }
-    }
-    for (const auto& key : stale_keys) {
-      symm_mems_.erase(key);
-    }
+    std::erase_if(symm_mems_, [&](const auto& entry) {
+      return entry.first.first == ptr;
+    });
 
     // nvshmem_free is collective, but tensor storage destruction is not.
     // Queue this allocation and drain it at a future collective alloc boundary.
