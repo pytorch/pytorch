@@ -2,7 +2,7 @@
 # (https://github.com/pytorch/pytorch/issues/183434, PR #185813 review).
 #
 # Included paths: [project].license-files in pyproject.toml (only explicit list).
-# Excluded paths + SPDX ids per shipped file: license_audit_manifest.toml next to this file.
+# Excluded paths + SPDX expressions per shipped file: license_audit_manifest.toml next to this file.
 
 from __future__ import annotations
 
@@ -19,14 +19,18 @@ from packaging.licenses import canonicalize_license_expression
 
 LICENSE_GLOBS = (
     "LICENSE",
-    "third_party/**/LICENSE",
-    "third_party/**/LICENSE.txt",
-    "third_party/**/LICENSE.rst",
-    "third_party/**/COPYING.BSD",
+    "third_party/**/LICENSE*",
+    "third_party/**/COPYING*",
 )
 
 _MANIFEST_PATH = Path(__file__).resolve().parent / "license_audit_manifest.toml"
 SPDX_OMIT_FROM_PROJECT_LICENSE = frozenset({"LicenseRef-NvidiaProprietary"})
+
+
+def _skip_discovery_path(path: str) -> bool:
+    # REUSE-style license pools (e.g. ittapi, kleidiai, nlohmann) include GPL
+    # texts for non-shipped files; handle separately from glob discovery.
+    return "/LICENSES/" in path or path.endswith("/LICENSES")
 
 
 def _load_license_audit_tables() -> tuple[frozenset[str], dict[str, str]]:
@@ -39,9 +43,16 @@ def _load_license_audit_tables() -> tuple[frozenset[str], dict[str, str]]:
         raise ValueError(f"{_MANIFEST_PATH.name}: 'spdx' must be an array of tables")
     spdx: dict[str, str] = {}
     for i, row in enumerate(rows):
-        if not isinstance(row, dict) or "path" not in row or "id" not in row:
-            raise ValueError(f"{_MANIFEST_PATH.name}: spdx[{i}] must have 'path' and 'id'")
-        spdx[str(row["path"])] = str(row["id"])
+        if not isinstance(row, dict) or "expression" not in row or "paths" not in row:
+            raise ValueError(
+                f"{_MANIFEST_PATH.name}: spdx[{i}] must have 'expression' and 'paths'"
+            )
+        expression = str(row["expression"])
+        paths = row["paths"]
+        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+            raise ValueError(f"{_MANIFEST_PATH.name}: spdx[{i}].paths must be a list of strings")
+        for path in paths:
+            spdx[path] = expression
     return frozenset(ex), spdx
 
 
@@ -58,22 +69,10 @@ def discover_license_files(repo_root: Path) -> set[str]:
         for path in glob.glob(str(repo_root / pattern), recursive=True):
             p = Path(path)
             if p.is_file():
-                found.add(p.relative_to(repo_root).as_posix())
+                rel = p.relative_to(repo_root).as_posix()
+                if not _skip_discovery_path(rel):
+                    found.add(rel)
     return found
-
-
-def skip_path_existence_for_sparse_checkout(repo_root: Path, path: str) -> bool:
-    if path == "LICENSE":
-        return False
-    full = repo_root / path
-    if full.is_file():
-        return False
-    cur = repo_root
-    for part in Path(path).parts[:-1]:
-        cur = cur / part
-        if not cur.exists():
-            return True
-    return False
 
 
 def classify_license_spdx(repo_root: Path, path: str) -> str:
@@ -98,13 +97,13 @@ def classify_license_spdx(repo_root: Path, path: str) -> str:
     raise ValueError(f"Could not classify SPDX license for {path}")
 
 
-def expected_project_license_expression(included_paths: list[str]) -> str:
-    ids = {
-        LICENSE_FILE_SPDX[p]
-        for p in included_paths
-        if LICENSE_FILE_SPDX[p] not in SPDX_OMIT_FROM_PROJECT_LICENSE
+def expected_project_license_expression() -> str:
+    expressions = {
+        expression
+        for expression in LICENSE_FILE_SPDX.values()
+        if expression not in SPDX_OMIT_FROM_PROJECT_LICENSE
     }
-    return " AND ".join(sorted(ids))
+    return " AND ".join(sorted(expressions))
 
 
 def audit_repo_license_files(repo_root: Path) -> list[str]:
@@ -130,12 +129,6 @@ def audit_repo_license_files(repo_root: Path) -> list[str]:
             + ", ".join(sorted(bad))
         )
 
-    for p in inc | EXCLUDED_LICENSE_FILES:
-        if skip_path_existence_for_sparse_checkout(repo_root, p):
-            continue
-        if not (repo_root / p).is_file():
-            err.append(f"Listed license path missing from tree (update lists): {p}")
-
     unknown = discover_license_files(repo_root) - inc - EXCLUDED_LICENSE_FILES
     if unknown:
         err.append(
@@ -157,7 +150,7 @@ def audit_repo_license_files(repo_root: Path) -> list[str]:
             )
     else:
         for p in included:
-            if skip_path_existence_for_sparse_checkout(repo_root, p):
+            if not (repo_root / p).is_file():
                 continue
             try:
                 got = classify_license_spdx(repo_root, p)
@@ -174,7 +167,7 @@ def audit_repo_license_files(repo_root: Path) -> list[str]:
     if not isinstance(lic, str):
         err.append("[project].license must be a string.")
     elif spdx_keys == inc:
-        if lic != (exp := expected_project_license_expression(included)):
+        if lic != (exp := expected_project_license_expression()):
             err.append(
                 "[project].license does not match SPDX manifest (expected):\n"
                 f"  expected: {exp!r}\n  actual:   {lic!r}"

@@ -1,287 +1,178 @@
-# SPDX path/id rows and excluded glob hits (issue #183434, PR #185813).
+# SPDX expressions grouped by license (issue #183434, PR #185813).
 excluded = [
   'third_party/NVTX/docs/LICENSE.txt',
   'third_party/NVTX/python/LICENSE.txt',
   'third_party/NVTX/tools/docs/github-markdown-css/LICENSE',
+  'third_party/NVTX/tools/docs/github-markdown-css/license',
   'third_party/aiter/3rdparty/composable_kernel/docs/LICENSE.rst',
+  'third_party/aiter/3rdparty/composable_kernel/docs/license.rst',
+  'third_party/benchmark/LICENSE',
   'third_party/composable_kernel/docs/LICENSE.rst',
+  'third_party/composable_kernel/docs/license.rst',
+  'third_party/concurrentqueue/moodycamel/LICENSE.md',
+  'third_party/cudnn_frontend/include/cudnn_frontend/thirdparty/nlohmann/LICENSE.MIT',
   'third_party/cutlass/python/LICENSE.txt',
+  'third_party/fbgemm/external/asmjit/LICENSE.md',
+  'third_party/fbgemm/external/asmjit/db/LICENSE.md',
   'third_party/fbgemm/external/composable_kernel/docs/LICENSE.rst',
+  'third_party/fbgemm/external/composable_kernel/docs/license.rst',
   'third_party/fbgemm/external/cutlass/python/LICENSE.txt',
   'third_party/fbgemm/external/googletest/LICENSE',
   'third_party/fbgemm/external/hipify_torch/LICENSE.txt',
+  'third_party/fbgemm/external/json/LICENSE.MIT',
+  'third_party/fbgemm/external/json/docs/mkdocs/docs/home/license.md',
   'third_party/fbgemm/fbgemm_gpu/docs/src/general/LICENSE.rst',
+  'third_party/fbgemm/fbgemm_gpu/docs/src/general/License.rst',
   'third_party/fbgemm/fbgemm_gpu/test/quantize/mx/LICENSE',
   'third_party/flash-attention/csrc/composable_kernel/docs/LICENSE.rst',
+  'third_party/flash-attention/csrc/composable_kernel/docs/license.rst',
   'third_party/flash-attention/csrc/cutlass/python/LICENSE.txt',
   'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/docs/LICENSE.rst',
+  'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/docs/license.rst',
   'third_party/flatbuffers/dart/LICENSE',
   'third_party/flatbuffers/swift/LICENSE',
+  'third_party/gloo/gloo/transport/uv/LICENSE.uvw',
   'third_party/googletest/LICENSE',
   'third_party/ideep/mkl-dnn/third_party/gtest/LICENSE',
+  'third_party/ideep/mkl-dnn/third_party/ittnotify/LICENSE.BSD',
+  'third_party/kineto/libkineto/third_party/dynolog/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/DCGM/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/DCGM/testing/python3/libs_3rdparty/colorama/LICENSE.txt',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/cpr/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/cpr/test/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/fmt/LICENSE.rst',
+  'third_party/kineto/libkineto/third_party/dynolog/third_party/gflags/COPYING.txt',
+  'third_party/kineto/libkineto/third_party/dynolog/third_party/glog/COPYING',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/googletest/LICENSE',
+  'third_party/kineto/libkineto/third_party/dynolog/third_party/json/LICENSE.MIT',
+  'third_party/kineto/libkineto/third_party/dynolog/third_party/json/doc/mkdocs/docs/home/license.md',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/doctest/LICENSE.txt',
+  'third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/fifo_map/LICENSE.MIT',
+  'third_party/kineto/libkineto/third_party/dynolog/third_party/json/third_party/amalgamate/LICENSE.md',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/json/third_party/cpplint/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/pfs/LICENSE',
+  'third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/LICENSE.md',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/examples/rest/cJSON/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.5.2/LICENSE.txt',
+  'third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.5.2/license.spdx',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.8.0/LICENSE.txt',
+  'third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.8.0/license.spdx',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/googletest/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/googletest/googlemock/scripts/generator/LICENSE',
   'third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/LICENSE',
+  'third_party/kineto/libkineto/third_party/fmt/LICENSE',
   'third_party/kineto/libkineto/third_party/googletest/LICENSE',
   'third_party/mslk/external/composable_kernel/docs/LICENSE.rst',
+  'third_party/mslk/external/composable_kernel/docs/license.rst',
   'third_party/mslk/external/cutlass/python/LICENSE.txt',
   'third_party/mslk/external/googletest/LICENSE',
   'third_party/mslk/external/hipify_torch/LICENSE.txt',
+  'third_party/nccl/LICENSE.txt',
+  'third_party/nccl/bindings/nccl4py/LICENSE.txt',
+  'third_party/nlohmann/docs/mkdocs/docs/home/license.md',
+  'third_party/onnx/third_party/pybind11/LICENSE',
+  'third_party/protobuf/third_party/benchmark/LICENSE',
   'third_party/protobuf/third_party/googletest/LICENSE',
   'third_party/protobuf/third_party/googletest/googlemock/LICENSE',
   'third_party/protobuf/third_party/googletest/googlemock/scripts/generator/LICENSE',
   'third_party/protobuf/third_party/googletest/googletest/LICENSE',
+  'third_party/python-peachpy/LICENSE.rst',
   'third_party/tensorpipe/third_party/googletest/LICENSE',
   'third_party/tensorpipe/third_party/googletest/googlemock/LICENSE',
   'third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator/LICENSE',
   'third_party/tensorpipe/third_party/googletest/googletest/LICENSE',
+  'third_party/tensorpipe/third_party/libuv/LICENSE-docs',
+  'third_party/tensorpipe/third_party/libuv/LICENSE-extra',
+  'third_party/tensorpipe/third_party/pybind11/LICENSE',
+  'third_party/tensorpipe/third_party/pybind11/tools/clang/LICENSE.TXT',
   'third_party/tensorpipe/third_party/pybind11/tools/clang/LICENSE.txt',
 ]
 
 [[spdx]]
-path = 'LICENSE'
-id = 'BSD-3-Clause'
+expression = 'Apache-2.0'
+paths = [
+  'third_party/flatbuffers/LICENSE',
+  'third_party/gemmlowp/gemmlowp/LICENSE',
+  'third_party/ideep/mkl-dnn/LICENSE',
+  'third_party/ideep/mkl-dnn/third_party/opencl/LICENSE',
+  'third_party/onnx/LICENSE',
+  'third_party/tensorpipe/third_party/libnop/LICENSE',
+]
 
 [[spdx]]
-path = 'third_party/FP16/LICENSE'
-id = 'MIT'
+expression = 'Apache-2.0 WITH LLVM-exception'
+paths = [
+  'third_party/NVTX/LICENSE.txt',
+  'third_party/llvm-openmp/LICENSE.txt',
+]
 
 [[spdx]]
-path = 'third_party/FXdiv/LICENSE'
-id = 'MIT'
+expression = 'BSD-2-Clause'
+paths = [
+  'third_party/NNPACK/LICENSE',
+  'third_party/cpuinfo/LICENSE',
+  'third_party/cpuinfo/deps/clog/LICENSE',
+  'third_party/fbgemm/external/cpuinfo/LICENSE',
+  'third_party/fbgemm/external/cpuinfo/deps/clog/LICENSE',
+  'third_party/pthreadpool/LICENSE',
+]
 
 [[spdx]]
-path = 'third_party/NNPACK/LICENSE'
-id = 'BSD-2-Clause'
+expression = 'BSD-3-Clause'
+paths = [
+  'LICENSE',
+  'third_party/XNNPACK/LICENSE',
+  'third_party/cutlass/LICENSE.txt',
+  'third_party/fbgemm/LICENSE',
+  'third_party/fbgemm/external/cutlass/LICENSE.txt',
+  'third_party/flash-attention/LICENSE',
+  'third_party/flash-attention/csrc/cutlass/LICENSE.txt',
+  'third_party/flash-attention/flash_attn/cute/LICENSE',
+  'third_party/gloo/LICENSE',
+  'third_party/kineto/LICENSE',
+  'third_party/mslk/LICENSE',
+  'third_party/mslk/external/cutlass/LICENSE.txt',
+  'third_party/mslk/mslk/attention/flash_attn/LICENSE',
+  'third_party/pocketfft/LICENSE.md',
+  'third_party/protobuf/LICENSE',
+  'third_party/pybind11/LICENSE',
+  'third_party/tensorpipe/LICENSE.txt',
+]
 
 [[spdx]]
-path = 'third_party/NVTX/LICENSE.txt'
-id = 'Apache-2.0 WITH LLVM-exception'
+expression = 'BSL-1.0'
+paths = [
+  'third_party/sleef/LICENSE.txt',
+]
 
 [[spdx]]
-path = 'third_party/VulkanMemoryAllocator/LICENSE.txt'
-id = 'MIT'
+expression = 'LicenseRef-NvidiaProprietary'
+paths = [
+  'third_party/fbgemm/fbgemm_gpu/experimental/hstu/LICENSE',
+]
 
 [[spdx]]
-path = 'third_party/XNNPACK/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/aiter/3rdparty/composable_kernel/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/aiter/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/benchmark/LICENSE'
-id = 'Apache-2.0'
-
-[[spdx]]
-path = 'third_party/composable_kernel/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/cpp-httplib/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/cpuinfo/LICENSE'
-id = 'BSD-2-Clause'
-
-[[spdx]]
-path = 'third_party/cpuinfo/deps/clog/LICENSE'
-id = 'BSD-2-Clause'
-
-[[spdx]]
-path = 'third_party/cudnn_frontend/LICENSE.txt'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/cutlass/LICENSE.txt'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/fbgemm/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/fbgemm/external/composable_kernel/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/fbgemm/external/cpuinfo/LICENSE'
-id = 'BSD-2-Clause'
-
-[[spdx]]
-path = 'third_party/fbgemm/external/cpuinfo/deps/clog/LICENSE'
-id = 'BSD-2-Clause'
-
-[[spdx]]
-path = 'third_party/fbgemm/external/cutlass/LICENSE.txt'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/fbgemm/fbgemm_gpu/experimental/hstu/LICENSE'
-id = 'LicenseRef-NvidiaProprietary'
-
-[[spdx]]
-path = 'third_party/fbgemm/fbgemm_gpu/src/quantize_ops/mx/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/flash-attention/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/flash-attention/csrc/composable_kernel/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/flash-attention/csrc/cutlass/LICENSE.txt'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/flash-attention/flash_attn/cute/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/flash-attention/third_party/aiter/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/flatbuffers/LICENSE'
-id = 'Apache-2.0'
-
-[[spdx]]
-path = 'third_party/fmt/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/gemmlowp/gemmlowp/LICENSE'
-id = 'Apache-2.0'
-
-[[spdx]]
-path = 'third_party/gloo/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/ideep/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/ideep/mkl-dnn/LICENSE'
-id = 'Apache-2.0'
-
-[[spdx]]
-path = 'third_party/ideep/mkl-dnn/third_party/opencl/LICENSE'
-id = 'Apache-2.0'
-
-[[spdx]]
-path = 'third_party/kineto/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/kineto/libkineto/third_party/dynolog/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/kineto/libkineto/third_party/fmt/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/llvm-openmp/LICENSE.txt'
-id = 'Apache-2.0 WITH LLVM-exception'
-
-[[spdx]]
-path = 'third_party/mimalloc/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/miniz-3.0.2/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/mslk/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/mslk/external/composable_kernel/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/mslk/external/cutlass/LICENSE.txt'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/mslk/mslk/attention/flash_attn/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/onnx/LICENSE'
-id = 'Apache-2.0'
-
-[[spdx]]
-path = 'third_party/onnx/third_party/pybind11/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/protobuf/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/protobuf/third_party/benchmark/LICENSE'
-id = 'Apache-2.0'
-
-[[spdx]]
-path = 'third_party/psimd/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/pthreadpool/LICENSE'
-id = 'BSD-2-Clause'
-
-[[spdx]]
-path = 'third_party/pybind11/LICENSE'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/python-peachpy/LICENSE.rst'
-id = 'BSD-2-Clause'
-
-[[spdx]]
-path = 'third_party/sleef/LICENSE.txt'
-id = 'BSL-1.0'
-
-[[spdx]]
-path = 'third_party/tensorpipe/LICENSE.txt'
-id = 'BSD-3-Clause'
-
-[[spdx]]
-path = 'third_party/tensorpipe/third_party/libnop/LICENSE'
-id = 'Apache-2.0'
-
-[[spdx]]
-path = 'third_party/tensorpipe/third_party/libuv/LICENSE'
-id = 'MIT'
-
-[[spdx]]
-path = 'third_party/tensorpipe/third_party/pybind11/LICENSE'
-id = 'BSD-3-Clause'
+expression = 'MIT'
+paths = [
+  'third_party/FP16/LICENSE',
+  'third_party/FXdiv/LICENSE',
+  'third_party/VulkanMemoryAllocator/LICENSE.txt',
+  'third_party/aiter/3rdparty/composable_kernel/LICENSE',
+  'third_party/aiter/LICENSE',
+  'third_party/composable_kernel/LICENSE',
+  'third_party/cpp-httplib/LICENSE',
+  'third_party/cudnn_frontend/LICENSE.txt',
+  'third_party/fbgemm/external/composable_kernel/LICENSE',
+  'third_party/fbgemm/fbgemm_gpu/src/quantize_ops/mx/LICENSE',
+  'third_party/flash-attention/csrc/composable_kernel/LICENSE',
+  'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/LICENSE',
+  'third_party/flash-attention/third_party/aiter/LICENSE',
+  'third_party/fmt/LICENSE',
+  'third_party/ideep/LICENSE',
+  'third_party/mimalloc/LICENSE',
+  'third_party/miniz-3.0.2/LICENSE',
+  'third_party/mslk/external/composable_kernel/LICENSE',
+  'third_party/nlohmann/LICENSE.MIT',
+  'third_party/psimd/LICENSE',
+  'third_party/tensorpipe/third_party/libuv/LICENSE',
+]
