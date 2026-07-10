@@ -2981,6 +2981,21 @@ class TestSparseCSR(TestCase):
             run_test(shape, max(shape), index_dtype)
             run_test(shape, shape[0] * shape[1], index_dtype)
 
+    @skipMeta
+    @dtypes(torch.float)
+    def test_reduction_on_batched_csr_errors(self, device, dtype):
+        # regression test for https://github.com/pytorch/pytorch/issues/117259 and
+        # https://github.com/pytorch/pytorch/issues/117242: reducing over a batched
+        # (>2D) CSR tensor used to hit an internal assert instead of raising a clear
+        # error, since only 2D CSR reductions are supported (see gh-29137).
+        batched = torch.randn(1, 1, 1, dtype=dtype, device=device).to_sparse_csr()
+        msg = "only supported for 2-dimensional CSR tensors"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            batched.sum(dim=0, keepdim=True)
+        other = torch.randn(1, 1, 1, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.tensordot(batched, other, ([0], [0]))
+
     @skipIfTorchDynamo()
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))

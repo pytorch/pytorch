@@ -676,7 +676,9 @@ Tensor reduce_sparse_csr_cuda_template(const Tensor& sparse, IntArrayRef dims_to
   TORCH_INTERNAL_ASSERT(sparse.is_cuda());
 
   const int64_t input_dim = sparse.dim();
-  TORCH_INTERNAL_ASSERT(input_dim == 2);
+  TORCH_CHECK(input_dim == 2,
+      "reduction operations are only supported for 2-dimensional CSR tensors, but got a tensor with ",
+      input_dim, " dimensions");
   auto dims = dims_to_sum.vec();
   maybe_wrap_dims(dims, input_dim);
   if (dims.size() == 0) {
