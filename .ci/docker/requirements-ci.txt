@@ -98,14 +98,16 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #Pinned versions:
 #test that import:
 
-mypy==1.16.0 ; platform_system == "Linux"
+mypy==1.16.0 ; platform_system == "Linux" and python_version < "3.14"
+mypy==1.17.1 ; platform_system == "Linux" and python_version >= "3.14"
 # Pin MyPy version because new errors are likely to appear with each release
 # Skip on Windows as lots of type annotations are POSIX specific
 #Description: linter
-#Pinned versions: 1.16.0
+#Pinned versions: 1.16.0, 1.17.1
 #test that import: test_typing.py, test_type_hints.py
 
-networkx==2.8.8
+networkx==2.8.8 ; python_version < "3.14"
+networkx==3.0.0 ; python_version >= "3.14"
 #Description: creation, manipulation, and study of
 #the structure, dynamics, and functions of complex networks
 #Pinned versions: 2.8.8
@@ -142,8 +144,7 @@ numpy==2.0.2 ; python_version == "3.9"
 numpy==2.1.2 ; python_version > "3.9" and python_version < "3.14"
 numpy==2.3.4; python_version >= "3.14"
 
-pandas==2.0.3; python_version < "3.13"
-pandas==2.2.3; python_version >= "3.13" and python_version < "3.14"
+pandas==2.2.3; python_version < "3.14"
 pandas==2.3.3; python_version >= "3.14"
 
 #onnxruntime
@@ -170,9 +171,10 @@ optree==0.17.0 ; python_version >= "3.14"
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==11.0.0
+pillow==11.0.0 ; python_version < "3.14"
+pillow==12.0.0 ; python_version >= "3.14"
 #Description:  Python Imaging Library fork
-#Pinned versions: 11.0.0
+#Pinned versions: 11.0.0, 12.0.0
 #test that import:
 
 protobuf==6.33.5
@@ -245,9 +247,10 @@ pygments==2.15.0
 #Pinned versions: 14.1.0
 #test that import:
 
-scikit-image==0.22.0
+scikit-image==0.22.0 ; python_version < "3.14"
+scikit-image==0.26.0 ; python_version >= "3.14"
 #Description: image processing routines
-#Pinned versions: 0.22.0
+#Pinned versions: 0.22.0, 0.26.0
 #test that import: test_nn.py
 
 #scikit-learn
@@ -323,7 +326,8 @@ tensorboard==2.18.0
 #test that import: test_tensorboard
 
 pywavelets==1.4.1 ; python_version < "3.12"
-pywavelets==1.7.0 ; python_version >= "3.12"
+pywavelets==1.7.0 ; python_version >= "3.12" and python_version < "3.14"
+pywavelets==1.9.0 ; python_version >= "3.14"
 #Description: This is a requirement of scikit-image, we need to pin
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
 #Pinned versions: 1.4.1
@@ -371,7 +375,8 @@ pwlf==2.2.1
 
 # To build PyTorch itself
 pyyaml==6.0.3
-pyzstd==0.16.2
+pyzstd==0.16.2 ; python_version < "3.14"
+pyzstd==0.18.0 ; python_version >= "3.14"
 setuptools==79.0.1
 packaging==25.0
 six==1.17.0
