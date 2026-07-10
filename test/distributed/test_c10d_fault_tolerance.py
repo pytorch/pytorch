@@ -18,17 +18,6 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 
 
-# The "nccl2" backend is normally discovered via the torch.distributed.backends
-# entry point. Register it explicitly so the test is self-contained under
-# editable installs (see test_c10d_nccl2.py).
-try:
-    from torch.distributed.distributed_c10d import _register_builtin_nccl2_backend
-
-    _register_builtin_nccl2_backend()
-except Exception:
-    pass
-
-
 FAULT_TOLERANCE_BACKENDS = [
     ("gloo", "cpu"),
     ("nccl2", "cuda"),
@@ -75,7 +64,7 @@ class AbstractFaultToleranceTest:
             enable_reconfigure=True,
         )
         self.pg = c10d._get_default_group()
-        self.backend = self.pg._get_backend(torch.device(self.device))
+        self.backend = dist.get_backend_impl(self.pg, torch.device(self.device))
         self.assertTrue(dist._supports_reconfigure())
         self.assertTrue(self.backend.supports_reconfigure)
 
