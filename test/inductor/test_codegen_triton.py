@@ -10,7 +10,7 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._inductor import ir
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
@@ -557,6 +557,34 @@ class TestCodegenTriton(InductorTestCase):
                 triton_utils.signature_of(arg, size_dtype=None), "*fp8e4nv"
             )
 
+    @inductor_config.patch("_use_fp64_for_unbacked_floats", True)
+    @patch(
+        "torch._inductor.codegen.triton_utils.device_supports_fp64",
+        return_value=True,
+    )
+    def test_signature_to_meta_can_match_triton_python_float_signature(self, mock):
+        class FakeGraph:
+            current_device = torch.device("cuda")
+
+        signature = [SizeArg("scale", 0.5)]
+        argdefs = [ArgName("scale")]
+        with V.set_graph_handler(FakeGraph()):
+            self.assertEqual(
+                triton_utils.signature_to_meta(
+                    signature, size_dtype=None, argdefs=argdefs
+                ),
+                {"scale": "fp64"},
+            )
+            self.assertEqual(
+                triton_utils.signature_to_meta(
+                    signature,
+                    size_dtype=None,
+                    argdefs=argdefs,
+                    use_fp64_for_python_float=False,
+                ),
+                {"scale": "fp32"},
+            )
+
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @patch("torch._inductor.codegen.triton.device_supports_fp64", return_value=False)
     @patch(
@@ -626,6 +654,40 @@ class TestCodegenTriton(InductorTestCase):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
+    def test_user_defined_triton_kernel_python_float_arg_signature_matches_triton(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def scale_kernel(in_ptr, out_ptr, n_elements, scale, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x * scale, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+
+            scale_kernel[grid](x, out, n, 0.5, BLOCK_SIZE=128)
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(64, 64, device=device)
+        result, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, x * 0.5)
+        code_str = " ".join(code)
+        self.assertIn("'scale': 'fp32'", code_str)
+        self.assertNotIn("'scale': 'fp64'", code_str)
 
 
 if __name__ == "__main__":

@@ -58,7 +58,12 @@ def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
     return DeviceProperties.create(device).cc < 89
 
 
-def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
+def signature_of(
+    arg: KernelArgType,
+    *,
+    size_dtype: str | None,
+    use_fp64_for_python_float: bool = True,
+) -> str:
     if isinstance(arg, TensorArg):
         typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
@@ -89,8 +94,10 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
             # Python floats are natively fp64, so use fp64 to preserve precision
-            if config._use_fp64_for_unbacked_floats and device_supports_fp64(
-                V.graph.current_device
+            if (
+                use_fp64_for_python_float
+                and config._use_fp64_for_unbacked_floats
+                and device_supports_fp64(V.graph.current_device)
             ):
                 return "fp64"
             return "fp32"
@@ -174,6 +181,7 @@ def signature_to_meta(
     argdefs: list[ArgName],
     indices: list[int] | None = None,
     is_template: bool = False,
+    use_fp64_for_python_float: bool = True,
 ) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
@@ -200,7 +208,11 @@ def signature_to_meta(
         return size_dtype
 
     return {
-        argdefs[i].name: signature_of(arg, size_dtype=_decide_tl_dtype(arg))
+        argdefs[i].name: signature_of(
+            arg,
+            size_dtype=_decide_tl_dtype(arg),
+            use_fp64_for_python_float=use_fp64_for_python_float,
+        )
         for i, arg in zip(indices, signature)
     }
 
