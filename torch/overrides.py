@@ -1524,7 +1524,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        Tensor.__dlpack__: lambda self, stream=None, max_version=None, dl_device=None, copy=None: -1,
+        Tensor.__dlpack__: lambda self, stream=None, max_version=None, dl_device=None, copy=None, read_only=False: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         Tensor.index: lambda self, a, b: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
@@ -1818,7 +1818,7 @@ has_torch_function = _add_docstr(
     Arguments
     ---------
     relevant_args : iterable
-        Iterable or arguments to check for __torch_function__ methods.
+        Iterable of arguments to check for __torch_function__ methods.
     Returns
     -------
     bool

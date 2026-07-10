@@ -191,7 +191,7 @@ class _KinetoProfile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
+            Note that this support exists, at the moment, only for TorchScript models
             and not eager mode models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
@@ -362,6 +362,13 @@ class _KinetoProfile:
                 enable_cuda_sync=bool(
                     self._custom_profiler_config.get("enable_cuda_sync_events")
                 ),
+                # PM sampling (true SM-active % + DRAM-throughput % counters) is a CUPTI-monitor
+                # feature, opt-in (not always-on like env counters). The metrics are per-profile
+                # (custom_profiler_config["pm_metrics"], a list of CUPTI metric names).
+                enable_pm_sampling=bool(
+                    self._custom_profiler_config.get("enable_pm_sampling")
+                ),
+                pm_metrics=self._custom_profiler_config.get("pm_metrics"),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,
             )
@@ -561,6 +568,7 @@ class _KinetoProfile:
         group_by_input_shape: bool = False,
         group_by_stack_n: int = 0,
         group_by_overload_name: bool = False,
+        include_python_functions: bool = False,
     ):
         """Averages events, grouping them by operator name and (optionally) input shapes, stack
         and overload name.
@@ -576,7 +584,10 @@ class _KinetoProfile:
                 "Profiler must be initialized before getting key averages"
             )
         return self.profiler.key_averages(
-            group_by_input_shape, group_by_stack_n, group_by_overload_name
+            group_by_input_shape,
+            group_by_stack_n,
+            group_by_overload_name,
+            include_python_functions,
         )
 
     def events(self):
@@ -886,7 +897,7 @@ class profile(_KinetoProfile):
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
+            Note that this support exists, at the moment, only for TorchScript models
             and not eager mode models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used for Kineto library features. Note, backward compatibility is not guaranteed.
@@ -1467,7 +1478,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             self.output_file_path, create_dir=can_create
         )
         if not generated_path:
-            # could not find of create the resources dir
+            # could not find or create the resources dir
             return None
         self.resources_dir = generated_path
         return self.resources_dir

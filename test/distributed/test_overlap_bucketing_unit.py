@@ -469,6 +469,82 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             "split_with_sizes"
         ).check_count("%mm", 2).run(graph_str)
 
+    def test_manual_bucket_splits_dependent_all_reduce(self):
+        """Bucketing must split dependent same-key all_reduces, not fuse them.
+
+        Reproduces the loss-parallel cross-entropy pattern with two independent
+        chunks: a "sumexp" all_reduce whose result feeds a "result" all_reduce.
+        All four are sum/same-group/same-dtype (one bucket key), but fusing a
+        sumexp with its dependent result would make the merged collective's
+        input depend on its own output -- a cycle that failed region
+        topological sort ("stable topological sort of region failed").
+
+        Correct partitioning fuses the two independent sumexps into one bucket
+        and the two independent results into another, so four all_reduces
+        collapse to exactly two bucketed all_reduces (via two cats), no cycle.
+        """
+
+        def func(a, b, c, d):
+            group_name = "0"
+            ar = torch.ops._c10d_functional.all_reduce
+            wait = torch.ops._c10d_functional.wait_tensor
+            sumexp0 = wait(ar(a, "sum", group_name))
+            sumexp1 = wait(ar(b, "sum", group_name))
+            result0 = wait(ar(sumexp0 + c, "sum", group_name))
+            result1 = wait(ar(sumexp1 + d, "sum", group_name))
+            return result0.sum() + result1.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            d = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b, c, d)
+
+        collective_info = build_collective_info(traced.graph, {})
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            ManualOverlapPreservingBucketer,
+        )
+
+        bucketer = ManualOverlapPreservingBucketer(
+            traced.graph, collective_info, scheduled
+        )
+
+        # find_nodes returns nodes in graph (topological) order.
+        sumexp0, sumexp1, result0, result1 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+
+        # The partition itself: independent sumexps in one bucket, dependent
+        # results in another -- a sumexp is never grouped with its own result.
+        buckets = bucketer._split_independent_collectives(
+            OrderedSet([sumexp0, sumexp1, result0, result1]),
+            list(traced.graph.nodes),
+        )
+        bucket_sets = [set(b) for b in buckets]
+        self.assertEqual(len(buckets), 2)
+        self.assertIn({sumexp0, sumexp1}, bucket_sets)
+        self.assertIn({result0, result1}, bucket_sets)
+
+        # End to end: bucketing must not raise, and the partition above means the
+        # two independent pairs each fuse (two cats) while the dependent pairs
+        # stay separate, so four all_reduces collapse to exactly two.
+        bucketer.manual_bucket_collectives(list(traced.graph.nodes))
+        traced.graph.lint()
+
+        all_reduces = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        cats = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.cat.default
+        )
+        self.assertEqual(len(all_reduces), 2)
+        self.assertEqual(len(cats), 2)
+
     def test_no_cross_type_bucketing_ar_and_rs(self):
         """
         Test that all_reduce and reduce_scatter on the same PG with
