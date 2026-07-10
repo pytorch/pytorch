@@ -79,9 +79,6 @@ elif [[ "$image" == *linter* ]]; then
 elif [[ "$image" == *riscv*cross* ]]; then
   # Use RISC-V cross-compilation specific Dockerfile
   DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
-elif [[ "$image" == *riscv64* ]]; then
-  # Use RISC-V specific Dockerfile
-  DOCKERFILE="${OS}-riscv64/Dockerfile"
 fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
@@ -289,6 +286,10 @@ case "$tag" in
     if [[ "$(uname -m)" != "riscv64" ]]; then
       platform_flag="--platform linux/riscv64" # we are building using QEMU
     fi
+    # Use a custom PyPI index to get pre-built wheels for RISC-V
+    # See https://riseproject.gitlab.io/python/wheel_builder/
+    PIP_EXTRA_INDEX_URL=https://gitlab.com/api/v4/projects/riseproject%2Fpython%2Fwheel_builder/packages/pypi/simple
+    PIP_PREFER_BINARY=1
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
     GCC_VERSION=14
@@ -401,6 +402,8 @@ build_image() {
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
+       --build-arg "PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL:-}" \
+       --build-arg "PIP_PREFER_BINARY=${PIP_PREFER_BINARY:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        ${output_flag} \
        "$@" \
