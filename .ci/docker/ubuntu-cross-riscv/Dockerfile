@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     ccache \
     git \
     wget \
+    curl \
     python3-pip \
     python3-venv \
     python-is-python3 \
@@ -52,8 +53,8 @@ WORKDIR /opt
 
 # Build zlib (for compression)
 RUN echo "--- Building zlib ---" \
-    && wget -c https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz \
-    && tar -xf zlib-${ZLIB_VERSION}.tar.gz --no-same-permissions --no-same-owner \
+    && curl -fsSL https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz \
+        | tar -xz --no-same-permissions --no-same-owner \
     && cd zlib-${ZLIB_VERSION}/ \
     && mkdir build && cd build \
     && ../configure --prefix=${SYSROOT} \
