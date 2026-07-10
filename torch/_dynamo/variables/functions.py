@@ -1397,7 +1397,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         tracer.exception_handler(observed)
 
     def gen_throw(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> VariableTracker:
         # * Raises an exception at the point where the generator was paused, and
         # returns the next value yielded by the generator.
@@ -1405,6 +1405,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # * If the generator function does not catch the passed-in exception,
         # or raises a different exception, then that exception propagates to the caller.
 
+        arg = args[1] if len(args) > 1 else args[0]
         self._setup_exception(tx, arg)
         return self.gen_send_ex(tx, ConstantVariable.create(None), True)
 
@@ -1420,7 +1421,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         elif name == "close":
             return self.gen_close(tx)
         elif name == "throw":
-            return self.gen_throw(tx, args[0])
+            return self.gen_throw(tx, args)
         return super().call_method(tx, name, args, kwargs)
 
 
