@@ -1844,6 +1844,8 @@ class triton:
         os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PER_CTA_OCCUPANCY", "1") == "1"
     )
 
+    dynamic_disable_pipelining = True
+
 
 class aot_inductor:
     """
