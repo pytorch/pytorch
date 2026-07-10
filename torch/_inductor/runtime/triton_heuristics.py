@@ -7,6 +7,7 @@ import dataclasses
 import enum
 import functools
 import hashlib
+import importlib
 import inspect
 import itertools
 import logging
@@ -3139,6 +3140,19 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "torch": torch_lib,
             "triton": triton_lib,
         }
+        for value in compile_meta.get("constants", {}).values():
+            value_type = type(value)
+            type_name = getattr(value_type, "__name__", None)
+            type_module = getattr(value_type, "__module__", None)
+            if (
+                type_name is not None
+                and type_module is not None
+                and type_module != "builtins"
+                and repr(value).startswith(f"{type_name}(")
+            ):
+                scope.setdefault(
+                    type_name, getattr(importlib.import_module(type_module), type_name)
+                )
 
         if not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.

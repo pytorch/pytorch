@@ -3546,6 +3546,22 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        imported_constant_types: OrderedSet[tuple[str, str]] = OrderedSet()
+        for value in triton_meta.get("constants", {}).values():
+            value_type = type(value)
+            type_name = getattr(value_type, "__name__", None)
+            type_module = getattr(value_type, "__module__", None)
+            if (
+                type_name is not None
+                and type_module is not None
+                and type_module != "builtins"
+                and repr(value).startswith(f"{type_name}(")
+                and (type_module, type_name) not in imported_constant_types
+            ):
+                compile_wrapper.writeline(
+                    f"from {type_module} import {type_name} as {type_name}"
+                )
+                imported_constant_types.add((type_module, type_name))
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 

@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import dataclasses
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -39,6 +40,11 @@ from torch.testing._internal.inductor_utils import (
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
+
+
+@dataclasses.dataclass(frozen=True)
+class UserDefinedTritonKernelConfig:
+    offset: int
 
 
 class TestCodegenTriton(InductorTestCase):
@@ -626,6 +632,49 @@ class TestCodegenTriton(InductorTestCase):
         _, code = run_and_get_code(torch.compile(fn), x, y)
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
+    def test_user_defined_triton_kernel_non_builtin_constexpr(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_constexpr_kernel(
+            x,
+            out,
+            n_elements,
+            cfg: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(x + offsets, mask=mask)
+            tl.store(out + offsets, values + cfg.offset, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            add_constexpr_kernel[grid](
+                x,
+                out,
+                n_elements,
+                cfg=UserDefinedTritonKernelConfig(offset=2),
+                BLOCK_SIZE=128,
+            )
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(1024, device=device)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(actual, x + 2)
 
 
 if __name__ == "__main__":
