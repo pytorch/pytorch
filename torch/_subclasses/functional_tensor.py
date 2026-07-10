@@ -789,8 +789,6 @@ def dispatch_functionalize(
     *,
     propagate_input_mutations: bool = False,
 ) -> Callable[..., Any]:
-    from torch._C._functorch import _propagate_functional_input_mutation
-
     # TODO: pull these from aot autograd
     def to_fun(t: object) -> object:
         if isinstance(t, torch.Tensor):
@@ -821,6 +819,8 @@ def dispatch_functionalize(
                 outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
 
             if propagate_input_mutations:
+                from torch._C._functorch import _propagate_functional_input_mutation
+
                 # Runs outside of mode so the copy_ mutates the caller's tensors.
                 for arg, func_arg in zip(
                     pytree.arg_tree_leaves(*args, **kwargs),

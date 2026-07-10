@@ -1496,10 +1496,35 @@ class GraphModule(torch.nn.Module):
             x_clone = x.clone()
             y = torch.randn(8, requires_grad=False)
 
-            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            backend = AotEagerAndRecordGraphs()
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
 
             self.assertEqual(opt_fn(x, y), fn(x_clone, y))
             self.assertEqual(x_clone, x)
+
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_subgraph, subgraph = auto_functionalized_subgraph_0, identifier = 'auto_functionalized_subgraph_0', arg0 = arg1_1, _arg1_base_index = 0, _all_bases = [arg0_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = arg1_1 = _tree_spec_constant0 = None
+        getitem: "f32[8]" = auto_functionalized_v2[0]
+        getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
+        return (getitem,)
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
+            empty_like: "f32[8]" = torch.ops.aten.empty_like.default(arg0_1, pin_memory = False)
+            auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.scale_into.default, x = arg0_1, scale = 2.0, _out_base_index = 0, _all_bases = [empty_like]);  empty_like = None
+            getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+            add: "f32[8]" = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  getitem_1 = None
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(add, arg0_1);  arg0_1 = None
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            return (mul,)""",
+                ignore_empty_lines=True,
+            )
 
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
