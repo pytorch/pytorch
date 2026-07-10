@@ -5,7 +5,7 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 
 import contextlib
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import torch
@@ -91,7 +91,7 @@ def _extract_tangent_source_stack_traces(
 
 def _create_graph(
     f: Callable[..., Any],
-    args: list[torch.Tensor],
+    args: Sequence[Any],
     args_descs: list[AOTInput]
     | None = None,  # keep compat with old clients; maybe we should split into two impls
     *,

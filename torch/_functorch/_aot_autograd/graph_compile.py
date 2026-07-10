@@ -2531,7 +2531,7 @@ def _aot_stage2c_make_autograd_function(
     # pyrefly: ignore [implicit-any]
     bw_compiler: Callable,
     lazy_backward_info: AutogradLazyBackwardCompileInfo | None,
-    try_save_cache_entry: Callable[..., Any],
+    try_save_cache_entry: Callable[..., Any] | None,
     entry: GenericAOTAutogradResult[Any, Any] | None,
     _indices_of_inps_to_detach: list[int],
     num_symints_saved_for_bw: int,
@@ -2599,7 +2599,7 @@ def _cache_autograd_info(
     min_cut_info_str: str | None,
 ) -> tuple[
     GenericAOTAutogradResult[Any, Any] | None,
-    Callable[..., Any],
+    Callable[..., Any] | None,
 ]:
     backward_state_indices = [
         idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
