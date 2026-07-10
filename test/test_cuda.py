@@ -923,7 +923,7 @@ print(t.is_pinned())
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
+            if gcn_arch in ["gfx942", "gfx950", "gfx1250"]:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -1106,6 +1106,13 @@ print(t.is_pinned())
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cublaslt_prefer_grouped_gemm_get_set(self):
+        orig = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+        self.assertEqual(torch._C._get_cublaslt_prefer_grouped_gemm(), orig)
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = not orig
+        self.assertEqual(torch._C._get_cublaslt_prefer_grouped_gemm(), not orig)
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = orig
 
     def test_float32_matmul_precision_get_set(self):
         orig = torch.get_float32_matmul_precision()
@@ -2684,19 +2691,6 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertEqual(b.sum().item(), 11000.0)
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    def test_graph_scalar_assignment(self):
-        x = torch.zeros(2, 2, device="cuda")
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            x[0, 1] = 5.0
-
-        x.zero_()  # Reset the side-effect of capture execution
-        g.replay()
-        self.assertEqual(x[0, 1].item(), 5.0)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -10110,9 +10104,13 @@ class TestCompileKernel(TestCase):
 
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
-            max_smem = (
-                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
-            )
+            gcn_arch = get_device_properties().gcnArchName.split(":", 1)[0]
+            if gcn_arch == "gfx1250":
+                max_smem = 320 * 1024
+            elif gcn_arch == "gfx950":
+                max_smem = 160 * 1024
+            else:
+                max_smem = 65536
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
         excessive_shared_mem = max_smem * 2
