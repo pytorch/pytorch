@@ -1224,9 +1224,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
             tracer.push(arg)
-            if exc:
-                self.throw_pending()
-            return tracer.inline_call_()
+            with self.inline_tracer.link_gi_exc_state():
+                if exc:
+                    self.throw_pending()
+                return tracer.inline_call_()
         except ObservedException:
             # An exception propagating out of the generator frame finishes it,
             # mirroring CPython setting gi_frame_state = FRAME_CLEARED.
@@ -1303,7 +1304,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             val = exc.call_function(tx, [], {})
         if not isinstance(val, ExceptionVals):
             raise AssertionError(f"Expected an exception variable, got {val}")
-        tx.exn_vt_stack.set_current_exception(val, set_context=True)
+        self.inline_tracer.exn_vt_stack.set_current_exception(val, set_context=False)
 
     def _frame_state_created(self) -> bool:
         return self.inline_tracer.frame_state == FrameState.FRAME_CREATED
@@ -1379,9 +1380,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def throw_pending(self) -> None:
         tracer = self.inline_tracer
         curr_exc = tracer.exn_vt_stack.get_current_exception()
-        observed = get_dynamo_observed_exception(curr_exc.python_type())(
-            f"raised exception {curr_exc}"
-        )
+        observed = get_dynamo_observed_exception(curr_exc.python_type())()
+        # TODO: This is a temporary workaround
+        tracer.exn_vt_stack.set_current_exception(curr_exc)
         tracer.exception_handler(observed)
 
     def gen_throw(
