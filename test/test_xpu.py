@@ -5,7 +5,7 @@ import collections
 import contextlib
 import ctypes
 import gc
-import importlib.util
+import importlib
 import json
 import os
 import random
