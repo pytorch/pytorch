@@ -1453,7 +1453,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         tracer.exception_handler(observed)
 
     def gen_throw(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> VariableTracker:
         # * Raises an exception at the point where the generator was paused, and
         # returns the next value yielded by the generator.
@@ -1466,6 +1466,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         from torch._dynamo.symbolic_convert import pyerr_given_exception_match
 
+        arg = args[1] if len(args) > 1 else args[0]
         yf = self.pygen_yf()
         tracer = self.inline_tracer
 
@@ -1500,7 +1501,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         elif name == "close":
             return self.gen_close(tx)
         elif name == "throw":
-            return self.gen_throw(tx, args[0])
+            return self.gen_throw(tx, args)
         return super().call_method(tx, name, args, kwargs)
 
 
