@@ -2557,14 +2557,21 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
         lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
     )
     if out_dtype is not None:
-        torch._check(
-            out_dtype == a.dtype
-            or (
-                out_dtype == torch.float32
-                and a.dtype in (torch.float16, torch.bfloat16)
-            ),
-            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(a) in ("cuda", "xpu"):
+            torch._check(
+                out_dtype == a.dtype
+                or (
+                    out_dtype == torch.float32
+                    and a.dtype in (torch.float16, torch.bfloat16)
+                ),
+                lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+            )
     result_dtype = a.dtype if out_dtype is None else out_dtype
     return a.new_empty((N, P), dtype=result_dtype)
 
@@ -4925,13 +4932,20 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
     if out_dtype:
-        supported_out_dtype = (
-            batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
-        ) and out_dtype == torch.float32
-        torch._check(
-            out_dtype == batch1.dtype or supported_out_dtype,
-            lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(batch1) in ("cuda", "xpu"):
+            supported_out_dtype = (
+                batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
+            ) and out_dtype == torch.float32
+            torch._check(
+                out_dtype == batch1.dtype or supported_out_dtype,
+                lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
+            )
         output = batch2.new_empty(output_size).to(out_dtype)
     else:
         # TODO: handle out
@@ -8344,10 +8358,20 @@ def _meta_grouped_mm_common(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
             lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
+    elif mat_a.dtype == torch.bfloat16:
+        torch._check(
+            mat_b.dtype == mat_a.dtype,
+            lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        )
+    elif mat_a.dtype == torch.float16:
+        torch._check(
+            mat_b.dtype == mat_a.dtype,
+            lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        )
     else:
         torch._check(
-            mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
-            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+            False,
+            lambda: f"Expected mat_a to be BFloat16 or supported Float16 matrix, got {mat_a.dtype}.",
         )
 
     torch._check(
@@ -8509,10 +8533,20 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
+            torch._check(
+                offs.stride() == (1,),
+                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+            )
     else:
         torch._check(
             offs is None,
             lambda: "Offsets tensor provided, but is not needed for 3D/3D multiplicand layouts.",
+        )
+
+    if mat_a.dtype == torch.float16:
+        torch._check(
+            _grouped_mm_fp16_cublaslt_supported(mat_a, mat_b, offs),
+            lambda: "Float16 grouped_mm requires cuBLASLt grouped GEMM support.",
         )
 
     torch._check(
@@ -8520,12 +8554,47 @@ def _meta_grouped_mm_common(
         lambda: "Bias tensor provided, but it is not supported yet.",
     )
 
-    torch._check(
-        out_dtype is None or out_dtype == torch.bfloat16,
-        lambda: "If output dtype provided, it must be torch.bfloat16.",
-    )
+    if scaled:
+        torch._check(
+            out_dtype is None or out_dtype == torch.bfloat16,
+            lambda: "If output dtype provided, it must be torch.bfloat16.",
+        )
+    else:
+        out_dtype = out_dtype or mat_a.dtype
+        torch._check(
+            out_dtype == mat_a.dtype,
+            lambda: "Grouped gemm output dtype must match `mat_a` dtype.",
+        )
 
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
+
+
+def _grouped_mm_fp16_cublaslt_supported(
+    mat_a: Tensor, mat_b: Tensor, offs: Tensor | None
+) -> bool:
+    if device_hint(mat_a) != "cuda" or device_hint(mat_b) != "cuda":
+        return False
+    if not torch.cuda.is_available():
+        return False
+    mat_a_is_2d = mat_a.dim() == 2
+    mat_b_is_2d = mat_b.dim() == 2
+    batch_count = (
+        offs.size(0)
+        if offs is not None and (mat_a_is_2d or mat_b_is_2d)
+        else mat_a.size(0)
+    )
+    if batch_count < 1 or batch_count > 1024:
+        return False
+    device_capability = torch.cuda.get_device_capability()
+    cuda_version: tuple[int, int] = (0, 0)
+    if torch.version.cuda:
+        parts = torch.version.cuda.split(".")
+        cuda_version = (int(parts[0]), int(parts[1]))
+    if device_capability[0] == 9:
+        return cuda_version >= (13, 3)
+    return cuda_version >= (13, 2) and (
+        device_capability[0] == 10 or device_capability == (11, 0)
+    )
 
 
 @register_meta(aten._grouped_mm)
@@ -8956,6 +9025,7 @@ def activate_meta():
                 "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
                 "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
+                "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
             }
         ):
             pass
