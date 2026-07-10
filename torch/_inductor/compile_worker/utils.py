@@ -27,7 +27,10 @@ def _async_compile_initializer(orig_ppid: int, close_fds: tuple[int, ...] = ()) 
     # In fork mode a worker inherits the sidecar's entire fd table, including the
     # sidecar<->parent pipes. The worker must not keep those open: holding the
     # result pipe's write end would stop the parent from ever seeing EOF when the
-    # sidecar dies. Closing a missing fd (e.g. under spawn) is harmless.
+    # sidecar dies. The caller only passes these fds under fork; under spawn the
+    # worker doesn't inherit them and the same integers would name unrelated fds
+    # the fresh interpreter reused, so closing them there would be silent
+    # corruption (the OSError guard wouldn't catch it) rather than a no-op.
     for fd in close_fds:
         try:
             os.close(fd)

@@ -392,6 +392,9 @@ class SubprocPool:
                 # Expected exit (shutdown) or already handled.
                 return
             self.running = False
+        # `running` is set under different locks across shutdown()/_read_thread/
+        # here, so this exit can race another for the same transition. That's
+        # safe: _WaitCounterTracker.__exit__ is idempotent (optional::reset()).
         self.running_waitcounter.__exit__()
 
         pid = self.process.pid
@@ -605,6 +608,9 @@ class SubprocMain:
             pool.shutdown(wait=False)
 
     def submit(self, job_id: int, data: bytes) -> None:
+        # Clock starts before _start_pool/_warm_process_pool, so the first job's
+        # reported elapsed intentionally includes cold pool creation and the fork
+        # of the workers -- that wait is real and worth surfacing.
         with self._inflight_lock:
             self._inflight[job_id] = time.monotonic()
         while self.running:
@@ -658,15 +664,22 @@ class SubprocMain:
 
         # Recycle heartbeat slots before the new worker generation forks.
         watchdog.reset()
+
+        # Only fork workers inherit the sidecar<->parent pipe fds and must close
+        # them (see _async_compile_initializer). Under spawn the workers do not
+        # inherit them (close_fds=True + O_CLOEXEC), and these integers would
+        # refer to unrelated fds the fresh interpreter reused -- closing them
+        # would be silent corruption, not a no-op.
+        close_fds = (
+            (self.read_pipe.fileno(), self.write_pipe.fileno())
+            if self.kind == SubprocKind.FORK
+            else ()
+        )
         self.pool = TrackedProcessPoolExecutor(
             self.nprocs,
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(
-                _async_compile_initializer,
-                os.getpid(),
-                # Forked workers inherit these sidecar<->parent pipe fds but must
-                # not hold them open (see _async_compile_initializer).
-                (self.read_pipe.fileno(), self.write_pipe.fileno()),
+                _async_compile_initializer, os.getpid(), close_fds
             ),
         )
         self.pool_finalizer = multiprocessing.util.Finalize(
@@ -716,9 +729,13 @@ class SubprocMain:
             status["phase_elapsed_s"] = round((now_ns - phase_start_ns) / 1e9, 1)
             status["worker_pid"] = worker_pid
         elif watchdog.enabled():
-            # Heartbeats are active but this job isn't in any worker's slot, so it
-            # is still queued in the pool -- a running (fork) worker always stamps
-            # its slot before doing anything.
+            # Heartbeats are active but this job isn't in any worker's slot. Almost
+            # always that means it's still queued in the pool -- a running (fork)
+            # worker stamps its slot before doing anything. It can also briefly
+            # mean the opposite: a job that just finished (clear_current_job ran in
+            # do_job's finally) but hasn't yet been popped from _inflight by the
+            # sidecar callback. That window is negligibly short, so we don't
+            # distinguish it.
             status["phase"] = "queued"
         # Otherwise phase tracking is unavailable (e.g. a spawn pool) and the
         # report carries duration only -- we can't tell queued from running.
