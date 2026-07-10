@@ -240,3 +240,53 @@ bad-param-name-override = false
 unannotated-return = true
 unannotated-parameter = true
 unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/non_strict_utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/wrappers.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/serde/schema_check.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
+
+[[sub-config]]
+matches = "torch/_export/serde/union.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true
