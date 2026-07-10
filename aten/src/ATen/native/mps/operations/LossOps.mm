@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -243,11 +244,21 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
                                           int64_t reduction,
                                           Tensor& grad_input,
                                           const std::string& op_name) {
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
+  // CPU broadcasts input/target/grad_output through a TensorIterator; match
+  // that instead of requiring identical shapes. Only broadcastability is
+  // validated here (infer_size raises the standard size-mismatch error):
+  // the dense fast path below self-rejects mismatched sizes and the ternary
+  // iterator fallback broadcasts natively.
+  if (!target.is_same_size(input)) {
+    (void)at::infer_size_dimvector(input.sizes(), target.sizes());
+  }
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
 
   // Empty input: gradient norm is 2/numel for mean (-> NaN as 2/0), else 0.
-  if ((input.numel() == 0) || (target.numel() == 0) || (grad_output.numel() == 0)) {
+  // Same-size only: an empty-via-broadcast pair falls through to the
+  // ternary iterator, which resizes grad_input to the (empty) common shape
+  // exactly like the CPU TensorIterator.
+  if (target.is_same_size(input) && ((input.numel() == 0) || (grad_output.numel() == 0))) {
     reduction == Reduction::Mean ? grad_input.fill_(std::numeric_limits<float>::quiet_NaN()) : grad_input.zero_();
     return grad_input;
   }
@@ -1209,7 +1220,6 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
     return;
   }
 
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
   TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
               op_name + ": only defined for floating types");
   TORCH_CHECK(output_.is_mps());
@@ -1229,9 +1239,15 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
   // This matches the fused MPSGraph square+reduce that the materialize-then-
   // at::sum path regressed against, and keeps the float32 accumulation so
   // large-N fp16/bf16 does not overflow. output_ is a scalar tensor.
+  // The structured meta has already validated and broadcast the shapes (CPU
+  // parity). The fused kernel walks one flat dense pair, so materialize
+  // numpy-style broadcast views first: expand_outplace borrows when the
+  // shapes already match (no copy on the equal-shape hot path), and
+  // fused_loss_reduce's contiguous() copies any stride-0 expanded view.
+  auto [b_input, b_target] = at::expand_outplace(input, target);
   FusedLossParams params{};
   params.reduction = static_cast<uint32_t>(reduction);
-  fused_loss_reduce("mse", input, target, std::nullopt, output_, params);
+  fused_loss_reduce("mse", *b_input, *b_target, std::nullopt, output_, params);
 }
 
 Tensor& mse_loss_backward_out_mps(const Tensor& grad_output,

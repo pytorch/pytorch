@@ -5084,6 +5084,36 @@ class TestMPS(TestCaseMPS):
         helper((3, 3, 0), 'mean')
         helper((3, 3, 0), 'none')
 
+    def test_mse_loss_broadcast(self):
+        # CPU broadcasts input/target through a TensorIterator; the Metal path
+        # must match (expand_outplace before the fused reduce, iterator
+        # fallbacks for backward). Includes the swapped-arg autograd path
+        # (target.requires_grad) which relies on the engine's sum_to.
+        cases = [((64, 10), (10,)), ((64, 10), (64, 1)), ((64, 10), ()),
+                 ((64, 10), (64, 10))]
+        for reduction in ('none', 'mean', 'sum'):
+            for in_shape, tgt_shape in cases:
+                x = torch.randn(in_shape, requires_grad=True)
+                t = (torch.randn(tgt_shape) if tgt_shape else torch.tensor(0.5)).requires_grad_()
+                xm = x.detach().to('mps').requires_grad_()
+                tm = t.detach().to('mps').requires_grad_()
+                lc = F.mse_loss(x, t, reduction=reduction)
+                lm = F.mse_loss(xm, tm, reduction=reduction)
+                self.assertEqual(lm.cpu(), lc)
+                g = torch.randn(lc.shape)
+                lc.backward(g)
+                lm.backward(g.to('mps'))
+                self.assertEqual(xm.grad.cpu(), x.grad)
+                self.assertEqual(tm.grad.cpu(), t.grad)
+        # expanded stride-0 same-size target (regression guard)
+        base = torch.randn(10)
+        t = base.expand(64, 10)
+        x = torch.randn(64, 10)
+        self.assertEqual(F.mse_loss(x.to('mps'), t.to('mps')).cpu(), F.mse_loss(x, t))
+        # non-broadcastable rejection matches CPU error class
+        with self.assertRaises(RuntimeError):
+            F.mse_loss(torch.randn(64, 10, device='mps'), torch.randn(3, device='mps'))
+
     def test_mse_loss_strided_output(self):
         # https://github.com/pytorch/pytorch/issues/124621
         lf = nn.MSELoss(reduction='none')
