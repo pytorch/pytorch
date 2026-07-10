@@ -11,7 +11,7 @@ __all__ = ["ExponentialFamily"]
 class ExponentialFamily(Distribution):
     r"""
     ExponentialFamily is the abstract base class for probability distributions belonging to an
-    exponential family, whose probability mass/density function has the form is defined below
+    exponential family, whose probability mass/density function is defined below
 
     .. math::
 

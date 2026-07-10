@@ -8990,6 +8990,9 @@ class DeviceCopy(ExternKernelOut):
             wrapper.sync_h2d_copy(self.get_name())
 
     def should_sync_h2d_data_ptr_copy(self) -> bool:
+        # This intentionally over-approximates to any pinned CPU->GPU copy in a
+        # graph with traced data_ptr, since the pointer table copy has no direct
+        # edge back to the keepalive source tensors whose addresses escaped.
         if not V.graph.data_ptr_keepalive_buffers:
             return False
         if not self.constant_args or self.constant_args[0] is not True:
@@ -9632,7 +9635,7 @@ class FallbackKernel(ExternKernelAlloc):
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
             # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
-            outputs = self.codegen_outputs()
+            outputs = self.outputs if self.outputs else self.mutation_outputs
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
@@ -9749,19 +9752,16 @@ class FallbackKernel(ExternKernelAlloc):
                 self.op_overload,
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
-                self.codegen_outputs(),
+                self.outputs if self.outputs else self.mutation_outputs,
             )
         else:
             wrapper.generate_fallback_kernel(self)
+            if isinstance(self.layout, Layout):
+                self.codegen_size_asserts(wrapper)
+                self.codegen_alignment_asserts(wrapper)
+                self.codegen_memory_tracking(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
-        # AOT runtime dispatch assertions are emitted by the proxy executor path.
-        if not (self.use_runtime_dispatch and V.graph.aot_mode) and isinstance(
-            self.layout, Layout
-        ):
-            self.codegen_size_asserts(wrapper)
-            self.codegen_alignment_asserts(wrapper)
-            self.codegen_memory_tracking(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor) -> FixedLayout:
@@ -9896,26 +9896,6 @@ class FallbackKernel(ExternKernelAlloc):
         ):
             device = torch.device("cpu")
 
-        def create_direct_output(output: torch.Tensor) -> FallbackKernel:
-            if not device:
-                raise AssertionError("Not sure where to find device info")
-            packed = cls(
-                cls.tensor_to_layout(output),
-                kernel,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                kwargs=kwargs,
-                unbacked_bindings=unbacked_bindings,
-            )
-            if (
-                config.assume_unaligned_fallback_output
-                or has_unaligned_input
-                or not tensor_is_aligned(output)
-            ):
-                V.graph.unaligned_buffers.add(packed.get_name())
-            return packed
-
         # Try multi-output .out() lowering for custom ops with the out tag.
         if (
             isinstance(kernel, torch._ops.OpOverload)
@@ -9947,9 +9927,6 @@ class FallbackKernel(ExternKernelAlloc):
                 kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
-
-        elif isinstance(example_output, torch.Tensor):
-            return create_direct_output(example_output)
 
         else:
             if not device:

@@ -3220,7 +3220,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return new_tensor_args, new_int_args
 
     @staticmethod
-    def _compatible_with_stableivalue(op: torch._ops.OpOverload) -> bool:
+    def _compatible_with_stableivalue(
+        op: torch._ops.OpOverload, *, allow_symint_returns: bool = False
+    ) -> bool:
         """Returns true if op_overload._schema only utilizes types supported by the AOT
         C-shim *internal* function to_ivalue.  to_ivalue is an implementation detail, so
         these types are not guaranteed to be supported long-term.  When generating code
@@ -3254,10 +3256,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 or repr(t) == "SymFloat"
             )
 
+        def return_supported(t: torch.JitType, real_type: torch.JitType) -> bool:
+            if not type_supported(t):
+                return False
+            if allow_symint_returns and isinstance(real_type, torch.SymIntType):
+                return True
+            return not uses_symint(real_type)
+
         return all(
             type_supported(a.type) and not uses_symint(a.real_type)
-            for a in chain(op._schema.arguments, op._schema.returns)
-        )
+            for a in op._schema.arguments
+        ) and all(return_supported(r.type, r.real_type) for r in op._schema.returns)
 
     def _fallback_output_declaration(
         self, output_arg: str | None, raw_output_arg: Any
@@ -3309,6 +3318,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return_supported(r.real_type) for r in op._schema.returns
         )
 
+    @staticmethod
+    def _stableivalue_can_return_symint_outputs(
+        op: torch._ops.OpOverload, raw_outputs: Sequence[Any]
+    ) -> bool:
+        if len(op._schema.returns) != len(raw_outputs):
+            return False
+        has_symint_return = False
+        for schema_return, raw_output in zip(op._schema.returns, raw_outputs):
+            if isinstance(schema_return.real_type, torch.SymIntType):
+                has_symint_return = True
+                if not isinstance(raw_output, sympy.Symbol):
+                    return False
+        return has_symint_return
+
     def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
@@ -3326,9 +3349,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ) -> str | None | _OUTPUT_ARGS_TYPE:
             if out is None:
                 return None
-            if isinstance(
-                out, (ir.MultiOutput, ir._CollectiveKernel, ir.FallbackKernel)
-            ):
+            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
             if isinstance(out, ir.MutationOutput):
                 mutated_buf_names = out.get_mutation_names()
@@ -3447,7 +3468,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # In non-AOT mode, we use aoti_torch_call_dispatcher if all the inputs and
         # outputs of the op can be represented with StableIValue.  This avoids the
         # overhead of calling back into Python, and covers most remaining fallback ops.
-        if self._compatible_with_stableivalue(op_overload):
+        if self._compatible_with_stableivalue(
+            op_overload,
+            allow_symint_returns=self._stableivalue_can_return_symint_outputs(
+                op_overload, outputs
+            ),
+        ):
             self.generate_fallback_kernel_with_runtime_lookup_nopython(
                 get_args,
                 op_overload,

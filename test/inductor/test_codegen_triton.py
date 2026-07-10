@@ -25,6 +25,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
+    get_code,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
@@ -293,6 +294,21 @@ class TestCodegenTriton(InductorTestCase):
                 self.assertNotIn("RAIIAtenTensorHandle mutated;", code)
         finally:
             V.graph.cpp_wrapper = original_cpp_wrapper
+
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    @inductor_config.patch(cpp_wrapper=True)
+    def test_cpp_wrapper_data_ptr_symint_output_uses_stable_dispatch(self):
+        def fn(x, y):
+            return torch.tensor([x.data_ptr(), y.data_ptr()], dtype=torch.long)
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+
+        code = get_code(torch.compile(fn, fullgraph=True), x, y)
+        code_str = "\n".join(code)
+        self.assertIn('aoti_torch_call_dispatcher("prims::_data_ptr", ""', code_str)
+        self.assertIn("torch::stable::detail::to<int64_t>", code_str)
+        self.assertNotIn('findSchemaOrThrow("prims::_data_ptr", "")', code_str)
 
     def test_pow_uses_active_override_constant_lowering(self):
         exponent = CSEVariable("ks0", ValueRanges.unknown(), torch.int64)
