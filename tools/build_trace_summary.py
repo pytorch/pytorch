@@ -43,11 +43,11 @@ def main():
     with open(trace_path) as trace_file:
         trace = json.load(trace_file)
 
-    stage_times = {}
     custom_command_times = []
     source_compile_times = []
     target_compile_times = defaultdict(lambda: 0)
     target_link_times = defaultdict(lambda: 0)
+    stage_times = defaultdict(lambda: 0)
 
     print("*** Build Metrics Summary ***")
     for item in trace:
@@ -65,7 +65,7 @@ def main():
                     (os.path.relpath(args["source"], cmdargs.root), duration_ms)
                 )
             case _ as role:
-                stage_times[role] = duration_ms
+                stage_times[role] += duration_ms
 
     print("\nStage durations")
     for stage in [Role.CONFIGURE, Role.GENERATE, Role.CMAKEBUILD, Role.INSTALL]:
