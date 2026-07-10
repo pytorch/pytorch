@@ -349,7 +349,7 @@ function install_cutlass_dsl() {
 
 function install_nvmath() {
   echo "Installing nvmath-python from PyPI..."
-  pip_install nvmath-python
+  pip_install nvmath-python==0.9.0
   # nvmath-python upgrades numpy to 2.x; realign scipy to a matching build. See #189034.
   pip_install "scipy==1.13.1"
   echo "nvmath-python installation complete."
