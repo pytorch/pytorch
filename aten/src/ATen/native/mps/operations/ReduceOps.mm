@@ -724,16 +724,16 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     const bool collapses = strides_collapse(input, reduce_dim + 1, nd - 1) && strides_collapse(input, 0, a_top);
     if (collapses && input.stride(0) < static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
       if (reduce_dim != nd - 1) {
-        const uint32_t A = static_cast<uint32_t>(c10::multiply_integers(input.sizes().slice(0, reduce_dim)));
-        const uint32_t K = static_cast<uint32_t>(input.size(reduce_dim));
-        const uint32_t B = static_cast<uint32_t>(input.numel() / (static_cast<int64_t>(A) * K));
-        const uint32_t sK32 = static_cast<uint32_t>(input.stride(reduce_dim));
-        const uint32_t sB32 = static_cast<uint32_t>(input.stride(nd - 1));
+        const auto A = static_cast<uint32_t>(c10::multiply_integers(input.sizes().slice(0, reduce_dim)));
+        const auto K = static_cast<uint32_t>(input.size(reduce_dim));
+        const auto B = static_cast<uint32_t>(input.numel() / (static_cast<int64_t>(A) * K));
+        const auto sK32 = static_cast<uint32_t>(input.stride(reduce_dim));
+        const auto sB32 = static_cast<uint32_t>(input.stride(nd - 1));
         const std::array<uint32_t, 4> strides_s{
             sK32, sB32, reduce_dim > 0 ? static_cast<uint32_t>(input.stride(reduce_dim - 1)) : 0u, 0u};
-        const uint32_t natural_tgs = c10::metal::ceil_div(B, 32u);
+        const auto natural_tgs = c10::metal::ceil_div(B, 32u);
         if (A == 1 && K >= 4096u && natural_tgs < 32u) {
-          const uint32_t G = std::clamp<uint32_t>(256u / natural_tgs, 2u, 2048u);
+          const auto G = std::clamp<uint32_t>(256u / natural_tgs, 2u, 2048u);
           auto val_partials = at::empty({(int64_t)B * G}, input.options().dtype(val_dtype));
           auto idx_partials = at::empty({(int64_t)B * G}, input.options().dtype(kInt));
           const auto p1_name = fmt::format("{}_outer_p1_{}", op_prefix, in_str);
@@ -772,16 +772,16 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
         });
         return;
       }
-      const uint32_t K = static_cast<uint32_t>(input.size(nd - 1));
-      const uint32_t M = static_cast<uint32_t>(input.numel() / K);
-      const uint32_t sK32 = static_cast<uint32_t>(input.stride(nd - 1));
-      const uint32_t sRow32 = static_cast<uint32_t>(input.stride(nd - 2));
+      const auto K = static_cast<uint32_t>(input.size(nd - 1));
+      const auto M = static_cast<uint32_t>(input.numel() / K);
+      const auto sK32 = static_cast<uint32_t>(input.stride(nd - 1));
+      const auto sRow32 = static_cast<uint32_t>(input.stride(nd - 2));
       const std::array<uint32_t, 2> strides_s{sK32, sRow32};
       if (c10::metal::ceil_div(M, 8u) < 512u && K >= 2048u) {
-        const uint32_t g_cap = std::min(K / 512u, std::max(2u, 16384u / std::max(M, 1u)));
-        const uint32_t G = c10::metal::ceil_div(K, c10::metal::ceil_div(K, std::max(g_cap, 2u)));
+        const auto g_cap = std::min(K / 512u, std::max(2u, 16384u / std::max(M, 1u)));
+        const auto G = c10::metal::ceil_div(K, c10::metal::ceil_div(K, std::max(g_cap, 2u)));
         if (G >= 2) {
-          const uint32_t C = c10::metal::ceil_div(K, G);
+          const auto C = c10::metal::ceil_div(K, G);
           auto val_partials = at::empty({(int64_t)M * G}, input.options().dtype(val_dtype));
           auto idx_partials = at::empty({(int64_t)M * G}, input.options().dtype(kInt));
           const auto p1_name = fmt::format("{}_inner_p1_{}", op_prefix, in_str);
@@ -823,12 +823,12 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   }
 
   if (input.is_contiguous() && output_t.is_contiguous() && input.dim() >= 1 && reduce_dim == input.dim() - 1) {
-    const uint32_t N = static_cast<uint32_t>(input.size(input.dim() - 1));
-    const uint32_t M = static_cast<uint32_t>(input.numel() / N);
+    const auto N = static_cast<uint32_t>(input.size(input.dim() - 1));
+    const auto M = static_cast<uint32_t>(input.numel() / N);
     if (c10::metal::ceil_div(M, 8u) < 512u && N >= 2048u) {
-      const uint32_t g_cap = std::min(N / 512u, std::max(2u, 16384u / std::max(M, 1u)));
-      const uint32_t C = c10::metal::ceil_div(N, std::max(g_cap, 2u));
-      const uint32_t G = c10::metal::ceil_div(N, C);
+      const auto g_cap = std::min(N / 512u, std::max(2u, 16384u / std::max(M, 1u)));
+      const auto C = c10::metal::ceil_div(N, std::max(g_cap, 2u));
+      const auto G = c10::metal::ceil_div(N, C);
       if (G >= 2) {
         auto val_partials = at::empty({(int64_t)M * G}, input.options().dtype(val_dtype));
         auto idx_partials = at::empty({(int64_t)M * G}, input.options().dtype(kInt));
@@ -856,13 +856,13 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
 
   if (input.is_contiguous() && output_t.is_contiguous() && input.dim() >= 1) {
     if (reduce_dim != input.dim() - 1) {
-      const uint32_t A = static_cast<uint32_t>(c10::multiply_integers(input.sizes().slice(0, reduce_dim)));
-      const uint32_t K = static_cast<uint32_t>(input.size(reduce_dim));
-      const uint32_t B = static_cast<uint32_t>(input.numel() / (static_cast<int64_t>(A) * K));
-      const uint32_t natural_tgs = c10::metal::ceil_div(B, 32u);
+      const auto A = static_cast<uint32_t>(c10::multiply_integers(input.sizes().slice(0, reduce_dim)));
+      const auto K = static_cast<uint32_t>(input.size(reduce_dim));
+      const auto B = static_cast<uint32_t>(input.numel() / (static_cast<int64_t>(A) * K));
+      const auto natural_tgs = c10::metal::ceil_div(B, 32u);
       if (A == 1 && K >= 4096u && natural_tgs < 32u) {
         const bool use_narrow = B < 32u && 256u % B == 0u;
-        uint32_t G = std::clamp<uint32_t>(256u / natural_tgs, 2u, 2048u);
+        auto G = std::clamp<uint32_t>(256u / natural_tgs, 2u, 2048u);
         if (use_narrow) {
           const auto g0 = std::clamp<uint32_t>((static_cast<uint64_t>(K) * B) / (256 * 32), 2u, 2048u);
           G = c10::metal::ceil_div(K, c10::metal::ceil_div(K, g0));
@@ -912,8 +912,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
       });
       return;
     }
-    const uint32_t N = static_cast<uint32_t>(input.size(input.dim() - 1));
-    const uint32_t M = static_cast<uint32_t>(input.numel() / N);
+    const auto N = static_cast<uint32_t>(input.size(input.dim() - 1));
+    const auto M = static_cast<uint32_t>(input.numel() / N);
     const auto kernel_name = fmt::format("{}_reduction_inner_{}_long", op_prefix, in_str);
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
@@ -1200,8 +1200,8 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     auto kname = fmt::format(
         "{}reduction_inner_chunk_{}_{}", prefix, scalarToMetalTypeString(in_dt), scalarToMetalTypeString(out_dt));
     constexpr uint32_t TG_SIZE = 256;
-    const uint32_t rows_per_simd = 32u / L;
-    const uint32_t total_simds = c10::metal::ceil_div(M * G, rows_per_simd);
+    const auto rows_per_simd = 32u / L;
+    const auto total_simds = c10::metal::ceil_div(M * G, rows_per_simd);
     const auto num_tgs = c10::metal::ceil_div(total_simds, TG_SIZE / 32);
     id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
     auto ps = lib.getPipelineStateForFunc(kname);
@@ -1218,8 +1218,8 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     getMPSProfiler().endProfileKernel(ps);
   };
   auto pick_split_segments = [](uint32_t M, uint32_t K) -> uint32_t {
-    const uint32_t cap = std::min<uint32_t>(2048u, c10::metal::ceil_div(K, 64u));
-    const uint32_t g0 = std::clamp<uint32_t>(c10::metal::ceil_div(2048u, std::max(M, 1u)), 2u, std::max(cap, 2u));
+    const auto cap = std::min<uint32_t>(2048u, c10::metal::ceil_div(K, 64u));
+    const auto g0 = std::clamp<uint32_t>(c10::metal::ceil_div(2048u, std::max(M, 1u)), 2u, std::max(cap, 2u));
     return c10::metal::ceil_div(K, c10::metal::ceil_div(K, g0));
   };
 
@@ -1238,21 +1238,21 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
     if (num_reduced == 1 && reduced_dim < nd - 1 && nd >= 2) {
       const bool collapses =
           strides_collapse(input_orig, reduced_dim + 1, nd - 1) && strides_collapse(input_orig, 0, reduced_dim - 1);
-      const uint32_t A = c10::multiply_integers(input_orig.sizes().slice(0, reduced_dim));
-      const uint32_t K = input_orig.size(reduced_dim);
-      const uint32_t B = input_orig.numel() / (static_cast<int64_t>(A) * K);
-      const int64_t sK = input_orig.stride(reduced_dim);
-      const int64_t sB = input_orig.stride(nd - 1);
-      const int64_t sA = reduced_dim > 0 ? input_orig.stride(reduced_dim - 1) : 0;
-      const int64_t max_off =
+      const auto A = static_cast<uint32_t>(c10::multiply_integers(input_orig.sizes().slice(0, reduced_dim)));
+      const auto K = static_cast<uint32_t>(input_orig.size(reduced_dim));
+      const auto B = static_cast<uint32_t>(input_orig.numel() / (static_cast<int64_t>(A) * K));
+      const auto sK = input_orig.stride(reduced_dim);
+      const auto sB = input_orig.stride(nd - 1);
+      const auto sA = reduced_dim > 0 ? input_orig.stride(reduced_dim - 1) : 0;
+      const auto max_off =
           static_cast<int64_t>(A - 1) * sA + static_cast<int64_t>(K - 1) * sK + static_cast<int64_t>(B - 1) * sB;
       if (collapses && max_off <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
-        const uint32_t natural_tgs = A * c10::metal::ceil_div(B, 32u);
-        const uint32_t sK32 = static_cast<uint32_t>(sK);
-        const uint32_t sB32 = static_cast<uint32_t>(sB);
-        const uint32_t sA32 = static_cast<uint32_t>(sA);
+        const auto natural_tgs = A * c10::metal::ceil_div(B, 32u);
+        const auto sK32 = static_cast<uint32_t>(sK);
+        const auto sB32 = static_cast<uint32_t>(sB);
+        const auto sA32 = static_cast<uint32_t>(sA);
         if (opts.has_strided_pass1 && B < 32u && 256u % B == 0u) {
-          const float final_div = opts.divisor.value_or(0.0f);
+          const auto final_div = opts.divisor.value_or(0.0f);
           if (A > 1) {
             dispatch_sync_with_rethrow(stream->queue(), ^() {
               @autoreleasepool {
@@ -1273,7 +1273,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
             });
             return;
           }
-          const uint32_t num_segs = std::clamp<uint32_t>((static_cast<int64_t>(K) * B) / (256 * 32), 1u, 2048u);
+          const auto num_segs = std::clamp<uint32_t>((static_cast<int64_t>(K) * B) / (256 * 32), 1u, 2048u);
           if (num_segs <= 1) {
             dispatch_sync_with_rethrow(stream->queue(), ^() {
               @autoreleasepool {
@@ -1325,7 +1325,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           return;
         }
         if (A == 1 && natural_tgs < 32u && K >= 4096u) {
-          const uint32_t G = std::clamp<uint32_t>(256u / std::max(natural_tgs, 1u), 2u, std::min(K, 2048u));
+          const auto G = std::clamp<uint32_t>(256u / std::max(natural_tgs, 1u), 2u, std::min(K, 2048u));
           auto partials = at::empty({(int64_t)G, (int64_t)B}, output.options().dtype(opts.partial_dtype));
           dispatch_sync_with_rethrow(stream->queue(), ^() {
             @autoreleasepool {
@@ -1384,14 +1384,14 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
   if (output.numel() > 1 && !input_orig.is_contiguous() && output.is_contiguous()) {
     if (num_reduced == 1 && reduced_dim == nd - 1 && nd >= 2) {
       const bool collapses = strides_collapse(input_orig, 0, nd - 2);
-      const uint32_t K = input_orig.size(nd - 1);
-      const uint32_t M = input_orig.numel() / K;
-      const int64_t sK = input_orig.stride(nd - 1);
-      const int64_t sRow = input_orig.stride(nd - 2);
-      const int64_t max_off = static_cast<int64_t>(M - 1) * sRow + static_cast<int64_t>(K - 1) * sK;
+      const auto K = static_cast<uint32_t>(input_orig.size(nd - 1));
+      const auto M = static_cast<uint32_t>(input_orig.numel() / K);
+      const auto sK = input_orig.stride(nd - 1);
+      const auto sRow = input_orig.stride(nd - 2);
+      const auto max_off = static_cast<int64_t>(M - 1) * sRow + static_cast<int64_t>(K - 1) * sK;
       if (collapses && max_off <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
-        const uint32_t sK32 = static_cast<uint32_t>(sK);
-        const uint32_t sRow32 = static_cast<uint32_t>(sRow);
+        const auto sK32 = static_cast<uint32_t>(sK);
+        const auto sRow32 = static_cast<uint32_t>(sRow);
         if (K <= 256u) {
           dispatch_sync_with_rethrow(stream->queue(), ^() {
             @autoreleasepool {
@@ -1412,7 +1412,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           return;
         }
         if (c10::metal::ceil_div(M, 8u) < 64u && K >= 2048u) {
-          const uint32_t G = pick_split_segments(M, K);
+          const auto G = pick_split_segments(M, K);
           auto partials = at::empty({(int64_t)M, (int64_t)G}, output.options().dtype(opts.partial_dtype));
           dispatch_sync_with_rethrow(stream->queue(), ^() {
             @autoreleasepool {
@@ -1466,10 +1466,10 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
   if (output.numel() > 1 && input_orig.is_contiguous() && output.is_contiguous()) {
     const bool non_innermost = num_reduced == 1 && reduced_dim != input_orig.dim() - 1 && input_orig.dim() >= 2;
     if (non_innermost) {
-      const uint32_t A = c10::multiply_integers(input_orig.sizes().slice(0, reduced_dim));
-      const uint32_t K = input_orig.size(reduced_dim);
-      const uint32_t B = input_orig.numel() / (static_cast<int64_t>(A) * K);
-      const uint32_t natural_tgs = A * c10::metal::ceil_div(B, 32u);
+      const auto A = static_cast<uint32_t>(c10::multiply_integers(input_orig.sizes().slice(0, reduced_dim)));
+      const auto K = static_cast<uint32_t>(input_orig.size(reduced_dim));
+      const auto B = static_cast<uint32_t>(input_orig.numel() / (static_cast<int64_t>(A) * K));
+      const auto natural_tgs = A * c10::metal::ceil_div(B, 32u);
       if (B < 32u && 256u % B == 0u) {
         if (A > 1) {
           dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -1488,7 +1488,7 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
           });
           return;
         }
-        const uint32_t num_segs = std::clamp<uint32_t>((static_cast<int64_t>(K) * B) / (256 * 32), 1u, 2048u);
+        const auto num_segs = std::clamp<uint32_t>((static_cast<int64_t>(K) * B) / (256 * 32), 1u, 2048u);
         if (num_segs <= 1) {
           dispatch_sync_with_rethrow(stream->queue(), ^() {
             @autoreleasepool {
@@ -1550,8 +1550,8 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
         return;
       }
       if (A == 1 && K >= 4096u && natural_tgs < 32u) {
-        const uint32_t seg_cap = std::min(K / 512u, std::max(2u, 2048u / std::max(natural_tgs, 1u)));
-        const uint32_t G = largest_divisor_leq(K, seg_cap);
+        const auto seg_cap = std::min(K / 512u, std::max(2u, 2048u / std::max(natural_tgs, 1u)));
+        const auto G = largest_divisor_leq(K, seg_cap);
         if (G >= 2) {
           auto partials = at::empty({(int64_t)G, (int64_t)B}, output.options().dtype(opts.partial_dtype));
           dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -1590,8 +1590,8 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       return;
     }
     if (num_reduced == 1 && reduced_dim == input_orig.dim() - 1) {
-      const uint32_t N = input_orig.size(input_orig.dim() - 1);
-      const uint32_t M = input_orig.numel() / N;
+      const auto N = static_cast<uint32_t>(input_orig.size(input_orig.dim() - 1));
+      const auto M = static_cast<uint32_t>(input_orig.numel() / N);
       if (N <= 256u) {
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           @autoreleasepool {
@@ -1612,10 +1612,10 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
         return;
       }
       if (c10::metal::ceil_div(M, 8u) < 64u && N >= 2048u) {
-        const uint32_t g_cap = std::min(N / 512u, std::max(2u, 16384u / std::max(M, 1u)));
-        const uint32_t G = largest_divisor_leq(N, g_cap);
+        const auto g_cap = std::min(N / 512u, std::max(2u, 16384u / std::max(M, 1u)));
+        const auto G = largest_divisor_leq(N, g_cap);
         if (G >= 2) {
-          const uint32_t C = N / G;
+          const auto C = N / G;
           auto partials = at::empty({(int64_t)M * G}, output.options().dtype(opts.partial_dtype));
           dispatch_sync_with_rethrow(stream->queue(), ^() {
             @autoreleasepool {
@@ -1646,17 +1646,17 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
 
   if (output.numel() == 1 && !input_orig.is_contiguous() && nd >= 1) {
     const bool collapses = strides_collapse(input_orig, 0, nd - 2);
-    const uint32_t K = input_orig.size(nd - 1);
-    const uint32_t M = input_orig.numel() / K;
-    const int64_t sK = input_orig.stride(nd - 1);
-    const int64_t sRow = nd >= 2 ? input_orig.stride(nd - 2) : 0;
-    const int64_t max_off = static_cast<int64_t>(M - 1) * sRow + static_cast<int64_t>(K - 1) * sK;
+    const auto K = static_cast<uint32_t>(input_orig.size(nd - 1));
+    const auto M = static_cast<uint32_t>(input_orig.numel() / K);
+    const auto sK = input_orig.stride(nd - 1);
+    const auto sRow = nd >= 2 ? input_orig.stride(nd - 2) : 0;
+    const auto max_off = static_cast<int64_t>(M - 1) * sRow + static_cast<int64_t>(K - 1) * sK;
     if (collapses && M <= 4096u && sK >= 0 && sRow >= 0 &&
         max_off <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
-      const uint32_t sK32 = static_cast<uint32_t>(sK);
-      const uint32_t sRow32 = static_cast<uint32_t>(sRow);
-      const uint32_t G = (K >= 2048u && M < 64u) ? pick_split_segments(M, K) : 1u;
-      const uint32_t P = M * G;
+      const auto sK32 = static_cast<uint32_t>(sK);
+      const auto sRow32 = static_cast<uint32_t>(sRow);
+      const auto G = (K >= 2048u && M < 64u) ? pick_split_segments(M, K) : 1u;
+      const auto P = M * G;
       auto partials = at::empty({(int64_t)P}, output.options().dtype(opts.partial_dtype));
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {

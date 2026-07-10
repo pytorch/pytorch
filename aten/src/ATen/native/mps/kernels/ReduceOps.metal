@@ -447,6 +447,7 @@ kernel void sum_reduction_strided_pass1(
 // memory. This avoids the strided-access penalty of the generic kernel for
 // dim=0.
 //
+// Grid: (ceil(N/TG_X), 1) threadgroups, each (TG_X, TG_Y) threads.
 // TG_X threads cover adjacent columns (coalesced), TG_Y threads split rows.
 template <
     typename TI,
