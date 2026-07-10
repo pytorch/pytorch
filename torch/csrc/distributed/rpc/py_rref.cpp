@@ -11,7 +11,7 @@
 
 namespace torch::distributed::rpc {
 
-/////////////////////  Pickle/Unpickle Helplers ////////////////////////////
+/////////////////////  Pickle/Unpickle Helpers ////////////////////////////
 
 namespace {
 
@@ -110,7 +110,7 @@ TypePtr tryInferTypeWithTypeHint(
   }
 
   // Otherwise it's a pure pyobject, create the RRef
-  // that holds an IValue of an pyobject.
+  // that holds an IValue of a pyobject.
   return PyObjectType::get();
 }
 

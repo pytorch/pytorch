@@ -591,7 +591,11 @@ class TestScheduleCsv(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(sch[rank], sch_ref[rank])):
-                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+                self.assertEqual(
+                    a,
+                    b,
+                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
+                )
 
 
 instantiate_parametrized_tests(TestScheduleCsv)
@@ -663,7 +667,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -702,7 +706,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
@@ -737,7 +741,7 @@ class TestScheduleLowering(TestCase):
                 expected,
                 actual,
                 (
-                    f"Mismatch: expected action {expected} but found {actual}."
+                    lambda msg: f"{msg}\nMismatch: expected action {expected} but found {actual}."
                     f"\nWhole Schedule: {merged_sch}"
                 ),
             )
@@ -888,7 +892,7 @@ class TestScheduleLowering(TestCase):
                     expected,
                     actual,
                     (
-                        f"Mismatch on rank {rank} at position {i}."
+                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
                         f"\nExpected: {expected_comms_sch[rank]}"
                         f"\nActual:   {comms_sch[rank]}"
                     ),
@@ -1242,7 +1246,7 @@ class TestScheduleLowering(TestCase):
                     expected,
                     actual,
                     (
-                        f"Mismatch on rank {rank} at position {i}."
+                        lambda msg: f"{msg}\nMismatch on rank {rank} at position {i}."
                         f"\nExpected: {expected_sch[rank]}"
                         f"\nActual:   {result_sch[rank]}"
                     ),
@@ -1408,7 +1412,11 @@ class TestScheduleLowering(TestCase):
 
         for rank in sch_ref:
             for timestep, (a, b) in enumerate(zip(comms_sch[rank], sch_ref[rank])):
-                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+                self.assertEqual(
+                    a,
+                    b,
+                    lambda msg: f"{msg}\nMismatch at {timestep=}, {a=}, expected {b}",
+                )
 
         simulated_schedule = _simulate_comms_compute(
             comms_sch,
@@ -1763,11 +1771,17 @@ class TestBatchP2P(TestCase):
     """Tests that _batch_p2p dispatches homogeneous ops individually to avoid
     head-of-line blocking, while still batching mixed ops for deadlock avoidance."""
 
-    def _make_p2p_op(self, op, group_peer=0):
+    def _make_p2p_op(self, op, group_peer=0, group=None):
         p = MagicMock()
         p.op = op
         p.tensor = torch.zeros(1)
-        p.group = MagicMock()
+        # Ops in a single _batch_p2p call normally share one group; tests pass an
+        # explicit shared group. _batch_p2p splits a list spanning multiple groups
+        # into one batch per group (per-direction PP comms), covered separately.
+        p.group = group if group is not None else MagicMock()
+        # _batch_p2p groups/orders ops by group_name, so give each group a stable
+        # string name (identity-derived) rather than a MagicMock attribute.
+        p.group.group_name = f"pg_{id(p.group)}"
         p.tag = 0
         p.group_peer = group_peer
         return p
@@ -1779,7 +1793,10 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.isend")
     def test_all_isend_dispatched_individually(self, mock_isend, mock_batch):
         mock_isend.return_value = MagicMock()
-        ops = [self._make_p2p_op(mock_isend, group_peer=i) for i in range(3)]
+        group = MagicMock()
+        ops = [
+            self._make_p2p_op(mock_isend, group_peer=i, group=group) for i in range(3)
+        ]
 
         result = _batch_p2p(ops)
 
@@ -1795,7 +1812,10 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.irecv")
     def test_all_irecv_dispatched_individually(self, mock_irecv, mock_batch):
         mock_irecv.return_value = MagicMock()
-        ops = [self._make_p2p_op(mock_irecv, group_peer=i) for i in range(3)]
+        group = MagicMock()
+        ops = [
+            self._make_p2p_op(mock_irecv, group_peer=i, group=group) for i in range(3)
+        ]
 
         result = _batch_p2p(ops)
 
@@ -1812,9 +1832,10 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.isend")
     def test_mixed_ops_use_batch(self, mock_isend, mock_irecv, mock_batch):
         mock_batch.return_value = [MagicMock(), MagicMock()]
+        group = MagicMock()
         ops = [
-            self._make_p2p_op(mock_isend, group_peer=0),
-            self._make_p2p_op(mock_irecv, group_peer=1),
+            self._make_p2p_op(mock_isend, group_peer=0, group=group),
+            self._make_p2p_op(mock_irecv, group_peer=1, group=group),
         ]
 
         result = _batch_p2p(ops)
@@ -1823,6 +1844,31 @@ class TestBatchP2P(TestCase):
         mock_isend.assert_not_called()
         mock_irecv.assert_not_called()
         self.assertEqual(len(result), 2)
+
+    @patch("torch.distributed.pipelining.schedules.dist.batch_isend_irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.isend")
+    def test_mixed_ops_split_per_group(self, mock_isend, mock_irecv, mock_batch):
+        """A mixed op list spanning multiple groups (per-direction PP comms) is
+        issued as one batch_isend_irecv per group, so each direction runs on its
+        own communicator instead of sharing one FIFO."""
+        mock_batch.side_effect = lambda ops: [MagicMock() for _ in ops]
+        g_fwd, g_bwd = MagicMock(), MagicMock()
+        ops = [
+            self._make_p2p_op(mock_isend, group_peer=1, group=g_fwd),
+            self._make_p2p_op(mock_irecv, group_peer=1, group=g_fwd),
+            self._make_p2p_op(mock_isend, group_peer=2, group=g_bwd),
+            self._make_p2p_op(mock_irecv, group_peer=2, group=g_bwd),
+        ]
+
+        result = _batch_p2p(ops)
+
+        self.assertEqual(mock_batch.call_count, 2)
+        mock_batch.assert_any_call([ops[0], ops[1]])
+        mock_batch.assert_any_call([ops[2], ops[3]])
+        mock_isend.assert_not_called()
+        mock_irecv.assert_not_called()
+        self.assertEqual(len(result), 4)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
+import torch._inductor.comms as comms
 import torch.distributed as c10d
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
@@ -24,7 +25,9 @@ from torch._inductor.comms import (
     sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.dependencies import WeakDep
 from torch._inductor.fx_passes.bucketing import (
+    _insert_fn_trace_before_node,
     _trace as bucketing_trace,
     all_gather_merge_fn_to_trace_custom_ops,
     is_all_gather_into_tensor,
@@ -33,6 +36,7 @@ from torch._inductor.fx_passes.bucketing import (
     is_reduce_scatter_tensor,
     reduce_scatter_merge_fn_to_trace_custom_ops,
 )
+from torch._inductor.memory import SNodeMemory
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
@@ -63,6 +67,29 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+# Opaque custom op so torch.compile traces the coalescing manager into the graph
+# (Dynamo otherwise graph-breaks on it) and reduce-overhead captures the
+# coalesced collective into a cudagraph. Used by
+# TestCollectivesMultiProc.test_coalescing_manager_reduce_overhead.
+@torch.library.custom_op(
+    "test_inductor_collectives::coalesced_all_gather", mutates_args=()
+)
+def _coalesced_all_gather(
+    inp: torch.Tensor, world_size: int, group_name: str
+) -> torch.Tensor:
+    group = c10d.distributed_c10d._resolve_process_group(group_name)
+    out = inp.new_empty(inp.numel() * world_size)
+    with c10d._coalescing_manager(group=group, device=inp.device, async_ops=True) as cm:
+        c10d.all_gather_single(out, inp)
+    cm.wait()
+    return out
+
+
+@_coalesced_all_gather.register_fake
+def _(inp, world_size, group_name):
+    return inp.new_empty(inp.numel() * world_size)
 
 
 class TestBucketingTrace(torch._dynamo.test_case.TestCase):
@@ -157,6 +184,99 @@ class TestBucketingTrace(torch._dynamo.test_case.TestCase):
         ]
         self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
         self.assertTrue(any("(u0//4)" in shape for shape in symbolic_shapes))
+
+    def test_replacement_updates_layout_dependent_user_metadata(self):
+        graph = torch.fx.Graph()
+        base = graph.placeholder("base")
+        original = graph.call_function(
+            torch.ops.aten.as_strided.default,
+            args=(base, [2, 4], [4, 1], 0),
+        )
+        transposed = graph.call_function(
+            torch.ops.aten.transpose.int,
+            args=(original, 0, 1),
+        )
+        graph.output(transposed)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        with fake_mode:
+            base_val = torch.empty(32)
+            original_val = torch.as_strided(base_val, (2, 4), (4, 1), 0)
+            transposed_val = original_val.transpose(0, 1)
+        base.meta["val"] = base_val
+        original.meta["val"] = original_val
+        transposed.meta["val"] = transposed_val
+
+        def replacement_fn(x):
+            return [torch.as_strided(x, (2, 4), (8, 1), 0)]
+
+        _insert_fn_trace_before_node(
+            gm.graph,
+            replacement_fn,
+            (base_val,),
+            original,
+            [base],
+            [original],
+        )
+
+        self.assertEqual(transposed.meta["val"].stride(), (1, 8))
+
+
+class TestSimpleOverlap(torch._dynamo.test_case.TestCase):
+    def test_preserves_fake_dep_ordering(self):
+        class FakeBuffer:
+            def __init__(self, name):
+                self.name = name
+
+            def get_name(self):
+                return self.name
+
+        class FakeSNode:
+            def __init__(self, name, kind, outputs, deps=()):
+                self.name = name
+                self.kind = kind
+                self.outputs = [FakeBuffer(output) for output in outputs]
+                self.unmet_dependencies = deps
+
+            def get_outputs(self):
+                return self.outputs
+
+            def get_name(self):
+                return self.name
+
+        sync_coll = FakeSNode("sync_coll", "sync_collective", ["sync_out"])
+        compute = FakeSNode("compute", "compute", ["compute_out"])
+        async_coll = FakeSNode(
+            "async_coll",
+            "async_collective",
+            ["async_out"],
+            [WeakDep("sync_out", mutating_buf="async_out", is_fake=True)],
+        )
+
+        def memory_tracking(snodes):
+            return (
+                0,
+                dict.fromkeys(snodes, (0, 0)),
+                {snode: SNodeMemory(0, 0) for snode in snodes},
+                {},
+                {},
+                {},
+            )
+
+        with (
+            mock.patch.object(comms, "_initialize_memory_tracking", memory_tracking),
+            mock.patch.object(
+                comms,
+                "contains_async_collective",
+                lambda snode: snode.kind == "async_collective",
+            ),
+            mock.patch.object(comms, "contains_wait", lambda snode: False),
+        ):
+            self.assertEqual(
+                comms.simple_overlap([sync_coll, compute, async_coll]),
+                [sync_coll, async_coll, compute],
+            )
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -290,6 +410,41 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 for _ in range(3):
                     compiled_out = compiled_func(x)
                     self.assertEqual(golden_out, compiled_out)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_manager_reduce_overhead(self):
+        # An async coalescing manager around a fast-path collective used to
+        # stash the gathered tensors on the discarded per-call Work, so
+        # cm.wait() never freed them and reduce-overhead cudagraph capture
+        # failed its "not tracked as outputs" pool check. The gathered buffer is
+        # an intermediate here (consumed by + 1), so the leak is not masked by
+        # being a graph output.
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+
+            def f(inp):
+                gathered = torch.ops.test_inductor_collectives.coalesced_all_gather(
+                    inp, self.world_size, group_name
+                )
+                return gathered + 1
+
+            compiled = torch.compile(f, mode="reduce-overhead")
+            inp = torch.full((16,), self.rank + 1.0, device=self.device)
+            expected = (
+                torch.cat(
+                    [
+                        torch.full((16,), r + 1.0, device=self.device)
+                        for r in range(self.world_size)
+                    ]
+                )
+                + 1
+            )
+            for _ in range(3):  # warmup iters before cudagraph capture kicks in
+                self.assertEqual(compiled(inp), expected)
+            torch.cuda.synchronize(device=self.device)
 
     def test_c10d_functional_tagged_pt2_compliant(self):
         op = torch.ops._c10d_functional.all_reduce.default
@@ -515,7 +670,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             def forward(self, x, world_size, tag, ranks, group_size):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
-                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                res = _functional_collectives.all_gather_single(y, 0, ranks, tag)
                 out = torch.cat(torch.chunk(res, world_size, dim=0), dim=last_dim)
                 return out
 
@@ -554,7 +709,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
                 y = y.transpose_(0, last_dim).contiguous()
-                _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                _functional_collectives.all_gather_single(y, 0, ranks, tag)
                 out = y.transpose_(0, last_dim).contiguous()
                 return out
 
@@ -970,7 +1125,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(debug=True)
+    @torch._inductor.config.patch(
+        {
+            "debug": True,
+            "aten_distributed_optimizations.enable_simple_overlap": False,
+        }
+    )
     def test_inductor_steal_buffer(self):
         """
         it's ok and optimal if inductor allreduce mutates the buffer of an intermediate
@@ -1004,6 +1164,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.enable_simple_overlap": False}
+    )
     def _test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
@@ -1073,7 +1236,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor(self):
         def func(inp):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
+            ar = _functional_collectives.all_gather_single(inp, 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -1090,7 +1253,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor_pg(self):
         def func(inp, *, pg):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, pg)
+            ar = _functional_collectives.all_gather_single(inp, 0, pg)
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -1107,7 +1270,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather(self):
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 out,
                 inp,
                 pg,
@@ -1167,7 +1330,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 output_tensor=out,
                 input_tensor=inp,
                 group=pg,
@@ -1199,7 +1362,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_reduce_scatter(self):
         def func(inp, out, *, pg):
-            torch.distributed.reduce_scatter_tensor(
+            torch.distributed.reduce_scatter_single(
                 out,
                 inp,
                 group=pg,
@@ -1385,7 +1548,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         def func(inp, out, *, pg):
             # user explicitly set the attribute `async_op` to False,
             # there should be no graph break
-            torch.distributed.reduce_scatter_tensor(out, inp, group=pg, async_op=False)
+            torch.distributed.reduce_scatter_single(out, inp, group=pg, async_op=False)
 
         local_size = [4, 4]
         # single-proc test
@@ -1409,7 +1572,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_graphbreaks_unsupported_async_op(self):
         def func(inp, out, *, pg):
-            work = torch.distributed.reduce_scatter_tensor(
+            work = torch.distributed.reduce_scatter_single(
                 out, inp, group=pg, async_op=True
             )
             work.wait()
@@ -1458,7 +1621,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_reduce_scatter_tensor(self):
         def func(inp):
-            ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
+            ar = _functional_collectives.reduce_scatter_single(inp, "sum", 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -1823,7 +1986,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(
             num_triton_kernels,
             1,
-            f"Expected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
+            lambda msg: f"{msg}\nExpected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -3503,6 +3666,61 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             torch.allclose(eager_out, compiled_out, rtol=1e-3, atol=1e-3),
             "Mismatch between eager and compiled output.",
         )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_benchmark_collective_with_symint_args(self):
+        """
+        Test that collective benchmarking handles SymInt non-tensor arguments.
+
+        When dynamic=True, ops like all_to_all_single receive SymInt split_sizes
+        in the FX graph. The benchmark path must convert these to concrete ints
+        before calling the collective.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(group_name, group)
+        group_size = group.size()
+
+        HIDDEN = 64
+
+        def func(x, w, group_size, group_name):
+            seq = x.shape[0]
+            pad = (-seq) % group_size
+            x_padded = torch.nn.functional.pad(x, (0, 0, 0, pad))
+            chunk = x_padded.shape[0] // group_size
+            split_sizes = [chunk] * group_size
+            gathered = torch.ops._c10d_functional.all_to_all_single(
+                x_padded, split_sizes, split_sizes, group_name
+            )
+            gathered = torch.ops.c10d_functional.wait_tensor(gathered)
+            return (gathered @ w).sum()
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def _pass(gm):
+            return schedule_overlap_bucketing(
+                gm.owning_module,
+                collective_bucketing=True,
+                insert_overlap_deps=True,
+                collective_estimator="benchmark",
+            )
+
+        torch._inductor.config.post_grad_custom_post_pass = _pass
+
+        w = torch.randn(HIDDEN, HIDDEN, device=self.device)
+        compiled = torch.compile(func, backend="inductor", fullgraph=True, dynamic=True)
+
+        for n in (7, 11):
+            x = torch.randn(n, HIDDEN, device=self.device)
+            compiled(x, w, group_size, group_name)
 
 
 class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):

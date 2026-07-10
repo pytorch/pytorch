@@ -18,7 +18,7 @@ static std::optional<std::string> maybeConvertToString(const py::object& obj) {
   }
   std::stringstream ss;
   ss << py::str(obj);
-  return ss.str();
+  return std::move(ss).str();
 }
 
 struct SourceRangeFactory {

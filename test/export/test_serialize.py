@@ -52,7 +52,7 @@ from torch._export.serde.serialize import (
     SerializeError,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch._library.opaque_object import get_opaque_type_name, register_opaque_type
+from torch._library.opaque_object import get_opaque_type_name, register_custom_class
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
@@ -71,7 +71,7 @@ from torch.testing._internal.torchbind_impls import init_torchbind_implementatio
 
 
 @dataclass(frozen=True)
-class _OpaqueConfig(torch._opaque_base.OpaqueBase):
+class _OpaqueConfig(torch._custom_class_base.CustomClassBase):
     scale: int
 
     def __fx_repr__(self):
@@ -81,16 +81,16 @@ class _OpaqueConfig(torch._opaque_base.OpaqueBase):
         )
 
 
-register_opaque_type(_OpaqueConfig, typ="value")
+register_custom_class(_OpaqueConfig, typ="constant")
 
 
-class _OpaqueEngine(torch._opaque_base.OpaqueBase):
+class _OpaqueEngine(torch._custom_class_base.CustomClassBase):
     def __init__(self, multiplier: int):
         super().__init__()
         self.multiplier = multiplier
 
 
-register_opaque_type(_OpaqueEngine, typ="reference")
+register_custom_class(_OpaqueEngine, typ="symbolic")
 
 
 def get_filtered_export_db_tests():
@@ -2309,6 +2309,108 @@ class TestSaveLoad(TestCase):
         self.assertEqual(unf.int_buffer.dtype, torch.uint8)
         self.assertEqual(unf.int_buffer2.dtype, torch.uint8)
         self.assertEqual(unf.float_buffer.dtype, torch.float32)
+
+    def test_save_load_multiple_dtypes(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p_f32 = torch.nn.Parameter(torch.randn(4, 4, dtype=torch.float32))
+                self.p_f16 = torch.nn.Parameter(
+                    torch.randn(4, 4, dtype=torch.float16), requires_grad=False
+                )
+                self.register_buffer("b_i8", torch.ones(4, 4, dtype=torch.int8))
+                self.register_buffer("b_f64", torch.randn(4, 4, dtype=torch.float64))
+
+            def forward(self, x):
+                return (
+                    x
+                    + self.p_f32
+                    + self.p_f16.float()
+                    + self.b_i8.float()
+                    + self.b_f64.float()
+                )
+
+        m = M()
+        inp = (torch.randn(4, 4),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
+        unf = unflatten(loaded_ep)
+        self.assertEqual(unf.p_f32.dtype, torch.float32)
+        self.assertEqual(unf.p_f16.dtype, torch.float16)
+        self.assertEqual(unf.b_i8.dtype, torch.int8)
+        self.assertEqual(unf.b_f64.dtype, torch.float64)
+
+    def test_save_load_requires_grad_preserved(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(8, 8))
+                self.frozen = torch.nn.Parameter(torch.randn(8, 8), requires_grad=False)
+                self.register_buffer("buf", torch.randn(8, 8))
+
+            def forward(self, x):
+                return x @ self.w + self.frozen + self.buf
+
+        m = M()
+        inp = (torch.randn(1, 8),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
+        loaded_sd = loaded_ep.state_dict
+        self.assertTrue(loaded_sd["w"].requires_grad)
+        self.assertFalse(loaded_sd["frozen"].requires_grad)
+        self.assertFalse(loaded_sd["buf"].requires_grad)
+
+    def test_save_load_large_tensor(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1024, 1024)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M()
+        inp = (torch.randn(1, 1024),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    def test_save_load_cuda_tensor(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().cuda()
+        inp = (torch.randn(1, 64, device="cuda"),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        loaded_sd = loaded_ep.state_dict
+        for name, param in loaded_sd.items():
+            self.assertEqual(
+                param.device.type, "cuda", lambda msg: f"{msg}\n{name} not on cuda"
+            )
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
 
     def test_from_node_metadata_serialization(self):
         """Test that from_node metadata is properly serialized and deserialized."""
