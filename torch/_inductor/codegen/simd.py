@@ -49,7 +49,7 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties
+from ..runtime.hints import DeviceProperties, InductorMeta
 from ..runtime.runtime_utils import (
     green_text,
     last_power_of_2,
@@ -81,6 +81,9 @@ from .simd_kernel_features import (
     NodeScheduleMarker,
     SIMDKernelFeatures,
 )
+
+
+_MAX_INLINE_PRECOMPUTABLE_SIZE_EXPR_OPS = 64
 
 
 if TYPE_CHECKING:
@@ -961,7 +964,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return_getters_groups.append(return_getters)
 
         if not all(V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining):
-            raise AssertionError(f"failed to set ranges {remaining} {lengths}")
+            # Non-unit leftover extents mean the node's iteration space does not
+            # tile onto the kernel groups -- e.g. fusing an epilogue whose row
+            # count is a strict sub-multiple of a template's tiling ([s, N] into
+            # [K*s, N]). Raise CantSplit (consistent with the divisibility exits
+            # in add_range above) so callers like is_compatible and
+            # Scheduler.speedup_by_fusion skip this fusion and fall back to
+            # unfused codegen instead of hard-failing the whole compile.
+            raise CantSplit(remaining, lengths)
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
@@ -1120,6 +1130,33 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return f"[{', '.join(map(self.index_to_str, index))}]"
         return self.kexpr(self.rename_indexing(index))  # type: ignore[call-arg]
 
+    @staticmethod
+    def _should_precompute_size_expr(index: sympy.Expr) -> bool:
+        if (
+            isinstance(index, (int, sympy.Symbol, sympy.Number))
+            or index.is_number
+            or index.is_symbol
+            or index.is_integer is not True
+        ):
+            return False
+
+        symbols = index.free_symbols
+        return (
+            bool(symbols)
+            and all(
+                symbol_is_type(
+                    s,
+                    (
+                        SymT.SIZE,
+                        SymT.UNBACKED_INT,
+                        SymT.PRECOMPUTED_SIZE,
+                    ),
+                )
+                for s in symbols
+            )
+            and sympy.count_ops(index) > _MAX_INLINE_PRECOMPUTABLE_SIZE_EXPR_OPS
+        )
+
     def prepare_indexing(
         self,
         index: sympy.Expr,
@@ -1167,6 +1204,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         simp_index = (
             simp_index if not isinstance(simp_index, Identity) else simp_index.args[0]
         )
+
+        if self._should_precompute_size_expr(simp_index):
+            simp_index = V.graph.sizevars.lookup_precomputed_size(simp_index)
 
         return self.codegen_indexing(simp_index)
 
@@ -2114,7 +2154,7 @@ class SIMDScheduling(BaseScheduling):
                     # prologue fusion input sizes differ from output group
                     # fuse so long as this node matches the group of existing prologue nodes
                     for node in node2.get_nodes():
-                        # dont need to check epilogue nodes for prologue fusion, break after template
+                        # don't need to check epilogue nodes for prologue fusion, break after template
                         if node.is_template():
                             break
                         # we would have already restricted prologue from fusing if it had multiple
@@ -3489,7 +3529,7 @@ class SIMDScheduling(BaseScheduling):
                 return None
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
+        V.graph.wrapper_code.generate_debug_sync(V.graph.wrapper_code)
 
     def _codegen_standalone_kernel(
         self, node_info: NodeInfo, only_gen_src_code: bool
@@ -3539,10 +3579,13 @@ class SIMDScheduling(BaseScheduling):
             for prefix, numel in kernel.numels.items()
             if not prefix_is_reduction(prefix) or kernel.inside_reduction
         }
-        inductor_meta = {
-            **kernel.inductor_meta_common(),
-            **kernel.inductor_meta_per_kernel(),
-        }
+        inductor_meta = cast(
+            "InductorMeta",
+            {
+                **kernel.inductor_meta_common(),
+                **kernel.inductor_meta_per_kernel(),
+            },
+        )
         if kernel.persistent_reduction:
             configs = persistent_reduction(
                 size_hints,
@@ -3732,7 +3775,7 @@ class SIMDScheduling(BaseScheduling):
                         configs, probe_kernel = self._probe_subkernel_heuristic(
                             node_schedule_map[pn]
                         )
-                        if torch.version.hip:
+                        if torch.version.hip or torch.xpu.is_available():
                             fuse_ok = configs and not probe_kernel.autotune_hints
                         else:
                             fuse_ok = configs and len(configs) <= 2
@@ -4333,7 +4376,7 @@ class SIMDScheduling(BaseScheduling):
 
         default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
 
-        # add a slight penalty for longer tilings that dont increase score much,
+        # add a slight penalty for longer tilings that don't increase score much,
         # and are poor sizes
         bad_size_additional_tiling_penalty = 1.025
         good_size_tiling_penalty = 1.005
@@ -4354,7 +4397,7 @@ class SIMDScheduling(BaseScheduling):
 
             return -(t[0].score + uncoalesced_penalty) * score_factor
 
-        # apply penalty for longer tilings that dont increase score much
+        # apply penalty for longer tilings that don't increase score much
         for cand, tiling_score in sorted(tilings, key=score_mod):
             if (
                 cls.tiling_is_compatible(
@@ -4362,7 +4405,7 @@ class SIMDScheduling(BaseScheduling):
                 )
                 or cand.tiling == default_tiling
             ):
-                # we always include default reduction numel == 1, dont include
+                # we always include default reduction numel == 1, don't include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
                 if tiling_len > get_max_tiles(default=3):
                     perf_hint_log.info(

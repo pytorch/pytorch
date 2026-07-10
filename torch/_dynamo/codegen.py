@@ -47,7 +47,7 @@ from .variables.functions import (
     LocalGeneratorObjectVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.script_object import TorchScriptObjectVariable
+from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -349,7 +349,7 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
-                TorchScriptObjectVariable,
+                CustomClassObjectVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)
@@ -521,6 +521,19 @@ class PyCodegen:
 
     def call_method(self, nargs: int) -> None:
         self.extend_output(create_call_method(nargs))
+
+    def create_list_append(self) -> list[Instruction]:
+        # Append TOS to the list at TOS-1, leaving the list on the stack
+        # (same stack effect as LIST_APPEND with arg=1).
+        #
+        # The bare LIST_APPEND opcode does not lock the list and so requires
+        # the target be uniquely owned (refcnt == 1) on free-threaded builds.
+        # Dynamo can't enforce this, so instead use LIST_EXTEND, which does
+        # lock
+        return [
+            create_instruction("BUILD_LIST", arg=1),
+            create_instruction("LIST_EXTEND", arg=1),
+        ]
 
     def create_load_attr(self, name: str) -> Instruction:
         if name not in self.code_options["co_names"]:

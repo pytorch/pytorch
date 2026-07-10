@@ -29,9 +29,8 @@ void lstm_onednn_xpu(
   TORCH_INTERNAL_ASSERT(
       !train, "oneDNN LSTM on XPU only supports inference mode");
   TORCH_INTERNAL_ASSERT(
-      input.scalar_type() == kFloat || input.scalar_type() == kHalf ||
-          input.scalar_type() == kBFloat16,
-      "oneDNN LSTM on XPU only supports float, half, and bfloat16");
+      input.scalar_type() == kFloat || input.scalar_type() == kHalf,
+      "oneDNN LSTM on XPU only supports float and half");
 
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
@@ -128,6 +127,11 @@ void lstm_onednn_xpu(
 
     dnnl::primitive_attr pattr;
     pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+#if ONEDNN_SUPPORT_DETERMINISTIC
+    if (at::globalContext().deterministicAlgorithms() ||
+        at::globalContext().deterministicMkldnn())
+      pattr.set_deterministic(true);
+#endif
 
     auto pd = dnnl::lstm_forward::primitive_desc(
         engine,

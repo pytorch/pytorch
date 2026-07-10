@@ -107,12 +107,14 @@ from .higher_order_ops import (
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
+    ChainVariable,
     CountIteratorVariable,
     FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
     RepeatIteratorVariable,
+    ZipLongestVariable,
     ZipVariable,
 )
 from .lazy import LazyConstantVariable, LazyVariableTracker
@@ -129,6 +131,7 @@ from .lists import (
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
+    CallMethodVariable,
     CellVariable,
     DeletedVariable,
     ExceptionVariable,
@@ -189,6 +192,7 @@ from .user_defined import (
     StructSequenceVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
+    UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedExceptionObjectVariable,
@@ -207,12 +211,14 @@ __all__ = [
     "BackwardHookVariable",
     "BaseBuiltinVariable",
     "BaseListVariable",
+    "CallMethodVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
     "CellVariable",
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
+    "ChainVariable",
     "CountIteratorVariable",
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
@@ -284,4 +290,5 @@ __all__ = [
     "WithEnterFunctionVariable",
     "WithExitFunctionVariable",
     "XPUDeviceVariable",
+    "ZipLongestVariable",
 ]

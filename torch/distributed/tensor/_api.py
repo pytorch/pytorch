@@ -14,6 +14,7 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import (
     _mesh_resources,
     _register_distributed_opaque_types,
@@ -47,6 +48,8 @@ __all__ = [
     "ones",
     "empty",
     "full",
+    "linspace",
+    "logspace",
     "rand",
     "randn",
     "zeros",
@@ -81,7 +84,7 @@ def _normalize_placements_for_grad(
 # together with torch.Tensor within the autograd engine. This
 # allows DTensor to only exist on part of the module hierarchy.
 #
-# As an example, we have the a module that consists of submodules
+# As an example, we have a module that consists of submodules
 # A, B, and C, the execution flow would be like:
 #  input(torch.Tensor) -> Module A -> Module B -> Module C -> output (torch.Tensor)
 #
@@ -105,6 +108,7 @@ class _ToTorchTensor(torch.autograd.Function):
         ctx.grad_placements = grad_placements
         ctx.set_materialize_grads(False)
         local_tensor = input._local_tensor
+        ctx.local_tensor_stride = local_tensor.stride()
 
         # We need to return a fresh Tensor object there as autograd metadata
         # will be inplaced into it. So we don't want to pollute the Tensor
@@ -121,25 +125,78 @@ class _ToTorchTensor(torch.autograd.Function):
         grad_placements = ctx.grad_placements
         dtensor_meta = dtensor_spec.tensor_meta
 
-        _, tensor_stride = compute_global_tensor_info(
-            grad_output, mesh, dtensor_spec.placements
-        )
-        tensor_stride = tuple(tensor_stride)
-
         # user should provide grad_placements as there's no guarantee on input gradient placement
         # if grad_placement is None, we provide default placement
         if grad_placements is None:
             # See DTensor.from_local docstring for gradient placement guarantees
             grad_placements = _normalize_placements_for_grad(dtensor_spec.placements)
 
+        from torch._prims_common import check_contiguous_sizes_strides
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        def strides_provably_match(stride, other):
+            return len(stride) == len(other) and all(
+                guard_or_false(a == b) for a, b in zip(stride, other)
+            )
+
+        def strides_provably_differ(stride, other):
+            return len(stride) != len(other) or any(
+                guard_or_false(a != b) for a, b in zip(stride, other)
+            )
+
+        def strides_are_contiguous_for_shape(shape, stride, other):
+            if not (len(shape) == len(stride) == len(other)):
+                return False
+            return check_contiguous_sizes_strides(
+                shape, stride, false_if_dde=True
+            ) and check_contiguous_sizes_strides(shape, other, false_if_dde=True)
+
+        def strides_may_match(shape, stride, other):
+            return (
+                strides_provably_match(stride, other)
+                or strides_are_contiguous_for_shape(shape, stride, other)
+                or not strides_provably_differ(stride, other)
+            )
+
+        def check_stride_matches(shape, stride, other):
+            if strides_provably_match(
+                stride, other
+            ) or strides_are_contiguous_for_shape(shape, stride, other):
+                return
+            for a, b in zip(stride, other):
+                torch._check(
+                    a == b,
+                    lambda: (
+                        f"Expected matching DTensor local strides, got {stride} and {other}"
+                    ),
+                )
+
+        # Same-placement to_local() backward preserves the forward DTensor
+        # layout. With symbolic shapes, the local grad stride can be equivalent
+        # to the saved stride while carrying different symbol provenance.
         if (
-            tensor_stride == dtensor_meta.stride
-            and grad_placements == dtensor_spec.placements
+            grad_placements == dtensor_spec.placements
+            and strides_may_match(
+                grad_output.shape, grad_output.stride(), ctx.local_tensor_stride
+            )
+            and strides_may_match(
+                dtensor_meta.shape, ctx.local_tensor_stride, dtensor_meta.stride
+            )
         ):
+            check_stride_matches(
+                grad_output.shape, grad_output.stride(), ctx.local_tensor_stride
+            )
+            check_stride_matches(
+                dtensor_meta.shape, ctx.local_tensor_stride, dtensor_meta.stride
+            )
             # Avoid actual sharing of specs in case they're modified during (e.g.)
             # sharding propagation.
             grad_spec = copy.copy(dtensor_spec)
         else:
+            _, tensor_stride = compute_global_tensor_info(
+                grad_output, mesh, dtensor_spec.placements
+            )
+            tensor_stride = tuple(tensor_stride)
             grad_spec = DTensorSpec(
                 mesh,
                 grad_placements,
@@ -1074,34 +1131,122 @@ def distribute_module(
     output_fn: Callable[[nn.Module, Any, DeviceMesh], None] | None = None,
 ) -> nn.Module:
     """
-    This function expose three functions to control the parameters/inputs/outputs of the module:
+    Convert a module's parameters/buffers to :class:`DTensor` s, and optionally
+    convert its inputs/outputs at runtime, using the three user-provided callbacks.
 
-    1. To perform sharding on the module before runtime execution by specifying the
-    ``partition_fn`` (i.e. allow user to convert Module parameters to :class:`DTensor`
-    parameters according to the `partition_fn` specified).
-    2. To control the inputs or outputs of the module during runtime execution by
-    specifying the ``input_fn`` and ``output_fn``. (i.e. convert the input to
-    :class:`DTensor`, convert the output back to ``torch.Tensor``)
+    The behavior of the three callbacks:
+
+    1. ``partition_fn`` shards the module's parameters/buffers *before* runtime
+       execution (i.e. it converts plain ``torch.Tensor`` parameters into
+       :class:`DTensor` parameters). Any parameter/buffer not converted by
+       ``partition_fn`` is replicated across ``device_mesh`` afterwards. If
+       ``partition_fn`` is ``None``, *all* parameters/buffers are replicated.
+    2. ``input_fn`` / ``output_fn`` convert the module's inputs/outputs *during*
+       runtime execution (e.g. convert plain tensor inputs into :class:`DTensor`,
+       or convert :class:`DTensor` outputs back into plain ``torch.Tensor``).
 
     Args:
         module (:class:`nn.Module`): user module to be partitioned.
-        device_mesh (:class:`DeviceMesh`): the device mesh to place the module.
-        partition_fn (Callable): the function to partition parameters (i.e. shard certain
-            parameters across the ``device_mesh``). If ``partition_fn`` is not specified,
-            by default we replicate all module parameters of ``module`` across the mesh.
-        input_fn (Callable): specify the input distribution, i.e. could control how the
-            input of the module is sharded. ``input_fn`` will be installed as a module
-            ``forward_pre_hook`` (pre forward hook).
-        output_fn (Callable): specify the output distribution, i.e. could control how the
-            output is sharded, or convert it back to torch.Tensor. ``output_fn`` will be
-            installed as a module ``forward_hook`` (post forward hook).
+        device_mesh (:class:`DeviceMesh`): the device mesh to place the module. If
+            ``None``, the current mesh from the ambient mesh context is used.
+        partition_fn (Callable): a function with signature
+            ``partition_fn(name: str, module: nn.Module, device_mesh: DeviceMesh) -> None``.
+            It is called once for *every* submodule (including ``module`` itself),
+            where ``name`` is the submodule's fully-qualified name (``""`` for the
+            top-level module) as returned by :meth:`nn.Module.named_modules`. The
+            function is expected to mutate ``module`` in place, typically by calling
+            :func:`distribute_tensor` and :meth:`register_parameter` to replace
+            selected parameters with :class:`DTensor` parameters. Its return value
+            is ignored. If not specified, all module parameters are replicated
+            across ``device_mesh``.
+        input_fn (Callable): a function with signature
+            ``input_fn(module: nn.Module, inputs: Inputs, device_mesh: DeviceMesh) -> Inputs``,
+            where ``Inputs`` is the tuple of positional arguments to ``forward`` (one
+            entry per positional argument, e.g. ``(x,)`` for ``forward(self, x)``;
+            keyword arguments are not forwarded to ``input_fn``). Installed on the
+            top-level ``module`` as a ``forward_pre_hook``, it returns the new
+            argument tuple -- the same structure as ``inputs``, typically with each
+            ``torch.Tensor`` entry converted to a :class:`DTensor` -- which replaces
+            ``inputs`` for the actual ``forward`` call.
+        output_fn (Callable): a function with signature
+            ``output_fn(module: nn.Module, outputs: Outputs, device_mesh: DeviceMesh) -> Outputs``,
+            where ``Outputs`` is the return type of ``module.forward`` (a single
+            tensor, or any nested structure of tensors such as a tuple/dict), with the
+            tensors typically being :class:`DTensor` s. Installed on the top-level
+            ``module`` as a ``forward_hook``, it returns the replacement output of the
+            same structure -- typically with each :class:`DTensor` converted back to a
+            plain ``torch.Tensor`` via :meth:`DTensor.to_local` or
+            :meth:`DTensor.full_tensor`, or redistributed to different placements.
 
     Returns:
-        A module that contains parameters/buffers that are all ``DTensor`` s.
+        A module whose parameters/buffers are all :class:`DTensor` s (the same
+        ``module`` object, mutated in place).
+
+    .. warning::
+        ``input_fn`` and ``output_fn`` previously took two arguments
+        ``(inputs, device_mesh)`` / ``(outputs, device_mesh)``. That form is
+        deprecated; use the three-argument form documented above.
+
+    Example::
+
+        import torch.nn as nn
+        from torch.distributed.tensor import (
+            DTensor,
+            Replicate,
+            Shard,
+            distribute_module,
+            distribute_tensor,
+            init_device_mesh,
+        )
+
+
+        class MyModule(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fc = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.fc(x)
+
+
+        mesh = init_device_mesh("cuda", (4,))
+
+
+        def shard_params(name, mod, mesh):
+            if isinstance(mod, nn.Linear):
+                for pname, param in mod.named_parameters(recurse=False):
+                    mod.register_parameter(
+                        pname, nn.Parameter(distribute_tensor(param, mesh, [Shard(0)]))
+                    )
+
+
+        # Replicate the input across the mesh before forward.
+        def to_replicated(mod, inputs, mesh):
+            return tuple(
+                distribute_tensor(x, mesh, [Replicate()])
+                if isinstance(x, torch.Tensor)
+                else x
+                for x in inputs
+            )
+
+
+        # Convert the DTensor output back to a plain torch.Tensor after forward.
+        def to_local(mod, outputs, mesh):
+            return outputs.full_tensor() if isinstance(outputs, DTensor) else outputs
+
+
+        sharded = distribute_module(
+            MyModule(),
+            mesh,
+            partition_fn=shard_params,
+            input_fn=to_replicated,
+            output_fn=to_local,
+        )
 
     .. note::
-        When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_module``
-        return nn.Module with PyTorch/XLA SPMD annotated parameters. See
+        When initializing the ``DeviceMesh`` with the ``xla`` device_type,
+        ``distribute_module`` returns an ``nn.Module`` with PyTorch/XLA SPMD
+        annotated parameters. See
         `this issue <https://github.com/pytorch/pytorch/issues/92909>`__
         for more details. The XLA integration is experimental and subject to change.
 
@@ -1224,6 +1369,36 @@ def distribute_module(
 # and placements to create a proper DTensor.
 
 
+@maybe_run_for_local_tensor
+def _linspace_local_tensor(
+    init_op, start, end, total_steps, local_steps, offset, **kwargs
+):
+    local_start = start
+    local_end = end
+    if local_steps > 0 and total_steps > 1:
+        step = (end - start) / (total_steps - 1)
+        local_start = start + offset * step
+        local_end = local_start + step * (local_steps - 1)
+    elif local_steps > 0:
+        local_end = start
+    return init_op(local_start, local_end, steps=local_steps, **kwargs)
+
+
+@maybe_run_for_local_tensor
+def _logspace_local_tensor(
+    init_op, start, end, base, total_steps, local_steps, offset, **kwargs
+):
+    local_start = start
+    local_end = end
+    if local_steps > 0 and total_steps > 1:
+        step = (end - start) / (total_steps - 1)
+        local_start = start + offset * step
+        local_end = local_start + step * (local_steps - 1)
+    elif local_steps > 0:
+        local_end = start
+    return init_op(local_start, local_end, steps=local_steps, base=base, **kwargs)
+
+
 def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     init_op,
     size: torch.Size,
@@ -1247,14 +1422,43 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     torch_stride = torch._prims_common.make_contiguous_strides_for(size)
 
     # get local tensor shape
-    local_shape, _ = compute_local_shape_and_global_offset(
-        size, device_mesh, placements, skip_offset=True
+    local_shape, global_offset = compute_local_shape_and_global_offset(
+        size,
+        device_mesh,
+        placements,
+        skip_offset=init_op not in (torch.linspace, torch.logspace),
     )
 
     # initialize the local tensor
     if init_op is torch.full:
-        fill_value = kwargs.pop("fill_value", 0)
+        fill_value = kwargs.pop("fill_value")
         local_tensor = init_op(local_shape, fill_value, **kwargs)
+    elif init_op is torch.linspace:
+        start = kwargs.pop("start")
+        end = kwargs.pop("end")
+        local_tensor = _linspace_local_tensor(
+            init_op,
+            start,
+            end,
+            size[0],
+            local_shape[0],
+            global_offset[0],
+            **kwargs,
+        )
+    elif init_op is torch.logspace:
+        start = kwargs.pop("start")
+        end = kwargs.pop("end")
+        base = kwargs.pop("base")
+        local_tensor = _logspace_local_tensor(
+            init_op,
+            start,
+            end,
+            base,
+            size[0],
+            local_shape[0],
+            global_offset[0],
+            **kwargs,
+        )
     elif init_op is torch.rand or init_op is torch.randn:
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
@@ -1417,6 +1621,148 @@ def full(  # type: ignore[no-untyped-def]
         torch.full,
         torch_size,
         fill_value=fill_value,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        device_mesh=device_mesh,
+        placements=placements,
+    )
+
+
+def linspace(
+    start,
+    end,
+    steps,
+    *,
+    dtype: torch.dtype | None = None,
+    layout: torch.layout = torch.strided,
+    requires_grad: bool = False,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
+) -> DTensor:
+    """
+    Returns a :class:`DTensor` of size ``steps`` whose values are evenly spaced from
+    `start` to `end`.
+
+    Args:
+        start (float or :class:`DTensor`): the starting value for the set of points. If
+           :class:`DTensor`, it must be 0-dimensional
+        end (float or :class:`DTensor`): the ending value for the set of points. If
+           :class:`DTensor`, it must be 0-dimensional
+        steps (int): size of the constructed :class:`DTensor`
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the data type to perform the computation
+            in. Default: if ``None``, uses the global default dtype
+            (see :func:`torch.set_default_dtype`) when both `start` and `end` are real,
+            and corresponding complex dtype when either is complex.
+        layout (:class:`torch.layout`, optional): the desired layout of returned
+            :class:`DTensor`. Default: ``torch.strided``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned :class:`DTensor`. Default: ``False``.
+        device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``
+
+    Returns:
+        A :class:`DTensor` object on each rank
+    """
+    if placements is not None and any(isinstance(p, _StridedShard) for p in placements):
+        raise AssertionError("linspace does not support _StridedShard placements")
+
+    if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        start = start.item()
+
+    if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        end = end.item()
+
+    torch_size = normalize_to_torch_size((steps,))
+
+    return _dtensor_init_helper(
+        torch.linspace,
+        torch_size,
+        start=start,
+        end=end,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        device_mesh=device_mesh,
+        placements=placements,
+    )
+
+
+def logspace(
+    start,
+    end,
+    steps,
+    base=10.0,
+    *,
+    dtype: torch.dtype | None = None,
+    layout: torch.layout = torch.strided,
+    requires_grad: bool = False,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
+) -> DTensor:
+    """
+    Returns a :class:`DTensor` of size ``steps`` whose values are evenly spaced from
+    ``base`` :sup:`start` to ``base`` :sup:`end`, inclusive, on a logarithmic scale
+    with base ``base``.
+
+    Args:
+        start (float or :class:`DTensor`): the starting value for the set of points. If
+           :class:`DTensor`, it must be 0-dimensional
+        end (float or :class:`DTensor`): the ending value for the set of points. If
+           :class:`DTensor`, it must be 0-dimensional
+        steps (int): size of the constructed :class:`DTensor`
+
+    Keyword args:
+        base (float, optional): base of the logarithm function. Default: ``10.0``.
+        dtype (:class:`torch.dtype`, optional): the data type to perform the computation
+            in. Default: if ``None``, uses the global default dtype
+            (see :func:`torch.set_default_dtype`) when both `start` and `end` are real,
+            and corresponding complex dtype when either is complex.
+        layout (:class:`torch.layout`, optional): the desired layout of returned
+            :class:`DTensor`. Default: ``torch.strided``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned :class:`DTensor`. Default: ``False``.
+        device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``
+
+    Returns:
+        A :class:`DTensor` object on each rank
+    """
+    if placements is not None and any(isinstance(p, _StridedShard) for p in placements):
+        raise AssertionError("logspace does not support _StridedShard placements")
+
+    if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "logspace only supports 0-dimensional start and end tensors",
+        )
+        start = start.item()
+
+    if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "logspace only supports 0-dimensional start and end tensors",
+        )
+        end = end.item()
+
+    torch_size = normalize_to_torch_size((steps,))
+
+    return _dtensor_init_helper(
+        torch.logspace,
+        torch_size,
+        start=start,
+        end=end,
+        base=base,
         dtype=dtype,
         layout=layout,
         requires_grad=requires_grad,

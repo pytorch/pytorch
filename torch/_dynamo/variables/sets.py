@@ -149,6 +149,12 @@ class SetVariable(VariableTracker):
     def python_type(self) -> type:
         return set
 
+    def is_python_constant(self) -> bool:
+        # Avoid the base implementation, which probes as_python_constant() and
+        # thus rebuilds a real set, re-hashing the elements (wrong for elements
+        # with a side-effecting __hash__).  Check element constness directly.
+        return all(k.vt.is_python_constant() for k in self.set_items)
+
     def as_python_constant(self) -> Any:
         return {k.vt.as_python_constant() for k in self.set_items}
 
@@ -210,15 +216,15 @@ class SetVariable(VariableTracker):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
-    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
+    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(set, name))
+        return VariableTracker.build(tx, hasattr(self.python_type(), name))
 
     def install_set_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
@@ -264,11 +270,14 @@ class SetVariable(VariableTracker):
     ) -> "Iterator[HashableTracker]":
         # Lazily yield HashableTracker keys for a set-operation operand, one
         # element at a time so callers that short-circuit (isdisjoint) observe
-        # the same generator side effects as CPython. A set operand's keys are
-        # reused directly (no re-hashing). HashableTracker raises
-        # ObservedTypeError for an unhashable element, matching CPython's
-        # hash-at-insert behavior.
-        if isinstance(other, SetVariable):
+        # the same generator side effects as CPython. A set or dict operand's
+        # keys are reused directly (no re-hashing), mirroring CPython's
+        # set_update_internal fast path for set/frozenset/dict operands.
+        # HashableTracker raises ObservedTypeError for an unhashable element,
+        # matching CPython's hash-at-insert behavior.
+        from .dicts import ConstDictVariable
+
+        if isinstance(other, (SetVariable, ConstDictVariable)):
             yield from other.items.keys()
             return
 
@@ -280,7 +289,9 @@ class SetVariable(VariableTracker):
         # Eager variant: unpack_iterable takes the fast unpack_var_sequence
         # path for builtin iterables instead of the per-element iterator
         # protocol.
-        if isinstance(other, SetVariable):
+        from .dicts import ConstDictVariable
+
+        if isinstance(other, (SetVariable, ConstDictVariable)):
             return list(other.items.keys())
         return [HashableTracker(x) for x in unpack_iterable(tx, other)]
 
@@ -318,6 +329,7 @@ class SetVariable(VariableTracker):
     ) -> VariableTracker:
         from ..utils import check_constant_args
         from .builder import SourcelessBuilder
+        from .dicts import ConstDictVariable
 
         if (
             name
@@ -328,6 +340,12 @@ class SetVariable(VariableTracker):
                 "difference",
                 "symmetric_difference",
             )
+            # Set/dict operands route to the VT-level branches below, which reuse
+            # the operand's HashableTracker keys without re-hashing (CPython's
+            # do-not-rehash-dict-keys fast path).  Materializing them via
+            # as_python_constant() here would rebuild a real set/dict and re-hash
+            # every key, diverging from CPython for side-effecting __hash__.
+            and not any(isinstance(a, (SetVariable, ConstDictVariable)) for a in args)
             and check_constant_args(args, kwargs)
             # Exact builtin types only: a subclass may override these methods,
             # and OrderedSet is excluded because as_python_constant() loses
@@ -340,15 +358,7 @@ class SetVariable(VariableTracker):
         # Lazy imports to avoid circular dependencies
         from .dicts import DictItemsVariable, DictKeysVariable
 
-        if name == "__init__":
-            temp_set_vt = SourcelessBuilder.create(tx, set).call_set(
-                tx, *args, **kwargs
-            )
-            tx.output.side_effects.mutation(self)
-            self.items.clear()
-            self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
-            return ConstantVariable.create(None)
-        elif name == "add":
+        if name == "add":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -484,11 +494,14 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if args[0] not in self:
-                raise_observed_exception(KeyError, tx, args=args)
+            if not self.sq_contains(tx, args[0]).as_python_constant():
+                raise_observed_exception(KeyError, tx, args=[args[0]])
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
-            self.items.pop(HashableTracker(args[0]))
+            # sq_contains validated/normalized args[0]; a set key was coerced to
+            # a frozenset, so pop that same normalized key.
+            key = args[0] if is_hashable(args[0]) else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
+            self.items.pop(HashableTracker(key))
             return ConstantVariable.create(None)
         elif name == "discard":
             if kwargs or len(args) != 1:
@@ -498,10 +511,17 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            if args[0] in self:
+            if self.sq_contains(tx, args[0]).as_python_constant():
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
-                self.items.pop(HashableTracker(args[0]))
+                # sq_contains validated/normalized args[0]; a set key was coerced
+                # to a frozenset, so pop that same normalized key.
+                key = (
+                    args[0]
+                    if is_hashable(args[0])
+                    else FrozensetVariable(args[0].items)  # type: ignore[missing-attribute]
+                )
+                self.items.pop(HashableTracker(key))
             return ConstantVariable.create(None)
         elif name in ("issubset", "issuperset"):
             if len(args) != 1:
@@ -633,6 +653,20 @@ class SetVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         raise RuntimeError("Illegal to getitem on a set")
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        temp_set_vt = SourcelessBuilder.create(tx, set).call_set(tx, *args, **kwargs)
+        tx.output.side_effects.mutation(self)
+        self.items.clear()
+        self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
+        return ConstantVariable.create(None)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import SetIterator
@@ -798,7 +832,7 @@ class OrderedSetClassVariable(VariableTracker):
     def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "__new__":
@@ -812,7 +846,7 @@ class OrderedSetClassVariable(VariableTracker):
                 self, name, py_type=type(getattr(OrderedSet, name)), source=attr_source
             )
         else:
-            return super().var_getattr(tx, name)
+            return super().getattro_impl(tx, name)
 
     def call_method(
         self,
@@ -1001,9 +1035,6 @@ class FrozensetVariable(SetVariable):
     ) -> VariableTracker:
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
-        elif name == "__init__":
-            # frozenset is immutable. Calling __init__ again shouldn't have any effect
-            return ConstantVariable.create(None)
         elif name == "copy":
             if args or kwargs:
                 raise_args_mismatch(
@@ -1024,6 +1055,15 @@ class FrozensetVariable(SetVariable):
             return FrozensetVariable(r.items)  # type: ignore[attr-defined]
         return super().call_method(tx, name, args, kwargs)
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # frozenset is immutable. Calling __init__ again shouldn't have any effect.
+        return ConstantVariable.create(None)
+
     def is_hashable(self) -> bool:
         return True
 
@@ -1042,12 +1082,6 @@ class FrozensetVariable(SetVariable):
             is_fake = is_fake or fake
             raw_hashes.append(RawHash(h))
         return hash(frozenset(raw_hashes)), is_fake
-
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
 
 
 class DictKeySetVariable(SetVariable):
