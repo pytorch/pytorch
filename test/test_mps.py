@@ -15189,7 +15189,6 @@ class TestConsistency(TestCaseMPS):
         'gradient', 'var', 'std', 'std_mean', 'ldexp',
         'linalg.vector_norm', 'lerp',
         'addr', 'var_mean',
-        'var_mean_unbiased',
         'acosh', 'asinh', 'asin',
         'masked.std',
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
