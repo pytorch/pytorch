@@ -3160,6 +3160,40 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled_mod2 = torch.compile(mod2, backend="eager", fullgraph=True)
         self.assertEqual(mod2(x), compiled_mod2(x))
 
+    def test_lazy_module_custom_getattr_no_recursion(self):
+        class LazyMod(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.UninitializedParameter()
+
+            def initialize_parameters(self, x):
+                with torch.no_grad():
+                    self.weight.materialize((x.shape[-1],))
+                    self.weight.fill_(2.0)
+
+            def forward(self, x):
+                return x * self.weight
+
+        class LazyModWithGetattr(LazyMod):
+            def __getattr__(self, name):
+                try:
+                    return super().__getattr__(name)
+                except AttributeError:
+                    if (
+                        hasattr(self, "custom_attributes")
+                        and name in self.custom_attributes
+                    ):
+                        return self.custom_attributes[name]
+                    raise
+
+        mod = LazyMod()
+        mod.__class__ = LazyModWithGetattr
+        x = torch.randn(2, 4)
+        compiled_mod = torch.compile(mod, backend="eager")
+        compiled_mod(x)
+        res = compiled_mod(x)
+        self.assertEqual(x * 2.0, res)
+
     def test_globals_change_in_other_file(self):
         global _variable, _variable1
 

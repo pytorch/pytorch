@@ -642,8 +642,9 @@ class OptimizedModule(torch.nn.Module):
 
     def _call_lazy_check(self, *args: Any, **kwargs: Any) -> Any:
         if (
-            hasattr(self._orig_mod, "_initialize_hook")
-            and hasattr(self._orig_mod, "_infer_parameters")
+            inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None
+            and inspect.getattr_static(self._orig_mod, "_infer_parameters", None)
+            is not None
             and callable(self._orig_mod._infer_parameters)
         ):
             # In the case of a lazy module, we want to run
