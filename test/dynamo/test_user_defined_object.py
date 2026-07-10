@@ -843,7 +843,7 @@ class TestClassSetattr(TestCase):
             MyModule.x = 20
             return MyModule.x
 
-        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        opt_fn = torch.compile(fn, fullgraph=True)
         result = opt_fn()
         self.assertEqual(result, 20)
 
