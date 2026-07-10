@@ -17,7 +17,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._subclasses import FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake, is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+    from torch._subclasses import FakeTensorMode
     from torch.types import IntLikeType
 
     from .descriptors import AOTInput, AOTOutput

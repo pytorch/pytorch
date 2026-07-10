@@ -17,6 +17,7 @@ from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import (
     FakeTensor,
+    FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_mode,
 )
@@ -40,8 +41,7 @@ class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
 
-def _find_or_create_fake_mode() -> "FakeTensorMode":
-    from torch._subclasses.fake_tensor import FakeTensorMode
+def _find_or_create_fake_mode() -> FakeTensorMode:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     fake_mode = detect_fake_mode()
