@@ -178,6 +178,7 @@ kernel void softmax_forward_looped(
 
   float local_max = -INFINITY;
   float local_sum = 0.0f;
+  bool found_nan = false;
   for (uint r = 0; r < axis_size; r += lsize * N_READS) {
     uint base = r + tid * N_READS;
     if (base + N_READS <= axis_size) {
@@ -191,6 +192,7 @@ kernel void softmax_forward_looped(
             x[(base + 2) * sa],
             x[(base + 3) * sa]);
       }
+      found_nan = found_nan || metal::any(metal::isnan(v));
       float chunk_max = fmax(fmax(v.x, v.y), fmax(v.z, v.w));
       float new_max = fmax(local_max, chunk_max);
       local_sum = (new_max > -INFINITY)
@@ -204,6 +206,7 @@ kernel void softmax_forward_looped(
     } else {
       for (uint i = base; i < min(base + uint(N_READS), axis_size); i++) {
         float val = contiguous ? float(x[i]) : float(x[i * sa]);
+        found_nan = found_nan || metal::isnan(val);
         float new_max = fmax(local_max, val);
         local_sum = (new_max > -INFINITY)
             ? local_sum * metal::precise::exp(local_max - new_max) +
@@ -214,8 +217,21 @@ kernel void softmax_forward_looped(
     }
   }
 
+  // A NaN input must poison the whole row (CPU semantics): fmax() drops NaNs,
+  // so a NaN seen while the running max was still -INFINITY never entered
+  // local_sum. Applied after the scan so it is order-independent.
+  if (found_nan) {
+    local_sum = NAN;
+  }
+
   float sg_max = simd_max(local_max);
-  local_sum *= metal::precise::exp(local_max - sg_max);
+  // Only rescale when this thread saw a finite max: if the whole simdgroup
+  // saw just -inf, local_max == sg_max == -INFINITY and exp(-inf - -inf) is
+  // NaN, turning the correct local_sum (0, or NaN from a NaN input) into
+  // 0 * NaN == NaN. local_sum needs no rescale in that case.
+  if (local_max > -INFINITY) {
+    local_sum *= metal::precise::exp(local_max - sg_max);
+  }
   float sg_sum = simd_sum(local_sum);
 
   threadgroup float shared_max[simdgroup_size];
@@ -232,9 +248,14 @@ kernel void softmax_forward_looped(
     float m =
         (simd_lane_id < num_simdgroups) ? shared_max[simd_lane_id] : -INFINITY;
     float global_max = simd_max(m);
-    float s = (simd_lane_id < num_simdgroups)
-        ? shared_sum[simd_lane_id] * metal::precise::exp(m - global_max)
-        : 0.0f;
+    // Same rescale guard as above: a fully masked simdgroup has
+    // m == -INFINITY with a 0 (or NaN-poisoned) sum that must pass through
+    // unscaled; exp(m - global_max) is exp(nan) when global_max is also
+    // -INFINITY (fully masked chunk/row).
+    float s = (simd_lane_id < num_simdgroups) ? shared_sum[simd_lane_id] : 0.0f;
+    if (m > -INFINITY) {
+      s *= metal::precise::exp(m - global_max);
+    }
     float global_sum = simd_sum(s);
     if (simd_lane_id == 0) {
       tg_result[0] = global_max;
