@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "packaging>=24.2",
+# ]
+# ///
 """Lintrunner adapter: PEP 639 license-files / SPDX alignment (issue #183434)."""
 
 from __future__ import annotations

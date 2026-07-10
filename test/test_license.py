@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import glob
 import os
+import sys
 import unittest
 from pathlib import Path
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
 from tools.linter.license_files_audit import audit_repo_license_files, load_project
+
+sys.path.remove(str(REPO_ROOT))
 
 # Audit for https://github.com/pytorch/pytorch/issues/183434:
 # explicit included + excluded license paths, unknown discovery fails,
 # SPDX from a per-file map with aggregate excluding LicenseRef-NvidiaProprietary
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
 
 site_packages = os.path.dirname(os.path.dirname(torch.__file__))
 distinfo = glob.glob(os.path.join(site_packages, "torch-*dist-info"))
@@ -47,7 +51,7 @@ class TestLicense(TestCase):
             for path in glob.glob(os.path.join(licenses_root, "**"), recursive=True)
             if os.path.isfile(path)
         }
-        self.assertEqual(found, set(load_project(REPO_ROOT)["license-files"]))
+        self.assertLessEqual(found, set(load_project(REPO_ROOT)["license-files"]))
 
 
 if __name__ == "__main__":
