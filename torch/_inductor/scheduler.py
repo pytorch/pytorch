@@ -5043,7 +5043,7 @@ class Scheduler:
 
     def _enforce_conditional_ordering(self) -> None:
         conditional_nodes = [
-            n for n in self.nodes if isinstance(n.node, ir.Conditional)
+            n for n in self.nodes if isinstance(n.node, ir.Switch) and n.node.is_cond
         ]
         for i in range(1, len(conditional_nodes)):
             mutating_buf = next(iter(conditional_nodes[i].get_buffer_names()))
@@ -8956,8 +8956,8 @@ class Scheduler:
         if isinstance(node.node, ir.DeviceCopy):
             return "DeviceCopy ops"
 
-        if isinstance(node.node, ir.Conditional):
-            return "Conditional ops"
+        if isinstance(node.node, ir.Switch):
+            return "Switch ops"
 
         if getattr(node.node, "unbacked_bindings", None):
             return "unbacked binding ops"

@@ -8924,7 +8924,7 @@ def cond(
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    result = ir.Switch.create_from_cond(pred, true_fn, false_fn, operands)
     return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 

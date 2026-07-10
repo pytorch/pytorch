@@ -312,8 +312,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_dtypes: OrderedSet[str] = OrderedSet()
         self.used_cached_layouts: OrderedSet[str] = OrderedSet()
         self.used_cached_memory_formats: OrderedSet[str] = OrderedSet()
-        self.used_cond_predicate: OrderedSet[str] = OrderedSet()
-        self.used_switch_index: OrderedSet[str] = OrderedSet()
+        self.used_switch_selector: OrderedSet[str] = OrderedSet()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -342,8 +341,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             OrderedSet(self.declared_int_array_vars),
             dict(self.codegen_int_array_var_cache),
             OrderedSet(self.kernel_numel_expr),
-            OrderedSet(self.used_cond_predicate),
-            OrderedSet(self.used_switch_index),
+            OrderedSet(self.used_switch_selector),
         )
         subgraph_state = [
             (
@@ -364,8 +362,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.declared_int_array_vars,
                 self.codegen_int_array_var_cache,
                 self.kernel_numel_expr,
-                self.used_cond_predicate,
-                self.used_switch_index,
+                self.used_switch_selector,
             ) = wrapper_state
             for graph, removed_buffers, inplaced_to_remove in subgraph_state:
                 graph.removed_buffers = removed_buffers
@@ -2791,133 +2788,60 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "codegen invoke_subgraph is not implemented for cpp wrapper"
         )
 
-    def codegen_conditional(self, conditional):
-        """Emit ABI-compatible C++ for a higher-order conditional."""
-        outer_inputs = [f"{buf.codegen_reference()}" for buf in conditional.operands]
+    def codegen_switch(self, node):
+        """Emit ABI-compatible C++ for a higher-order cond/switch."""
+        outer_inputs = [f"{buf.codegen_reference()}" for buf in node.operands]
         outer_outputs = []
-        for out in conditional.outputs:
+        for out in node.outputs:
             # in ABI-compatible mode, ir.MultiOutput is not codegened,
             # hence pre-declare output variables directly and separately
             self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
             outer_outputs.append(out.get_name())
 
-        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
-            # in ABI-compatible mode, we need to use the ABI shim function
-            # to extract a C++ bool from the underlying scalar bool Tensor
-            predicate = f"{conditional.predicate.get_name()}_scalar"
-            if predicate not in self.used_cond_predicate:
+        if not isinstance(node.selector, ir.ShapeAsConstantBuffer):
+            # use the ABI shim to extract the scalar selector value from the Tensor
+            selector_var = f"{node.selector.get_name()}_scalar"
+            if selector_var not in self.used_switch_selector:
+                dtype = torch.bool if node.is_cond else torch.int64
                 self.codegen_tensor_item(
-                    torch.bool,
-                    conditional.predicate.codegen_reference(),
-                    predicate,
+                    dtype,
+                    node.selector.codegen_reference(),
+                    selector_var,
                 )
-                self.used_cond_predicate.add(predicate)
+                self.used_switch_selector.add(selector_var)
         else:
-            # the predicate is not a Tensor: SymBool or Python bool
-            predicate = conditional.predicate.codegen_reference()
+            # the selector is not a Tensor: SymBool/bool or SymInt/int
+            selector_var = node.selector.codegen_reference()
 
-        def codegen_original_conditional() -> None:
-            self.writeline(f"if ({predicate}) {{")
+        def _emit_branch(header: str, branch) -> None:
+            self.writeline(header)
             with self._preserve_device_guard_state():
-                self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
-                self.codegen_subgraph(
-                    conditional.true_subgraph, outer_inputs, outer_outputs
-                )
+                self.writeline(EnterSubgraphLine(self, branch.graph))
+                self.codegen_subgraph(branch, outer_inputs, outer_outputs)
                 self.writeline(ExitSubgraphLine(self))
-            self.writeline("} else {")
-            with self._preserve_device_guard_state():
-                self.writeline(
-                    EnterSubgraphLine(self, conditional.false_subgraph.graph)
-                )
-                self.codegen_subgraph(
-                    conditional.false_subgraph, outer_inputs, outer_outputs
-                )
-                self.writeline(ExitSubgraphLine(self))
+
+        def codegen_original() -> None:
+            if node.is_cond:
+                # torch.cond: exactly two branches — plain if/else, no index comparison.
+                true_branch, false_branch = node.branches
+                _emit_branch(f"if ({selector_var}) {{", true_branch)
+                _emit_branch("} else {", false_branch)
+            else:
+                # torch.switch: N branches — if/else-if chain with index comparison.
+                for b_idx, branch in enumerate(node.branches):
+                    if b_idx == 0:
+                        header = f"if ({selector_var} == 0) {{"
+                    elif b_idx < len(node.branches) - 1:
+                        header = f"}} else if ({selector_var} == {b_idx}) {{"
+                    else:
+                        header = "} else {"
+                    _emit_branch(header, branch)
             self.writeline("}")
 
         if not V.graph.is_dual_wrapper_mode:
-            return codegen_original_conditional()
+            return codegen_original()
 
-        graphs = (
-            conditional.true_subgraph.graph,
-            conditional.false_subgraph.graph,
-        )
-        jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
-        with (
-            self._preserve_codegen_state(graphs),
-            self._target_buf("wrapper_call", jit_code),
-            self.set_writeline(jit_code, jit_code.writeline_jit),
-        ):
-            self.writeline("{")
-            with self._preserve_device_guard_state():
-                self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
-                self.codegen_subgraph(
-                    conditional.true_subgraph, outer_inputs, outer_outputs
-                )
-                self.writeline(ExitSubgraphLine(self))
-            self.writeline("}")
-            self.writeline("{")
-            with self._preserve_device_guard_state():
-                self.writeline(
-                    EnterSubgraphLine(self, conditional.false_subgraph.graph)
-                )
-                self.codegen_subgraph(
-                    conditional.false_subgraph, outer_inputs, outer_outputs
-                )
-                self.writeline(ExitSubgraphLine(self))
-            self.writeline("}")
-
-        aot_code = AotOnlyBuffer(initial_indent=self.wrapper_call._indent)
-        with (
-            self._target_buf("wrapper_call", aot_code),
-            self.set_writeline(aot_code, aot_code.writeline_aot),
-        ):
-            codegen_original_conditional()
-
-        self.writeline(DualWrapperCodeLine(jit_code, aot_code))
-
-    def codegen_switch(self, switch):
-        """Emit ABI-compatible C++ for a higher-order switch."""
-        outer_inputs = [f"{buf.codegen_reference()}" for buf in switch.operands]
-        outer_outputs = []
-        for out in switch.outputs:
-            # in ABI-compatible mode, ir.MultiOutput is not codegened,
-            # hence pre-declare output variables directly and separately
-            self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
-            outer_outputs.append(out.get_name())
-
-        if not isinstance(switch.index, ir.ShapeAsConstantBuffer):
-            # use the ABI shim to extract a C++ int64_t from the scalar index Tensor
-            index_var = f"{switch.index.get_name()}_scalar"
-            if index_var not in self.used_switch_index:
-                self.codegen_tensor_item(
-                    torch.int64,
-                    switch.index.codegen_reference(),
-                    index_var,
-                )
-                self.used_switch_index.add(index_var)
-        else:
-            # the index is not a Tensor: SymInt or Python int
-            index_var = switch.index.codegen_reference()
-
-        def codegen_original_switch() -> None:
-            for b_idx, branch in enumerate(switch.branches):
-                if b_idx == 0:
-                    self.writeline(f"if ({index_var} == 0) {{")
-                elif b_idx < len(switch.branches) - 1:
-                    self.writeline(f"}} else if ({index_var} == {b_idx}) {{")
-                else:
-                    self.writeline("} else {")
-                with self._preserve_device_guard_state():
-                    self.writeline(EnterSubgraphLine(self, branch.graph))
-                    self.codegen_subgraph(branch, outer_inputs, outer_outputs)
-                    self.writeline(ExitSubgraphLine(self))
-            self.writeline("}")
-
-        if not V.graph.is_dual_wrapper_mode:
-            return codegen_original_switch()
-
-        graphs = tuple(branch.graph for branch in switch.branches)
+        graphs = tuple(branch.graph for branch in node.branches)
         jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
         with (
             self._preserve_codegen_state(graphs),
@@ -2925,7 +2849,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.set_writeline(jit_code, jit_code.writeline_jit),
         ):
             # JIT pass: visit each branch once for lazy kernel autotune
-            for branch in switch.branches:
+            for branch in node.branches:
                 self.writeline("{")
                 with self._preserve_device_guard_state():
                     self.writeline(EnterSubgraphLine(self, branch.graph))
@@ -2938,7 +2862,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self._target_buf("wrapper_call", aot_code),
             self.set_writeline(aot_code, aot_code.writeline_aot),
         ):
-            codegen_original_switch()
+            codegen_original()
 
         self.writeline(DualWrapperCodeLine(jit_code, aot_code))
 
