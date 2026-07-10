@@ -55,9 +55,11 @@ from .base import (
     AttributeMutationExisting,
     AttributeMutationNew,
     AttrMutationKind,
+    GetSet,
     Method,
     MethodFlags,
     NO_SUCH_SUBOBJ,
+    read,
     ValueMutationNew,
     VariableTracker,
 )
@@ -745,7 +747,9 @@ class ConstDictVariable(VariableTracker):
         "pop": Method(dict_pop, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
         "popitem": Method(dict_popitem, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
         "update": Method(dict_update, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
-        "setdefault": Method(dict_setdefault, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "setdefault": Method(
+            dict_setdefault, MethodFlags.VARARGS | MethodFlags.KEYWORDS
+        ),
         "__reversed__": Method(dict_reversed, MethodFlags.NOARGS),
     }
 
@@ -875,8 +879,6 @@ class ConstDictVariable(VariableTracker):
         return eq_result
 
     def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
-        if name == "__class__":
-            return VariableTracker.build(tx, self.python_type())
         # DictGuardManager does not support getattr_manager for plain dicts,
         # so AttrSource chains through a dict source break guard creation.
         # Return CallMethodVariable directly for methods, bypassing the
@@ -1080,15 +1082,11 @@ class DictViewVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        # dictview_mapping getset returns a read-only mappingproxy of the
-        # underlying dict for dict_keys/values/items.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
-        if name == "mapping":
-            return MappingProxyVariable(self.dv_dict)
-        return super().getattro_impl(tx, name)
+    # dictview_mapping getset returns a read-only mappingproxy of the underlying
+    # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
+    tp_getset = {
+        "mapping": GetSet(read(lambda s: MappingProxyVariable(s.dv_dict))),
+    }
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
