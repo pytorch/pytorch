@@ -1492,6 +1492,7 @@ class GraphModule(torch.nn.Module):
             def fn(x, y):
                 return gn(x, y)
 
+            # x is mutated in place, so it cannot require grad (autograd leaf error).
             x = torch.randn(8, requires_grad=False)
             x_clone = x.clone()
             y = torch.randn(8, requires_grad=False)
