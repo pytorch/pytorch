@@ -16,7 +16,15 @@ from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 import torch
 
 from . import cupti_python
-from .records import Api, FIELD_REGISTRY, Kernel, STRING_FIELDS, Sync
+from .records import (
+    Api,
+    Ctype,
+    FIELD_CTYPE,
+    FIELD_REGISTRY,
+    Kernel,
+    STRING_FIELDS,
+    Sync,
+)
 
 
 # A registration request: either a plain iterable of activity kinds (meaning "all
@@ -1119,18 +1127,28 @@ class CuptiMonitor:
         self, kind: int, fields: Mapping[int, tuple[int, bytes]]
     ) -> dict[int, Any]:
         """Turn one native group's ``{field_id: (field_size, bytes)}`` into
-        ``{field_id: column}``: numeric fields are viewed as ``<u{size}``; const
-        char* (string) fields are dereferenced to str."""
+        ``{field_id: column}``: numeric fields are viewed per their :class:`Ctype`
+        (unsigned/signed/float) at the captured width; const char* (string) fields are
+        dereferenced to str."""
         str_fields = STRING_FIELDS.get(kind, frozenset())
+        ctype_by_fid = FIELD_CTYPE.get(kind, {})
         cols: dict[int, Any] = {}
         for fid, (size, raw) in fields.items():
             if fid in str_fields and size == 8:
                 ptrs = np.frombuffer(raw, dtype="<u8")
                 cols[fid] = np.array([_deref_cstr(int(p)) for p in ptrs], dtype=object)
             elif size in (1, 2, 4, 8):
+                # The width is the captured layout's; Ctype only picks the interpretation.
+                # Fall back to unsigned for the cases numpy can't express -- a <f1 (there is
+                # no 1-byte numpy float) or a CSTR that isn't an 8-byte pointer -- so a
+                # mis-typed field can't crash the drain.
+                ctype = ctype_by_fid.get(fid, Ctype.UINT)
+                bad_float = ctype is Ctype.FLOAT and size not in (2, 4, 8)
+                if ctype is Ctype.CSTR or bad_float:
+                    ctype = Ctype.UINT
                 # .copy() so the column is writable and owns its memory (the
                 # frombuffer view is read-only over the transient bytes).
-                cols[fid] = np.frombuffer(raw, dtype=f"<u{size}").copy()
+                cols[fid] = np.frombuffer(raw, dtype=ctype.numpy(size)).copy()
         return cols
 
     def _maybe_warn_backpressure(self) -> None:
