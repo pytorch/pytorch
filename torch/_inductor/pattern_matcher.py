@@ -78,7 +78,7 @@ from torch.utils._ordered_set import OrderedSet
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
-from .._subclasses import FakeTensorMode
+from .._subclasses import FakeTensor, FakeTensorMode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
@@ -544,7 +544,7 @@ class Ignored(PatternExpr):
 
 
 def _get_fake_tensor_constant(value: torch.Tensor) -> torch.Tensor | None:
-    if isinstance(value, FakeTensor):
+    if isinstance(value, FakeTensor):  # noqa-isinstance-fake: reads .constant
         return value.constant
     return value
 
@@ -617,7 +617,7 @@ def _tensor_constant_repr(value: torch.Tensor) -> str:
         )
     dtype = value.dtype
     device = value.device
-    if isinstance(value, FakeTensor):
+    if isinstance(value, FakeTensor):  # noqa-isinstance-fake: reads .constant
         constant = value.constant
         if constant is None:
             raise NotImplementedError("NYI: serializing fake get_attr tensor")

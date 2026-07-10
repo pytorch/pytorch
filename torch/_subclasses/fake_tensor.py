@@ -352,24 +352,6 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     return None
 
 
-def maybe_get_real_tensor(x: object) -> Tensor | None:
-    if isinstance(x, FakeTensor):
-        return x.real_tensor
-    return None
-
-
-def maybe_get_fake_device(x: object) -> torch.device | None:
-    if isinstance(x, FakeTensor):
-        return x.fake_device
-    return None
-
-
-def maybe_get_fake_constant(x: object) -> Tensor | None:
-    if isinstance(x, FakeTensor):
-        return x.constant
-    return None
-
-
 @functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
@@ -3327,7 +3309,7 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             (func is aten.alias.default or func is aten.detach.default)
             and len(flat_args) == 1
-            and isinstance(flat_args[0], FakeTensor)
+            and isinstance(flat_args[0], FakeTensor)  # noqa-isinstance-fake: dispatch keys
         ):
             input_dispatch_keys = flat_args[0].dispatch_keys
             preserve_dispatch_keys = input_dispatch_keys is not None

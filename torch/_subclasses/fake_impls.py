@@ -1640,7 +1640,7 @@ def maybe_to_dense_mkldnn(
     dtype: torch.dtype | None = None,
     masked_grad: bool | None = None,
 ) -> object:
-    if not isinstance(a, FakeTensor) or not a.is_mkldnn:
+    if not isinstance(a, FakeTensor) or not a.is_mkldnn:  # noqa-isinstance-fake: op impl
         return NotImplemented
 
     out_dtype = dtype if dtype is not None else a.dtype
@@ -1796,7 +1796,7 @@ def to_dense_python_tls_impl(
 ) -> torch.Tensor:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(self, (FakeTensor, FunctionalTensor)):
+    if isinstance(self, (FakeTensor, FunctionalTensor)):  # noqa-isinstance-fake: op impl
         return to_dense_composite_impl(self, dtype=dtype, masked_grad=masked_grad)
 
     with torch._C._ExcludeDispatchKeyGuard(_PYTHON_TLS_SNAPSHOT_KEYSET):
@@ -1824,7 +1824,7 @@ def to_mkldnn(
     a: FakeTensor,
     dtype: torch.dtype | None = None,
 ) -> object:
-    if not isinstance(a, FakeTensor):
+    if not isinstance(a, FakeTensor):  # noqa-isinstance-fake: op impl
         return NotImplemented
 
     out_dtype = dtype if dtype is not None else a.dtype
@@ -2240,7 +2240,7 @@ def _fake_alias(fake_mode: FakeTensorMode, x: FakeTensor) -> FakeTensor:
 def fake_alias(
     fake_mode: FakeTensorMode, func: OpOverload, x: FakeTensor
 ) -> FakeTensor | object:
-    if not isinstance(x, FakeTensor):
+    if not isinstance(x, FakeTensor):  # noqa-isinstance-fake: op impl
         return NotImplemented
     return _fake_alias(fake_mode, x)
 
