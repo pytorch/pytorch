@@ -556,19 +556,6 @@ class EnterSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
-class ConditionalLine(WrapperLine):
-    wrapper: PythonWrapperCodegen
-    node: ir.Conditional
-
-    def codegen(self, code: IndentedBuffer) -> None:
-        raise NotImplementedError("Only supports FX codegen")
-
-    @staticmethod
-    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
-        return converter._generate_conditional
-
-
-@dataclasses.dataclass
 class SwitchLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.Switch
@@ -4470,69 +4457,47 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, name)
 
-    def codegen_conditional(self, conditional) -> None:
-        name = conditional.get_name()
+    def codegen_switch(self, node) -> None:
+        name = node.get_name()
 
-        outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
+        outer_inputs = [buf.codegen_reference() for buf in node.operands]
 
-        predicate = conditional.predicate.codegen_reference()
-        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
-            # move the Tensor predicate to host
-            predicate = f"{predicate}.item()"
-
-        self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
-        self.writeline(f"if {predicate}:")
-        self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
-        if V.graph.aot_mode:
-            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
-            self.codegen_subgraph_by_inlining(
-                conditional.true_subgraph, outer_inputs, outer_outputs
-            )
-        else:
-            self.codegen_subgraph(conditional.true_subgraph, outer_inputs, name)
-
-        self.writeline(ExitSubgraphLine(self))
-        self.writeline("else:")
-        self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
-        if V.graph.aot_mode:
-            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
-            self.codegen_subgraph_by_inlining(
-                conditional.false_subgraph, outer_inputs, outer_outputs
-            )
-        else:
-            self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
-        self.writeline(ExitSubgraphLine(self))
-
-    def codegen_switch(self, switch) -> None:
-        name = switch.get_name()
-
-        outer_inputs = [buf.codegen_reference() for buf in switch.operands]
-
-        index = switch.index.codegen_reference()
-        if not isinstance(switch.index, ir.ShapeAsConstantBuffer):
-            # move the Tensor index to host
-            index = f"int({index}.item())"
-
-        self.writeline(f"{name} = [None] * {len(switch.outputs)}")
-        num_branches = len(switch.branches)
-        for b_idx, branch in enumerate(switch.branches):
-            if b_idx == 0:
-                keyword = "if"
-                condition = f" {index} == 0"
-            elif b_idx < num_branches - 1:
-                keyword = "elif"
-                condition = f" {index} == {b_idx}"
+        selector = node.selector.codegen_reference()
+        if not isinstance(node.selector, ir.ShapeAsConstantBuffer):
+            # move the Tensor selector to host
+            if node.is_cond:
+                selector = f"{selector}.item()"
             else:
-                keyword = "else"
-                condition = ""
+                selector = f"int({selector}.item())"
+
+        self.writeline(f"{name} = [None] * {len(node.outputs)}")
+
+        def _emit_branch(keyword: str, condition: str, branch) -> None:
             self.writeline(f"{keyword}{condition}:")
             self.writeline(EnterSubgraphLine(self, branch.graph))
             if V.graph.aot_mode:
-                outer_outputs = [f"{name}[{i}]" for i in range(len(switch.outputs))]
+                outer_outputs = [f"{name}[{i}]" for i in range(len(node.outputs))]
                 self.codegen_subgraph_by_inlining(branch, outer_inputs, outer_outputs)
             else:
                 self.codegen_subgraph(branch, outer_inputs, name)
             self.writeline(ExitSubgraphLine(self))
+
+        if node.is_cond:
+            # torch.cond: exactly two branches — plain if/else, no index comparison.
+            true_branch, false_branch = node.branches
+            _emit_branch("if", f" {selector}", true_branch)
+            _emit_branch("else", "", false_branch)
+        else:
+            # torch.switch: N branches — if/elif chain with index comparison, else for last.
+            num_branches = len(node.branches)
+            for b_idx, branch in enumerate(node.branches):
+                if b_idx == 0:
+                    keyword, condition = "if", f" {selector} == 0"
+                elif b_idx < num_branches - 1:
+                    keyword, condition = "elif", f" {selector} == {b_idx}"
+                else:
+                    keyword, condition = "else", ""
+                _emit_branch(keyword, condition, branch)
 
     def codegen_while_loop(self, while_loop, stack_output):
         """while_loop is codegened as a host side while_loop"""
