@@ -141,6 +141,7 @@ from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
     counters,
+    FrameState,
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
@@ -189,7 +190,12 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import generic_bool, generic_contains, generic_getiter
+from .variables.object_protocol import (
+    generic_bool,
+    generic_contains,
+    generic_getattr,
+    generic_getiter,
+)
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -2524,7 +2530,7 @@ class InstructionTranslatorBase(
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
         frame_summary = self.frame_summary()
-        tb = exc.var_getattr(
+        tb = exc.getattro_impl(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__traceback__",
@@ -2706,7 +2712,7 @@ class InstructionTranslatorBase(
                     "expected self._isinstance_exception(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = val.var_getattr(
+            tb = val.getattro_impl(
                 # pyrefly: ignore[bad-argument-type]
                 self,
                 "__traceback__",
@@ -2725,7 +2731,7 @@ class InstructionTranslatorBase(
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
-            tb = val.var_getattr(self, "__traceback__")
+            tb = val.getattro_impl(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -3168,12 +3174,16 @@ class InstructionTranslatorBase(
         )
 
     def _load_attr(self, attr: Any) -> None:
-        obj = self.pop()
-        result = VariableTracker.build(self, getattr).call_function(
-            self,  # type: ignore[arg-type]
-            [obj, VariableTracker.build(self, attr)],
-            {},
-        )
+        obj = self.pop().realize()
+        try:
+            result = generic_getattr(self, obj, attr)
+        except Unsupported:
+            if not obj.is_python_constant():
+                raise
+            source = AttrSource(obj.source, attr) if obj.source else None
+            result = VariableTracker.build(
+                self, getattr(obj.as_python_constant(), attr), source=source
+            )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
@@ -3207,7 +3217,7 @@ class InstructionTranslatorBase(
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
-        # side effects. We intentionally avoid var_getattr here because it
+        # side effects. We intentionally avoid getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
             attr_var = self.output.side_effects.load_attr(obj, name)
@@ -4325,7 +4335,9 @@ class InstructionTranslatorBase(
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
         val = self.stack[-1]
         if not self._isinstance_exception(val):
-            raise AssertionError("expected self._isinstance_exception(val) to be true")
+            raise AssertionError(
+                f"expected self._isinstance_exception(val) to be true, got {val}"
+            )
         if val.exc_type is StopIteration:  # type: ignore[union-attr]
             new_val = VariableTracker.build(self, RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
@@ -6065,7 +6077,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if (
                 is_generator(code)
                 and isinstance(self, InliningGeneratorInstructionTranslator)
-                and self.generator_exhausted
+                and self.frame_state == FrameState.FRAME_CLEARED
             ):
                 if not isinstance(self, InliningGeneratorInstructionTranslator):
                     raise AssertionError(
@@ -6308,8 +6320,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
-        self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
+        self.frame_state = FrameState.FRAME_CREATED
 
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
@@ -6322,6 +6334,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()
         self.generated_items.append(top)
+        if inst.argval == 1:
+            self.frame_state = FrameState.FRAME_SUSPENDED_YIELD_FROM
+        else:
+            self.frame_state = FrameState.FRAME_SUSPENDED
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
         if (
@@ -6344,11 +6360,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         raise ReturnValueOp
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.generator_exhausted = True
+        self.frame_state = FrameState.FRAME_CLEARED
         return super().RETURN_VALUE(inst)
 
     def RETURN_CONST(self, inst: Instruction) -> None:
-        self.generator_exhausted = True
+        self.frame_state = FrameState.FRAME_CLEARED
         return super().RETURN_CONST(inst)
 
     def YIELD_FROM(self, inst: Instruction) -> None:
