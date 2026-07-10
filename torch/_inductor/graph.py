@@ -36,7 +36,7 @@ from torch._prims_common import (
     compute_required_storage_length,
     make_channels_last_strides_for,
 )
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -2546,7 +2546,7 @@ class GraphLowering(torch.fx.Interpreter):
                     elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
                         return not_none(x.hint)
-                    elif is_fake_tensor(x):
+                    elif isinstance(x, FakeTensor):
                         return defake(x)
                     else:
                         if not isinstance(x, torch.Tensor):
@@ -2839,7 +2839,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         def materialize_constant(name: str) -> torch.Tensor:
             constant = self.constants[name]
-            if is_fake_tensor(constant):
+            if isinstance(constant, FakeTensor):
                 constant = defake(constant)
             if not isinstance(constant, torch.Tensor):
                 raise AssertionError(f"Expected tensor constant for {name}")
