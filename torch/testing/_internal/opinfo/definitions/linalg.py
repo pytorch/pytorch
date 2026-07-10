@@ -1267,7 +1267,7 @@ op_db: list[OpInfo] = [
             with_tf32_off,
         ],
         skips=(
-            # The operator 'aten::linalg_matrix_sqrth' is not implemented for MPS.
+            # The operator 'aten::linalg_matrix_sqrth' is not implemented for MPS and XPU.
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
