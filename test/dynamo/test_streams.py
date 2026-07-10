@@ -403,6 +403,17 @@ assert record_event_nodes[0].args[1] != CURRENT_STREAM_INDEX
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, s), fn(x, s))
 
+    @requires_cuda
+    def test_cuda_current_stream_unindexed_device_with_entered_stream(self):
+        def fn(x, s):
+            with s:
+                return torch.cuda.current_stream(torch.device("cuda")).cuda_stream
+
+        s = torch.cuda.Stream()
+        x = torch.zeros(1, device="cuda")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, s), fn(x, s))
+
     @unittest.skipIf(not TEST_XPU, "XPU is not available")
     def test_xpu_current_stream_with_entered_stream(self):
         """Verify that torch.xpu.current_stream().sycl_queue returns the

@@ -1017,28 +1017,37 @@ class CachingAutotuner(KernelInterface):
         device_interface = self.get_device_interface()
         launchers = []
         exc = None
-        # DeviceGuard ensures each launcher's binary loads onto the right device.
-        with DeviceGuard(device_interface, cast(int, self.triton_meta["device"])):
-            for result in self.compile_results:
-                launcher, exc = self._make_launcher(result)
-                if launcher is not None:
-                    launchers.append(launcher)
-            if len(launchers) == 0:
-                result = self.compile_results[-1]
-                config = result.config
-                if (
-                    isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
-                    and (
-                        config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1
+        try:
+            # DeviceGuard ensures each launcher's binary loads onto the right device.
+            with DeviceGuard(device_interface, cast(int, self.triton_meta["device"])):
+                for result in self.compile_results:
+                    launcher, exc = self._make_launcher(result)
+                    if launcher is not None:
+                        launchers.append(launcher)
+                if len(launchers) == 0:
+                    result = self.compile_results[-1]
+                    config = result.config
+                    if (
+                        isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
+                        and (
+                            config.num_stages > 1
+                            or config.kwargs.get("NUM_STAGES", 1) > 1
+                        )
+                        and self.inductor_meta.get("dynamic_disable_pipelining", True)
+                    ):
+                        self.launchers = [self.compile_by_disabling_pipelining(config)]
+                        return
+                    raise RuntimeError(
+                        f"No valid triton configs. {type(exc).__name__}: {exc}"
                     )
-                    and self.inductor_meta.get("dynamic_disable_pipelining", True)
-                ):
-                    self.launchers = [self.compile_by_disabling_pipelining(config)]
-                    return
-                raise RuntimeError(
-                    f"No valid triton configs. {type(exc).__name__}: {exc}"
-                )
-        self.launchers = launchers
+            self.launchers = launchers
+        finally:
+            # Drop the retained failed-config exception. Holding it keeps its traceback
+            # (and thus the whole benchmarking frame chain up to do_bench via f_back)
+            # alive; do_bench's 256MB L2-flush buffer would then leak one-per-autotuned
+            # kernel until cyclic GC runs -- which never happens under gc.disable(). We
+            # only needed exc's type/message above.
+            exc = None
 
     def _prune_compile_results_to_launcher(self, launcher: LauncherType) -> None:
         if not self.compile_results:

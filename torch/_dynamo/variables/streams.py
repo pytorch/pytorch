@@ -48,6 +48,12 @@ def _device_module_is_initialized(device: torch.device) -> bool:
     return is_initialized()
 
 
+def _stream_device_matches(device: torch.device, stream_device: torch.device) -> bool:
+    if device.index is None:
+        return device.type == stream_device.type
+    return device == stream_device
+
+
 def _reserve_current_stream_index_if_needed() -> None:
     if index_to_bytecode_constructor:
         return
@@ -374,7 +380,7 @@ class SymbolicStreamState:
     ) -> "StreamVariable":
         if device is not None:
             for stream in reversed(self.cur_stream_stack):
-                if stream.device == device:
+                if _stream_device_matches(device, stream.device):
                     return stream
             return self._register_current_stream(device, tx)
 
