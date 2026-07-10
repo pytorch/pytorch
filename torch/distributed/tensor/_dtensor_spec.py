@@ -73,6 +73,52 @@ class TensorMeta(NamedTuple):
     dtype: torch.dtype
 
 
+def _normalize_int_for_key(value: Any) -> Any:
+    if isinstance(value, int | torch.SymInt):
+        from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
+
+        return SymIntEqByExpr(value)
+    return value
+
+
+def _has_symint(values: Any) -> bool:
+    return any(isinstance(value, torch.SymInt) for value in values)
+
+
+def _normalize_sequence_for_key(values: Any, force: bool = False) -> Any:
+    if force or _has_symint(values):
+        return tuple(_normalize_int_for_key(value) for value in values)
+    return values
+
+
+def _normalize_sequence_pair_for_compare(lhs: Any, rhs: Any) -> tuple[Any, Any]:
+    has_symint = _has_symint(lhs) or _has_symint(rhs)
+    return (
+        _normalize_sequence_for_key(lhs, force=has_symint),
+        _normalize_sequence_for_key(rhs, force=has_symint),
+    )
+
+
+def _tensor_meta_key(
+    tensor_meta: TensorMeta,
+) -> tuple[Any, Any, torch.dtype]:
+    return (
+        _normalize_sequence_for_key(tensor_meta.shape),
+        _normalize_sequence_for_key(tensor_meta.stride),
+        tensor_meta.dtype,
+    )
+
+
+def _tensor_meta_equals(lhs: TensorMeta, rhs: TensorMeta) -> bool:
+    lhs_shape, rhs_shape = _normalize_sequence_pair_for_compare(lhs.shape, rhs.shape)
+    lhs_stride, rhs_stride = _normalize_sequence_pair_for_compare(
+        lhs.stride, rhs.stride
+    )
+    return (
+        lhs_shape == rhs_shape and lhs_stride == rhs_stride and lhs.dtype == rhs.dtype
+    )
+
+
 # used internally to propagate the placements
 @dataclass
 class DTensorSpec:
@@ -425,13 +471,14 @@ class DTensorSpec:
     def _hash_key(self) -> tuple[Any, ...]:
         """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
         if self.tensor_meta is not None:
+            shape, stride, dtype = _tensor_meta_key(self.tensor_meta)
             return (
                 self.mesh,
                 self.placements,
                 self.shard_order,
-                self.tensor_meta.shape,
-                self.tensor_meta.stride,
-                self.tensor_meta.dtype,
+                shape,
+                stride,
+                dtype,
             )
         return (self.mesh, self.placements, self.shard_order)
 
@@ -477,13 +524,11 @@ class DTensorSpec:
         if self.tensor_meta is None or other.tensor_meta is None:
             return self.tensor_meta == other.tensor_meta
 
+        if self.tensor_meta.dtype != other.tensor_meta.dtype:
+            return False
         if skip_shapes:
-            return self.tensor_meta.dtype == other.tensor_meta.dtype
-        return (
-            self.tensor_meta.shape == other.tensor_meta.shape  # type: ignore[union-attr]
-            and self.tensor_meta.stride == other.tensor_meta.stride  # type: ignore[union-attr]
-            and self.tensor_meta.dtype == other.tensor_meta.dtype  # type: ignore[union-attr]
-        )
+            return True
+        return _tensor_meta_equals(self.tensor_meta, other.tensor_meta)
 
     def __eq__(self, other: object, /) -> bool:
         return self._check_equals(other)

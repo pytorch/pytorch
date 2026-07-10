@@ -2610,6 +2610,20 @@ class GraphModule(torch.nn.Module):
                 out_test = compiled_f(view)
                 self.assertEqual(out_ref, out_test)
 
+    @unittest.expectedFailure
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    def test_subclass_split_view_no_duck_dynamic(self):
+        def f(x):
+            return x * 2
+
+        compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True, dynamic=True)
+
+        t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
+        view = t.split(5, -1)[2]
+        out_ref = f(view)
+        out_test = compiled_f(view)
+        self.assertEqual(out_ref, out_test)
+
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
         from collections.abc import Callable
@@ -3145,7 +3159,7 @@ class GraphModule(torch.nn.Module):
         clone: "f32[s47, s16]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
         clone_1: "f32[s47, s16]" = torch.ops.aten.clone.default(primals_8);  primals_8 = None
 
-        mul_6: "Sym(s16*s47)" = primals_9 * primals_7;  primals_7 = None
+        mul_6: "Sym(s16*s47)" = primals_9 * primals_7
         view: "f32[s16*s47]" = torch.ops.aten.view.default(clone, [mul_6])
         view_1: "f32[s16*s47]" = torch.ops.aten.view.default(clone_1, [mul_6]);  clone_1 = None
         return (
@@ -3155,6 +3169,7 @@ class GraphModule(torch.nn.Module):
             mul_6,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=1), idx=0)
             primals_9,  # SavedForBackwardsAOTOutput(idx=0)
             primals_10,  # SavedForBackwardsAOTOutput(idx=1)
+            primals_7,  # SavedForBackwardsAOTOutput(idx=2)
         )
 """,
         )
@@ -3167,6 +3182,7 @@ class GraphModule(torch.nn.Module):
         self,
         primals_9: "Sym(s47)",  # PlainAOTInput(idx=4)
         primals_10: "Sym(s16)",  # PlainAOTInput(idx=5)
+        primals_7: "Sym(s16)",  # PlainAOTInput(idx=2)
         tangents_1: "f32[s16*s47]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=1)), attr='a')
         tangents_2: "f32[s16*s47]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=1)), attr='b')
     ):

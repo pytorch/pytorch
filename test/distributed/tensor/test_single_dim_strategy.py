@@ -851,7 +851,7 @@ class TestExpandPlaceholder(TestCase):
         self.assertIsInstance(result, OpStrategy)
         self.assertGreater(len(result.strategies), 0)
 
-    def test_symbolic_shapes_bypass_sharding_prop_caches(self):
+    def test_symbolic_shapes_hash_for_sharding_prop_caches(self):
         from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymNode
 
         mesh = DeviceMesh("cpu", mesh=torch.arange(2))
@@ -862,24 +862,73 @@ class TestExpandPlaceholder(TestCase):
         symbol = shape_env.create_symbol(
             sym_size, source=ConstantSource("test_sym_size")
         )
+        other_symbol = shape_env.create_symbol(
+            sym_size + 1, source=ConstantSource("test_other_sym_size")
+        )
+        second_dim_symbol = shape_env.create_symbol(
+            4, source=ConstantSource("test_second_dim_sym_size")
+        )
         sym_int = torch.SymInt(SymNode(symbol, shape_env, int, hint=sym_size))
+        other_sym_int = torch.SymInt(
+            SymNode(other_symbol, shape_env, int, hint=sym_size + 1)
+        )
+        second_dim_sym_int = torch.SymInt(
+            SymNode(second_dim_symbol, shape_env, int, hint=4)
+        )
 
         symbolic_meta = TensorMeta(torch.Size([sym_int, 4]), (4, 1), torch.float32)
         spec = DTensorSpec(mesh, (Shard(0),), symbolic_meta)
+        same_spec = DTensorSpec(mesh, (Shard(0),), symbolic_meta)
+        static_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([sym_size, 4]), (4, 1), torch.float32),
+        )
+        other_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([other_sym_int, 4]), (4, 1), torch.float32),
+        )
+        mixed_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(
+                torch.Size([sym_int, second_dim_sym_int]), (4, 1), torch.float32
+            ),
+        )
+        symbolic_stride_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([sym_int, 4]), (sym_int, 1), torch.float32),
+        )
+        static_stride_spec = DTensorSpec(
+            mesh,
+            (Shard(0),),
+            TensorMeta(torch.Size([sym_int, 4]), (sym_size, 1), torch.float32),
+        )
+        self.assertEqual(hash(spec), hash(same_spec))
+        self.assertEqual(spec, same_spec)
+        self.assertNotEqual(spec, static_spec)
+        self.assertNotEqual(static_spec, spec)
+        self.assertNotEqual(spec, other_spec)
+        self.assertNotEqual(spec, mixed_spec)
+        self.assertNotEqual(symbolic_stride_spec, static_stride_spec)
+        self.assertNotEqual(static_stride_spec, symbolic_stride_spec)
+
         op_schema = OpSchema(torch.ops.aten.sin.default, (spec,), {})
-        self.assertFalse(_op_schema_can_be_cached(op_schema))
+        self.assertTrue(_op_schema_can_be_cached(op_schema))
 
         propagator = ShardingPropagator()
 
         with (
             patch.object(
                 propagator,
-                "_propagate_tensor_meta_non_cached",
+                "_propagate_tensor_meta_cached",
                 return_value=symbolic_meta,
-            ) as non_cached_tensor_meta,
+            ) as cached_tensor_meta,
         ):
             self.assertIs(propagator._propagate_tensor_meta(op_schema), symbolic_meta)
-            non_cached_tensor_meta.assert_called_once_with(op_schema)
+            cached_tensor_meta.assert_called_once_with(op_schema)
 
         output_sharding = OutputSharding(spec)
         op_info = OpInfo(
@@ -892,13 +941,13 @@ class TestExpandPlaceholder(TestCase):
         with (
             patch.object(
                 propagator,
-                "propagate_op_sharding_non_cached",
+                "propagate_op_sharding",
                 return_value=output_sharding,
-            ) as non_cached_sharding,
+            ) as cached_sharding,
         ):
             propagator.propagate(op_info)
             self.assertIs(op_info.output_sharding, output_sharding)
-            non_cached_sharding.assert_called_once_with(op_schema)
+            cached_sharding.assert_called_once_with(op_schema)
 
     def test_strategy_length_validation(self):
         """Test that _PreparedSingleDimStrategy validates strategy length against
