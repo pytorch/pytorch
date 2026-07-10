@@ -10877,16 +10877,24 @@ class Conditional(ExternKernel):
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
             fake_tensors: Sequence[torch.Tensor],
+            branch_fakes: Sequence[Any],
         ) -> list[IRNode]:
             ret = []
-            for output, fake in zip(graph_outputs, fake_tensors):
+            for output, fake, branch_fake in zip(
+                graph_outputs, fake_tensors, branch_fakes
+            ):
                 if isinstance(output, ShapeAsConstantBuffer):
                     ret.append(output)
                 else:
+                    strides = fake.stride()
+                    # merged strides can contain unbacked symbols (from mismatched
+                    # branch output shapes) undefined inside the subgraph
+                    if any(has_free_unbacked_symbols(s) for s in strides):
+                        strides = branch_fake.stride()
                     ret.append(
                         # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
-                            TensorBox(output), fake.stride(), allow_padding=False
+                            TensorBox(output), strides, allow_padding=False
                         )
                     )
             # pyrefly: ignore [bad-return]
@@ -10900,13 +10908,19 @@ class Conditional(ExternKernel):
                     example_inputs=fake_operands,
                     subgraph_name=subgraph.name,
                 )
+                branch_out_args = subgraph.graph_module.graph.output_node().args[0]
+                if not isinstance(branch_out_args, Sequence):
+                    raise AssertionError(type(branch_out_args))
+                branch_fakes = [
+                    a.meta["val"] if isinstance(a, Node) else a for a in branch_out_args
+                ]
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
                     # Force subgraph outputs to have the expected strides from
                     # FakeTensor metadata. This ensures both branches produce
                     # outputs with consistent strides.
                     subgraph.graph.graph_outputs = _require_exact_strides(
-                        subgraph.graph.graph_outputs, fake_outputs
+                        subgraph.graph.graph_outputs, fake_outputs, branch_fakes
                     )
 
         if true_fn.graph is None:
