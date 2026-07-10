@@ -866,7 +866,8 @@ void ExportModule(
   }
   std::ofstream ofile;
   ofile.open(
-      std::filesystem::path((const char8_t*)filename.c_str()), std::ios::binary | std::ios::out);
+      std::filesystem::path((const char8_t*)filename.c_str()),
+      std::ios::binary | std::ios::out);
   if (ofile.fail()) {
     std::stringstream message;
     if (errno == ENOENT) {
