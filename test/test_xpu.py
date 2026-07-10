@@ -762,13 +762,6 @@ print(torch.xpu.is_initialized())
     def test_sleep(self):
         # clock_rate() returns MHz; multiply by 1e6 to get ~1 second of device cycles.
         cycles = torch.xpu.clock_rate() * 1_000_000
-        if int(torch.version.xpu) < 20260000:
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "sleep is not supported for the current SYCL compiler version",
-            ):
-                torch.xpu._sleep(cycles)
-            return
         # PVC's bundled IGC is too old to support it.
         if not Xe2_Or_Later:
             with self.assertRaisesRegex(
