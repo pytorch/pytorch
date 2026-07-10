@@ -256,7 +256,7 @@ For a non-AWS S3-compatible store, also pass its endpoint through the s3fs
 
 ```python
 import torch.distributed.checkpoint as dcp
-from torch.distributed.checkpoint._fsspec_filesystem import FsspecWriter
+from torch.distributed.checkpoint import FsspecWriter
 
 writer = FsspecWriter(
     "s3://my-bucket/run-42/step-1000",
@@ -270,6 +270,8 @@ using the s3fs `key` and `secret` arguments:
 
 ```python
 import os
+import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint import FsspecWriter
 
 writer = FsspecWriter(
     "s3://my-bucket/run-42/step-1000",
@@ -283,7 +285,8 @@ dcp.save(state_dict=app_state, storage_writer=writer)
 `FsspecReader` takes the same arguments for distributed loads:
 
 ```python
-from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader
+import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint import FsspecReader
 
 reader = FsspecReader(
     "s3://my-bucket/run-42/step-1000",

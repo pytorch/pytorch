@@ -16,9 +16,8 @@ import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed.checkpoint._fsspec_filesystem import (
     FileSystem,
-    FsspecReader,
-    FsspecWriter,
 )
+from torch.distributed.checkpoint import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
