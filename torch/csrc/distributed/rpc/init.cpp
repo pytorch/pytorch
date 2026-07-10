@@ -117,7 +117,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               [](const WorkerInfo& workerInfo) {
                 std::ostringstream os;
                 os << workerInfo;
-                return os.str();
+                return std::move(os).str();
               })
           .def(py::pickle(
               /* __getstate__ */
