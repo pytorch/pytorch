@@ -51,8 +51,6 @@ def tvm(
 ) -> Callable[..., Any]:
     if options is None:
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
-    if options is None:
-        raise AssertionError("options must not be None")
     try:
         import tvm  # type: ignore[import]
         from tvm import relay  # type: ignore[import]
