@@ -45,7 +45,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm
+    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -13319,7 +13319,7 @@ op_db: list[OpInfo] = [
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type=('cuda', 'xpu'), active_if=not SM53OrLater),
+                            device_type='cuda', active_if=not SM53OrLater),
                # addbmm does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # https://github.com/pytorch/pytorch/issues/55907
@@ -13413,7 +13413,7 @@ op_db: list[OpInfo] = [
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                            device_type=('cuda', 'xpu'), active_if=not SM53OrLater),
+                            device_type='cuda', active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                             "TestCommon", "test_out"),
            ),
@@ -15415,7 +15415,7 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
-                                                       if SM53OrLater or TEST_WITH_ROCM else []),
+                                                       if SM53OrLater or TEST_WITH_ROCM or TEST_XPU else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            backward_dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
