@@ -90,8 +90,8 @@ def _reject_shared_mutable(obj: Any, _seen: set[_ObjId]) -> None:
     shared-identity aliasing (mutating one copy would no longer affect the other), which
     is not expressible as a source literal today. Routed here are the kinds reconstructed
     as fresh MUTABLE copies whose aliasing a flat literal cannot preserve: list / dict /
-    set, non-frozen dataclasses, and the opaque _emit_via_reduce value objects. Kinds
-    treated as immutable value objects are exempt -- scalars, tuple / frozenset, frozen
+    set, bytearray, non-frozen dataclasses, and the opaque _emit_via_reduce value objects.
+    Kinds treated as immutable value objects are exempt -- scalars, tuple / frozenset, frozen
     dataclasses, and the recipe-like value objects emitted by their own branches
     (functools.partial, ViewMeta, ViewMetaSequence), which are never mutated after
     reconstruction -- so a shared one of those still emits fine. ``_seen`` is threaded in
@@ -197,8 +197,16 @@ def _emit_value(
     # importable/reduce path, which reconstructs it faithfully or raises.
     if obj is None or (
         not isinstance(obj, enum.Enum)
-        and type(obj) in (bool, int, float, complex, str, bytes, bytearray)
+        and type(obj) in (bool, int, float, complex, str, bytes)
     ):
+        return repr(obj)
+    # bytearray is the one mutable builtin whose repr round-trips, so it is emitted as a
+    # repr literal like the immutable scalars above -- but being mutable it needs the same
+    # shared-alias guard the containers get (reached twice it would become two independent
+    # literals, silently dropping the aliasing). It cannot be self-referential, so it needs
+    # only the alias check and no cycle guard.
+    if type(obj) is bytearray:
+        _reject_shared_mutable(obj, _seen)
         return repr(obj)
 
     # Cycle guard: thread an identity-keyed in-progress set down the recursion so a
