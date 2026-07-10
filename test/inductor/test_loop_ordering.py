@@ -3,7 +3,7 @@
 import contextlib
 import os
 import unittest
-from unittest import skipUnless
+from unittest import mock, skipUnless
 
 import numpy as np
 import sympy
@@ -283,7 +283,7 @@ class LoopOrderingTest(TestCase):
                 scores.append(score)
             return score
 
-        with unittest.mock.patch.object(
+        with mock.patch.object(
             inductor_scheduler.Scheduler,
             "_try_reindex_transpose_contiguous_clone",
             wrapped_reindex,
@@ -307,7 +307,7 @@ class LoopOrderingTest(TestCase):
                 score_call_count += 1
                 return 0
 
-            with unittest.mock.patch.object(
+            with mock.patch.object(
                 inductor_scheduler.Scheduler,
                 "score_fusion_memory",
                 force_no_score_gain,
@@ -317,7 +317,7 @@ class LoopOrderingTest(TestCase):
                 results.append(result)
             return result
 
-        with unittest.mock.patch.object(
+        with mock.patch.object(
             inductor_scheduler.Scheduler,
             "_try_reindex_transpose_contiguous_clone",
             wrapped_reindex,
@@ -587,6 +587,10 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
 
     @skipUnless(HAS_GPU, "requires GPU")
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=True,
+    )
     def test_transpose_contiguous_clone_reindexing(self):
         """
         A producer writes [B, S, H], then a view + transpose + contiguous clone
@@ -611,6 +615,10 @@ class LoopOrderingTest(TestCase):
         ).run(code[0])
 
     @skipUnless(HAS_GPU, "requires GPU")
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=True,
+    )
     def test_transpose_contiguous_clone_reindexing_rolls_back_without_score_gain(
         self,
     ):
@@ -634,6 +642,10 @@ class LoopOrderingTest(TestCase):
         FileCheck().check("triton_poi_fused_clone").run(code[0])
 
     @skipUnless(HAS_GPU, "requires GPU")
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=True,
+    )
     def test_transpose_contiguous_clone_reindexing_rejects_other_permute(self):
         """
         A different permute + contiguous copy should not be rewritten by the
@@ -654,6 +666,24 @@ class LoopOrderingTest(TestCase):
         torch.testing.assert_close(actual, ref)
         self.assertEqual(actual.stride(), (512, 128, 16, 1))
         self.assertEqual(scores, [])
+
+    @skipUnless(HAS_GPU, "requires GPU")
+    @inductor_config.patch(
+        loop_index_inversion_in_fusion=True,
+        loop_reindexing_after_fusion=False,
+    )
+    def test_transpose_contiguous_clone_reindexing_disabled_by_config(self):
+        f, args = self._transpose_contiguous_clone_reindexing_case()
+        ref = f(*args)
+        with self._record_transpose_contiguous_clone_reindex_scores() as scores:
+            actual, code = run_and_get_code(
+                torch.compile(f),
+                *args,
+            )
+
+        torch.testing.assert_close(actual, ref)
+        self.assertEqual(scores, [])
+        FileCheck().check("triton_poi_fused_clone").run(code[0])
 
     def test_reindex_unfusable_write_read_dep(self):
         """

@@ -305,59 +305,21 @@ class LoopBody:
         )
         return new_body
 
-    def reindex_iter_loops(self, new_iter_sizes: Sequence[sympy.Expr]) -> LoopBody:
-        """
-        Reindex iteration loops into a different factorization of the same
-        total numel. For example, [1024, 8192] -> [65536, 128].
-
-        The old iteration vars are expressed as functions of the new vars via
-        FloorDiv and ModularIndexing on the flat index.
-        """
-        old_body = self
-        old_iter_sizes = self.sizes[0]
-        reduce_sizes = self.sizes[1]
-
-        new_sizes = (list(new_iter_sizes), list(reduce_sizes))
-
-        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            *new_sizes,
-            prefix="t",  # type: ignore[arg-type]
-        )
-
-        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
-            index = [*itertools.chain.from_iterable(indices)]
-            new_iter_idx = index[: len(new_iter_sizes)]
-            reduce_idx = index[len(new_iter_sizes) :]
-            flat = flatten_index(new_iter_idx, new_iter_sizes)
-            old_iter_idx = decompose_index(flat, old_iter_sizes)
-            return old_body(old_iter_idx, list(reduce_idx))
-
-        loop_body = LoopBody(
-            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
-        )
-
-        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            *new_sizes,
-            prefix="p",  # type: ignore[arg-type]
-        )
-        return LoopBody(
-            loop_body,
-            (iter_vars2, reduce_vars2),
-            var_ranges2,
-            iter_vars2,
-            reduce_vars2,
-        )
-
-    def reindex_iter_loops_with_indexer(
+    def reindex_iter_loops(
         self,
         new_iter_sizes: Sequence[sympy.Expr],
         indexer: Callable[
             [Sequence[sympy.Expr], Sequence[sympy.Expr]], Sequence[sympy.Expr]
-        ],
+        ]
+        | None = None,
     ) -> LoopBody:
         """
-        Reindex iteration loops into a different factorization using an explicit
-        mapping from new iteration indices to old iteration indices.
+        Reindex iteration loops into a different factorization of the same
+        total numel. For example, [1024, 8192] -> [65536, 128].
+
+        By default, the old iteration vars are expressed as functions of the
+        new vars via FloorDiv and ModularIndexing on the flat index. An explicit
+        indexer can be provided for other mappings.
         """
         old_body = self
         old_iter_sizes = self.sizes[0]
@@ -374,7 +336,11 @@ class LoopBody:
             index = [*itertools.chain.from_iterable(indices)]
             new_iter_idx = index[: len(new_iter_sizes)]
             reduce_idx = index[len(new_iter_sizes) :]
-            old_iter_idx = indexer(new_iter_idx, old_iter_sizes)
+            if indexer is None:
+                flat = flatten_index(new_iter_idx, new_iter_sizes)
+                old_iter_idx = decompose_index(flat, old_iter_sizes)
+            else:
+                old_iter_idx = indexer(new_iter_idx, old_iter_sizes)
             return old_body(list(old_iter_idx), list(reduce_idx))
 
         loop_body = LoopBody(

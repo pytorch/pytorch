@@ -2353,28 +2353,13 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
-    def apply_loop_reindexing(self, new_iter_sizes: Sequence[sympy.Expr]) -> None:
-        if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
-            raise AssertionError(
-                "expected self.node to be a ComputedBuffer or TemplateBuffer"
-            )
-
-        self._before_loop_state_mutation()
-        self._body = self._body.reindex_iter_loops(new_iter_sizes)
-        self._sizes = self._body.sizes
-
-        device = self.node.get_device_or_error()
-        group_fn = self.scheduler.get_backend(device).group_fn
-        self.group = (device, group_fn(self._sizes))
-
-        self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
-
-    def apply_loop_reindexing_with_indexer(
+    def apply_loop_reindexing(
         self,
         new_iter_sizes: Sequence[sympy.Expr],
         indexer: Callable[
             [Sequence[sympy.Expr], Sequence[sympy.Expr]], Sequence[sympy.Expr]
-        ],
+        ]
+        | None = None,
     ) -> None:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             raise AssertionError(
@@ -2382,7 +2367,7 @@ class SchedulerNode(BaseSchedulerNode):
             )
 
         self._before_loop_state_mutation()
-        self._body = self._body.reindex_iter_loops_with_indexer(new_iter_sizes, indexer)
+        self._body = self._body.reindex_iter_loops(new_iter_sizes, indexer=indexer)
         self._sizes = self._body.sizes
 
         device = self.node.get_device_or_error()
@@ -7043,11 +7028,12 @@ class Scheduler:
         if not isinstance(node1_write, MemoryDep):
             return -1
 
-        score = self._try_reindex_transpose_contiguous_clone(
-            node1, node2, node1_write, node2_read, node2_write
-        )
-        if score >= 0:
-            return score
+        if config.loop_reindexing_after_fusion:
+            score = self._try_reindex_transpose_contiguous_clone(
+                node1, node2, node1_write, node2_read, node2_write
+            )
+            if score >= 0:
+                return score
 
         # We are checking for compatibility with the normalized node1 write
         # then modifying node2 reads/writes. since the node1 write will be just used
@@ -7169,7 +7155,7 @@ class Scheduler:
         if "index0" not in body.indexing_exprs or "index1" not in body.indexing_exprs:
             return -1
 
-        read_exprs = OrderedSet(expr for expr in body.get_read_exprs())
+        read_exprs = OrderedSet(body.get_read_exprs())
         if len(read_exprs) != 1:
             return -1
         if next(iter(read_exprs)) not in body.indexing_exprs.values():
@@ -7195,9 +7181,6 @@ class Scheduler:
             V.graph.sizevars.statically_known_equals(bsz, read_bsz)
             and V.graph.sizevars.statically_known_equals(seq, read_seq)
             and V.graph.sizevars.statically_known_equals(hidden, heads * head_dim)
-            and V.graph.sizevars.statically_known_equals(
-                sympy_product(producer_size), sympy_product(clone_read_size)
-            )
         ):
             return -1
 
@@ -7229,7 +7212,7 @@ class Scheduler:
                 ModularIndexing(h, 1, old_iter_sizes[3]),
             ]
 
-        node2.apply_loop_reindexing_with_indexer(producer_size, indexer)
+        node2.apply_loop_reindexing(producer_size, indexer=indexer)
         score = self.score_fusion_memory(node1, node2)
         if not isinstance(score, int):
             raise AssertionError("expected score to be an int")
