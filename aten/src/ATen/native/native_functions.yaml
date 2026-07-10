@@ -6632,6 +6632,16 @@
     CUDA: _philox_uniform_cuda_
   autogen: _philox_uniform, _philox_uniform.out
 
+- func: _dtensor_local_normal_(Tensor(a!) self, Tensor key, int global_numel, int shard_offset, float mean=0, float std=1) -> Tensor(a!)
+  dispatch:
+    CUDA: _dtensor_local_normal_cuda_
+  autogen: _dtensor_local_normal, _dtensor_local_normal.out
+
+- func: _dtensor_local_uniform_(Tensor(a!) self, Tensor key, int global_numel, int shard_offset, float low=0, float high=1) -> Tensor(a!)
+  dispatch:
+    CUDA: _dtensor_local_uniform_cuda_
+  autogen: _dtensor_local_uniform, _dtensor_local_uniform.out
+
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
     CPU: _dirichlet_grad_cpu

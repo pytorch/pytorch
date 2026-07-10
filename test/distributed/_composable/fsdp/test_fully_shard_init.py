@@ -6,6 +6,7 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
+import torch.func._random as stateless_random
 import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed.device_mesh import init_device_mesh
@@ -796,6 +797,81 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             model(inp)
 
     @skip_if_lt_x_gpu(1)
+    def test_stateless_normal_meta_device_init(self):
+        if device_type.type != "cuda":
+            self.skipTest("torch.func._random.normal_ is only available on CUDA")
+
+        class TinyModel(nn.Module):
+            def __init__(self, world_size: int, dtype: torch.dtype):
+                super().__init__()
+                self.extra = nn.Parameter(
+                    torch.empty(world_size, world_size + 3, dtype=dtype)
+                )
+                self.in_proj = nn.Linear(
+                    3 * world_size, 4 * world_size, bias=True, dtype=dtype
+                )
+                self.out_proj = nn.Linear(
+                    4 * world_size, 2 * world_size, bias=False, dtype=dtype
+                )
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return self.out_proj(torch.relu(self.in_proj(inp)))
+
+        device = torch.device(
+            device_type.type, torch.get_device_module(device_type).current_device()
+        )
+        seed = 12345
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+
+        def num_philox_calls(numel: int, dtype: torch.dtype) -> int:
+            elems_per_call = 2 if dtype == torch.float64 else 4
+            return (numel + elems_per_call - 1) // elems_per_call
+
+        def stateless_init(model: nn.Module) -> dict[str, int]:
+            offsets: dict[str, int] = {}
+            offset = 0
+            with torch.no_grad():
+                for name, param in model.named_parameters():
+                    offsets[name] = offset
+                    key = torch.tensor(
+                        [seed, offset],
+                        dtype=torch.uint64,
+                        device=param.device,
+                    )
+                    stateless_random.normal_(key, param, std=0.02)
+                    offset += num_philox_calls(param.numel(), param.dtype)
+            return offsets
+
+        for dtype in (torch.float32, torch.float64):
+            if self.rank == 0:
+                torch.manual_seed(seed + 1000)
+                with torch.device("meta"):
+                    ref_model = TinyModel(self.world_size, dtype)
+                ref_model.to_empty(device=device)
+                ref_offsets = stateless_init(ref_model)
+                ref_state = {
+                    name: param.detach().clone()
+                    for name, param in ref_model.named_parameters()
+                }
+
+            torch.manual_seed(seed + 1000 + self.rank)
+            with torch.device("meta"):
+                model = TinyModel(self.world_size, dtype)
+                fully_shard(model, mesh=mesh)
+            model.to_empty(device=device)
+            offsets = stateless_init(model)
+            if self.rank == 0:
+                self.assertEqual(offsets, ref_offsets)
+
+            for name, param in model.named_parameters():
+                actual = param.full_tensor()
+                expected = torch.empty_like(actual)
+                if self.rank == 0:
+                    expected.copy_(ref_state[name])
+                dist.broadcast(expected, src=0)
+                self.assertEqual(actual, expected)
+
+    @skip_if_lt_x_gpu(1)
     def test_rank0_broadcast_meta_device_init(self):
         model_args = ModelArgs(dropout_p=0.0)
         # Assume we have a CPU full state dict on rank 0
@@ -879,6 +955,89 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         self.assertEqual(loss, ref_loss)
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
             self.assertEqual(param.grad, ref_param.grad)
+
+
+class StatefulNNInitMetaDeviceInitMixin:
+    @skip_if_lt_x_gpu(1)
+    def test_stateful_nn_init_meta_device_init_matches_dense(self):
+        if device_type.type != "cuda":
+            self.skipTest("CUDA distribution kernels are required for exact numerics")
+
+        class InitModel(nn.Module):
+            def __init__(self, world_size: int, dtype: torch.dtype):
+                super().__init__()
+                self.p0 = nn.Parameter(
+                    torch.empty(world_size * 257 + 3, 17, dtype=dtype)
+                )
+                self.p1 = nn.Parameter(
+                    torch.empty(world_size * 129 + 5, 11, dtype=dtype)
+                )
+                self.p2 = nn.Parameter(
+                    torch.empty(world_size + 3, world_size * 5 + 1, dtype=dtype)
+                )
+
+        def init_model(model: nn.Module, init_name: str) -> None:
+            for param in model.parameters():
+                if init_name == "normal":
+                    nn.init.normal_(param, mean=0.01, std=0.02)
+                elif init_name == "trunc_normal":
+                    nn.init.trunc_normal_(param, mean=0.0, std=0.02, a=-0.06, b=0.06)
+                elif init_name == "xavier_uniform":
+                    nn.init.xavier_uniform_(param, gain=0.75)
+                else:
+                    raise AssertionError(f"Unexpected init name: {init_name}")
+
+        device = torch.device(
+            device_type.type, torch.get_device_module(device_type).current_device()
+        )
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        init_names = ("normal", "trunc_normal", "xavier_uniform")
+
+        dtypes = (torch.float32, torch.float64, torch.float16, torch.bfloat16)
+        for dtype_idx, dtype in enumerate(dtypes):
+            for init_idx, init_name in enumerate(init_names):
+                seed = 23456 + dtype_idx * 100 + init_idx
+                if self.rank == 0:
+                    torch.manual_seed(seed)
+                    with torch.device("meta"):
+                        ref_model = InitModel(self.world_size, dtype)
+                    ref_model.to_empty(device=device)
+                    init_model(ref_model, init_name)
+                    ref_state = {
+                        name: param.detach().clone()
+                        for name, param in ref_model.named_parameters()
+                    }
+
+                torch.manual_seed(seed + self.rank)
+                with torch.device("meta"):
+                    model = InitModel(self.world_size, dtype)
+                    fully_shard(model, mesh=mesh)
+                model.to_empty(device=device)
+                init_model(model, init_name)
+
+                for name, param in model.named_parameters():
+                    actual = param.full_tensor()
+                    expected = torch.empty_like(actual)
+                    if self.rank == 0:
+                        expected.copy_(ref_state[name])
+                    dist.broadcast(expected, src=0)
+                    self.assertEqual(actual, expected, rtol=0, atol=0)
+
+
+class TestFullyShardStatefulNNInitMetaDeviceInit2(
+    StatefulNNInitMetaDeviceInitMixin, FSDPTest
+):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+
+class TestFullyShardStatefulNNInitMetaDeviceInit4(
+    StatefulNNInitMetaDeviceInitMixin, FSDPTest
+):
+    @property
+    def world_size(self) -> int:
+        return 4
 
 
 class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
