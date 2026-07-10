@@ -7829,8 +7829,13 @@ class TestMPS(TestCaseMPS):
         x = torch.arange(-9.0, 9.0, 2**-10)
         actual = torch.erfc(x.to('mps')).cpu().double()
         expected = torch.erfc(x.double())
-        rel = ((actual - expected) / expected).abs().max()
-        self.assertLess(rel.item(), 1e-6)
+        self.assertEqual(actual, expected, rtol=1e-6, atol=0)
+        # specials and the clamped tail (t = min(|x|, 10.5) in the kernel);
+        # erfc rounds to exactly 0/2 in fp32 well before the clamp
+        vals = [0.0, float('inf'), float('-inf'), float('nan'), 10.5, -10.5, 1e30, -1e30]
+        expected_sp = torch.tensor([1.0, 0.0, 2.0, float('nan'), 0.0, 2.0, 0.0, 2.0])
+        actual_sp = torch.erfc(torch.tensor(vals, device='mps')).cpu()
+        self.assertEqual(actual_sp, expected_sp, rtol=0, atol=0)
 
     def test_igammac_tail_accuracy(self):
         # igamma.h evaluates 0.5 * erfc(...) on its large-a asymptotic path,

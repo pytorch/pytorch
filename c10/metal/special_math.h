@@ -61,8 +61,12 @@ inline float erf(T x) {
  * since erfc(-x) < 0.19 here. The scaled-rational construction follows
  * N. Juffa's vectorizable erfcf
  * (https://stackoverflow.com/questions/35966695) with freshly fitted
- * coefficients. Max observed error 4.6 ulp over the fp32-normal range
- * (subnormal results flush to zero on the GPU).
+ * coefficients. Both quotients use ::metal::fast::divide: full-precision
+ * division costs 1.2-2x in erfc-bound ops and would tighten the max error
+ * only to ~5.0 ulp. Exhaustive enumeration of fp32 inputs measures a max
+ * error of 5.6 ulp (4.0e-7 relative, M5; fast-math division rounding is
+ * GPU-dependent) over the normal output range (subnormal results flush to
+ * zero on the GPU).
  */
 template <typename T>
 float erfc(T x) {
@@ -77,7 +81,7 @@ float erfc(T x) {
   }
   // erfc underflows fp32 past 10.06; the clamp also handles +-infinity
   const auto t = ::metal::min(a, 10.5f);
-  const auto q = (t - 4.0f) / (t + 4.0f);
+  const auto q = ::metal::fast::divide(t - 4.0f, t + 4.0f);
   auto p = 5.271875e-03f; // 0x1.597f62p-8
   p = ::metal::fma(p, q, -1.6534764e-02f); // -0x1.0ee7d4p-6
   p = ::metal::fma(p, q, 3.702093e-02f); // 0x1.2f4684p-5
@@ -92,7 +96,8 @@ float erfc(T x) {
   auto e = ::metal::exp(-s);
   // fold in the residual of the squaring: t * t = s + fma(t, t, -s) exactly
   e = ::metal::fma(-e, ::metal::fma(t, t, -s), e);
-  const auto r = (1.0f + p) / ::metal::fma(2.0f, t, 1.0f) * e;
+  const auto den = ::metal::fma(2.0f, t, 1.0f);
+  const auto r = ::metal::fast::divide(1.0f + p, den) * e;
   return xf < 0.0f ? 2.0f - r : r;
 }
 
