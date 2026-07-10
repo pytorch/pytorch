@@ -131,7 +131,7 @@ class HardwareClassification(Enum):
       typically do **not** use
       :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
 
-    * ``DEVICE_GENERIC`` – tests that verify behavior which must hold
+    * ``ACCELERATOR`` – tests that verify behavior which must hold
       across every accelerator (e.g. operator semantics, memory profiling).
       These test classes **are** instantiated via
       :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
@@ -148,13 +148,13 @@ class HardwareClassification(Enum):
             def test_bar(self):
                 ...
 
-    Run only GENERIC and DEVICE_GENERIC tests::
+    Run only GENERIC and ACCELERATOR tests:
 
-        python test/test_torch.py --hw-classification GENERIC DEVICE_GENERIC
+        python test/test_torch.py --hw-classification GENERIC ACCELERATOR
 
     """
     GENERIC = "generic"
-    DEVICE_GENERIC = "device_generic"
+    ACCELERATOR = "accelerator"
     CPU = "cpu"
     CUDA = "cuda"
     MPS = "mps"

@@ -135,7 +135,7 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestIdentifyGradients(TestCase):
-    hw_classification = HardwareClassification.DEVICE_GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def gradient_detected(
         self,
@@ -1267,7 +1267,7 @@ class TestMemoryProfilerE2E(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2EDeviceType(TestCase):
-    hw_classification = HardwareClassification.DEVICE_GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _run_and_check_parameters_and_gradients(
         self, inner_fn, model, grads_none: bool = False
@@ -1497,7 +1497,7 @@ class TestMemoryProfilerE2EDeviceType(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerTimeline(TestCase):
-    hw_classification = HardwareClassification.DEVICE_GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipXPUIf(
         True,

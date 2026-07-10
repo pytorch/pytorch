@@ -2701,15 +2701,15 @@ class TestHardwareClassifications(TestCase):
     def test_filter_suite_uses_inherited_metadata(self):
         requirement = self._cu.HardwareClassification
 
-        class DeviceGenericBase(TestCase):
-            hw_classification = requirement.DEVICE_GENERIC
+        class AcceleratorBase(TestCase):
+            hw_classification = requirement.ACCELERATOR
 
-        class DeviceGenericChild(DeviceGenericBase):
+        class AcceleratorChild(AcceleratorBase):
             def test_inherited_classification(self):
                 pass
 
-        suite = unittest.defaultTestLoader.loadTestsFromTestCase(DeviceGenericChild)
-        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.DEVICE_GENERIC})
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(AcceleratorChild)
+        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.ACCELERATOR})
         filtered_suite = loader.get_filtered_suite(suite)
 
         self.assertEqual(

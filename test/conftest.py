@@ -95,7 +95,8 @@ def pytest_addoption(parser: Parser) -> None:
         default=None,
         metavar="SCOPE",
         dest="hw_classification",
-        help="filter tests by hardware classification categories (e.g., GENERIC DEVICE_GENERIC CPU CUDA MPS XPU)",
+        type=str.upper,
+        help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
     )
     shard_addoptions(parser)
 
