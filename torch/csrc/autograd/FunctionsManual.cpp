@@ -2775,6 +2775,73 @@ Tensor soft_margin_loss_double_backward_grad_output(
   return (r * grad).sum();
 }
 
+// Double backward for the fused MPS cross-entropy backward. The backward
+// computes, matching the reference decomposition:
+//   grad_input[b, c] = grad_loss[b] * (a[b] * p[b, c] - k[b, c])
+// where p = softmax(self) is recomputed from the saved per-row lse,
+//   a[b] = (1 - eps) * w[target[b]] + (eps / V) * sum(w)
+// (a[b] == 1 unweighted, 0 for ignored rows) and k does not depend on
+// self. lse is a saved statistic of self and is never differentiable, so
+// the self gradient below is the total derivative through
+// p = exp(self - logsumexp(self)), i.e. the softmax Jacobian applied to
+// the incoming gradient:
+//   d<gg, grad_input> / d self = grad_loss * a * p * (gg - sum_c(gg * p))
+// This mirrors layer_norm_double_backward, which folds the saved
+// mean/rstd dependence back into the input gradient the same way.
+std::tuple<Tensor, Tensor> fused_cross_entropy_loss_2d_double_backward(
+    const Tensor& grad,
+    const Tensor& grad_loss,
+    const Tensor& self,
+    const Tensor& target,
+    const std::optional<Tensor>& weight,
+    const Tensor& lse,
+    int64_t ignore_index,
+    double label_smoothing,
+    std::array<bool, 2> grad_input_mask) {
+  Tensor grad_grad_loss, grad_self;
+  if (!grad.defined()) {
+    return std::make_tuple(grad_grad_loss, grad_self);
+  }
+  const auto gg = grad.to(at::kFloat);
+  if (grad_input_mask[0]) {
+    // grad_input is linear in grad_loss: contract gg with the backward
+    // evaluated at grad_loss == 1 (same pattern as
+    // soft_margin_loss_double_backward_grad_output above).
+    auto unit_grad_input = at::_fused_cross_entropy_loss_2d_backward(
+        at::ones_like(grad_loss),
+        self,
+        target,
+        weight,
+        lse,
+        ignore_index,
+        label_smoothing);
+    grad_grad_loss = (gg * unit_grad_input.to(at::kFloat))
+                         .sum(-1)
+                         .to(grad_loss.scalar_type());
+  }
+  if (grad_input_mask[1]) {
+    auto p = (self.to(at::kFloat) - lse.unsqueeze(-1)).exp();
+    auto not_ignored = target.ne(ignore_index);
+    Tensor a;
+    if (isDefined(weight)) {
+      auto w = weight->to(at::kFloat);
+      auto safe_target =
+          at::where(not_ignored, target, at::zeros_like(target)).to(at::kLong);
+      // sum(w) / V == mean(w); avoids explicit (possibly symbolic) V.
+      a = (1.0 - label_smoothing) * w.index_select(0, safe_target) +
+          label_smoothing * w.mean();
+    } else {
+      // Unweighted: (1 - eps) * 1 + (eps / V) * V == 1.
+      a = at::ones_like(grad_loss);
+    }
+    a = at::where(not_ignored, a, at::zeros_like(a));
+    auto row_scale = (grad_loss.to(at::kFloat) * a).unsqueeze(-1);
+    grad_self = (row_scale * p * (gg - (gg * p).sum(-1, /*keepdim=*/true)))
+                    .to(self.scalar_type());
+  }
+  return std::make_tuple(grad_grad_loss, grad_self);
+}
+
 Tensor softplus_double_backward(
     const Tensor& grad,
     const Tensor& input,

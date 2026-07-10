@@ -107,6 +107,7 @@ kernel void cross_entropy_forward(
   float local_max = -INFINITY;
   float local_sum = 0.0f;
   float local_wlogit_sum = 0.0f;
+  bool found_nan = false;
   float target_logit = 0.0f;
   bool found_target = false;
 
@@ -114,13 +115,20 @@ kernel void cross_entropy_forward(
     uint base = r + tid * N_READS;
     if (base + N_READS <= V) {
       float4 v = ce_load_vec4(row + base);
+      // fmax discards NaN, so track it explicitly; the flag poisons the sum
+      // after the loop (CPU parity: one NaN logit -> NaN loss).
+      found_nan = found_nan || metal::any(metal::isnan(v));
       float chunk_max = fmax(fmax(v.x, v.y), fmax(v.z, v.w));
       float new_max = fmax(local_max, chunk_max);
-      local_sum = local_sum * metal::precise::exp(local_max - new_max) +
-          metal::precise::exp(v.x - new_max) +
-          metal::precise::exp(v.y - new_max) +
-          metal::precise::exp(v.z - new_max) +
-          metal::precise::exp(v.w - new_max);
+      // All-(-inf) prefix chunks: exp(-inf - -inf) is NaN; the sum is 0 and
+      // stays 0 until a finite value raises new_max.
+      if (new_max > -INFINITY) {
+        local_sum = local_sum * metal::precise::exp(local_max - new_max) +
+            metal::precise::exp(v.x - new_max) +
+            metal::precise::exp(v.y - new_max) +
+            metal::precise::exp(v.z - new_max) +
+            metal::precise::exp(v.w - new_max);
+      }
       local_max = new_max;
       if (has_weight) {
         local_wlogit_sum += weight[base + 0] * v.x + weight[base + 1] * v.y +
@@ -137,9 +145,12 @@ kernel void cross_entropy_forward(
     } else {
       for (uint i = base; i < min(base + uint(N_READS), V); i++) {
         float val = float(row[i]);
+        found_nan = found_nan || metal::isnan(val);
         float new_max = fmax(local_max, val);
-        local_sum = local_sum * metal::precise::exp(local_max - new_max) +
-            metal::precise::exp(val - new_max);
+        if (new_max > -INFINITY) {
+          local_sum = local_sum * metal::precise::exp(local_max - new_max) +
+              metal::precise::exp(val - new_max);
+        }
         local_max = new_max;
         local_wlogit_sum += has_weight ? weight[i] * val : val;
         if (int64_t(i) == tgt) {
@@ -150,6 +161,12 @@ kernel void cross_entropy_forward(
     }
   }
 
+  // A NaN input must poison the row like CPU; applied once after the scan
+  // (an in-loop poison could be skipped by the guarded update above). NaN
+  // survives the 0-factor rescale below (0 * NaN == NaN) and simd_sum.
+  if (found_nan) {
+    local_sum = NAN;
+  }
   // Reduce max across the threadgroup. Guard the all-idle simdgroup case:
   // exp(-inf - (-inf)) is NaN; use factor 0 when a simdgroup saw no data.
   float sg_max = simd_max(local_max);

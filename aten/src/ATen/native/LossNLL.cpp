@@ -694,7 +694,7 @@ static bool can_use_fused_mps_cross_entropy(
     const Tensor& target,
     const std::optional<Tensor>& weight,
     double label_smoothing,
-    int64_t ignore_index) {
+    const c10::SymInt& ignore_index) {
   // Escape hatch + same-build A/B (benchmarks/mps/bench_crossentropy.py): force
   // the reference decomposed log_softmax + nll_loss path instead of the fused
   // Metal kernel, without a rebuild.
@@ -720,7 +720,10 @@ static bool can_use_fused_mps_cross_entropy(
   }
   // ignore_index is packed into the int32 CrossEntropyParams field; a value
   // outside int32 range would truncate, so fall back to the decomposed path.
-  if (ignore_index < INT32_MIN || ignore_index > INT32_MAX) {
+  // Concretize (guard_int) only here, after the is_mps / shape checks above
+  // have passed, so non-MPS and export/tracing paths never specialize on it.
+  const int64_t ignore_index_int = ignore_index.guard_int(__FILE__, __LINE__);
+  if (ignore_index_int < INT32_MIN || ignore_index_int > INT32_MAX) {
     return false;
   }
   // Reference nll_loss only accepts Long/Byte class-index targets; reject
@@ -774,8 +777,7 @@ Tensor cross_entropy_loss_symint(
     double label_smoothing) {
   Tensor ret;
   if (can_use_fused_mps_cross_entropy(
-          self, target, weight, label_smoothing,
-          ignore_index.guard_int(__FILE__, __LINE__))) {
+          self, target, weight, label_smoothing, ignore_index)) {
     return cross_entropy_loss_2d_fused_mps(
         self, target, weight, reduction, ignore_index.guard_int(__FILE__, __LINE__),
         label_smoothing);

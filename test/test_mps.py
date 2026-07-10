@@ -5262,6 +5262,29 @@ class TestMPS(TestCaseMPS):
         om2 = F.cross_entropy(lg2.to("mps"), tgt2.to("mps"), ignore_index=big_ignore)
         oc2 = F.cross_entropy(lg2, tgt2, ignore_index=big_ignore)
         self.assertEqual(om2, oc2)
+        # Double backward (create_graph) must route through the registered
+        # derivative of _fused_cross_entropy_loss_2d_backward and match the
+        # CPU reference for both d/dlogits and d/dgrad_output, including the
+        # weighted + label-smoothed + ignored-row case.
+        N3, C3 = 6, 33
+        base = torch.randn(N3, C3)
+        tgt3 = torch.randint(0, C3, (N3,))
+        tgt3[1] = -100  # ignored row
+        w3 = torch.rand(C3) + 0.5
+        vec3 = torch.randn(N3, C3)
+        results = []
+        for dev in ("cpu", "mps"):
+            lg3 = base.detach().to(dev).requires_grad_()
+            go = torch.ones((), device=dev, requires_grad=True)
+            loss3 = F.cross_entropy(lg3, tgt3.to(dev), weight=w3.to(dev),
+                                    label_smoothing=0.2)
+            g3, = torch.autograd.grad(loss3, lg3, grad_outputs=go,
+                                      create_graph=True)
+            gg_logits, gg_go = torch.autograd.grad(
+                (g3 * vec3.to(dev)).sum(), (lg3, go))
+            results.append((gg_logits.cpu(), gg_go.cpu()))
+        self.assertEqual(results[0][0], results[1][0], atol=1e-4, rtol=1e-4)
+        self.assertEqual(results[0][1], results[1][1], atol=1e-4, rtol=1e-4)
 
     def test_log_softmax(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]

@@ -2098,6 +2098,18 @@
   target: non_differentiable
   weight: non_differentiable
 
+# Double backward of the fused MPS cross-entropy (the forward entry above
+# calls this op). lse is a saved statistic of self and is never
+# differentiable (uncovered forward outputs are non-differentiable), so the
+# self formula is the total derivative through softmax(self) recomputed from
+# lse -- the same convention as native_layer_norm_backward folding its saved
+# mean/rstd into the input gradient.
+- name: _fused_cross_entropy_loss_2d_backward(Tensor grad_loss, Tensor self, Tensor target, Tensor? weight, Tensor lse, int ignore_index=-100, float label_smoothing=0.0) -> Tensor
+  grad_loss, self: fused_cross_entropy_loss_2d_double_backward(grad, grad_loss, self, target, weight, lse, ignore_index, label_smoothing, grad_input_mask)
+  target: non_differentiable
+  weight: non_differentiable
+  lse: not_implemented("_fused_cross_entropy_loss_2d_backward lse")
+
 - name: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index) -> (Tensor output, Tensor total_weight)
   self: nll_loss_backward_symint(grad, self, target, weight, reduction, ignore_index, total_weight)
   target: non_differentiable

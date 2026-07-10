@@ -524,6 +524,16 @@ at::Tensor softmax_double_backward(
     const at::Tensor& grad_output,
     int dim,
     const at::Tensor& output);
+std::tuple<at::Tensor, at::Tensor> fused_cross_entropy_loss_2d_double_backward(
+    const at::Tensor& grad,
+    const at::Tensor& grad_loss,
+    const at::Tensor& self,
+    const at::Tensor& target,
+    const std::optional<at::Tensor>& weight,
+    const at::Tensor& lse,
+    int64_t ignore_index,
+    double label_smoothing,
+    std::array<bool, 2> grad_input_mask);
 at::Tensor binary_cross_entropy_double_backward(
     const at::Tensor& grad_output,
     const at::Tensor& grad,
