@@ -497,7 +497,7 @@ class BaseListVariable(VariableTracker):
                 [self, args[0]],
                 kwargs,
             )
-        elif name in ("__add__", "__iadd__"):
+        elif name == "__add__":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -505,23 +505,16 @@ class BaseListVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-
-            if type(self) is not type(args[0]):
-                tp_name = self.python_type_name()
-                other = args[0].python_type_name()
-                raise_observed_exception(
-                    TypeError,
+            return self.sq_concat_impl(tx, args[0])
+        elif name == "__iadd__":
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
                     tx,
-                    args=[
-                        f'can only concatenate {tp_name} (not "{other}") to {tp_name}'
-                    ],
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-
-            if name == "__add__":
-                return type(self)(self.items + args[0].items)  # type: ignore[attr-defined]
-            else:
-                self.items += args[0].items  # type: ignore[attr-defined]
-                return self
+            return self.sq_inplace_concat_impl(tx, args[0])
         elif name == "__reversed__":
             # list/tuple/namedtuple __reversed__: reverse iterator over items.
             if args or kwargs:
