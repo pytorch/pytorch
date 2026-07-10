@@ -1115,6 +1115,49 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(d.keys(), mp.keys())
 
+    def test_dict_view_mapping(self):
+        # dict_keys/values/items expose a read-only mappingproxy via .mapping
+        mappingproxy = type(type.__dict__)
+
+        def fn(x):
+            d = {"a": 1, "b": 2}
+            m_keys = d.keys().mapping
+            m_values = d.values().mapping
+            m_items = d.items().mapping
+            y = torch.sin(x)
+            for m in (m_keys, m_values, m_items):
+                if isinstance(m, mappingproxy) and m == d:
+                    y = y + 1
+            return y, m_keys, m_values, m_items
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        for m in res[1:]:
+            self.assertTrue(type(m) is mappingproxy)
+            self.assertEqual(m, {"a": 1, "b": 2})
+
+    def test_dict_view_mapping_reflects_mutation(self):
+        # The mappingproxy returned by .mapping proxies the live dict, so a
+        # later mutation must be visible through it.
+        mappingproxy = type(type.__dict__)
+
+        def fn(x):
+            d = {}
+            m = d.keys().mapping
+            d["foo"] = "bar"
+            return torch.sin(x), isinstance(m, mappingproxy), dict(m)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertTrue(res[1])
+        self.assertEqual(res[2], {"foo": "bar"})
+
     def test_move_to_end(self):
         def fn(x):
             d = OrderedDict({"a": torch.cos(x), "b": 3, "c": 5})
@@ -3298,6 +3341,82 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(items, {"x": 1, "y": 20, "z": 3})
         self.assertEqual(keys, {"x", "y", "z"})
 
+    def test_dunder_dict_pop_reinsert_order(self):
+        # CPython appends a re-inserted key at the end of the dict rather than
+        # reusing its old slot. obj.__dict__ ordering is observable, so popping
+        # then re-adding a key must move it to the end (mirrors
+        # test_dict.DictTest.test_splittable_pop).
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = MyClass()
+            obj.x, obj.y, obj.z = 1, 2, 3
+            d = obj.__dict__
+            d.pop("y")
+            d["y"] = 42
+            return list(d), d["y"]
+
+        keys, value = fn()
+        self.assertEqual(keys, ["x", "z", "y"])
+        self.assertEqual(value, 42)
+
+    def test_dunder_dict_pop_reinsert_order_with_other_mutations(self):
+        # Mutating other keys after a pop must not disturb their relative order;
+        # only the re-inserted popped key moves to the end. Updating an existing
+        # key keeps its slot, a brand-new key appends, and the reinserted key
+        # lands last.
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = MyClass()
+            obj.a, obj.b, obj.c = 1, 2, 3
+            d = obj.__dict__
+            d.pop("b")  # a, c
+            d["c"] = 30  # update existing -> stays in place: a, c
+            d["e"] = 5  # new key -> appended: a, c, e
+            d["b"] = 20  # reinsert popped -> end: a, c, e, b
+            return list(d), dict(d)
+
+        keys, value = fn()
+        self.assertEqual(keys, ["a", "c", "e", "b"])
+        self.assertEqual(value, {"a": 1, "c": 30, "e": 5, "b": 20})
+
+    def test_dunder_dict_pop_missing_raises_keyerror(self):
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = MyClass()
+            obj.x = 1
+            d = obj.__dict__
+            d.pop("x")
+            try:
+                d.pop("x")
+                raised = False
+            except KeyError:
+                raised = True
+            return list(d), raised
+
+        self.assertEqual(fn(), ([], True))
+
+    def test_dunder_dict_pop_default(self):
+        class MyClass:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            obj = MyClass()
+            obj.x = 1
+            d = obj.__dict__
+            return d.pop("missing", "fallback"), d.pop("x"), list(d)
+
+        self.assertEqual(fn(), ("fallback", 1, []))
+
     def test_dunder_dict_items_iteration(self):
         """Test iterating over __dict__.items() with mutations"""
 
@@ -3338,6 +3457,44 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
 
         # This should not raise Unsupported
         fn()
+
+    def test_dunder_dict_non_str_key_setitem(self):
+        # CPython's instance __dict__ accepts arbitrary hashable keys when set
+        # via the mapping API; only attribute access via setattr requires str.
+        # Mirrors test_dict.DictTest.test_object_set_item_single_instance_non_str_key.
+        class Foo:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            f = Foo()
+            f.__dict__[1] = 1
+            f.a = "a"
+            return dict(f.__dict__), list(f.__dict__)
+
+        d, keys = fn()
+        self.assertEqual(d, {1: 1, "a": "a"})
+        self.assertEqual(keys, [1, "a"])
+
+    def test_dunder_dict_non_str_key_roundtrip(self):
+        # Non-str instance-dict keys must read back and delete correctly.
+        class Foo:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            f = Foo()
+            d = f.__dict__
+            d[1] = 10
+            d[2.5] = 20
+            d[(3, 4)] = 30
+            got = (d[1], d[2.5], d[(3, 4)])
+            del d[2.5]
+            return got, dict(d)
+
+        got, d = fn()
+        self.assertEqual(got, (10, 20, 30))
+        self.assertEqual(d, {1: 10, (3, 4): 30})
 
 
 if __name__ == "__main__":

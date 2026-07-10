@@ -97,6 +97,7 @@
 #include <ATen/ops/linalg_matrix_power_native.h>
 #include <ATen/ops/linalg_matrix_rank.h>
 #include <ATen/ops/linalg_matrix_rank_native.h>
+#include <ATen/ops/linalg_matrix_sqrth_native.h>
 #include <ATen/ops/linalg_multi_dot_native.h>
 #include <ATen/ops/linalg_norm.h>
 #include <ATen/ops/linalg_norm_native.h>
@@ -2807,6 +2808,33 @@ Tensor matrix_exp(const Tensor& a) {
   return at::linalg_matrix_exp(a);
 }
 
+// Principal square root of a symmetric/Hermitian positive-definite matrix.
+// Computed from the eigendecomposition A = Q diag(lambda) Q^H as
+// A^{1/2} = Q diag(sqrt(lambda)) Q^H. Only the lower triangle of `a` is read
+// (via linalg_eigh, UPLO="L"); `a` is assumed Hermitian. The custom backward in
+// FunctionsManual.cpp (linalg_matrix_sqrth_differential) uses the Daleckii-Krein
+// formula, whose denominator sqrt(lambda_i) + sqrt(lambda_j) stays well-defined
+// even at degenerate eigenvalues.
+Tensor linalg_matrix_sqrth(const Tensor& a) {
+  squareCheckInputs(a, "linalg.matrix_sqrth");
+  checkFloatingOrComplex(
+      a, "linalg.matrix_sqrth", /*allow_low_precision_dtypes=*/false);
+
+  NoTF32Guard disable_tf32;
+
+  if (a.sym_size(-1) == 0) {
+    return a.clone();
+  }
+  auto [eigvals, eigvecs] = at::linalg_eigh(a);
+
+  // PSD input may still show small eigenvalues due to roundoff.
+  // The clamp_min zeroes them.
+  auto sqrt_eigvals = eigvals.clamp_min(0).sqrt();
+  auto result = at::matmul(eigvecs * sqrt_eigvals.unsqueeze(-2), eigvecs.mH());
+  // The reconstruction is Hermitian up to roundoff; symmetrize to enforce it.
+  return 0.5 * (result + result.mH());
+}
+
 // TODO This should be deprecated in favor of linalg_matrix_exp_differential
 //      in FunctionsManual.cpp
 Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
@@ -3279,12 +3307,14 @@ static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtyp
 static void _linalg_cond_check_ord(std::variant<Scalar, std::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = std::get_if<Scalar>(&ord_variant);
+    TORCH_CHECK_VALUE(!at::isComplexType(ord->type()),
+      "linalg.cond: Expected a non-complex scalar as the order of norm.");
     double abs_ord = std::abs(ord->toDouble());
-    TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
+    TORCH_CHECK_VALUE(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
     std::string_view* ord = std::get_if<std::string_view>(&ord_variant);
-    TORCH_CHECK(*ord == "fro" || *ord == "nuc",
+    TORCH_CHECK_VALUE(*ord == "fro" || *ord == "nuc",
       "linalg.cond got an invalid norm type: ", *ord);
   } else {
     TORCH_CHECK(false,
