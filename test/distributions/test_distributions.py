@@ -3612,6 +3612,31 @@ class TestDistributions(DistributionsTestCase):
                 failure_rate=1e-4,
             )
 
+    def test_gamma_sample_generator(self):
+        gamma = Gamma(torch.tensor(2.0), torch.tensor(1.0))
+        device = gamma.concentration.device
+        # sampling with a generator honors the requested shape
+        gen = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(gamma.sample((5,), generator=gen).size(), (5,))
+        self.assertEqual(gamma.sample((5, 3), generator=gen).size(), (5, 3))
+        # sampling without a generator still works
+        self.assertEqual(gamma.sample((5,)).size(), (5,))
+        # same seed produces identical samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(
+            gamma.sample((5,), generator=gen1), gamma.sample((5,), generator=gen2)
+        )
+        # different seeds produce different samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(99)
+        self.assertFalse(
+            torch.allclose(
+                gamma.sample((5,), generator=gen1),
+                gamma.sample((5,), generator=gen2),
+            )
+        )
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto(self):
         scale = torch.randn(2, 3).abs().requires_grad_()
