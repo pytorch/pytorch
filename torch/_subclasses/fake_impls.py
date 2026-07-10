@@ -378,7 +378,7 @@ def workaround_stride_incorrect_op(
     # This is a workaround for meta implementations with incorrect strides
 
     def is_symbolic(x: object) -> bool:
-        if isinstance(x, FakeTensor):
+        if isinstance(x, FakeTensor):  # noqa-isinstance-fake: op impl
             return x._has_symbolic_sizes_strides
         if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             return True
@@ -425,7 +425,7 @@ def _spdiags_static_offsets(offsets: FakeTensorLike) -> list[int] | None:
     constant = getattr(offsets, "constant", None)
     if constant is None:
         constant = getattr(offsets, "real_tensor", None)
-    if isinstance(constant, FakeTensor):
+    if isinstance(constant, FakeTensor):  # noqa-isinstance-fake: op impl
         return None
     if constant is None or constant.device.type != "cpu":
         return None
@@ -1640,7 +1640,7 @@ def maybe_to_dense_mkldnn(
     dtype: torch.dtype | None = None,
     masked_grad: bool | None = None,
 ) -> object:
-    if not isinstance(a, FakeTensor) or not a.is_mkldnn:
+    if not isinstance(a, FakeTensor) or not a.is_mkldnn:  # noqa-isinstance-fake: op impl
         return NotImplemented
 
     out_dtype = dtype if dtype is not None else a.dtype
@@ -1796,7 +1796,7 @@ def to_dense_python_tls_impl(
 ) -> torch.Tensor:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(self, (FakeTensor, FunctionalTensor)):
+    if isinstance(self, (FakeTensor, FunctionalTensor)):  # noqa-isinstance-fake: op impl
         return to_dense_composite_impl(self, dtype=dtype, masked_grad=masked_grad)
 
     with torch._C._ExcludeDispatchKeyGuard(_PYTHON_TLS_SNAPSHOT_KEYSET):
@@ -1824,7 +1824,7 @@ def to_mkldnn(
     a: FakeTensor,
     dtype: torch.dtype | None = None,
 ) -> object:
-    if not isinstance(a, FakeTensor):
+    if not isinstance(a, FakeTensor):  # noqa-isinstance-fake: op impl
         return NotImplemented
 
     out_dtype = dtype if dtype is not None else a.dtype
@@ -2240,7 +2240,7 @@ def _fake_alias(fake_mode: FakeTensorMode, x: FakeTensor) -> FakeTensor:
 def fake_alias(
     fake_mode: FakeTensorMode, func: OpOverload, x: FakeTensor
 ) -> FakeTensor | object:
-    if not isinstance(x, FakeTensor):
+    if not isinstance(x, FakeTensor):  # noqa-isinstance-fake: op impl
         return NotImplemented
     return _fake_alias(fake_mode, x)
 

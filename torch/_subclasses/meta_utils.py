@@ -60,9 +60,9 @@ if TYPE_CHECKING:
 
 
 def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import is_fake_tensor
 
-    return isinstance(t, FakeTensor)
+    return is_fake_tensor(t)
 
 
 def _unwrap_python_functional_tensor(t: torch.Tensor) -> torch.Tensor:

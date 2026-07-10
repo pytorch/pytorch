@@ -718,6 +718,31 @@ command = [
 ]
 
 [[linter]]
+code = 'ISINSTANCE_FAKE_TENSOR'
+include_patterns = ['torch/**/*.py']
+exclude_patterns = [
+    '**/fb/**',
+    'torch/testing/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=isinstance\([^)]*\bFakeTensor\b',
+    '--linter-name=ISINSTANCE_FAKE_TENSOR',
+    '--error-name=isinstance(x, FakeTensor)',
+    '--line-allowlist-pattern=noqa-isinstance-fake',
+    """--error-description=\
+        Do not use isinstance(x, FakeTensor) because this will only match \
+        on Python FakeTensors and will miss C++ FakeTensors \
+        Use is_fake_tensor(x) for a leaf fake check. \
+        If you intend to only match on a Python FakeTensor instance, keep isinstance \
+        and add a comment "# noqa-isinstance-fake: <reason>".
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'PYBIND11_SPECIALIZATION'
 include_patterns = [
     '**/*.cpp',
