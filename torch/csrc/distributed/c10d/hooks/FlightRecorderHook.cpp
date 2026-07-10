@@ -1,6 +1,6 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
-#include <torch/csrc/distributed/c10d/FlightRecorderHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 
 #include <atomic>
 

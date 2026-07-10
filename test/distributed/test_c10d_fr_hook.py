@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 #
 # Backend-agnostic tests for the FlightRecorder hook
-# (torch._C._distributed_c10d._FlightRecorderHook): FlightRecorder recording
+# (torch._C._distributed_c10d.FlightRecorderHook): FlightRecorder recording
 # driven by the ProcessGroup pre/post collective hooks rather than native
 # backend integration, so it works for any backend routed through c10d ops.
 # Modeled on torchcomms' hooks/fr FlightRecorderTest; parameterized over
@@ -21,20 +21,9 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch._C._distributed_c10d import _FlightRecorderHook
+from torch._C._distributed_c10d import FlightRecorderHook
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
-
-
-# The "nccl2" backend is normally discovered via the torch.distributed.backends
-# entry point. Register it explicitly so the test is self-contained under
-# editable installs (see test_c10d_nccl2.py).
-try:
-    from torch.distributed.distributed_c10d import _register_builtin_nccl2_backend
-
-    _register_builtin_nccl2_backend()
-except Exception:
-    pass
 
 
 FR_HOOK_BACKENDS = [
@@ -82,7 +71,7 @@ class AbstractFlightRecorderHookTest:
             store=store,
             timeout=timedelta(seconds=60),
         )
-        return dist.distributed_c10d._get_default_group()
+        return dist.group.WORLD
 
     def _hook_entries(self):
         trace = json.loads(torch._C._distributed_c10d._dump_fr_trace_json())
@@ -94,7 +83,7 @@ class AbstractFlightRecorderHookTest:
 
     def test_records_and_retires_collectives(self):
         pg = self._init_pg()
-        hook = _FlightRecorderHook.attach(pg)
+        hook = FlightRecorderHook.attach(pg)
         before = len(self._hook_entries())
 
         t = torch.ones(8, device=self.device)
@@ -119,7 +108,7 @@ class AbstractFlightRecorderHookTest:
 
     def test_records_tensor_metadata(self):
         pg = self._init_pg()
-        hook = _FlightRecorderHook.attach(pg)
+        hook = FlightRecorderHook.attach(pg)
         before = len(self._hook_entries())
 
         t = torch.ones(4, 8, device=self.device)
@@ -134,7 +123,7 @@ class AbstractFlightRecorderHookTest:
 
     def test_p2p_and_collective_seq_ids(self):
         pg = self._init_pg()
-        hook = _FlightRecorderHook.attach(pg)
+        hook = FlightRecorderHook.attach(pg)
         before = len(self._hook_entries())
 
         t = torch.ones(4, device=self.device)
@@ -164,7 +153,7 @@ class AbstractFlightRecorderHookTest:
 
     def test_remove_stops_recording(self):
         pg = self._init_pg()
-        hook = _FlightRecorderHook.attach(pg)
+        hook = FlightRecorderHook.attach(pg)
         t = torch.ones(4, device=self.device)
         dist.all_reduce(t)
         count_attached = len(self._hook_entries())
@@ -176,7 +165,7 @@ class AbstractFlightRecorderHookTest:
 
     def test_multiple_collectives_entry_order(self):
         pg = self._init_pg()
-        hook = _FlightRecorderHook.attach(pg)
+        hook = FlightRecorderHook.attach(pg)
         before = len(self._hook_entries())
 
         t = torch.ones(4, device=self.device)

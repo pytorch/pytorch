@@ -4,12 +4,12 @@
 #include <torch/csrc/distributed/c10d/FakeStore.hpp>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -4674,8 +4674,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
   py::class_<
       ::c10d::FlightRecorderHook,
-      std::shared_ptr<::c10d::FlightRecorderHook>>(
-      module, "_FlightRecorderHook")
+      std::shared_ptr<::c10d::FlightRecorderHook>>(module, "FlightRecorderHook")
       .def_static(
           "attach",
           &::c10d::FlightRecorderHook::attach,

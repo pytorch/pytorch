@@ -15,23 +15,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
-# The "nccl2" backends are normally discovered via the torch.distributed
-# backends entry points. Register them explicitly here too so the test is
-# self-contained under editable installs, where a stale repo egg-info can
-# shadow the dist-info entry points. Registration short-circuits if already
-# present.
-try:
-    from torch.distributed.distributed_c10d import (
-        _register_builtin_nccl2_backend,
-        _register_builtin_nccl2_lazy_backend,
-    )
-
-    _register_builtin_nccl2_backend()
-    _register_builtin_nccl2_lazy_backend()
-except Exception:
-    pass
-
-
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
@@ -164,7 +147,7 @@ class ProcessGroupNCCL2LazyTest(ProcessGroupNCCL2Test):
         # Collectives run on the primary and must not create pair channels;
         # send/recv lazily creates one channel per peer. The PG is shared
         # across tests in this class, so only assert on deltas/lower bounds.
-        backend = dist.distributed_c10d._get_default_group()._get_backend(self.device)
+        backend = dist.get_backend_impl(device=self.device)
         before_collective = backend._num_active_channels()
         t = torch.full((4,), 1.0, device=self.device)
         dist.all_reduce(t)
