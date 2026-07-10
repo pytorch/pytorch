@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 
+#include <ATen/Context.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -204,7 +205,10 @@ C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
 //  2. remembering the "leaf streams" (streams each backward leaf node ran on)
 //  3. during exec_post_processing, for each leaf stream, sync the remembered
 //     current streams (on the leaf stream's device) with that
-//     leaf stream.
+//     leaf stream. If exactly one of the two streams is capturing a CUDA
+//     graph, this sync would cross the capture boundary; it is skipped under
+//     torch.autograd.graph.set_override_stale_capture_stream(True) and is an
+//     error otherwise.
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
@@ -723,7 +727,9 @@ void GraphTask::exec_post_processing() {
 
   // See Note [Streaming backwards].
   // Syncs caller_current_stream with leaf streams, so final_callbacks may use
-  // any grad on its device's current stream.
+  // any grad on its device's current stream. (Under
+  // set_override_stale_capture_stream(True), syncs that would cross a CUDA
+  // graph capture boundary are skipped; see below.)
   if (!leaf_streams.empty()) {
     for (const auto& leaf_stream : leaf_streams) {
       // stash_current_cuda/privateuse1_streams() stashed streams for all device
@@ -738,6 +744,45 @@ void GraphTask::exec_post_processing() {
 
       if (caller_current_stream.has_value() &&
           caller_current_stream != leaf_stream) {
+        // If exactly one of the two streams is capturing, this sync would
+        // cross the CUDA graph capture boundary and invalidate the capture
+        // (cudaErrorStreamCaptureIsolation). The common case is a leaf that
+        // ran on a stale non-capturing stream during capture: when all of a
+        // leaf's incoming grads are undefined, InputBuffer::add returns
+        // before its stream reconciliation, so the stale-capture-stream
+        // override never reconciles the leaf's stream. Work on a
+        // non-capturing stream is not part of the capture (and captured work
+        // produces no eager-visible results), so this ordering edge is
+        // meaningless in either direction: skip it under the override,
+        // otherwise raise an actionable error instead of the CUDA error.
+        if (caller_current_stream->is_capturing() !=
+            leaf_stream.is_capturing()) {
+          if (at::globalContext().overrideStaleCaptureStream()) {
+            TORCH_WARN_ONCE(
+                "Skipping the end-of-backward sync between a leaf stream and "
+                "the caller's current stream because exactly one of them is "
+                "capturing a CUDA graph (see "
+                "torch.autograd.graph.set_override_stale_capture_stream).");
+            continue;
+          }
+          TORCH_CHECK(
+              false,
+              "During CUDA graph capture, autograd tried to synchronize "
+              "streams across the capture boundary (leaf stream ",
+              leaf_stream.id(),
+              " on device ",
+              static_cast<int>(leaf_stream.device_index()),
+              leaf_stream.is_capturing() ? " is capturing but the caller's "
+                                           "stream is not"
+                                         : " is not capturing but the "
+                                           "caller's stream is",
+              "), which would invalidate the capture. A common cause is an "
+              "autograd leaf from warmup holding a stale stream. Either run "
+              "warmup on the capture stream, delete references to the "
+              "autograd graph (e.g. `del loss`) before capture, call "
+              "backward() with the capturing stream current, or call "
+              "torch.autograd.graph.set_override_stale_capture_stream(True).");
+        }
         auto event = c10::Event{leaf_stream.device_type()};
         event.record(leaf_stream);
         caller_current_stream->wait(event);
@@ -756,9 +801,9 @@ void GraphTask::exec_post_processing() {
     // final_callbacks run on the per-device caller_current_streams (the ambient
     // streams surrounding the user's call to backward()). This has two
     // benefits:
-    //  1. caller_current_streams have been synced with leaf_streams, so
-    //  callbacks may
-    //     safely access any grad.
+    //  1. caller_current_streams have been synced with leaf_streams (except
+    //     for syncs skipped under set_override_stale_capture_stream during
+    //     CUDA graph capture), so callbacks may safely access any grad.
     //  2. The callback's results can safely be used on (user-facing)
     //  caller_current_streams
     //     after backward().

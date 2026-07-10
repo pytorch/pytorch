@@ -548,11 +548,22 @@ def set_override_stale_capture_stream(enabled: bool) -> None:
     stream, allowing the capture to proceed. This is a process-global setting
     and is not thread-local.
 
+    The flag also governs the end-of-backward sync between each leaf's stream
+    and the caller's current stream. A leaf whose incoming gradients are all
+    undefined (e.g. patterns that compute certain gradients out of band and
+    return ``None`` from autograd) cannot be reconciled by the override, so
+    when exactly one of the two streams is capturing, that sync would cross
+    the capture boundary: with the flag enabled the sync is skipped (work on
+    a non-capturing stream is not part of the capture, so the ordering has no
+    effect on it); with the flag disabled a ``RuntimeError`` is raised.
+
     Args:
         enabled (bool): If ``True``, override stale non-capturing streams with
-            the producer's capturing stream during CUDA graph capture. If
-            ``False`` (the process-initial state), raise an error only when the
-            stale stream is the default stream (stream 0); other stale streams
+            the producer's capturing stream during CUDA graph capture, and
+            skip end-of-backward leaf syncs that would cross the capture
+            boundary. If ``False`` (the process-initial state), raise an error
+            when the stale stream is the default stream (stream 0) or when a
+            leaf sync would cross the capture boundary; other stale streams
             are left unchanged.
     """
     return torch._C._set_override_stale_capture_stream(enabled)
