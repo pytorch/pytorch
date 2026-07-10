@@ -1508,26 +1508,26 @@ kernel void factorPanelLU(
   }
 }
 
-#define INSTANTIATE_FACTOR_PANEL_LU(NAME, T, R, W)     \
-  template [[host_name(NAME)]]                         \
-  kernel void factorPanelLU<T, R, W>(                  \
-      device T * A [[buffer(0)]],                      \
-      device int* pivots [[buffer(1)]],                \
-      device int* info [[buffer(2)]],                  \
-      constant uint2& dims [[buffer(3)]],              \
-      constant uint4& params [[buffer(4)]],            \
-      uint3 tid3 [[thread_position_in_threadgroup]],   \
-      uint3 bid [[threadgroup_position_in_grid]],      \
-      uint3 tpg [[threads_per_threadgroup]],           \
-      uint warp_id [[simdgroup_index_in_threadgroup]], \
+#define INSTANTIATE_FACTOR_PANEL_LU(T, R, W)                \
+  template [[host_name("factorPanelLU_" #T "_" #R "_" #W)]] \
+  kernel void factorPanelLU<T, R, W>(                       \
+      device T * A [[buffer(0)]],                           \
+      device int* pivots [[buffer(1)]],                     \
+      device int* info [[buffer(2)]],                       \
+      constant uint2& dims [[buffer(3)]],                   \
+      constant uint4& params [[buffer(4)]],                 \
+      uint3 tid3 [[thread_position_in_threadgroup]],        \
+      uint3 bid [[threadgroup_position_in_grid]],           \
+      uint3 tpg [[threads_per_threadgroup]],                \
+      uint warp_id [[simdgroup_index_in_threadgroup]],      \
       uint lane [[thread_index_in_simdgroup]]);
 
-INSTANTIATE_FACTOR_PANEL_LU("factorPanelLU_1_32", float, 1, 32)
-INSTANTIATE_FACTOR_PANEL_LU("factorPanelLU_2_16", float, 2, 16)
-INSTANTIATE_FACTOR_PANEL_LU("factorPanelLU_4_8", float, 4, 8)
-INSTANTIATE_FACTOR_PANEL_LU("factorPanelLU_c64_1_32", float2, 1, 32)
-INSTANTIATE_FACTOR_PANEL_LU("factorPanelLU_c64_2_16", float2, 2, 16)
-INSTANTIATE_FACTOR_PANEL_LU("factorPanelLU_c64_4_8", float2, 4, 8)
+INSTANTIATE_FACTOR_PANEL_LU(float, 1, 32)
+INSTANTIATE_FACTOR_PANEL_LU(float, 2, 16)
+INSTANTIATE_FACTOR_PANEL_LU(float, 4, 8)
+INSTANTIATE_FACTOR_PANEL_LU(float2, 1, 32)
+INSTANTIATE_FACTOR_PANEL_LU(float2, 2, 16)
+INSTANTIATE_FACTOR_PANEL_LU(float2, 4, 8)
 
 // Streaming panel factorization for tall panels (H > kStreamMinRows): factor
 // one column at a time across many threadgroups when the register-resident
@@ -1633,8 +1633,8 @@ kernel void luStreamUpdate(
   }
 }
 
-#define INSTANTIATE_LU_STREAM_UPDATE(NAME, T)          \
-  template [[host_name(NAME)]]                         \
+#define INSTANTIATE_LU_STREAM_UPDATE(T)                \
+  template [[host_name("luStreamUpdate_" #T)]]         \
   kernel void luStreamUpdate<T>(                       \
       device T * A [[buffer(0)]],                      \
       constant uint2 & dims [[buffer(3)]],             \
@@ -1644,8 +1644,8 @@ kernel void luStreamUpdate(
       uint warp_id [[simdgroup_index_in_threadgroup]], \
       uint lane [[thread_index_in_simdgroup]]);
 
-INSTANTIATE_LU_STREAM_UPDATE("luStreamUpdate", float)
-INSTANTIATE_LU_STREAM_UPDATE("luStreamUpdate_c64", float2)
+INSTANTIATE_LU_STREAM_UPDATE(float)
+INSTANTIATE_LU_STREAM_UPDATE(float2)
 
 // Reduce luStreamUpdate's per-threadgroup argmax partials to the global pivot
 // for column j, record it (1-based, like LAPACK), swap the pivot row, and
@@ -1734,8 +1734,8 @@ kernel void luStreamPivot(
   }
 }
 
-#define INSTANTIATE_LU_STREAM_PIVOT(NAME, T)           \
-  template [[host_name(NAME)]]                         \
+#define INSTANTIATE_LU_STREAM_PIVOT(T)                 \
+  template [[host_name("luStreamPivot_" #T)]]          \
   kernel void luStreamPivot<T>(                        \
       device T * A [[buffer(0)]],                      \
       device int* pivots [[buffer(1)]],                \
@@ -1748,8 +1748,8 @@ kernel void luStreamPivot(
       uint warp_id [[simdgroup_index_in_threadgroup]], \
       uint lane [[thread_index_in_simdgroup]]);
 
-INSTANTIATE_LU_STREAM_PIVOT("luStreamPivot", float)
-INSTANTIATE_LU_STREAM_PIVOT("luStreamPivot_c64", float2)
+INSTANTIATE_LU_STREAM_PIVOT(float)
+INSTANTIATE_LU_STREAM_PIVOT(float2)
 
 // slaswp: apply a block's pivot interchanges as one staged gather/scatter
 // through threadgroup memory, not nb sequential row swaps. CW is the staged
@@ -1889,8 +1889,8 @@ kernel void laswpGatherLU(
   }
 }
 
-#define INSTANTIATE_LASWP_GATHER_LU(NAME, T, CW)       \
-  template [[host_name(NAME)]]                         \
+#define INSTANTIATE_LASWP_GATHER_LU(T, CW)             \
+  template [[host_name("laswpGatherLU_" #T)]]          \
   kernel void laswpGatherLU<T, CW>(                    \
       device T * A [[buffer(0)]],                      \
       device const int* pivots [[buffer(1)]],          \
@@ -1903,8 +1903,8 @@ kernel void laswpGatherLU(
       uint warp_id [[simdgroup_index_in_threadgroup]], \
       uint lane [[thread_index_in_simdgroup]]);
 
-INSTANTIATE_LASWP_GATHER_LU("laswpGatherLU", float, 64)
-INSTANTIATE_LASWP_GATHER_LU("laswpGatherLU_c64", float2, 32)
+INSTANTIATE_LASWP_GATHER_LU(float, 64)
+INSTANTIATE_LASWP_GATHER_LU(float2, 32)
 
 // strsm: solve unit-lower L*X = B for the panel's off-diagonal block, with L
 // staged in threadgroup memory and one thread per column of B.
@@ -2000,8 +2000,8 @@ kernel void trsmPanelLU(
   }
 }
 
-#define INSTANTIATE_TRSM_PANEL_LU(NAME, T, TS)       \
-  template [[host_name(NAME)]]                       \
+#define INSTANTIATE_TRSM_PANEL_LU(T, TS)             \
+  template [[host_name("trsmPanelLU_" #T "_" #TS)]]  \
   kernel void trsmPanelLU<T, TS>(                    \
       device T * A [[buffer(0)]],                    \
       constant uint2 & dims [[buffer(3)]],           \
@@ -2010,12 +2010,12 @@ kernel void trsmPanelLU(
       uint3 tgid [[threadgroup_position_in_grid]],   \
       uint3 tpg [[threads_per_threadgroup]]);
 
-INSTANTIATE_TRSM_PANEL_LU("trsmPanelLU_8", float, 8)
-INSTANTIATE_TRSM_PANEL_LU("trsmPanelLU_16", float, 16)
-INSTANTIATE_TRSM_PANEL_LU("trsmPanelLU_32", float, 32)
-INSTANTIATE_TRSM_PANEL_LU("trsmPanelLU_c64_8", float2, 8)
-INSTANTIATE_TRSM_PANEL_LU("trsmPanelLU_c64_16", float2, 16)
-INSTANTIATE_TRSM_PANEL_LU("trsmPanelLU_c64_32", float2, 32)
+INSTANTIATE_TRSM_PANEL_LU(float, 8)
+INSTANTIATE_TRSM_PANEL_LU(float, 16)
+INSTANTIATE_TRSM_PANEL_LU(float, 32)
+INSTANTIATE_TRSM_PANEL_LU(float2, 8)
+INSTANTIATE_TRSM_PANEL_LU(float2, 16)
+INSTANTIATE_TRSM_PANEL_LU(float2, 32)
 
 // In-place square transpose so the row-major factor matches the column-major LU
 // view; tiles with tj < ti are produced by their mirror.
@@ -2056,20 +2056,23 @@ kernel void transposeInPlaceLU(
   }
 }
 
-#define INSTANTIATE_TRANSPOSE_IN_PLACE_LU(NAME, T)   \
-  template [[host_name(NAME)]]                       \
+#define INSTANTIATE_TRANSPOSE_IN_PLACE_LU(T)         \
+  template [[host_name("transposeInPlaceLU_" #T)]]   \
   kernel void transposeInPlaceLU<T>(                 \
       device T * A [[buffer(0)]],                    \
       constant uint2 & dims [[buffer(3)]],           \
       uint3 tid3 [[thread_position_in_threadgroup]], \
       uint3 tgid [[threadgroup_position_in_grid]]);
 
-INSTANTIATE_TRANSPOSE_IN_PLACE_LU("transposeInPlaceLU", float)
-INSTANTIATE_TRANSPOSE_IN_PLACE_LU("transposeInPlaceLU_c64", float2)
+INSTANTIATE_TRANSPOSE_IN_PLACE_LU(float)
+INSTANTIATE_TRANSPOSE_IN_PLACE_LU(float2)
 
-// Schur update C -= A*B for complex64: simdgroup_matrix and MPP matmul2d are
+// Schur update A -= A@A for complex64: simdgroup_matrix and MPP matmul2d are
 // float-only hardware paths, so complex uses this threadgroup-tiled scalar
 // kernel (c10::metal::mul complex multiply, zero-padded ragged edges).
+// addmm_ cannot be used instead: it does not produce the correct result when
+// all of its inputs alias the same tensor, which is exactly this in-place
+// update where L21, U12 and the destination are windows of one buffer.
 // Window convention matches gemmSimdLU/gemmLU: params = {rs, re, cs, ce},
 // w = {kc, kw, 0, 0}; C = A[rs:re, cs:ce] -= A[rs:re, kc:kc+kw] @
 // A[kc:kc+kw, cs:ce]. In-place safe: C rows/cols are disjoint from the
@@ -2120,8 +2123,8 @@ kernel void gemmTiledLU(
   }
 }
 
-#define INSTANTIATE_GEMM_TILED_LU(NAME, T)           \
-  template [[host_name(NAME)]]                       \
+#define INSTANTIATE_GEMM_TILED_LU(T)                 \
+  template [[host_name("gemmTiledLU_" #T)]]          \
   kernel void gemmTiledLU<T>(                        \
       device T * A [[buffer(0)]],                    \
       constant uint2 & dims [[buffer(3)]],           \
@@ -2130,7 +2133,7 @@ kernel void gemmTiledLU(
       uint3 tid3 [[thread_position_in_threadgroup]], \
       uint3 tgid [[threadgroup_position_in_grid]]);
 
-INSTANTIATE_GEMM_TILED_LU("gemmTiledLU_c64", float2)
+INSTANTIATE_GEMM_TILED_LU(float2)
 
 // Schur-complement trailing update C -= A*B (sgemm) via simdgroup matmul;
 // fallback used when matmul2d is unavailable (cf. gemmLU).
