@@ -50,7 +50,7 @@ class MyModule3(torch.nn.Module):
         return output
 
 
-class TestDecomposeAddMM(torch.nn.Module):
+class _TestDecomposeAddMM(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -484,7 +484,7 @@ class TestDecomposeMemMM(TestCase):
 
         counters.clear()
 
-        module = TestDecomposeAddMM().to(GPU_TYPE)
+        module = _TestDecomposeAddMM().to(GPU_TYPE)
         traced = torch.compile(module, dynamic=True)
         input = [bias, input, weight]
 

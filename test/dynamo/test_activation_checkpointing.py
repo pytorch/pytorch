@@ -868,7 +868,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             additional_saved_tensors,
             expected_additional_saved_tensors,
-            f"""
+            lambda msg: f"""{msg}\n
 Expected additional saved tensors: {expected_additional_saved_tensors} but got: {additional_saved_tensors}.
 Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
 Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
