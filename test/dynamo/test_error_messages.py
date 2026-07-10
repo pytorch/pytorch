@@ -2875,8 +2875,8 @@ graph break in loop
 Stack variable source attribution:
   RangeIteratorVariable() originated from:
   File "test_error_messages.py", line N
-                for i in range(2):
-                         ~~~~~^^^
+                for _i in range(2):
+                          ~~~~~^^^
 
 User code traceback:
   File "test_error_messages.py", line N, in test_stack_variable_source_attribution
