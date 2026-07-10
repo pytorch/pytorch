@@ -737,7 +737,7 @@ def _apply_config_patches_recursive(
         if hasattr(op, "set_config_patches"):
             op.set_config_patches(config_patches.copy())
 
-        # Recurse into any subgraphs (Conditional, WhileLoop, InvokeSubgraph, etc.)
+        # Recurse into any subgraphs (Switch, WhileLoop, InvokeSubgraph, etc.)
         for subgraph in op.get_subgraphs():
             if subgraph.graph:
                 _apply_config_patches_recursive(

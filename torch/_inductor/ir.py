@@ -10903,17 +10903,6 @@ class Switch(ExternKernel):
 
         return outputs
 
-    @classmethod
-    def create_from_cond(
-        cls,
-        predicate: TensorBox,
-        true_fn: Subgraph,
-        false_fn: Subgraph,
-        operands: list[TensorBox],
-    ) -> list[MultiOutput]:
-        """Create a Switch node from a torch.cond call (2-branch boolean select)."""
-        return cls.create(predicate, [true_fn, false_fn], operands, is_cond=True)
-
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_switch(self)
         wrapper.codegen_unbacked_symbol_defs_for_outputs(

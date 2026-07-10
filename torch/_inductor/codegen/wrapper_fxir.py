@@ -163,7 +163,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         Instead, FX conversion uses a dedicated line for the whole node.
         """
         self.writeline(SwitchLine(self, node))
-        for subgraph in node.branches:
+        for subgraph in node.branches:  # pyrefly: ignore [not-iterable]
             self.codegen_subgraph_common(subgraph)
 
     def define_subgraph_launcher_fn(
@@ -737,19 +737,23 @@ class FxConverter:
         operands = tuple(generate_buffer(arg) for arg in ir_node.operands)
         branch_subgms = [self._get_subgm_attr(branch) for branch in ir_node.branches]
 
-        hop = (
-            torch.ops.higher_order.cond
-            if ir_node.is_cond
-            else torch.ops.higher_order.switch
-        )
-        # cond expects (selector, true_fn, false_fn, operands) — branches unpacked positionally.
-        # switch expects (selector, [branch_fn, ...], operands) — branches passed as a list.
-        fx_node = self.gm.graph.call_function(
-            hop,
-            args=(selector, *branch_subgms, operands)
-            if ir_node.is_cond
-            else (selector, branch_subgms, operands),
-        )
+        if ir_node.is_cond:
+            # cond expects (selector, true_fn, false_fn, operands) -- branches unpacked positionally.
+            if len(branch_subgms) != 2:
+                raise AssertionError(
+                    f"cond requires exactly 2 branches, got {len(branch_subgms)}"
+                )
+            true_subgm, false_subgm = branch_subgms
+            fx_node = self.gm.graph.call_function(
+                torch.ops.higher_order.cond,
+                args=(selector, true_subgm, false_subgm, operands),
+            )
+        else:
+            # switch expects (selector, [branch_fn, ...], operands) -- branches passed as a list.
+            fx_node = self.gm.graph.call_function(
+                torch.ops.higher_order.switch,
+                args=(selector, branch_subgms, operands),
+            )
         self._record_allocation(ir_node, fx_node)
 
     def _generate_assert_size_stride(self, line: WrapperLine) -> None:
