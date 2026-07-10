@@ -3851,7 +3851,14 @@ def _sync_decision_cross_ranks(
         with no_dispatch(), unset_fake_temporarily():
             # TODO: maybe use a different process group?
             torch.distributed.all_gather_object(all_inputs, inputs)
-        return all(all_inputs[0] == x for x in all_inputs)
+            for rank, x in enumerate(all_inputs):
+                if all_inputs[0] != x:
+                    log.debug(
+                        "Skipping sync decision cross rank due to different inputs between rank 0 and rank %s",
+                        rank,
+                    )
+                    return False
+        return True
 
     if has_same_nodes(joint_graph):
         with no_dispatch(), unset_fake_temporarily():
