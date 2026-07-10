@@ -308,6 +308,7 @@ def _check_method_arity(
             raise_type_error(tx, f"{qualname}() takes exactly one argument ({n} given)")
 
 
+@dataclasses.dataclass(slots=True)
 class Method:
     """Declarative entry in a VariableTracker's `tp_methods` table, analogous
     to CPython's PyMethodDef. `flags` drives centralized arity checking.
@@ -317,15 +318,8 @@ class Method:
     `super().call_method` fall-through) so `call_method` continues to the
     object-protocol dispatch below."""
 
-    __slots__ = ("handler", "flags")
-
-    def __init__(
-        self,
-        handler: Callable[..., VariableTracker | None],
-        flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS,
-    ) -> None:
-        self.handler = handler
-        self.flags = flags
+    handler: Callable[..., VariableTracker | None]
+    flags: MethodFlags = MethodFlags.VARARGS | MethodFlags.KEYWORDS
 
     def invoke(
         self,
@@ -337,6 +331,39 @@ class Method:
     ) -> VariableTracker | None:
         _check_method_arity(vt, tx, name, self.flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
+
+
+@dataclasses.dataclass(slots=True)
+class GetSet:
+    """`tp_getset` entry, analogous to CPython's PyGetSetDef. `getter`
+    `(self, tx) -> VT | None` (None declines); `setter`
+    `(self, tx, value) -> VT | None`, None for read-only."""
+
+    getter: Callable[..., VariableTracker | None]
+    setter: Callable[..., VariableTracker | None] | None = None
+
+
+@dataclasses.dataclass(slots=True)
+class Member:
+    """`tp_members` entry, analogous to CPython's PyMemberDef. Same shape as
+    GetSet; a distinct type so members and getsets never share a class."""
+
+    getter: Callable[..., VariableTracker | None]
+    setter: Callable[..., VariableTracker | None] | None = None
+
+
+def read(
+    accessor: Callable[[Any], VariableTracker],
+) -> Callable[..., VariableTracker]:
+    """Getter for a GetSet/Member whose value is an already-built VT."""
+    return lambda self, tx: accessor(self)
+
+
+def build(
+    accessor: Callable[[Any], Any],
+) -> Callable[..., VariableTracker]:
+    """Getter that builds a VT from the raw value returned by `accessor`."""
+    return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -410,6 +437,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     # merge, so a VT is only driven by the base `call_method` once no class
     # between it and VariableTracker still defines its own `call_method`.
     tp_methods: dict[str, Method] = {}
+    # Declarative attribute tables, split to match CPython: tp_getset holds the
+    # PyGetSetDef attributes, tp_members the PyMemberDef ones.
+    tp_getset: dict[str, GetSet] = {}
+    tp_members: dict[str, Member] = {}
 
     # fields to leave unmodified in apply()
     _nonvar_fields = {
@@ -698,6 +729,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         falls back to const_getattr for VTs without a known python_type or
         when the descriptor protocol hits an unhandled type.
         """
+        # tp_getset/tp_members are data descriptors: resolve ahead of the
+        # object-protocol walk. A getter returning None declines.
+        getset = self.tp_getset.get(name) or self.tp_members.get(name)
+        if getset is not None:
+            result = getset.getter(self, tx)
+            if result is not None:
+                return result
+
+        # object.__class__: one shared getset on `object` rather than per-VT.
+        if name == "__class__":
+            return VariableTracker.build(tx, self.python_type())
+
         try:
             py_type = self.python_type()
         except NotImplementedError:
