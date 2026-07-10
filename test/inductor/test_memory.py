@@ -348,7 +348,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
         N = 128
         x = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
         y = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
-        z = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
+        # Keep the add as pointwise so this test continues to exercise scheduler
+        # fusion choices instead of addmm fusion.
+        z = torch.rand(1, N, dtype=torch.float32, device=GPU_TYPE).expand(N, N)
 
         from torch._inductor.choices import InductorChoices
         from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
@@ -545,7 +547,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 base_order,
                 peak_mem_order,
                 msg=(
-                    f"torch.cond operations were reordered by reorder_for_peak_memory!\n"
+                    lambda msg: f"{msg}\ntorch.cond operations were reordered by reorder_for_peak_memory!\n"
                     f"Base order: {base_order}\n"
                     f"Peak memory order: {peak_mem_order}\n"
                     f"This can cause NCCL hangs when torch.cond contains collective operations "
