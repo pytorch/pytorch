@@ -688,21 +688,21 @@ static void lu_factor_panel_encode(const Tensor& LU,
                                    int64_t B,
                                    bool transposeResult) {
   auto stream = getCurrentMPSStream();
-  // complex64 runs the same blocked schedule through the _c64 kernel
-  // instantiations; the float pipeline names and behavior are unchanged.
+  // complex64 runs the same blocked schedule through the float2 kernel
+  // instantiations; the float pipeline behavior is unchanged.
   const bool isComplex = LU.scalar_type() == kComplexFloat;
-  const char* sfx = isComplex ? "_c64" : "";
+  const auto tname = mps::scalarToMetalTypeString(LU);
   const bool useMpp = has_mpp() && !isComplex;
 
-  auto factorW32PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU{}_1_32", sfx));
-  auto factorW16PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU{}_2_16", sfx));
-  auto factorW8PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU{}_4_8", sfx));
-  auto streamUpdatePSO = lib.getPipelineStateForFunc(fmt::format("luStreamUpdate{}", sfx));
-  auto streamPivotPSO = lib.getPipelineStateForFunc(fmt::format("luStreamPivot{}", sfx));
-  auto laswpPSO = lib.getPipelineStateForFunc(fmt::format("laswpGatherLU{}", sfx));
-  auto trsm8PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU{}_8", sfx));
-  auto trsm16PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU{}_16", sfx));
-  auto trsm32PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU{}_32", sfx));
+  auto factorW32PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU_{}_1_32", tname));
+  auto factorW16PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU_{}_2_16", tname));
+  auto factorW8PSO = lib.getPipelineStateForFunc(fmt::format("factorPanelLU_{}_4_8", tname));
+  auto streamUpdatePSO = lib.getPipelineStateForFunc(fmt::format("luStreamUpdate_{}", tname));
+  auto streamPivotPSO = lib.getPipelineStateForFunc(fmt::format("luStreamPivot_{}", tname));
+  auto laswpPSO = lib.getPipelineStateForFunc(fmt::format("laswpGatherLU_{}", tname));
+  auto trsm8PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU_{}_8", tname));
+  auto trsm16PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU_{}_16", tname));
+  auto trsm32PSO = lib.getPipelineStateForFunc(fmt::format("trsmPanelLU_{}_32", tname));
   uint32_t maxG = static_cast<uint32_t>(std::min({factorW32PSO.maxTotalThreadsPerThreadgroup,
                                                   factorW16PSO.maxTotalThreadsPerThreadgroup,
                                                   factorW8PSO.maxTotalThreadsPerThreadgroup}));
@@ -712,8 +712,8 @@ static void lu_factor_panel_encode(const Tensor& LU,
   auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
   auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
   auto gemmSimdPSO = (!useMpp && !isComplex) ? lib.getPipelineStateForFunc("gemmSimdLU") : nil;
-  auto gemmTiledPSO = isComplex ? lib.getPipelineStateForFunc("gemmTiledLU_c64") : nil;
-  auto transposePSO = transposeResult ? lib.getPipelineStateForFunc(fmt::format("transposeInPlaceLU{}", sfx)) : nil;
+  auto gemmTiledPSO = isComplex ? lib.getPipelineStateForFunc(fmt::format("gemmTiledLU_{}", tname)) : nil;
+  auto transposePSO = transposeResult ? lib.getPipelineStateForFunc(fmt::format("transposeInPlaceLU_{}", tname)) : nil;
 
   const auto uM = static_cast<uint32_t>(M);
   const auto uN = static_cast<uint32_t>(N);
