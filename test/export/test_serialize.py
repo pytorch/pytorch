@@ -1605,6 +1605,21 @@ class TestDeserialize(TestCase):
         f = Module()
         self.check_graph(f, (torch.ones(1), torch.ones(3)))
 
+    def test_sym_bool_output_spec(self):
+        # A SymBool returned as a graph output is recorded as a SymBoolArgument in
+        # the output spec, which exercises (de)serialize_argument_spec. Before the
+        # SymBoolArgument branch was added there, this raised AssertionError("TODO").
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x + 1, x.shape[0] > 4
+
+        dim0 = torch.export.Dim("dim0")
+        self.check_graph(
+            Module(),
+            (torch.ones(6),),
+            dynamic_shapes={"x": {0: dim0}},
+        )
+
     def test_sym_bool_torch_check_equal(self):
         class Module(torch.nn.Module):
             def forward(self, x):
