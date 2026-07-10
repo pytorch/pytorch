@@ -5272,13 +5272,13 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
                 raise AssertionError(
                     "tuple_vt must be constructed by builder.py when source is present"
                 )
-            if not init_args:
-                raise AssertionError("init_args must be provided when tuple_vt is None")
-            # Emulate `tuple.__new__`
+            # Emulate `tuple.__new__`: `tuple.__new__(cls)` with no iterable
+            # arg builds an empty tuple, `tuple.__new__(cls, iterable)` builds
+            # a tuple from the iterable.
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            elems = unpack_iterable(tx, init_args[0])
+            elems = unpack_iterable(tx, init_args[0]) if init_args else []
             self._base_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
             self._base_vt = tuple_vt
