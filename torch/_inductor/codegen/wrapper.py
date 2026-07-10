@@ -4566,12 +4566,12 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(ExitSubgraphLine(self))
 
         if node.is_cond:
-            # torch.cond: exactly two branches — plain if/else, no index comparison.
+            # torch.cond: exactly two branches -- plain if/else, no index comparison.
             true_branch, false_branch = node.branches
             _emit_branch("if", f" {selector}", true_branch)
             _emit_branch("else", "", false_branch)
         else:
-            # torch.switch: N branches — if/elif chain with index comparison, else for last.
+            # torch.switch: N branches -- if/elif chain with index comparison, else for last.
             num_branches = len(node.branches)
             for b_idx, branch in enumerate(node.branches):
                 if b_idx == 0:

@@ -8924,12 +8924,15 @@ def cond(
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.Switch.create_from_cond(pred, true_fn, false_fn, operands)
+    result = ir.Switch.create(pred, [true_fn, false_fn], operands, is_cond=True)
     return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 
 @register_lowering(torch.ops.higher_order.switch, type_promotion_kind=None)
 def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer]:
+    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
+    # we run into memory cleanup issue
+    # TODO: cudagraph support for torch.switch is not yet implemented; always disable.
     msg = "control flow operator: torch.switch."
     if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
         msg = f"{msg} Found from : \n {stack_trace}"

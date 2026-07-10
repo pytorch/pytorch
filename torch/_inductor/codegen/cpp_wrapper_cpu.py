@@ -2788,7 +2788,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "codegen invoke_subgraph is not implemented for cpp wrapper"
         )
 
-    def codegen_switch(self, node):
+    def codegen_switch(self, node) -> None:
         """Emit ABI-compatible C++ for a higher-order cond/switch."""
         outer_inputs = [f"{buf.codegen_reference()}" for buf in node.operands]
         outer_outputs = []
@@ -2820,14 +2820,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.codegen_subgraph(branch, outer_inputs, outer_outputs)
                 self.writeline(ExitSubgraphLine(self))
 
-        def codegen_original() -> None:
+        def emit_switch_body() -> None:
             if node.is_cond:
-                # torch.cond: exactly two branches — plain if/else, no index comparison.
+                # torch.cond: exactly two branches -- plain if/else, no index comparison.
                 true_branch, false_branch = node.branches
                 _emit_branch(f"if ({selector_var}) {{", true_branch)
                 _emit_branch("} else {", false_branch)
             else:
-                # torch.switch: N branches — if/else-if chain with index comparison.
+                # torch.switch: N branches -- if/else-if chain with index comparison.
                 for b_idx, branch in enumerate(node.branches):
                     if b_idx == 0:
                         header = f"if ({selector_var} == 0) {{"
@@ -2839,7 +2839,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline("}")
 
         if not V.graph.is_dual_wrapper_mode:
-            return codegen_original()
+            return emit_switch_body()
 
         graphs = tuple(branch.graph for branch in node.branches)
         jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
@@ -2862,7 +2862,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self._target_buf("wrapper_call", aot_code),
             self.set_writeline(aot_code, aot_code.writeline_aot),
         ):
-            codegen_original()
+            emit_switch_body()
 
         self.writeline(DualWrapperCodeLine(jit_code, aot_code))
 
