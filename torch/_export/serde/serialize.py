@@ -1618,7 +1618,7 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state.sym_float_values[name] = serialize_sym_float(meta_val)
         return SymFloatArgument.create(as_name=name)
 
-    def serialize_sym_bool_output(self, name, meta_val) -> SymIntArgument:
+    def serialize_sym_bool_output(self, name, meta_val) -> SymBoolArgument:
         if name in self.graph_state.sym_bool_values:
             raise AssertionError(f"name {name!r} already in sym_bool_values")
         self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)
