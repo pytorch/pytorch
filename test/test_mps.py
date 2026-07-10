@@ -10226,11 +10226,11 @@ class TestMPS(TestCaseMPS):
         out = x.nonzero().squeeze(-1)
         self.assertEqual(out, positions.sort().values.to(torch.int64))
 
-    def test_nonzero_scatter_uses_64bit_index_math(self):
-        # Regression smoke test for the 64-bit `flat` accumulator in
-        # scatter_nonzero_indices: multi-dim decomposition must not wrap the
-        # linear index when a nonzero sits at the largest position. Small
-        # enough to run on any machine.
+    def test_nonzero_scatter_multidim_decomposition(self):
+        # Smoke test for the linear-index -> multi-dim coordinate decomposition
+        # in scatter_nonzero_indices. Small enough to run on any machine; this
+        # does NOT exercise the >INT_MAX path (that is test_nonzero_large_64bit,
+        # which is memory-gated because it needs a multi-GiB allocation).
         x = torch.zeros(1 << 20, dtype=torch.bool, device="mps")
         x[(1 << 20) - 1] = True
         out = x.nonzero().squeeze(-1)

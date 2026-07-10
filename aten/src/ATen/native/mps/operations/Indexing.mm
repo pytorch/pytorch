@@ -358,10 +358,6 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   Tensor input = self.contiguous();
   const int64_t nDim = self.dim();
   const int64_t numel = input.numel();
-  if (numel == 0) {
-    at::native::resize_output(out_, {0, nDim});
-    return;
-  }
 
   // Metal's thread_position_in_grid is uint32, so a single 1D dispatch is
   // bounded at UINT32_MAX threads. Enforce that here. This also bounds the
@@ -385,8 +381,6 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
 
   uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
   uint64_t num_blocks = (static_cast<uint64_t>(numel) + threads_per_group - 1) / threads_per_group;
-  TORCH_CHECK(num_blocks <= std::numeric_limits<uint32_t>::max(),
-              "nonzero: tensor too large for single-pass prefix sum (num_blocks exceeds uint32)");
   uint32_t num_blocks_u32 = static_cast<uint32_t>(num_blocks);
 
   // Storage for the four helper buffers is a single int32-typed tensor (same
@@ -434,7 +428,9 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   Tensor out = contiguous_output ? out_ : at::empty_like(out_, MemoryFormat::Contiguous);
 
   int ndim_int = static_cast<int>(nDim);
-  uint32_t max_entries = static_cast<uint32_t>(*max_elements);
+  // Clamp to uint32: max_elements is user-supplied (int64) on the static path
+  // and could exceed 2^32, which would silently truncate and drop nonzeros.
+  uint32_t max_entries = static_cast<uint32_t>(std::min<int64_t>(*max_elements, std::numeric_limits<uint32_t>::max()));
 
   // Step 3: scatter indices, capped at max_entries
   dispatch_sync_with_rethrow(stream->queue(), ^() {
