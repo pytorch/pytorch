@@ -1102,15 +1102,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             from .object_protocol import generic_hash
 
             return generic_hash(tx, self)
-        elif name == "__add__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
-            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
-            return self.nb_add_impl(tx, args[0])
-        elif name == "__radd__":
-            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
-            return self.nb_add_impl(tx, args[0], reverse=True)
-        elif name == "__iadd__":
-            return self.nb_inplace_add_impl(tx, args[0])
+        elif name in ("__add__", "__radd__", "__iadd__"):
+            if kwargs or len(args) != 1:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f"expected 1 argument, got {len(args)}"],
+                )
+            from .object_protocol import slot_wrapper_add, slot_wrapper_iadd
+
+            if name == "__add__":
+                return slot_wrapper_add(tx, self, args[0])
+            if name == "__radd__":
+                return slot_wrapper_add(tx, self, args[0], reverse=True)
+            return slot_wrapper_iadd(tx, self, args[0])
         elif name == "__sub__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
