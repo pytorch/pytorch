@@ -18,7 +18,7 @@ from ..graph_bytecode_inputs import (
     reset_user_object_tracking,
 )
 from ..source import CurrentStreamSource
-from .base import Method, MethodFlags, VariableTracker
+from .base import GetSet, Method, MethodFlags, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
 from .lazy import LazyVariableTracker
@@ -402,22 +402,20 @@ class StreamVariable(StreamContextVariable):
     def python_type(self) -> type:
         return self._cpython_type
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker":
-        if self._device_handle_attr is not None and name == self._device_handle_attr:
-            from ..guards import GuardBuilder, install_guard
+    def _stream_device_handle_get(
+        self: "StreamVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        from ..guards import GuardBuilder, install_guard
 
-            if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-
-            if hasattr(self.value, name):
-                return ConstantVariable.create(getattr(self.value, name))
-
-            if hasattr(self.value, "native_handle"):
-                return ConstantVariable.create(self.value.native_handle)
-
-        return super().getattro_impl(tx, name)
+        name = self._device_handle_attr
+        assert name is not None
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        if hasattr(self.value, name):
+            return ConstantVariable.create(getattr(self.value, name))
+        if hasattr(self.value, "native_handle"):
+            return ConstantVariable.create(self.value.native_handle)
+        return None
 
     def get_real_python_backed_value(self) -> object:
         return self.value
@@ -590,12 +588,20 @@ class CudaStreamVariable(StreamVariable):
     _cpython_type = torch.cuda.Stream
     _device_handle_attr = "cuda_stream"
 
+    tp_getset = {
+        "cuda_stream": GetSet(StreamVariable._stream_device_handle_get, None),
+    }
+
 
 class XpuStreamVariable(StreamVariable):
     """Represents torch.xpu.Stream, preserving device-specific type and attributes."""
 
     _cpython_type = torch.xpu.Stream
     _device_handle_attr = "sycl_queue"
+
+    tp_getset = {
+        "sycl_queue": GetSet(StreamVariable._stream_device_handle_get, None),
+    }
 
 
 _stream_fn_to_variable_cls: dict[object, type[StreamVariable]] = {

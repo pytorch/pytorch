@@ -38,7 +38,6 @@ from ..exc import (
     unimplemented,
     Unsupported,
 )
-from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
     get_fake_value,
@@ -54,8 +53,11 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    GetSet,
+    Member,
     Method,
     MethodFlags,
+    read,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1103,14 +1105,13 @@ class RangeVariable(BaseListVariable):
         "__reversed__": Method(range_reversed, MethodFlags.NOARGS),
     }
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        fields = ["start", "stop", "step"]
-        if name in fields:
-            return self.items[fields.index(name)]
-
-        return super().getattro_impl(tx, name)
+    # range_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_members)
+    tp_members = {
+        "start": Member(read(lambda s: s.items[0])),
+        "stop": Member(read(lambda s: s.items[1])),
+        "step": Member(read(lambda s: s.items[2])),
+    }
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython range_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L572
@@ -1211,18 +1212,6 @@ class ListVariable(BaseListVariable):
         if len(args) == 1:
             self.call_method(tx, "extend", args, {})
         return ConstantVariable.create(None)
-
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "__class__":
-            source = AttrSource(self.source, name) if self.source else None
-            class_type = self.python_type()
-            if class_type is list:
-                return VariableTracker.build(tx, class_type, source=source)
-            else:
-                return VariableTracker.build(tx, class_type, source)
-        return super().getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1556,12 +1545,11 @@ class DequeVariable(BaseListVariable):
             ]
         )
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "maxlen":
-            return self.maxlen
-        return super().getattro_impl(tx, name)
+    # deque_getset: maxlen is a read-only getset (deque_get_maxlen, no setter).
+    # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c (deque_getset)
+    tp_getset = {
+        "maxlen": GetSet(read(lambda s: s.maxlen)),
+    }
 
     def _clamp_maxlen(self, side: str) -> None:
         # Trim to maxlen after a growth op: keep the last maxlen items when the
@@ -1769,15 +1757,6 @@ class TupleVariable(BaseListVariable):
             return "()"
         else:
             return f"({', '.join([item.reconstruct_pycode(codegen) for item in self.items])},)"
-
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if name == "__class__":
-            source = AttrSource(self.source, name) if self.source else None
-            class_type = self.python_type()
-            return VariableTracker.build(tx, class_type, source=source)
-        return super().getattro_impl(tx, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2186,6 +2165,14 @@ class SliceVariable(VariableTracker):
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
+    # slice_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c (slice_members)
+    tp_members = {
+        "start": Member(read(lambda s: s.items[0])),
+        "stop": Member(read(lambda s: s.items[1])),
+        "step": Member(read(lambda s: s.items[2])),
+    }
+
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -2193,16 +2180,7 @@ class SliceVariable(VariableTracker):
             return variables.GetAttrVariable(
                 self, name, py_type=type(getattr(slice, name))
             )
-        fields = ["start", "stop", "step"]
-        if name not in fields:
-            unimplemented(
-                gb_type="Unsupported attribute for slice() object",
-                context=f"getattro_impl {self} {name}",
-                explanation=f"Expected attribute to be one of {','.join(fields)} "
-                f"but got {name}",
-                hints=[*graph_break_hints.USER_ERROR],
-            )
-        return self.items[fields.index(name)]
+        return super().getattro_impl(tx, name)
 
     def indices(
         self,
