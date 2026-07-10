@@ -1849,16 +1849,28 @@ class cpp:
     use_two_step_variance_threshold = 1024
 
 
+def tlx_mode_from_env() -> Literal["allow", "force"] | None:
+    # Only the explicit values "allow"/"force" enable torchTLX. Any other
+    # value -- unset, empty, a typo, or a legacy "default" -- maps to None so
+    # TLX stays off. See the "Knob" section of the torchTLX README under
+    # third-party/triton/.../tlx/language/tlx/inductor/README.md.
+    mode = os.environ.get("TORCHINDUCTOR_TLX_MODE")
+    if mode in ("allow", "force"):
+        return cast("Literal['allow', 'force']", mode)
+    return None
+
+
 class triton:
     """
     Config specific to codegen/triton.py
     """
 
-    # No-op unless fbtriton (a Triton fork) is installed
-    tlx_mode: Literal["default", "allow", "force"] = cast(
-        Literal["default", "allow", "force"],
-        os.environ.get("TORCHINDUCTOR_TLX_MODE", "default"),
-    )
+    # torchTLX enablement. None (the default) means TLX is never considered
+    # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
+    # "force" uses only TLX templates plus forced epilogue fusion. Also a
+    # no-op unless the active Triton is the fbtriton fork (the integration
+    # import in template_heuristics/tlx.py fails cleanly otherwise).
+    tlx_mode: Literal["allow", "force"] | None = tlx_mode_from_env()
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
