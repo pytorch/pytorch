@@ -391,6 +391,9 @@ class SubprocPool:
                 # Expected exit (shutdown) or already handled.
                 return
             self.running = False
+        # `running` is set under different locks across shutdown()/_read_thread/
+        # here, so this exit can race another for the same transition. That's
+        # safe: _WaitCounterTracker.__exit__ is idempotent (optional::reset()).
         self.running_waitcounter.__exit__()
 
         pid = self.process.pid
@@ -600,6 +603,9 @@ class SubprocMain:
             pool.shutdown(wait=False)
 
     def submit(self, job_id: int, data: bytes) -> None:
+        # Clock starts before _start_pool/_warm_process_pool, so the first job's
+        # reported elapsed intentionally includes cold pool creation and the fork
+        # of the workers -- that wait is real and worth surfacing.
         with self._inflight_lock:
             self._inflight[job_id] = time.monotonic()
         while self.running:
@@ -651,15 +657,21 @@ class SubprocMain:
         if self.pool is not None:
             return
 
+        # Only fork workers inherit the sidecar<->parent pipe fds and must close
+        # them (see _async_compile_initializer). Under spawn the workers do not
+        # inherit them (close_fds=True + O_CLOEXEC), and these integers would
+        # refer to unrelated fds the fresh interpreter reused -- closing them
+        # would be silent corruption, not a no-op.
+        close_fds = (
+            (self.read_pipe.fileno(), self.write_pipe.fileno())
+            if self.kind == SubprocKind.FORK
+            else ()
+        )
         self.pool = TrackedProcessPoolExecutor(
             self.nprocs,
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(
-                _async_compile_initializer,
-                os.getpid(),
-                # Forked workers inherit these sidecar<->parent pipe fds but must
-                # not hold them open (see _async_compile_initializer).
-                (self.read_pipe.fileno(), self.write_pipe.fileno()),
+                _async_compile_initializer, os.getpid(), close_fds
             ),
         )
         self.pool_finalizer = multiprocessing.util.Finalize(

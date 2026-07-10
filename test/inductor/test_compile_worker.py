@@ -17,6 +17,7 @@ import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
+    SubprocKind,
     SubprocPool,
 )
 from torch._inductor.compile_worker.timer import Timer
@@ -116,6 +117,65 @@ class TestCompileWorker(TestCase):
                     self.fail("expected an exception after sidecar death")
             finally:
                 pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_spawn_pool_basic_jobs(self):
+        # compile_fx_subproc.py runs the pool with kind=SPAWN. The worker
+        # fd-close must be gated to fork; otherwise a spawned worker closes an
+        # unrelated (reused) fd and wedges the pool via a BrokenProcessPool loop.
+        pool = SubprocPool(2, kind=SubprocKind.SPAWN)
+        try:
+            a = pool.submit(operator.add, 100, 1)
+            b = pool.submit(operator.sub, 100, 1)
+            self.assertEqual(a.result(), 101)
+            self.assertEqual(b.result(), 99)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_fails_futures_when_no_eof(self):
+        # Isolate the liveness watchdog from the fd/EOF fix: hold a duplicate of
+        # the result pipe's write end open (an orphaned holder), so killing the
+        # sidecar produces no EOF and _read_thread stays blocked. Only
+        # _health_monitor -> _on_sidecar_death can then resolve the futures.
+        records = []  # (read_fd, write_fd, dup_of_write_fd)
+        real_pipe = os.pipe
+
+        def capturing_pipe():
+            r, w = real_pipe()
+            records.append((r, w, os.dup(w)))
+            return r, w
+
+        with patch("os.pipe", capturing_pipe):
+            pool = SubprocPool(2)
+        # The result pipe's read end is the pool's read_pipe; keep only that
+        # pipe's write-end dup alive and release every other captured dup.
+        result_read_fd = pool.read_pipe.fileno()
+        held_write_fd = None
+        for r, _w, dup_w in records:
+            if r == result_read_fd:
+                held_write_fd = dup_w
+            else:
+                os.close(dup_w)
+        self.assertIsNotNone(held_write_fd, "failed to capture the result pipe")
+        try:
+            # Warm so workers are forked and (via the fd fix) have dropped the
+            # inherited write end, leaving our dup as the sole holder.
+            self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+            fut = pool.submit(time.sleep, 600)
+            time.sleep(1.0)
+            pool.process.kill()
+            try:
+                fut.result(timeout=60)
+            except FuturesTimeoutError:
+                self.fail("watchdog did not fail the future when no EOF arrives")
+            except Exception:
+                pass  # expected: the watchdog fails the future
+            else:
+                self.fail("expected an exception after sidecar death")
+        finally:
+            os.close(held_write_fd)
+            pool.shutdown()
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_quiesce(self):
@@ -337,16 +397,24 @@ class TestCompileWorkerWatchdog(TestCase):
         with patch.dict(
             os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
         ):
-            with patch(
-                "torch._inductor.compile_worker.subproc_pool.trace_structured",
-                fake_trace_structured,
-            ):
-                pool = SubprocPool(2)
-                try:
+            pool = SubprocPool(2)
+            try:
+                # Warm the pool before collecting reports. The first job pays cold
+                # pool creation and the worker forks, which can exceed the
+                # (test-shortened) interval and be legitimately reported; that
+                # cost must not be attributed to the "fast" job below. The
+                # callback drops a job from _inflight before its result is sent,
+                # so once this result returns the warm-up job can no longer be
+                # reported.
+                self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                with patch(
+                    "torch._inductor.compile_worker.subproc_pool.trace_structured",
+                    fake_trace_structured,
+                ):
                     self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
                     time.sleep(2.5)  # a couple of watchdog ticks with no slow job
-                finally:
-                    pool.shutdown()
+            finally:
+                pool.shutdown()
 
         self.assertEqual(reports, [])
 
