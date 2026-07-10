@@ -299,6 +299,16 @@
       "Hints": []
     }
   ],
+  "GB1273": [
+    {
+      "Gb_type": "Unsupported attribute assignment on traceback object",
+      "Context": "call_setattr {self} {attr}",
+      "Explanation": "Dynamo does not support setting the attribute '{attr}' on tracked traceback objects. Only `tb_next` is supported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0023": [
     {
       "Gb_type": "Builtin `operator.*` comparison with constant `self` failed",
@@ -1936,6 +1946,14 @@
     }
   ],
   "GB0135": [
+    {
+      "Gb_type": "Unsupported attribute assignment on Exception object",
+      "Context": "call_setattr {self} {attr}",
+      "Explanation": "Dynamo does not support setting the attribute '{attr}' on tracked exception objects. Only `__context__`, `__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Unsupported attribute assignment on Exception object",
       "Context": "call_setattr {self} {name}",
