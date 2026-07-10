@@ -87,8 +87,11 @@ function install_cupti_headers {
   target_dir="/usr/local/cupti-headers-${major_minor}"
 
   # The CUDA toolkit runfile ships an older CUPTI than the standalone redist
-  # archive, so stage the newer headers where the build can pick them up. The
-  # headers are architecture independent, so always grab the x86_64 archive.
+  # archive, so stage the newer headers in a non-default location where they are
+  # available for inspection without poisoning the build's include search path.
+  # Staged for every CUDA version so the binary-build Dockerfiles can COPY the
+  # directory unconditionally. The headers are architecture independent, so
+  # always grab the x86_64 archive.
   redist_url="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cupti/linux-x86_64"
   archive="cuda_cupti-linux-x86_64-${cupti_version}-archive"
 
@@ -186,8 +189,6 @@ function install_130 {
 
   install_nvshmem 13 $NVSHMEM_VERSION
 
-  install_cupti_headers $CUDA_CUPTI_VERSION
-
   CUDA_VERSION=13.0 bash install_nccl.sh
 
   CUDA_VERSION=13.0 bash install_cusparselt.sh $CUSPARSELT_VERSION
@@ -206,8 +207,6 @@ function install_132 {
   install_cudnn 13 $CUDNN_VERSION
 
   install_nvshmem 13 $NVSHMEM_VERSION
-
-  install_cupti_headers $CUDA_CUPTI_VERSION
 
   CUDA_VERSION=13.2 bash install_nccl.sh
 
@@ -235,5 +234,6 @@ do
     *) echo "bad argument $1"; exit 1
         ;;
     esac
+    install_cupti_headers $CUDA_CUPTI_VERSION
     shift
 done
