@@ -8173,8 +8173,8 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA, XPU: view
-    ZeroTensor: view_symint
+    CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA, XPU: view
+    Meta, ZeroTensor: view_symint
     MkldnnCPU: mkldnn_view
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: view_nested
   tags: core

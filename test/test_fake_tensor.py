@@ -963,6 +963,20 @@ class FakeTensorTest(TestCase):
             b = torch.empty(u0, 16, device="cpu")
         prims.utils.compare_tensor_meta(a, b, check_strides=True)
 
+    def test_stack_symbolic_shapes(self):
+        # torch.stack, for a non-trailing dim, is computed as
+        # cat(...).view(result_sizes). The inner view must not require concrete
+        # sizes when the stacked tensors have symbolic shapes, otherwise it
+        # raises "SymIntArrayRef expected to contain only concrete integers".
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            t = torch.empty(u0, u1, device="cpu")
+            out = torch.stack([t, t], dim=1)
+            self.assertEqual(out.dim(), 3)
+            self.assertEqual(out.size(1), 2)
+
     def test_batch_tensor(self):
         x = torch.rand((3, 4, 5))
         b = _add_batch_dim(x, 0, 0)
