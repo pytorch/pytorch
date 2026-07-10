@@ -22,6 +22,17 @@ class FrozenstSubclass(frozenset):
     pass
 
 
+class BadCmp:
+    # Elements collide on hash (so __eq__ runs during set insertion/lookup),
+    # and __eq__ raises so the error must propagate.  Mirrors CPython
+    # test_set.py BadCmp.
+    def __hash__(self):
+        return 1
+
+    def __eq__(self, other):
+        raise RuntimeError
+
+
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         self.old = torch._dynamo.config.enable_trace_unittest
@@ -400,6 +411,20 @@ class _FrozensetBase:
         self.assertEqual(self.thetype.__xor__(p, q), set("acef"))
 
     @make_dynamo_test
+    def test_badcmp(self):
+        # A comparison error during insertion/lookup must propagate as the
+        # user exception.  For frozenset types hasattr(s, "add") is False, so
+        # the mutating block is skipped (regression: exact frozenset used to
+        # report hasattr(set, "add")).  Mirrors CPython test_set.py test_badcmp.
+        s = self.thetype([BadCmp()])
+        self.assertRaises(RuntimeError, self.thetype, [BadCmp(), BadCmp()])
+        self.assertRaises(RuntimeError, s.__contains__, BadCmp())
+        if hasattr(s, "add"):
+            self.assertRaises(RuntimeError, s.add, BadCmp())
+            self.assertRaises(RuntimeError, s.discard, BadCmp())
+            self.assertRaises(RuntimeError, s.remove, BadCmp())
+
+    @make_dynamo_test
     def test_cmp_eq(self):
         p = self.thetype("abc")
         self.assertEqual(p, p)
@@ -487,6 +512,16 @@ class _FrozensetBase:
         p = self.thetype("abc")
         self.assertIsInstance(p, self.thetype)
         self.assertIsInstance(p, Iterable)
+
+    @make_dynamo_test
+    def test_new_or_init(self):
+        # set/frozenset constructors reject extra positional args and any
+        # keyword arguments; set().__init__ rejects keywords even with 0 args.
+        self.assertRaises(TypeError, set, [], 2)
+        self.assertRaises(TypeError, frozenset, [], 2)
+        self.assertRaises(TypeError, set, a=1)
+        self.assertRaises(TypeError, frozenset, a=1)
+        self.assertRaises(TypeError, set().__init__, a=1)
 
     @make_dynamo_test
     def test_equality(self):

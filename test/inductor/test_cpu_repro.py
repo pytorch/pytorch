@@ -158,10 +158,11 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
+    @parametrize("p", ("fro", "nuc"))
     @skipIfNoLapack
-    def test_linalg_cond_fro_dynamic_shapes(self):
+    def test_linalg_cond_string_dynamic_shapes(self, p):
         def fn(x):
-            condition_number = torch.linalg.cond(x, p="fro")
+            condition_number = torch.linalg.cond(x, p=p)
             observer = (
                 condition_number > torch.tensor(0.0, dtype=condition_number.dtype)
             ).count_nonzero()
@@ -4061,6 +4062,34 @@ class CPUReproTests(TestCase):
                 metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
                 1,
             )
+
+    @requires_vectorization
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_outer_loop_local_buffer_with_tiled_outer_dim(self):
+        def fn(l_c, y, alpha, beta):
+            x = l_c[..., 16]
+            positive = F.softplus(x) + 0.0001
+            rates = F.softplus(y) + 0.0001
+
+            gammaln_term = torch.special.gammaln(positive + alpha.view(1, -1))
+            erf_term = torch.special.erf(x * beta.view(1, -1))
+
+            xlogy_term = torch.special.xlogy(positive, rates)
+            logadd = torch.logaddexp(gammaln_term, xlogy_term)
+            centered = logadd - logadd.mean(dim=-1, keepdim=True)
+
+            return torch.stack([centered, erf_term, centered * erf_term], dim=-1)
+
+        torch.manual_seed(20592561)
+        inputs = (
+            torch.randn([4, 8, 64], dtype=torch.float32) * 0.1,
+            torch.randn([4, 8], dtype=torch.float32) * 0.1,
+            torch.randn([8], dtype=torch.float32) * 0.1,
+            torch.zeros([8], dtype=torch.float32),
+        )
+
+        with torch.no_grad():
+            self.common(fn, inputs, atol=1e-6, rtol=1e-6)
 
     @requires_vectorization
     def test_argmin(self):
