@@ -962,6 +962,34 @@ class DuplicateWarningChecker:
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
+class _StructuredDuplicateChecker:
+    """Tracks distinct keys for structured trace deduplication.
+
+    Unlike DuplicateWarningChecker, this always deduplicates regardless
+    of config.verbose, since structured trace output is meant to be a
+    clean summary.
+    """
+
+    def __init__(self, maxsize: int = 4096) -> None:
+        self.maxsize = maxsize
+        self.reset()
+
+    def reset(self) -> None:
+        self.set: OrderedDict[Any, None] = OrderedDict()
+
+    def add(self, key: str | tuple[object, object]) -> bool:
+        if key in self.set:
+            self.set.move_to_end(key, last=True)
+            return False
+        self.set[key] = None
+        while len(self.set) > self.maxsize:
+            self.set.popitem(last=False)
+        return True
+
+
+_graph_break_structured_dup_checker = _StructuredDuplicateChecker()
+
+
 def setup_compile_debug() -> contextlib.ExitStack:
     compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
@@ -973,6 +1001,7 @@ def setup_compile_debug() -> contextlib.ExitStack:
 
 def reset_graph_break_dup_checker() -> None:
     graph_break_dup_warning_checker.reset()
+    _graph_break_structured_dup_checker.reset()
 
 
 # Matches ANSI escape sequences (CSI)

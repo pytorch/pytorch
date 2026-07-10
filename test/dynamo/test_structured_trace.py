@@ -293,6 +293,25 @@ class StructuredTraceTest(TestCase):
         finally:
             shutil.rmtree(out, ignore_errors=True)
 
+    def test_graph_break_dedup(self):
+        def fn(x):
+            if x.sum().item() > 0:
+                x = x + 1
+            if x.mean().item() > 0:
+                x = x + 2
+            return x
+
+        torch.compile(fn, backend="eager")(torch.randn(3, 3))
+
+        artifacts = [
+            line
+            for line in self.buffer.getvalue().splitlines()
+            if "dynamo_graph_break_reason" in line
+        ]
+        self.assertEqual(
+            len(artifacts), 2, "Expected 2 distinct graph break artifacts"
+        )
+
     def test_compile_id_serialization_deserialization(self):
         cid = torch._guards.CompileId(
             frame_id=1,

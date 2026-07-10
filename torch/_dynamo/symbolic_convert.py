@@ -140,6 +140,7 @@ from .source import (
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
+    _graph_break_structured_dup_checker,
     counters,
     get_fake_value,
     get_instruction_source_311,
@@ -5163,18 +5164,19 @@ class InstructionTranslatorBase(
         else:
             user_stack_trace += str(user_stack_formatted)
 
-        torch._logging.trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "dynamo_graph_break_reason",
-                "encoding": "string",
-            },
-            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
-        )
-
         # torch._dynamo.explain() formats this a little nicer, and presents a slightly
         # more actionable user code pointer
         gb_type = exc.gb_type if isinstance(exc, Unsupported) else type(exc)
+        if _graph_break_structured_dup_checker.add((gb_type, frame_loc_chain)):
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "dynamo_graph_break_reason",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
+            )
+
         if (
             graph_break_log.isEnabledFor(logging.DEBUG)
             and not explain
