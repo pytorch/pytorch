@@ -4892,8 +4892,14 @@ class ShapeEnv:
             )
         expr = value.node.expr
         env_id = id(src_shape_env)
+        # free_symbols are the leaves that need local replacements; no recursion
+        # into the expression is necessary.
         foreign_symbols = sorted(expr.free_symbols, key=lambda s: s.name)
         cache = self.foreign_unbacked_symbol_cache
+        hint_sources = (
+            src_shape_env.backed_var_to_val.keys()
+            | src_shape_env.var_to_hint_override.keys()
+        )
 
         can_transfer_structurally = all(
             (env_id, sym) in cache or src_shape_env.is_unbacked_symint(sym)
@@ -4902,10 +4908,6 @@ class ShapeEnv:
         if can_transfer_structurally:
             from torch._dynamo.source import EphemeralSource
 
-            hint_sources = (
-                src_shape_env.backed_var_to_val.keys()
-                | src_shape_env.var_to_hint_override.keys()
-            )
             replacements = {}
             for foreign_sym in foreign_symbols:
                 key = (env_id, foreign_sym)
@@ -4954,10 +4956,6 @@ class ShapeEnv:
             # override; otherwise optimization_hint would return a generic
             # heuristic fallback that shouldn't be recorded as user
             # provenance.
-            hint_sources = (
-                src_shape_env.backed_var_to_val.keys()
-                | src_shape_env.var_to_hint_override.keys()
-            )
             optimization_hint = (
                 src_shape_env.optimization_hint(expr)
                 if not expr.free_symbols - hint_sources
