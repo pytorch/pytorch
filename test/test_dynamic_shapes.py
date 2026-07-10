@@ -6800,6 +6800,12 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         # All free symbols are owned by local_env.
         for sym in result_expr.free_symbols:
             self.assertTrue(local_env.is_unbacked_symint(sym))
+        # Do not partially seed resolvable leaves when the whole expression
+        # requires the opaque fallback.
+        self.assertNotIn(
+            (id(foreign_env), u0.node.expr),
+            local_env.foreign_unbacked_symbol_cache,
+        )
 
     def test_transfer_is_self_short_circuit(self):
         """When the SymInt already belongs to this ShapeEnv,
@@ -7008,7 +7014,8 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         self.assertIn(new_sizes[1].node.expr, local_env.size_like)
         self.assertIn(new_sizes[2].node.expr, local_env.size_like)
         self.assertEqual(
-            local_env.var_to_range[new_sizes[1].node.expr].lower, 0,
+            local_env.var_to_range[new_sizes[1].node.expr].lower,
+            0,
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
