@@ -1329,8 +1329,8 @@ class TestMPS(TestCaseMPS):
     @parametrize("transpose", [False, True])
     def test_gemv_mm(self, dtype, transpose):
         tol = self._gemv_tol(dtype)
-        # M==1: (1,K) @ (K,N), matrix operand is B. Shapes hit vec=1/2/4/8 and
-        # outlen not divisible by 4 (exercises the kernel's row-bounds guard).
+        # M==1: (1,K) @ (K,N), matrix operand is B. Ragged shapes exercise the
+        # kernels' K-loop tails and row/column bounds guards.
         for K, N in [(1, 1), (7, 16), (64, 17), (512, 1000), (2048, 4096), (8192, 256)]:
             a = torch.randn(1, K, device="mps", dtype=dtype)
             b = self._gemv_mat(K, N, dtype, transpose)
@@ -1343,13 +1343,58 @@ class TestMPS(TestCaseMPS):
             self._gemv_check(a, b, **tol)
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("case", ["t2d", "t2d_misaligned", "deep_split", "kcap_16", "kcap_8", "kcap_4", "scalar_cols", "vec_clamp"])
+    def test_gemv_t_policy(self, dtype, case):
+        # Pins every gemv_t GemvPolicy branch with shapes whose pick is the
+        # same for any GPU core count: t2d = small-outlen 16-byte-load kernel;
+        # t2d_misaligned = its {16, 1} scalar fallback; deep_split = narrow-tier
+        # {32, 2}; kcap_N = K/min_k_per_simd caps nsimd at N (fp32; lp floors
+        # at 16); scalar_cols = fp32 long-K {32, 1}; vec_clamp = odd leading
+        # dim halves vec to 1.
+        tol = self._gemv_tol(dtype)
+        K, N, sliced = {
+            "t2d": (1024, 512, False),
+            "t2d_misaligned": (1024, 512, True),
+            "deep_split": (2048, 2048, False),
+            "kcap_16": (512, 2048, False),
+            "kcap_8": (256, 2048, False),
+            "kcap_4": (128, 2048, False),
+            "scalar_cols": (16384, 2048, False),
+            "vec_clamp": (2048, 2048, True),
+        }[case]
+        a = torch.randn(1, K, device="mps", dtype=dtype)
+        b = torch.randn(K, N + sliced, device="mps", dtype=dtype)
+        if sliced:
+            # Slicing off column 0 leaves an odd leading dim and storage offset.
+            b = b[:, 1:]
+        self._gemv_check(a, b, **tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("case", ["narrow", "mid", "wide", "vec_clamp", "strided_x"])
+    def test_gemv_nt_policy(self, dtype, case):
+        # Pins every gemv_nt GemvPolicy branch: narrow/mid/wide straddle both
+        # wide_outlen knees (fp32 {16,4}->{4,4} at 2048, lp {4,8}->{8,8} at
+        # 8192); vec_clamp = odd leading dim halves vec to 1 (plus a K tail);
+        # strided_x = the non-unit-stride x kernel.
+        tol = self._gemv_tol(dtype)
+        M, K = {"narrow": (1024, 2048), "mid": (4096, 2048), "wide": (8192, 2048),
+                "vec_clamp": (4096, 1001), "strided_x": (4096, 2048)}[case]
+        a = torch.randn(M, K, device="mps", dtype=dtype)
+        b = torch.randn(K, 2 if case == "strided_x" else 1, device="mps", dtype=dtype)[:, :1]
+        self._gemv_check(a, b, **tol)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("transpose", [False, True])
     @parametrize("beta", [0.0, 0.5, 1.0])
-    def test_gemv_addmm(self, dtype, beta):
+    def test_gemv_addmm(self, dtype, transpose, beta):
+        # transpose flips the matrix operand's layout, so both directions hit
+        # both the gemv_t and gemv_nt alpha/beta epilogues; outlen 1000 lands
+        # on the t2d kernel and 2048 on the standard split-K one.
         tol = self._gemv_tol(dtype)
         alpha = 0.75
-        for M, K, N in [(1, 512, 1000), (1000, 512, 1)]:
-            a = torch.randn(M, K, device="mps", dtype=dtype)
-            b = torch.randn(K, N, device="mps", dtype=dtype)
+        for M, K, N in [(1, 512, 1000), (1, 512, 2048), (1000, 512, 1), (2048, 512, 1)]:
+            a = torch.randn(1, K, device="mps", dtype=dtype) if M == 1 else self._gemv_mat(M, K, dtype, transpose)
+            b = self._gemv_mat(K, N, dtype, transpose) if N > 1 else torch.randn(K, 1, device="mps", dtype=dtype)
             bias = torch.randn(M, N, device="mps", dtype=dtype)
             out_mps = torch.addmm(bias, a, b, alpha=alpha, beta=beta)
             out_cpu = torch.addmm(bias.cpu(), a.cpu(), b.cpu(), alpha=alpha, beta=beta)

@@ -129,22 +129,15 @@ bool is_macos_at_least(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
 }
 
-AppleGPUFamily get_apple_gpu_family() {
-  static const auto family = [] {
-    const auto device = MPSDevice::getInstance()->device();
-    for (int f = static_cast<int>(AppleGPUFamily::APPLE_10_PLUS); f >= static_cast<int>(AppleGPUFamily::APPLE_7_PLUS);
-         --f) {
-      if ([device supportsFamily:static_cast<MTLGPUFamily>(f)]) {
-        return static_cast<AppleGPUFamily>(f);
-      }
-    }
-    return AppleGPUFamily::UNKNOWN;
-  }();
-  return family;
+bool is_apple_family_or_newer(AppleGPUFamily family) {
+  // some ops which are on MPSGraph behave differently between GPU families
+  auto mtl_family = static_cast<MTLGPUFamily>(family);
+  return [MPSDevice::getInstance()->device() supportsFamily:mtl_family];
 }
 
-bool is_apple_family_or_newer(AppleGPUFamily family) {
-  return static_cast<uint32_t>(get_apple_gpu_family()) >= static_cast<uint32_t>(family);
+bool has_mpp() {
+  // MetalPerformancePrimitives matmul2d (cooperative tensors) needs macOS 26.2+
+  return is_macos_at_least(MacOSVersion::MACOS_26_2);
 }
 
 } // namespace at::mps

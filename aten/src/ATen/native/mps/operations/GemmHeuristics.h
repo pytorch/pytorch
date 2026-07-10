@@ -2,8 +2,9 @@
 
 #pragma once
 
-#include <ATen/mps/MPSDevice.h>
 #include <c10/core/ScalarType.h>
+
+#include <cstdint>
 
 namespace at::native::mps {
 
@@ -14,14 +15,16 @@ enum class GemvKernel {
 
 struct GemvConfig {
   int nsimd, vec;
-  int rows = 1; // rows per simdgroup (gemv_nt only)
   int kq = 4; // k-sublanes per simdgroup (gemv_t2d only)
   GemvKernel kernel = GemvKernel::Standard;
 };
 
+// One shape-based launch heuristic shared by every GPU generation; only the
+// device core count scales the occupancy targets. Per-device peak is deferred
+// to an opt-in autotuner (follow-up).
 class GemvPolicy {
  public:
-  GemvPolicy(at::mps::AppleGPUFamily family, uint32_t cores);
+  explicit GemvPolicy(uint32_t cores);
 
   static GemvPolicy current();
 
@@ -36,11 +39,10 @@ class GemvPolicy {
       int64_t K,
       int64_t align) const;
 
-  static GemvConfig clamp_t(GemvConfig cfg, int64_t align);
-  static GemvConfig clamp_nt(GemvConfig cfg, int64_t align);
+  // Halves vec until the matrix leading dim and storage offset are aligned.
+  static GemvConfig clamp_vec(GemvConfig cfg, int64_t align);
 
  private:
-  at::mps::AppleGPUFamily family_;
   uint32_t cores_; // scales the occupancy targets with device size
 };
 

@@ -137,7 +137,7 @@ void dispatch_gemv(const Tensor& A,
     // Offsets overflow int32: such operands are DRAM-bound, so skip the
     // policy and use the fixed configs the _i64 variants are built at.
     cfg = gemv_use_t ? GemvConfig{16, 2} : GemvConfig{8, dt == at::kFloat ? 4 : 8};
-    cfg = gemv_use_t ? GemvPolicy::clamp_t(cfg, align) : GemvPolicy::clamp_nt(cfg, align);
+    cfg = GemvPolicy::clamp_vec(cfg, align);
   } else {
     cfg = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
   }
@@ -183,20 +183,14 @@ void dispatch_gemv(const Tensor& A,
   } else if (gemv_use_t) {
     fname = fmt::format("gemv_t_{}_{}_{}_{}{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str, idx_str);
   } else {
-    fname = fmt::format("gemv_nt_{}_{}_{}_{}_{}{}{}",
-                        dt_str,
-                        launch_cfg.nsimd,
-                        launch_cfg.vec,
-                        epi_str,
-                        xc ? "xc" : "xs",
-                        launch_cfg.rows > 1 ? fmt::format("_r{}", launch_cfg.rows) : "",
-                        idx_str);
+    fname = fmt::format(
+        "gemv_nt_{}_{}_{}_{}_{}{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str, xc ? "xc" : "xs", idx_str);
   }
   auto pso = lib.getPipelineStateForFunc(fname);
   const NSUInteger threads_per_tg = static_cast<NSUInteger>(launch_cfg.nsimd * 32);
   const int64_t rows_per_tg = gemv_t2d ? (32 / launch_cfg.kq) * t2d_vec
       : gemv_use_t                     ? 32 * launch_cfg.vec
-                                       : launch_cfg.nsimd * launch_cfg.rows;
+                                       : launch_cfg.nsimd;
   const int64_t num_groups = (outlen + rows_per_tg - 1) / rows_per_tg;
   const std::array<float, 2> ab = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
 
