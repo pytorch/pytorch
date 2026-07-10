@@ -93,12 +93,12 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             "max": (
                 "cute.ReductionOp.MAX",
                 'float("-inf")',
-                "cute.arch.fmax(lhs, rhs)",
+                "cutlass.max(lhs, rhs)",
             ),
             "min": (
                 "cute.ReductionOp.MIN",
                 'float("inf")',
-                "cute.arch.fmin(lhs, rhs)",
+                "cutlass.min(lhs, rhs)",
             ),
         }
         self.assertEqual(set(TENSORSSA_REDUCTIONS), set(expected))
@@ -2017,8 +2017,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("sum", lambda x: x.sum(1), "local_reduce_combine_fn"),
             ("mean", lambda x: x.mean(1), " / {group}.0"),
             ("prod", lambda x: (x * 0.05).prod(1), "lhs * rhs"),
-            ("amax", lambda x: x.amax(1), "cute.arch.fmax"),
-            ("amin", lambda x: x.amin(1), "cute.arch.fmin"),
+            ("amax", lambda x: x.amax(1), "cutlass.max"),
+            ("amin", lambda x: x.amin(1), "cutlass.min"),
         ),
         name_fn=lambda case: case[0],
     )
@@ -2157,7 +2157,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         )
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
-        FileCheck().check("cute.arch.fmax").check("cute.math.sqrt").check(
+        FileCheck().check("cutlass.max").check("cute.math.sqrt").check(
             "local_reduce_finalize_fn"
         ).run(code)
         self.assertLocalReduceAuxCode(code, group, axis=0, callbacks=True)
@@ -2190,13 +2190,51 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("reduction", ("amax", "amin"))
+    def test_mm_tuple_aux_physical_extrema_preserve_nan(self, reduction):
+        m = 16
+        n = 128
+        k = 16
+        group = 64
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            return acc, getattr(x, reduction)(-1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
+        b[0, 0] = float("nan")
+        (_, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        _, expected_aux = epilogue_fn(a @ b)
+        torch.testing.assert_close(aux, expected_aux, equal_nan=True)
+        self.assertTrue(torch.isnan(aux[:, 0]).all())
+        self.assertEqual(aux[:, 1], torch.zeros_like(aux[:, 1]))
+        FileCheck().check(f"cutlass.{reduction[1:]}").check(
+            "local_reduce_finalize_fn"
+        ).run(code)
+        self.assertLocalReduceAuxCode(code, group, callbacks=True)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("group", (64, 128))
     @parametrize(
         "case",
         (
             ("sum", lambda x: x.sum(1), "local_reduce_combine_fn"),
             ("mean", lambda x: x.mean(1), " / {group}.0"),
-            ("amax", lambda x: x.amax(1), "cute.arch.fmax"),
+            ("amax", lambda x: x.amax(1), "cutlass.max"),
         ),
         name_fn=lambda case: case[0],
     )
@@ -2374,7 +2412,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         (
             ("sum_group64", 128, 64, lambda x: x.sum(-1), "lhs + rhs"),
             ("mean_group64", 128, 64, lambda x: x.mean(-1), " / 64.0"),
-            ("amax_group64", 128, 64, lambda x: x.amax(-1), "cute.arch.fmax"),
+            ("amax_group64", 128, 64, lambda x: x.amax(-1), "cutlass.max"),
             ("sum_group128", 256, 128, lambda x: x.sum(-1), "lhs + rhs"),
         ),
         name_fn=lambda case: case[0],
