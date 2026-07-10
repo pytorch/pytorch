@@ -93,12 +93,12 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             "max": (
                 "cute.ReductionOp.MAX",
                 'float("-inf")',
-                "cute.arch.fmax(lhs, rhs)",
+                "cutlass.max(lhs, rhs)",
             ),
             "min": (
                 "cute.ReductionOp.MIN",
                 'float("inf")',
-                "cute.arch.fmin(lhs, rhs)",
+                "cutlass.min(lhs, rhs)",
             ),
         }
         self.assertEqual(set(TENSORSSA_REDUCTIONS), set(expected))
@@ -2017,8 +2017,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("sum", lambda x: x.sum(1), "local_reduce_combine_fn"),
             ("mean", lambda x: x.mean(1), " / {group}.0"),
             ("prod", lambda x: (x * 0.05).prod(1), "lhs * rhs"),
-            ("amax", lambda x: x.amax(1), "cute.arch.fmax"),
-            ("amin", lambda x: x.amin(1), "cute.arch.fmin"),
+            ("amax", lambda x: x.amax(1), "cutlass.max"),
+            ("amin", lambda x: x.amin(1), "cutlass.min"),
         ),
         name_fn=lambda case: case[0],
     )
