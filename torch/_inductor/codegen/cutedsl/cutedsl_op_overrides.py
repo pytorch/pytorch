@@ -52,10 +52,10 @@ TENSORSSA_REDUCTIONS: dict[str, TensorSSAReduction] = {
     "sum": TensorSSAReduction("cute.ReductionOp.ADD", "0.0", "lhs + rhs"),
     "prod": TensorSSAReduction("cute.ReductionOp.MUL", "1.0", "lhs * rhs"),
     "max": TensorSSAReduction(
-        "cute.ReductionOp.MAX", 'float("-inf")', "cute.arch.fmax(lhs, rhs)"
+        "cute.ReductionOp.MAX", 'float("-inf")', "cutlass.max(lhs, rhs)"
     ),
     "min": TensorSSAReduction(
-        "cute.ReductionOp.MIN", 'float("inf")', "cute.arch.fmin(lhs, rhs)"
+        "cute.ReductionOp.MIN", 'float("inf")', "cutlass.min(lhs, rhs)"
     ),
 }
 
