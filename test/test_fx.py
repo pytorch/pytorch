@@ -386,6 +386,40 @@ class TestFX(JitTestCase):
         x, y = torch.rand(1), torch.rand(1)
         self.assertEqual(torch.sin(x + y), gm(x, y))
 
+    def test_tuple_return_annotation_for_schemas(self):
+
+        # Target an op that returns multiple tensors (e.g., var_mean)
+        op = torch.ops.aten.var_mean.default
+
+        # get_signature_for_torch_op returns a list of signatures
+        sigs = get_signature_for_torch_op(op)
+        self.assertTrue(len(sigs) > 0, "Expected at least one signature")
+
+        # Grab the first signature schema
+        sig = sigs[0]
+        ret_ann = sig.return_annotation
+
+        # 1. Ensure it's not a raw Python tuple (The bug you fixed)
+        self.assertNotEqual(
+            type(ret_ann), tuple,
+            "return_annotation should be a generic type hint, not a raw tuple of types"
+        )
+
+        # 2. Ensure it resolves to a proper tuple typing origin (tuple or typing.Tuple)
+        origin = getattr(ret_ann, "__origin__", None)
+        self.assertIn(
+            origin, (tuple, tuple),
+            f"Expected tuple or typing.Tuple origin, got {origin}"
+        )
+
+        # 3. Ensure the inner arguments are properly set to torch.Tensor
+        args = getattr(ret_ann, "__args__", None)
+        self.assertIsNotNone(args, "Tuple annotation must have __args__")
+        self.assertTrue(
+            all(issubclass(a, torch.Tensor) for a in args),
+            "Inner tuple arguments should be subclass of torch.Tensor"
+        )
+
     def test_boxed_arg_indices_codegen(self):
         def multi_boxed_call(left, passthrough, right):
             return left[0] + left[1] + passthrough + right[0]
