@@ -128,7 +128,7 @@ endif()
 
 # ---[ CUDA libraries wrapper
 
-# find lbnvrtc.so
+# find libnvrtc.so
 set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
 if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
   file(SHA256 "${CUDA_NVRTC_LIB}" _cuda_nvrtc_sha256)
