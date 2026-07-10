@@ -650,6 +650,30 @@ def _register_builtin_nccl_backend() -> None:
     )
 
 
+def _create_nccl_lazy_process_group(
+    opts: _DistributedBackendOptions, backend_options: Any | None
+) -> C10DBackend | None:
+    # nccl-lazy is a TorchComms-only per-peer variant of NCCL: it lazily creates
+    # a dedicated 2-rank communicator per send/recv peer (matching
+    # ProcessGroupNCCL) so P2P to different peers can overlap. It is constructed
+    # on the TorchComms branch of _new_process_group_helper; this creator only
+    # runs when torchcomms is disabled, in which case there is nothing to build.
+    raise RuntimeError(
+        "The nccl-lazy backend is only available when torchcomms is enabled "
+        "(e.g. via dist_config.use_torchcomms)."
+    )
+
+
+def _register_builtin_nccl_lazy_backend() -> None:
+    Backend.register_backend(
+        "nccl-lazy",
+        _create_nccl_lazy_process_group,
+        extended_api=True,
+        devices=["cuda"],
+        _backend_type=ProcessGroup.BackendType.CUSTOM,
+    )
+
+
 def _register_builtin_ucc_backend() -> None:
     Backend.register_backend(
         Backend.UCC,

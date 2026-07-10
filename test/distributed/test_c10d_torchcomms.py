@@ -372,6 +372,34 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         self.assertIsNotNone(default_pg.bound_device_id)
         self.assertEqual(default_pg.bound_device_id.type, "cuda")
 
+    def test_new_group_nccl_lazy_builds_per_peer_group(self):
+        # Passing backend="nccl-lazy" builds a per-peer, lazily-initialized
+        # group (a dedicated comm + stream per send/recv peer) usable for P2P.
+        # use_local_synchronization makes it members-only. The parent must be
+        # device-bound (it is, in this class).
+        ranks = list(range(self.world_size))
+        g = dist.new_group(
+            ranks=ranks, backend="nccl-lazy", use_local_synchronization=True
+        )
+        self.assertEqual(dist.get_process_group_ranks(g), ranks)
+        # P2P round-trip over the lazy group: 0 -> 1 -> ... -> 0
+        dev = torch.device(f"cuda:{self.rank}")
+        send_to = (self.rank + 1) % self.world_size
+        recv_from = (self.rank - 1) % self.world_size
+        if self.rank % 2 == 0:
+            dist.send(
+                torch.full((4,), float(self.rank), device=dev), dst=send_to, group=g
+            )
+            r = torch.empty(4, device=dev)
+            dist.recv(r, src=recv_from, group=g)
+        else:
+            r = torch.empty(4, device=dev)
+            dist.recv(r, src=recv_from, group=g)
+            dist.send(
+                torch.full((4,), float(self.rank), device=dev), dst=send_to, group=g
+            )
+        self.assertEqual(r[0].item(), float(recv_from))
+
 
 instantiate_device_type_tests(
     TestC10dTorchCommsInitAutoQualify, globals(), only_for=["cuda"]
