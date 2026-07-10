@@ -1460,6 +1460,31 @@ class TestCleanupHook(TestCase):
         with self.assertRaises(AssertionError):
             utils.CleanupHook.create(scope, "test_name", val2)
 
+    def test_double_cleanup_no_keyerror(self):
+        """Two hooks for the same (scope, name, val) can both fire without error.
+
+        Regression test: when two OutputGraphs share a global installed via
+        the idempotent reinstall path, both hold a CleanupHook for the same
+        slot. When both are collected, the second hook's __call__ must not
+        raise KeyError — it should be a no-op since the first already removed
+        the entry.
+        """
+        val = {"key": "value"}
+        scope = {}
+        baseline = utils.CleanupManager.count
+        hook1 = utils.CleanupHook.create(scope, "test_name", val)
+        hook2 = utils.CleanupHook.create(scope, "test_name", val)
+        self.assertEqual(utils.CleanupManager.count, baseline + 2)
+        self.assertIn("test_name", scope)
+        # First cleanup removes the entry.
+        hook1()
+        self.assertNotIn("test_name", scope)
+        self.assertEqual(utils.CleanupManager.count, baseline + 1)
+        # Second cleanup is a no-op — must not raise.
+        hook2()
+        self.assertNotIn("test_name", scope)
+        self.assertEqual(utils.CleanupManager.count, baseline)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
