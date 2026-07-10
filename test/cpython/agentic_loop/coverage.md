@@ -2723,6 +2723,329 @@ timeout 120 env CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
 # Ran 1 test in 0.351s, OK (skipped=1)
 ```
 
+### Cycle5-E: test_list.ListTest.test_keywords_in_subclass (list.__new__ + init kwarg leniency)
+
+Status: IMPLEMENTED (Cycle 5). Classification: in scope (list-subclass object
+modeling). Sentinel removed.
+
+Target: `CPython313-test_list-ListTest.test_keywords_in_subclass`. The earlier
+sub-cases in this test already traced (plain `subclass([1,2])`, the
+`subclass(sequence=())` TypeError case, and `subclass_with_init`). Only the
+`subclass_with_new` path was missing:
+```python
+class subclass_with_new(list):
+    def __new__(cls, seq, newarg=None):
+        self = super().__new__(cls, seq)   # list.__new__(subclass, [1,2])
+        self.newarg = newarg
+        return self
+u = subclass_with_new([1, 2], newarg=3)
+```
+
+Root cause (two gaps, confirmed via repro with the sentinel removed):
+1. `super().__new__(cls, seq)` routes to
+   `ListBuiltinVariable.call_method(tx, "__new__", [UserDefinedClassVariable(subclass), ListVariable([1,2])], {})`.
+   The `__new__` handler only accepted `len(args) == 1`, so the 2-arg call
+   (cls + seq) fell through to the base handler and graph-broke with gb0156
+   ("Dynamo does not know how to trace method `__new__` of class `type`").
+2. After fixing (1), the construction polyfill
+   `instantiate_user_defined_class_object` calls `obj.__init__([1,2], newarg=3)`.
+   Dynamo's `ListVariable.tp_init_impl` rejected the keyword arg with gb0088
+   ("wrong number of arguments or keyword arguments for __init__() call.
+   Expect: at most 1 args and 0 kwargs. Actual: 1 args and 1 kwargs").
+
+CPython semantics verified empirically (Python 3.13):
+- `list.__new__(cls, seq)` returns an EMPTY instance of `cls`; the elements are
+  populated later by `list.__init__` (not by `__new__`). `list.__new__` ignores
+  the extra sequence arg (and any kwargs) for both `list` and subclasses.
+- `list.__init__`'s Argument Clinic wrapper (`Objects/clinic/listobject.c.h`
+  `list___init__`) silently ignores excess keyword args when
+  `Py_TYPE(self)->tp_new != list.tp_new` -- i.e. when the subclass overrides
+  `__new__`. A plain `list`, or a subclass that inherits `list.__new__`, still
+  raises `TypeError("list() takes no keyword arguments")`. Extra POSITIONAL args
+  (>1) always raise `TypeError("list expected at most 1 argument, got N")`,
+  regardless of the `__new__` override.
+
+Fix:
+- `ListBuiltinVariable.call_method` (`__new__`): relaxed the guard from
+  `len(args) == 1` to `len(args) >= 1`. The extra sequence arg is ignored for
+  the empty-list result; for a subclass, `args[1:]` is recorded as `init_args`
+  for instance reconstruction via `track_new_user_defined_object` (which builds
+  an empty `UserDefinedListVariable` of the right type; the example value comes
+  from `list.__new__(user_cls)`).
+- New `UserDefinedListVariable.call_method`: mirrors the clinic leniency -- on
+  `__init__`, when `type(self.value).__new__ is not list.__new__` and the
+  resolved `__init__` is the inherited `list.__init__`, drop the kwargs before
+  delegating to the base `ListVariable`. This preserves the `TypeError` for
+  plain subclasses (no `__new__` override) and for direct `list()` calls.
+
+Files changed:
+- `torch/_dynamo/variables/builtin.py` (`ListBuiltinVariable.call_method`
+  `__new__` arg-count guard)
+- `torch/_dynamo/variables/user_defined.py` (new
+  `UserDefinedListVariable.call_method` kwarg-leniency)
+- `test/dynamo/test_functions.py` (`DefaultsTests.test_udf_list_subclass_with_new`,
+  `fullgraph=True`; placed next to `test_udf_list_reconstruction`)
+
+Sentinel removed (working tree, uncommitted):
+- `CPython313-test_list-ListTest.test_keywords_in_subclass`
+
+Zero collateral: the whole-file run reported 0 XPASS/XFAIL, so no other
+`test_list` sentinel became stale.
+
+Exact commands run and results (current tree):
+```bash
+# Target, sentinel removed -> PASS
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python -m pytest test/cpython/v3_13/test_list.py::ListTest::test_keywords_in_subclass
+# 1 passed
+
+# Whole affected CPython file -> PASS, no new failures, no XPASS/XFAIL
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python -m pytest test/cpython/v3_13/test_list.py -rXP
+# 53 passed, 12 skipped (0 failed, 0 XPASS, 0 XFAIL)
+
+# New regression test (fullgraph=True) -> PASS
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+  python -m pytest test/dynamo/test_functions.py \
+  -k "test_udf_list_subclass_with_new or test_udf_list_reconstruction"
+# 2 passed
+
+# Nearby Dynamo suites (plain pytest; the PYTORCH_TEST_WITH_DYNAMO flag
+# double-compiles Dynamo's own suites and produces spurious failures) -> green
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+  python -m pytest test/dynamo/test_functions.py -q
+# 519 passed, 8 skipped, 2 xfailed
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu \
+  python -m pytest test/dynamo/test_misc.py -q
+# 771 passed, 14 skipped, 4 xfailed
+
+# Lint
+lintrunner -a torch/_dynamo/variables/builtin.py \
+  torch/_dynamo/variables/user_defined.py test/dynamo/test_functions.py
+# ok No lint issues.
+```
+
+Risks: low. The `__new__` change only widens an existing handler to accept the
+ignored sequence arg (matching CPython). The `__init__` leniency is gated on
+both the `__new__` override and the inherited `list.__init__`, so it cannot
+mask a real `TypeError` from a plain subclass, a direct `list()` call, or a
+user-defined `__init__`; extra positional args still raise via the unchanged
+`tp_init_impl` positional check.
+
+### Cycle5-F: test_range.RangeTest.test_types (range.__contains__ non-int fallback)
+
+Status: IMPLEMENTED (Cycle 5). Classification: in scope (range membership
+protocol modeling). Sentinel removed.
+
+Target: `CPython313-test_range-RangeTest.test_types`. The test asserts CPython's
+range membership semantics for non-integer operands:
+```python
+self.assertIn(1.0, range(3))          # float equal to a member
+self.assertIn(True, range(3))         # bool
+self.assertIn(1+0j, range(3))         # complex equal to a member  <- failing line
+self.assertIn(ALWAYS_EQ, range(3))    # object whose __eq__ is always True
+self.assertNotIn(C2(), range(3))      # __int__/__index__ NOT coerced -> identity __eq__
+self.assertIn(int(C2()), range(3))
+class C3(int):
+    def __eq__(self, other): return True
+self.assertIn(C3(11), range(10))      # int SUBCLASS must NOT take the fast path
+```
+
+Root cause (confirmed via repro with the sentinel removed): `RangeVariable.sq_contains`
+(`torch/_dynamo/variables/lists.py`) delegated unconditionally to `range_count`,
+which is the integer arithmetic fast path (`start <= x < stop` plus a stride
+modulo test) and returns 0 for any operand whose `type(x)` is not `bool`/`int`/`float`.
+So `(1+0j) in range(3)` returned 0 -> `assertIn` failed -> the raised
+`AssertionError` had no handler and surfaced as gb0088 "Observed exception" at
+`test_range.py:494` (`raised exception AssertionError('(1+0j) not found in range(0, 3)')`).
+CPython's `range_contains` (Objects/rangeobject.c) uses the arithmetic fast path
+ONLY for exact `int`/`bool` operands (`PyLong_CheckExact(ob) || PyBool_Check(ob)`);
+everything else (float, complex, int subclasses, arbitrary objects) falls back to
+`_PySequence_IterSearch`, a linear scan comparing each element via `==` with an
+identity shortcut, and never coerces the operand.
+
+Fix (`torch/_dynamo/variables/lists.py`, `RangeVariable.sq_contains`): gate the
+arithmetic fast path on `maybe_get_python_type(item) in (int, bool)` (exact type,
+so an `int` subclass like `C3` does not qualify). For every other operand, fall
+back to the existing `iter_contains(self.unpack_var_sequence(tx), item, tx)`,
+which is the same `__eq__` linear scan (via `generic_richcompare_bool`) that
+`ListVariable`/`TupleVariable` already use, mirroring `_PySequence_IterSearch`.
+This routes float/complex/int-subclass/custom-`__eq__` operands through the
+element-wise comparison (honoring reflected `__eq__` so `ALWAYS_EQ` and `C3`
+match) without coercing via `__int__`/`__index__`. `range_count` (and the
+`.count()` method that also calls it) is left unchanged. Negative-step and
+strided ranges keep working because `unpack_var_sequence` materializes the exact
+element list and the fast path still handles exact-int operands via `range_count`.
+
+Files changed:
+- `torch/_dynamo/variables/lists.py` (`RangeVariable.sq_contains`: exact-int/bool
+  fast-path gate + `__eq__` linear-scan fallback)
+- `test/dynamo/test_sequence_ops.py` (new `TestRangeContains` class:
+  `test_non_int_members`, `test_negative_step_and_strided`; `fullgraph=True`)
+
+Sentinel removed (working tree):
+- `CPython313-test_range-RangeTest.test_types`
+
+Zero collateral: the module-runner whole-file run reported `OK (skipped=10)` with
+no unexpected successes, so no other `test_range` sentinel became stale.
+
+Exact commands run and results (current tree):
+```bash
+# Target, sentinel removed -> PASS
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python -m pytest test/cpython/v3_13/test_range.py::RangeTest::test_types -x -q
+# 1 passed
+
+# Whole affected CPython file -> PASS, no new failures, no XPASS
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python -m pytest test/cpython/v3_13/test_range.py -q -rXx
+# 18 passed, 10 skipped (0 failed, 0 XPASS)
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python test/cpython/v3_13/test_range.py
+# Ran 28 tests -> OK (skipped=10); no unexpectedSuccesses
+
+# New regression tests (fullgraph=True) -> PASS
+python test/dynamo/test_sequence_ops.py TestRangeContains
+# Ran 2 tests -> OK
+
+# Nearby Dynamo suites (plain runner; no PYTORCH_TEST_WITH_DYNAMO) -> green
+python test/dynamo/test_sequence_ops.py
+# Ran 167 tests -> OK (expected failures=1)
+python test/dynamo/test_functions.py
+# Ran 529 tests -> OK (skipped=8, expected failures=2)
+python test/dynamo/test_misc.py
+# Ran 789 tests -> OK (skipped=14, expected failures=4)
+
+# Lint
+lintrunner -a torch/_dynamo/variables/lists.py test/dynamo/test_sequence_ops.py
+# ok No lint issues.
+```
+
+Risks: low. The change only narrows the arithmetic fast path to exact `int`/`bool`
+(matching CPython) and reuses the already-vetted list/tuple `__eq__` scan for the
+rest. The linear scan materializes the full element list via `unpack_var_sequence`,
+so very large non-int membership tests trace as many elements as CPython would
+compare -- acceptable since CPython does the same linear scan; exact-int membership
+still uses O(1) arithmetic.
+
+### Cycle5-G: test_collections.TestNamedTuple.test_copy (faithful __reduce_ex__ for newargs/slots objects)
+
+Status: IMPLEMENTED (Cycle 5). Classification: in scope (copy/pickle reduction
+protocol modeling). Sentinel removed.
+
+Target: `CPython313-test_collections-TestNamedTuple.test_copy`. The test does
+`copy.copy(p)` and `copy.deepcopy(p)` on a namedtuple instance
+`p = TestNT(x=10, y=20, z=30)` and asserts equality plus `_fields` preservation.
+
+Root cause (confirmed via repro with the sentinel removed):
+`torch/_dynamo/polyfills/copy.py::reduce_ex_user_defined_object`, the traceable
+substitute for `object.__reduce_ex__` used by `copy.copy`/`copy.deepcopy`, was
+hardcoded to return `(copyreg.__newobj__, (cls,), obj.__dict__, None, None)`. It
+assumed every object has a `__dict__` and takes no `__new__` args. A namedtuple
+is a `tuple` subclass with `__slots__ = ()` and NO `__dict__`, so `obj.__dict__`
+raised `AttributeError`, which surfaced as gb0088 "Observed exception"
+(`raised exception AttributeError()`) at `copy.py:88 -> polyfills/copy.py:33`.
+
+Fix (`torch/_dynamo/polyfills/copy.py`): reimplement the polyfill to mirror
+CPython's `reduce_newobj` (Objects/typeobject.c) for protocol >= 2:
+1. Build `__new__` args from `__getnewargs_ex__()` -> `(args, kwargs)` if the
+   type defines it, else `__getnewargs__()` -> `args` (kwargs empty), else
+   `args=(), kwargs={}`. Only these dunders are called; no `__int__` coercion.
+2. Select the reconstructor: `copyreg.__newobj_ex__` with `(cls, args, kwargs)`
+   when kwargs is non-empty, otherwise `copyreg.__newobj__` with `(cls, *args)`.
+3. Compute state safely: if `cls.__getstate__ is not object.__getstate__` (i.e.
+   the type overrides `__getstate__`), use `obj.__getstate__()`; else try
+   `obj.__dict__` and fall back to `None` on `AttributeError`. This never
+   unconditionally touches `obj.__dict__`.
+4. Return the same 5-tuple shape `(func, newargs, state, None, None)` that
+   `copy._reconstruct` consumes; listiter/dictiter stay `None` for this family.
+
+A namedtuple thus reduces to `(copyreg.__newobj__, (cls, 10, 20, 30), None,
+None, None)` and `copy._reconstruct` rebuilds it via `cls.__new__(cls, *values)`.
+All the primitives (`hasattr(cls, "__getnewargs__")`, the `__getstate__` identity
+check, and the `try/except AttributeError` around `obj.__dict__`) trace cleanly
+under Dynamo (verified by a probe over namedtuple / plain-`__dict__` object /
+custom-`__getstate__` object / `__getnewargs__` object, all `fullgraph=True`).
+
+Files changed:
+- `torch/_dynamo/polyfills/copy.py` (`reduce_ex_user_defined_object`: faithful
+  newargs/kwargs/state computation; no unconditional `obj.__dict__` access)
+- `test/dynamo/test_misc.py` (new `MiscTests.test_copy_namedtuple_and_user_object`:
+  `copy.copy`+`copy.deepcopy` of a namedtuple (equality, type, `_fields`) and of a
+  plain `__dict__` object (shallow shares nested list, deep clones it);
+  `fullgraph=True`)
+
+Sentinels removed (working tree):
+- `CPython313-test_collections-TestNamedTuple.test_copy` (target)
+- `CPython313-test_descr-ClassPropertiesAndMethods.test_copy_setstate` (real
+  collateral: this polyfill is shared by every `copy.copy`/`copy.deepcopy` of a
+  user-defined object, and this test now passes. Confirmed OK with the sentinel
+  removed; the whole `test_descr.py` file runs `OK (skipped=110, expected
+  failures=3)` with no unexpected successes and no new failures.)
+
+Verified NOT collateral (checked by removing each sentinel and re-running; each
+still FAILS for reasons unrelated to `__reduce_ex__`, so left in place):
+- `test_userlist-UserListTest.test_copy`, `test_userdict-UserDictTest.test_copy`,
+  `test_functools-TestPartial{Py,PySubclass,C,CSubclass}.test_copy` -> still fail
+  on `bind_args` (gb7312 / signature binding), a separate graph break.
+- `test_ordered_dict-*.test_copying` (all variants) -> still fail: the copy
+  yields an empty/plain `OrderedDict` because a dict-subclass keeps its contents
+  in the dict itself (not in `__dict__`), and this polyfill leaves the
+  dictiterator (5th tuple slot) `None`. Pre-existing xfail, neither regressed nor
+  fixed.
+- `test_collections-TestCounter.test_copying` -> still skipped for an unrelated
+  reason (not an XPASS).
+
+The `test_collections` whole-file run reported `OK (skipped=39)` with no
+unexpected successes, so no other `test_collections` sentinel became stale.
+
+Exact commands run and results (current tree):
+```bash
+# Target, sentinel removed -> PASS (both copy.copy and copy.deepcopy branches)
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python test/cpython/v3_13/test_collections.py TestNamedTuple.test_copy
+# Ran 1 test -> OK
+
+# Whole affected CPython file -> PASS, no new failures, no XPASS
+CUDA_VISIBLE_DEVICES= PYTORCH_TESTING_DEVICE_ONLY_FOR=cpu PYTORCH_TEST_WITH_DYNAMO=1 \
+  python test/cpython/v3_13/test_collections.py
+# Ran 100 tests -> OK (skipped=39); no unexpectedSuccesses
+
+# New regression test (fullgraph=True) -> PASS
+python test/dynamo/test_misc.py MiscTests.test_copy_namedtuple_and_user_object
+# Ran 1 test -> OK
+
+# Regression-safety: existing copy paths (plain runner; no PYTORCH_TEST_WITH_DYNAMO)
+python test/dynamo/test_misc.py -k copy
+# Ran 13 tests -> OK
+python test/dynamo/test_misc.py
+# Ran 789 tests -> OK (skipped=14, expected failures=4)
+python test/dynamo/test_functions.py
+# Ran 529 tests -> OK (skipped=8, expected failures=2)
+
+# Lint
+lintrunner -a torch/_dynamo/polyfills/copy.py test/dynamo/test_misc.py
+# ok No lint issues.
+```
+
+Risks: low, but the polyfill is on the hot path for all user-object copies.
+The common `__dict__` case is preserved bit-for-bit (state still resolves to
+`obj.__dict__`), and the new `__getnewargs__`/kwargs/`__getstate__` branches only
+activate for objects that actually define those dunders. The `__getstate__`
+identity check (`cls.__getstate__ is not object.__getstate__`) avoids invoking
+`object.__getstate__`'s default machinery on plain objects. Verified no new
+failures across `test_misc` (789), `test_functions` (529), and the `-k copy`
+subset (13).
+
+Known limitation (not regressed): objects that store state in `__slots__` (other
+than empty-slots namedtuples) or whose real contents live in dict/list-subclass
+storage (e.g. `OrderedDict`, `Counter`, `UserList`) are not fully reconstructed
+by this polyfill -- the slot state and the dictiterator/listiterator (4th/5th
+tuple slots) are left `None`, so slot values and subclass container contents are
+dropped on copy. This is acceptable here because those cases were already
+failing/xfail before this change and remain so (verified above); closing them is
+follow-up work.
+
 ## Proposed Gate Changes Awaiting Human Approval
 
 Use this section only when an implementation subagent believes a gate is too
