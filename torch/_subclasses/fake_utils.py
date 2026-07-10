@@ -9,7 +9,6 @@ import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
-    is_fake_tensor,
     MetadataMismatchError,
     tree_flatten_only,
     UnsupportedFakeTensorException,
@@ -125,7 +124,9 @@ def try_convert_fake_to_real(
     Note: this is not currently optimized (makes copies of the meta converter internal dictionaries)
     """
 
-    fake_tensor = next((item for item in ten_list if is_fake_tensor(item)), None)
+    fake_tensor = next(
+        (item for item in ten_list if isinstance(item, FakeTensor)), None
+    )
     if fake_tensor is None:
         return ten_list
 
@@ -137,7 +138,7 @@ def try_convert_fake_to_real(
     key_to_real_storage = {v: k for k, v in desc.lookup_storage.items()}
     out = []
     for t in ten_list:
-        if not is_fake_tensor(t) or t.layout != torch.strided:
+        if not isinstance(t, FakeTensor) or t.layout != torch.strided:
             out.append(t)
             continue
 

@@ -1,11 +1,7 @@
 from typing import Any
 
 import torch.fx
-from torch._subclasses.fake_tensor import (
-    FakeTensorMode,
-    is_fake_tensor,
-    maybe_get_fake_device,
-)
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
@@ -84,7 +80,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         rebind_unbacked(self._mode.shape_env, n, result)
 
         def extract_val(obj: Any) -> Any:
-            if is_fake_tensor(obj):
+            if isinstance(obj, FakeTensor):
                 return snapshot_fake(obj)
             elif isinstance(obj, torch.Tensor):
                 # TODO: How is it possible that we get a non fake tensor?  We
@@ -116,9 +112,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         # In-place ops like shallow_copy_data_ can mutate fake_device on
         # input FakeTensors during propagation. Save and restore so the
         # caller's inputs are not permanently corrupted.
-        saved_devices = [
-            (a, maybe_get_fake_device(a)) for a in args if is_fake_tensor(a)
-        ]
+        saved_devices = [(a, a.fake_device) for a in args if isinstance(a, FakeTensor)]
         with self._mode:
             try:
                 return super().run(*args)
