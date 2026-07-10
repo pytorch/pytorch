@@ -3840,11 +3840,11 @@
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
   dispatch:
-    CPU, CUDA, XPU: _compute_linear_combination
+    CPU, CUDA, XPU, MPS: _compute_linear_combination
 
 - func: _compute_linear_combination.out(Tensor input, Tensor coefficients, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: _compute_linear_combination_out
+    CPU, CUDA, XPU, MPS: _compute_linear_combination_out
 
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
@@ -8173,8 +8173,8 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA, XPU: view
-    ZeroTensor: view_symint
+    CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA, XPU: view
+    Meta, ZeroTensor: view_symint
     MkldnnCPU: mkldnn_view
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: view_nested
   tags: core
@@ -14395,7 +14395,7 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA: linalg_matrix_exp
+    CPU, CUDA, MPS: linalg_matrix_exp
   autogen: linalg_matrix_exp.out
 
 - func: linalg_matrix_sqrth(Tensor self) -> Tensor
