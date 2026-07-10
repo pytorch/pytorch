@@ -95,6 +95,14 @@ def wrap_branch_fn_flat(*args, branch_fn, spec_operands):
     return branch_fn(*operands)
 
 
+def _get_branch(branches, idx):
+    if not 0 <= idx < len(branches):
+        raise AssertionError(
+            f"switch index {idx} out of range for {len(branches)} branches"
+        )
+    return branches[idx]
+
+
 @exposed_in("torch")
 def switch(
     index: int | torch.SymInt | torch.Tensor,
@@ -189,7 +197,7 @@ def switch(
     elif isinstance(index, torch.SymInt):
         index = torch.sym_max(0, torch.sym_min(index, num_branches - 1))
     elif isinstance(index, int):
-        index = min(max(0, index), num_branches - 1)
+        index = max(0, min(index, num_branches - 1))
 
     # Constant index shortcut for eager mode.
     if not torch.compiler.is_dynamo_compiling() and isinstance(index, int):
@@ -203,7 +211,7 @@ def switch(
                 stacklevel=2,
             )
 
-        return wrapped_branches[index](*leaves_operands)
+        return _get_branch(wrapped_branches, index)(*leaves_operands)
 
     # Use _maybe_compile_and_run_fn pattern from scan/associative_scan
     def run_switch(index, wrapped_branches, leaves_operands):
@@ -267,13 +275,7 @@ def switch_op_dense(index, branches, operands):
     if mode is not None:
         raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     idx: int = int(index.item()) if isinstance(index, torch.Tensor) else int(index)
-    # torch.switch is the only supported entry point and clamps index into range;
-    # a direct HOP invocation with an out-of-range index is a caller error.
-    if not 0 <= idx < len(branches):
-        raise AssertionError(
-            f"switch index {idx} out of range for {len(branches)} branches"
-        )
-    return branches[idx](*operands)
+    return _get_branch(branches, idx)(*operands)
 
 
 @switch_op.py_autograd_impl

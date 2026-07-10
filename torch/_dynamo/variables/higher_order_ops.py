@@ -2607,6 +2607,8 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._higher_order_ops.switch import _get_branch
+
         from . import ListVariable
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -2639,11 +2641,7 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
             idx = index.as_python_constant()
             branch_fns = branches.unpack_var_sequence(tx)
-            if not 0 <= idx < len(branch_fns):
-                raise AssertionError(
-                    f"switch index {idx} out of range for {len(branch_fns)} branches"
-                )
-            return branch_fns[idx].call_function(
+            return _get_branch(branch_fns, idx).call_function(
                 tx, operands.unpack_var_sequence(tx), {}
             )
 
