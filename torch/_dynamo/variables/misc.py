@@ -2628,39 +2628,47 @@ class RandomVariable(VariableTracker):
             mutation_type=variables.base.ValueMutationNew(),
         )
 
+    def _call_random(self, tx, name, args, kwargs):
+        tx.output.side_effects.mutation(self)
+        state = self.random.getstate()
+
+        def call_random_meth(*args: Any, **kwargs: Any) -> Any:
+            r = random.Random()
+            r.setstate(state)
+            return getattr(r, name)(*args, **kwargs)
+
+        # self.random state not actually updated by call_random_meth, so update here
+        # by calling the method
+        getattr(self.random, name)(
+            *[x.as_python_constant() for x in args],
+            **{k: v.as_python_constant() for k, v in kwargs.items()},
+        )
+
+        return call_random_fn(tx, call_random_meth, args, kwargs)
+
+    def _random(self, tx, args, kwargs):
+        return self._call_random(tx, "random", args, kwargs)
+
+    def _randint(self, tx, args, kwargs):
+        return self._call_random(tx, "randint", args, kwargs)
+
+    def _randrange(self, tx, args, kwargs):
+        return self._call_random(tx, "randrange", args, kwargs)
+
+    def _uniform(self, tx, args, kwargs):
+        return self._call_random(tx, "uniform", args, kwargs)
+
     tp_methods = {
         "seed": Method(seed, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
         "getstate": Method(getstate, MethodFlags.NOARGS),
         "setstate": Method(setstate, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
         "shuffle": Method(shuffle, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
         "sample": Method(sample, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "random": Method(_random, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "randint": Method(_randint, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "randrange": Method(_randrange, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "uniform": Method(_uniform, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
     }
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in self._supported_fn_names:
-            tx.output.side_effects.mutation(self)
-            state = self.random.getstate()
-
-            def call_random_meth(*args: Any, **kwargs: Any) -> Any:
-                r = random.Random()
-                r.setstate(state)
-                return getattr(r, name)(*args, **kwargs)
-
-            # self.random state not actually updated by call_random_meth, so update here
-            # by calling the method
-            getattr(self.random, name)(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-
-            return call_random_fn(tx, call_random_meth, args, kwargs)
-        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
