@@ -6,6 +6,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/real.h>
@@ -131,41 +132,40 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     // 4 bytes alignment required on macos for blits.
     TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
 
-    id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
-    Tensor maybeCastedSource;
+    id<MTLBuffer> blitSourceBuffer = sourceBuffer;
+    Tensor blitSource = src;
+    NSUInteger blitSourceOffset = storage_byte_offset;
     bool needsBlit = true;
     if (src_.dtype() != dst.dtype()) {
-      uint32_t dst_offs_for_cast = 0;
       if (destOffset == 0 && storage_byte_offset == 0) {
         // Return the casted tensor directly if there's no destination offset
         needsBlit = false;
-        maybeCastedSourceBuffer = destBuffer;
-      } else if (src.element_size() < dst.element_size()) {
-        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-        maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
-      }
-
-      // In case of dtype change, first convert src inplace via a Metal castout kernel writing into
-      // maybeCastedSourceBuffer (which may be the wrapped CPU destBuffer, a fresh MPS temp, or
-      // sourceBuffer itself when src.element_size() >= dst.element_size()).
-      const bool needs_conj = src.is_conj() != dst.is_conj();
-      const bool needs_neg = src.is_neg() != dst.is_neg();
-      const bool fused_conj_neg = needs_conj && needs_neg && c10::isComplexType(src.scalar_type());
-      const std::string_view name = fused_conj_neg ? "copy_conj_neg"
-          : needs_neg                              ? "copy_neg"
-          : needs_conj                             ? "copy_conj"
-                                                   : "copy_identity";
-      lib.exec_unary_kernel_raw(std::string(name),
-                                sourceBuffer,
-                                static_cast<uint32_t>(storage_byte_offset),
-                                src.scalar_type(),
-                                maybeCastedSourceBuffer,
-                                dst_offs_for_cast,
-                                dst.scalar_type(),
-                                static_cast<uint32_t>(src.numel()),
-                                /*ilp_threshold=*/0u);
-      if (!non_blocking) {
-        stream->synchronize(SyncType::COMMIT_AND_WAIT);
+        const bool needs_conj = src.is_conj() != dst.is_conj();
+        const bool needs_neg = src.is_neg() != dst.is_neg();
+        const bool fused_conj_neg = needs_conj && needs_neg && c10::isComplexType(src.scalar_type());
+        const std::string_view name = fused_conj_neg ? "copy_conj_neg"
+            : needs_neg                              ? "copy_neg"
+            : needs_conj                             ? "copy_conj"
+                                                     : "copy_identity";
+        lib.exec_unary_kernel_raw(std::string(name),
+                                  sourceBuffer,
+                                  0,
+                                  src.scalar_type(),
+                                  destBuffer,
+                                  0,
+                                  dst.scalar_type(),
+                                  static_cast<uint32_t>(src.numel()),
+                                  /*ilp_threshold=*/0u);
+        if (!non_blocking) {
+          stream->synchronize(SyncType::COMMIT_AND_WAIT);
+        }
+      } else {
+        blitSource = at::empty_strided(dst.sizes(), dst.strides(), src.options().dtype(dst.scalar_type()));
+        blitSource._set_conj(dst.is_conj());
+        blitSource._set_neg(dst.is_neg());
+        copy_cast_kernel_mps(blitSource, src);
+        blitSourceBuffer = getMTLBufferStorage(blitSource);
+        blitSourceOffset = 0;
       }
     }
 
@@ -173,12 +173,12 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
       const size_t size_to_copy = (src.nbytes() / src.element_size()) * dst.element_size();
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
-      TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
+      TORCH_INTERNAL_ASSERT(blitSourceBuffer && dst_tensor_nbytes > 0);
       uint64_t profile_id =
-          getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
+          getMPSProfiler().beginProfileCopy(blitSourceBuffer, destBuffer, blitSource, dst, size_to_copy, non_blocking);
 
       stream->copy_and_sync(
-          maybeCastedSourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
+          blitSourceBuffer, destBuffer, size_to_copy, blitSourceOffset, destOffset, non_blocking, profile_id);
     }
   }
   if (!dst.is_same(dst_)) {

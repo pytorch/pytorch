@@ -7664,6 +7664,53 @@ class TestMPS(TestCaseMPS):
         helper(torch.half, torch.float)
         helper(torch.float, torch.half)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/189563
+    @parametrize("src_dtype,dst_dtype", [
+        (torch.float, torch.half),
+        (torch.float, torch.int),
+        (torch.half, torch.float),
+    ])
+    @parametrize("src_offset", [0, 1])
+    @parametrize("non_blocking", [False, True])
+    def test_cast_mps_to_cpu_preserves_source(self, src_dtype, dst_dtype, src_offset, non_blocking):
+        input_cpu = torch.arange(9, dtype=src_dtype)
+        input_mps = input_cpu.to("mps")
+        source = input_mps[src_offset:]
+
+        dst_offset = max(1, 4 // torch.empty((), dtype=dst_dtype).element_size())
+        output_storage = torch.empty(source.numel() + dst_offset, dtype=dst_dtype)
+        output = output_storage[dst_offset:]
+        self.assertEqual(output.data_ptr() % 4, 0)
+        self.assertNotEqual(output.data_ptr() % os.sysconf("SC_PAGE_SIZE"), 0)
+        output.copy_(source, non_blocking=non_blocking)
+        if non_blocking:
+            torch.mps.synchronize()
+
+        self.assertEqual(output, input_cpu[src_offset:].to(dst_dtype))
+        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
+
+    def test_cast_mps_to_cpu_preserves_transposed_layout(self):
+        input_cpu = torch.arange(12, dtype=torch.float).reshape(3, 4).t()
+        input_mps = input_cpu.to("mps")
+
+        output_storage = torch.empty(input_cpu.numel() + 2, dtype=torch.half)
+        output = output_storage[2:].as_strided(input_cpu.size(), input_cpu.stride())
+        output.copy_(input_mps)
+
+        self.assertEqual(output, input_cpu.to(torch.half))
+        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
+
+    def test_cast_mps_to_cpu_preserves_destination_bits(self):
+        input_cpu = torch.arange(8, dtype=torch.float)
+        input_mps = input_cpu.to("mps")
+
+        output_storage = torch.empty(input_cpu.numel() + 2, dtype=torch.half)
+        output = output_storage[2:]._neg_view()
+        output.copy_(input_mps)
+
+        self.assertEqual(output, input_cpu.to(torch.half))
+        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
+
     def test_cast_mps_to_mps(self):
         def helper(src_dtype, dst_dtype):
             input_cpu = torch.rand((1, 3, 128, 128), dtype=src_dtype)
