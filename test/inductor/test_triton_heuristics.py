@@ -392,7 +392,7 @@ class TestTritonHeuristics(TestCase):
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
             ROCmConfigHeuristic,
@@ -1518,6 +1518,74 @@ class TestWarpSizeUnification(TestCase):
             size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=64
         )
         self.assertEqual(cfg64.kwargs["XBLOCK"], 2 * cfg32.kwargs["XBLOCK"])
+
+
+class TestMakeLaunchersMemory(TestCase):
+    def test_failed_config_exception_not_retained(self):
+        """Regression (D107597017 / PR #184285): CachingAutotuner._make_launchers
+        must not retain the failed-config build exception past its return. That
+        exception's traceback pins its frame chain -- and via those frames' f_back
+        the benchmarking callers up to do_bench, whose 256MB Triton L2-flush buffer
+        then leaks one-per-autotuned-kernel until cyclic GC (which never runs under
+        gc.disable(), as APS training does). Pure reference-cycle check, no GPU: a
+        sentinel standing in for the L2 buffer, held only by a frame that calls
+        _make_launchers, must be freed by refcount once _make_launchers returns.
+        """
+        import contextlib
+        import gc
+        import types
+        import weakref
+
+        class _Result:
+            config = types.SimpleNamespace(num_stages=1, kwargs={})
+
+        results = [_Result(), _Result()]
+
+        def fake_make_launcher(result):
+            # First config builds; the last fails, returning a live exception whose
+            # traceback references this call stack -- as the real _make_launcher does
+            # for OutOfResources / OutOfMemoryError.
+            if result is results[0]:
+                return object(), None
+            try:
+                raise RuntimeError("out of resource (test)")
+            except RuntimeError as e:
+                return None, e
+
+        fake_self = types.SimpleNamespace(
+            launchers=[],
+            compile_results=results,
+            triton_meta={"device": 0},
+            inductor_meta={},
+            get_device_interface=lambda: None,
+            _make_launcher=fake_make_launcher,
+        )
+
+        class _Sentinel:
+            pass
+
+        def run():
+            l2_buffer = _Sentinel()  # stands in for do_bench's L2-flush buffer
+            ref = weakref.ref(l2_buffer)
+            with patch(
+                "torch._dynamo.device_interface.DeviceGuard",
+                lambda *args, **kwargs: contextlib.nullcontext(),
+            ):
+                CachingAutotuner._make_launchers(fake_self)
+            return ref
+
+        gc.disable()
+        try:
+            ref = run()
+            self.assertIsNone(
+                ref(),
+                "_make_launchers retained the failed-config exception; its traceback "
+                "pins caller frames (do_bench's L2-flush buffer) until cyclic GC.",
+            )
+        finally:
+            gc.enable()
+
+        self.assertEqual(len(fake_self.launchers), 1)
 
 
 if __name__ == "__main__":

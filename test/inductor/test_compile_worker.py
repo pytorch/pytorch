@@ -115,20 +115,41 @@ class TestCompileWorker(TestCase):
         code = textwrap.dedent(
             """
             import operator
+            import os
             import subprocess
             import time
 
-            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+            from torch._inductor.compile_worker.subproc_pool import (
+                _test_signal_then_sleep,
+                SubprocPool,
+            )
 
+            # Warm the pool so the sidecar and its worker pool are fully up.
             pool = SubprocPool(2)
             assert pool.submit(operator.add, 1, 2).result() == 3
-            pool.submit(time.sleep, 5)
-            time.sleep(0.5)
 
+            # Submit a job that signals (via a sentinel file) once a worker is
+            # actually executing it, then blocks far longer than the shutdown
+            # timeout below.
+            signal_path = os.environ["WORKER_SIGNAL_PATH"]
+            pool.submit(_test_signal_then_sleep, signal_path, 120)
+
+            # Readiness barrier: wait until a worker is provably running the job
+            # before timing the shutdown, so process/worker startup cost stays
+            # out of the shutdown budget.
+            deadline = time.time() + 60
+            while not os.path.exists(signal_path):
+                if time.time() >= deadline:
+                    raise RuntimeError("worker never started the long-running job")
+                time.sleep(0.05)
+
+            # Bound the shutdown well below the running job's sleep so a
+            # regression that waits for the in-flight job (instead of
+            # terminating it) is detected quickly.
             wait = pool.process.wait
 
             def short_wait(timeout=None):
-                return wait(timeout=2)
+                return wait(timeout=30)
 
             pool.process.wait = short_wait
 
@@ -143,17 +164,22 @@ class TestCompileWorker(TestCase):
             """
         )
         with tempfile.TemporaryDirectory() as cwd:
+            signal_path = os.path.join(cwd, "worker_started")
             result = subprocess.run(
                 [sys.executable, "-c", code],
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                timeout=20,
+                env={**os.environ, "WORKER_SIGNAL_PATH": signal_path},
+                # Generous backstop: the child pays multiple heavyweight process
+                # cold-starts (esp. in fbcode). A real regression still fails
+                # fast via the bounded shutdown wait above.
+                timeout=120,
             )
         self.assertEqual(
             result.returncode,
             0,
-            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
         self.assertIn("shutdown returned", result.stdout)
 
