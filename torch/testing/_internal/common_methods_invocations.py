@@ -15383,8 +15383,6 @@ op_db: list[OpInfo] = [
                # mexp does not support bf16 and fp16
                DecorateInfo(unittest.skip('Skipped!'), 'TestInductorOpInfo', 'test_comprehensive',
                             dtypes=[torch.half], device_type="cpu"),
-               # The operator 'aten::linalg_matrix_exp' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
            ),
            supports_out=False,
            ),
