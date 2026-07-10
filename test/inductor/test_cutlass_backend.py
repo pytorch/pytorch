@@ -2240,7 +2240,6 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_filtered_ops_cache(self):
         class TestModel(torch.nn.Module):
             def forward(self, B):
@@ -2253,21 +2252,23 @@ class TestCutlassBackend(TestCase):
         B = torch.randn(M, M).to(GPU_TYPE).half()
         model = TestModel().to(GPU_TYPE)
 
-        start_time = time.time()
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 1,
-            }
+        counters.clear()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cutlass.cutlass_max_profiling_configs": 1,
+                }
+            ),
         ):
             _ = torch.compile(model)(B)
 
-        if GPU_TYPE == "xpu":
-            time_limit = 100
-        else:
-            time_limit = 60
-        self.assertTrue(time.time() - start_time < time_limit)
+        # All 100 matmuls share one input shape/dtype/layout, so they map to a
+        # single filtered-ops cache key: op filtering runs exactly once (one
+        # miss) and the remaining lowerings hit the cache.
+        self.assertEqual(counters["inductor"]["cutlass_filtered_ops_cache_miss"], 1)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
