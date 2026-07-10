@@ -423,8 +423,8 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
-  a->cdata = tmp_b;
-  b->cdata = tmp_a;
+  a->cdata = std::move(tmp_b);
+  b->cdata = std::move(tmp_a);
 
   // Fix up the PyObjects associated with each TensorImpl
   a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);

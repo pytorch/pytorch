@@ -592,7 +592,7 @@ static Tensor fft_hfftn_impl(
     auto c2c_dims = IntArrayRef(desc.dim).slice(0, desc.dim.size() - 1);
     tmp = at::_fft_c2c(x, c2c_dims, norm, /*forward=*/true);
   } else {
-    tmp = x;
+    tmp = std::move(x);
   }
 
   const auto last_dim = desc.dim.back();
