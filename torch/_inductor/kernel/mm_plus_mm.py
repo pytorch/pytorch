@@ -88,27 +88,28 @@ mm_plus_mm_template = TritonTemplate(
     D = D + (rk[:, None] * stride_dk + rbn[None, :] * stride_dn)
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k1 in range(K1, 0, -BLOCK_K):
+    for k_idx in range(0, tl.cdiv(K1, BLOCK_K)):
         # First matmul with A @ B
         if EVEN_K:
             a = tl.load(A)
             b = tl.load(B)
         else:
-            a = tl.load(A, mask=rk[None, :] < k1, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k1, other=0.)
+            k_remaining = K1 - k_idx * BLOCK_K
+            a = tl.load(A, mask=rk[None, :] < k_remaining, other=0.)
+            b = tl.load(B, mask=rk[:, None] < k_remaining, other=0.)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
-    for k2 in range(K1, 0, -BLOCK_K):
-
+    for k_idx in range(0, tl.cdiv(K1, BLOCK_K)):
         # Second matmul with C @ D
         if EVEN_K:
             c = tl.load(C)
             d = tl.load(D)
         else:
-            c = tl.load(C, mask=rk[None, :] < k2, other=0.)
-            d = tl.load(D, mask=rk[:, None] < k2, other=0.)
+            k_remaining = K1 - k_idx * BLOCK_K
+            c = tl.load(C, mask=rk[None, :] < k_remaining, other=0.)
+            d = tl.load(D, mask=rk[:, None] < k_remaining, other=0.)
         acc += tl.dot(c, d, allow_tf32=ALLOW_TF32)
         C += BLOCK_K * stride_ck
         D += BLOCK_K * stride_dk
