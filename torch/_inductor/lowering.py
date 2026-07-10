@@ -4143,12 +4143,20 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     ranges: list[sympy.Expr] = []
 
+    _truncate_fp = dtype in (torch.bfloat16, torch.float16)
+
     if isinstance(data, sympy.Basic):
 
         def inner_fn(index):
-            return ops.index_expr(data, dtype)
+            result = ops.index_expr(data, dtype)
+            if _truncate_fp:
+                result = ops.to_dtype(result, dtype, use_compute_types=False)
+                result = ops.to_dtype(result, dtype)
+            return result
 
     elif isinstance(data, (float, int)):
+        if _truncate_fp and isinstance(data, float):
+            data = torch.tensor(data, dtype=dtype).item()
 
         def inner_fn(index):
             return ops.constant(data, dtype)
@@ -7592,6 +7600,36 @@ def _div_rn(a, b):
     return ops.div_rn(a, b)
 
 
+def _floor_div_floating(a, b):
+    nan = constant_like(float("nan"))(a)
+    neg_one = constant_like(-1.0)(a)
+    zero = constant_like(0.0)(a)
+
+    def fn(a, b, nan, neg_one, zero):
+        quotient = ops.div_rn(a, b)
+        result = ops.floor(quotient)
+        a_is_inf = ops.isinf(a)
+        a_is_finite = ops.logical_and(
+            ops.logical_not(a_is_inf), ops.logical_not(ops.isnan(a))
+        )
+        # Eager floor division uses a fmod-based implementation. For +/-inf
+        # divided by a nonzero divisor, fmod produces NaN. Keep divisor == 0
+        # unchanged because eager returns a / b directly.
+        a_inf_nonzero_b = ops.logical_and(a_is_inf, ops.ne(b, zero))
+
+        # For finite nonzero a divided by +/-inf, floor(a / b) can produce
+        # signed zero. Eager applies Python-style floor-division sign correction,
+        # so negative zero direction results become -1.
+        finite_nonzero_a_inf_b = ops.logical_and(
+            ops.logical_and(a_is_finite, ops.ne(a, zero)),
+            ops.logical_and(ops.isinf(b), ops.ne(ops.lt(a, zero), ops.lt(b, zero))),
+        )
+        result = ops.where(finite_nonzero_a_inf_b, neg_one, result)
+        return ops.where(a_inf_nonzero_b, nan, result)
+
+    return make_pointwise(fn)(a, b, nan, neg_one, zero)
+
+
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -7608,7 +7646,7 @@ def div_mode(a, b, rounding_mode=None):
         # Triton's default division uses an approximate reciprocal, which can
         # produce a result slightly below the true quotient and cause floor()
         # to round down by one.
-        return floordiv(a, b) if both_integer else floor(_div_rn(a, b))
+        return floordiv(a, b) if both_integer else _floor_div_floating(a, b)
     if rounding_mode == "trunc":
         if both_boolean:
             raise AssertionError(
