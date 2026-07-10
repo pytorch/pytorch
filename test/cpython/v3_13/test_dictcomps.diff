@@ -1,0 +1,41 @@
+diff --git a/test/cpython/v3_13/test_dictcomps.py b/test/cpython/v3_13/test_dictcomps.py
+index 26b56dac503..9f9ad85ba1c 100644
+--- a/test/cpython/v3_13/test_dictcomps.py
++++ b/test/cpython/v3_13/test_dictcomps.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_dictcomps.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import traceback
+ import unittest
+ 
+@@ -7,7 +25,7 @@ from test.support import BrokenIter
+ g = "Global variable"
+ 
+ 
+-class DictComprehensionTest(unittest.TestCase):
++class DictComprehensionTest(CPythonTestCase):
+ 
+     def test_basics(self):
+         expected = {0: 10, 1: 11, 2: 12, 3: 13, 4: 14, 5: 15, 6: 16, 7: 17,
+@@ -167,4 +185,4 @@ class DictComprehensionTest(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
