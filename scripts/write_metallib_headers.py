@@ -15,12 +15,9 @@ def write_metallib_headers(metal_filename: str, output_filename: str):
         out.writelines(
             [
                 "#include <ATen/native/mps/OperationUtils.h>\n",
-                'static const char METAL_SHADER_SOURCE[] = R"SHDR(\n',
+                'static ::at::native::mps::MetalShaderLibrary lib(R"SHDR(\n',
                 embedded_headers,
-                ')SHDR";\n',
-                "#ifdef PYTORCH_JIT_COMPILE_SHADERS\n",
-                "static ::at::native::mps::MetalShaderLibrary lib(METAL_SHADER_SOURCE);\n",
-                "#endif\n",
+                ')SHDR");\n',
             ]
         )
 

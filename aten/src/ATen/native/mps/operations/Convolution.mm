@@ -18,6 +18,12 @@
 
 namespace at::native {
 
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Convolution_metallib.h>
+#endif
+
 // `memory_format` selects NDHWC vs NCDHW; `use_dhwio` selects DHWIO vs OIDHW
 // (caller must insert the matching in-graph weight transpose).
 static void fill_conv3d_desc(MPSGraphConvolution3DOpDescriptor* descriptor_,
@@ -97,16 +103,6 @@ static at::native::mps::Placeholder make_conv_placeholder(MPSGraphTensor* graphT
                                       at::native::mps::getMPSNDArray(t, at::native::mps::getMPSShape(t, desc_layout)));
 }
 
-#include <ATen/native/mps/Convolution_metallib.h>
-#ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
-#endif
-
-static mps::MetalShaderLibrary& conv3d_template_lib() {
-  static mps::MetalShaderLibrary l(METAL_SHADER_SOURCE);
-  return l;
-}
-
 // NDHWC copy of a 5D tensor. Packed channels-last passes through; C <= 8
 // barely fills a transpose tile, so the plain strided copy wins there.
 static Tensor conv3d_to_ndhwc(const Tensor& t) {
@@ -184,14 +180,10 @@ static Conv3dTile conv3d_mpp_tile(const Conv3dDims& d, int64_t groups) {
     }
   } else {
     for (const auto& t : {Conv3dTile{32, 8, 8, 2},
-                          {32, 8, 8, 4},
                           {32, 16, 8, 4},
                           {64, 8, 8, 2},
-                          {64, 8, 8, 4},
-                          {64, 16, 4, 4},
                           {64, 16, 8, 4},
-                          {128, 8, 8, 4},
-                          {128, 16, 4, 4}}) {
+                          {128, 8, 8, 4}}) {
       cands[nc++] = t;
     }
     if (d.HO <= 4) {
@@ -225,41 +217,34 @@ struct Conv3dSpec {
   int SZ, SY, SX;
   int DZ, DY, DX;
   int SRCC, SRCW, SRCH;
-  bool relaxed, has_bias, out_ncdhw, grouped;
+  bool has_bias, out_ncdhw, grouped;
 };
 
-static id<MTLComputePipelineState> conv3d_metal_pso(const Conv3dSpec& s, Conv3dTile t) {
-  const auto targs = fmt::format("{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}",
-                                 s.dtype,
-                                 t.BO,
-                                 t.BW,
-                                 t.BH,
-                                 t.NSG,
-                                 s.KD,
-                                 s.KH,
-                                 s.KW,
-                                 s.SZ,
-                                 s.SY,
-                                 s.SX,
-                                 s.DZ,
-                                 s.DY,
-                                 s.DX,
-                                 s.SRCC,
-                                 s.SRCW,
-                                 s.SRCH,
-                                 s.relaxed,
-                                 s.has_bias,
-                                 s.out_ncdhw,
-                                 s.grouped);
-  const auto inst = fmt::format(
-      "\ntemplate [[host_name(\"conv3d_mpp\")]] kernel void conv3d_mpp<{}>(\n"
-      "    device {}*, device {}*, device {}*, constant Conv3dDims&, device const {}*, uint3);\n",
-      targs,
-      s.dtype,
-      s.dtype,
-      s.dtype,
-      s.dtype);
-  return conv3d_template_lib().getPipelineStateForTemplateInstantiation("conv3d_mpp", inst);
+static id<MTLComputePipelineState> conv3d_mpp_pso(const Conv3dSpec& s, Conv3dTile t) {
+  if (s.SRCW != 16384 || s.SRCH != 16384) {
+    return nil;
+  }
+  const auto src_channels = s.SRCC < 0 ? std::string("dyn") : std::to_string(s.SRCC);
+  const auto name = fmt::format("conv3d_mpp_{}_b{}_w{}_h{}_s{}_k{}{}{}_s{}{}{}_d{}{}{}_c{}_{}_{}_{}",
+                                s.dtype,
+                                t.BO,
+                                t.BW,
+                                t.BH,
+                                t.NSG,
+                                s.KD,
+                                s.KH,
+                                s.KW,
+                                s.SZ,
+                                s.SY,
+                                s.SX,
+                                s.DZ,
+                                s.DY,
+                                s.DX,
+                                src_channels,
+                                s.has_bias ? "bias" : "nobias",
+                                s.out_ncdhw ? "ncdhw" : "ndhwc",
+                                s.grouped ? "grouped" : "ungrouped");
+  return lib.hasFunction(name) ? lib.getPipelineStateForFunc(name) : nil;
 }
 
 static id<MTLComputePipelineState> conv3d_simd_pso(const std::string& dtype, Conv3dTile t, bool huge_plane) {
@@ -300,7 +285,7 @@ static void conv3d_metal_launch(id<MTLComputePipelineState> pso,
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pso, "conv3d_mpp", {act, wts});
+      getMPSProfiler().beginProfileKernel(pso, simd ? "conv3d_simd" : "conv3d_mpp", {act, wts});
       [encoder setComputePipelineState:pso];
       mtl_setArgs(encoder, act, wts, out, dims, bias ? *bias : act);
       [encoder dispatchThreadgroups:tgs threadsPerThreadgroup:tptg];
@@ -396,21 +381,29 @@ static void conv3d_metal_forward(const Tensor& input_t,
   spec.SRCC = CG <= 64 ? static_cast<int>(CG) : -1;
   spec.SRCW = static_cast<int>(std::max<int64_t>(W, 16384));
   spec.SRCH = static_cast<int>(std::max<int64_t>(H, 16384));
-  spec.relaxed = dtype != kFloat;
   spec.has_bias = bias_defined;
   spec.out_ncdhw = out_ncdhw;
   spec.grouped = groups > 1;
 
   Conv3dTile tile;
+  id<MTLComputePipelineState> pso = nil;
+  bool simd = !use_mpp;
   if (use_mpp) {
     tile = conv3d_mpp_tile(dims, groups);
+    pso = conv3d_mpp_pso(spec, tile);
+    if (!pso) {
+      simd = true;
+      tile = conv3d_simd_tile(HO, WO);
+    }
   } else if (huge_plane) {
     tile = {64, 64, 2, 2};
   } else {
     tile = conv3d_simd_tile(HO, WO);
   }
-  const auto pso = use_mpp ? conv3d_metal_pso(spec, tile) : conv3d_simd_pso(dtype_str, tile, huge_plane);
-  conv3d_metal_launch(pso, !use_mpp, act, wts, bias, output_t, dims, tile, groups);
+  if (!pso) {
+    pso = conv3d_simd_pso(dtype_str, tile, huge_plane);
+  }
+  conv3d_metal_launch(pso, simd, act, wts, bias, output_t, dims, tile, groups);
 }
 
 // im2col + GEMM only where the direct conv is occupancy-starved; elsewhere the

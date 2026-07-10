@@ -841,19 +841,6 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
   return libMap.try_emplace(std::move(key), lib).first->second;
 }
 
-id<MTLComputePipelineState> MetalShaderLibrary::getPipelineStateForTemplateInstantiation(
-    const std::string& fname,
-    const std::string& instantiation) {
-  TORCH_INTERNAL_ASSERT(!shaderSource.empty(), "Template instantiation needs a source-backed library");
-  auto found = libMap.find(instantiation);
-  auto lib = found != libMap.end() ? found->second : nil;
-  if (!lib) {
-    lib = compileLibrary(shaderSource + instantiation);
-    libMap.try_emplace(instantiation, lib);
-  }
-  return getLibraryPipelineState(lib, fname).first;
-}
-
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   static auto fast_math = []() {
     auto const val = c10::utils::get_env("PYTORCH_MPS_FAST_MATH");

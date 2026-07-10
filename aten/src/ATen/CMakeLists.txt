@@ -963,10 +963,6 @@ if(USE_MPS)
                           OUTPUT metallib_dummy.cpp
                           COMMENT "Updating metallibs timestamp")
         list(APPEND METALLIB_DEPS metallib_dummy.cpp)
-        # Convolution.mm JIT-instantiates the MPP conv3d kernel at runtime
-        # (macOS 26+), so it embeds the source even when metallibs precompile.
-        metal_to_metallib_h(${CMAKE_CURRENT_SOURCE_DIR}/native/mps/kernels/Convolution.metal)
-        list(APPEND METALLIB_DEPS ${SHADER_HDR})
     else()
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             metal_to_metallib_h(${SHADER})
