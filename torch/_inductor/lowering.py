@@ -2794,7 +2794,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
             return False
 
         for meta in pytree.tree_leaves(inp_out_node.meta["val"]):
-            if not isinstance(meta, torch._subclasses.FakeTensor):
+            if not torch._subclasses.fake_tensor.is_fake_tensor(meta):
                 continue
 
             if is_output:
