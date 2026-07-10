@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoMagmaAndNoCusolver,
     skipCUDAIfNoMagmaAndNoLinalgsolver,
     skipCUDAIfRocm,
+    skipXPU,
     tol,
     toleranceOverride,
 )
@@ -1251,7 +1252,8 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # autogen .out exists but is not exercised here (mirrors linalg.matrix_exp).
         supports_out=False,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
+        # torch-xpu-ops/issues/4169
+        decorators=[skipXPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
         skips=(
             # The operator 'aten::linalg_matrix_sqrth' is not implemented for MPS.
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
@@ -1913,6 +1915,8 @@ op_db: list[OpInfo] = [
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_polar,
         decorators=[
+            # torch-xpu-ops/issues/4162
+            skipXPU,
             skipCUDAIfNoCusolver,
             skipCPUIfNoLapack,
             # On CUDA the cuSOLVER QDWH override is the path under test; without
