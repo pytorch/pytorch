@@ -3307,12 +3307,14 @@ static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtyp
 static void _linalg_cond_check_ord(std::variant<Scalar, std::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = std::get_if<Scalar>(&ord_variant);
+    TORCH_CHECK_VALUE(!at::isComplexType(ord->type()),
+      "linalg.cond: Expected a non-complex scalar as the order of norm.");
     double abs_ord = std::abs(ord->toDouble());
-    TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
+    TORCH_CHECK_VALUE(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
     std::string_view* ord = std::get_if<std::string_view>(&ord_variant);
-    TORCH_CHECK(*ord == "fro" || *ord == "nuc",
+    TORCH_CHECK_VALUE(*ord == "fro" || *ord == "nuc",
       "linalg.cond got an invalid norm type: ", *ord);
   } else {
     TORCH_CHECK(false,
