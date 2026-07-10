@@ -108,6 +108,55 @@ class TestFuseOrErr(TestCase):
         (xr.sin().cos()).sum().backward()
         self.assertEqual(x.grad, xr.grad)
 
+    def _enforce_flags(self, fuse_backward):
+        # Compiles a differentiable region and returns the _enforce_fusion flag
+        # carried by the fuse_or_err node in the (forward, backward) graphs.
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        fw_graphs = []
+        bw_graphs = []
+
+        def fw_compiler(gm, _):
+            fw_graphs.append(gm)
+            return make_boxed_func(gm.forward)
+
+        def bw_compiler(gm, _):
+            bw_graphs.append(gm)
+            return make_boxed_func(gm.forward)
+
+        def fn(x):
+            return fuse_or_err(lambda a: a.sin().cos(), fuse_backward=fuse_backward)(
+                x
+            ).sum()
+
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        x = torch.randn(64, requires_grad=True)
+        torch._dynamo.reset()
+        torch.compile(fn, backend=backend, fullgraph=True)(x).backward()
+
+        def enforce_flag(gms):
+            for gm in gms:
+                for node in gm.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target is torch.ops.higher_order.fuse_or_err
+                    ):
+                        return node.kwargs["_enforce_fusion"]
+            return None
+
+        return enforce_flag(fw_graphs), enforce_flag(bw_graphs)
+
+    def test_forward_always_enforced_backward_gated(self):
+        # Forward is always enforced; backward is enforced iff fuse_backward.
+        fwd, bwd = self._enforce_flags(fuse_backward=False)
+        self.assertTrue(fwd)
+        self.assertFalse(bwd)
+
+        fwd, bwd = self._enforce_flags(fuse_backward=True)
+        self.assertTrue(fwd)
+        self.assertTrue(bwd)
+
     def test_eager_runs_closure(self):
         # Outside torch.compile the closure just runs, with no fusion check.
         called = {}
