@@ -201,6 +201,9 @@ inductor_skips["cpu"] = {
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
     ("index_reduce", "mean"): {f16},  # flaky
+    # torch._C._linalg.linalg_polar graph-breaks on some CPU runners but
+    # succeeds on others, so a strict xfail causes XPASS failures.
+    "linalg.polar": {f32, f64},
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
@@ -250,6 +253,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
+    "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
@@ -260,8 +264,6 @@ inductor_expected_failures_single_sample["cpu"] = {
         i32,
         i64,
     },  # Sparse tensor outputs are not supported by torch.compile fullgraph.
-    # torch._C._linalg.linalg_polar is a C-bound builtin that Dynamo can't trace.
-    "linalg.polar": {f32, f64},
     "view_as_complex": {f16},
 }
 
