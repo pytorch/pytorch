@@ -205,7 +205,8 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       T params,
-      const std::string& params_type_name);
+      const std::string& params_type_name,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
 
  protected:
   virtual MTLLibrary_t getLibrary();

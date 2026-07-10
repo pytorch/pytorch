@@ -89,12 +89,33 @@ static void hardswish_backward_kernel(at::TensorIterator& iter) {
 static void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
   AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "hardtanh_backward_mps", [&]() {
     HardtanhBackwardParams<float> params{min.to<float>(), max.to<float>()};
-    lib.exec_binary_kernel_with_params(iter, "hardtanh_backward", params, "HardtanhBackwardParams_float");
+    lib.exec_binary_kernel_with_params(
+        iter, "hardtanh_backward", params, "HardtanhBackwardParams_float", /*ilp_threshold=*/1u << 18);
   });
 }
 
 static void tanh_backward_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "tanh_backward");
+}
+
+// Floating dtypes: scalars convert to float (opmath) once on the host like
+// the CUDA kernel -- no quantization to half/bfloat and no Scalar::to<Half>
+// overflow throw. Integral dtypes keep exact scalar_t params.
+static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
+  if (c10::isFloatingType(iter.common_dtype())) {
+    ThresholdParams<float> params{threshold.to<float>(), value.to<float>()};
+    lib.exec_binary_kernel_with_params(iter, "threshold", params, "ThresholdParams_float", /*ilp_threshold=*/1u << 18);
+    return;
+  }
+  AT_DISPATCH_INTEGRAL_TYPES_AND(c10::kBool, iter.common_dtype(), "threshold_mps", [&]() {
+    ThresholdParams<scalar_t> params{threshold.to<scalar_t>(), value.to<scalar_t>()};
+    lib.exec_binary_kernel_with_params(
+        iter,
+        "threshold",
+        params,
+        fmt::format("ThresholdParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())),
+        /*ilp_threshold=*/1u << 18);
+  });
 }
 
 static void elu_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
@@ -355,6 +376,7 @@ Tensor log_sigmoid_backward_mps(const Tensor& grad_output, const Tensor& self, c
   return grad_input;
 }
 
+REGISTER_DISPATCH(threshold_stub, threshold_kernel);
 REGISTER_DISPATCH(hardtanh_backward_stub, hardtanh_backward_kernel);
 REGISTER_DISPATCH(tanh_backward_stub, tanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);

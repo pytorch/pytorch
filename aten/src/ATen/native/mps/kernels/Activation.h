@@ -8,6 +8,14 @@ struct HardtanhBackwardParams {
   T max;
 };
 
+// threshold/value ride at float for floating dtypes (CUDA opmath convention);
+// integral dtypes instantiate at scalar_t for exactness.
+template <typename T>
+struct ThresholdParams {
+  T threshold;
+  T value;
+};
+
 template <typename T>
 struct ELUParams {
   T alpha;

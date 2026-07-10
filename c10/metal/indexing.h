@@ -822,6 +822,43 @@ kernel void binary_alpha_dense(
   out[tid] = f(input[tid], other[tid], alpha);
 }
 
+// ILP variant of binary_alpha_dense; mirrors unary_alpha_dense_ilp. Selected
+// by the host only when the caller opts in via ilp_threshold (see
+// exec_binary_kernel_with_params).
+template <typename T, typename T2, typename F>
+kernel void binary_alpha_dense_ilp(
+    device result_of<F, T, T, T2>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant T2& alpha [[buffer(3)]],
+    constant uint& numel [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  uint base = tid * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<T, ILP_PER_THREAD> tmp_in;
+    array<T, ILP_PER_THREAD> tmp_other;
+    array<result_of<F, T, T, T2>, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = input[base + j];
+      tmp_other[j] = other[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j], tmp_other[j], alpha);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      out[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      out[i] = f(input[i], other[i], alpha);
+    }
+  }
+}
+
 template <typename T, typename F, typename om_t = T>
 kernel void binary_dense_cast(
     device result_of<F, T, T>* out [[buffer(0)]],
@@ -1257,6 +1294,17 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           DTYPEO,                                                             \
           ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA>>,   \
       "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);    \
+  template [[host_name(#NAME "_dense_ilp_" #DTYPEO "_" #DTYPEI                \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::        \
+      binary_alpha_dense_ilp<DTYPEI, DTYPEA, NAME##_functor>(                 \
+          device ::c10::metal::                                               \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
+              out,                                                            \
+          constant DTYPEI * input,                                            \
+          constant DTYPEI * other,                                            \
+          constant DTYPEA & alpha,                                            \
+          constant uint & numel,                                              \
+          uint tid);                                                          \
   template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI                  \
                              "_" #DTYPEA)]] kernel void ::c10::metal::        \
       binary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(                   \

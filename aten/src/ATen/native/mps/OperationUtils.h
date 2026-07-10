@@ -13,6 +13,7 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
+#include <c10/metal/common.h>
 #include <fmt/format.h>
 #include <torch/library.h>
 #include <limits>
@@ -754,7 +755,8 @@ template <typename T>
 void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter,
                                                         const std::string& name,
                                                         T params,
-                                                        const std::string& params_type_name) {
+                                                        const std::string& params_type_name,
+                                                        const std::optional<uint32_t> ilp_threshold) {
   using namespace mps;
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
@@ -769,7 +771,7 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_binary_kernel_with_params(sub_iter, name, params, params_type_name);
+      exec_binary_kernel_with_params(sub_iter, name, params, params_type_name, ilp_threshold);
     }
     return;
   }
@@ -794,7 +796,11 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
 
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto cast_needed = input.scalar_type() != other.scalar_type();
-  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  // ILP is opt-in per call site (mirrors exec_unary_kernel_with_params):
+  // callers with cheap bandwidth-bound functors pass a crossover threshold.
+  const bool dense_ilp = iter.is_contiguous() && !cast_needed && ilp_threshold.has_value() &&
+      iter.numel() >= static_cast<int64_t>(ilp_threshold.value());
+  const auto suffix = dense_ilp ? "dense_ilp" : (iter.is_contiguous() ? "dense" : "strided");
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto kernel_name = cast_needed
       ? fmt::format("{}_{}_cast_{}_{}", name, suffix, scalarToMetalTypeString(out), params_type_name)
@@ -817,6 +823,9 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
       // i.e. it's true for both row-first and column-first tensors
       if (iter.is_contiguous()) {
         detail::mtl_setArg(computeEncoder, params, 3);
+        if (dense_ilp) {
+          mtl_setBytes(computeEncoder, static_cast<uint32_t>(iter.numel()), 4);
+        }
         if (cast_needed) {
           std::array<int, 4> size_and_types = {static_cast<int>(c10::elementSize(input.scalar_type())),
                                                static_cast<int>(c10::elementSize(other.scalar_type())),
@@ -835,7 +844,10 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
         mtl_setArgs<3>(
             computeEncoder, params, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       }
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      mtl_dispatch1DJob(
+          computeEncoder,
+          binaryPSO,
+          dense_ilp ? (iter.numel() + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD : iter.numel());
       getMPSProfiler().endProfileKernel(binaryPSO);
     }
   });
