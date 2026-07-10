@@ -14,11 +14,17 @@ from torch._functorch._aot_autograd.to_standalone_python import (
     _module_level_names,
 )
 from torch._functorch.aot_autograd import compile_to_python, load_from_python
-from torch._higher_order_ops.effects import _get_effect
+from torch._higher_order_ops.effects import _get_effect, hop_print
 from torch._inductor.utils import fresh_cache
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
+)
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -152,6 +158,17 @@ def _assert_composed(test, src):
     test.assertNotIn("base64", src)
 
 
+# Effectful targets the composition must reject. Both kinds must be caught: an effectful
+# OpOverload (aten._print) and an effectful HigherOrderOperator (hop_print, ORDERED). A HOP
+# is NOT an OpOverload, so an OpOverload-only gate would silently let the HOP through -- so
+# the HOP subtest is the one that fails against the narrower gate.
+_EFFECTFUL_TARGETS = [
+    subtest(torch.ops.aten._print.default, name="op_overload"),
+    subtest(hop_print, name="hop"),
+]
+
+
+@instantiate_parametrized_tests
 class TestAOTCompileToPython(TestCase):
     # End-to-end coverage of the functorch composition layer: compile_to_python composes
     # AOTAutograd's codegen'd runtime wrappers (prelude/epilogue) around the inner Inductor
@@ -211,9 +228,12 @@ class TestAOTCompileToPython(TestCase):
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
     def test_dynamic_shapes_runs_at_multiple_shapes(self):
-        # dynamic_shapes="from_graph" on a symbolically-traced graph composes one module
-        # keyed on symbolic sizes rather than baked constants, and that single module runs
-        # at multiple shapes. (The default "from_example_inputs" specializes instead.)
+        # compile_to_python has no dynamic_shapes knob: it auto-detects symbolic shapes
+        # (_graph_has_dynamic_shapes) and picks the internal shapes_mode accordingly. A
+        # symbolically-traced graph selects "from_graph", composing one module keyed on
+        # symbolic sizes rather than baked constants, and that single module runs at
+        # multiple shapes. (A statically-traced graph selects "from_example_inputs", which
+        # specializes to the example shapes instead.)
         m = _Pointwise().eval()
         x = torch.randn(8, 4)
         gm = _capture(m, x, tracing_mode="symbolic")
@@ -546,13 +566,16 @@ class TestAOTCompileToPython(TestCase):
         )
         self.assertNotIn("functional_utils.gen_alias_from_base", src)
 
-    def test_rejects_effectful_op(self):
-        # A graph carrying an effectful op (here aten._print) is rejected up front with a
-        # concrete NotImplementedError -- effect tokens thread through a calling convention
-        # the standalone composition does not reproduce.
+    @parametrize("target", _EFFECTFUL_TARGETS)
+    def test_rejects_effectful_op(self, target):
+        # A graph carrying an effectful op is rejected up front with a concrete
+        # NotImplementedError -- effect tokens thread through a calling convention the
+        # standalone composition does not reproduce. Both an effectful OpOverload
+        # (aten._print) and an effectful HigherOrderOperator (hop_print) must be caught;
+        # the HOP case would slip past an OpOverload-only gate.
         g = fx.Graph()
         a = g.placeholder("a")
-        g.call_function(torch.ops.aten._print.default, ("hello",))
+        g.call_function(target, ("hello",))
         g.output((a,))
         gm = fx.GraphModule(torch.nn.Module(), g)
         with self.assertRaisesRegex(NotImplementedError, "effectful op"):
@@ -654,6 +677,7 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(sinks["b"], ["b_fn"])
 
 
+@instantiate_parametrized_tests
 class TestComposerHelpers(TestCase):
     # Unit coverage of the composer's own helpers: the _known_helper_table stable-import
     # contract, _module_level_names (inner-binding collision seeding), and the recursive
@@ -683,15 +707,17 @@ class TestComposerHelpers(TestCase):
         self.assertIn("b", names)
         self.assertNotIn("a", names)
 
-    def test_find_effectful_op_top_level(self):
+    @parametrize("target", _EFFECTFUL_TARGETS)
+    def test_find_effectful_op_top_level(self, target):
+        # The scan must surface an effectful OpOverload AND an effectful
+        # HigherOrderOperator (hop_print); the HOP case would return None under an
+        # OpOverload-only isinstance check.
         g = fx.Graph()
         a = g.placeholder("a")
-        g.call_function(torch.ops.aten._print.default, ("hi",))
+        g.call_function(target, ("hi",))
         g.output((a,))
         gm = fx.GraphModule(torch.nn.Module(), g)
-        self.assertIs(
-            _find_effectful_op(gm, _get_effect), torch.ops.aten._print.default
-        )
+        self.assertIs(_find_effectful_op(gm, _get_effect), target)
 
     def test_find_effectful_op_nested_in_subgraph(self):
         # An effect nested inside a child GraphModule reached via get_attr must be found.
@@ -1091,13 +1117,13 @@ class TestAOTComposeGuards(TestCase):
         # The other inductor codegen form binds the entry point as ``call = runner.call``
         # (the graph_partition Runner path) rather than ``def call``. The guard must accept
         # that Assign-with-Name-target form too, so this composes without raising.
-        runner_inner = (
-            "class _R:\n"
-            "    def call(self, args):\n"
-            "        return args\n"
-            "runner = _R()\n"
-            "call = runner.call\n"
-        )
+        runner_inner = """\
+class _R:
+    def call(self, args):
+        return args
+runner = _R()
+call = runner.call
+"""
         src = _compose_standalone_module(
             runner_inner, [self._orch()], _SENTINEL_INNER_CALL
         )
