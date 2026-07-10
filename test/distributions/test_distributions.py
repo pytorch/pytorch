@@ -119,6 +119,7 @@ from torch.testing._internal.common_device_type import (
     skipMPS,
 )
 from torch.testing._internal.common_utils import (
+    device_rng_seed,
     gradcheck,
     load_tests,
     run_tests,
@@ -3213,8 +3214,8 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0, xpu=3)  # see Note [Randomized statistical tests]
     def test_multivariate_normal_moments(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
         d = MultivariateNormal(mean, scale_tril=scale_tril)
@@ -3400,8 +3401,8 @@ class TestDistributions(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @skipMPS  # flaky failure
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=0, xpu=1)  # see Note [Randomized statistical tests]
     def test_wishart_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
         # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
@@ -3445,8 +3446,8 @@ class TestDistributions(DistributionsTestCase):
         )
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
+    @device_rng_seed(default=0, xpu=1)  # see Note [Randomized statistical tests]
     def test_wishart_moments(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([]) + ndim - 1
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
@@ -3681,8 +3682,8 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(GeneralizedPareto(loc, scale, concentration), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=1, xpu=2)  # see note [Randomized statistical tests]
     def test_generalized_pareto_sample(self):
-        set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale, concentration in product(
             [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0], [-0.5, 0.0, 0.5]
         ):
@@ -3872,8 +3873,8 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(Chi2(df), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @device_rng_seed(default=0, xpu=1)  # see Note [Randomized statistical tests]
     def test_chi2_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for df in [0.1, 1.0, 5.0]:
             self._check_sampler_sampler(
                 Chi2(df), scipy.stats.chi2(df), f"Chi2(df={df})"
@@ -3906,8 +3907,8 @@ class TestDistributions(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
+    @device_rng_seed(default=11, xpu=0)  # see Note [Randomized statistical tests]
     def test_studentT_sample(self):
-        set_rng_seed(11)  # see Note [Randomized statistical tests]
         for df, loc, scale in product(
             [0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]
         ):
