@@ -3116,7 +3116,6 @@ class TestReductions(TestCase):
         with ctx:
             self.assertEqual(torch.mean(t), expected)
 
-    @onlyCPU
     @dtypes(torch.float, torch.bfloat16)
     def test_dim_reduction_lastdim(self, device, dtype):
         x = torch.randn(3, 5, 40, device=device, dtype=dtype)
