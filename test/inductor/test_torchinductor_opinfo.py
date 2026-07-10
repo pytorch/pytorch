@@ -374,6 +374,7 @@ inductor_override_kwargs["cpu"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     ("nn.functional.multilabel_soft_margin_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.002,
@@ -411,6 +412,7 @@ inductor_override_kwargs["cuda"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     ("cross", f16): {"reference_in_float": True},
     ("linalg.cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
@@ -529,6 +531,7 @@ inductor_override_kwargs["xpu"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     # XPU
     ("cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},

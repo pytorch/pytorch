@@ -7767,6 +7767,7 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0.0, 1.0, -1.0])])
 
+    @config.patch(fallback_random=True)
     def test_uniform(self):
         def fn(x):
             return aten.uniform.default(x, 0, 1)
@@ -7779,6 +7780,27 @@ for dtype in (torch.int32, torch.int64):
             exact_stride=True,
             reference_in_float=False,
         )
+
+    @config.patch(fallback_random=False)
+    def test_uniform_no_fallback(self):
+        def fn(x):
+            return aten.uniform.default(x, 0, 1)
+
+        a = torch.randn([5, 3]).permute(1, 0)
+
+        compiled = torch.compile(fn, fullgraph=True)
+        res = compiled(a)
+        self.assertEqual(res.shape, a.shape)
+        self.assertEqual(res.dtype, a.dtype)
+        self.assertEqual(res.device.type, a.device.type)
+        self.assertEqual(res.stride(), a.stride())
+
+        # Confirm non-eager compilation
+        torch.manual_seed(0)
+        eager_out = fn(a)
+        torch.manual_seed(0)
+        compiled_out = compiled(a)
+        self.assertNotEqual(eager_out, compiled_out)
 
     def test_complex_from_real_imag(self):
         def fn(x, y):
