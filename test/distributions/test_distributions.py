@@ -3214,7 +3214,7 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
     @set_default_dtype_if_supported(torch.double)
-    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
+    @device_rng_seed(default=0, xpu=3)  # see Note [Randomized statistical tests]
     def test_multivariate_normal_moments(self):
         mean = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
@@ -3400,7 +3400,7 @@ class TestDistributions(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @skipMPS  # flaky failure
     @set_default_dtype_if_supported(torch.double)
-    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
+    @device_rng_seed(default=0, xpu=1)  # see Note [Randomized statistical tests]
     def test_wishart_sample(self):
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
@@ -3445,7 +3445,7 @@ class TestDistributions(DistributionsTestCase):
         )
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
-    @device_rng_seed(default=0)  # see Note [Randomized statistical tests]
+    @device_rng_seed(default=0, xpu=1)  # see Note [Randomized statistical tests]
     def test_wishart_moments(self):
         ndim = 3
         df = torch.rand([]) + ndim - 1
@@ -3706,7 +3706,7 @@ class TestDistributions(DistributionsTestCase):
         self._check_log_prob(GeneralizedPareto(loc, scale, concentration), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @device_rng_seed(default=1)  # see note [Randomized statistical tests]
+    @device_rng_seed(default=1, xpu=2)  # see note [Randomized statistical tests]
     def test_generalized_pareto_sample(self):
         for loc, scale, concentration in product(
             [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0], [-0.5, 0.0, 0.5]
@@ -3931,7 +3931,7 @@ class TestDistributions(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
-    @device_rng_seed(default=11)  # see Note [Randomized statistical tests]
+    @device_rng_seed(default=11, xpu=0)  # see Note [Randomized statistical tests]
     def test_studentT_sample(self):
         for df, loc, scale in product(
             [0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]
