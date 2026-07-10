@@ -13,14 +13,8 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .kernel_inputs import KernelInputs, MMKernelInputs
-from .kernel_template_choice import make_ktc_generator
-from .metrics import get_metric_table, is_metric_table_enabled
-from .runtime.hints import DeviceProperties, ReductionHint
-from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
-from .select_algorithm import ExternKernelChoice
-from .template_heuristics import get_template_heuristic
-from .template_heuristics.triton import (
+from .heuristics.template import get_template_heuristic
+from .heuristics.template.triton import (
     _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
@@ -30,6 +24,12 @@ from .template_heuristics.triton import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
+from .kernel_inputs import KernelInputs, MMKernelInputs
+from .kernel_template_choice import make_ktc_generator
+from .metrics import get_metric_table, is_metric_table_enabled
+from .runtime.hints import DeviceProperties, ReductionHint
+from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from .select_algorithm import ExternKernelChoice
 from .utils import _use_autotune_backend
 from .virtualized import V
 
@@ -159,10 +159,14 @@ class InductorChoices:
     # Flex attention configs
     # TODO(coconutruben): break out flexattention/decode configs into the new retrieval mechanism
     def get_flex_attention_fwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: torch.dtype,
+        device_type: str | None = "cuda",
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, dtype)
+        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
 
     def get_flex_attention_bwd_configs(
         self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
@@ -175,6 +179,24 @@ class InductorChoices:
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
+
+    def append_flex_attention_choices(
+        self,
+        choices: list[Any],
+        configs: list[Any],
+        input_nodes: list[Any],
+        subgraphs: list[Any],
+        layout: Any,
+        kernel_options: dict[str, Any],
+        sparse_q_block_size: int,
+        sparse_kv_block_size: int,
+    ) -> list[Any]:
+        """Append backend-specific flex-attention template choices.
+
+        Default is a no-op. Subclasses may override to inject additional
+        autotuning candidates (e.g. TLX templates in fbcode).
+        """
+        return choices
 
     def _logging_context(self) -> dict[str, Any]:
         """Extra fields for the per-shape log row. Subclasses may override."""

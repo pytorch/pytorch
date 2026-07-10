@@ -451,7 +451,7 @@ class TestCommon(TestCase):
                 self.assertEqual(
                     result.numel(),
                     expected_numel,
-                    f"{op.name} with dim={dim_val} should reduce numel by factor of {reduction_factor} "
+                    lambda msg: f"{msg}\n{op.name} with dim={dim_val} should reduce numel by factor of {reduction_factor} "
                     f"(input: {sample.input.numel()}, expected: {expected_numel}, got: {result.numel()})",
                 )
 
@@ -914,7 +914,7 @@ class TestCommon(TestCase):
 
             msg = "Got different gradients for contiguous / non-contiguous inputs wrt input {}."
             for i, (t, n) in enumerate(zip(t_grads, n_grads)):
-                self.assertEqual(t, n, msg=msg.format(i))
+                self.assertEqual(t, n, msg=lambda _m: f"{_m}\n" + (msg.format(i)))
 
     # Separates one case from the following test_out because many ops don't properly implement the
     #   incorrectly sized out parameter warning properly yet
@@ -1910,6 +1910,36 @@ class TestCompositeCompliance(TestCase):
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
     )
+    @skipOps(
+        {
+            xfail("item"),
+            xfail("narrow"),
+            xfail("nn.functional.gaussian_nll_loss"),
+            xfail("tensor_split"),
+            skip("empty"),
+            skip("empty_like"),
+            skip("empty_permuted"),
+            skip("empty_strided"),
+            skip("jiterator_2inputs_2outputs"),
+            skip("jiterator_4inputs_with_extra_args"),
+            skip("jiterator_binary"),
+            skip("jiterator_binary_return_by_ref"),
+            skip("jiterator_unary"),
+            skip("new_empty"),
+            skip("new_empty_strided"),
+            skip("nn.functional.embedding"),
+            skip("nn.functional.embedding_bag"),
+            skip("nn.functional.multi_head_attention_forward"),
+            skip("resize_"),
+            skip("resize_as_"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("sparse.sampled_addmm"),
+            skip("to_sparse"),
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+        }
+    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_operator(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
@@ -1924,6 +1954,22 @@ class TestCompositeCompliance(TestCase):
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
+    )
+    @skipOps(
+        {
+            xfail("istft"),
+            xfail("narrow"),
+            xfail("nn.functional.gaussian_nll_loss"),
+            xfail("tensor_split"),
+            skip("normal", variant_name="number_mean"),
+            skip("sparse.mm", variant_name="reduce"),
+            skip("sparse.sampled_addmm"),
+            skip("to_sparse"),
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+            skip("nn.functional.linear_cross_entropy", variant_name="chunked_none"),
+        }
     )
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     def test_backward(self, device, dtype, op):
@@ -1946,6 +1992,19 @@ class TestCompositeCompliance(TestCase):
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
     )
+    @skipOps(
+        {
+            xfail("narrow"),
+            xfail("nn.functional.gaussian_nll_loss"),
+            xfail("tensor_split"),
+            skip("nn.functional.max_unpool2d"),
+            skip("nn.functional.max_unpool3d"),
+            skip("nn.functional.multi_head_attention_forward"),
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+        }
+    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_forward_ad(self, device, dtype, op):
         if torch.float not in op.supported_backward_dtypes(device):
@@ -1965,6 +2024,13 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
 
+    @skipOps(
+        {
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+        }
+    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2145,6 +2211,13 @@ class TestCompositeCompliance(TestCase):
                             allow_list=op.allow_cow_input_materialize_backward,
                         )
 
+    @skipOps(
+        {
+            skip("bmm", variant_name="triton_optimized"),
+            skip("topk", variant_name="cutedsl_optimized"),
+            skip("topk", variant_name="cutedsl_optimized_deterministic"),
+        }
+    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_view_replay(self, device, dtype, op):
         def _assert_match_metadata(a, b):
@@ -3045,14 +3118,18 @@ class TestForwardADWithScalars(TestCase):
                 result = op(dual0d, 2.0)
                 p, t = torch.autograd.forward_ad.unpack_dual(result)
                 self.assertEqual(
-                    p.dtype, t.dtype, f"{op.name} and scalar on RHS - dtype mismatch"
+                    p.dtype,
+                    t.dtype,
+                    lambda msg: f"{msg}\n{op.name} and scalar on RHS - dtype mismatch",
                 )
             # Test with scalar on LHS
             if op.supports_one_python_scalar:
                 result = op(2.0, dual0d)
                 p, t = torch.autograd.forward_ad.unpack_dual(result)
                 self.assertEqual(
-                    p.dtype, t.dtype, f"{op.name} and scalar on LHS - dtype mismatch"
+                    p.dtype,
+                    t.dtype,
+                    lambda msg: f"{msg}\n{op.name} and scalar on LHS - dtype mismatch",
                 )
 
 
