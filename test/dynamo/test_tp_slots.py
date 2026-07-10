@@ -11,6 +11,7 @@ import collections.abc
 import dataclasses
 import enum
 
+import torch
 from torch._C._dynamo import (
     get_type_slots,
     has_slot,
@@ -20,6 +21,16 @@ from torch._C._dynamo import (
     PyTypeSlots,
 )
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.variables.base import VariableTracker
+from torch._dynamo.variables.dicts import ConstDictVariable
+from torch._dynamo.variables.lists import (
+    DequeVariable,
+    ListVariable,
+    RangeVariable,
+    SizeVariable,
+    TupleVariable,
+)
+from torch._dynamo.variables.sets import FrozensetVariable, SetVariable
 
 
 class TestTypeSlots(TestCase):
@@ -321,6 +332,85 @@ class TestTypeSlots(TestCase):
                 has_slot(map_slots, PyMappingSlots.MP_SUBSCRIPT),
                 f"{t.__name__} should have mp_subscript",
             )
+
+
+class TestSlotImplConformance(TestCase):
+    """Every C-level sq/mp/nb slot a container type fills must have a matching
+    ``*_impl`` override on its VariableTracker.
+
+    Operator dispatch reads slot presence from the real CPython type
+    (``get_type_slots``) and then calls the VT's ``*_impl``. If the type fills a
+    slot the VT never overrides, dispatch silently falls through to the base
+    graph-break default (see ``VariableTracker.sq_*_impl`` / ``nb_*_impl``). This
+    test turns that latent gap into a hard failure at test time.
+    """
+
+    # Concrete container types with a 1:1 VariableTracker. Value-polymorphic VTs
+    # (ConstantVariable, TensorVariable) dispatch by value rather than per-slot
+    # overrides and are out of scope.
+    TYPE_TO_VT = {
+        list: ListVariable,
+        tuple: TupleVariable,
+        range: RangeVariable,
+        collections.deque: DequeVariable,
+        torch.Size: SizeVariable,
+        dict: ConstDictVariable,
+        set: SetVariable,
+        frozenset: FrozensetVariable,
+    }
+
+    # Slot names that do not follow the ``<slot>_impl`` convention.
+    _NO_IMPL_SUFFIX = {"SQ_LENGTH", "MP_LENGTH", "SQ_CONTAINS"}
+
+    # (python_type, method) pairs exempt from the override requirement, with the
+    # reason dispatch does not need a dedicated override.
+    _EXEMPT = {
+        # These types fill both sq_length and mp_length (CPython compat); length
+        # dispatch uses sq_length, which they do override.
+        (list, "mp_length"): "uses sq_length",
+        (tuple, "mp_length"): "uses sq_length",
+        (range, "mp_length"): "uses sq_length",
+        (torch.Size, "mp_length"): "uses sq_length",
+        # bool() dispatches via generic_bool, not a per-slot nb_bool_impl.
+        (range, "nb_bool_impl"): "bool() via generic_bool",
+    }
+
+    _GROUPS = (
+        (PySequenceSlots, 0),
+        (PyMappingSlots, 1),
+        (PyNumberSlots, 2),
+    )
+
+    @classmethod
+    def _slot_method(cls, member):
+        name = member.name.lower()
+        return name if member.name in cls._NO_IMPL_SUFFIX else name + "_impl"
+
+    @staticmethod
+    def _is_overridden(vt_cls, method):
+        vt_attr = getattr(vt_cls, method, None)
+        base_attr = getattr(VariableTracker, method, None)
+        return vt_attr is not None and vt_attr is not base_attr
+
+    def test_filled_slots_have_impl_override(self):
+        missing = []
+        for py_type, vt_cls in self.TYPE_TO_VT.items():
+            slots = get_type_slots(py_type)
+            for enum_cls, idx in self._GROUPS:
+                bits = slots[idx]
+                for member in enum_cls.__members__.values():
+                    if not has_slot(bits, member):
+                        continue
+                    method = self._slot_method(member)
+                    if (py_type, method) in self._EXEMPT:
+                        continue
+                    if not self._is_overridden(vt_cls, method):
+                        missing.append(
+                            f"{py_type.__name__}/{vt_cls.__name__}: "
+                            f"fills {enum_cls.__name__}.{member.name} but "
+                            f"{vt_cls.__name__} does not override {method}"
+                        )
+        self.assertEqual(missing, [], "\n".join(missing))
 
 
 if __name__ == "__main__":
