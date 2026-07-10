@@ -164,8 +164,6 @@ jobs:
           esac
 
           runner_label="linux.arm64.${runner_config}.${runner_type}"
-          {
-            echo "runner-config=${runner_config}"
-            echo "runner-type=${runner_type}"
-            echo "runner-label=${runner_label}"
-          } >> "$GITHUB_OUTPUT"
+          echo "runner-config=${runner_config}" >> "$GITHUB_OUTPUT"
+          echo "runner-type=${runner_type}" >> "$GITHUB_OUTPUT"
+          echo "runner-label=${runner_label}" >> "$GITHUB_OUTPUT"
