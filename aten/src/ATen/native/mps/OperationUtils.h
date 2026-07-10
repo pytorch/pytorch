@@ -127,6 +127,23 @@ bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true);
 // True if PYTORCH_MPS_PREFER_METAL is set (prefer the Metal matmul kernels).
 bool prefer_metal_matmul();
 
+// Metal matmul kernels. Works with strides.
+Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output);
+Tensor& do_metal_addmm(const Tensor& self,
+                       const Tensor& other,
+                       Tensor& output,
+                       const Scalar& alpha,
+                       const Scalar& beta,
+                       const Tensor& bias);
+Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output);
+Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
+                                   const Tensor& batch1,
+                                   const Tensor& batch2,
+                                   const Scalar& alpha,
+                                   const Scalar& beta,
+                                   Tensor& output,
+                                   bool is_baddbmm);
+
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }

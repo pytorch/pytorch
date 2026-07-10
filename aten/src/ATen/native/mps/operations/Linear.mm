@@ -4,10 +4,8 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/ops/addmm.h>
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
-#include <ATen/ops/mm.h>
 
 // MTLGPUFamilyApple10 is only defined in the macOS 26+ SDK.
 #if !defined(__MAC_26_0)
@@ -127,13 +125,33 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return output;
   }
 
-  if (prefer_metal_matmul()) {
-    auto input2d = input.reshape({-1, input.size(-1)});
+  // Metal kernels take 2-D operands: a contiguous output is one (M,N) matmul, a channels_last output
+  // batches the matmul over channels so each slice is 2-D. Broadcast (>1-D) bias goes to the graph path.
+  if (prefer_metal_matmul() && (!is_bias_defined || bias.dim() <= 1)) {
     auto weight_t = weight.transpose(0, 1);
-    auto out2d = is_bias_defined ? at::addmm(bias, input2d, weight_t) : at::mm(input2d, weight_t);
-    // contiguous(memory_format) preserves the output layout. no-op when already matching.
-    auto result = out2d.view(output_size).contiguous(input.suggest_memory_format());
-    return weight_arg.dim() != 1 ? result : result.squeeze(-1);
+    const int64_t K = input.size(-1);
+    const int64_t N = weight.size(0);
+    if (output.is_contiguous()) {
+      // reshape copies for a non-collapsible input (e.g. a transposed 3-D activation); unavoidable for a 2-D GEMM.
+      auto in2d = input.reshape({-1, K});
+      auto out2d = output.view({-1, N});
+      if (is_bias_defined) {
+        do_metal_addmm(in2d, weight_t, out2d, 1, 1, bias.expand({in2d.size(0), N}));
+      } else {
+        do_metal_mm(in2d, weight_t, out2d);
+      }
+    } else {
+      const int64_t C = input.size(1);
+      auto in3d = input.movedim(1, 0).reshape({C, -1, K});
+      auto weight_b = weight_t.expand({C, K, N});
+      auto out3d = output.movedim(1, 0).reshape({C, -1, N});
+      if (is_bias_defined) {
+        do_metal_addbmm_or_baddbmm(bias, in3d, weight_b, 1, 1, out3d, /*is_baddbmm=*/true);
+      } else {
+        do_metal_bmm(in3d, weight_b, out3d);
+      }
+    }
+    return weight_arg.dim() != 1 ? output : output.squeeze(-1);
   }
 
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());

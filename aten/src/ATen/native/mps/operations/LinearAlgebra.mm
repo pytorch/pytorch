@@ -88,6 +88,85 @@ AlphaBeta make_alpha_beta(const Scalar& alpha, const Scalar& beta, ScalarType sc
   return alpha_beta;
 }
 
+std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
+                                                                    const Tensor& self,
+                                                                    const Tensor& other) {
+  if (self.numel() == 0 || other.numel() == 0) {
+    auto output = [graph constantWithScalar:0.0
+                                      shape:getMPSShape({self.size(0), other.size(1)})
+                                   dataType:getMPSDataType(self)];
+    return {nil, nil, output};
+  }
+  auto selfTensor_ = mpsGraphRankedPlaceHolder(graph, self);
+  auto otherTensor_ = mpsGraphRankedPlaceHolder(graph, other);
+  auto selfTensor = self.is_conj() ? [graph conjugateWithTensor:selfTensor_ name:nil] : selfTensor_;
+  auto otherTensor = other.is_conj() ? [graph conjugateWithTensor:otherTensor_ name:nil] : otherTensor_;
+  auto output = [graph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
+  return {selfTensor_, otherTensor_, output};
+}
+
+bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
+  constexpr auto max_stride_size = 32768;
+  constexpr auto max_complex_inner_size = 2048;
+  static bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
+  if (prefer_metal_matmul() || c10::isIntegralType(self.scalar_type(), true)) {
+    return true;
+  }
+  // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
+  // kernels honor the output strides.
+  static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
+  if (!output.is_contiguous() && !is_macos_26_0_or_newer) {
+    return true;
+  }
+  // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
+  // See https://github.com/pytorch/pytorch/issues/167727#issuecomment-3529308548
+  if (c10::isComplexType(self.scalar_type()) && self.size(1) > max_complex_inner_size) {
+    return true;
+  }
+  // Detect conditions that would trigger LORADOWN GEMV kernel with potential padding overflow
+  // See https://github.com/pytorch/pytorch/issues/178056
+  if (self.scalar_type() == at::ScalarType::Half && (self.size(0) <= 16 || other.size(1) <= 16) &&
+      self.stride(1) == 1 && other.stride(0) == 1) {
+    int64_t self_padding = self.stride(0) - self.size(1);
+    int64_t other_padding = other.stride(1) - other.size(0);
+
+    if (self_padding > 15 || other_padding > 15 || self_padding % 4 != 0 || other_padding % 4 != 0) {
+      TORCH_WARN_ONCE(
+          "MPS mm implementation has a known issue with this shape, dtype and slice. Dispatching to metal implementation instead. This may impact performance.");
+      return true;
+    }
+  }
+
+  return !is_macos_14_4_or_newer &&
+      (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
+       self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
+       other.size(0) > max_stride_size || other.size(1) > max_stride_size);
+}
+
+void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
+  const auto& status_flat = status.view(-1);
+
+  for (const auto i : c10::irange(status_flat.size(0))) {
+    int code = status_flat[i].item<int>();
+    switch (code) {
+      case MPSMatrixDecompositionStatusSuccess:
+        status_flat[i] = 0;
+        break;
+      case MPSMatrixDecompositionStatusNonPositiveDefinite:
+      case MPSMatrixDecompositionStatusSingular:
+        status_flat[i] = 2;
+        break;
+      case MPSMatrixDecompositionStatusFailure:
+        status_flat[i] = -1;
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unknown MPSMatrixDecompositionStatus enum value: ", code);
+    }
+  }
+}
+
+} // anonymous namespace
+
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   // Handle conjugated inputs by creating resolved copies
   auto self_ = self.is_conj() ? self.resolve_conj() : self;
@@ -113,48 +192,6 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
       mtl_setArgs(computeEncoder, self_, other_, output, strides, sizes);
-      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
-      getMPSProfiler().endProfileKernel(matmulPSO);
-    }
-  });
-  return output;
-}
-
-Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output) {
-  // Handle conjugated inputs by creating resolved copies
-  auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
-  auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
-
-  auto stream = getCurrentMPSStream();
-  auto device = MPSDevice::getInstance()->device();
-  auto matmulPSO = lib.getPipelineStateForFunc("naive_bmm_" + mps::scalarToMetalTypeString(output));
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1_, batch2_});
-      auto computeEncoder = stream->commandEncoder();
-      [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(batch1_.size(1)),
-                                       static_cast<uint32_t>(batch1_.size(2)),
-                                       static_cast<uint32_t>(output.size(2)),
-                                       static_cast<uint32_t>(output.size(0))};
-      std::array<int64_t, 9> strides = {batch1_.stride(2),
-                                        batch1_.stride(1),
-                                        batch1_.stride(0),
-                                        batch2_.stride(2),
-                                        batch2_.stride(1),
-                                        batch2_.stride(0),
-                                        output.stride(2),
-                                        output.stride(1),
-                                        output.stride(0)};
-      constexpr uint32_t TILE_DIM = 16;
-      uint32_t gridSizeX = (output.size(2) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeY = (batch1_.size(1) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeZ = output.size(0);
-
-      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
-      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
-
-      mtl_setArgs(computeEncoder, batch1_, batch2_, output, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
@@ -203,6 +240,48 @@ Tensor& do_metal_addmm(const Tensor& self,
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
       mtl_setArgs(computeEncoder, self_, other_, output, bias_, alpha_beta.i64, strides, sizes);
+      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
+      getMPSProfiler().endProfileKernel(matmulPSO);
+    }
+  });
+  return output;
+}
+
+Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output) {
+  // Handle conjugated inputs by creating resolved copies
+  auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
+  auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
+
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+  auto matmulPSO = lib.getPipelineStateForFunc("naive_bmm_" + mps::scalarToMetalTypeString(output));
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1_, batch2_});
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:matmulPSO];
+      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(batch1_.size(1)),
+                                       static_cast<uint32_t>(batch1_.size(2)),
+                                       static_cast<uint32_t>(output.size(2)),
+                                       static_cast<uint32_t>(output.size(0))};
+      std::array<int64_t, 9> strides = {batch1_.stride(2),
+                                        batch1_.stride(1),
+                                        batch1_.stride(0),
+                                        batch2_.stride(2),
+                                        batch2_.stride(1),
+                                        batch2_.stride(0),
+                                        output.stride(2),
+                                        output.stride(1),
+                                        output.stride(0)};
+      constexpr uint32_t TILE_DIM = 16;
+      uint32_t gridSizeX = (output.size(2) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (batch1_.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeZ = output.size(0);
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
+      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
+
+      mtl_setArgs(computeEncoder, batch1_, batch2_, output, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
@@ -288,85 +367,6 @@ Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
 
   return output;
 }
-
-std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
-                                                                    const Tensor& self,
-                                                                    const Tensor& other) {
-  if (self.numel() == 0 || other.numel() == 0) {
-    auto output = [graph constantWithScalar:0.0
-                                      shape:getMPSShape({self.size(0), other.size(1)})
-                                   dataType:getMPSDataType(self)];
-    return {nil, nil, output};
-  }
-  auto selfTensor_ = mpsGraphRankedPlaceHolder(graph, self);
-  auto otherTensor_ = mpsGraphRankedPlaceHolder(graph, other);
-  auto selfTensor = self.is_conj() ? [graph conjugateWithTensor:selfTensor_ name:nil] : selfTensor_;
-  auto otherTensor = other.is_conj() ? [graph conjugateWithTensor:otherTensor_ name:nil] : otherTensor_;
-  auto output = [graph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
-  return {selfTensor_, otherTensor_, output};
-}
-
-bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
-  constexpr auto max_stride_size = 32768;
-  constexpr auto max_complex_inner_size = 2048;
-  static bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
-  if (prefer_metal_matmul() || c10::isIntegralType(self.scalar_type(), true)) {
-    return true;
-  }
-  // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
-  // kernels honor the output strides.
-  static const bool is_macos_26_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_0);
-  if (!output.is_contiguous() && !is_macos_26_0_or_newer) {
-    return true;
-  }
-  // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
-  // See https://github.com/pytorch/pytorch/issues/167727#issuecomment-3529308548
-  if (c10::isComplexType(self.scalar_type()) && self.size(1) > max_complex_inner_size) {
-    return true;
-  }
-  // Detect conditions that would trigger LORADOWN GEMV kernel with potential padding overflow
-  // See https://github.com/pytorch/pytorch/issues/178056
-  if (self.scalar_type() == at::ScalarType::Half && (self.size(0) <= 16 || other.size(1) <= 16) &&
-      self.stride(1) == 1 && other.stride(0) == 1) {
-    int64_t self_padding = self.stride(0) - self.size(1);
-    int64_t other_padding = other.stride(1) - other.size(0);
-
-    if (self_padding > 15 || other_padding > 15 || self_padding % 4 != 0 || other_padding % 4 != 0) {
-      TORCH_WARN_ONCE(
-          "MPS mm implementation has a known issue with this shape, dtype and slice. Dispatching to metal implementation instead. This may impact performance.");
-      return true;
-    }
-  }
-
-  return !is_macos_14_4_or_newer &&
-      (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
-       self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
-       other.size(0) > max_stride_size || other.size(1) > max_stride_size);
-}
-
-void map_mps_decomposition_error_code_to_blas(const Tensor& status) {
-  const auto& status_flat = status.view(-1);
-
-  for (const auto i : c10::irange(status_flat.size(0))) {
-    int code = status_flat[i].item<int>();
-    switch (code) {
-      case MPSMatrixDecompositionStatusSuccess:
-        status_flat[i] = 0;
-        break;
-      case MPSMatrixDecompositionStatusNonPositiveDefinite:
-      case MPSMatrixDecompositionStatusSingular:
-        status_flat[i] = 2;
-        break;
-      case MPSMatrixDecompositionStatusFailure:
-        status_flat[i] = -1;
-        break;
-      default:
-        TORCH_INTERNAL_ASSERT(false, "Unknown MPSMatrixDecompositionStatus enum value: ", code);
-    }
-  }
-}
-
-} // anonymous namespace
 
 static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool pivot,
