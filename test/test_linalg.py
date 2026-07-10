@@ -9069,6 +9069,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         n = 50_000
         A = torch.ones(n, n, dtype=dtype, device=device)
         B = torch.randn(n, dtype=dtype, device=device)
+
+        if (
+            torch.device(device).type == "cuda"
+            and dtype == torch.float32
+            and not TEST_WITH_ROCM
+            and torch.cuda.get_device_capability(device) == (11, 0)
+        ):
+            # Remove this sentinel when zero-workspace cublasSgemv works on SM 11.0.
+            previous_workspace_size = torch.backends.cuda.cublas_workspace_size()
+            cublas_error = "CUBLAS_STATUS_NOT_SUPPORTED.*cublasSgemv"
+            try:
+                torch.backends.cuda.cublas_workspace_size(0)
+                with self.assertRaisesRegex(RuntimeError, cublas_error):
+                    torch.matmul(A, B)
+            finally:
+                torch.backends.cuda.cublas_workspace_size(previous_workspace_size)
+                torch._C._cuda_clearCublasWorkspaces()
+
         C = torch.matmul(A, B)
 
         # Sanity Checks
