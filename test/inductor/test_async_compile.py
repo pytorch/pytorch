@@ -1340,7 +1340,7 @@ class TestCuteDSLSubprocessCompile(TestCase):
 
     @unittest.skipIf(
         not ensure_nv_universal_gemm_available(),
-        "NVIDIA Universal GEMM (cutlass_api) library not available",
+        "NVIDIA Universal GEMM (cutlass.operators) library not available",
     )
     def test_nv_universal_gemm_subprocess_precompile_skips_bad_fork(self):
         """NV Universal GEMM precompile skips compile in bad-fork workers."""
@@ -1359,9 +1359,6 @@ class TestCuteDSLSubprocessCompile(TestCase):
             from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
                 _nvgemm_precompile,
             )
-            from torch._inductor.utils import _ensure_fp4_dtype_registered
-
-            _ensure_fp4_dtype_registered()
 
             _KERNEL_NAME = "test_kernel_manifest"
             _DISK_CACHE_CONFIG_KEY = (_KERNEL_NAME,)

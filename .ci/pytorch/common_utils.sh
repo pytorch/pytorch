@@ -355,36 +355,23 @@ function install_nvmath() {
   echo "nvmath-python installation complete."
 }
 
-function install_cutlass_api() {
-  # cutlass-api requires Python >= 3.12
+function install_cutlass_operators() {
+  # nvidia-cutlass-operators requires Python >= 3.10
   local py_version
   py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
-    echo "Skipping CUTLASS API install: requires Python >= 3.12, have $py_version"
+  if [[ "$(echo -e "3.10\n$py_version" | sort -V | head -n1)" != "3.10" ]]; then
+    echo "Skipping CUTLASS Operators install: requires Python >= 3.10, have $py_version"
     return 0
   fi
 
-  echo "Installing CUTLASS API from Github..."
+  echo "Installing CUTLASS Operators from PyPI..."
 
-  # Install CuTeDSL dependency first
-  install_cutlass_dsl
+  # NOTE: nvidia-cutlass-operators requires nvidia-cutlass-dsl >= 4.6.
+  # The wheel pulls in a compatible nvidia-cutlass-dsl transitively.
+  # TODO: Decide whether to upgrade install_cutlass_dsl pin from 4.5.2 to 4.6.
+  pip_install "nvidia-cutlass-operators[torch]"
 
-  # Grab latest til we have a pinned commit
-  local cutlass_commit
-  cutlass_commit=$(git ls-remote https://github.com/NVIDIA/cutlass.git refs/heads/cutlass_api | cut -f1)
-
-  rm -rf cutlass-build
-  git clone --depth 1 -b cutlass_api https://github.com/NVIDIA/cutlass.git cutlass-build
-
-  pushd cutlass-build
-  git checkout "${cutlass_commit}"
-
-  # Install cutlass_api with torch extras
-  pip_install "python/cutlass_api[torch]"
-  popd
-
-  rm -rf cutlass-build
-  echo "CUTLASS API installation complete."
+  echo "CUTLASS Operators installation complete."
 }
 
 function print_sccache_stats() {

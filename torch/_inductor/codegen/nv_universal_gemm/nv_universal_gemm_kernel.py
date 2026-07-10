@@ -2,13 +2,14 @@
 """
 NVIDIA Universal GEMM kernel code generation.
 
-This module generates Python code that calls cutlass_api to execute GEMM operations.
-The runtime helpers (_nvgemm_run, _nvgemm_precompile, etc.) are imported by the
-generated wrapper at runtime, keeping the generated code thin.
+This module generates Python code that calls cutlass.operators to execute GEMM
+operations. The runtime helpers (_nvgemm_run, _nvgemm_precompile, etc.) are
+imported by the generated wrapper at runtime, keeping the generated code thin.
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib
 import logging
@@ -43,6 +44,17 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+@functools.cache
+def _target_sm_for_device(dev_idx: int):
+    """TargetSm for a CUDA device, memoized (a device's capability is constant)."""
+    from cutlass.operators.arch import TargetSm
+
+    import torch
+
+    major, minor = torch.cuda.get_device_capability(dev_idx)
+    return TargetSm(f"{major}{minor}a")
+
+
 def _make_disk_config_key(
     kernel_name: str,
     variant_name: str,
@@ -69,11 +81,12 @@ def _compile_nvgemm(
     out,
     accumulator_type,
     *,
-    kernel_obj=None,
+    operator_obj=None,
     kernel_name: str | None = None,
     args_kwargs=None,
     epilogue_args=None,
-    epilogue_source="",
+    epilogue_source: str = "",
+    target_sm=None,
     fallback_fn=None,
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
@@ -82,13 +95,16 @@ def _compile_nvgemm(
     runs in subprocess workers (process-isolated), runtime is
     single-threaded per graph execution.
 
-    kernel_obj: pre-resolved kernel (skips _lookup_gemm_kernel).
-    kernel_name: kernel name for _lookup_gemm_kernel.
+    operator_obj: pre-resolved operator (skips _lookup_gemm_operator).
+    kernel_name: operator name for _lookup_gemm_operator.
     args_kwargs: extra kwargs forwarded to _create_gemm_arguments.
-    fallback_fn: callable(kernel) -> artifact | None, called before
+    epilogue_args: ops.EpilogueArguments; threaded into `args` so per-problem
+        discovery binds the correct EFC operator.
+    target_sm: TargetSm for per-problem operator discovery in _lookup_gemm_operator.
+    fallback_fn: callable(operator) -> artifact | None, called before
         compiling (for disk cache lookup).
 
-    Returns (artifact, args, kernel, was_compiled).
+    Returns (artifact, args, operator, was_compiled).
     """
     was_compiled = False
 
@@ -100,23 +116,24 @@ def _compile_nvgemm(
         epilogue=epilogue_args,
         **(args_kwargs or {}),
     )
-    if kernel_obj is not None:
-        kernel = kernel_obj
+    if operator_obj is not None:
+        operator = operator_obj
     else:
-        kernel = _lookup_gemm_kernel(
+        operator = _lookup_gemm_operator(
             kernel_name,  # pyrefly: ignore[bad-argument-type]
-            epilogue_args=epilogue_args,
-            epilogue_source=epilogue_source,
+            args,
+            target_sm,
+            epilogue_source,
         )
 
     artifact = None
     if fallback_fn is not None:
-        artifact = fallback_fn(kernel)
+        artifact = fallback_fn(operator)
     if artifact is None:
-        artifact = kernel.compile(args)
+        artifact = operator.compile(args)
         was_compiled = True
 
-    return artifact, args, kernel, was_compiled
+    return artifact, args, operator, was_compiled
 
 
 class CUDAContextMetadata:
@@ -137,17 +154,18 @@ class CUDAContextMetadata:
         self.device_capability = device_capability
 
     @staticmethod
-    def from_kernel(kernel, device) -> CUDAContextMetadata:
-        """Build from a cutlass_api Kernel and torch device in the main process."""
+    def from_operator(operator, device) -> CUDAContextMetadata:
+        """Build from a cutlass.operators Operator and torch device in the main process."""
         import torch
 
         mac = None
         try:
-            cluster_shape = getattr(
-                getattr(kernel, "impl", None), "cluster_shape_mn", None
-            )
+            design = operator.metadata.design
+            cluster_shape = getattr(design, "cluster_shape", None)
             if cluster_shape is not None:
-                from cutlass_api.providers.cutedsl.utils import get_max_active_clusters
+                from cutlass.operators.providers.cutedsl.integration_utils.mma import (
+                    get_max_active_clusters,
+                )
 
                 mac = get_max_active_clusters(cluster_shape)
         except Exception:
@@ -211,12 +229,11 @@ def _worker_nvgemm_autotuning_precompile(
 
     start_ns = time.time_ns()
 
+    from cutlass.operators import TargetSm
+
     import torch
     from torch._inductor.runtime.cutedsl_cache import disk_cache_set
-    from torch._inductor.utils import _ensure_fp4_dtype_registered
     from torch._subclasses.fake_tensor import FakeTensorMode
-
-    _ensure_fp4_dtype_registered()
 
     with FakeTensorMode():
         input_tensors = tuple(
@@ -257,6 +274,9 @@ def _worker_nvgemm_autotuning_precompile(
     )
     disk_fn_cache: dict = {}
 
+    major, minor = cuda_ctx.device_capability
+    target_sm = TargetSm(f"{major}{minor}a")
+
     patched = _patch_max_active_clusters(cuda_ctx.max_active_clusters)
     try:
         artifact, _, _, was_compiled = _compile_nvgemm(
@@ -266,16 +286,16 @@ def _worker_nvgemm_autotuning_precompile(
             accumulator_type,
             kernel_name=kernel_name,
             args_kwargs=helper_kwargs,
+            target_sm=target_sm,
         )
 
         if was_compiled:
-            obj = _unwrap_efc_compiled_obj(artifact.compiled_obj)
             disk_cache_set(
                 disk_fn_cache,
                 kernel_name,
                 disk_config_key,
                 cache_key,
-                obj,
+                artifact.compiled_obj,
                 dev_idx,
                 device_capability=cuda_ctx.device_capability,
             )
@@ -317,7 +337,7 @@ def _create_gemm_arguments(
     swizzle_mode_b: Any | None = None,
     epilogue: Any | None = None,
 ):
-    import cutlass_api
+    import cutlass.operators as ops
 
     if epilogue is not None and variant_name != "GEMM":
         raise NotImplementedError(
@@ -327,7 +347,7 @@ def _create_gemm_arguments(
     match variant_name:
         case "GROUPED_GEMM":
             a, b, offsets = input_tensors
-            return cutlass_api.arguments.GroupedGemmArguments(
+            return ops.GroupedGemmArguments(
                 a,
                 b,
                 out,
@@ -336,12 +356,10 @@ def _create_gemm_arguments(
             )
 
         case "SCALED_GEMM":
-            from cutlass_api.arguments import ScaledTensor
-
             a, b, scale_a, scale_b = input_tensors
-            scaled_a = ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
-            scaled_b = ScaledTensor(b, scale_b, scale_mode_b, swizzle_mode_b)
-            return cutlass_api.arguments.GemmArguments(
+            scaled_a = ops.ScaledOperand(a, scale_a, scale_mode_a, swizzle_mode_a)
+            scaled_b = ops.ScaledOperand(b, scale_b, scale_mode_b, swizzle_mode_b)
+            return ops.GemmArguments(
                 scaled_a,
                 scaled_b,
                 out,
@@ -353,35 +371,23 @@ def _create_gemm_arguments(
             kwargs: dict[str, Any] = {"accumulator_type": accumulator_type}
             if epilogue is not None:
                 kwargs["epilogue"] = epilogue
-            return cutlass_api.arguments.GemmArguments(a, b, out, **kwargs)
+            return ops.GemmArguments(a, b, out, **kwargs)
 
         case _:
             raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
 
 
-def _lookup_gemm_kernel(
-    kernel_name: str,
-    *,
-    epilogue_args: Any | None = None,
-    epilogue_source: str = "",
-):
-    from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
-        get_efc_kernel_with_epilogue,
-        get_kernel_by_name,
+def _lookup_gemm_operator(kernel_name: str, args, target_sm, epilogue_source: str = ""):
+    # Per-problem discovery. This handles `args` with and without epilogue.
+    # epilogue_source distinguishes epilogue-bound operators in the cache.
+    from torch._inductor.codegen.nv_universal_gemm.operator_cache import (
+        get_operator_by_name,
     )
 
-    if epilogue_args is None:
-        kernel = get_kernel_by_name(kernel_name)
-        if kernel is None:
-            raise RuntimeError(f"Could not find kernel: {kernel_name}")
-        return kernel
-
-    kernel = get_efc_kernel_with_epilogue(
-        kernel_name, epilogue_args, epilogue_source=epilogue_source
-    )
-    if kernel is None:
-        raise RuntimeError(f"Could not find EFC kernel: {kernel_name}")
-    return kernel
+    operator = get_operator_by_name(kernel_name, args, target_sm, epilogue_source)
+    if operator is None:
+        raise RuntimeError(f"Could not find operator: {kernel_name}")
+    return operator
 
 
 def _tensor_sig(t):
@@ -404,73 +410,6 @@ def _create_gemm_cache_key(
     return cache_key
 
 
-def _unwrap_efc_compiled_obj(compiled_obj):
-    """Extract the inner JIT function from an EFC closure for disk serialization."""
-    if hasattr(compiled_obj, "__closure__") and compiled_obj.__closure__:
-        inner = compiled_obj.__closure__[0].cell_contents
-        if hasattr(inner, "export_to_c"):
-            return inner
-    return compiled_obj
-
-
-def _init_efc_jit(kernel, epilogue_args):
-    """Lightweight EFC JIT init from epilogue args, without a full kernel.compile().
-
-    EFC.compile() calls analyze_epilogue_with_arguments() then creates the JIT
-    object. We replicate just those two steps so that disk-cached artifacts can
-    be rewrapped without recompiling the CuTe DSL kernel.
-    """
-    from cutlass_api.providers.cutedsl.evt.common_efc import EFC
-    from cutlass_api.utils import TensorWrapper
-
-    efc = kernel.impl.efc
-    params = [
-        e.compile_time_tensor if isinstance(e, TensorWrapper) else e
-        for e in epilogue_args.parameters
-    ]
-    efc.analyze_epilogue_with_arguments(params)
-    efc.jit = EFC.JIT(efc, efc.epilogue_parameter_names)
-
-
-def _rewrap_efc_compiled_obj(compiled_fn, kernel, epilogue_args=None):
-    """Reconstruct the EFC wrapped_launch closure from a loaded JIT function.
-
-    When epilogue_args is provided and efc.jit is missing, performs a
-    lightweight initialization (analyze + JIT creation) so that
-    disk-cached EFC artifacts can be reused without a full recompile.
-    Falls back to returning None (triggering recompile) only when
-    epilogue_args is not available.
-    """
-    if not hasattr(kernel, "impl") or not hasattr(kernel.impl, "efc"):
-        return compiled_fn
-    if not hasattr(kernel.impl.efc, "jit"):
-        if epilogue_args is not None:
-            _init_efc_jit(kernel, epilogue_args)
-        else:
-            return None
-
-    from cutlass_api.providers.cutedsl.gemm.sm100_static_persistent_efc import (
-        KernelOperand,
-        TensorWrapper,
-    )
-
-    def wrapped_launch(a_tensor, b_tensor, stream, *supplemental_args):
-        runtime_args = [
-            e.runtime_tensor
-            if isinstance(e, TensorWrapper)
-            else (e.tensor.runtime_tensor if isinstance(e, KernelOperand) else e)
-            for e in supplemental_args
-        ]
-        return compiled_fn(
-            a_tensor,
-            b_tensor,
-            stream,
-            kernel.impl.efc.jit.pack_arguments(*runtime_args),
-        )
-
-    return wrapped_launch
-
-
 def _nvgemm_run(
     variant_name: str,
     kernel_name: str,
@@ -490,7 +429,7 @@ def _nvgemm_run(
     has_epilogue: bool = False,
     aux_tensors: tuple = (),
 ):
-    from cutlass_api.artifact import CompiledArtifact
+    from cutlass.operators.artifact import CompiledArtifact
 
     from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 
@@ -513,10 +452,11 @@ def _nvgemm_run(
             epilogue=epilogue_args,
             **(variant_kwargs or {}),
         )
-        kernel = artifact.kernel_obj
+        operator = artifact.operator_obj
     else:
+        compiled_for = _target_sm_for_device(dev_idx)
 
-        def disk_fallback(kernel):
+        def disk_fallback(operator):
             compiled_fn = disk_cache_get(
                 disk_fn_cache,
                 module_path,
@@ -525,16 +465,12 @@ def _nvgemm_run(
                 dev_idx,
             )
             if compiled_fn is not None:
-                compiled_fn = _rewrap_efc_compiled_obj(
-                    compiled_fn,
-                    kernel,
-                    epilogue_args=epilogue_args,
+                return CompiledArtifact(
+                    compiled_fn, operator, compiled_for=compiled_for
                 )
-            if compiled_fn is not None:
-                return CompiledArtifact(compiled_fn, kernel)
             return None
 
-        artifact, args, kernel, was_compiled = _compile_nvgemm(
+        artifact, args, operator, was_compiled = _compile_nvgemm(
             variant_name,
             input_tensors,
             out,
@@ -543,6 +479,7 @@ def _nvgemm_run(
             args_kwargs=variant_kwargs,
             epilogue_args=epilogue_args,
             epilogue_source=epilogue_source,
+            target_sm=compiled_for,
             fallback_fn=disk_fallback,
         )
 
@@ -552,13 +489,13 @@ def _nvgemm_run(
                 module_path,
                 disk_config_key,
                 cache_key,
-                _unwrap_efc_compiled_obj(artifact.compiled_obj),
+                artifact.compiled_obj,
                 dev_idx,
             )
 
         compiled_cache[mem_key] = artifact
 
-    kernel.run(
+    operator.run(
         args,
         artifact,
         stream=stream,
@@ -568,11 +505,15 @@ def _nvgemm_run(
 
 
 _MAX_ACTIVE_CLUSTERS_MODULES = [
-    "cutlass_api.providers.cutedsl.utils",
-    "cutlass_api.providers.cutedsl.gemm.sm100_static_persistent",
-    "cutlass_api.providers.cutedsl.gemm.sm100_static_persistent_efc",
-    "cutlass_api.providers.cutedsl.gemm.sm100_dense_blockscaled_static_persistent",
-    "cutlass_api.providers.cutedsl.gemm.sm100_contiguous_offset_2d3d_dense_gemm",
+    "cutlass.operators.providers.cutedsl.integration_utils.mma",
+    "cutlass.operators.providers.cutedsl.gemm.sm90_static_persistent",
+    "cutlass.operators.providers.cutedsl.gemm.sm100_persistent",
+    "cutlass.operators.providers.cutedsl.gemm.sm100_persistent_preferred_cluster",
+    "cutlass.operators.providers.cutedsl.gemm.sm100_static_persistent_efc",
+    "cutlass.operators.providers.cutedsl.gemm.sm100_mixed_input",
+    "cutlass.operators.providers.cutedsl.gemm.sm100_contiguous_offset_2d3d_dense_gemm",
+    # Vendored BYOK wrapper: binds get_max_active_clusters into its own namespace.
+    "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",
 ]
 
 
@@ -596,9 +537,11 @@ def _nvgemm_precompile(
 ):
     """Precompile an NVGEMM kernel in a subprocess for parallel compilation.
 
-    Precompiles only the base (non-EFC) kernel. EFC kernels produce
-    closure-wrapped artifacts that can't be serialized to disk cache.
+    Precompiles only base (non-EFC) kernels; EFC (epilogue-fused) precompile is
+    not yet implemented.
     """
+    from cutlass.operators import TargetSm
+
     import torch
     from torch._inductor.runtime.cutedsl_cache import disk_cache_set
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -606,8 +549,9 @@ def _nvgemm_precompile(
     if max_active_clusters is None:
         return
 
-    # cutlass_api queries device occupancy while compiling. In async-compile
-    # workers forked from a CUDA-initialized parent, skip precompile.
+    # cutlass.operators queries device occupancy while compiling. In
+    # async-compile workers forked from a CUDA-initialized parent, skip
+    # precompile.
     if torch.cuda._is_in_bad_fork():
         return
 
@@ -625,6 +569,11 @@ def _nvgemm_precompile(
     input_tensors = tuple(tensors[n] for n in input_param_names)
     out = tensors["output"]
 
+    target_sm = None
+    if device_capability is not None:
+        major, minor = device_capability
+        target_sm = TargetSm(f"{major}{minor}a")
+
     patched = _patch_max_active_clusters(max_active_clusters)
     try:
         cache_key = _create_gemm_cache_key(input_tensors, out)
@@ -637,6 +586,7 @@ def _nvgemm_precompile(
                 accumulator_type,
                 kernel_name=kernel_name,
                 args_kwargs=variant_kwargs,
+                target_sm=target_sm,
             )
             disk_cache_set(
                 disk_fn_cache,
@@ -755,7 +705,7 @@ class NVUniversalGemmKernel(Kernel):
                 self.swizzle_type_b,
             )
             variant_extra_imports = (
-                "from cutlass_api.library import ScaleMode, ScaleSwizzleMode"
+                "from cutlass.operators import ScaleMode, ScaleSwizzleMode"
             )
             variant_kwargs_expr = (
                 "{"
@@ -778,15 +728,13 @@ class NVUniversalGemmKernel(Kernel):
             code.writeline("_nvgemm_run,")
             code.writeline("_nvgemm_precompile,")
         code.writeline(")")
-        code.writeline("from torch._inductor.utils import _ensure_fp4_dtype_registered")
-        code.writeline("_ensure_fp4_dtype_registered()")
         if variant_extra_imports:
             code.writeline(variant_extra_imports)
         if has_epilogue:
-            code.writeline("from cutlass_api.arguments import EpilogueArguments")
+            code.writeline("from cutlass.operators import EpilogueArguments")
         code.writeline("")
 
-        # -- Epilogue function definition (must be module-level for cutlass_api) --
+        # -- Epilogue function definition (must be module-level for cutlass.operators) --
         epilogue_fn_code = self.epilogue_fn_code
         if has_epilogue and epilogue_fn_code is not None:
             code.splice(epilogue_fn_code, strip=True)

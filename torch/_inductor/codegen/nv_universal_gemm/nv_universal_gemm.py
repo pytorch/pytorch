@@ -2,16 +2,16 @@
 """
 NVIDIA Universal GEMM (NVGEMM) backend for PyTorch Inductor.
 
-This module provides integration with the cutlass_api library to enable
+This module provides integration with the cutlass.operators library to enable
 high-performance GEMM kernels for NVIDIA GPUs.
 """
 
 import itertools
-import re
 from enum import auto, Enum
 from typing import Any
 
 import torch
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -25,8 +25,7 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _create_gemm_cache_key,
     _get_scaled_gemm_modes,
     _make_disk_config_key,
-    _rewrap_efc_compiled_obj,
-    _unwrap_efc_compiled_obj,
+    _target_sm_for_device,
 )
 from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
@@ -67,7 +66,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         kernel_name: str,
         input_tensor_meta: TensorMeta | list[TensorMeta],
         output_tensor_meta: TensorMeta | list[TensorMeta],
-        kernel,  # cutlass_api.Kernel object
+        operator,  # cutlass.operators.Operator object
         accumulator_type: torch.dtype,
         variant: GemmVariant,
         workspace_size: int = 0,
@@ -77,7 +76,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         swizzle_type_b: Any | None = None,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, ())
-        self.kernel = kernel
+        self.operator = operator
         self.accumulator_type = accumulator_type
         self._workspace: torch.Tensor | None = None
         self._disk_fn_cache: dict = {}
@@ -122,12 +121,9 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
     def make_run_fn(self, *input_tensors: torch.Tensor, out: torch.Tensor):
         """Create a function to run the NVIDIA Universal GEMM kernel."""
-        from cutlass_api.artifact import CompiledArtifact
+        from cutlass.operators.artifact import CompiledArtifact
 
         from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
-        from torch._inductor.utils import _ensure_fp4_dtype_registered
-
-        _ensure_fp4_dtype_registered()
 
         helper_kwargs: dict[str, Any] = {}
         if self.variant == GemmVariant.SCALED_GEMM:
@@ -148,7 +144,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         cache_key = _create_gemm_cache_key(input_tensors, out)
         dev_idx = input_tensors[0].device.index or 0
-        kernel_name = self.kernel.metadata.kernel_name
+        compiled_for = _target_sm_for_device(dev_idx)
+        kernel_name = self.operator.metadata.operator_name
         disk_config_key = _make_disk_config_key(
             kernel_name,
             self.variant.name,
@@ -159,7 +156,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             self.swizzle_type_b,
         )
 
-        def disk_fallback(kernel):
+        def disk_fallback(operator):
             compiled_fn = disk_cache_get(
                 self._disk_fn_cache,
                 kernel_name,
@@ -168,29 +165,28 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
                 dev_idx,
             )
             if compiled_fn is not None:
-                compiled_fn = _rewrap_efc_compiled_obj(compiled_fn, kernel)
-            if compiled_fn is not None:
-                return CompiledArtifact(compiled_fn, kernel)
+                return CompiledArtifact(
+                    compiled_fn, operator, compiled_for=compiled_for
+                )
             return None
 
-        artifact, args, kernel, was_compiled = _compile_nvgemm(
+        artifact, args, operator, was_compiled = _compile_nvgemm(
             self.variant.name,
             input_tensors,
             out,
             self.accumulator_type,
-            kernel_obj=self.kernel,
+            operator_obj=self.operator,
             args_kwargs=helper_kwargs,
             fallback_fn=disk_fallback,
         )
 
         if was_compiled:
-            obj = _unwrap_efc_compiled_obj(artifact.compiled_obj)
             disk_cache_set(
                 self._disk_fn_cache,
                 kernel_name,
                 disk_config_key,
                 cache_key,
-                obj,
+                artifact.compiled_obj,
                 dev_idx,
             )
 
@@ -206,7 +202,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         def run_kernel():
             stream = torch.cuda.current_stream()
-            kernel.run(
+            operator.run(
                 args,
                 artifact,
                 stream=stream,
@@ -230,7 +226,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
     """
     ChoiceCaller for NVIDIA Universal GEMM kernels.
 
-    Wraps a cutlass_api kernel and integrates with Inductor's autotuning.
+    Wraps a cutlass.operators Operator and integrates with Inductor's autotuning.
     """
 
     index_counter = itertools.count()
@@ -240,7 +236,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         name: str,
         input_nodes: list[Buffer],
         layout: Layout,
-        kernel,  # cutlass_api.Kernel object
+        operator,  # cutlass.operators.Operator object
         accumulator_type: torch.dtype,
         variant: GemmVariant,
         workspace_size: int = 0,
@@ -254,9 +250,9 @@ class NVUniversalGemmCaller(ChoiceCaller):
             name=name,
             input_nodes=input_nodes,
             layout=layout,
-            description=f"{variant.op_name} {kernel.metadata.kernel_name}",
+            description=f"{variant.op_name} {operator.metadata.operator_name}",
         )
-        self.kernel = kernel
+        self.operator = operator
         self.accumulator_type = accumulator_type
         self.workspace_size = workspace_size
         self.variant = variant
@@ -273,7 +269,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
             kernel_name=name,
             input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(output_buffer),
-            kernel=kernel,
+            operator=operator,
             accumulator_type=accumulator_type,
             workspace_size=workspace_size,
             variant=variant,
@@ -284,7 +280,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         )
 
     def __str__(self) -> str:
-        return f"NVUniversalGemmCaller({self.kernel.metadata.kernel_name})"
+        return f"NVUniversalGemmCaller({self.operator.metadata.operator_name})"
 
     def precompile(self):
         self.bmreq.precompile()
@@ -305,7 +301,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         buffer = NVUniversalGemmBuffer(
             layout=self.layout,
             inputs=self.input_nodes,
-            kernel=self.kernel,
+            operator=self.operator,
             accumulator_type=self.accumulator_type,
             workspace_size=self.workspace_size,
             variant=self.variant,
@@ -328,14 +324,14 @@ class NVUniversalGemmCaller(ChoiceCaller):
 
     def hash_key(self) -> str:
         # `select_algorithm` uses this as a precompile dedup key. Two callers
-        # wrapping the same physical kernel name but with different accumulator/
+        # wrapping the same physical operator name but with different accumulator/
         # scale/swizzle types produce distinct compiled artifacts; collapsing
         # them here would silently drop the second from autotuning.
         return "_".join(
             str(x)
             for x in (
                 self.variant.op_name,
-                self.kernel.metadata.kernel_name,
+                self.operator.metadata.operator_name,
                 self.accumulator_type,
                 self.scale_type_a,
                 self.scale_type_b,
@@ -348,7 +344,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         return {
             "name": self.name,
             "backend": self.variant.op_name,
-            "kernel_name": self.kernel.metadata.kernel_name,
+            "kernel_name": self.operator.metadata.operator_name,
         }
 
     def get_make_kernel_render(self):
@@ -358,8 +354,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         from torch._inductor.utils import Placeholder
 
         kernel_metadata = {
-            "kernel_name": self.kernel.metadata.kernel_name,
-            "min_cc": self.kernel.metadata.min_cc,
+            "kernel_name": self.operator.metadata.operator_name,
         }
         accumulator_type = self.accumulator_type
         workspace_size = self.workspace_size
@@ -424,8 +419,8 @@ def _create_dummy_tensor_from_layout(
     Create a FakeTensor from a Layout for kernel filtering.
 
     Uses Layout.get_example() which creates FakeTensors within V.fake_mode,
-    avoiding real CUDA memory allocation. cutlass_api only needs shape/stride/dtype
-    metadata for its supports() checks.
+    avoiding real CUDA memory allocation. cutlass.operators only needs
+    shape/stride/dtype metadata for its supports() checks.
     """
     try:
         result = layout.get_example()
@@ -440,37 +435,28 @@ def _create_dummy_tensor_from_layout(
         return None
 
 
-_TILE_RE = re.compile(r"tile(\d+)x\d+x\d+")
+def _include_efc_operators_only(metadata) -> bool:
+    """Filter to include only those operators that support epilogue fusion ("EFC").
 
-
-def _include_efc_kernels_only(metadata) -> bool:
-    """Filter to include only EFC (Epilogue Fusion Compatible) kernels.
-
-    Excludes tile_M=64 EFC kernels: cutlass_api has a broadcast bug in the
-    epilogue thread operation for aux-tensor inputs with tile_M=64, and we
-    don't yet know at autotune time whether fusion will consume aux tensors.
-    Non-EFC kernels still cover tile_M=64, so plain GEMM autotune is unaffected.
-
-    Strictly requires the kernel name to encode tile dims; if cutlass_api ever
-    changes the naming scheme, this raises rather than silently letting the
-    broken tile_M=64 kernels through.
+    TODO: Currently this also excludes tile_M < 128 EFC operators as a conservative
+    workaround for a reported aux-tensor broadcast failure (pytorch/pytorch#181901).
+    This bug is not reproduced now. This filter should be removed once a tile_M=64
+    aux-tensor regression test guards it.
+    Removing it will help small-M decode shapes. Non-EFC operators still cover tile_M < 128,
+    so plain GEMM autotuning is unaffected.
     """
-    if "EFC" not in metadata.kernel_class.__name__:
+    if "EFC" not in metadata.operator_class.__name__:
         return False
-    match = _TILE_RE.search(metadata.kernel_name)
-    if match is None:
-        raise RuntimeError(
-            f"NVGEMM EFC kernel name does not match expected tile pattern "
-            f"'tileMxNxK': {metadata.kernel_name}. The tile_M=64 broadcast "
-            f"workaround in _include_efc_kernels_only depends on this naming "
-            f"convention; update the regex or move to metadata-based filtering."
-        )
-    return int(match.group(1)) >= 128
+    design = metadata.design
+    tile_shape = getattr(design, "tile_shape", None) if design is not None else None
+    if not tile_shape:
+        return False
+    return tile_shape[0] >= 128
 
 
-def _exclude_efc_kernels(metadata) -> bool:
-    """Filter to exclude EFC kernels (for non-epilogue cases)."""
-    return "EFC" not in metadata.kernel_class.__name__
+def _exclude_efc_operators(metadata) -> bool:
+    """Keep only non-EFC operators (for the plain, non-epilogue bucket)."""
+    return "EFC" not in metadata.operator_class.__name__
 
 
 def _add_nv_gemm_choices_impl(
@@ -500,15 +486,11 @@ def _add_nv_gemm_choices_impl(
         swizzle_type_a: SwizzleType for A (required for SCALED_GEMM)
         swizzle_type_b: SwizzleType for B (required for SCALED_GEMM)
     """
-    from torch._inductor.utils import _ensure_fp4_dtype_registered
-
-    _ensure_fp4_dtype_registered()
-
-    from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
-        partition_compatible_kernels,
+    from torch._inductor.codegen.nv_universal_gemm.operator_cache import (
+        compatible_operators,
     )
 
-    # Create dummy tensors for cutlass_api's supports() checks.
+    # Create dummy tensors for cutlass.operators' supports() checks.
     # Pass node dtype to handle FP4 ReinterpretView (uint8 storage viewed as float4_e2m1fn_x2).
     dummy_tensors = [
         _create_dummy_tensor_from_layout(
@@ -556,58 +538,71 @@ def _add_nv_gemm_choices_impl(
         return
     cc_int = int(cc)
 
-    # Single-pass partition over the ~390K-entry kernel cache. The two-pass
-    # form below called `kernel.supports(args)` once per bucket -- i.e. twice
-    # per non-EFC-class kernel -- across the full cache.
-    def _classify(metadata) -> int:
-        if _include_efc_kernels_only(metadata):
-            return 1  # efc bucket (with tile_M >= 128)
-        if _exclude_efc_kernels(metadata):
-            return 0  # non-efc bucket
-        # NOTE: tile_M < 128 EFC kernels are dropped due to a cutlass_api
-        # broadcast bug. Tracking: https://github.com/pytorch/pytorch/issues/181901
-        return -1
+    from cutlass.operators.arch import TargetSm
 
-    non_efc_kernels, efc_kernels = partition_compatible_kernels(
-        args, cc_int, _classify, num_buckets=2
+    target_sm = TargetSm(cc=cc_int)
+
+    with dynamo_timed(
+        "nv_universal_gemm_operator_discovery",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="compile_time_autotune_time_us",
+    ):
+        # Per-problem discovery: the library prunes to operators compatible with
+        # args + target_sm. Bucket the result into non-EFC vs EFC ourselves.
+        # _include_efc_operators_only keeps only tile_M >= 128 EFC operators
+        # (see its TODO re pytorch/pytorch#181901).
+        ops_list = compatible_operators(args, target_sm)
+        non_efc_operators = [o for o in ops_list if _exclude_efc_operators(o.metadata)]
+        efc_operators = [o for o in ops_list if _include_efc_operators_only(o.metadata)]
+    from torch._inductor.codegen.nv_universal_gemm.operator_cache import (
+        materialized_operator_count,
+    )
+
+    log.debug(
+        "NVGEMM_DISCOVERY variant=%s compatible=%d non_efc=%d efc=%d materialized=%d",
+        variant.op_name,
+        len(non_efc_operators) + len(efc_operators),
+        len(non_efc_operators),
+        len(efc_operators),
+        materialized_operator_count(),
     )
     if not config.epilogue_fusion:
-        efc_kernels = []
-    if not non_efc_kernels and not efc_kernels:
-        log.debug("No compatible %s kernels found", variant.op_name)
+        efc_operators = []
+    if not non_efc_operators and not efc_operators:
+        log.debug("No compatible %s operators found", variant.op_name)
         return
 
     max_configs = config.nvgemm_max_profiling_configs or max(
-        len(non_efc_kernels), len(efc_kernels)
+        len(non_efc_operators), len(efc_operators)
     )
     if variant in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM) and mm_inputs is not None:
         heuristics = get_nvgemm_heuristics()
-        non_efc_kernels = heuristics.filter_kernels(
-            non_efc_kernels, mm_inputs, max_configs, accumulator_type
+        non_efc_operators = heuristics.filter_kernels(
+            non_efc_operators, mm_inputs, max_configs, accumulator_type
         )
-        efc_kernels = heuristics.filter_kernels(
-            efc_kernels, mm_inputs, max_configs, accumulator_type
+        efc_operators = heuristics.filter_kernels(
+            efc_operators, mm_inputs, max_configs, accumulator_type
         )
     else:
         # TODO(nikhilap): Enable heuristics for grouped GEMM
         # when nvMatmulHeuristics adds support
-        non_efc_kernels = non_efc_kernels[:max_configs]
-        efc_kernels = efc_kernels[:max_configs]
+        non_efc_operators = non_efc_operators[:max_configs]
+        efc_operators = efc_operators[:max_configs]
 
-    all_kernels = [(kernel, False) for kernel in non_efc_kernels] + [
-        (kernel, True) for kernel in efc_kernels
+    all_operators = [(operator, False) for operator in non_efc_operators] + [
+        (operator, True) for operator in efc_operators
     ]
 
     num_added = 0
-    for kernel, supports_epilogue_fusion in all_kernels:
+    for operator, supports_epilogue_fusion in all_operators:
         name = f"{variant.op_name}_{next(NVUniversalGemmCaller.index_counter)}"
-        workspace_size = kernel.get_workspace_size(args)
+        workspace_size = operator.get_workspace_size(args).size_bytes
         try:
             caller = NVUniversalGemmCaller(
                 name=name,
                 input_nodes=input_nodes,
                 layout=layout,
-                kernel=kernel,
+                operator=operator,
                 accumulator_type=accumulator_type,
                 workspace_size=workspace_size,
                 variant=variant,
@@ -620,9 +615,10 @@ def _add_nv_gemm_choices_impl(
             choices.append(caller)
             num_added += 1
         except Exception:
-            # Broad: caller construction touches cutlass_api / fake-mode tensors
-            # which can raise types other than RuntimeError/ValueError. A single
-            # bad choice should never abort the rest of autotune choice population.
+            # Broad: caller construction touches cutlass.operators / fake-mode
+            # tensors which can raise types other than RuntimeError/ValueError.
+            # A single bad choice should never abort the rest of autotune choice
+            # population.
             log.debug("Failed to create %s choice", variant.op_name, exc_info=True)
 
     log.debug("Added %d %s choices", num_added, variant.op_name)
@@ -640,7 +636,9 @@ def add_nv_universal_gemm_choices(
     Thin wrapper around _add_nv_gemm_choices_impl for regular GEMM.
     """
     if not ensure_nv_universal_gemm_available():
-        log.debug("cutlass_api not available, skipping NVIDIA Universal GEMM choices")
+        log.debug(
+            "cutlass.operators not available, skipping NVIDIA Universal GEMM choices"
+        )
         return
 
     _add_nv_gemm_choices_impl(
@@ -672,7 +670,7 @@ def add_nv_universal_grouped_gemm_choices(
     """
     if not ensure_nv_universal_gemm_available():
         log.debug(
-            "cutlass_api not available, skipping NVIDIA Universal Grouped GEMM choices"
+            "cutlass.operators not available, skipping NVIDIA Universal Grouped GEMM choices"
         )
         return
 
