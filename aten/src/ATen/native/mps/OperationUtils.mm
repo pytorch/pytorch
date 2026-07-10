@@ -428,6 +428,11 @@ bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI) {
   return false;
 }
 
+bool prefer_metal_matmul() {
+  static const bool flag = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
+  return flag;
+}
+
 MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes, MPSShape* strides) {
   id<MTLBuffer> srcBuf = getMTLBufferStorage(t);
 

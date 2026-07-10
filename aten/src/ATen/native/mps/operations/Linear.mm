@@ -4,8 +4,10 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/addmm.h>
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
+#include <ATen/ops/mm.h>
 
 // MTLGPUFamilyApple10 is only defined in the macOS 26+ SDK.
 #if !defined(__MAC_26_0)
@@ -123,6 +125,15 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
 
   if (output.numel() == 0) {
     return output;
+  }
+
+  if (prefer_metal_matmul()) {
+    auto input2d = input.reshape({-1, input.size(-1)});
+    auto weight_t = weight.transpose(0, 1);
+    auto out2d = is_bias_defined ? at::addmm(bias, input2d, weight_t) : at::mm(input2d, weight_t);
+    // contiguous(memory_format) preserves the output layout. no-op when already matching.
+    auto result = out2d.view(output_size).contiguous(input.suggest_memory_format());
+    return weight_arg.dim() != 1 ? result : result.squeeze(-1);
   }
 
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());

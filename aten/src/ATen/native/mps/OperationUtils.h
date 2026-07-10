@@ -123,6 +123,9 @@ MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = Memor
 // Determines whether a tensor is too large to use MPSGraph
 bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true);
 
+// True if PYTORCH_MPS_PREFER_METAL is set (prefer the Metal matmul kernels).
+bool prefer_metal_matmul();
+
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }

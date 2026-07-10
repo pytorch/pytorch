@@ -313,11 +313,10 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 }
 
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
-  static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
   constexpr auto max_complex_inner_size = 2048;
   static bool is_macos_14_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_14_4);
-  if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
+  if (prefer_metal_matmul() || c10::isIntegralType(self.scalar_type(), true)) {
     return true;
   }
   // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
