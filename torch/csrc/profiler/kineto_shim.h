@@ -140,9 +140,9 @@ void logInvariantViolation(
 } // namespace profiler
 
 namespace autograd::profiler {
-#ifdef USE_KINETO
+// Always defined: collection.cpp calls this unconditionally. The body is
+// guarded on USE_KINETO in the .cpp and returns a default when Kineto is off.
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type);
-#endif // USE_KINETO
 
 TORCH_API void addMetadataJson(
     const std::string& key,
