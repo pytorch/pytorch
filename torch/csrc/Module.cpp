@@ -1456,6 +1456,31 @@ static PyObject* THPModule_allowTF32CuBLAS(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setPreferCublasltGroupedGemm(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_prefer_cublaslt_grouped_gemm expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setPreferCublasltGroupedGemm(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_preferCublasltGroupedGemm(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().preferCublasltGroupedGemm()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* args) {
@@ -2163,6 +2188,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_warn_deprecation", THPModule_warnDeprecation, METH_NOARGS, nullptr},
     {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS, nullptr},
     {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O, nullptr},
+    {"_get_cublaslt_prefer_grouped_gemm",
+     THPModule_preferCublasltGroupedGemm,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cublaslt_prefer_grouped_gemm",
+     THPModule_setPreferCublasltGroupedGemm,
+     METH_O,
+     nullptr},
     {"_get_float32_matmul_precision",
      THPModule_float32MatmulPrecision,
      METH_NOARGS,
@@ -2720,6 +2753,35 @@ Call this whenever a new thread is created in order to propagate values from
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     return c10::raw::intrusive_ptr::use_count(storage_impl);
   });
+
+  py_module.def(
+      "_storage_throw_on_immutable_data_ptr", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        return storage_impl->throw_on_immutable_data_ptr();
+      });
+
+  py_module.def(
+      "_storage_throw_on_mutable_data_ptr", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        return storage_impl->throw_on_mutable_data_ptr();
+      });
+
+  py_module.def(
+      "_set_storage_data_ptr_access_error_msg",
+      [](size_t storage_impl_ptr, std::string s) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  py_module.def(
+      "_clear_storage_data_ptr_access_error_msg", [](size_t storage_impl_ptr) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->clear_data_ptr_access_error_msg_();
+      });
 
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
