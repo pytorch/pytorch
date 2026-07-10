@@ -84,6 +84,7 @@ class SetVariable(VariableTracker):
 
     # PySet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2436
     _cpython_type = set
+    tp_name = "set"
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
@@ -806,6 +807,8 @@ class OrderedSetClassVariable(VariableTracker):
 
 
 class OrderedSetVariable(SetVariable):
+    tp_name = "OrderedSet"
+
     def debug_repr(self) -> str:
         if not self.items:
             return "OrderedSet([])"
@@ -888,6 +891,7 @@ class OrderedSetVariable(SetVariable):
 class FrozensetVariable(SetVariable):
     # PyFrozenSet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2526
     _cpython_type = frozenset
+    tp_name = "frozenset"
 
     nb_inplace_subtract_impl = None  # type: ignore[bad-override]
 
@@ -996,6 +1000,8 @@ class FrozensetVariable(SetVariable):
 
 
 class DictKeySetVariable(SetVariable):
+    tp_name = "dict_keys"
+
     def debug_repr(self) -> str:
         if not self.items:
             return "dict_keys([])"
