@@ -2610,12 +2610,13 @@ class TestDistributions(DistributionsTestCase):
             ref_dist.rvs = self._get_logistic_normal_ref_sampler(base_dist)
             mean_th = torch.tensor(mean)
             std_th = torch.tensor(np.sqrt(np.diag(cov)))
-            self._check_sampler_sampler(
-                LogisticNormal(mean_th, std_th),
-                ref_dist,
-                f"LogisticNormal(loc={mean_th}, scale={std_th})",
-                multivariate=True,
-            )
+            with freeze_rng_state():
+                self._check_sampler_sampler(
+                    LogisticNormal(mean_th, std_th),
+                    ref_dist,
+                    f"LogisticNormal(loc={mean_th}, scale={std_th})",
+                    multivariate=True,
+                )
 
     def test_mixture_same_family_shape(self):
         normal_case_1d = MixtureSameFamily(
