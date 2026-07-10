@@ -10,6 +10,7 @@ from torch._inductor.kernel.flex.interval_mask_packing import (
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -18,8 +19,38 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
+def piecewise_affine_mask(_b, _h, q_idx, kv_idx):
+    """Build bounded windows over two piecewise-affine coordinates."""
+    row_coord = torch.where(q_idx < 64, q_idx + 64, q_idx + 320)
+    shifted_kv = kv_idx - 512
+    col_coord = torch.where(shifted_kv < 64, shifted_kv + 64, shifted_kv + 320)
+    primary = (kv_idx < 512) & (kv_idx >= row_coord - 32) & (kv_idx <= row_coord)
+    secondary = (
+        (kv_idx >= 512)
+        & (kv_idx < 640)
+        & (col_coord >= row_coord - 16)
+        & (col_coord <= row_coord)
+    )
+    return primary | secondary
+
+
+def piecewise_aux_index_mask(_b, _h, q_idx, kv_idx, offsets):
+    """Load a lane-uniform bound through a piecewise-affine index."""
+    selected_q = torch.where(q_idx < 64, q_idx, q_idx + 64)
+    return kv_idx >= torch.ops.aten.index.Tensor(offsets, [selected_q])
+
+
+def piecewise_strided_guard_mask(_b, _h, q_idx, kv_idx):
+    """Use a non-interval lane predicate as a piecewise guard."""
+    mapped_kv = torch.where(kv_idx % 2 == 0, kv_idx, kv_idx + 1)
+    return mapped_kv <= q_idx
+
+
 @instantiate_parametrized_tests
 class TestIntervalMaskPacking(InductorTestCase):
+    def _trace_mask(self, mask, *extra_args):
+        return make_fx(mask)(*(torch.tensor(i) for i in range(4)), *extra_args)
+
     def _expected_packed_mask_interval(self, case_name, q_idx, kv_idx, lane):
         match case_name:
             case "causal":
@@ -258,7 +289,7 @@ class TestIntervalMaskPacking(InductorTestCase):
         q_idx = graph.placeholder("q_idx")
         kv_idx = graph.placeholder("kv_idx")
         terms = []
-        for offset in range(9):
+        for offset in range(17):
             shifted_q = graph.call_function(torch.ops.aten.add.Scalar, (q_idx, offset))
             terms.append(
                 graph.call_function(torch.ops.aten.eq.Tensor, (kv_idx, shifted_q))
@@ -402,6 +433,47 @@ class TestIntervalMaskPacking(InductorTestCase):
         self.assertIn("min(", intervals[0].render_upper())
         self.assertIn("aux_tensors[0]", intervals[0].render_upper())
         self.assertIn("cutlass.Int32(32)", intervals[0].render_upper())
+
+    def test_packed_mask_interval_selector_piecewise_affine_coordinates(self):
+        """Pack bounded windows over two piecewise-affine index mappings."""
+        graph_module = self._trace_mask(piecewise_affine_mask)
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(graph_module)
+
+        self.assertIsNotNone(intervals)
+        for q in (0, 15, 63, 64, 65, 127):
+            for kv in range(0, 641, 32):
+                expected_lanes = piecewise_affine_mask(
+                    None, None, torch.tensor(q), kv + torch.arange(32)
+                )
+                expected_mask = sum(
+                    int(value) << lane for lane, value in enumerate(expected_lanes)
+                )
+                with V.set_graph_handler(MockGraphHandler()):
+                    actual_mask = self._eval_packed_mask_intervals(intervals, q, kv)
+                self.assertEqual(actual_mask, expected_mask)
+
+    def test_packed_mask_interval_selector_piecewise_aux_index(self):
+        offsets = torch.zeros(256, dtype=torch.int32)
+        graph_module = self._trace_mask(piecewise_aux_index_mask, offsets)
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(graph_module)
+
+        self.assertIsNotNone(intervals)
+        self.assertEqual(len(intervals), 2)
+        rendered = "\n".join(interval.render_lower() for interval in intervals)
+        self.assertEqual(rendered.count("aux_tensors[0]"), 2)
+        self.assertIn("(q_idx[0] + cutlass.Int32(64))", rendered)
+
+    def test_packed_mask_interval_selector_rejects_piecewise_strided_guard(self):
+        graph_module = self._trace_mask(piecewise_strided_guard_mask)
+
+        with V.set_graph_handler(MockGraphHandler()):
+            intervals = select_packed_mask_intervals(graph_module)
+
+        self.assertIsNone(intervals)
 
 
 if __name__ == "__main__":
