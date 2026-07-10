@@ -16,7 +16,15 @@ from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 import torch
 
 from . import cupti_python
-from .records import Api, FIELD_REGISTRY, Kernel, STRING_FIELDS, Sync
+from .records import (
+    Api,
+    Ctype,
+    FIELD_CTYPE,
+    FIELD_REGISTRY,
+    Kernel,
+    STRING_FIELDS,
+    Sync,
+)
 
 
 # A registration request: either a plain iterable of activity kinds (meaning "all
@@ -398,6 +406,11 @@ class CuptiMonitor:
                     f"coexisting subscribers: {e}"
                 ) from e
             raise
+        # Arm the per-subscriber approx-clock timestamp callback right after subscribe, before
+        # arming UDR, so it is in effect before any user-defined record is produced.
+        self._timestamp_callback_active = self._try_arm_approx_timestamp_callback(
+            self._subscriber
+        )
         self._cupti.arm_user_defined_records(
             self._subscriber, request_addr, complete_addr
         )
@@ -411,9 +424,8 @@ class CuptiMonitor:
         self.register_callbacks()
         # Put activity records on kineto's unix timeline via the clock (see _SynchronizedClock):
         # normally cuptiGetTimestamp == CLOCK_REALTIME == unix and records pass through, unless
-        # the timestamp callback stamps them on the approx clock. calibrate() reads the native
-        # clock through this callable, which is valid for the life of the subscription.
-        self._timestamp_callback_active = self._try_register_timestamp_callback()
+        # register_callbacks armed the timestamp callback (approx clock). calibrate() reads the
+        # native clock through this callable, which is valid for the life of the subscription.
         self._clock.calibrate(
             callback_active=self._timestamp_callback_active,
             native_now=lambda: self._cupti.get_timestamp(cast(int, self._subscriber)),
@@ -482,8 +494,8 @@ class CuptiMonitor:
         _cupti_monitor_native.stop_decoder()
         self._drain_and_dispatch()
         # Clear the timestamp callback (restore CUPTI's default timer) before unsubscribe.
-        if self._timestamp_callback_active:
-            self._cupti.unregister_timestamp_callback()
+        if self._timestamp_callback_active and self._subscriber is not None:
+            self._cupti.disarm_approx_timestamp_callback(self._subscriber)
             self._timestamp_callback_active = False
         # Disable everything we enabled, then tear down the subscription.
         self._disable(self._enabled.keys())
@@ -644,24 +656,33 @@ class CuptiMonitor:
         record timestamps. Returns 0 before the session is calibrated."""
         return self._clock.now_record_ns()
 
-    def _try_register_timestamp_callback(self) -> bool:
+    def _try_arm_approx_timestamp_callback(self, sub_handle: int) -> bool:
         """Best-effort: hand CUPTI the profiler's approx-clock timestamp callback so it
         stamps activity records on kineto's exact timebase directly. Opt-in via the
         use_approx_timestamps monitor arg (and only as the sole subscriber); returns False --
         leaving records on the CLOCK_REALTIME pass-through -- when disabled or when CUPTI
-        rejects it (current libcupti returns CUPTI_ERROR_NOT_COMPATIBLE under the
-        user-defined-record path)."""
+        rejects it. Set as a per-subscriber attribute (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK),
+        which coexists with the user-defined-record path -- unlike the global
+        cuptiActivityRegisterTimestampCallback, which returns CUPTI_ERROR_NOT_COMPATIBLE."""
         if not self._timestamp_callback_enabled:
             return False
+        # cuptiSubscribe latches the device-record correlation base against a pre-existing CUDA
+        # context, so a callback armed now (post-subscribe) can't re-time device records if one
+        # exists -- they stay pinned to CLOCK_REALTIME. Refuse rather than silently drop them.
+        if _has_active_cuda_context():
+            logger.warning(
+                "CUPTI monitor: use_approx_timestamps requested but a CUDA context already "
+                "exists; device records were correlated on CLOCK_REALTIME at subscribe and "
+                "cannot be re-timed. Falling back to the CLOCK_REALTIME pass-through."
+            )
+            return False
         addr = _cupti_monitor_native.approximate_time_callback_address()
-        rc = self._cupti.register_timestamp_callback(addr)
-        if rc == cupti_python.CUPTI_SUCCESS:
+        if self._cupti.arm_approx_timestamp_callback(sub_handle, addr):
             logger.info("CUPTI monitor: approx-clock timestamp callback engaged")
             return True
         logger.warning(
-            "CUPTI monitor: timestamp callback rejected (%s); using the cuptiGetTimestamp "
-            "(CLOCK_REALTIME) pass-through",
-            self._cupti._result_string(rc),
+            "CUPTI monitor: timestamp callback rejected; using the cuptiGetTimestamp "
+            "(CLOCK_REALTIME) pass-through"
         )
         return False
 
@@ -1106,18 +1127,28 @@ class CuptiMonitor:
         self, kind: int, fields: Mapping[int, tuple[int, bytes]]
     ) -> dict[int, Any]:
         """Turn one native group's ``{field_id: (field_size, bytes)}`` into
-        ``{field_id: column}``: numeric fields are viewed as ``<u{size}``; const
-        char* (string) fields are dereferenced to str."""
+        ``{field_id: column}``: numeric fields are viewed per their :class:`Ctype`
+        (unsigned/signed/float) at the captured width; const char* (string) fields are
+        dereferenced to str."""
         str_fields = STRING_FIELDS.get(kind, frozenset())
+        ctype_by_fid = FIELD_CTYPE.get(kind, {})
         cols: dict[int, Any] = {}
         for fid, (size, raw) in fields.items():
             if fid in str_fields and size == 8:
                 ptrs = np.frombuffer(raw, dtype="<u8")
                 cols[fid] = np.array([_deref_cstr(int(p)) for p in ptrs], dtype=object)
             elif size in (1, 2, 4, 8):
+                # The width is the captured layout's; Ctype only picks the interpretation.
+                # Fall back to unsigned for the cases numpy can't express -- a <f1 (there is
+                # no 1-byte numpy float) or a CSTR that isn't an 8-byte pointer -- so a
+                # mis-typed field can't crash the drain.
+                ctype = ctype_by_fid.get(fid, Ctype.UINT)
+                bad_float = ctype is Ctype.FLOAT and size not in (2, 4, 8)
+                if ctype is Ctype.CSTR or bad_float:
+                    ctype = Ctype.UINT
                 # .copy() so the column is writable and owns its memory (the
                 # frombuffer view is read-only over the transient bytes).
-                cols[fid] = np.frombuffer(raw, dtype=f"<u{size}").copy()
+                cols[fid] = np.frombuffer(raw, dtype=ctype.numpy(size)).copy()
         return cols
 
     def _maybe_warn_backpressure(self) -> None:
