@@ -1472,6 +1472,35 @@ class GraphModule(torch.nn.Module):
         ):
             opt_fn(x, y)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_input_mutation_alias_annotated_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("scale_into(Tensor x, Tensor! out, float scale) -> ()")
+
+            def scale_into(x, out, scale):
+                out.copy_(x * scale)
+
+            lib.impl("scale_into", scale_into, "CompositeExplicitAutograd")
+
+            @nested_compile_region
+            def gn(x, y):
+                out = torch.empty_like(y)
+                torch.ops.mylib.scale_into(y, out, 2.0)
+                x.add_(out)
+                return torch.mul(x, y)
+
+            def fn(x, y):
+                return gn(x, y)
+
+            x = torch.randn(8, requires_grad=False)
+            x_clone = x.clone()
+            y = torch.randn(8, requires_grad=False)
+
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+            self.assertEqual(opt_fn(x, y), fn(x_clone, y))
+            self.assertEqual(x_clone, x)
+
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
 

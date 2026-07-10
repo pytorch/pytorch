@@ -782,9 +782,15 @@ def disable_functional_mode() -> Generator[None, None, None]:
 # - Doing so means that it does not automatically compose with other
 #   functorch transforms, since these transforms always run above __torch_dispatch__.
 #   That's why this util lives here, and not in functorch.
+# - Input mutations are only propagated back when propagate_input_mutations is set.
 def dispatch_functionalize(
-    func: Callable[..., Any], mode: FunctionalTensorMode = FunctionalTensorMode()
+    func: Callable[..., Any],
+    mode: FunctionalTensorMode = FunctionalTensorMode(),
+    *,
+    propagate_input_mutations: bool = False,
 ) -> Callable[..., Any]:
+    from torch._C._functorch import _propagate_functional_input_mutation
+
     # TODO: pull these from aot autograd
     def to_fun(t: object) -> object:
         if isinstance(t, torch.Tensor):
@@ -807,11 +813,21 @@ def dispatch_functionalize(
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        with disable_above, mode:
-            func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
-            func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
-            func_outputs = func(*func_args, **func_kwargs)
-            outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
+        with disable_above:
+            with mode:
+                func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
+                func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
+                func_outputs = func(*func_args, **func_kwargs)
+                outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
+
+            if propagate_input_mutations:
+                # Runs outside of mode so the copy_ mutates the caller's tensors.
+                for arg, func_arg in zip(
+                    pytree.arg_tree_leaves(*args, **kwargs),
+                    pytree.arg_tree_leaves(*func_args, **func_kwargs),
+                ):
+                    if isinstance(func_arg, FunctionalTensor):
+                        _propagate_functional_input_mutation(arg, func_arg.elem)
 
             return outputs
 
