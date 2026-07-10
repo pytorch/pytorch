@@ -165,6 +165,10 @@ RUN echo "[ROCm]" > /etc/yum.repos.d/rocm.repo && \
         roctracer-devel && \
     yum clean all && \
     rm -rf /var/cache/yum
+# numactl-devel fixes the rocSHMEM install issue by providing numa.h.
+RUN yum install -y numactl-devel && \
+    yum clean all && \
+    rm -rf /var/cache/yum
 # All rocm clang cfg files load the same rocm.cfg, make sure it points to the right toolchain.
 RUN echo "--gcc-toolchain=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr" >> /opt/rocm/llvm/bin/rocm.cfg
 # Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path,
