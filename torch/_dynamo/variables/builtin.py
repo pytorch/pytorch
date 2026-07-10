@@ -42,7 +42,9 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import graph_break_hints, polyfills, variables
 from ..exc import (
+    handle_observed_exception,
     ObservedAttributeError,
+    ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -113,6 +115,8 @@ from .object_protocol import (
     pysequence_check,
     ternary_iop,
     ternary_op,
+    type_implements_mp_length,
+    type_implements_sq_length,
     vt_add,
     vt_getitem,
     vt_identity_compare,
@@ -2161,17 +2165,19 @@ class BuiltinVariable(BaseBuiltinVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
+        # CPython set_init rejects keywords before unpacking positional args, so
+        # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
+        if kwargs:
+            raise_type_error(
+                tx,
+                "set() takes no keyword arguments",
+            )
         if len(args) == 0:
             return variables.SetVariable(set(), mutation_type=ValueMutationNew())
         elif len(args) > 1:
             raise_type_error(
                 tx,
                 f"set expected at most 1 argument, got {len(args)}",
-            )
-        elif kwargs:
-            raise_type_error(
-                tx,
-                "set() takes no keyword arguments",
             )
 
         s = SetVariable([], mutation_type=ValueMutationNew())
@@ -2184,17 +2190,17 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if kwargs:
+            raise_type_error(
+                tx,
+                "frozenset() takes no keyword arguments",
+            )
         if len(args) == 0:
             return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
         elif len(args) > 1:
             raise_type_error(
                 tx,
                 f"frozenset expected at most 1 argument, got {len(args)}",
-            )
-        elif kwargs:
-            raise_type_error(
-                tx,
-                "frozenset() takes no keyword arguments",
             )
 
         if istype(args[0], variables.FrozensetVariable):
@@ -2250,6 +2256,35 @@ class BuiltinVariable(BaseBuiltinVariable):
                 tx, f"len() takes exactly one argument ({len(args)} given)"
             )
         return generic_len(tx, args[0])
+
+    def call_length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        # ref: PyObject_LengthHint (Objects/abstract.c): try __len__, then
+        # __length_hint__, falling back to the supplied default for either a
+        # missing slot or a TypeError raised by the slot.
+        if kwargs or not (1 <= len(args) <= 2):
+            raise_type_error(
+                tx, f"length_hint expected 1 or 2 arguments, got {len(args)}"
+            )
+        obj = args[0]
+        default = args[1] if len(args) == 2 else ConstantVariable.create(0)
+
+        obj_type = maybe_get_python_type(obj)
+
+        if type_implements_sq_length(obj_type) or type_implements_mp_length(obj_type):
+            return generic_len(tx, obj)
+
+        if getattr(obj_type, "__length_hint__", None) is None:
+            return default
+        try:
+            return obj.call_method(tx, "__length_hint__", [], {})
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+            return default
 
     def call_getitem(
         self,
