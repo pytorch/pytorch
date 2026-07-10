@@ -615,8 +615,10 @@ void initFuncTorchBindings(PyObject* module) {
   m.def(
       "get_single_level_autograd_function_allowed",
       &at::functorch::getSingleLevelAutogradFunctionAllowed);
+  THPObjectPtr module_name(PyModule_GetNameObject(m.ptr()));
+  TORCH_CHECK(module_name, "failed to get _functorch module name");
   PyObject* unwrap_dead_wrappers =
-      PyCFunction_New(&unwrapDeadWrappersDef, nullptr);
+      PyCFunction_NewEx(&unwrapDeadWrappersDef, nullptr, module_name.get());
   if (unwrap_dead_wrappers == nullptr ||
       PyModule_AddObject(
           m.ptr(), "unwrap_dead_wrappers", unwrap_dead_wrappers) < 0) {
