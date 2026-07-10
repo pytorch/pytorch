@@ -57,7 +57,7 @@ namespace {
 std::string iValueToString(const c10::IValue& val) {
   std::ostringstream oss;
   oss << val;
-  return oss.str();
+  return std::move(oss).str();
 }
 #endif
 
@@ -182,7 +182,7 @@ std::string dumpValueSet(
     oss << '%' << val->debugName() << ", ";
   }
   oss << '}';
-  return oss.str();
+  return std::move(oss).str();
 }
 
 namespace {
