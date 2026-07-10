@@ -1346,12 +1346,12 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
             (torch.float32, 192): FlexConfig(32, 64, 2, 4),
             (torch.float32, 256): FlexConfig(32, 32, 3, 4),
-            (torch.bfloat16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.bfloat16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.bfloat16, 64): FlexConfig(128, 64, 3, 4),
+            (torch.bfloat16, 128): FlexConfig(128, 128, 2, 8),
             (torch.bfloat16, 192): FlexConfig(128, 128, 1, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
-            (torch.float16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.float16, 128): FlexConfig(128, 64, 3, 8),
+            (torch.float16, 64): FlexConfig(128, 64, 3, 4),
+            (torch.float16, 128): FlexConfig(128, 128, 2, 8),
             (torch.float16, 192): FlexConfig(128, 128, 1, 8),
             (torch.float16, 256): FlexConfig(64, 32, 3, 4),
         }
@@ -1473,6 +1473,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 FlexBwDConfig(64, 64, 64, 64, 2, 4)
             ),
             "sm10x": lambda h: (
+                FlexBwDConfig(32, 64, 64, 32, 3, 4) if h <= 64 else
                 FlexBwDConfig(64, 128, 128, 64, 3, 4) if h <= 128 else
                 FlexBwDConfig(64, 64, 64, 64, 1, 8) if h <= 192 else
                 FlexBwDConfig(64, 64, 64, 64, 1, 4)
