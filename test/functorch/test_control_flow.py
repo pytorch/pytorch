@@ -1982,9 +1982,15 @@ def forward(self, pred_1, x_1):
         switch_calls = [
             n
             for n in gm.graph.nodes
-            if n.op == "call_function" and "switch" in str(n.target)
+            if n.op == "call_function" and n.target is torch.ops.higher_order.switch
         ]
         self.assertEqual(len(switch_calls), 2)
+
+        grads = f(torch.tensor(1), x)
+        expected_grads = torch.autograd.grad(
+            branch1(x), (x,), torch.ones_like(branch1(x))
+        )
+        self.assertEqual(grads, expected_grads)
 
     def test_switch_autograd_nested(self):
         def true_fn(x):
@@ -2198,12 +2204,13 @@ def forward(self, pred_1, x_1):
         branches = (branch0, branch1, branch2)
 
         @torch.compile(backend="eager", fullgraph=True, dynamic=True)
-        def f(idx_tensor, x):
-            return switch(idx_tensor, branches, (x,))
+        def f(i, x):
+            index = torch.arange(i).size(0)
+            return switch(index, branches, (x,))
 
         for i, fn in enumerate(branches):
             x = torch.randn(4, requires_grad=True)
-            result = f(torch.tensor(i), x)
+            result = f(i, x)
             self.assertEqual(result, fn(x))
 
             grad_out = torch.ones_like(result)
