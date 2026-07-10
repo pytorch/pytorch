@@ -2001,7 +2001,8 @@ def invoke_and_store_as_constant(
             # specializes it to the traced value and installs a shape-env
             # guard, so a different value recompiles and re-invokes fn.
             return x.evaluate_expr(tx.output)
-        if x.source is None:
+        source = x.source
+        if source is None:
             try:
                 return x.as_python_constant()
             except AsPythonConstantNotImplementedError:
@@ -2016,28 +2017,30 @@ def invoke_and_store_as_constant(
                         "Ensure all arguments can be converted to constants",
                     ],
                 )
-        source = x.source
-        if x.mutation_type is not None and tx.output.side_effects.is_modified(x):
-            _mutated_constant_arg(name, source.name)
-        if isinstance(x, UserDefinedObjectVariable):
-            value = x.value
         else:
-            try:
-                value = x.as_python_constant()
-            except AsPythonConstantNotImplementedError:
-                unimplemented(
-                    gb_type="assume_constant_result specialize_args argument conversion failed",
-                    context=f"function {name}, variable type {type(x).__name__}",
-                    explanation=f"Cannot convert argument of type {type(x).__name__} to a Python "
-                    f"constant for function {name} marked with "
-                    f"torch._dynamo.assume_constant_result(specialize_args=True).",
-                    hints=[
-                        "Use plain torch._dynamo.assume_constant_result (without specialize_args) instead",
-                        "Ensure all arguments can be converted to constants",
-                    ],
-                )
-        _install_constant_arg_guards(source, value, name, set(), tx.output.side_effects)
-        return value
+            if x.mutation_type is not None and tx.output.side_effects.is_modified(x):
+                _mutated_constant_arg(name, source.name)
+            if isinstance(x, UserDefinedObjectVariable):
+                value = x.value
+            else:
+                try:
+                    value = x.as_python_constant()
+                except AsPythonConstantNotImplementedError:
+                    unimplemented(
+                        gb_type="assume_constant_result specialize_args argument conversion failed",
+                        context=f"function {name}, variable type {type(x).__name__}",
+                        explanation=f"Cannot convert argument of type {type(x).__name__} to a Python "
+                        f"constant for function {name} marked with "
+                        f"torch._dynamo.assume_constant_result(specialize_args=True).",
+                        hints=[
+                            "Use plain torch._dynamo.assume_constant_result (without specialize_args) instead",
+                            "Ensure all arguments can be converted to constants",
+                        ],
+                    )
+            _install_constant_arg_guards(
+                source, value, name, set(), tx.output.side_effects
+            )
+            return value
 
     def convert(x: VariableTracker) -> Any:
         if specialize_args:
