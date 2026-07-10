@@ -154,7 +154,6 @@ blocklist = [
     "cartesian_prod",
     "block_diag",
     "norm",
-    "chain_matmul",
     "stft",
     "tensordot",
     "split",

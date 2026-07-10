@@ -224,7 +224,6 @@ baddbmm
 block_diag
 bmm
 cartesian_prod
-chain_matmul
 cholesky_inverse
 cholesky_solve
 cross
