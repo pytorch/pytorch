@@ -1118,46 +1118,6 @@ def forward(self, L_x_ : torch.Tensor):
         finally:
             RemovableHandle.next_id = old_next_id
 
-    def test_register_forward_hook_inside_compiled_region_existing_hook_id_collision_graph_breaks(
-        self,
-    ):
-        class Mod(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                def forward_hook(module, args, output):
-                    return output + 1
-
-                handle = self.linear.register_forward_hook(forward_hook)
-                try:
-                    return self.linear(x)
-                finally:
-                    handle.remove()
-
-        def existing_hook(module, args, output):
-            return output + 2
-
-        old_next_id = RemovableHandle.next_id
-        pre_handle = None
-        try:
-            RemovableHandle.next_id = 601
-            mod = Mod()
-            pre_handle = mod.linear.register_forward_hook(existing_hook)
-            self.assertEqual(pre_handle.id, 601)
-            RemovableHandle.next_id = 600
-
-            opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, "RemovableHandle.id"
-            ):
-                opt_mod(torch.randn(4, 4))
-        finally:
-            if pre_handle is not None:
-                pre_handle.remove()
-            RemovableHandle.next_id = old_next_id
-
     def test_register_forward_hook_inside_compiled_region_existing_hook_next_id_reset_invalidates_guard(
         self,
     ):

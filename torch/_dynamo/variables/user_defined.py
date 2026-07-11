@@ -77,7 +77,9 @@ from ..utils import (
     base_exception_methods,
     check_constant_args,
     cmp_name_to_op_mapping,
+    deque_iterator,
     deque_methods,
+    deque_rev_iterator,
     dict_methods,
     exception_methods,
     frozenset_methods,
@@ -176,7 +178,6 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
 
-    from .dicts import DunderDictVariable
     from .lists import ListVariable, TupleVariable
 
 
@@ -1229,6 +1230,42 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif self.value in (
+            deque_iterator,
+            deque_rev_iterator,
+        ):
+            # _deque_iterator(deque[, index]) / _deque_reverse_iterator(deque[, index])
+            # ref: dequeiter_new in Modules/_collectionsmodule.c
+            name = self.value.__name__
+
+            def deque_iterator_sig(deque: Any, index: Any = 0, /) -> tuple[Any, Any]:
+                return deque, index
+
+            try:
+                deque_arg, index = deque_iterator_sig(*args, **kwargs)
+            except TypeError:
+                raise_args_mismatch(tx, name)
+            if not isinstance(deque_arg, variables.lists.DequeVariable):
+                raise_type_error(
+                    tx,
+                    f"{name}() argument 1 must be collections.deque, "
+                    f"not {deque_arg.python_type_name()}",
+                )
+            if not isinstance(index, int):
+                index = index.as_python_constant()
+            if self.value is deque_rev_iterator:
+                cls = variables.lists.DequeReverseIteratorVariable
+                snapshot = list(reversed(deque_arg.items))
+            else:
+                cls = variables.lists.DequeIteratorVariable
+                snapshot = list(deque_arg.items)
+            return cls(
+                snapshot,
+                deque_arg,
+                deque_arg.state,
+                index=index,
+                mutation_type=ValueMutationNew(),
+            )
         elif (
             # https://github.com/python/cpython/blob/33efd7178e269cbd04233856261fd0aabbf35447/Lib/contextlib.py#L475-L477
             self.value is types.MethodType
@@ -1700,10 +1737,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
 
-        # This records the attributes that were modified via instance
-        # `__dict__` directly, rather than the normal setattr path.
-        self.dict_vt: DunderDictVariable | None = None
-
         # Cache inspect.getattr_static outputs for the same name. This is fine
         # because if there is a mutation for the name, we use side-effects infra
         # to early return the mutated value.
@@ -1733,11 +1766,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
-
-    def get_dict_vt(self, tx: "InstructionTranslatorBase") -> "DunderDictVariable":
-        if self.dict_vt is None:
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
-        return self.dict_vt
 
     def is_base_vt_modified(self, side_effects: "SideEffects") -> bool:
         if self._base_vt is not None:
@@ -5510,13 +5538,13 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
                 raise AssertionError(
                     "tuple_vt must be constructed by builder.py when source is present"
                 )
-            if not init_args:
-                raise AssertionError("init_args must be provided when tuple_vt is None")
-            # Emulate `tuple.__new__`
+            # Emulate `tuple.__new__`: `tuple.__new__(cls)` with no iterable
+            # arg builds an empty tuple, `tuple.__new__(cls, iterable)` builds
+            # a tuple from the iterable.
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            elems = unpack_iterable(tx, init_args[0])
+            elems = unpack_iterable(tx, init_args[0]) if init_args else []
             self._base_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
             self._base_vt = tuple_vt

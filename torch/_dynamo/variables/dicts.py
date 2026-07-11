@@ -68,7 +68,6 @@ from .object_protocol import (
     mro_lookup,
     vt_getitem,
 )
-from .sets import SetVariable
 
 
 if TYPE_CHECKING:
@@ -1739,7 +1738,7 @@ class DictKeysVariable(DictViewVariable):
                 _graph_break_removable_handle_id(tx)
             m = getattr(self.set_items, name)
             r = m(other_items)
-            return SetVariable(r)
+            return variables.SetVariable(r)
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1897,25 +1896,6 @@ class DictItemsVariable(DictViewVariable):
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictItemsIterator(self.dv_dict.items)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in (
-            "__and__",
-            "__iand__",
-            "__xor__",
-            "__ixor__",
-        ):
-            # These methods always returns a set
-            fn_hdl = getattr(self.set_items, name)
-            ret_val = fn_hdl(args[0].set_items)  # type: ignore[attr-defined]
-            return SetVariable(ret_val)
-        return super().call_method(tx, name, args, kwargs)
 
 
 kV = HashableTracker | str
