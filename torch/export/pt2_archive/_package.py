@@ -7,7 +7,7 @@ import pickle
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import Any, IO, TYPE_CHECKING, TypeAlias
+from typing import Any, IO, Optional, TYPE_CHECKING, TypeAlias
 from typing_extensions import TypeIs
 
 import torch
@@ -864,6 +864,7 @@ def _load_payload_config(
 def _load_state_dict(
     archive_reader: PT2ArchiveReader,
     model_name: str,
+    weights_only: bool = False,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy weight files
     legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
@@ -891,7 +892,7 @@ def _load_state_dict(
                     os.path.join(WEIGHTS_DIR, payload_meta.path_name)
                 )
                 state_dict[weight_fqn] = torch.load(
-                    io.BytesIO(weight_bytes), weights_only=False
+                    io.BytesIO(weight_bytes), weights_only=weights_only
                 )
             else:
                 tensor_meta = payload_meta.tensor_meta
@@ -920,6 +921,7 @@ def _load_state_dict(
 def _load_constants(
     archive_reader: PT2ArchiveReader,
     model_name: str,
+    weights_only: bool = False,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy constant files
     legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
@@ -949,7 +951,7 @@ def _load_constants(
                         os.path.join(CONSTANTS_DIR, path_name)
                     )
                     constants[constant_fqn] = torch.load(
-                        io.BytesIO(constant_bytes), weights_only=False
+                        io.BytesIO(constant_bytes), weights_only=weights_only
                     )
                 else:
                     tensor_meta = payload_meta.tensor_meta
@@ -1087,6 +1089,8 @@ def load_pt2(
     num_runners: int = 1,
     device_index: int = -1,
     load_weights_from_disk: bool = False,
+    weights_only: bool = False,
+    format: Optional[str] = None,
 ) -> PT2ArchiveContents:  # type: ignore[type-arg]
     """
     Loads all the artifacts previously saved with ``package_pt2``.
