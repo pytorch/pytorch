@@ -1095,6 +1095,14 @@
       "Hints": []
     }
   ],
+  "GB2069": [
+    {
+      "Gb_type": "Comprehension analysis failed: ambiguous result store",
+      "Context": "store_targets={store_targets}, iterator_vars={iterator_vars}",
+      "Explanation": "Expected exactly one comprehension result assignment.",
+      "Hints": []
+    }
+  ],
   "GB6012": [
     {
       "Gb_type": "Cannot trace user-defined __len__",
@@ -2471,6 +2479,12 @@
     }
   ],
   "GB9898": [
+    {
+      "Gb_type": "Comprehension analysis failed: No matches",
+      "Context": "pre_store_ops={pre_store_ops}, store_targets={store_targets}, iterator_vars={iterator_vars}",
+      "Explanation": "Comprehension does not match any known bytecode pattern.",
+      "Hints": []
+    },
     {
       "Gb_type": "Comprehension analysis failed: No matches",
       "Context": "pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
