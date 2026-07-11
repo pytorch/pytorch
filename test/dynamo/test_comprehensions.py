@@ -771,6 +771,130 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
         for i in range(2):
             self.assertEqual(count_op(backend.graphs[i], operator.add), 3)
 
+    def test_reuse_name(self):
+        def fn(x):
+            i = [(i + x, torch._dynamo.graph_break()) for i in range(5)]
+            return i, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_store_multiple(self):
+        def fn(x):
+            i, j, k = [(i + x, torch._dynamo.graph_break()) for i in range(3)]
+            return i, j, k, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_store_nonlocal(self):
+        i = 0
+
+        def fn(x):
+            nonlocal i
+            i = [(i + x, torch._dynamo.graph_break()) for i in range(2)]
+            return i, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        res = fn(x)
+        self.assertEqual(res, opt_fn(x))
+        self.assertEqual(i, res[0])
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_reconstruct_cell(self):
+        def fn(x):
+            i = 100
+
+            def g():
+                return i  # makes `i` a cellvar of fn
+
+            r = [(i + x, torch._dynamo.graph_break())[0] for i in range(2)]
+            return (r, g(), i)
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        res = fn(x)
+        self.assertEqual(res, opt_fn(x))
+
+    def test_store_nonlocal_lambda_capture(self):
+        # `i` is a fast local, a comprehension cell, and a free var at once;
+        # Dynamo cannot model two same-named cells and must fall back
+        # (gb_type "MAKE_CELL on a free variable name") rather than silently
+        # capture the wrong cell.
+        i = 0
+
+        def fn(x):
+            nonlocal i
+            i = [lambda: i for i in range(2)]
+            return [f() is i for f in i], x + 1
+
+        x = torch.randn(3, 3)
+        res = fn(x)
+        i = 0
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(res, opt_fn(x))
+
+        i = 0
+        torch._dynamo.reset()
+        full_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "MAKE_CELL on a free variable name"
+        ):
+            full_fn(x)
+
+    def test_store_global(self):
+        global _comprehension_global
+
+        def fn(x):
+            global _comprehension_global
+            _comprehension_global = [
+                (i + x, torch._dynamo.graph_break()) for i in range(2)
+            ]
+            return _comprehension_global, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        res = fn(x)
+        self.assertEqual(res, opt_fn(x))
+        self.assertEqual(_comprehension_global, res[0])
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_store_attribute(self):
+        class C:
+            pass
+
+        def fn(x):
+            obj = C()
+            obj.vals = [(i + x, torch._dynamo.graph_break()) for i in range(2)]
+            return obj.vals, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_augmented_assign(self):
+        def fn(x):
+            acc = [x]
+            acc += [(i + x, torch._dynamo.graph_break()) for i in range(2)]
+            return acc, x.sin()
+
+        x = torch.randn(3, 3)
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(len(backend.graphs), 1)
+
 
 @skipIfNotPy312
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
