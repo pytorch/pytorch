@@ -1189,7 +1189,7 @@ std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
       devices.begin(),
       devices.end(),
       std::ostream_iterator<c10::Device>(oss, ", "));
-  return oss.str();
+  return std::move(oss).str();
 }
 #endif
 
