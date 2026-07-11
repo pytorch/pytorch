@@ -949,12 +949,18 @@ class TestPatternMatcher(TestCase):
             x = torch.full([100], 0.1, dtype=torch.float32)
             return torch.cumsum(x, 0, dtype=torch.float64)
 
-        for fn in (fn1, fn2, fn3, fn4, fn5, fn6, fn7, fn8, fn9):
+        def fn10():
+            x = torch.full([5000], 1.0, dtype=torch.float16)
+            return torch.cumsum(x, 0, dtype=torch.float32)
+
+        def fn11():
+            x = torch.full([10], 2.5, dtype=torch.float32)
+            return torch.cumsum(x, 0, dtype=torch.int64)
+
+        for fn in (fn1, fn2, fn3, fn4, fn5, fn6, fn7, fn8, fn9, fn10, fn11):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
-            expected = fn()
-            self.assertEqual(result.dtype, expected.dtype)
-            self.assertEqual(result, expected)
+            self.assertEqual(result, fn())
             self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
 

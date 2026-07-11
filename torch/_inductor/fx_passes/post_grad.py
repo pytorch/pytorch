@@ -1022,10 +1022,16 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
         dtype = torch.int64
 
     out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
+    # pyrefly: ignore[bad-argument-type]
+    integral_out = bool_out or is_integer_dtype(out_dtype)
+    if integral_out:
+        fill_value = int(bool(fill_value) if bool_out else fill_value)
+    acc_dtype = torch.int64 if integral_out else torch.float64
 
     def repl(*shape):
         dim_size = shape[dim]
-        idx = torch.arange(1, dim_size + 1, device=device, dtype=dtype)
+        idx = torch.arange(1, dim_size + 1, device=device, dtype=acc_dtype)
 
         inter_shape = [1] * len(shape)
         inter_shape[dim] = dim_size
