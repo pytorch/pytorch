@@ -90,7 +90,7 @@ from .dicts import (
 )
 from .hashable import is_hashable
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
-from .misc import NullVariable, StringFormatVariable
+from .misc import CallMethodVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
     _NO_DEFAULT,
     binary_iop,
@@ -368,15 +368,13 @@ class BaseBuiltinVariable(VariableTracker):
                 ]
                 return variables.TupleVariable(items, source=source)
             return VariableTracker.build(tx, getattr(fn, name), source)
-        attr = getattr(fn, name, None)
-        return variables.GetAttrVariable(
-            self, name, py_type=type(attr) if attr is not None else None, source=source
-        )
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.as_python_constant(), name))  # type: ignore[return-value]
+        try:
+            attr = getattr(fn, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+        if callable(attr):
+            return CallMethodVariable(self, name, source=source)
+        return VariableTracker.build(tx, attr, source)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
@@ -1015,16 +1013,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def tensor_args(self, *args: VariableTracker) -> bool:
         any_tensor = False
         for arg in args:
-            if isinstance(arg, variables.GetAttrVariable):
-                return False
             any_tensor = any_tensor or arg.is_tensor()
         return any_tensor
 
     def tensor_args_type(self, arg_types: list[type]) -> bool:
         any_tensor = False
         for arg_type in arg_types:
-            if issubclass(arg_type, variables.GetAttrVariable):
-                return False
             any_tensor = any_tensor or issubclass(arg_type, variables.TensorVariable)
         return any_tensor
 
@@ -2520,18 +2514,13 @@ class BuiltinVariable(BaseBuiltinVariable):
                 ]
                 return variables.TupleVariable(items, source=source)
             return VariableTracker.build(tx, getattr(self.fn, name), source)
-        if self.fn is object:
-            # for object, we can just directly read the attribute
-            try:
-                value = getattr(self.fn, name)
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-            if not callable(value):
-                return VariableTracker.build(tx, value, source)
-        attr = getattr(self.fn, name, None)
-        return variables.GetAttrVariable(
-            self, name, py_type=type(attr) if attr is not None else None, source=source
-        )
+        try:
+            attr = getattr(self.fn, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+        if callable(attr):
+            return CallMethodVariable(self, name, source=source)
+        return VariableTracker.build(tx, attr, source)
 
     def call_delattr(
         self,
@@ -3212,7 +3201,10 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             except Exception as exc:
                 raise_observed_exception(type(exc), tx, args=list(exc.args))
                 raise
-            return VariableTracker.build(tx, result)
+            obj, name_var = args[0], args[1]
+            name = name_var.as_python_constant()
+            source = AttrSource(obj.source, name) if obj.source else None
+            return VariableTracker.build(tx, result, source=source)
 
     def _call_getattr(
         self,
@@ -3337,6 +3329,17 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif (
+            not tx.output.side_effects.is_attribute_mutation(obj)
+            and obj.source is not None
+            and (underlying := obj.get_value_for_setattr()) is not None
+            and hasattr(underlying, "__dict__")
+            and name_var.is_python_constant()
+        ):
+            tx.output.side_effects.track_object_existing(underlying, obj)
+            name = name_var.as_python_constant()
+            tx.output.side_effects.store_attr(obj, name, val)
+            return val
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()

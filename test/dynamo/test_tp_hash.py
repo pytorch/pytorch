@@ -441,10 +441,10 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         self._assert_hash_equals(row)
 
     def test_hash_non_constant_getattr_graph_breaks(self):
-        """Hashing a non-constant GetAttrVariable graph-breaks instead of crashing.
+        """Hashing a non-constant attribute graph-breaks instead of crashing.
 
         Regression test for test_public_api_surface: v.__name__ in seen where
-        the GetAttrVariable wraps a dict with non-constant values (ModuleSpec).
+        the attribute wraps a dict with non-constant values (ModuleSpec).
         """
 
         def fn(x):
@@ -537,7 +537,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
     # --- Bound method / user method ---
 
     def test_hash_bound_method(self):
-        """GetAttrVariable wrapping a bound method — has wrapper_hash/meth_hash."""
+        """Bound method hashing -- uses wrapper_hash/meth_hash."""
         s = "hello"
         expected = hash(s.upper)
 

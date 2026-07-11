@@ -1454,7 +1454,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.reset()
 
     # =====================================================================
-    # GetAttrVariable resolution
+    # Deferred attribute resolution
     # =====================================================================
 
     def test_getattr_bound_method_cmp(self):

@@ -2413,6 +2413,16 @@
       ]
     }
   ],
+  "GB8816": [
+    {
+      "Gb_type": "Unresolved attribute access",
+      "Context": "generic_getattr: {type(obj).__name__}.{name}",
+      "Explanation": "Dynamo cannot resolve attribute '{name}' on {type(obj).__name__}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB5904": [
     {
       "Gb_type": "unsupported __getitem__ (sq_item)",

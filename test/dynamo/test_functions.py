@@ -3219,6 +3219,28 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, t + 123 + 12)
 
+    def test_getattr_builtin_constant_fold_recompiles_on_change(self):
+        class Meta(type):
+            def __getattribute__(cls, name):
+                return type.__getattribute__(cls, name)
+
+        class MyClass(metaclass=Meta):
+            value = 10
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x + MyClass.value
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), x + 10)
+        self.assertEqual(cnt.frame_count, 1)
+
+        MyClass.value = 20
+        self.assertEqual(fn(x), x + 20)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_two_point_iter(self):
         def fn(x, y):
             it = map(lambda n: n + 1, range(6))
@@ -5477,7 +5499,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         for fn in [fn_add, fn_pop, fn_update, fn_remove, fn_discard, fn_clear]:
             torch._dynamo.reset()
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
                 opt_fn()
 
     def test_is_tensor_tensor(self):

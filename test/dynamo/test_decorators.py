@@ -2183,6 +2183,34 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with self.assertRaises(Unsupported):
             f9(inp)
 
+    def test_load_attr_break_graph_if_unsupported_with_skip_frame(self):
+        # Regression test: break_graph_if_unsupported on LOAD_ATTR must not
+        # skip the speculation checkpoint when should_compile_partial_graph()
+        # is False, otherwise skip_frame() exceptions don't propagate
+        # correctly and produce fewer compiled frames than expected.
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.error_on_graph_break(False)
+        def inner2(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def inner1(x):
+            with torch._dynamo.error_on_graph_break(False):
+                torch._dynamo.skip_frame()
+            return inner2(x)
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            return inner1(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(fn(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 3)
+
         # test export with error_on_graph_break(False) still errors
 
     def test_error_on_graph_break_export(self):

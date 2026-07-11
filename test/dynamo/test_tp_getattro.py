@@ -239,6 +239,24 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 123)
 
+    def test_udov_non_function_getattr_graph_breaks(self):
+        """Non-function __getattr__ (callable instance) triggers a graph break."""
+
+        class CallableGetattr:
+            def __call__(self, name):
+                return 42
+
+        class MyObj:
+            __getattr__ = CallableGetattr()
+
+        def fn(obj):
+            return obj.dynamic
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=cnt)(MyObj())
+        self.assertEqual(result, 42)
+        self.assertEqual(cnt.frame_count, 0)
+
     def test_udov_getattribute_override(self):
         class MyObj:
             def __getattribute__(self, name):
@@ -582,6 +600,64 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 42)
 
+    def test_delattr_exposes_class_attr(self):
+        """Deleting an instance attr exposes the class attr underneath."""
+
+        class MyObj:
+            x = "class"
+
+            def __init__(self):
+                self.x = "instance"
+
+        def fn(obj):
+            del obj.x
+            return obj.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, "class")
+
+    def test_delattr_then_hasattr_false(self):
+        """Deleting the only attr makes hasattr return False."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 1
+
+        def fn(obj):
+            del obj.x
+            return hasattr(obj, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertFalse(result)
+
+    def test_dict_replacement_attr_found(self):
+        """Replacing __dict__ wholesale; lookup finds the attr in new dict."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 1
+
+        def fn(obj):
+            obj.__dict__ = {"x": 42, "y": 99}
+            return obj.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 42)
+
+    def test_dict_replacement_attr_not_found(self):
+        """Replacing __dict__ wholesale; attr not in new dict."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 1
+
+        def fn(obj):
+            obj.__dict__ = {"y": 99}
+            return hasattr(obj, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertFalse(result)
+
     # --- UnspecializedNNModule pending mutation ---
 
     def test_unspecialized_nn_module_pending_mutation_graph_breaks(self):
@@ -604,8 +680,8 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
     # --- object_generic_getattr on converted VTs ---
 
     def test_constant_method_via_generic_getattr(self):
-        """ConstantVariable now resolves methods through the descriptor protocol
-        via object_generic_getattr, instead of falling back to GetAttrVariable.
+        """ConstantVariable resolves methods through the descriptor protocol
+        via object_generic_getattr.
         """
 
         def fn():
@@ -688,6 +764,185 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertEqual(result, 123)
+
+    def test_dunder_getattr_bypasses_instance_dict(self):
+        """obj.__getattr__("x") should call __getattr__ directly,
+        not go through full attribute resolution."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = "from_dict"
+
+            def __getattr__(self, name):
+                return "from_getattr"
+
+        def fn(obj):
+            return obj.__getattr__("x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, "from_getattr")
+
+    def test_dunder_getattr_no_fallback_raises(self):
+        """obj.__getattr__("x") on an object without __getattr__ should raise."""
+
+        class MyObj:
+            pass
+
+        def fn(obj):
+            try:
+                obj.__getattr__("x")
+                return False
+            except AttributeError:
+                return True
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertTrue(result)
+
+    def test_dunder_getattr_inherited(self):
+        """obj.__getattr__("x") finds __getattr__ on a parent class."""
+
+        class Base:
+            def __getattr__(self, name):
+                return "from_base"
+
+        class Child(Base):
+            pass
+
+        def fn(obj):
+            return obj.__getattr__("x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(Child())
+        self.assertEqual(result, "from_base")
+
+    def test_dunder_getattr_non_attribute_error_propagates(self):
+        """obj.__getattr__("x") raising non-AttributeError should propagate."""
+
+        class MyObj:
+            def __getattr__(self, name):
+                raise ValueError("custom error")
+
+        def fn(obj):
+            try:
+                return obj.__getattr__("x")
+            except ValueError:
+                return "caught"
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, "caught")
+
+    def test_dunder_getattribute_skips_getattr_fallback(self):
+        """obj.__getattribute__("x") should NOT fall back to __getattr__."""
+
+        class MyObj:
+            def __getattr__(self, name):
+                return "from_getattr"
+
+        def fn(obj):
+            try:
+                obj.__getattribute__("nonexistent")
+                return False
+            except AttributeError:
+                return True
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertTrue(result)
+
+    def test_dunder_getattribute_finds_instance_attr(self):
+        """obj.__getattribute__("x") should still find instance dict attrs."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 42
+
+        def fn(obj):
+            return obj.__getattribute__("x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 42)
+
+    def test_dunder_getattribute_resolves_property(self):
+        """obj.__getattribute__("x") should resolve data descriptors."""
+
+        class MyObj:
+            @property
+            def x(self):
+                return 99
+
+        def fn(obj):
+            return obj.__getattribute__("x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 99)
+
+    def test_super_getattribute_skips_getattr(self):
+        """super().__getattribute__("x") should NOT fall back to __getattr__."""
+
+        class Base:
+            def __getattr__(self, name):
+                return "from_getattr"
+
+        class Child(Base):
+            def lookup(self, name):
+                return super().__getattribute__(name)
+
+        def fn(obj):
+            try:
+                obj.lookup("nonexistent")
+                return False
+            except AttributeError:
+                return True
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(Child())
+        self.assertTrue(result)
+
+    def test_custom_getattribute_skips_getattr(self):
+        """obj.__getattribute__("x") with custom __getattribute__ should NOT
+        fall back to __getattr__, even though normal attribute access does."""
+
+        class WithBoth:
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+            def __getattr__(self, name):
+                return "fallback"
+
+        obj = WithBoth()
+
+        def fn_normal():
+            return obj.nonexistent
+
+        def fn_dunder():
+            try:
+                return obj.__getattribute__("nonexistent")
+            except AttributeError:
+                return "raised"
+
+        normal = torch.compile(fn_normal, backend="eager", fullgraph=True)()
+        self.assertEqual(normal, "fallback")
+        result = torch.compile(fn_dunder, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "raised")
+
+    def test_custom_getattribute_non_attribute_error_propagates(self):
+        """Non-AttributeError from __getattribute__ propagates without
+        falling back to __getattr__."""
+
+        class MyObj:
+            def __getattribute__(self, name):
+                if name.startswith("_"):
+                    return super().__getattribute__(name)
+                raise RuntimeError("boom")
+
+            def __getattr__(self, name):
+                return "should_not_reach"
+
+        def fn(obj):
+            try:
+                return obj.x
+            except RuntimeError:
+                return "caught"
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, "caught")
 
     # --- BoundBuiltinMethodVariable slots ---
 
@@ -849,6 +1104,697 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         MyClass.value = 20
         self.assertEqual(fn(x), x + 20)
         self.assertEqual(cnt.frame_count, 2)
+
+    # --- UserFunctionVariable attribute mutation ---
+
+    def test_function_setattr_then_getattr(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            return target.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_function_hasattr_after_setattr(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            return hasattr(target, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_function_preexisting_attr(self):
+        def target():
+            return 0
+
+        target.x = 10
+
+        def fn():
+            return target.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 10)
+
+    def test_function_setattr_persists(self):
+        def target():
+            return 0
+
+        def fn(x):
+            target.my_attr = 99
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt_fn(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(target.my_attr, 99)
+
+    def test_function_setattr_tensor_value(self):
+        def target():
+            return 0
+
+        def fn(x):
+            target.data = x + 1
+            return target.data
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(5))
+        self.assertEqual(result, torch.tensor(6))
+        self.assertEqual(target.data, torch.tensor(6))
+
+    def test_function_setattr_cross_compilation(self):
+        def target():
+            return 0
+
+        def fn1():
+            target.x = 42
+
+        def fn2():
+            return target.x
+
+        torch.compile(fn1, backend="eager", fullgraph=True)()
+        self.assertEqual(target.x, 42)
+        result = torch.compile(fn2, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_function_overwrite_preexisting_attr(self):
+        def target():
+            return 0
+
+        target.x = 10
+
+        def fn():
+            target.x = 42
+            return target.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+        self.assertEqual(target.x, 42)
+
+    # --- PythonModuleVariable attribute mutation ---
+
+    def test_module_setattr_then_getattr(self):
+        import types
+
+        mod = types.ModuleType("test_mod")
+
+        def fn():
+            mod.x = 42
+            return mod.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_module_hasattr_after_setattr(self):
+        import types
+
+        mod = types.ModuleType("test_mod")
+
+        def fn():
+            mod.x = 42
+            return hasattr(mod, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_module_setattr_persists(self):
+        import types
+
+        mod = types.ModuleType("test_mod")
+
+        def fn(x):
+            mod.my_attr = 99
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt_fn(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(mod.my_attr, 99)
+
+    # --- UserDefinedClassVariable attribute mutation ---
+
+    def test_class_setattr_then_getattr(self):
+        class MyClass:
+            pass
+
+        def fn():
+            MyClass.x = 42
+            return MyClass.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_class_hasattr_after_setattr(self):
+        class MyClass:
+            pass
+
+        def fn():
+            MyClass.x = 42
+            return hasattr(MyClass, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_class_setattr_persists(self):
+        class MyClass:
+            pass
+
+        def fn(x):
+            MyClass.my_attr = 99
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt_fn(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(MyClass.my_attr, 99)
+
+    # --- SkipFunctionVariable attribute mutation ---
+
+    def test_skip_function_setattr_then_getattr(self):
+        @torch._dynamo.disable
+        def skipped():
+            return 0
+
+        def fn():
+            skipped.x = 42
+            return skipped.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_skip_function_setattr_persists(self):
+        @torch._dynamo.disable
+        def skipped():
+            return 0
+
+        def fn(x):
+            skipped.my_attr = 99
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result = opt_fn(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(skipped.my_attr, 99)
+
+    def test_skip_function_hasattr_after_setattr(self):
+        @torch._dynamo.disable
+        def skipped():
+            return 0
+
+        def fn():
+            skipped.x = 42
+            return hasattr(skipped, "x")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_polyfilled_function_hasattr_after_setattr(self):
+        def my_polyfill(x):
+            return x
+
+        def my_replacement(x):
+            return x
+
+        torch.compiler.substitute_in_graph(my_polyfill)(my_replacement)
+        try:
+
+            def fn():
+                my_polyfill.x = 42
+                return hasattr(my_polyfill, "x")
+
+            result = torch.compile(fn, backend="eager", fullgraph=True)()
+            self.assertTrue(result)
+        finally:
+            if hasattr(my_polyfill, "x"):
+                del my_polyfill.x
+
+    # --- Additional coverage for setattr mutation paths ---
+
+    def test_two_setattrs_on_same_object(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            target.y = 99
+            return target.x + target.y
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 141)
+
+    def test_hasattr_nonexistent_on_opted_in_vt(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            return hasattr(target, "nonexistent")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertFalse(result)
+
+    def test_getattr_with_default_after_setattr(self):
+        def target():
+            return 0
+
+        def fn():
+            target.x = 42
+            return getattr(target, "x", "sentinel")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 42)
+
+    def test_polyfilled_function_setattr(self):
+        def my_polyfill(x):
+            return x
+
+        def my_replacement(x):
+            return x
+
+        torch.compiler.substitute_in_graph(my_polyfill)(my_replacement)
+        try:
+
+            def fn(x):
+                my_polyfill._my_attr = "mutated"
+                return x + 1
+
+            x = torch.randn(4)
+            result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(my_polyfill._my_attr, "mutated")
+            self.assertEqual(result, x + 1)
+        finally:
+            if hasattr(my_polyfill, "_my_attr"):
+                del my_polyfill._my_attr
+
+    # --- Mutation opt-in guard tests ---
+
+    def test_torch_internal_class_setattr_graph_breaks(self):
+        """setattr on torch-internal classes should graph break."""
+
+        def fn(x):
+            torch.nn.Linear.my_attr = 42
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1))
+
+    def test_torch_toplevel_class_setattr_graph_breaks(self):
+        """setattr on classes with __module__=='torch' should graph break."""
+
+        def fn(x):
+            torch.Size.my_attr = 42
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1))
+
+    def test_metaclass_setattr_works(self):
+        """setattr on class with custom metaclass __setattr__ works because
+        side-effect replay calls setattr() which goes through the metaclass.
+        """
+
+        class Meta(type):
+            def __setattr__(cls, name, value):
+                super().__setattr__(name, value)
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        def fn(x):
+            MyClass.my_attr = 42
+            return x + 1
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertEqual(MyClass.my_attr, 42)
+
+    def test_class_delattr(self):
+        """delattr on a class works (graph breaks at the del, but replays)."""
+
+        class MyClass:
+            pass
+
+        def fn(x):
+            MyClass.y = 42
+            del MyClass.y
+            return x + 1
+
+        result = torch.compile(fn, backend="eager")(torch.tensor(1))
+        self.assertEqual(result, torch.tensor(2))
+        self.assertFalse(hasattr(MyClass, "y"))
+
+    # --- Explicit comparison dunder access (CallMethodVariable) ---
+
+    def test_function_explicit_dunder_eq(self):
+        """Accessing __eq__ on a function and calling it routes through call_method."""
+
+        def target_fn():
+            pass
+
+        def fn(f):
+            eq_method = f.__eq__
+            return eq_method(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(target_fn)
+        self.assertTrue(result)
+
+    def test_function_explicit_dunder_ne(self):
+        def target_fn():
+            pass
+
+        def fn(f):
+            # f.__ne__(f) on a function uses identity, so same-object returns False
+            return f.__ne__(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(target_fn)
+        self.assertFalse(result)
+
+    def test_slice_explicit_dunder_eq(self):
+        """Accessing __eq__ on a slice and calling it."""
+
+        def fn():
+            s = slice(1, 10, 2)
+            return s.__eq__(slice(1, 10, 2))
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_udcv_comparison_dunder(self):
+        """Comparison dunder on a class (non-function type attr)."""
+
+        class MyClass:
+            pass
+
+        def fn(cls):
+            # cls.__eq__(cls) is like MyClass == MyClass (identity)
+            return cls.__eq__(cls)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyClass)
+        self.assertTrue(result)
+
+    def test_closure_explicit_dunder_eq(self):
+        """Accessing __eq__ on a closure (NestedUserFunctionVariable)."""
+
+        def make_closure():
+            x = 10
+
+            def inner():
+                return x
+
+            return inner
+
+        closure = make_closure()
+
+        def fn(f):
+            return f.__eq__(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(closure)
+        self.assertTrue(result)
+
+    def test_partial_explicit_dunder_eq(self):
+        """Accessing __eq__ on a functools.partial."""
+        import functools
+
+        def add(a, b):
+            return a + b
+
+        p = functools.partial(add, 1)
+
+        def fn(f):
+            return f.__eq__(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(p)
+        self.assertTrue(result)
+
+    def test_slice_explicit_dunder_eq_false(self):
+        """__eq__ on non-equal slices returns False."""
+
+        def fn():
+            s1 = slice(1, 10, 2)
+            s2 = slice(3, 20, 4)
+            return s1.__eq__(s2)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertFalse(result)
+
+    def test_slice_explicit_dunder_ne_true(self):
+        """__ne__ on non-equal slices returns True."""
+
+        def fn():
+            s1 = slice(1, 10, 2)
+            s2 = slice(3, 20, 4)
+            return s1.__ne__(s2)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_skip_function_explicit_dunder_eq(self):
+        """Accessing __eq__ on a skip function (SkipFunctionVariable)."""
+
+        def fn(f):
+            return f.__eq__(f)
+
+        # len is a builtin that Dynamo wraps as SkipFunctionVariable
+        result = torch.compile(fn, backend="eager", fullgraph=True)(len)
+        self.assertTrue(result)
+
+    # --- Eager attribute resolution (VT.build / CallMethodVariable) ---
+
+    def test_autograd_function_apply_alias(self):
+        """Aliased autograd Function.apply routes through CallMethodVariable."""
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        apply_alias = MyFunc.apply
+
+        def fn(x):
+            return apply_alias(x)
+
+        x = torch.randn(3, requires_grad=True)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x)
+
+    def test_float_fromhex_inline(self):
+        """float.fromhex accessed inline routes through BuiltinVariable.getattro_impl."""
+
+        def fn():
+            return float.fromhex("0x1.0p10")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 1024.0)
+
+    def test_float_fromhex_captured(self):
+        """float.fromhex captured as a variable routes through builder.py."""
+        fh = float.fromhex
+
+        def fn():
+            return fh("0x1.0p10")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 1024.0)
+
+    def test_builtin_non_callable_attr(self):
+        """Non-callable builtin attribute resolved eagerly via VT.build."""
+
+        def fn():
+            return len.__module__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "builtins")
+
+    def test_builtin_callable_attr_as_constant(self):
+        """Callable builtin attribute accessible as python constant via BMV."""
+
+        def fn():
+            return len.__class__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(result, type(len))
+
+    def test_specialized_builtin_non_callable_attr(self):
+        """Non-callable attr on a specialized builtin (DictBuiltinVariable) via
+        BaseBuiltinVariable.getattro_impl."""
+
+        def fn():
+            return dict.__name__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "dict")
+
+    def test_torch_function_non_op_attr(self):
+        """Non-op attribute on a TorchInGraphFunctionVariable resolves via VT.build."""
+
+        def fn():
+            return torch.sin.__name__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "sin")
+
+    def test_class_bases_via_meta_descriptor(self):
+        """__bases__ on a UDCV resolves through resolve_meta_data_descriptor."""
+
+        class MyBase:
+            pass
+
+        class MyChild(MyBase):
+            pass
+
+        def fn():
+            return MyChild.__bases__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, (MyBase,))
+
+    # --- bound tensor methods (via CallMethodVariable) ---
+
+    def test_bound_tensor_method_call(self):
+        """Bound tensor method dispatches through BMV's call_function."""
+
+        def fn(x):
+            return x.add(x)
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x + x)
+
+    def test_bound_tensor_method_as_value(self):
+        """Bound tensor method captured as a variable and called later."""
+
+        def fn(x):
+            m = x.mul
+            return m(x)
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x * x)
+
+    # --- UDCV metaclass non-data descriptor (via CallMethodVariable) ---
+
+    def test_metaclass_function_method_call(self):
+        """FunctionType on metaclass is resolved by _resolve_descriptor_get."""
+
+        class Meta(type):
+            def greet(cls):
+                return "hello from " + cls.__name__
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        def fn():
+            return MyClass.greet()
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "hello from MyClass")
+
+    def test_metaclass_builtin_callable_attr(self):
+        """BuiltinFunctionType on metaclass falls through _resolve_descriptor_get
+        to the callable BMV path."""
+
+        class Meta(type):
+            action = len
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        def fn():
+            return MyClass.action
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(result, len)
+
+    def test_metaclass_non_callable_attr(self):
+        """Non-callable attribute from metaclass resolves via VT.build."""
+
+        class Meta(type):
+            registry_name = "default"
+
+        class MyClass(metaclass=Meta):
+            pass
+
+        def fn():
+            return MyClass.registry_name
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "default")
+
+    # --- UDCV C-level method descriptor (via CallMethodVariable) ---
+
+    def test_inherited_dunder_get_descriptor(self):
+        """__get__ inherited from a C parent bypasses WrapperDescriptorVariable
+        (name exclusion) and reaches the ismethoddescriptor BMV fallback."""
+
+        class MyProp(property):
+            pass
+
+        def fn():
+            return MyProp.__get__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(result, property.__get__)
+
+    def test_unresolved_attr_graph_breaks(self):
+        """Accessing an attribute that getattro_impl cannot resolve graph-breaks
+        instead of silently deferring via GetAttrVariable."""
+
+        def fn():
+            s = frozenset((1, 2, 3))
+            return s.add
+
+        with self.assertRaises(torch._dynamo.exc.TorchDynamoException):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_autograd_function_apply_call(self):
+        """AutogradFunctionVariable.apply resolves via getattro_impl BMV."""
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        def fn(x):
+            return MyFunc.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, x * 2)
+
+    def test_tensor_subclass_method_via_bound_method(self):
+        """Tensor subclass methods not in all_tensor_attrs resolve via BMV."""
+        import torch.nested
+
+        def fn(values, offsets):
+            t = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return t.offsets()
+
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 2, 4, 7, 10])
+        result = torch.compile(fn, backend="eager", fullgraph=True)(values, offsets)
+        self.assertEqual(result, offsets)
+
+    def test_tensor_hasattr_unresolvable_returns_false(self):
+        """hasattr on a tensor for a non-existent attr returns False without
+        graph-breaking, even though generic_getattr would graph-break."""
+
+        def fn(x):
+            return hasattr(x, "nonexistent_custom_attr")
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+        self.assertFalse(result)
 
 
 if __name__ == "__main__":

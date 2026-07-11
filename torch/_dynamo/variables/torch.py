@@ -42,7 +42,6 @@ import torch.fx
 import torch.nn
 import torch.utils._pytree as _pytree
 from torch._C import DispatchKeySet
-from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
@@ -634,12 +633,6 @@ class BaseTorchVariable(VariableTracker):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        result = hasattr(self.value, name)
-        return VariableTracker.build(tx, result)
 
     def can_constant_fold_through(self) -> bool:
         if self.value in constant_fold_functions:
@@ -3175,13 +3168,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             member = getattr(self.value, name)
         except AttributeError:
             raise_observed_exception(AttributeError, tx)
-            raise
 
         if isinstance(
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
             return TorchInGraphFunctionVariable(member, source=source)
-        return variables.GetAttrVariable(self, name, source=source)
+        return VariableTracker.build(tx, member, source)
 
     def call_function(
         self,

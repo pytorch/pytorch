@@ -1991,7 +1991,7 @@ def _resolve_descriptor_get(
 
 # BuiltinFunctionType is intentionally excluded: _resolve_descriptor_get
 # does not handle it, so it falls through to _UnhandledDescriptorError
-# and generic_getattr's GetAttrVariable fallback.
+# and generic_getattr's graph-break fallback.
 _METHOD_TYPES = (
     types.FunctionType,
     types.MethodDescriptorType,
@@ -2086,10 +2086,8 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Attribute not found -- signal to caller to fall back.
-    raise _UnhandledDescriptorError(
-        f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
-    )
+    # Step 7: Attribute not found.
+    raise_observed_exception(AttributeError, tx)
 
 
 def generic_getattr(
@@ -2101,8 +2099,7 @@ def generic_getattr(
     """Dynamo's PyObject_GetAttr: attribute access dispatch.
 
     Checks side effects for pending attribute mutations, then dispatches
-    to obj.getattro_impl(tx, name).  On NotImplementedError, falls back
-    to GetAttrVariable (deferred resolution).
+    to obj.getattro_impl(tx, name).  On NotImplementedError, graph-breaks.
     """
     from .user_defined import is_data_descriptor
 
@@ -2141,4 +2138,10 @@ def generic_getattr(
     except AsPythonConstantNotImplementedError:
         raise
     except NotImplementedError:
-        return variables.GetAttrVariable(obj, name, source=source)
+        unimplemented(
+            gb_type="Unresolved attribute access",
+            context=f"generic_getattr: {type(obj).__name__}.{name}",
+            explanation=f"Dynamo cannot resolve attribute '{name}' on "
+            f"{type(obj).__name__}.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )

@@ -598,6 +598,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
+    def get_value_for_setattr(self) -> object | None:
+        """Return the wrapped Python object for generic STORE_ATTR mutation,
+        or None to decline.  Only override for VTs with __dict__ and
+        standard __setattr__."""
+        return None
+
     def lookup_instance_dict(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:
@@ -619,6 +625,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         __getattr__).  UDOV overrides to walk the MRO for __getattr__.
         """
         return None
+
+    def call_getattribute(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker:
+        """Called for obj.__getattribute__(name).  The base delegates to
+        getattro_impl, which already implements GenericGetAttr without
+        __getattr__ fallback.  UDOV overrides to handle custom
+        __getattribute__ and to pass skip_getattr_fallback=True."""
+        return self.getattro_impl(tx, name)
 
     def getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
@@ -713,6 +728,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> list[VariableTracker]:
         raise NotImplementedError
 
+    def _hasattr_check_side_effects(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> ConstantVariable | None:
+        """If *name* has a pending mutation, return the hasattr result; else None."""
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            value = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            return variables.ConstantVariable.create(
+                not isinstance(value, variables.DeletedVariable)
+            )
+        return None
+
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
@@ -723,6 +749,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         True/False.
         https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
         """
+        result = self._hasattr_check_side_effects(tx, name)
+        if result is not None:
+            return result
+
         try:
             self.getattro_impl(tx, name)
             return variables.ConstantVariable.create(True)
@@ -979,25 +1009,26 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and args[0].is_python_constant()
             and not kwargs
         ):
-            # TODO(tp_getattro): In CPython, obj.__getattr__("foo") calls only
-            # the type's __getattr__ method, not the full attribute resolution.
-            # Currently we dispatch through getattro_impl which does the full
-            # GenericGetAttr + __getattr__ fallback. Fix in a follow-up to
-            # call __getattr__ directly for UDOV types.
-            return self.getattro_impl(tx, args[0].as_python_constant())
+            attr_name = args[0].as_python_constant()
+            result = self.call_getattr_fallback(tx, attr_name)
+            if result is not None:
+                return result
+            try:
+                type_name = self.python_type().__name__
+            except NotImplementedError:
+                type_name = type(self).__name__
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'{type_name}' object has no attribute '__getattr__'"],
+            )
         elif (
             name == "__getattribute__"
             and len(args) == 1
             and args[0].is_python_constant()
             and not kwargs
         ):
-            # TODO(tp_getattro): In CPython, obj.__getattribute__("foo")
-            # calls GenericGetAttr WITHOUT the __getattr__ fallback.
-            # Currently we route through getattro_impl which, for UDOV,
-            # includes __getattr__. Fix in a follow-up to have UDOV
-            # override this to call generic_getattr (the inner helper)
-            # directly, skipping __getattr__.
-            return self.getattro_impl(tx, args[0].as_python_constant())
+            return self.call_getattribute(tx, args[0].as_python_constant())
         elif name == "__index__" and not args and not kwargs:
             return self.nb_index_impl(tx)
         elif name == "__int__" and not args and not kwargs:
