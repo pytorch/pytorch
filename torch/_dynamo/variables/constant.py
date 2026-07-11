@@ -939,6 +939,84 @@ class FakeIdVariable(VariableTracker):
             ],
         )
 
+    # Arithmetic on a fake id/hash (e.g. ``id(self) & 0x7fffffff`` inside a
+    # custom __hash__) stays compile-time-only: CPython computes int op int,
+    # but the operand is a fake address so the result must not be baked into
+    # the graph. We mirror int's nb_* slots and return another fake int.
+    def _operand_int(self, other: VariableTracker) -> int | None:
+        if isinstance(other, FakeIdVariable):
+            return other.value
+        if other.is_python_constant():
+            val = other.as_python_constant()
+            if isinstance(val, int):
+                return val
+        return None
+
+    def _nb_binary_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        other: VariableTracker,
+        op: Any,
+        reverse: bool,
+    ) -> VariableTracker:
+        other_val = self._operand_int(other)
+        if other_val is None:
+            return ConstantVariable.create(NotImplemented)
+        lhs, rhs = (other_val, self.value) if reverse else (self.value, other_val)
+        try:
+            result = op(lhs, rhs)
+        except (TypeError, ValueError, OverflowError, ZeroDivisionError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return FakeIdVariable(result)
+
+    def nb_add_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.add, reverse)
+
+    def nb_subtract_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.sub, reverse)
+
+    def nb_multiply_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.mul, reverse)
+
+    def nb_floor_divide_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.floordiv, reverse)
+
+    def nb_remainder_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.mod, reverse)
+
+    def nb_and_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.and_, reverse)
+
+    def nb_or_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.or_, reverse)
+
+    def nb_xor_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.xor, reverse)
+
+    def nb_lshift_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.lshift, reverse)
+
+    def nb_rshift_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        return self._nb_binary_impl(tx, other, operator.rshift, reverse)
+
+    def nb_negative_impl(self, tx):  # type: ignore[no-untyped-def]
+        return FakeIdVariable(-self.value)
+
+    def nb_positive_impl(self, tx):  # type: ignore[no-untyped-def]
+        return FakeIdVariable(+self.value)
+
+    def nb_absolute_impl(self, tx):  # type: ignore[no-untyped-def]
+        return FakeIdVariable(abs(self.value))
+
+    def nb_invert_impl(self, tx):  # type: ignore[no-untyped-def]
+        return FakeIdVariable(~self.value)
+
+    def nb_int_impl(self, tx):  # type: ignore[no-untyped-def]
+        return FakeIdVariable(int(self.value), kind=self.kind)
+
+    def nb_index_impl(self, tx):  # type: ignore[no-untyped-def]
+        return FakeIdVariable(self.value, kind=self.kind)
+
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(
             gb_type="Reconstruction of FakeIdVariable",
