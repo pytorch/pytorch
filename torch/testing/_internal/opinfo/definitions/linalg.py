@@ -2274,10 +2274,8 @@ op_db: list[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="cpu",
             ),
-            # Exception: linalg.lu_factor(): MPS only supports floats.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
+            # complex64 lu_factor works on MPS now, so test_dtypes passes (with
+            # partial-sample warnings); full complex solve support is future work.
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
@@ -2349,10 +2347,8 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: linalg.lu_factor(): MPS only supports floats.
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
+            # complex64 lu_factor works on MPS now, so test_dtypes passes (with
+            # partial-sample warnings); full complex solve support is future work.
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
