@@ -439,8 +439,7 @@ def _use_flex_flash_attention(
     if backend == "AUTO":
         device = query.get_device()
         if (
-            not kernel_options.get("PREFER_FLASH", False)
-            or device is None
+            device is None
             or device.type != "cuda"
             or torch.version.hip is not None
             or torch.cuda.get_device_capability(device)[0] != 10
@@ -482,8 +481,7 @@ def create_flex_flash_attention_kernel(
     sparse_kv_block_size: int,
     mask_graph: Subgraph,
     subgraph: Subgraph | None = None,
-    fallback_on_error: bool = False,
-) -> tuple[TensorBox, TensorBox] | None:
+) -> tuple[TensorBox, TensorBox]:
     """Create a flex flash attention kernel using CuteDSL template."""
     if query.dtype != key.dtype or query.dtype != value.dtype:
         raise ValueError(
@@ -620,16 +618,12 @@ def create_flex_flash_attention_kernel(
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
             )
         if error is not None and len(configs) == 1:
-            if fallback_on_error:
-                return None
             raise RuntimeError(f"CuteDSL template failed: {error}")
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)
 
     if not choices:
-        if fallback_on_error:
-            return None
         raise RuntimeError(f"CuteDSL template failed: {error}")
 
     input_gen_fns: dict[int, Callable] | None = None
@@ -707,7 +701,6 @@ def _use_flex_flash_attention_backward(
     backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
     joint_outputs: Any | None = None,
     score_mod_other_buffers: Sequence[TensorBox] | None = None,
-    grad_logsumexp: TensorBox | None = None,
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
@@ -726,9 +719,7 @@ def _use_flex_flash_attention_backward(
     if backend == "AUTO":
         device = query.get_device()
         if (
-            not kernel_options.get("PREFER_FLASH", False)
-            or grad_logsumexp is not None
-            or device is None
+            device is None
             or device.type != "cuda"
             or torch.version.hip is not None
             or torch.cuda.get_device_capability(device)[0] != 10
@@ -757,6 +748,7 @@ def create_flex_flash_attention_backward_kernel(
     value: TensorBox,
     out: TensorBox,
     logsumexp: TensorBox,
+    grad_logsumexp: TensorBox | None,
     grad_out: TensorBox,
     scale: float,
     kernel_options: dict[str, Any],
@@ -775,8 +767,7 @@ def create_flex_flash_attention_backward_kernel(
     dq_write_order_full: TensorBox | None = None,
     dq_kv_order: TensorBox | None = None,
     dq_kv_order_spt: bool | None = None,
-    fallback_on_error: bool = False,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple] | None:
+) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
         raise RuntimeError(_flash_attention_unavailable_message())
@@ -838,6 +829,7 @@ def create_flex_flash_attention_backward_kernel(
         out,
         grad_out,
         logsumexp,
+        grad_logsumexp if grad_logsumexp is not None else logsumexp,
         grad_key,
         grad_value,
     ]
@@ -881,16 +873,12 @@ def create_flex_flash_attention_backward_kernel(
         supports_dq_kv_order = "dq_kv_order" in block_sparse_fields
         supports_spt = "spt" in block_sparse_fields
         if has_dq_kv_order and not supports_dq_kv_order:
-            if fallback_on_error:
-                return None
             raise NotImplementedError(
                 "Explicit tensor dq_kv_order requires flash-attn-4 with dq_kv_order support"
             )
         if dq_kv_order_spt_for_flash is not None and not (
             supports_dq_kv_order or supports_spt
         ):
-            if fallback_on_error:
-                return None
             raise NotImplementedError(
                 "Boolean dq_kv_order requires flash-attn-4 with dq_kv_order or spt support"
             )
@@ -909,8 +897,6 @@ def create_flex_flash_attention_backward_kernel(
         if major < 10:
             if warn_only:
                 deterministic_backward_enabled = False
-            elif fallback_on_error:
-                return None
             else:
                 raise NotImplementedError(
                     "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
@@ -920,8 +906,6 @@ def create_flex_flash_attention_backward_kernel(
         elif missing_dq_write_order:
             if warn_only:
                 deterministic_backward_enabled = False
-            elif fallback_on_error:
-                return None
             else:
                 raise ValueError(
                     "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
@@ -931,8 +915,6 @@ def create_flex_flash_attention_backward_kernel(
         elif missing_dq_kv_order:
             if warn_only:
                 deterministic_backward_enabled = False
-            elif fallback_on_error:
-                return None
             else:
                 raise ValueError(
                     "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
@@ -976,6 +958,7 @@ def create_flex_flash_attention_backward_kernel(
                 subgraphs=subgraphs or None,
                 SM_SCALE=scale,
                 HAS_SCORE_MOD=has_score_mod,
+                HAS_DLSE=grad_logsumexp is not None,
                 SCORE_MOD_VEC_SIZE=conf.score_mod_vec_size,
                 HAS_BLOCK_MASK=has_block_mask,
                 HAS_DQ_WRITE_ORDER=has_dq_write_order,
@@ -990,25 +973,21 @@ def create_flex_flash_attention_backward_kernel(
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
             )
         if error is not None and len(configs) == 1:
-            if fallback_on_error:
-                return None
             raise RuntimeError(f"CuteDSL template failed: {error}")
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)
 
     if not choices:
-        if fallback_on_error:
-            return None
         raise RuntimeError(f"CuteDSL template failed: {error}")
 
     input_gen_fns: dict[int, Callable] | None = None
     if has_block_mask:
         input_gen_fns = {
-            8: create_num_blocks_fake_generator(q_indices),
-            9: create_indices_fake,
-            10: create_num_blocks_fake_generator(full_q_indices),
-            11: create_indices_fake,
+            9: create_num_blocks_fake_generator(q_indices),
+            10: create_indices_fake,
+            11: create_num_blocks_fake_generator(full_q_indices),
+            12: create_indices_fake,
         }
 
     template_output, _ = autotune_select_algorithm(

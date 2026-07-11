@@ -235,7 +235,6 @@ class FlexKernelOptions(TypedDict, total=False):
 class _KernelOptionsWithInternals(FlexKernelOptions, total=False):
     OUTPUT_LOGSUMEXP: bool
     OUTPUT_MAX: bool
-    PREFER_FLASH: bool
 
 
 class AuxRequest(NamedTuple):
@@ -1929,7 +1928,7 @@ def create_block_mask(
     Q_LEN: int,
     KV_LEN: int,
     device: DeviceLikeType | None = None,
-    BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
+    BLOCK_SIZE: int | tuple[int, int] | None = None,
     _compile=False,
     separate_full_blocks: bool = True,
     compute_dq_write_order: bool = False,
@@ -1989,6 +1988,14 @@ def create_block_mask(
         B = 1
     if H is None:
         H = 1
+    if BLOCK_SIZE is None:
+        block_device = torch.device(device)
+        BLOCK_SIZE = (
+            (256, _DEFAULT_SPARSE_BLOCK_SIZE)
+            if block_device.type == "cuda"
+            and torch.cuda.get_device_capability(block_device)[0] == 10
+            else _DEFAULT_SPARSE_BLOCK_SIZE
+        )
     if isinstance(BLOCK_SIZE, int):
         Q_BLOCK_SIZE = BLOCK_SIZE
         KV_BLOCK_SIZE = BLOCK_SIZE
@@ -2060,15 +2067,6 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
-def _prefer_flash_attention(query: Tensor) -> bool:
-    """Prefer the external FA4 CuTe backend on datacenter Blackwell."""
-    return (
-        query.device.type == "cuda"
-        and torch.version.hip is None
-        and torch.cuda.get_device_capability(query.device)[0] == 10
-    )
-
-
 def _apply_kernel_options(
     query: Tensor,
     key: Tensor,
@@ -2101,11 +2099,6 @@ def _apply_kernel_options(
             )
 
     kernel_options.setdefault("BACKEND", "AUTO")
-    kernel_options["PREFER_FLASH"] = (
-        kernel_options["BACKEND"] == "AUTO"
-        and not (return_aux is not None and return_aux.max_scores)
-        and _prefer_flash_attention(query)
-    )
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)

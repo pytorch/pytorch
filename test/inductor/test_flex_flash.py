@@ -1185,21 +1185,34 @@ class TestFlexFlash(InductorTestCase):
             self.skipTest("FlashAttention-4 defaults on SM100-SM109")
 
         q, k, v = create_test_tensors(
-            seq_len=512,
-            dtype=dtype,
-            device=device,
-            requires_grad=True,
+            seq_len=512, dtype=dtype, device=device, requires_grad=True
         )
         block_mask = _create_block_mask_for_device(
             _causal_mask, 2, 4, 512, 512, device=device
         )
+        q_ref = q.detach().clone().requires_grad_()
+        k_ref = k.detach().clone().requires_grad_()
+        v_ref = v.detach().clone().requires_grad_()
         compiled_fn = torch.compile(flex_attention)
 
         with DeterministicGuard(True):
             with cuda_kernel_profiler("flash_attncuteflash_bwd") as prof_result:
-                compiled_fn(q, k, v, block_mask=block_mask).sum().backward()
+                out = compiled_fn(q, k, v, block_mask=block_mask)
+                out.sum().backward()
+            ref = compiled_fn(
+                q_ref,
+                k_ref,
+                v_ref,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "TRITON"},
+            )
+            ref.sum().backward()
 
         self.assertFalse(prof_result["found"])
+        self.assertEqual(out, ref, atol=3e-2, rtol=3e-2)
+        self.assertEqual(q.grad, q_ref.grad, atol=3e-2, rtol=3e-2)
+        self.assertEqual(k.grad, k_ref.grad, atol=3e-2, rtol=3e-2)
+        self.assertEqual(v.grad, v_ref.grad, atol=3e-2, rtol=3e-2)
 
     @dtypes(torch.bfloat16)
     def test_flash_deterministic_block_mask_without_scheduler_order_raises(
@@ -2062,12 +2075,14 @@ class TestFlexFlash(InductorTestCase):
             self.skipTest("FlashAttention-4 defaults on SM100-SM109")
 
         q, k, v = create_test_tensors(dtype=dtype, device=device, requires_grad=True)
+        block_mask = create_block_mask(_causal_mask, 2, 4, 512, 512, device=device)
+        self.assertEqual(block_mask.BLOCK_SIZE, (256, 128))
         compiled_fn = torch.compile(flex_attention)
 
         with cuda_kernel_profiler("flash_attncute") as fwd_prof_result:
-            compiled_fn(q, k, v, score_mod=_causal)
+            compiled_fn(q, k, v, block_mask=block_mask)
         with cuda_kernel_profiler("flash_attncuteflash_bwd") as bwd_prof_result:
-            compiled_fn(q, k, v, score_mod=_causal).sum().backward()
+            compiled_fn(q, k, v, block_mask=block_mask).sum().backward()
 
         self.assertTrue(
             fwd_prof_result["found"],
@@ -2078,7 +2093,28 @@ class TestFlexFlash(InductorTestCase):
             f"Flash attention backward kernel not found. Available kernels: {bwd_prof_result['kernel_names']}",
         )
 
-    def test_blackwell_default_supports_tensor_capture(self, device):
+    @parametrize(
+        "dtype,dim",
+        [(torch.float32, 64), (torch.float16, 160)],
+        name_fn=lambda dtype, dim: f"{dtype}_{dim}",
+    )
+    def test_blackwell_default_falls_back_for_unsupported_input(
+        self, device, dtype, dim
+    ):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        q, k, v = create_test_tensors(dtype=dtype, dim=dim, device=device)
+        compiled_fn = torch.compile(flex_attention)
+
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            out = compiled_fn(q, k, v)
+        ref = compiled_fn(q, k, v, kernel_options={"BACKEND": "TRITON"})
+
+        self.assertFalse(prof_result["found"])
+        self.assertEqual(out, ref)
+
+    def test_blackwell_default_falls_back_for_tensor_capture(self, device):
         if torch.cuda.get_device_capability(device)[0] != 10:
             self.skipTest("FlashAttention-4 defaults on SM100-SM109")
 
@@ -2090,91 +2126,17 @@ class TestFlexFlash(InductorTestCase):
 
         compiled_fn = torch.compile(flex_attention)
         with cuda_kernel_profiler("flash_attncute") as prof_result:
-            compiled_fn(q, k, v, score_mod=score_mod)
-
-        self.assertTrue(prof_result["found"])
-
-    def test_blackwell_default_restores_view_capture_after_template_rejection(
-        self, device
-    ):
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
-
-        q, k, v = create_test_tensors(dtype=torch.float16, device=device)
-        bias = torch.randn(q.size(1) * 2, device=device, dtype=q.dtype)[::2]
-
-        def score_mod(score, b, h, q_idx, kv_idx):
-            return score + bias[h]
-
-        compiled_fn = torch.compile(flex_attention)
-        with mock.patch.object(
-            flex_flash_attention_module.flash_attention_cutedsl_template,
-            "maybe_append_choice",
-            return_value=NotImplementedError("forced rejection"),
-        ):
-            with cuda_kernel_profiler("flash_attncute") as prof_result:
-                actual = compiled_fn(q, k, v, score_mod=score_mod)
-
-        self.assertEqual(
-            actual,
-            flex_attention(q, k, v, score_mod=score_mod),
-            atol=2e-2,
-            rtol=2e-2,
+            out = compiled_fn(q, k, v, score_mod=score_mod)
+        ref = compiled_fn(
+            q,
+            k,
+            v,
+            score_mod=score_mod,
+            kernel_options={"BACKEND": "TRITON"},
         )
+
         self.assertFalse(prof_result["found"])
-
-    def test_blackwell_default_falls_back_for_float32(self, device):
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
-
-        q, k, v = create_test_tensors(dtype=torch.float32, device=device)
-        compiled_fn = torch.compile(flex_attention)
-
-        with cuda_kernel_profiler("flash_attncute") as prof_result:
-            actual = compiled_fn(q, k, v, score_mod=_causal)
-
-        self.assertEqual(actual, flex_attention(q, k, v, score_mod=_causal))
-        self.assertFalse(prof_result["found"])
-
-    def test_blackwell_default_falls_back_for_unsupported_head_dim(self, device):
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
-
-        q, k, v = create_test_tensors(dim=160, dtype=torch.float16, device=device)
-        compiled_fn = torch.compile(flex_attention)
-
-        with cuda_kernel_profiler("flash_attncute") as prof_result:
-            actual = compiled_fn(q, k, v, score_mod=_causal)
-
-        self.assertEqual(
-            actual,
-            flex_attention(q, k, v, score_mod=_causal),
-            atol=2e-2,
-            rtol=2e-2,
-        )
-        self.assertFalse(prof_result["found"])
-
-    def test_blackwell_default_falls_back_for_grad_capture(self, device):
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
-
-        q, k, v = create_test_tensors(dtype=torch.float16, device=device)
-        bias = torch.randn(q.size(1), device=device, dtype=q.dtype, requires_grad=True)
-
-        def score_mod(score, b, h, q_idx, kv_idx):
-            return score + bias[h]
-
-        compiled_fn = torch.compile(flex_attention)
-        with cuda_kernel_profiler("flash_attncute") as prof_result:
-            actual = compiled_fn(q, k, v, score_mod=score_mod)
-
-        self.assertEqual(
-            actual,
-            flex_attention(q, k, v, score_mod=score_mod),
-            atol=2e-2,
-            rtol=2e-2,
-        )
-        self.assertFalse(prof_result["found"])
+        self.assertEqual(out, ref)
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
@@ -2535,24 +2497,64 @@ class TestFlexFlash(InductorTestCase):
             lse_flash.float(), lse_triton.float(), atol=1e-4, rtol=1e-4
         )
 
+    @dtypes(torch.bfloat16)
+    def test_auto_return_logsumexp_uses_flash(self, device, dtype):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+        compiled_flex = torch.compile(flex_attention)
+
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            _, lse = compiled_flex(q, k, v, return_lse=True)
+        _, ref_lse = compiled_flex(
+            q, k, v, return_lse=True, kernel_options={"BACKEND": "TRITON"}
+        )
+
+        self.assertTrue(prof_result["found"])
+        torch.testing.assert_close(lse.float(), ref_lse.float(), atol=1e-4, rtol=1e-4)
+
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_backend_raises_on_grad_logsumexp(self, device, dtype):
-        from torch._dynamo.exc import BackendCompilerFailed
+    @parametrize("backend", ["AUTO", "FLASH"])
+    def test_flash_backend_grad_logsumexp(self, device, dtype, backend):
+        if backend == "AUTO" and torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
 
         q, k, v = create_test_tensors(dtype=dtype, device=device, requires_grad=True)
+        q_ref = q.detach().clone().requires_grad_()
+        k_ref = k.detach().clone().requires_grad_()
+        v_ref = v.detach().clone().requires_grad_()
         lse_mask = torch.randn(2, 4, 512, device=device)
-
+        block_mask = create_block_mask(_causal_mask, 2, 4, 512, 512, device=device)
         compiled_flex = torch.compile(flex_attention)
-        out, lse = compiled_flex(
-            q, k, v, return_lse=True, kernel_options={"BACKEND": "FLASH"}
+
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            out, lse = compiled_flex(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                return_lse=True,
+                kernel_options={"BACKEND": backend},
+            )
+            (out.mean() + (lse * lse_mask).sum()).backward()
+        out_ref, lse_ref = compiled_flex(
+            q_ref,
+            k_ref,
+            v_ref,
+            block_mask=block_mask,
+            return_lse=True,
+            kernel_options={"BACKEND": "TRITON"},
         )
-        loss = out.mean() + (lse * lse_mask).sum()
-        with self.assertRaisesRegex(
-            BackendCompilerFailed,
-            "FLASH backend backward does not support differentiating through logsumexp",
-        ):
-            loss.backward()
+        (out_ref.mean() + (lse_ref * lse_mask).sum()).backward()
+
+        self.assertTrue(prof_result["found"])
+        self.assertEqual(out, out_ref, atol=3e-2, rtol=3e-2)
+        self.assertEqual(lse, lse_ref, atol=3e-2, rtol=3e-2)
+        self.assertEqual(q.grad, q_ref.grad, atol=3e-2, rtol=3e-2)
+        self.assertEqual(k.grad, k_ref.grad, atol=3e-2, rtol=3e-2)
+        self.assertEqual(v.grad, v_ref.grad, atol=3e-2, rtol=3e-2)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_backend_raises_on_return_max_scores(self, device, dtype):

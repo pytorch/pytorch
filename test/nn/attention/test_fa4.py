@@ -22,8 +22,15 @@ def _fa4_dependencies_available() -> bool:
         return False
     try:
         importlib.import_module("flash_attn.cute.interface")
-    except ImportError:
-        return False
+    except ModuleNotFoundError as error:
+        if error.name and error.name.split(".")[0] in {
+            "cuda",
+            "cutlass",
+            "flash_attn",
+            "tvm_ffi",
+        }:
+            return False
+        raise
     return True
 
 
