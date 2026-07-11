@@ -31,7 +31,7 @@ def get_idx_from_placements(placements, current_rank) -> int:
         current_rank (int): number of current device.
 
     Returns:
-        A int which contains the position of current device in the placement list.
+        An int which contains the position of current device in the placement list.
     """
     for idx, placement in enumerate(placements):  # type: ignore[attr-defined]
         if current_rank == placement.rank():  # type: ignore[union-attr]

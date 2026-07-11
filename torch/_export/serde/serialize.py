@@ -28,6 +28,7 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
+from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
@@ -706,7 +707,7 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state = GraphState()
         self.graph_signature = graph_signature
         self.module_call_graph = module_call_graph
-        self.custom_objs: dict[str, torch._C.ScriptObject] = {}
+        self.custom_objs: dict[str, Any] = {}
         self.duplicate_getitem_nodes: dict[str, str] = {}
         self.treespec_namedtuple_fields: dict[str, NamedTupleDef] = {}
 
@@ -1585,6 +1586,13 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(
                 as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn)
             )
+        elif is_custom_class_obj(arg):
+            custom_obj_name = f"_custom_obj_{len(self.custom_objs)}"
+            self.custom_objs[custom_obj_name] = arg
+            class_fqn = get_opaque_type_name(type(arg))
+            return Argument.create(
+                as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn)
+            )
         elif isinstance(arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return Argument.create(as_operator=self.serialize_operator(arg))
         else:
@@ -1610,7 +1618,7 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state.sym_float_values[name] = serialize_sym_float(meta_val)
         return SymFloatArgument.create(as_name=name)
 
-    def serialize_sym_bool_output(self, name, meta_val) -> SymIntArgument:
+    def serialize_sym_bool_output(self, name, meta_val) -> SymBoolArgument:
         if name in self.graph_state.sym_bool_values:
             raise AssertionError(f"name {name!r} already in sym_bool_values")
         self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)
@@ -4404,7 +4412,7 @@ def _registered_extension_types():
 
 
 # Registry to store all custom serialization implementations.
-# The registry maps a operation to its serialization function (a callable), in their own
+# The registry maps an operation to its serialization function (a callable), in their own
 # namespace to avoid conflicts.
 # Serialization: Op type --> custom handler.
 # De-serialization: Namespace --> custom handler.

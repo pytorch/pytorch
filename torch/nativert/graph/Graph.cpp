@@ -1657,7 +1657,7 @@ std::string graphToString(const Graph& g, bool include_signature) {
     ss << g.signature();
   }
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 } // namespace torch::nativert
