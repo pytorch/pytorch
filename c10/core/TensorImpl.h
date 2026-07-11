@@ -224,6 +224,13 @@ struct C10_API BackendMeta : intrusive_ptr_target {
       const intrusive_ptr<BackendMeta>& ptr) const {
     return ptr;
   }
+  // Clone this metadata for a FakeTensor. Defaults to nullptr (dropped) so
+  // existing backends are unaffected; a backend opts in by overriding this and
+  // should strip data that is only valid on a real tensor.
+  virtual intrusive_ptr<BackendMeta> clone_for_fake(
+      const intrusive_ptr<BackendMeta>& ptr [[maybe_unused]]) const {
+    return nullptr;
+  }
 };
 
 // same as Python's FakeTensorMode
