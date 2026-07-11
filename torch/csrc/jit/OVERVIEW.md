@@ -58,7 +58,7 @@ Sections start with a reference to the source file where the code related to the
     - [Required Passes](#required-passes)
     - [Derivative Preserving Optimization](#derivative-preserving-optimization)
     - [Post-derivative optimization](#post-derivative-optimization)
-    - [Derivate Splitting](#derivate-splitting)
+    - [Derivative Splitting](#derivative-splitting)
     - [Fusers](#fusers)
     - [Disabling Optimizations](#disabling-optimizations)
   - [JIT Logging](#jit-logging)
@@ -213,7 +213,7 @@ When `Nodes` are inserted into a `Graph`, they are inserted at a special "insert
 Each `Block` has two dummy nodes that are not included in the list of nodes in the `Block`. The `prim::Param` node represents the inputs to the `Block` and does not have a `prev()` or `next()` `Node`. The `prim::Return` `Node` represents the outputs of a `Block`.
 The list of `Nodes` in a `Block` is implemented as a circular linked list with the `prim::Return` `Node` serving as the beginning/end sentinel. Inserting and deleting at arbitrary places is efficient. Developers may also encounter implementations inside of IR objects that use this fact (e.g. appending to a `Block` is equivalent to putting the node before the `prim::Return` Node).
 
-Iterators for the `Block::nodes()` list are invalided when the current `Node` they point to is moved or deleted. Otherwise iterators remain valid.
+Iterators for the `Block::nodes()` list are invalidated when the current `Node` they point to is moved or deleted. Otherwise iterators remain valid.
 
 Blocks also contain a list of input and output values. The meaning of these values depends on where the `Block` is used. For the Graph's top-level `Block`, these are inputs and outputs to the `Graph`, and line up with the FunctionSchema associated with the Method that owns the `Graph`.
 
@@ -1139,7 +1139,7 @@ with prim::FusionGroup_0 = graph(%13 : Float(*, *),
   return (%hy, %cy)
 ```
 
-### Derivate Splitting ###
+### Derivative Splitting ###
 
 Many `Graphs` will require gradients (i.e. one of the inputs will have a `requires_grad` property set). In this case, it is unsafe to run post-derivative optimizations directly on the `Graph`. Instead, our approach is to first *split* the `Graph` into sub-Graphs where symbolic gradient formulas are known and produce an explicit `Graph` for the forward pass along with a complementary `Graph` that implements the backwards pass using some of the values computed in the forward pass. We can then apply post-derivative optimization to the forward graph. The "gradOutputs" for the backwards graph are only known when the backward pass runs, so we cannot fully optimize it at this time. For instance, we do not know if some of those gradOutputs will also `require_grad` meaning that a gradient-of-gradient situation exists. Instead the backward pass will use a new GraphExecutor object to run and optimize its execution. In this way, we can handle an indefinite number of recursive gradient calculations.
 

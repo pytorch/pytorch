@@ -1475,6 +1475,81 @@ class TestPatternMatcher(TestPatternMatcherBase):
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.to_dense() + 1
+
+        x = torch.randn(4, 4).to_mkldnn()
+        mod = Model().eval()
+        expected = mod(x)
+        actual = torch.compile(mod, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual, expected)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_float8_dtype(self):
+        def fn(x):
+            return x.to_dense(torch.float8_e4m3fn)
+
+        x = torch.randn(4, 4).to_mkldnn()
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertEqual(actual.float(), expected.float())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_input_backward(self):
+        def fn(x):
+            return (x.to_dense() + 1).sum()
+
+        eager_base = torch.randn(4, 4, requires_grad=True)
+        compiled_base = eager_base.detach().clone().requires_grad_()
+
+        expected = fn(eager_base.to_mkldnn())
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(
+            compiled_base.to_mkldnn()
+        )
+        self.assertEqual(actual, expected)
+
+        expected.backward()
+        actual.backward()
+        self.assertEqual(compiled_base.grad, eager_base.grad)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_after_detach(self):
+        def fn(x):
+            return x.to_mkldnn().detach().to_dense() + 1
+
+        x = torch.randn(4, 4)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual, expected)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @config.patch({"cpp_wrapper": True})
+    def test_mkldnn_to_dense_cpp_wrapper(self):
+        def fn(x):
+            return x.to_mkldnn().detach().to_dense() + 1
+
+        x = torch.randn(4, 4)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual, expected)
+
     def test_reproduce_113440_issue_1(self):
         class Mod(torch.nn.Module):
             def __init__(
