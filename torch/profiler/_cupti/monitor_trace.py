@@ -771,6 +771,171 @@ def _gpu_user_annotation_events(
     return gpu_user_events
 
 
+# PM counter descriptor ids: local (0-based, by metric order); _merge_counters maps them onto the
+# global monotonic id sequence, alongside the env and cycle counters.
+
+# Friendly display names for common PM metrics, keyed by the metric base (before the rollup); a
+# "% of peak" rollup gets a "(%)" suffix. Unknown metrics fall back to their raw metric name.
+_PM_METRIC_LABELS = {
+    "sm__cycles_active": "SM Active",
+    "gpu__dram_throughput": "DRAM BW",
+    "dram__throughput": "HBM BW",
+    "dram__read_throughput": "HBM Read",
+    "dram__write_throughput": "HBM Write",
+    "nvlrx__bytes": "NVLink RX",
+    "nvltx__bytes": "NVLink TX",
+    "pcie__throughput": "PCIe",
+}
+
+
+def _pm_label(metric: str) -> str:
+    base, _, rollup = metric.partition(".")
+    friendly = _PM_METRIC_LABELS.get(base)
+    if friendly is None:
+        return metric
+    return f"{friendly} (%)" if "pct_of_peak" in rollup else friendly
+
+
+def _build_pm_counters(pm: dict | None, active_devices: set):
+    """Build the GpuCounterEvent payload from PM-sampling columns (start_ns/device_id plus one
+    value column per metric, keyed by the CUPTI metric name): same tuple shape as
+    :func:`_build_gpu_counters`. The metric columns are self-describing, so each is assigned a
+    local descriptor id here (mapped to a global id in :func:`_merge_counters`) and labeled with a
+    friendly display name (:func:`_pm_label`, or the raw metric name if unmapped). Restricted to
+    devices that ran GPU work."""
+    if not pm or not len(pm.get("start_ns", ())):
+        return None
+    ts = np.ascontiguousarray(pm["start_ns"], dtype=np.int64)
+    dev = np.asarray(pm["device_id"], dtype=np.int64)
+    base = (
+        np.isin(dev, list(active_devices))
+        if active_devices
+        else np.ones(len(dev), dtype=bool)
+    )
+    if not base.any():
+        return None
+    metric_cols = [k for k in pm if k not in ("start_ns", "device_id")]
+    specs, gpu_l, ts_l, cid_l, val_l = [], [], [], [], []
+    for name in metric_cols:
+        col = pm.get(name)
+        if col is None:
+            continue
+        cid = len(specs)  # local id; _merge_counters assigns the global id
+        specs.append((cid, _pm_label(name)))
+        gpu_l.append(dev[base])
+        ts_l.append(ts[base])
+        cid_l.append(np.full(int(base.sum()), cid, dtype=np.int32))
+        val_l.append(np.asarray(col, dtype=np.float64)[base])
+    if not specs:
+        return None
+    return (
+        specs,
+        np.concatenate(gpu_l).astype(np.int32),
+        np.concatenate(ts_l).astype(np.int64),
+        np.concatenate(cid_l).astype(np.int32),
+        np.concatenate(val_l).astype(np.float64),
+    )
+
+
+def _merge_counters(*parts):
+    """Concatenate GpuCounterEvent payloads (the tuples from the per-source builders) into a single
+    payload for the encoder. Each source uses its own local descriptor ids; here they are assigned
+    onto a single monotonic sequence (0, 1, 2, ...) so ids are globally unique by construction, and
+    each source's cid column, COMPUTE-group ids (6th element), and int-valued ids (7th) are remapped
+    through it."""
+    parts = [p for p in parts if p]
+    if not parts:
+        return None
+    specs: list = []
+    gpu_l, ts_l, cid_l, val_l = [], [], [], []
+    compute_group: list = []
+    int_value_ids: list = []
+    next_id = 0
+    for p in parts:
+        s, g, t, c, v = p[:5]
+        remap = {old: next_id + k for k, (old, _name) in enumerate(s)}
+        next_id += len(s)
+        specs.extend((remap[old], name) for old, name in s)
+        gpu_l.append(g)
+        ts_l.append(t)
+        lut = np.zeros(max(remap) + 1, dtype=np.int32)
+        for old, new in remap.items():
+            lut[old] = new
+        cid_l.append(lut[np.asarray(c)])
+        val_l.append(v)
+        if len(p) > 5 and p[5]:
+            compute_group.extend(remap[i] for i in p[5])
+        if len(p) > 6 and p[6]:
+            int_value_ids.extend(remap[i] for i in p[6])
+    return (
+        specs,
+        np.concatenate(gpu_l),
+        np.concatenate(ts_l),
+        np.concatenate(cid_l),
+        np.concatenate(val_l),
+        compute_group,
+        int_value_ids,
+    )
+
+
+def _active_devices(columns: dict) -> set:
+    """Devices that ran GPU work this window (so idle GPUs get no counters)."""
+    active: set = set()
+    for ks in ("kernel", "gpu_memcpy", "gpu_memset"):
+        c = columns.get(ks)
+        if c is not None and len(c.get("device_id", ())):
+            active.update(np.unique(c["device_id"]).tolist())
+    return active
+
+
+def _gpu_counter_process(device_id: int) -> str:
+    """String "pid" for a device's GPU counter row. A string pid makes Perfetto label the process
+    row with the string verbatim ("GPU N Counters", no numeric suffix -- the same way kineto's
+    "Spans"/"Traces" rows work) and keeps it a distinct process: an integer pid would show its
+    number, and a pid <= 0 collapses into the device/unknown process."""
+    return f"GPU {device_id} Counters"
+
+
+def _build_chrome_counters(counters, base_ns: int) -> list[dict]:
+    """Emit the merged GPU counter payload as chrome-trace "C" (counter) events -- one per
+    sample -- in a per-device "GPU N Counters" process row, separate from the device's kernel/
+    stream work (the JSON counterpart of the .pftrace "GPU / Counters / <gpu>" tracks)."""
+    if counters is None:
+        return []
+    specs, gpu, ts, cid, val = counters[:5]
+    int_ids = set(counters[6]) if len(counters) > 6 else set()
+    name_by_id = dict(specs)
+    ts_us = (ts - base_ns) / 1000.0
+    out: list[dict] = []
+    counter_procs: dict[int, str] = {}
+    for i in range(len(cid)):
+        name = name_by_id.get(int(cid[i]))
+        if name is None:
+            continue
+        did = int(gpu[i])
+        proc = _gpu_counter_process(did)
+        counter_procs[did] = proc
+        v = int(val[i]) if int(cid[i]) in int_ids else float(val[i])
+        out.append(
+            {
+                "ph": "C",
+                "name": name,
+                "pid": proc,
+                "ts": float(ts_us[i]),
+                # single unnamed series (empty key): keying it by the metric name instead
+                # makes Perfetto render the track label doubled ("name name").
+                "args": {"": v},
+            }
+        )
+    # Low sort index (below the CPU pid and the 5000000 + did device rows) so Perfetto floats
+    # the counter rows to the top of the trace, above the CPU and GPU work.
+    meta: list[dict] = [
+        _metadata_event("process_sort_index", 0.0, proc, 0, "sort_index", 100 + did)
+        for did, proc in sorted(counter_procs.items())
+    ]
+    return meta + out
+
+
 def merge_trace_window_into_chrome_trace(
     cpu_trace_path: str | os.PathLike[str],
     output_path: str | os.PathLike[str],
@@ -837,6 +1002,19 @@ def merge_trace_window_into_chrome_trace(
     events[metadata_insert:metadata_insert] = metadata_events
 
     events.extend(trace_events)
+
+    # GPU counters (PM utilization) as chrome "C" events on the device pid -- the JSON
+    # counterpart of the .pftrace GPU counter tracks.
+    columns = cast("dict[str, dict[str, Any]]", trace_window.get("columns", {}))
+    active_devices = _active_devices(columns)
+    events.extend(
+        _build_chrome_counters(
+            _merge_counters(
+                _build_pm_counters(columns.get("pm_sampling"), active_devices),
+            ),
+            base_ns,
+        )
+    )
 
     min_ts = math.inf
     max_end_ts = 0.0
