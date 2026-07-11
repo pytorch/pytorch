@@ -433,7 +433,6 @@ def forward(self, x_1):
 
         self._test(f, [torch.randn(2), torch.randn(2)])
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_proxy_tensor(self):
         def f_grad(x):
             val = x.cos().cos().sum()
