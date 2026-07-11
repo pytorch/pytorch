@@ -239,10 +239,15 @@ class TorchRuntimeError(TorchDynamoException):
 
 
 class InvalidBackend(TorchDynamoException):
-    def __init__(self, name: str) -> None:
-        super().__init__(
-            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+    def __init__(self, name: str, suggestions: list[str] | None = None) -> None:
+        msg = f"Invalid backend: {name!r}"
+        msg += (
+            f", did you mean: {', '.join(map(repr, suggestions))}?"
+            if suggestions
+            else "."
         )
+        msg += " See `torch._dynamo.list_backends()` for available backends."
+        super().__init__(msg)
 
 
 class ResetRequired(TorchDynamoException):
