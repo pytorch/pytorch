@@ -95,7 +95,7 @@ class _BaseDataSparsiferTestCase(TestCase):
         self.assertEqual(
             len(sparsifier.data_groups),
             len(data_list) + len(data_with_config),
-            msg="Sparsifier data groups don't match the input "
+            msg=lambda msg: f"{msg}\nSparsifier data groups don't match the input "
             f"({len(sparsifier.data_groups)} vs. "
             f"{len(data_list) + len(data_with_config)}).",
         )

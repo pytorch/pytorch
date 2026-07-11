@@ -52,6 +52,21 @@ def _warn_once(msg, category=UserWarning, stacklevel=2):
         warn(msg, category=category, stacklevel=stacklevel)
 
 
+def _parse_custom_profiler_config(
+    experimental_config: _ExperimentalConfig | None,
+) -> dict[str, Any]:
+    if experimental_config is None:
+        return {}
+    raw = getattr(experimental_config, "custom_profiler_config", None)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"backend": raw}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 class _NumpyEncoder(json.JSONEncoder):
     """
     Json encoder for numpy types (np.int, np.float, np.array etc.)
@@ -159,7 +174,7 @@ class _KinetoProfile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
+            Note that this support exists, at the moment, only for TorchScript models
             and not eager mode models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
@@ -210,6 +225,23 @@ class _KinetoProfile:
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.with_modules = with_modules
+        if (
+            experimental_config is not None
+            and experimental_config.trace_only
+            and with_stack
+        ):
+            import copy
+
+            warn(
+                "trace_only=True is incompatible with with_stack=True "
+                "(stack traces require event post-processing). "
+                "Disabling trace_only."
+            )
+            experimental_config_copy: _ExperimentalConfig = copy.copy(
+                experimental_config
+            )
+            experimental_config_copy.trace_only = False
+            experimental_config = experimental_config_copy
         self.experimental_config = experimental_config
         self.execution_trace_observer = execution_trace_observer
         self.acc_events = acc_events
@@ -237,6 +269,34 @@ class _KinetoProfile:
 
         # user-defined metadata to be amended to the trace
         self.preset_metadata: dict[str, str] = {}
+        self._trace_metadata: dict[str, str] = {}
+        self._custom_profiler_config = _parse_custom_profiler_config(
+            self.experimental_config
+        )
+        self._use_cupti_monitor = self._custom_profiler_config.get(
+            "backend"
+        ) == "cupti_monitor" or bool(self._custom_profiler_config.get("cupti_monitor"))
+        # The ProfilerObserver driving the shared CUPTI monitor this session; window opened
+        # at start, closed at stop (_monitor_window_id), exported by export_chrome_trace.
+        self._cupti_profiler_observer: Any = None
+        self._monitor_window_id: int | None = None
+        # cupti_monitor exports synchronously by default (like the stock profiler).
+        # {"cupti_monitor_async_export": true} hands the merge+write off-thread, joined by
+        # wait_for_exports; cupti_monitor-only, rejected elsewhere.
+        self._cupti_async_export = False
+        if self._use_cupti_monitor:
+            if ProfilerActivity.CPU not in self.activities:
+                raise ValueError(
+                    "cupti_monitor profiler backend currently requires CPU activity"
+                )
+            self._cupti_async_export = bool(
+                self._custom_profiler_config.get("cupti_monitor_async_export", False)
+            )
+        elif "cupti_monitor_async_export" in self._custom_profiler_config:
+            raise ValueError(
+                "cupti_monitor_async_export is only supported with the cupti_monitor "
+                "backend"
+            )
 
     def start(self) -> None:
         self.prepare_trace()
@@ -257,9 +317,10 @@ class _KinetoProfile:
                 "To keep events across cycles, set acc_events=True."
             )
         if (self.profiler is None) or (not self.acc_events):
+            use_device = None if self._use_cupti_monitor else self.use_device
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
-                use_device=self.use_device,
+                use_device=use_device,
                 record_shapes=self.record_shapes,
                 with_flops=self.with_flops,
                 profile_memory=self.profile_memory,
@@ -274,6 +335,30 @@ class _KinetoProfile:
                 if self.activity_filters
                 else None,
             )
+        if self._use_cupti_monitor:
+            from torch.profiler._cupti.observers.profiler import ProfilerObserver
+
+            self._monitor_trace_window = None
+            # Constructing the observer registers it with the shared monitor and starts
+            # collection. cuda_sync events are opt-in via the config, matching kineto's flag.
+            self._cupti_profiler_observer = ProfilerObserver(
+                enable_cuda_sync=bool(
+                    self._custom_profiler_config.get("enable_cuda_sync_events")
+                ),
+                # PM sampling (true SM-active % + DRAM-throughput % counters) is a CUPTI-monitor
+                # feature, opt-in (not always-on like env counters). The metrics are per-profile
+                # (custom_profiler_config["pm_metrics"], a list of CUPTI metric names).
+                enable_pm_sampling=bool(
+                    self._custom_profiler_config.get("enable_pm_sampling")
+                ),
+                pm_metrics=self._custom_profiler_config.get("pm_metrics"),
+                # Synchronous export finalizes on the calling thread, so skip the poll thread.
+                defer_export=self._cupti_async_export,
+            )
+            # Publish the observer so record_function routes annotations to it. The reference
+            # lives in torch.autograd (not the cupti package), so record_function never
+            # imports the cupti chain on a non-cupti run.
+            prof._set_active_cupti_profiler_observer(self._cupti_profiler_observer)
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
@@ -282,6 +367,10 @@ class _KinetoProfile:
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before starting trace")
         self.profiler._start_trace()
+        if self._use_cupti_monitor and self._cupti_profiler_observer is not None:
+            # Open the trace window here (stamps the start boundary, native clock, no
+            # device sync); records before this are excluded from the window.
+            self._cupti_profiler_observer.open_window()
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -328,9 +417,16 @@ class _KinetoProfile:
             self.execution_trace_observer.stop()
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before stopping trace")
+        if self._use_cupti_monitor:
+            # Unpublish the observer (record_function stops routing here) and close the trace
+            # window (end boundary, native clock, no device sync), queuing it for deferred
+            # export; the observer is kept alive past stop for the async write.
+            prof._set_active_cupti_profiler_observer(None)
+            if self._cupti_profiler_observer is not None:
+                self._monitor_window_id = self._cupti_profiler_observer.close_window()
         self.profiler.__exit__(None, None, None)
 
-    def export_chrome_trace(self, path: str):
+    def export_chrome_trace(self, path: str, use_python_export: bool = False):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
@@ -339,14 +435,72 @@ class _KinetoProfile:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
             )
-        if path.endswith(".gz"):
+        if self._use_cupti_monitor:
+            obs = self._cupti_profiler_observer
+            if obs is None or not obs.available or self._monitor_window_id is None:
+                # Nothing to export this cycle: the per-cycle ProfilerObserver didn't register
+                # with the CUPTI monitor (available is False -- the intermittent case), or its
+                # window wasn't opened/closed (window id None). Skip rather than crash -- a
+                # profiler-trace hiccup must not take down a training run -- and clean up below.
+                _warn_once(
+                    "CUPTI monitor observer unavailable; skipping chrome trace export"
+                )
+                # join() tears down the poll thread + monitor registration, which exist only
+                # when the observer registered (available). An unavailable observer never
+                # started either, so just drop the reference and let it be GC'd.
+                if obs is not None and obs.available:
+                    obs.join()
+                self._cupti_profiler_observer = None
+                self._monitor_window_id = None
+                return
+            # Capture the profiler's CPU-side trace (cheap, no device sync) and hand it + the
+            # output path to the observer. Async: the poller merges + writes `path` once the
+            # GPU records arrive; wait_for_exports() blocks for it.
+            fp = tempfile.NamedTemporaryFile(  # noqa: SIM115
+                "w+t", suffix=".json", delete=False
+            )
+            fp.close()
+            self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
+            self._cupti_profiler_observer.set_export(
+                self._monitor_window_id, fp.name, path
+            )
+            if not self._cupti_async_export:
+                # Synchronous: finalize + write now, so `path` exists on return.
+                self._cupti_profiler_observer.join()
+                self._cupti_profiler_observer = None
+                self._monitor_window_id = None
+            return
+        if use_python_export:
+            self.profiler.export_chrome_trace(
+                path, self._trace_metadata, use_python_export=True
+            )
+        elif path.endswith(".gz"):
             with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
-                retvalue = self.profiler.export_chrome_trace(fp.name)
+                self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
                 with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
-            return retvalue
         else:
-            return self.profiler.export_chrome_trace(path)
+            self.profiler.export_chrome_trace(path, self._trace_metadata)
+
+    def wait_for_exports(self) -> None:
+        """Block until every deferred cupti_monitor export is written, then unregister.
+        No-op unless the cupti_monitor backend is active. Call on the training thread when
+        you need the file(s) on disk; the finalize force-flushes CUPTI (safe here)."""
+        if self._use_cupti_monitor and self._cupti_profiler_observer is not None:
+            self._cupti_profiler_observer.join()
+            self._cupti_profiler_observer = None
+            self._monitor_window_id = None
+
+    def take_pending_cupti_export(self) -> Any:
+        """Detach this cycle's cupti_monitor ProfilerObserver (with its unwritten window) so
+        the deferred export can be finalized OFF the training thread (call
+        ``obs.join(force=False)`` on a worker). None for non-cupti backends."""
+        if not self._use_cupti_monitor:
+            return None
+        obs = self._cupti_profiler_observer
+        self._cupti_profiler_observer = None
+        self._monitor_window_id = None
+        return obs
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         """Save stack traces to a file
@@ -397,6 +551,7 @@ class _KinetoProfile:
         group_by_input_shape: bool = False,
         group_by_stack_n: int = 0,
         group_by_overload_name: bool = False,
+        include_python_functions: bool = False,
     ):
         """Averages events, grouping them by operator name and (optionally) input shapes, stack
         and overload name.
@@ -412,7 +567,10 @@ class _KinetoProfile:
                 "Profiler must be initialized before getting key averages"
             )
         return self.profiler.key_averages(
-            group_by_input_shape, group_by_stack_n, group_by_overload_name
+            group_by_input_shape,
+            group_by_stack_n,
+            group_by_overload_name,
+            include_python_functions,
         )
 
     def events(self):
@@ -422,6 +580,11 @@ class _KinetoProfile:
         """
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before accessing events")
+        if self.experimental_config is not None and self.experimental_config.trace_only:
+            raise RuntimeError(
+                "events() is not available when trace_only=True in "
+                "ExperimentalConfig. Use export_chrome_trace() instead."
+            )
         return self.profiler.function_events
 
     def add_metadata(self, key: str, value: str) -> None:
@@ -430,6 +593,7 @@ class _KinetoProfile:
         into the trace file
         """
         wrapped_value = '"' + value.replace('"', '\\"') + '"'
+        self._trace_metadata[key] = wrapped_value
         torch.autograd._add_metadata_json(key, wrapped_value)
 
     def add_metadata_json(self, key: str, value: str) -> None:
@@ -437,6 +601,7 @@ class _KinetoProfile:
         Adds a user defined metadata with a string key and a valid json value
         into the trace file
         """
+        self._trace_metadata[key] = value
         torch.autograd._add_metadata_json(key, value)
 
     def preset_metadata_json(self, key: str, value: str) -> None:
@@ -631,7 +796,10 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
 
 
 def tensorboard_trace_handler(
-    dir_name: str, worker_name: str | None = None, use_gzip: bool = False
+    dir_name: str,
+    worker_name: str | None = None,
+    use_gzip: bool = False,
+    use_python_export: bool = False,
 ):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -655,7 +823,10 @@ def tensorboard_trace_handler(
         file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
         if use_gzip:
             file_name = file_name + ".gz"
-        prof.export_chrome_trace(os.path.join(dir_name, file_name))
+        prof.export_chrome_trace(
+            os.path.join(dir_name, file_name),
+            use_python_export=use_python_export,
+        )
 
     return handler_fn
 
@@ -692,7 +863,7 @@ class profile(_KinetoProfile):
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
+            Note that this support exists, at the moment, only for TorchScript models
             and not eager mode models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used for Kineto library features. Note, backward compatibility is not guaranteed.
@@ -775,7 +946,7 @@ class profile(_KinetoProfile):
             # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
-            # the third and the forth iterations,
+            # the third and the fourth iterations,
             # after which the trace will become available
             # and on_trace_ready (when set) is called;
             # the cycle repeats starting with the next step
@@ -1273,7 +1444,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             self.output_file_path, create_dir=can_create
         )
         if not generated_path:
-            # could not find of create the resources dir
+            # could not find or create the resources dir
             return None
         self.resources_dir = generated_path
         return self.resources_dir

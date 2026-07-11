@@ -1,5 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <ATen/DynamicLibrary.h>
+#include <c10/util/ScopeExit.h>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
@@ -13,7 +14,7 @@
 #include <errno.h>
 #include <io.h>
 #include <sys/stat.h>
-#include <windows.h>
+#include <torch/headeronly/util/win32-headers.h>
 #include <functional> // std::function
 #else // !_WIN32
 #include <sys/mman.h>
@@ -39,6 +40,51 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
         num_models >= 1,
         "num_models must be >=1 when run_single_threaded is false");
   }
+  load_aoti_symbols(model_so_path, device_str, run_single_threaded);
+
+  AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
+      &container_handle_,
+      num_models,
+      device_str.c_str(),
+      cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
+}
+
+AOTIModelContainerRunner::AOTIModelContainerRunner(
+    const std::string& model_so_path,
+    size_t num_models,
+    const std::string& device_str,
+    const std::string& cubin_dir,
+    std::unordered_map<std::string, at::Tensor>& constants) {
+  TORCH_CHECK(num_models >= 1, "num_models must be >=1");
+  load_aoti_symbols(model_so_path, device_str, /*run_single_threaded=*/false);
+  TORCH_CHECK(
+      create_with_external_constants_func_ != nullptr,
+      "AOTInductorModelContainerCreateWithExternalConstants symbol not found "
+      "in .so. Rebuild the model with the latest AOTInductor.");
+
+  // Pass constants as C-ABI-safe entries (name + AtenTensorHandle) so no std
+  // container crosses the .so boundary. AtenTensorHandle borrows the caller's
+  // at::Tensor; the caller retains ownership (tensors must outlive the runner).
+  std::vector<AOTInductorConstantMapEntry> entries;
+  entries.reserve(constants.size());
+  for (auto& [name, tensor] : constants) {
+    entries.push_back(
+        {name.c_str(),
+         torch::aot_inductor::tensor_pointer_to_tensor_handle(&tensor)});
+  }
+  AOTI_RUNTIME_ERROR_CODE_CHECK(create_with_external_constants_func_(
+      &container_handle_,
+      num_models,
+      device_str.c_str(),
+      cubin_dir.empty() ? nullptr : cubin_dir.c_str(),
+      entries.data(),
+      entries.size()));
+}
+
+void AOTIModelContainerRunner::load_aoti_symbols(
+    const std::string& model_so_path,
+    const std::string& device_str,
+    bool run_single_threaded) {
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
 
@@ -107,9 +153,15 @@ consider rebuild your model with the latest AOTInductor.");
       get_constants_blob_size_func_,
       "AOTInductorModelContainerGetConstantsBlobSize")
   TRY_LOAD_SYMBOL(
+      did_call_load_constants_func_,
+      "AOTInductorModelContainerDidCallLoadConstants")
+  TRY_LOAD_SYMBOL(
       update_constants_from_blob_func_,
       "AOTInductorModelUpdateConstantsFromBlob")
   TRY_LOAD_SYMBOL(get_last_error_func_, "AOTInductorGetLastError")
+  TRY_LOAD_SYMBOL(
+      create_with_external_constants_func_,
+      "AOTInductorModelContainerCreateWithExternalConstants")
 #undef TRY_LOAD_SYMBOL
 
   // Hack to find the json file name from the model so file
@@ -118,18 +170,12 @@ consider rebuild your model with the latest AOTInductor.");
 
   if (c10::filesystem::exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-        json_filename, device_str == "cpu");
+        json_filename, device_str);
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
   } else {
     proxy_executor_handle_ = nullptr;
   }
-
-  AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
-      &container_handle_,
-      num_models,
-      device_str.c_str(),
-      cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
 }
 
 AOTIModelContainerRunner::~AOTIModelContainerRunner() {
@@ -358,14 +404,14 @@ void AOTIModelContainerRunner::update_constant_buffer_from_blob(
   if (hMapping == NULL) {
     TORCH_CHECK(false, "CreateFileMapping failed");
   }
+  auto mapping_guard =
+      c10::make_scope_exit([hMapping]() { CloseHandle(hMapping); });
 
   uint8_t* ptr = static_cast<uint8_t*>(
       MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, weights_size));
 
-  if (ptr == NULL) {
-    CloseHandle(hMapping);
-    TORCH_CHECK(false, "MapViewOfFile failed");
-  }
+  TORCH_CHECK(ptr != NULL, "MapViewOfFile failed");
+  auto view_guard = c10::make_scope_exit([ptr]() { UnmapViewOfFile(ptr); });
 
 #else
   // Unix/Linux implementation
@@ -377,19 +423,11 @@ void AOTIModelContainerRunner::update_constant_buffer_from_blob(
 
   close(fd);
   TORCH_CHECK(ptr != MAP_FAILED, "mmap() failed");
+  auto mmap_guard = c10::make_scope_exit(
+      [ptr, weights_size]() { munmap(ptr, weights_size); });
 #endif
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       update_constants_from_blob_func_(container_handle_, ptr));
-
-  // After update_constants_from_blob_func_ returns, the model has copied
-  // all the data from the mmap'd memory to its own internal storage,
-  // so we can safely unmap the memory now.
-#ifdef _WIN32
-  UnmapViewOfFile(ptr);
-  CloseHandle(hMapping);
-#else
-  munmap(ptr, weights_size);
-#endif
 }
 
 void AOTIModelContainerRunner::update_inactive_constant_buffer(
@@ -418,6 +456,16 @@ void AOTIModelContainerRunner::free_inactive_constant_buffer() {
       "No free_inactive_constant_buffer in .so! Consider rebuild your model with the latest AOTInductor.");
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       free_inactive_constant_buffer_func_(container_handle_));
+}
+
+bool AOTIModelContainerRunner::did_call_load_constants() const {
+  TORCH_CHECK(
+      did_call_load_constants_func_ != nullptr,
+      "No did_call_load_constants in .so! Consider rebuild your model with the latest AOTInductor.");
+  bool did_call_load_constants = false;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(did_call_load_constants_func_(
+      container_handle_, &did_call_load_constants));
+  return did_call_load_constants;
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
