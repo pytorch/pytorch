@@ -8,12 +8,12 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, overload, TYPE_CHECKING, TypeVar
+from typing import Any, overload, Protocol, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
@@ -1048,11 +1048,11 @@ def _apply_func_to_inner_tensors_of_same_dim(
             case torch.Tensor() as inner:
                 if inner.dim() == t.dim():
                     func(inner, *args, **kwargs)
-            case OpaqueBase():
+            case CustomClassBase():
                 pass
             case unexpected:
                 raise AssertionError(
-                    f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                 )
 
 
@@ -1485,10 +1485,25 @@ def _allow_in_graph_einops() -> None:
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
+class _ConfigPatchProtocol(Protocol):
+    """The config.patch() context manager object wrapped by DynamoConfigPatchProxy."""
+
+    changes: dict[str, Any]
+
+    def __enter__(self) -> None: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+
 # Proxy class for torch._dynamo.config patching - so dynamo can identify context managers/decorators
 # created by patch_dynamo_config, compared to ones created by a raw torch._dynamo.config.patch.
 class DynamoConfigPatchProxy:
-    def __init__(self, config_patch: Any) -> None:
+    def __init__(self, config_patch: _ConfigPatchProtocol) -> None:
         self.config_patch = config_patch
 
     @property

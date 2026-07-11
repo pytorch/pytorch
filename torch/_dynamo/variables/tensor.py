@@ -34,9 +34,9 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch import sym_float, sym_int
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo import compiled_autograd
-from torch._library.opaque_object import is_opaque_reference_type
-from torch._opaque_base import OpaqueBase
+from torch._library.opaque_object import is_opaque_symbolic_type
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -78,7 +78,7 @@ from ..utils import (
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
-from .script_object import TorchScriptObjectVariable
+from .script_object import CustomClassObjectVariable
 from .user_defined import UserDefinedClassVariable
 
 
@@ -438,23 +438,23 @@ class TensorVariable(VariableTracker):
             example_value = getattr(fake_val, name)
             if name in attrs:
                 # attrs returned from tensor_flatten are always tensors or opaques
-                if not isinstance(example_value, (torch.Tensor, OpaqueBase)):
+                if not isinstance(example_value, (torch.Tensor, CustomClassBase)):
                     raise AssertionError(
-                        f"Expected Tensor or OpaqueBase, got {type(example_value)}"
+                        f"Expected Tensor or CustomClassBase, got {type(example_value)}"
                     )
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(tx=tx, proxy=proxy, example_value=example_value)
-            elif is_opaque_reference_type(type(example_value)):
+            elif is_opaque_symbolic_type(type(example_value)):
                 fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                     tx.output.fake_mode, example_value
                 )
-                return TorchScriptObjectVariable.create(proxy, fake_script_obj, tx=tx)
+                return CustomClassObjectVariable.create(proxy, fake_script_obj, tx=tx)
             elif isinstance(
                 example_value,
                 torch._library.fake_class_registry.FakeScriptObject,
             ):
-                return TorchScriptObjectVariable.create(proxy, example_value, tx=tx)
+                return CustomClassObjectVariable.create(proxy, example_value, tx=tx)
             # any other attributes on the subclass (that are not methods)
             # are assumed to be constant metadata.
             elif not callable(example_value):
@@ -590,7 +590,7 @@ class TensorVariable(VariableTracker):
     def method_attr_retain_grad(self, tx: "InstructionTranslatorBase") -> NoReturn:
         unimplemented(
             gb_type="Tensor.retain_grad() with AOTDispatcher",
-            context=f"var_getattr {self} retain_grad",
+            context=f"getattro_impl {self} retain_grad",
             explanation="`Tensor.retain_grad()` does not work with AOTDispatcher.",
             hints=[],
         )
@@ -605,7 +605,7 @@ class TensorVariable(VariableTracker):
             and not self.has_grad_fn
         ):
             return ConstantVariable.create(None)
-        # None tells var_getattr to use default .grad handling
+        # None tells getattro_impl to use default .grad handling
         return None
 
     def method_attr_data(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -619,7 +619,7 @@ class TensorVariable(VariableTracker):
         if self.has_grad_fn:
             unimplemented(
                 gb_type="Tensor with grad_fn()",
-                context=f"var_getattr {self} grad_fn",
+                context=f"getattro_impl {self} grad_fn",
                 explanation="Dynamo does not support tracing tensors with a grad_fn directly.",
                 hints=[],
             )
@@ -639,7 +639,7 @@ class TensorVariable(VariableTracker):
         from . import GetAttrVariable
 
         # TODO - This is not a good solution but solves an accuracy issue.
-        # Today, var_getattr returns GetAttrVariable for both non-existent
+        # Today, getattro_impl returns GetAttrVariable for both non-existent
         # attributes and existing attributes. This is a bug and requires more
         # deep dive.
         if name in all_tensor_attrs:
@@ -664,14 +664,27 @@ class TensorVariable(VariableTracker):
 
         return VariableTracker.build(tx, ret_val)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        fake_val = self.as_proxy().node.meta["example_value"]
+        if (
+            isinstance(fake_val, torch.Tensor)
+            and is_sparse_any(fake_val)
+            and (not tx.export or not config.capture_sparse_compute)
+        ):
+            unimplemented(
+                gb_type="Attempted to wrap sparse Tensor",
+                context="",
+                explanation="torch.compile does not support sparse Tensors",
+                hints=[*graph_break_hints.SPARSE_TENSOR],
+            )
+
         if self.is_strict_mode(tx):
             if name in self._strict_mode_banned_ops():
                 unimplemented(
                     gb_type="Strict mode banned op",
-                    context=f"var_getattr {self} {name}",
+                    context=f"getattro_impl {self} {name}",
                     explanation=f"Getattr invocation '{name}' in strict mode is not supported.",
                     hints=[
                         f"Remove `{name}` from the list of banned ops by "
@@ -2303,8 +2316,8 @@ class TensorVariable(VariableTracker):
                 return None
         fwd_kwargs = dict(kwargs)
         fwd_kwargs.pop("layout", None)
-        fwd_kwargs.setdefault("dtype", self.var_getattr(tx, "dtype"))
-        fwd_kwargs.setdefault("device", self.var_getattr(tx, "device"))
+        fwd_kwargs.setdefault("dtype", self.getattro_impl(tx, "dtype"))
+        fwd_kwargs.setdefault("device", self.getattro_impl(tx, "device"))
         return variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
             tx,
             [data_arg],
@@ -3068,7 +3081,7 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # NB: This INTENTIONALLY does not call super(), because there is
@@ -3126,14 +3139,14 @@ class NumpyNdarrayVariable(TensorVariable):
         elif name in ["base", "flags", "dtype"]:
             unimplemented(
                 gb_type="Unsupported ndarray attribute access",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
         elif name == "__version__":
             unimplemented(
                 gb_type="Unsupported ndarray.__version__ access",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )

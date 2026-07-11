@@ -39,14 +39,14 @@ import torch.fx as fx
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_reconstruct_fn,
-    is_opaque_reference_type,
-    is_opaque_value,
-    is_opaque_value_type,
-    OpaqueBase,
+    is_custom_class_obj,
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
     should_hoist,
 )
 from torch._logging import trace_structured
@@ -270,7 +270,7 @@ def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> No
 
 @overload
 def set_proxy_slot(
-    obj: _AnyScriptObjectType | OpaqueBase, tracer: _ProxyTracer, proxy: Proxy
+    obj: _AnyScriptObjectType | CustomClassBase, tracer: _ProxyTracer, proxy: Proxy
 ) -> None: ...
 
 
@@ -281,7 +281,7 @@ def set_proxy_slot(
 
 
 def set_proxy_slot(
-    obj: PySymType | _AnyScriptObjectType | Tensor | OpaqueBase,
+    obj: PySymType | _AnyScriptObjectType | Tensor | CustomClassBase,
     tracer: _ProxyTracer,
     proxy: object,
 ) -> None:
@@ -297,12 +297,12 @@ def set_proxy_slot(
             or not _is_proxy_tensor_update_tensor_tracker_disabled()
         ):
             tracer.tensor_tracker[obj] = proxy
-    elif isinstance(obj, (_AnyScriptObject)) or is_opaque_value(obj):
+    elif isinstance(obj, (_AnyScriptObject)) or is_custom_class_obj(obj):
         if not isinstance(proxy, Proxy):
             raise AssertionError(f"Expected Proxy, got {type(proxy)}")
         # ScriptObject (actual C++ torchbind) uses _WeakHashRef-keyed tracker
         # because the same C++ IValue can produce different Python wrappers.
-        # FakeScriptObject/OpaqueBase uses WeakIdRef-keyed tracker because
+        # FakeScriptObject/CustomClassBase uses WeakIdRef-keyed tracker because
         # value-equal objects (e.g. primal vs tangent) must be tracked separately.
         if isinstance(obj, torch.ScriptObject):
             tracer.script_object_tracker[obj] = proxy
@@ -440,7 +440,7 @@ def get_proxy_slot(
 
 @overload
 def get_proxy_slot(
-    obj: OpaqueBase,
+    obj: CustomClassBase,
     tracer: _ProxyTracer,
     default: T,
 ) -> T | _OpaqueObjectProxyType: ...
@@ -459,7 +459,7 @@ def get_proxy_slot(
 # the transform argument is handy if you need to extract a subfield from
 # the successfully looked up result (but NOT the default.)
 def get_proxy_slot(
-    obj: Tensor | _AnyScriptObjectType | PySymType | OpaqueBase,
+    obj: Tensor | _AnyScriptObjectType | PySymType | CustomClassBase,
     tracer: _ProxyTracer,
     default: object = no_default,
     transform: Callable[..., Any] = lambda x: x,
@@ -467,7 +467,7 @@ def get_proxy_slot(
     tracker: Any
     if isinstance(obj, Tensor):
         tracker = tracer.tensor_tracker
-    elif isinstance(obj, _AnyScriptObject) or is_opaque_value(obj):
+    elif isinstance(obj, _AnyScriptObject) or is_custom_class_obj(obj):
         if isinstance(obj, torch.ScriptObject):
             tracker = tracer.script_object_tracker
         else:
@@ -573,6 +573,13 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
             handlers[k] = _nary_sym_max
         elif v == "minimum":
             handlers[k] = _nary_sym_min
+        # sympy.Pow / PowByNatural map to the interp name "pow_by_natural",
+        # which has no operator.* equivalent. sympy canonicalizes x * x into
+        # Pow(x, 2), so without this _build_proxy_for_sym_expr cannot rebuild
+        # any repeated-symbol product (e.g. a reduction numel s0 * s1**2 when
+        # two equal dims duck-share a symbol).
+        elif v == "pow_by_natural":
+            handlers[k] = operator.pow
 
     # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
     # torch.sym_sum handles n-ary integer addition and accepts both
@@ -697,7 +704,7 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
 _ExtractValType: TypeAlias = (
     None
     | PySymType
-    | OpaqueBase
+    | CustomClassBase
     | _AnyScriptObjectType
     | BackwardState
     | list["_ExtractValType"]
@@ -715,11 +722,11 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
         return snapshot_fake(val, include_real=include_real)
     elif isinstance(val, py_sym_types):
         return val
-    elif isinstance(val, (_AnyScriptObject, OpaqueBase)):
+    elif isinstance(val, (_AnyScriptObject, CustomClassBase)):
         return val
     elif isinstance(val, BackwardState):
         return val
-    elif is_opaque_value(val):
+    elif is_custom_class_obj(val):
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
@@ -960,14 +967,14 @@ def track_tensor_tree(
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, thunkify(tracer, lambda: proxy))
-        elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
+        elif isinstance(e, _AnyScriptObject) or is_custom_class_obj(e):
             if not isinstance(proxy, Proxy):
                 raise AssertionError(f"Expected Proxy, got {type(proxy)}")
             # Non-hoisted opaque value types should be baked as constants
             # in the graph, not tracked as proxy references. This matches
             # dynamo's behavior where non-hoisted values are not graph inputs.
             if (
-                is_opaque_value_type(type(e))  # pyrefly: ignore[bad-argument-type]
+                is_opaque_constant_type(type(e))  # pyrefly: ignore[bad-argument-type]
                 and not should_hoist(type(e))
             ):
                 set_meta(proxy, e)
@@ -1072,13 +1079,13 @@ def fetch_object_proxy(
 
 @overload
 def fetch_object_proxy(
-    tracer: _ProxyTracer, t: OpaqueBase
+    tracer: _ProxyTracer, t: CustomClassBase
 ) -> _OpaqueObjectProxyType | PySymType: ...
 
 
 def fetch_object_proxy(
     tracer: _ProxyTracer,
-    t: Tensor | _AnyScriptObjectType | PySymType | OpaqueBase,
+    t: Tensor | _AnyScriptObjectType | PySymType | CustomClassBase,
 ) -> object:
     return get_proxy_slot(t, tracer, t)
 
@@ -1129,7 +1136,7 @@ def _fetch_proxies_and_all_constant_flag(
     f_flat_args_kwargs = [
         (
             fetch_object_proxy(tracer, x)
-            if isinstance(x, (Tensor, _AnyScriptObject)) or is_opaque_value(x)
+            if isinstance(x, (Tensor, _AnyScriptObject)) or is_custom_class_obj(x)
             else x
         )
         for x in flat_args_kwargs
@@ -1549,9 +1556,9 @@ class PythonKeyTracer(Tracer):
     # ScriptObject uses _WeakHashRef because the same C++ IValue can produce
     # different Python wrapper objects, so Python id() won't match.
     script_object_tracker: MutableMapping[torch.ScriptObject, Proxy]
-    # FakeScriptObject/OpaqueBase uses WeakIdRef because distinct objects that
+    # FakeScriptObject/CustomClassBase uses WeakIdRef because distinct objects that
     # are value-equal (e.g. primal vs tangent opaques) must be tracked separately.
-    opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase, Proxy]
+    opaque_tracker: MutableMapping[FakeScriptObject | CustomClassBase, Proxy]
     # Maps id(real_obj) -> proxy for opaque FSOs, so that multiple FSO wrappers
     # of the same real object (e.g. primal vs tangent) resolve to one proxy.
     _opaque_real_obj_proxy: dict[int, Proxy]
@@ -1604,7 +1611,7 @@ class PythonKeyTracer(Tracer):
 
         # Try reconstructing untracked opaque reference types from existing
         # graph inputs (e.g. derive a DeviceMesh submesh from its root mesh).
-        if isinstance(a, (FakeScriptObject, OpaqueBase)):
+        if isinstance(a, (FakeScriptObject, CustomClassBase)):
             node = self._try_reconstruct_opaque(a)
             if node is not None:
                 return node
@@ -1612,7 +1619,7 @@ class PythonKeyTracer(Tracer):
         return super().create_arg(a)  # type: ignore[return-value]
 
     def _try_reconstruct_opaque(
-        self, a: FakeScriptObject | OpaqueBase
+        self, a: FakeScriptObject | CustomClassBase
     ) -> fx.node.Node | None:
         """Try to reconstruct an opaque object from existing graph inputs.
 
@@ -1622,16 +1629,16 @@ class PythonKeyTracer(Tracer):
         from inputs already in the graph.  Returns an FX Node on success,
         None on failure (falls back to get_attr constant).
         """
-        real_obj: OpaqueBase = a.real_obj if isinstance(a, FakeScriptObject) else a
+        real_obj: CustomClassBase = a.real_obj if isinstance(a, FakeScriptObject) else a
 
-        if not is_opaque_reference_type(type(real_obj)):
+        if not is_opaque_symbolic_type(type(real_obj)):
             return None
 
         reconstruct_fn = get_reconstruct_fn(type(real_obj))
         if reconstruct_fn is None:
             return None
 
-        def get_tracked_proxy(obj: OpaqueBase) -> Proxy | None:
+        def get_tracked_proxy(obj: CustomClassBase) -> Proxy | None:
             proxy = self._opaque_real_obj_proxy.get(id(obj))
             if proxy is not None:
                 return proxy
@@ -1684,7 +1691,7 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e, lambda x: x.proxy)  # type: ignore[attr-defined]
         elif isinstance(e, py_sym_types):
             return get_proxy_slot(e, self, e, lambda e: e.force())
-        elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
+        elif isinstance(e, _AnyScriptObject) or is_custom_class_obj(e):
             return get_proxy_slot(e, self, e)
         else:
             return e
@@ -1909,7 +1916,7 @@ def wrap_key(
             _AnyScriptObject, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out
         )
         out = pytree.tree_map_only(
-            OpaqueBase, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out
+            CustomClassBase, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out
         )
 
         def get_sym_proxy_slot(t: PySymType) -> Proxy:
@@ -2264,7 +2271,7 @@ def _compute_proxy(
 
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     script_object_tracker: MutableMapping[torch.ScriptObject, Proxy]
-    opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase, Proxy]
+    opaque_tracker: MutableMapping[FakeScriptObject | CustomClassBase, Proxy]
     # Maps id(real_obj) -> proxy for opaque FSOs, so that multiple FSO wrappers
     # of the same real object (e.g. primal vs tangent) resolve to one proxy.
     _opaque_real_obj_proxy: dict[int, Proxy]
@@ -3080,8 +3087,8 @@ class _MakefxTracer:
                     )
                 # Otherwise: an int not declared in the spec stays static.
 
-            if isinstance(x, torch.ScriptObject) or is_opaque_value(x):
-                if is_opaque_value_type(
+            if isinstance(x, torch.ScriptObject) or is_custom_class_obj(x):
+                if is_opaque_constant_type(
                     type(x)  # pyrefly: ignore[bad-argument-type]
                 ):
                     return x

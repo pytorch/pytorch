@@ -61,8 +61,12 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable, raise_unhashable
-from .object_protocol import generic_richcompare_bool, vt_getitem
-from .sets import SetVariable
+from .object_protocol import (
+    _is_method_type,
+    generic_richcompare_bool,
+    mro_lookup,
+    vt_getitem,
+)
 
 
 if TYPE_CHECKING:
@@ -891,10 +895,17 @@ class ConstDictVariable(VariableTracker):
             return VariableTracker.build(tx, not eq_result.as_python_constant())
         return eq_result
 
-    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
+    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
-        return super().var_getattr(tx, name)
+        # DictGuardManager does not support getattr_manager for plain dicts,
+        # so AttrSource chains through a dict source break guard creation.
+        # Return CallMethodVariable directly for methods, bypassing the
+        # MRO walk in object_generic_getattr that would create that chain.
+        type_attr = mro_lookup(self.python_type(), name)
+        if type_attr is not NO_SUCH_SUBOBJ and _is_method_type(type_attr):
+            return variables.CallMethodVariable(self, name)
+        return super().getattro_impl(tx, name)
 
 
 class MappingProxyVariable(VariableTracker):
@@ -1090,7 +1101,7 @@ class DictViewVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # dictview_mapping getset returns a read-only mappingproxy of the
@@ -1098,7 +1109,7 @@ class DictViewVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
         if name == "mapping":
             return MappingProxyVariable(self.dv_dict)
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.kv == "keys":
@@ -1251,25 +1262,6 @@ class DictKeysVariable(DictViewVariable):
             ],
             {},
         )
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in (
-            "__and__",
-            "__iand__",
-            "__xor__",
-            "__ixor__",
-        ):
-            # These methods always returns a set
-            m = getattr(self.set_items, name)
-            r = m(args[0].set_items)  # type: ignore[attr-defined]
-            return SetVariable(r)
-        return super().call_method(tx, name, args, kwargs)
 
 
 class DictValuesVariable(DictViewVariable):
@@ -1425,25 +1417,6 @@ class DictItemsVariable(DictViewVariable):
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictItemsIterator(self.dv_dict.items)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in (
-            "__and__",
-            "__iand__",
-            "__xor__",
-            "__ixor__",
-        ):
-            # These methods always returns a set
-            fn_hdl = getattr(self.set_items, name)
-            ret_val = fn_hdl(args[0].set_items)  # type: ignore[attr-defined]
-            return SetVariable(ret_val)
-        return super().call_method(tx, name, args, kwargs)
 
 
 kV = HashableTracker | str

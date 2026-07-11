@@ -20,21 +20,47 @@ import torch.fx as fx
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
 
 
-def rename_nodes_to_canonical(graph: fx.Graph) -> None:
+def _computation_node_key(
+    node: fx.Node, canonical_idx: dict[fx.Node, int]
+) -> tuple[int, str, tuple[int, ...]]:
+    """Canonical heap key for a computation node (call_function / call_method / call_module)."""
+    input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
+    return (2, node.graph._target_to_str(node.target), input_indices)
+
+
+def rename_nodes_to_canonical(
+    graph: fx.Graph,
+    skip_ops: frozenset[str] = frozenset(),
+) -> dict[str, str]:
     """Rename all nodes in the graph to canonical names based on their target.
 
     Uses the same naming scheme as FX ``Graph.create_node`` (auto-generated
     names from the target string). After renaming, replaces the graph's
     namespace so future node creation stays consistent.
+
+    Args:
+        graph: The FX graph whose nodes to rename.
+        skip_ops: Node ops to skip renaming (their names are reserved in the
+            new namespace but left unchanged).
+
+    Returns a mapping from old name to new name for nodes that were renamed.
     """
     from torch.fx.graph import _Namespace
 
+    renamed: dict[str, str] = {}
     ns = _Namespace()
     for node in graph.nodes:
+        if node.op in skip_ops:
+            ns.create_name(node.name, node)
+            continue
+        old_name = node.name
         candidate = graph._target_to_str(node.target)
         new_name = ns.create_name(candidate, node)
+        if new_name != old_name:
+            renamed[old_name] = new_name
         node.name = new_name
     graph._graph_namespace = ns
+    return renamed
 
 
 def _sink_get_attr_nodes(order: list[fx.Node]) -> None:
@@ -73,7 +99,10 @@ def canonicalize_graph(
     graph: fx.Graph,
     canonical_key_fn: Callable[[fx.Node, dict[fx.Node, int]], object],
     is_safe_to_reorder: Callable[[fx.Node], bool],
-) -> fx.Graph:
+    *,
+    rename: bool = True,
+    skip_rename_ops: frozenset[str] = frozenset(),
+) -> dict[str, str]:
     """Reorder graph nodes into a canonical topological order and rename them.
 
     This ensures that structurally equivalent graphs produce identical node
@@ -92,9 +121,15 @@ def canonicalize_graph(
         is_safe_to_reorder: ``(node) -> bool``.  Nodes for which this returns
             ``False`` act as barriers: they are chained in original order, and
             pure nodes are confined to their barrier segment.
+        rename: If ``True`` (default), rename nodes after reordering via
+            ``rename_nodes_to_canonical``. Pass ``False`` to reorder only,
+            preserving all existing node names.
+        skip_rename_ops: Node ops to skip renaming (only applies when
+            ``rename=True``). Skipped nodes keep their original names.
 
     Returns:
-        The same ``graph`` object, reordered and renamed in-place.
+        A mapping from old node name to new node name for nodes that were
+        renamed.  Empty when ``rename=False``.
     """
     indeg: dict[fx.Node, int] = {
         node: len(node.all_input_nodes) for node in graph.nodes
@@ -163,12 +198,27 @@ def canonicalize_graph(
 
     _sink_get_attr_nodes(canonical_order)
 
+    # Purge erased nodes that are still physically in the linked list.
+    # erase_node() sets _erased=True and unlinks the node, but stale
+    # _prev/_next pointers on the erased node can leave it reachable from
+    # neighbors that were inserted later.  If such a ghost node sits between
+    # `cursor` and the node being appended, cursor.append() (which goes via
+    # cursor._next._prepend()) corrupts the chain.
+    root = graph._root  # type: ignore[attr-defined]
+    node = root._next
+    while node is not root:
+        nxt = node._next
+        if node._erased:
+            node._remove_from_list()
+        node = nxt
+
     # Reorder nodes in-place to preserve node object identity.
-    cursor = graph._root  # type: ignore[attr-defined]
+    cursor = root
     for node in canonical_order:
         cursor.append(node)
         cursor = node
 
-    rename_nodes_to_canonical(graph)
+    if rename:
+        return rename_nodes_to_canonical(graph, skip_ops=skip_rename_ops)
 
-    return graph
+    return {}
