@@ -37,7 +37,8 @@ install(DIRECTORY
 # Copy vendored external kernel sources into torch/_inductor.
 # The original Python code raises RuntimeError when the source is missing
 # on CUDA-enabled builds (cutlass submodule should be present).
-set(_cutedsl_src "${PROJECT_SOURCE_DIR}/third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py")
+set(_cutedsl_rel_path "examples/python/CuTeDSL/cute/blackwell/kernel/grouped_gemm/grouped_gemm.py")
+set(_cutedsl_src "${PROJECT_SOURCE_DIR}/third_party/cutlass/${_cutedsl_rel_path}")
 if(EXISTS "${_cutedsl_src}")
   set(_cutedsl_dest "${SKBUILD_PLATLIB_DIR}/torch/_inductor/kernel/vendored_templates/cutedsl/kernels")
   install(FILES "${_cutedsl_src}"
