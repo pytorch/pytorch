@@ -256,6 +256,21 @@ class TestAutograd(TestCase):
 
         return x, y
 
+    def test_is_differentiable_type(self) -> None:
+        # Test that valid differentiable types return True
+        self.assertTrue(torch.autograd.is_differentiable_type(torch.float32))
+        self.assertTrue(torch.autograd.is_differentiable_type(torch.float64))
+        self.assertTrue(torch.autograd.is_differentiable_type(torch.complex64))
+
+        # Test that non-differentiable types return False
+        self.assertFalse(torch.autograd.is_differentiable_type(torch.int64))
+        self.assertFalse(torch.autograd.is_differentiable_type(torch.int32))
+        self.assertFalse(torch.autograd.is_differentiable_type(torch.bool))
+
+        # Test error handling when an invalid object is passed
+        with self.assertRaisesRegex(TypeError, "must be a torch.dtype"):
+            torch.autograd.is_differentiable_type("not-a-dtype")
+
     def test_function(self):
         class MyFunction(Function):
             @staticmethod

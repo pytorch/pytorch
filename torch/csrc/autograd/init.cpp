@@ -27,6 +27,7 @@
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
@@ -1668,6 +1669,24 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_is_differentiable_type(
+    PyObject* self,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(arg),
+      "is_differentiable_type(): argument 'dtype' must be a torch.dtype (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
+
+  at::ScalarType scalar_type = reinterpret_cast<THPDtype*>(arg)->scalar_type;
+  if (torch::autograd::isDifferentiableType(scalar_type)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
 static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   const auto len = c10::impl::TorchDispatchModeTLS::stack_len();
@@ -1841,6 +1860,10 @@ static PyMethodDef methods[] = {
     {"_set_dispatch_mode", set_dispatch_mode, METH_O, nullptr},
     {"_get_dispatch_mode", get_dispatch_mode, METH_O, nullptr},
     {"_unset_dispatch_mode", unset_dispatch_mode, METH_O, nullptr},
+    {"is_differentiable_type",
+     THPModule_is_differentiable_type,
+     METH_O,
+     nullptr},
 
     {nullptr, nullptr, 0, nullptr}};
 
