@@ -3469,19 +3469,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       processGroupGloo, "_Options", backendOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads)
-      .def(
-          "__copy__",
-          [](const ::c10d::ProcessGroupGloo::Options& self) {
-            return ::c10d::ProcessGroupGloo::Options(self);
-          })
-      .def(
-          "__deepcopy__",
-          [](const ::c10d::ProcessGroupGloo::Options& self,
-             const py::dict& memo) {
-            return ::c10d::ProcessGroupGloo::Options(self);
-          },
-          py::arg("memo"));
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
 
   processGroupGloo
       .def_static(
