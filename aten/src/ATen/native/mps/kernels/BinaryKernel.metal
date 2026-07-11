@@ -18,6 +18,81 @@ struct sub_functor {
   }
 };
 
+// MSE elementwise (input - target)^2 in float32, cast to the output dtype
+// (OPMATH op). Used for reduction=None; mean/sum use the fused LossOps
+// reduction.
+struct mse_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    const T d = a - b;
+    return static_cast<T>(d * d);
+  }
+};
+
+// Fused MSE backward: grad_input = norm * (input - target) * grad_output in
+// a single pass; the ternary iterator supplies broadcast (0-dim grad for
+// mean/sum), strides, and mixed-dtype casts. norm is exactly 2 for
+// reduction none/sum, so mse_backward2 bakes it in; for mean the host
+// pre-scales the 0-dim grad_output by 2/N and uses mse_backward_scaled.
+struct mse_backward2_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T g) {
+    return static_cast<T>(T(2) * (a - b) * g);
+  }
+};
+
+struct mse_backward_scaled_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T g) {
+    return static_cast<T>((a - b) * g);
+  }
+};
+
+// Smooth-L1 / Huber forward (reduction=None): alpha carries beta/delta.
+// beta == 0 degenerates to L1 (the quadratic branch is unreachable, so the
+// division is never taken). Backward *_clip functors compute only the
+// clipped-difference term; the host multiplies by the (pre-scaled) grad.
+struct smooth_l1_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T alpha) {
+    const float d = float(a) - float(b);
+    const float ad = ::metal::fabs(d);
+    const float beta = float(alpha);
+    return static_cast<T>(ad < beta ? 0.5f * d * d / beta : ad - 0.5f * beta);
+  }
+};
+
+struct huber_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T alpha) {
+    const float d = float(a) - float(b);
+    const float ad = ::metal::fabs(d);
+    const float delta = float(alpha);
+    return static_cast<T>(
+        ad < delta ? 0.5f * d * d : delta * (ad - 0.5f * delta));
+  }
+};
+
+struct smooth_l1_backward_clip_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T alpha) {
+    const float d = float(a) - float(b);
+    const float beta = float(alpha);
+    return static_cast<T>(
+        ::metal::fabs(d) < beta ? d / beta : ::metal::sign(d));
+  }
+};
+
+struct huber_backward_clip_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T alpha) {
+    const float d = float(a) - float(b);
+    const float delta = float(alpha);
+    return static_cast<T>(
+        ::metal::fabs(d) < delta ? d : delta * ::metal::sign(d));
+  }
+};
+
 struct add_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
@@ -601,6 +676,25 @@ REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_FLOAT_BINARY_OP(add);
 REGISTER_INTEGER_BINARY_OP(add);
 REGISTER_OPMATH_FLOAT_BINARY_OP(mul);
+REGISTER_OPMATH_FLOAT_BINARY_OP(mse);
+REGISTER_BINARY_ALPHA_OP(smooth_l1, float, float, float);
+REGISTER_BINARY_ALPHA_OP(smooth_l1, half, half, half);
+REGISTER_BINARY_ALPHA_OP(smooth_l1, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(huber, float, float, float);
+REGISTER_BINARY_ALPHA_OP(huber, half, half, half);
+REGISTER_BINARY_ALPHA_OP(huber, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(smooth_l1_backward_clip, float, float, float);
+REGISTER_BINARY_ALPHA_OP(smooth_l1_backward_clip, half, half, half);
+REGISTER_BINARY_ALPHA_OP(smooth_l1_backward_clip, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(huber_backward_clip, float, float, float);
+REGISTER_BINARY_ALPHA_OP(huber_backward_clip, half, half, half);
+REGISTER_BINARY_ALPHA_OP(huber_backward_clip, bfloat, bfloat, bfloat);
+REGISTER_OPMATH_TERNARY_OP(mse_backward2, float, float);
+REGISTER_OPMATH_TERNARY_OP(mse_backward2, half, half);
+REGISTER_OPMATH_TERNARY_OP(mse_backward2, bfloat, bfloat);
+REGISTER_OPMATH_TERNARY_OP(mse_backward_scaled, float, float);
+REGISTER_OPMATH_TERNARY_OP(mse_backward_scaled, half, half);
+REGISTER_OPMATH_TERNARY_OP(mse_backward_scaled, bfloat, bfloat);
 REGISTER_INTEGER_BINARY_OP(mul);
 REGISTER_FLOAT_BINARY_OP(sub);
 REGISTER_INTEGER_BINARY_OP(sub);
