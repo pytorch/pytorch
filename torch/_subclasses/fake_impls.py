@@ -115,6 +115,12 @@ def is_noncontiguous_supported(device: torch.device) -> bool:
     return device.type != "hpu"
 
 
+def _same_device_or_unspecified_index(a: torch.device, b: torch.device) -> bool:
+    if a.type != b.type:
+        return False
+    return a.index is None or b.index is None or a.index == b.index
+
+
 _like_tensor_constructors = ordered_set(
     aten.empty_like.default,
     aten.empty_like.out,
@@ -2065,8 +2071,18 @@ def conv(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    input_ = new_kwargs["input"]
-    weight = new_kwargs["weight"]
+
+    def expect_fake_tensor(name: str, value: object) -> FakeTensor:
+        if not isinstance(value, FakeTensor):
+            raise AssertionError(
+                "Expected fake convolution tensor arguments to be FakeTensors, "
+                f"but {name} was {type(value).__name__}"
+            )
+        return value
+
+    input_ = expect_fake_tensor("input", new_kwargs["input"])
+    weight = expect_fake_tensor("weight", new_kwargs["weight"])
+    device = input_.fake_device
     # Internal passes such as Inductor freezing may run fake propagation over
     # folded convs that do not need to match eager's public input checks.
     if (
@@ -2084,7 +2100,15 @@ def conv(
             f"Input type ({input_.dtype}) and weight type "
             f"({weight.dtype}) should be the same"
         )
-    device = input_.fake_device
+    for name, value in new_kwargs.items():
+        if isinstance(value, torch.Tensor):
+            fake_value = expect_fake_tensor(name, value)
+            if not _same_device_or_unspecified_index(fake_value.fake_device, device):
+                raise RuntimeError(
+                    "Expected all tensors to be on the same device, but got "
+                    f"{name} is on {fake_value.fake_device}, different from "
+                    f"other tensors on {device}"
+                )
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
         # if the input is unsqueezed in Convolution.cpp we get segfault
@@ -2182,19 +2206,30 @@ def bincount(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    new_size = fake_mode.shape_env.create_unbacked_symint()
+    from torch.fx.experimental.symbolic_shapes import (
+        _constrain_range_for_size,
+        has_free_symbols,
+    )
 
-    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+    if not has_free_symbols(inputs.numel()) and inputs.numel() == 0:
+        return inputs.new_empty(minlength, dtype=torch.int64)  # type: ignore[return]
+
+    new_size = fake_mode.shape_env.create_unbacked_symint()
 
     _constrain_range_for_size(new_size)
     torch._check(new_size >= minlength)
-
     if weights is None:
-        return inputs.new_empty(new_size, dtype=torch.long)  # type: ignore[return]
-    elif weights.dtype == torch.float32:
-        return inputs.new_empty(new_size, dtype=torch.float32)  # type: ignore[return]
+        return inputs.new_empty(new_size, dtype=torch.int64)  # type: ignore[return]
+
+    if weights.device.type == "mps":
+        dtype = (
+            weights.dtype
+            if weights.dtype in (torch.float32, torch.int32, torch.float16)
+            else torch.int32
+        )
     else:
-        return inputs.new_empty(new_size, dtype=torch.float64)  # type: ignore[return]
+        dtype = weights.dtype if weights.dtype == torch.float32 else torch.float64
+    return weights.new_empty(new_size, dtype=dtype)  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)
