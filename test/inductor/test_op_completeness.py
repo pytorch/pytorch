@@ -79,21 +79,21 @@ class TestOpCompleteness(TestCase):
                 "std::fma(value_times_t1, t2, self)",
             )
 
-        clear_addcmul_caches()
-        with patch(
-            "torch.__config__.show",
-            return_value=(
-                "PyTorch built with:\n  - GCC 11.5\n  - CPU capability usage: NEON\n"
-            ),
-        ):
-            self.assertEqual(
-                CppVecOverrides.addcmul_aten("self", "value_times_t1", "t2"),
-                "fmadd(value_times_t1, t2, self)",
-            )
-            self.assertEqual(
-                CppOverrides.addcmul_aten("self", "value_times_t1", "t2"),
-                "std::fma(value_times_t1, t2, self)",
-            )
+        arm_vector_configs = (
+            "PyTorch built with:\n  - GCC 11.5\n  - CPU capability usage: NEON\n",
+            "PyTorch built with:\n  - GCC 13.4\n  - CPU capability usage: SVE256\n",
+        )
+        for config in arm_vector_configs:
+            clear_addcmul_caches()
+            with patch("torch.__config__.show", return_value=config):
+                code = CppVecOverrides.addcmul_aten("self", "value_times_t1", "t2")
+                self.assertIn('asm volatile("" : "+m"(product));', code)
+                self.assertIn("return self + product;", code)
+                self.assertNotIn("fmadd", code)
+                self.assertEqual(
+                    CppOverrides.addcmul_aten("self", "value_times_t1", "t2"),
+                    "std::fma(value_times_t1, t2, self)",
+                )
 
         clear_addcmul_caches()
         with patch(
@@ -138,6 +138,7 @@ class TestOpCompleteness(TestCase):
                 "  - CPU capability usage: AVX512\n"
             ),
             "PyTorch built with:\n  - GCC 11.5\n  - CPU capability usage: NEON\n",
+            "PyTorch built with:\n  - GCC 13.4\n  - CPU capability usage: SVE256\n",
         )
         for config in scalar_contracting_tail_configs:
             clear_addcmul_caches()

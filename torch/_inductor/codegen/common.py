@@ -1273,12 +1273,22 @@ class OverridesData:
     mps: Callable[..., str] | None = None
 
 
+def _triton_cyl_bessel_i(order: int, x: str) -> str:
+    # PyTorch's Cephes-derived kernels return NaN for infinities; libdevice
+    # returns signed infinities, so synthesize a same-dtype NaN with x - x.
+    return (
+        f"tl.where(tl.abs({x}) == float('inf'), "
+        f"{x} - {x}, "
+        f"libdevice.cyl_bessel_i{order}({x}))"
+    )
+
+
 @functools.cache
 def _pytorch_cpu_vec_intrinsics_contract_addcmul() -> bool:
     # ATen's CPU addcmul vector path is written as vector intrinsics:
-    # self_vec + value_vec * t1_vec * t2_vec. GCC builds contract the final
-    # multiply-add in that expression on both x86 and aarch64, while clang
-    # and Windows/MSVC builds keep it as mul/mul/add.
+    # self_vec + value_vec * t1_vec * t2_vec. GCC contracts the final
+    # multiply-add on the x86 AVX vector path, while clang, Windows/MSVC,
+    # and ARM SVE/NEON intrinsic paths keep it as mul/mul/add.
     build_config = torch.__config__.show()
     compiler_lines = [
         line.removeprefix("  - ")
@@ -1290,7 +1300,15 @@ def _pytorch_cpu_vec_intrinsics_contract_addcmul() -> bool:
     ) and not any(
         line == "clang" or line.startswith("clang ") for line in compiler_lines
     )
-    return has_gcc_without_clang
+    cpu_capability = next(
+        (
+            line.removeprefix("CPU capability usage: ")
+            for line in compiler_lines
+            if line.startswith("CPU capability usage: ")
+        ),
+        "",
+    )
+    return has_gcc_without_clang and cpu_capability.startswith("AVX")
 
 
 @functools.cache
@@ -1444,7 +1462,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"calc_i0({x})",
-        triton=lambda x: f"libdevice.cyl_bessel_i0({x})",
+        triton=lambda x: _triton_cyl_bessel_i(0, x),
         cppvec=lambda x: f"{x}.i0()",
         name="i0",
     ),
@@ -1457,7 +1475,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"calc_i1({x})",
-        triton=lambda x: f"libdevice.cyl_bessel_i1({x})",
+        triton=lambda x: _triton_cyl_bessel_i(1, x),
         name="special_i1",
     ),
     i1e=OverridesData(
@@ -1474,13 +1492,13 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     modified_bessel_i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"modified_bessel_i0_forward({x})",
-        triton=lambda x: f"libdevice.cyl_bessel_i0({x})",
+        triton=lambda x: _triton_cyl_bessel_i(0, x),
         name="special_modified_bessel_i0",
     ),
     modified_bessel_i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"modified_bessel_i1_forward({x})",
-        triton=lambda x: f"libdevice.cyl_bessel_i1({x})",
+        triton=lambda x: _triton_cyl_bessel_i(1, x),
         name="special_modified_bessel_i1",
     ),
     modified_bessel_k0=OverridesData(
@@ -2267,6 +2285,8 @@ class CodeGen:
 
 
 class Kernel(CodeGen, Generic[CSEVariableType]):
+    """Base class for generated kernels and their code buffers."""
+
     newvar_prefix: str = ""
     suffix: str = ""
     overrides: Callable[[], OpsHandler[Any]] | None = None
@@ -2594,6 +2614,15 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             return None
         return self.args.arg_name(node.get_name())
 
+    def record_op_trace(
+        self,
+        name: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        result: Any = None,
+    ) -> None:
+        pass
+
 
 @dataclasses.dataclass
 class OptimizationContext:
@@ -2867,7 +2896,9 @@ class CSEProxy(DefaultHandler):
 
             return csevar
 
-        return pytree.tree_map(do_cse, value)
+        result = pytree.tree_map(do_cse, value)
+        self.kernel.record_op_trace(name, args, kwargs, result)
+        return result
 
     def _bound_variable(self, name: str, *args: Any, **kwargs: Any) -> ValueRanges[Any]:
         """
@@ -2999,6 +3030,7 @@ class CSEProxy(DefaultHandler):
         # cse cache.
         if out.use_count == 1:
             self.kernel.num_load += 1
+        self.kernel.record_op_trace("load", (name, index), {}, out)
         return out
 
     def _update_store_cache(self, name: str, value: CSEVariable) -> None:
@@ -3018,9 +3050,11 @@ class CSEProxy(DefaultHandler):
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
+        self.kernel.record_op_trace("store", (name, index, value, mode), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
+        self.kernel.record_op_trace("device_assert_async", (cond, msg), {})
 
     # pyrefly: ignore [bad-override]
     def partial_accumulate(self, *args: Any) -> None:
