@@ -46,7 +46,7 @@ def _orthogonalize_gram_schmidt(matrices, epsilon=0):
     """
     Apply Gram-Schmidt procedure to orthogonalize a batch of matrices.
 
-    If epsilon is 0, this is equivalent to `torch.qr(matrices, out=(matrices, _))`,
+    If epsilon is 0, this is equivalent to `torch.linalg.qr(matrices, out=(matrices, _))`,
     """
     num_cols = matrices.shape[2]
     for i in range(num_cols):
