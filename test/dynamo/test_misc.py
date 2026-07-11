@@ -16872,6 +16872,38 @@ def forward(self, L_x_ : torch.Tensor):
         result = opt()
         self.assertEqual(result.shape, (3, 7))
 
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_custom_op_register_fake_inside_traced_function(self):
+        """Custom op defined with register_fake inside a traced function must
+        work under NGB. The register_fake side effect mutates _abstract_fn on
+        the real CustomOpDef, which NGB suppress ensures happens eagerly.
+        """
+        from typing import Tuple
+
+        def get_my_op():
+            @torch.library.custom_op("test::ngb_id", mutates_args=[])
+            def ngb_id(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            @ngb_id.register_fake
+            def _(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            return ngb_id
+
+        def fn(x):
+            my_op = get_my_op()
+            return my_op(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt)
+        x = torch.randn(3)
+        result = opt(x)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], x)
+        self.assertGreaterEqual(cnt.frame_count, 1)
+
 
 instantiate_parametrized_tests(MiscTests)
 
