@@ -202,6 +202,13 @@ def split_const_subgraphs(
     FoldedGraphModule which runs that constant subgraph on the first run to set
     attributes on the module prior to running the non-constant portion of the
     graph.
+
+    `skip_folding_node_fn`, if provided, may be invoked on nodes owned by nested
+    `call_module` subgraphs, not just top-level nodes: a `call_module` node is
+    folded atomically, so it is skipped if any node inside its subgraph is
+    skipped. Predicates must therefore be node-local; one that needs to resolve a
+    node's `target` to a submodule must use `node.graph.owning_module` rather than
+    a captured top-level module.
     """
 
     import sympy
@@ -231,6 +238,29 @@ def split_const_subgraphs(
                 return _subgraph_has_impure_ops(submodule)
         return False
 
+    def _subgraph_has_skipped_node(
+        module: torch.fx.GraphModule,
+        skip_fn: Callable[[torch.fx.Node], bool],
+    ) -> bool:
+        """
+        Return True if a GraphModule type subgraph contains any node that
+        `skip_fn` says to skip, recursing into nested submodules.
+        """
+        for node in module.graph.nodes:
+            if node.op in {"placeholder", "output"}:
+                continue
+            if skip_fn(node):
+                return True
+            if (
+                node.op == "call_module"
+                # pyrefly: ignore [not-callable]
+                and (submodule := module.get_submodule(node.target))
+                and isinstance(submodule, torch.fx.GraphModule)
+                and _subgraph_has_skipped_node(submodule, skip_fn)
+            ):
+                return True
+        return False
+
     # Build up a list of const_nodes, defined as nodes that are themselves
     # get_attrs, or have all get_attr or other constant node inputs.
     const_nodes: set[torch.fx.Node] = set()
@@ -248,9 +278,20 @@ def split_const_subgraphs(
         ):
             continue
 
-        # If provided skip folding function says to skip, then skip.
-        if skip_folding_node_fn and skip_folding_node_fn(node):
-            continue
+        # If provided skip folding function says to skip, then skip. Also skip a
+        # call_module node whose subgraph contains a node that should be skipped,
+        # since a call_module node can only be folded as a whole.
+        if skip_folding_node_fn is not None:
+            if skip_folding_node_fn(node):
+                continue
+            if (
+                node.op == "call_module"
+                # pyrefly: ignore [not-callable]
+                and (target_mod := mod_traced.get_submodule(node.target))
+                and isinstance(target_mod, torch.fx.GraphModule)
+                and _subgraph_has_skipped_node(target_mod, skip_folding_node_fn)
+            ):
+                continue
 
         # Skip folding side-effectful functions
         if node.is_impure():
