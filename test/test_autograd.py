@@ -791,6 +791,7 @@ class TestAutograd(TestCase):
             unpack_hook_ref = scope()
             self.assertIsNone(unpack_hook_ref())
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_will_engine_execute_node(self):
         counter = [0]
 
@@ -6623,7 +6624,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "MKLDNN inputs are not supported for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -6639,7 +6640,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "MKLDNN inputs are not supported for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),

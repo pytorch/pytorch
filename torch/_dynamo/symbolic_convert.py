@@ -5380,6 +5380,7 @@ class InstructionTranslatorBase(
         self.has_no_inlined_calls = True
         self.parent = None
         self.is_child_tracer_active = False
+        self._tree_map_fast_path_active = False
         self.debug_locals = []
 
         self.package = package
