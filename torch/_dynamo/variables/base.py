@@ -347,7 +347,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "mutation_type",
         "parents_tracker",
         "user_code_variable_name",
+        "dict_vt",
     }
+
+    # Lazily-created view of the instance __dict__, backed by the side effects table
+    dict_vt: variables.DunderDictVariable | None = None
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         """Shallow copy with some (optional) changes"""
@@ -649,6 +653,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # Skip guards on const getattr objects like __code__.co_argcount
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
+
+    def get_dict_vt(
+        self, tx: InstructionTranslatorBase
+    ) -> variables.DunderDictVariable:
+        # Callers gate this on the object actually having an instance __dict__
+        # (e.g. the per-VT `__dict__` attribute branches). If a VT without a
+        # real instance dict reaches here, DunderDictVariable's example-value
+        # lookup graph-breaks rather than fabricating a bogus dict.
+        if self.dict_vt is None:
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
+        return self.dict_vt
 
     def is_proxy(self) -> bool:
         try:
@@ -1241,11 +1256,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             rest,
             tree_map_kwargs,
         )
-        return tree_map_fn_copy.call_function(
-            tx,
-            [map_fn, self, *rest],
-            tree_map_kwargs,
-        )
+        # The fallback inlines tree_map normally, creating a proper frame,
+        # so NGB can work correctly here -- clear the fast path flag.
+        prev = tx._tree_map_fast_path_active
+        tx._tree_map_fast_path_active = False
+        try:
+            return tree_map_fn_copy.call_function(
+                tx,
+                [map_fn, self, *rest],
+                tree_map_kwargs,
+            )
+        finally:
+            tx._tree_map_fast_path_active = prev
 
     def call_tree_map_with_path(
         self,
@@ -1319,11 +1341,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             tree_map_kwargs,
             keypath,
         )
-        return tree_map_fn_copy.call_function(
-            tx,
-            [map_fn, self, *rest],
-            tree_map_kwargs,
-        )
+        prev = tx._tree_map_fast_path_active
+        tx._tree_map_fast_path_active = False
+        try:
+            return tree_map_fn_copy.call_function(
+                tx,
+                [map_fn, self, *rest],
+                tree_map_kwargs,
+            )
+        finally:
+            tx._tree_map_fast_path_active = prev
 
     def set_name_hint(self, name: str) -> None:
         pass
@@ -1908,11 +1935,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Source | None = None,
         mutation_type: MutationType | None = None,
         source_location: SourceLocation | None = None,
+        dict_vt: variables.DunderDictVariable | None = None,
     ) -> None:
         super().__init__()
         self.source = source
         self.source_location = source_location
         self.mutation_type = mutation_type
+        # Carried so clone() round-trips the cached __dict__ view.
+        self.dict_vt = dict_vt
 
         # NOTE sometimes mutation_type is set afterwards for implementation
         # convenience, we don't validate those cases at the moment.
