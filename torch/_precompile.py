@@ -51,14 +51,15 @@ graph under foreign metadata.
 # raises PrecompileError); the rest are the caller's responsibility and, if broken,
 # produce a SILENTLY INCORRECT artifact -- the ordinary consequence of tracing.
 #
-# 1. Everything live is an input. Every tensor the computation reads must reach the
-#    graph as a parameter/buffer of a module argument or as an explicit tensor
-#    argument. For an nn.Module argument you do NOT enumerate its tensors yourself:
-#    precompile lifts every registered parameter and buffer (recursively, including
-#    submodules, tied weights collapsed by identity) to explicit graph inputs for you
-#    via functional reparametrization, and re-derives the same list from the runtime
-#    model you pass to load(). Passing the module is enough -- that is the whole point
-#    of accepting modules as arguments. What is NOT lifted is anything not reachable
+# 1. Everything live is an input. Every tensor the computation reads must be passed to
+#    fn as an explicit tensor argument -- EXCEPT tensors held inside an nn.Module
+#    argument, which precompile handles for you. For an nn.Module argument you do NOT
+#    enumerate its tensors yourself: precompile lifts every registered parameter and
+#    buffer (recursively, including submodules, tied weights collapsed by identity) to
+#    explicit graph inputs for you via functional reparametrization, and re-derives the
+#    same list from the runtime model you pass to load(). Passing the module is enough --
+#    that is the whole point of accepting modules as arguments. What is NOT lifted is
+#    anything not reachable
 #    through that protocol: tensors closed over by ``fn`` (globals, captured locals)
 #    and plain (non-registered) module attributes -- a bare ``self.weight = t`` rather
 #    than a registered parameter/buffer. Those are not inputs; a vanilla make_fx trace
@@ -141,20 +142,29 @@ graph under foreign metadata.
 #    codegen'd as source and composed in; the one non-codegen'd wrapper
 #    (FakifiedOutWrapper) only activates under fakify_first_call, which makes the graph
 #    non-cacheable, so such a graph is rejected before composition ever runs.
+#    Distributed capture: a ``compile_on_one_rank`` flag (trace on a single rank and
+#    broadcast the artifact to the rest, so every rank need not re-capture) is
+#    anticipated and scheduled for a follow-up later in this stack.
 #
-# 5. Backward is part of the computation. If ``fn`` runs a backward, the parameter
+# 5. Backward is part of the computation. Yes: if you trace ``forward -> loss ->
+#    backward``, running the artifact re-runs that whole computation and puts the
+#    resulting parameter gradients onto the runtime model. Concretely: the parameter
 #    gradients are harvested inside the (functional) graph as extra outputs, and the
 #    driver scatters them back onto the runtime model's ``parameters()`` ``.grad``
-#    fields -- accumulating (``p.grad += g``) exactly like eager ``.backward()``, so
-#    a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged. Only params that
-#    actually received a gradient at trace time are harvested (recorded by index); a
-#    frozen (``requires_grad=False``) or non-contributing param keeps ``.grad = None``,
-#    exactly as eager leaves it -- precompile does NOT zero-fill such params. The
-#    artifact therefore returns ``fn``'s own result (``None`` for a bare ``.backward()``
-#    step), not the grads. The grad scatter is the ONLY mutation precompile performs,
-#    and it happens in Python outside the graph, so the graph stays functional
-#    (invariant 4 is about in-graph mutation and is unaffected). precompile does not
-#    own optimizer state; bring your own optimizer and zero grads as usual.
+#    fields -- ACCUMULATING (``p.grad += g``), not overwriting, exactly like eager
+#    ``.backward()``, so a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged
+#    (skip the zero and grads pile up, by design). WHICH params get a grad is fixed at
+#    TRACE time, not runtime: only params that actually received a gradient during the
+#    traced backward are harvested (recorded by index in GRAD_PARAM_INDICES); a frozen
+#    (``requires_grad=False``) or non-contributing param keeps ``.grad = None``, exactly
+#    as eager leaves it -- precompile does NOT zero-fill such params, and flipping a
+#    param's requires_grad at runtime does not change what gets scattered (invariant 2).
+#    Buffers are never harvested (a requires_grad buffer that got a grad is rejected at
+#    capture). The artifact therefore returns ``fn``'s own result (``None`` for a bare
+#    ``.backward()`` step), not the grads. The grad scatter is the ONLY mutation
+#    precompile performs, and it happens in Python outside the graph, so the graph stays
+#    functional. precompile does not own optimizer state; bring your own optimizer and
+#    zero grads as usual.
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
