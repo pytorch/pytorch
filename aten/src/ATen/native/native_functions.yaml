@@ -9371,8 +9371,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA, XPU: addcmul_out
-    MPS: addcmul_out_mps
+    CPU, CUDA, MTIA, XPU, MPS: addcmul_out
   tags: pointwise
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
@@ -9392,8 +9391,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA, XPU: addcdiv_out
-    MPS: addcdiv_out_mps
+    CPU, CUDA, MTIA, XPU, MPS: addcdiv_out
   tags: pointwise
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
