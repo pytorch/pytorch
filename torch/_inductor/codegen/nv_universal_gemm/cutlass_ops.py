@@ -1,42 +1,29 @@
 # mypy: allow-untyped-defs
-"""Import adapter for `cutlass.operators` and legacy `cutlass_api`."""
+"""Compatibility helpers for `cutlass.operators`."""
 
 from __future__ import annotations
 
 import importlib
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 
-_CANONICAL_API = "cutlass.operators"
-_LEGACY_API = "cutlass_api"
+_OPERATOR_API = "cutlass.operators"
 
 _proxy_cache: dict[str, ModuleType] = {}
 
 
+def _get_module_attr(module: ModuleType, name: str) -> Any:
+    return getattr(module, name)
+
+
+def _set_module_attr(module: ModuleType, name: str, value: Any) -> None:
+    setattr(module, name, value)
+
+
 def get_operator_api() -> ModuleType:
-    """Return `cutlass.operators`, falling back to legacy `cutlass_api`.
-
-    Any ImportError from the canonical namespace (absent, a missing transitive
-    dependency, or a broken import) falls back to legacy `cutlass_api` when it is
-    importable. This mirrors the ImportError boundary used by is_available(), so
-    a present-but-broken canonical install does not silently disable NVGEMM when
-    a working legacy `cutlass_api` exists. If legacy is also unavailable, the
-    original canonical error is raised so the broken install is not masked by a
-    bare "cutlass_api not found".
-    """
-    try:
-        return importlib.import_module(_CANONICAL_API)
-    except ImportError as canonical_err:
-        try:
-            return importlib.import_module(_LEGACY_API)
-        except ImportError:
-            raise canonical_err from None
-
-
-def _is_canonical_api(api: ModuleType | None = None) -> bool:
-    api = api or get_operator_api()
-    return api.__name__ == _CANONICAL_API
+    """Return the `cutlass.operators` module."""
+    return importlib.import_module(_OPERATOR_API)
 
 
 def is_available() -> bool:
@@ -67,14 +54,6 @@ def _copy_module_proxy(cache_key: str, module: ModuleType) -> ModuleType:
     return proxy
 
 
-def _set_module_attr(module: ModuleType, name: str, value: Any) -> None:
-    setattr(module, name, value)
-
-
-def _get_module_attr(module: ModuleType, name: str) -> Any:
-    return getattr(module, name)
-
-
 def _target_sm_cc(target_sm: Any) -> int | None:
     if target_sm is None:
         return None
@@ -98,17 +77,14 @@ def _metadata_min_cc(metadata: Any) -> int:
 
 
 def get_arguments_module() -> ModuleType:
-    """Return the arguments module with legacy-style operand properties.
+    """Return the arguments module with NVGEMM-compatible operand properties.
 
-    For the canonical API this adds legacy properties (element_type/shape/stride
-    and scaled-operand aliases) directly onto the real `DenseTensor`/
-    `ScaledOperand` classes in place, so the mutation is process-global rather
-    than confined to the returned proxy. Each property is only added when absent.
+    This adds element_type/shape/stride properties and scaled-operand aliases
+    directly onto the real `DenseTensor`/`ScaledOperand` classes in place, so
+    the mutation is process-global rather than confined to the returned proxy.
+    Each property is only added when absent.
     """
     arguments = _get_submodule("arguments")
-    if not _is_canonical_api() or not hasattr(arguments, "ScaledOperand"):
-        return arguments
-
     proxy = _copy_module_proxy("canonical_arguments", arguments)
     DenseTensor = arguments.DenseTensor
     ScaledOperand = arguments.ScaledOperand
@@ -161,11 +137,8 @@ def get_arguments_module() -> ModuleType:
 
 def get_artifact_module() -> ModuleType:
     artifact = _get_submodule("artifact")
-    if not _is_canonical_api():
-        return artifact
-
     proxy = _copy_module_proxy("canonical_artifact", artifact)
-    if getattr(proxy.CompiledArtifact, "_torchinductor_legacy_ctor", False):
+    if getattr(proxy.CompiledArtifact, "_torchinductor_compat_ctor", False):
         return proxy
 
     from cutlass.operators.arch import TargetSm
@@ -181,31 +154,26 @@ def get_artifact_module() -> ModuleType:
             super().__init__(compiled_obj, operator_obj, compiled_for)
 
     CompiledArtifact.__module__ = artifact.__name__
-    CompiledArtifact._torchinductor_legacy_ctor = True
+    CompiledArtifact._torchinductor_compat_ctor = True
     _set_module_attr(proxy, "CompiledArtifact", CompiledArtifact)
     return proxy
 
 
 def get_library_module() -> ModuleType:
-    if not _is_canonical_api():
-        return _get_submodule("library")
-
-    arguments = get_arguments_module()
     proxy = _proxy_cache.get("canonical_library")
     if proxy is None:
-        proxy = ModuleType(f"{_CANONICAL_API}.library")
-        _set_module_attr(proxy, "ScaleMode", _get_module_attr(arguments, "ScaleMode"))
-        _set_module_attr(
-            proxy, "ScaleSwizzleMode", _get_module_attr(arguments, "ScaleSwizzleMode")
-        )
+        arguments = get_arguments_module()
+        proxy = ModuleType(f"{_OPERATOR_API}.library")
+        _set_module_attr(proxy, "ScaleMode", arguments.ScaleMode)
+        _set_module_attr(proxy, "ScaleSwizzleMode", arguments.ScaleSwizzleMode)
         _proxy_cache["canonical_library"] = proxy
     return proxy
 
 
 def get_metadata_module() -> ModuleType:
-    """Return operator metadata with legacy NVGEMM aliases when needed."""
+    """Return operator metadata with NVGEMM compatibility aliases."""
     metadata = _get_submodule("metadata")
-    if not _is_canonical_api() or hasattr(metadata, "KernelMetadata"):
+    if hasattr(metadata, "KernelMetadata"):
         return metadata
 
     proxy = _copy_module_proxy("canonical_metadata", metadata)
@@ -302,9 +270,6 @@ def get_status_module() -> ModuleType:
 
 def get_utils_module() -> ModuleType:
     utils = _get_submodule("utils")
-    if not _is_canonical_api():
-        return utils
-
     proxy = _copy_module_proxy("canonical_utils", utils)
     if not hasattr(proxy, "strides_to_layout_string"):
         _set_module_attr(
@@ -344,8 +309,8 @@ def get_dtype_utils_module() -> ModuleType:
     return _get_submodule("utils.dtype")
 
 
-def _canonical_cutedsl_kernel_module() -> ModuleType:
-    proxy = _proxy_cache.get("canonical_cutedsl_kernel")
+def _cutedsl_kernel_module() -> ModuleType:
+    proxy = _proxy_cache.get("cutedsl_kernel")
     if proxy is not None:
         return proxy
 
@@ -354,7 +319,7 @@ def _canonical_cutedsl_kernel_module() -> ModuleType:
     arguments = get_arguments_module()
 
     class CuteDslKernel(CuteDslOperator):
-        supported_args_type = _get_module_attr(arguments, "GemmArguments")
+        supported_args_type = arguments.GemmArguments
         designed_for_min_cc = 100
 
         def __init_subclass__(cls, **kwargs):
@@ -397,55 +362,43 @@ def _canonical_cutedsl_kernel_module() -> ModuleType:
                 args=args,
             )
 
-    CuteDslKernel.__module__ = f"{_CANONICAL_API}.providers.cutedsl.kernel"
+    CuteDslKernel.__module__ = f"{_OPERATOR_API}.providers.cutedsl.kernel"
     proxy = ModuleType(CuteDslKernel.__module__)
     _set_module_attr(proxy, "CuteDslKernel", CuteDslKernel)
-    _proxy_cache["canonical_cutedsl_kernel"] = proxy
+    _proxy_cache["cutedsl_kernel"] = proxy
     return proxy
 
 
 def get_provider_submodule(name: str) -> ModuleType:
-    if not _is_canonical_api():
-        return _get_submodule(f"providers.{name}")
     if name == "cutedsl.kernel":
-        return _canonical_cutedsl_kernel_module()
+        return _cutedsl_kernel_module()
     if name == "cutedsl.utils":
         return importlib.import_module(
-            f"{_CANONICAL_API}.providers.cutedsl.integration_utils.mma"
+            f"{_OPERATOR_API}.providers.cutedsl.integration_utils.mma"
         )
     return _get_submodule(f"providers.{name}")
 
 
-def _canonical_provider_module_name(name: str) -> str:
-    mapping = {
-        "cutedsl.utils": f"{_CANONICAL_API}.providers.cutedsl.integration_utils.mma",
-        "cutedsl.gemm.sm100_static_persistent": f"{_CANONICAL_API}.providers.cutedsl.gemm.sm100_persistent",
-    }
-    return mapping.get(name, f"{_CANONICAL_API}.providers.{name}")
+def _provider_module_name(name: str) -> str:
+    provider_root = f"{_OPERATOR_API}.providers"
+    if name == "cutedsl.utils":
+        return f"{provider_root}.cutedsl.integration_utils.mma"
+    if name == "cutedsl.gemm.sm100_static_persistent":
+        return f"{provider_root}.cutedsl.gemm.sm100_persistent"
+    return f"{provider_root}.{name}"
 
 
 def provider_module_names(names: list[str]) -> list[str]:
-    api = get_operator_api()
-    if api.__name__ == _CANONICAL_API:
-        return [_canonical_provider_module_name(name) for name in names]
-    return [f"{api.__name__}.providers.{name}" for name in names]
+    return [_provider_module_name(name) for name in names]
 
 
-def _ensure_legacy_workspace_size(kernel: Any) -> None:
-    if getattr(kernel, "_torchinductor_workspace_size_compat", False):
-        return
-
-    get_workspace_size = kernel.get_workspace_size
-
-    def legacy_get_workspace_size(args):
-        workspace_size = get_workspace_size(args)
-        return getattr(workspace_size, "size_bytes", workspace_size)
-
-    kernel.get_workspace_size = legacy_get_workspace_size
-    kernel._torchinductor_workspace_size_compat = True
+def get_workspace_size(kernel: Any, args: Any) -> int:
+    """Return a workspace allocation size in bytes."""
+    requirement = kernel.get_workspace_size(args)
+    return cast(int, getattr(requirement, "size_bytes", requirement))
 
 
-def _ensure_legacy_kernel_metadata(kernel: Any) -> Any:
+def _ensure_kernel_metadata(kernel: Any) -> Any:
     metadata = kernel.metadata
     if not all(
         hasattr(metadata, attr) for attr in ("kernel_name", "kernel_class", "min_cc")
@@ -462,23 +415,20 @@ def _ensure_legacy_kernel_metadata(kernel: Any) -> Any:
         )
         kernel._metadata = metadata
 
-    _ensure_legacy_workspace_size(kernel)
     return kernel
 
 
 def get_kernels() -> Any:
     api = get_operator_api()
-    if hasattr(api, "get_kernels"):
-        return api.get_kernels()
-    return [_ensure_legacy_kernel_metadata(kernel) for kernel in api.get_operators()]
+    return [_ensure_kernel_metadata(kernel) for kernel in api.get_operators()]
 
 
 def ensure_fp4_dtype_registered() -> None:
-    """Patch `cutlass.operators` or legacy `cutlass_api` for FP4.
+    """Patch `cutlass.operators` for FP4.
 
     Patches the lookup in place on the real dtype module in addition to the
     adapter proxy so cutlass-internal callers (not just code going through the
-    proxy) pick up the FP4 mapping, matching the legacy in-place patch.
+    proxy) pick up the FP4 mapping.
     """
     import torch
 

@@ -19,13 +19,11 @@ def to_cutlass_scale_mode(
         swizzle_type: SwizzleType from torch.nn.functional
 
     Returns:
-        Tuple of (ScaleMode, ScaleSwizzleMode) from `cutlass.operators` or
-        legacy `cutlass_api`,
+        Tuple of (ScaleMode, ScaleSwizzleMode) from `cutlass.operators`,
         or (None, None) if the types are not supported.
 
-    The returned enum objects can be used directly with `cutlass.operators` or
-    legacy `cutlass_api`, or their
-    .name attribute can be used for codegen (e.g., scale_mode.name -> "Blockwise1x32").
+    The returned enum objects can be used directly with `cutlass.operators`.
+    Their .name attribute can be used for codegen.
 
     NOTE:
         Currently on Blackwell (SM100), NVGEMM only supports MXFP8 scaling modes.

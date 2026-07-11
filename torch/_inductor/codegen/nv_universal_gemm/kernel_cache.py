@@ -3,11 +3,11 @@
 Global kernel cache for NVIDIA Universal GEMM.
 
 This module provides a lazy-initialized cache for CUTLASS operator API
-(`cutlass.operators` or legacy `cutlass_api`) kernels,
+(`cutlass.operators`) kernels,
 avoiding expensive manifest scans on every kernel lookup.
 
 The first call to get_kernel_by_name() loads all kernels from
-`cutlass.operators` or legacy `cutlass_api`
+`cutlass.operators`
 (~10 seconds) and builds a name->kernel dict. Subsequent calls use the
 dict for O(1) lookup (~0.1 μs).
 """
@@ -124,7 +124,7 @@ def partition_compatible_kernels(
 
 
 def get_kernel_by_name(kernel_name: str) -> Any:
-    """Get a `cutlass.operators` or legacy `cutlass_api` kernel by name."""
+    """Get a `cutlass.operators` kernel by name."""
     return _get_kernel_cache().get(kernel_name)
 
 

@@ -388,11 +388,10 @@ class TestFP4Support(TestCase):
 
     @unittest.skipIf(
         not torch.cuda.is_available() or not is_nv_universal_gemm_operator_available(),
-        "requires CUDA and CUTLASS operator API "
-        "(`cutlass.operators` or legacy `cutlass_api`)",
+        "requires CUDA and CUTLASS operator API (`cutlass.operators`)",
     )
     def test_ensure_fp4_dtype_registered(self):
-        """Patch `cutlass.operators` or legacy `cutlass_api` for FP4."""
+        """Patch `cutlass.operators` for FP4."""
         from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
             get_dtype_utils_module,
         )

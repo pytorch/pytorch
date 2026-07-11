@@ -2352,9 +2352,8 @@ def ensure_cute_available() -> bool:
 def ensure_nv_universal_gemm_available() -> bool:
     """Check if the NVGEMM operator API is importable; cache the result.
 
-    This accepts public `cutlass.operators` or legacy `cutlass_api`. Call
-    ensure_nv_universal_gemm_available.cache_clear() after installing either
-    operator package in the same interpreter to retry the import.
+    Call ensure_nv_universal_gemm_available.cache_clear() after installing
+    `cutlass.operators` in the same interpreter to retry the import.
     """
     from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import is_available
 
@@ -2365,7 +2364,7 @@ def ensure_nv_universal_gemm_available() -> bool:
 
 
 def _ensure_fp4_dtype_registered():
-    """Patch `cutlass.operators` or legacy `cutlass_api` for FP4."""
+    """Patch `cutlass.operators` for FP4."""
     from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
         ensure_fp4_dtype_registered,
     )
@@ -2502,7 +2501,7 @@ def use_nv_universal_gemm_template(
 
     Required conditions:
         1. NVGEMM backend is enabled
-        2. CUTLASS operator API (`cutlass.operators` or legacy `cutlass_api`) is available
+        2. CUTLASS operator API (`cutlass.operators`) is available
         3. We are on a NVIDIA GPU
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
@@ -2511,8 +2510,7 @@ def use_nv_universal_gemm_template(
 
     Note:
         - Shape and stride constraints are handled internally by
-          the adapter loads kernels from `cutlass.operators` or legacy
-          `cutlass_api` and filters incompatible kernels.
+          `cutlass.operators`, which filters incompatible kernels.
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
         - Dynamic shapes are supported as long as they have hints
@@ -2540,7 +2538,7 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # The CUTLASS operator API (`cutlass.operators` or legacy `cutlass_api`)
+    # The CUTLASS operator API (`cutlass.operators`)
     # can't handle unbacked symbols because it needs to evaluate
     # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
     # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
@@ -2551,7 +2549,7 @@ def use_nv_universal_gemm_template(
         return False
 
     # Base pointer must be 16-byte aligned. The CUTLASS operator API
-    # (`cutlass.operators` or legacy `cutlass_api`) can't check this at
+    # (`cutlass.operators`) can't check this at
     # compile time because it only sees FakeTensors without real data pointers.
     tensors_to_check = [mat_a, mat_b]
     if offs is not None:

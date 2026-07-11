@@ -6451,7 +6451,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
     Buffer for NVIDIA Universal GEMM kernels.
 
     Unlike CuteDSL templates which use Jinja templates, this generates
-    simpler Python code that directly calls the cutlass_api library.
+    simpler Python code that directly calls the cutlass.operators library.
     """
 
     def __init__(

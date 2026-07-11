@@ -2,8 +2,7 @@
 """
 NVIDIA Universal GEMM kernel code generation.
 
-This module generates Python code that calls `cutlass.operators` or legacy
-`cutlass_api` kernels to execute GEMM operations.
+This module generates Python code that calls `cutlass.operators` kernels.
 The runtime helpers (_nvgemm_run, _nvgemm_precompile, etc.) are imported by the
 generated wrapper at runtime, keeping the generated code thin.
 """
@@ -278,7 +277,7 @@ def _worker_nvgemm_autotuning_precompile(
         )
 
         if was_compiled:
-            obj = _unwrap_efc_compiled_obj(artifact.compiled_obj)
+            obj = artifact.compiled_obj
             disk_cache_set(
                 disk_fn_cache,
                 kernel_name,
@@ -411,79 +410,11 @@ def _create_gemm_cache_key(
     return cache_key
 
 
-def _unwrap_efc_compiled_obj(compiled_obj):
-    """Extract the inner JIT function from an EFC closure for disk serialization."""
-    if hasattr(compiled_obj, "__closure__") and compiled_obj.__closure__:
-        inner = compiled_obj.__closure__[0].cell_contents
-        if hasattr(inner, "export_to_c"):
-            return inner
-    return compiled_obj
-
-
-def _init_efc_jit(kernel, epilogue_args):
-    """Lightweight EFC JIT init from epilogue args, without a full kernel.compile().
-
-    EFC.compile() calls analyze_epilogue_with_arguments() then creates the JIT
-    object. We replicate just those two steps so that disk-cached artifacts can
-    be rewrapped without recompiling the CuTe DSL kernel.
-    """
-    EFC = get_provider_submodule("cutedsl.evt.common_efc").EFC
-    TensorWrapper = get_provider_submodule(
-        "cutedsl.gemm.sm100_static_persistent_efc"
-    ).TensorWrapper
-
-    efc = kernel.impl.efc
-    params = [
-        e.compile_time_tensor if isinstance(e, TensorWrapper) else e
-        for e in epilogue_args.parameters
-    ]
-    efc.analyze_epilogue_with_arguments(params)
-    efc.jit = EFC.JIT(efc, efc.epilogue_parameter_names)
-
-
-def _rewrap_efc_compiled_obj(compiled_fn, kernel, epilogue_args=None):
-    """Reconstruct the EFC wrapped_launch closure from a loaded JIT function.
-
-    When epilogue_args is provided and efc.jit is missing, performs a
-    lightweight initialization (analyze + JIT creation) so that
-    disk-cached EFC artifacts can be reused without a full recompile.
-    Falls back to returning None (triggering recompile) only when
-    epilogue_args is not available.
-    """
-    if not hasattr(kernel, "impl") or not hasattr(kernel.impl, "efc"):
-        return compiled_fn
-
-    efc_module = get_provider_submodule("cutedsl.gemm.sm100_static_persistent_efc")
-    # The legacy `cutlass_api` disk-cache rewrap depends on KernelOperand and a
-    # packed-argument JIT entry point. Canonical `cutlass.operators` has no
-    # KernelOperand and its EFC compiled function takes tensors directly, so the
-    # legacy closure does not apply; signal recompile instead of reloading.
-    if not hasattr(efc_module, "KernelOperand"):
+def _use_disk_cached_compiled_obj(compiled_obj, kernel):
+    """Return a reusable cached object, or None when the kernel must recompile."""
+    if hasattr(kernel, "impl") and hasattr(kernel.impl, "efc"):
         return None
-    KernelOperand = efc_module.KernelOperand
-    TensorWrapper = efc_module.TensorWrapper
-
-    if not hasattr(kernel.impl.efc, "jit"):
-        if epilogue_args is not None:
-            _init_efc_jit(kernel, epilogue_args)
-        else:
-            return None
-
-    def wrapped_launch(a_tensor, b_tensor, stream, *supplemental_args):
-        runtime_args = [
-            e.runtime_tensor
-            if isinstance(e, TensorWrapper)
-            else (e.tensor.runtime_tensor if isinstance(e, KernelOperand) else e)
-            for e in supplemental_args
-        ]
-        return compiled_fn(
-            a_tensor,
-            b_tensor,
-            stream,
-            kernel.impl.efc.jit.pack_arguments(*runtime_args),
-        )
-
-    return wrapped_launch
+    return compiled_obj
 
 
 def _nvgemm_run(
@@ -528,7 +459,7 @@ def _nvgemm_run(
             epilogue=epilogue_args,
             **(variant_kwargs or {}),
         )
-        kernel = artifact.kernel_obj
+        kernel = artifact.operator_obj
     else:
 
         def disk_fallback(kernel):
@@ -540,11 +471,7 @@ def _nvgemm_run(
                 dev_idx,
             )
             if compiled_fn is not None:
-                compiled_fn = _rewrap_efc_compiled_obj(
-                    compiled_fn,
-                    kernel,
-                    epilogue_args=epilogue_args,
-                )
+                compiled_fn = _use_disk_cached_compiled_obj(compiled_fn, kernel)
             if compiled_fn is not None:
                 return CompiledArtifact(compiled_fn, kernel)
             return None
@@ -567,7 +494,7 @@ def _nvgemm_run(
                 module_path,
                 disk_config_key,
                 cache_key,
-                _unwrap_efc_compiled_obj(artifact.compiled_obj),
+                artifact.compiled_obj,
                 dev_idx,
             )
 
@@ -611,8 +538,8 @@ def _nvgemm_precompile(
 ):
     """Precompile an NVGEMM kernel in a subprocess for parallel compilation.
 
-    Precompiles only the base (non-EFC) kernel. EFC kernels produce
-    closure-wrapped artifacts that can't be serialized to disk cache.
+    Precompiles only the base (non-EFC) kernel. EFC compiled artifacts cannot
+    currently be reused from the disk cache.
     """
     import torch
     from torch._inductor.runtime.cutedsl_cache import disk_cache_set
@@ -621,8 +548,8 @@ def _nvgemm_precompile(
     if max_active_clusters is None:
         return
 
-    # cutlass_api queries device occupancy while compiling. In async-compile
-    # workers forked from a CUDA-initialized parent, skip precompile.
+    # CUTLASS queries device occupancy while compiling. Skip precompile in an
+    # async-compile worker forked from a CUDA-initialized parent.
     if torch.cuda._is_in_bad_fork():
         return
 
