@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import operator
+
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
@@ -73,6 +75,24 @@ class RightMatMulClass:
 
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestNbMatrixMultiply(torch._dynamo.test_case.TestCase):
+    # --- using operator ---
+
+    @make_dynamo_test
+    def test_operator_matmul(self):
+        self.assertEqual(
+            operator.matmul(
+                UserDefinedClassWithMatMul(2), UserDefinedClassWithMatMul(3)
+            ),
+            UserDefinedClassWithMatMul(6),
+        )
+
+    @make_dynamo_test
+    def test_operator_imatmul(self):
+        x = UserDefinedClassWithMatMul(2)
+        out = operator.imatmul(x, UserDefinedClassWithMatMul(3))
+        self.assertIs(out, x)
+        self.assertEqual(x, UserDefinedClassWithMatMul(6))
+
     # --- user defined matrix multiply ---
 
     @make_dynamo_test
@@ -92,6 +112,36 @@ class TestNbMatrixMultiply(torch._dynamo.test_case.TestCase):
     def test_user_defined_rmatmul_with_int(self):
         self.assertEqual(
             3 @ UserDefinedClassWithMatMul(2), UserDefinedClassWithMatMul(6)
+        )
+
+    # --- using left matrix multiply ---
+
+    @make_dynamo_test
+    def test_left_matmul_left_uses_matmul(self):
+        a = LeftMatMulClass(5)
+        b = LeftMatMulClass(3)
+        self.assertEqual(a @ b, LeftMatMulClass(15))
+
+    @make_dynamo_test
+    def test_left_matmul_direct_dunder(self):
+        self.assertIs(
+            LeftMatMulClass(5).__matmul__(RightMatMulClass(7)),
+            NotImplemented,
+        )
+
+    @make_dynamo_test
+    def test_left_matmul_right_fallback_rmatmul(self):
+        a = LeftMatMulClass(5)
+        b = RightMatMulClass(3)
+        self.assertEqual(a @ b, "LeftMatMulClass(5)@RightMatMulClass(3)")
+
+    # --- using right matrix multiply ---
+
+    @make_dynamo_test
+    def test_right_matmul_direct_dunder(self):
+        self.assertIs(
+            RightMatMulClass(5).__matmul__(LeftMatMulClass(7)),
+            NotImplemented,
         )
 
     # --- using dunder ---
@@ -130,6 +180,18 @@ class TestNbMatrixMultiply(torch._dynamo.test_case.TestCase):
         x = UserDefinedClassWithMatMul(2)
         x @= 3
         self.assertEqual(x, UserDefinedClassWithMatMul(6))
+
+    # --- unsupported operations ---
+
+    @make_dynamo_test
+    def test_scalar_matmul_scalar(self):
+        with self.assertRaisesRegex(TypeError, r"unsupported operand type"):
+            1 @ 2
+
+    @make_dynamo_test
+    def test_scalar_matmul_scalar_operator(self):
+        with self.assertRaisesRegex(TypeError, r"unsupported operand type"):
+            operator.matmul(1.0, 2.0)
 
     # --- using torch.compile ---
 

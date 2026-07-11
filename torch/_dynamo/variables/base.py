@@ -1027,13 +1027,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     tx,
                     args=[f"expected 1 argument, got {len(args)}"],
                 )
-            from .object_protocol import slot_wrapper_imatmul, slot_wrapper_matmul
 
             if name == "__matmul__":
-                return slot_wrapper_matmul(tx, self, args[0])
+                return self.nb_matrix_multiply_impl(tx, args[0])
             if name == "__rmatmul__":
-                return slot_wrapper_matmul(tx, self, args[0], reverse=True)
-            return slot_wrapper_imatmul(tx, self, args[0])
+                return self.nb_matrix_multiply_impl(tx, args[0], reverse=True)
+            return self.nb_inplace_matrix_multiply_impl(tx, args[0])
         elif name == "__lshift__":
             # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
             #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561

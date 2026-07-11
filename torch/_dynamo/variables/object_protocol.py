@@ -1534,35 +1534,6 @@ def slot_wrapper_imul(
     return slot_wrapper_mul(tx, self, other)
 
 
-def slot_wrapper_matmul(
-    tx: "InstructionTranslatorBase",
-    self: VariableTracker,
-    other: VariableTracker,
-    reverse: bool = False,
-) -> VariableTracker:
-    """``self.__matmul__(other)`` / ``self.__rmatmul__(other)`` slot wrapper."""
-    self_type = maybe_get_python_type(self)
-    if type_implements_nb_slot(self_type, PyNumberSlots.NB_MATRIX_MULTIPLY):
-        return self.nb_matrix_multiply_impl(tx, other, reverse=reverse)
-    raise_type_error(
-        tx,
-        f"unsupported operand type(s) for @: "
-        f"'{self.python_type_name()}' and '{other.python_type_name()}'",
-    )
-
-
-def slot_wrapper_imatmul(
-    tx: "InstructionTranslatorBase",
-    self: VariableTracker,
-    other: VariableTracker,
-) -> VariableTracker:
-    """``self.__imatmul__(other)`` slot wrapper."""
-    self_type = maybe_get_python_type(self)
-    if type_implements_nb_slot(self_type, PyNumberSlots.NB_INPLACE_MATRIX_MULTIPLY):
-        return self.nb_inplace_matrix_multiply_impl(tx, other)
-    return slot_wrapper_matmul(tx, self, other)
-
-
 # ---------------------------------------------------------------------------
 # tp_richcompare -- comparison dispatch
 #
