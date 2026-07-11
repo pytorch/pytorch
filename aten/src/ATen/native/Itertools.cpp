@@ -24,7 +24,6 @@ namespace {
 using namespace at;
 
 c10::SymInt calculate_num_combinations(c10::SymInt n, int64_t r, bool with_replacement) {
-  // Helper to compute the number of combinations (binomial coefficient)
   if (r < 0) return 0;
   if (r == 0) return 1;
   if (with_replacement) {
