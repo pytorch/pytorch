@@ -51,6 +51,22 @@ CUDA_AARCH64_ARCHES = [
     "13.2-aarch64",
 ]
 
+_CUTEDSL_RUNTIME_MARKER = (
+    "platform_system == 'Linux' and platform_machine == 'x86_64' "
+    "and python_version < '3.14'"
+)
+
+
+def cutedsl_runtime_requirements(cuda_major: int) -> str:
+    """Return the runtime dependencies for vendored CuTeDSL kernels."""
+    cutlass_extra = "[cu13]" if cuda_major == 13 else ""
+    return (
+        f"nvidia-cutlass-dsl{cutlass_extra}==4.6.0.dev0; {_CUTEDSL_RUNTIME_MARKER} | "
+        f"apache-tvm-ffi>=0.1.12,<0.2; {_CUTEDSL_RUNTIME_MARKER} | "
+        f"torch-c-dlpack-ext; {_CUTEDSL_RUNTIME_MARKER}"
+    )
+
+
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | "
@@ -59,7 +75,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
-        "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
+        "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux' | "
+        + cutedsl_runtime_requirements(12)
     ),
     "13.0": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
@@ -67,7 +84,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux' | "
+        + cutedsl_runtime_requirements(13)
     ),
     "13.2": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
@@ -75,7 +93,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux' | "
+        + cutedsl_runtime_requirements(13)
     ),
     "xpu": (
         "intel-cmplr-lib-rt==2026.0.0 | "
