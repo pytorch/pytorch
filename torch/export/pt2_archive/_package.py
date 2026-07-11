@@ -7,7 +7,7 @@ import pickle
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import Any, IO, Optional, TYPE_CHECKING, TypeAlias
+from typing import Any, IO, TYPE_CHECKING, TypeAlias
 from typing_extensions import TypeIs
 
 import torch
@@ -864,7 +864,6 @@ def _load_payload_config(
 def _load_state_dict(
     archive_reader: PT2ArchiveReader,
     model_name: str,
-    weights_only: bool = False,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy weight files
     legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
@@ -892,7 +891,7 @@ def _load_state_dict(
                     os.path.join(WEIGHTS_DIR, payload_meta.path_name)
                 )
                 state_dict[weight_fqn] = torch.load(
-                    io.BytesIO(weight_bytes), weights_only=weights_only
+                    io.BytesIO(weight_bytes), weights_only=False
                 )
             else:
                 tensor_meta = payload_meta.tensor_meta
@@ -921,7 +920,6 @@ def _load_state_dict(
 def _load_constants(
     archive_reader: PT2ArchiveReader,
     model_name: str,
-    weights_only: bool = False,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy constant files
     legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
@@ -951,7 +949,7 @@ def _load_constants(
                         os.path.join(CONSTANTS_DIR, path_name)
                     )
                     constants[constant_fqn] = torch.load(
-                        io.BytesIO(constant_bytes), weights_only=weights_only
+                        io.BytesIO(constant_bytes), weights_only=False
                     )
                 else:
                     tensor_meta = payload_meta.tensor_meta
@@ -991,6 +989,7 @@ def _load_exported_programs(
     archive_reader: PT2ArchiveReader,
     file_names: list[str],
     expected_opset_version: dict[str, int] | None,
+    weights_only: bool | None = None,
 ) -> dict[str, ExportedProgram]:
     exported_program_files = [
         file for file in file_names if file.startswith(MODELS_DIR)
@@ -1052,16 +1051,6 @@ def _load_aoti(
         file, model_name
     )
 
-    aoti_compiled_model = AOTICompiledModel(
-        torch._C._aoti.AOTIModelPackageLoader(
-            file,
-            model_name,
-            run_single_threaded,
-            num_runners,
-            device_idx,
-        )
-    )
-
     device = loaded_metadata["AOTI_DEVICE_KEY"]
     from torch._inductor.codecache import get_device_information
 
@@ -1078,19 +1067,29 @@ def _load_aoti(
                     loaded_metadata[k],
                 )
 
+    aoti_compiled_model = AOTICompiledModel(
+        torch._C._aoti.AOTIModelPackageLoader(
+            file,
+            model_name,
+            run_single_threaded,
+            num_runners,
+            device_idx,
+        )
+    )
+
     return aoti_compiled_model
 
 
 def load_pt2(
     f: FileLike,
     *,
+    extra_files: dict[str, Any] | None = None,
     expected_opset_version: dict[str, int] | None = None,
+    weights_only: bool = False,
     run_single_threaded: bool = False,
     num_runners: int = 1,
     device_index: int = -1,
     load_weights_from_disk: bool = False,
-    weights_only: bool = False,
-    format: Optional[str] = None,
 ) -> PT2ArchiveContents:  # type: ignore[type-arg]
     """
     Loads all the artifacts previously saved with ``package_pt2``.
@@ -1099,8 +1098,17 @@ def load_pt2(
         f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
+        extra_files (Optional[Dict[str, Any]]): A dictionary to be updated with
+         the extra files from the archive.
+
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
+
+        weights_only: If True, use `torch.load(..., weights_only=True)` when
+         loading the file (default: False). This is a security feature
+         to prevent arbitrary code execution when loading the model. Note that
+         setting this to True may fail if the archive contains non-tensor data
+         (e.g., custom objects) that require pickle to load.
 
         num_runners (int): Number of runners to load AOTInductor artifacts
 
@@ -1116,7 +1124,6 @@ def load_pt2(
     Returns:
         A ``PT2ArchiveContents`` object which contains all the objects in the PT2.
     """
-
     from torch._inductor.cpp_builder import normalize_path_separator
 
     if not (
@@ -1126,7 +1133,7 @@ def load_pt2(
         # TODO: turn this into an error in 2.9
         logger.warning(
             "Unable to load package. f must be a buffer or a file ending in "
-            ".pt2. Instead got {%s}",
+            ".pt2. Instead got %s",
             f,
         )
 
@@ -1141,7 +1148,7 @@ def load_pt2(
         if version != ARCHIVE_VERSION_VALUE:
             raise ValueError(
                 f"Saved archive version {version} does not match our current "
-                f"archive version {ARCHIVE_VERSION_VALUE}."
+                f"archive version {ARCHIVE_VALUE_VALUE}."
             )
 
         file_names = archive_reader.get_file_names()
@@ -1149,7 +1156,13 @@ def load_pt2(
         exported_programs = _load_exported_programs(
             archive_reader, file_names, expected_opset_version
         )
-        extra_files = _load_extra_files(archive_reader, file_names)
+        extra_files_from_archive = _load_extra_files(archive_reader, file_names)
+
+        # If extra_files dictionary is provided, update it with the extra files from the archive
+        if extra_files is not None:
+            extra_files.update(extra_files_from_archive)
+        else:
+            extra_files = extra_files_from_archive
 
         # Get a list of AOTI model names
         aoti_model_names: set[str] = set()
@@ -1169,11 +1182,9 @@ def load_pt2(
                     weight_map = json.loads(archive_reader.read_string(file))
                     weight_maps[model_name] = weight_map
             elif load_weights_from_disk and file.startswith(WEIGHTS_DIR):
-                weight_file_name = file[
-                    len(WEIGHTS_DIR) :
-                ]  # remove data/weights/ prefix
+                weight_file_name = file[len(WEIGHTS_DIR):]
                 weight_bytes = archive_reader.read_bytes(file)
-                loaded_weight = torch.load(io.BytesIO(weight_bytes))
+                loaded_weight = torch.load(io.BytesIO(weight_bytes), weights_only=weights_only)
                 weights[weight_file_name] = loaded_weight
 
     if isinstance(f, (io.IOBase, IO)):
@@ -1224,10 +1235,7 @@ def load_pt2(
             aoti_runners[model_name].load_constants(
                 model_weights, check_full_update=True, user_managed=True
             )
-
     return PT2ArchiveContents(exported_programs, aoti_runners, extra_files)
-
-
 def load_weights_to_pt2_contents(
     pt2_contents: PT2ArchiveContents, weights_map: dict[str, Any]
 ) -> None:

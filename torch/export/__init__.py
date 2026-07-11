@@ -3,7 +3,7 @@ import os
 import warnings
 import zipfile
 from collections.abc import Callable, Mapping
-from typing import Any, Optional
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -35,13 +35,11 @@ __all__ = [
     "UnflattenedModule",
 ]
 
-
 # To make sure export specific custom ops are loaded
 import torch.export.custom_ops
 
-
 from ._state_dict_utils import _restore_state_dict
-from .decomp_utils import DecompTable
+from .decomp_utils import CustomDecompTable
 from .dynamic_shapes import AdditionalInputs, Constraint, Dim, dims, ShapesCollection
 from .exported_program import (
     default_decompositions,
@@ -63,8 +61,7 @@ def export(
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any] | None = None,
     *,
-    # dynamic_shapes: _DynamicShapesInput | AdditionalInputs | ShapesCollection
-    dynamic_shapes: Any = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
@@ -99,9 +96,9 @@ def export(
     the error message will include suggested fixes to the specification that are needed
     to validate the assumptions. For example :func:`export` might suggest the
     following fix to the definition of a dynamic dimension ``dim0_x``, say appearing in the
-    shape associated with input ``x``, that was previously defined as ``Dim(\"dim0_x\")``::
+    shape associated with input ``x``, that was previously defined as ``Dim("dim0_x")``::
 
-        dim = Dim(\"dim0_x\", max=5)
+        dim = Dim("dim0_x", max=5)
 
     This example means the generated code requires dimension 0 of input ``x`` to be less
     than or equal to 5 to be valid. You can inspect the suggested fixes to dynamic dimension
@@ -115,7 +112,7 @@ def export(
 
         kwargs: Optional example keyword inputs.
 
-        dynamic_shares:
+        dynamic_shapes:
          An optional argument where the type should either be:
          1) a dict from argument names of ``f`` to their dynamic shape specifications,
          2) a tuple that specifies dynamic shape specifications for each input in original order.
@@ -129,52 +126,6 @@ def export(
          where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
-
-         **ShapesSpec API.** ``dynamic_shapes`` may also be a
-         :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
-         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
-         This is a newer unbacked unified API across compile, pre-compile,
-         export, etc., and is the recommended way to specify dynamic
-         shapes for export going forward. It is the same spec API exposed
-         via ``dynamic_shapes=`` in :func:`torch.compile`.
-
-         The keys of ``ParamsSpec`` are **parameter names of the callable
-         being traced** (for an ``nn.Module``, the parameters of
-         ``forward``); keyword and ``**kwargs`` arguments are addressed by
-         name too.
-
-         Key properties (see :mod:`torch.fx.experimental.dynamic_spec` for
-         full details):
-
-         * **Unbacked-only.** Dims / scalars marked dynamic become unbacked
-           SymInts (``u`` symbols) and are never specialized (including no
-           0/1 specialization).
-         * **Assumptions and derived expressions.** A dim can be an
-           expression over the spec's symbols (e.g. ``TensorSpec([B * 2,
-           ...])``), and you can pass relational ``assumptions`` between
-           symbols (e.g. ``[B % 2 == 0]``) that export validates.
-         * **No silent specialization.** The exported graph is guaranteed valid
-           for every assumption provided, otherwise export fails. (By
-           contrast, ``Dim.DYNAMIC`` / ``Dim.AUTO`` may silently specialize a
-           dynamic dim, yielding a graph that is not valid for all the inputs).
-
-         Example::
-
-            batch = ShapeVar(\"batch\", min=2, max=128)
-            ep = torch.export.export(
-                mod,
-                (torch.randn(8, 3), torch.randn(16, 3)),
-                dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec(
-                        {
-                            \"x\": TensorSpec([batch, 3]),
-                            \"y\": TensorSpec([batch * 2, 3]),  # derived expression
-                        }
-                    ),
-                    assumptions=[batch % 2 == 0],
-                ),
-                strict=True,
-            )
 
         strict: When disabled (default), the export function will trace the program through
          Python runtime, which by itself will not validate some of the implicit assumptions
@@ -215,12 +166,6 @@ def export(
             "Maybe try converting your ScriptModule to an ExportedProgram "
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
-
-    # If ``mod.forward`` carries an ``@dynamic_spec(...)`` decorator, the
-    # attached ``ShapesSpec`` is used as ``dynamic_shapes``. Passing both raises.
-    from torch.fx.experimental.dynamic_spec import _resolve_dynamic_shapes
-
-    dynamic_shapes = _resolve_dynamic_shapes(mod, dynamic_shapes)
 
     try:
         return _export(
@@ -269,11 +214,11 @@ def save(
     *,
     extra_files: dict[str, Any] | None = None,
     opset_version: dict[str, int] | None = None,
-    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    pickle_protocol: int = 2,
     weights_only: bool = False,
-    format: Optional[str] = None,
+    format: str | None = None,
 ) -> None:
-    r"""
+    """
     .. warning::
         Under active development, saved files may not be usable in newer versions
         of PyTorch.
@@ -284,7 +229,7 @@ def save(
     Args:
         ep (ExportedProgram): The exported program to save.
 
-        f (str | os.PathLike[str] | IO[bytes]) A file-like object (has to
+        f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): Map from filename to contents
@@ -295,27 +240,26 @@ def save(
 
         pickle_protocol: can be specified to override the default protocol
 
-        weights_only (bool, default=False): Whether to use `weights_only=True` when
-         loading the saved file with :func:`torch.export.load`. This flag is only
-         respected when loading the file (not when saving). Setting this to True
-         can improve security by preventing arbitrary code execution via pickle
-         during loading, but may fail if the saved file contains non-tensor objects
-         that require pickle to load.
+        weights_only: If True, use `torch.load(..., weights_only=True)` when
+         loading the saved file (only affects loading, not saving).
+         This is a security feature to prevent arbitrary code execution when
+         loading the model. Note that setting this to True may fail if the
+         archive contains non-tensor data (e.g., custom objects) that require
+         pickle to load.
 
-        format (Optional[str], default=None): The format to use for saving.
-         Currently only supports the default format (`.pt2`). Specifying
-         ``format='safetensors'`` is not yet implemented.
+        format: The format to use for saving. Currently only `None` (the default)
+         and `'safetensors'` are supported. If `None`, the standard `.pt2` format
+         is used. If `'safetensors'`, the model is saved in safetensors format.
+         Note: safetensors support is not yet implemented and will raise an error.
 
     Example::
 
         import torch
         import io
 
-
         class MyModule(torch.nn.Module):
             def forward(self, x):
                 return x + 10
-
 
         ep = torch.export.export(MyModule(), (torch.randn(5),))
 
@@ -336,15 +280,10 @@ def save(
             f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
         )
 
-    if format is not None and format != "safetensors":
-        raise ValueError(f"Unsupported format: {format}")
-    if format == "safetensors":
-        raise NotImplementedError(
-            "Saving in safetensors format is not yet implemented. "
-            "Please use the default format (None or omitted) for now."
-        )
+    if format is not None and format != "pt2":
+        raise ValueError(f"Unsupported format: {format}. Only 'pt2' is currently supported.")
 
-    from .pt2_archive._package import package_pt2
+    from torch.export.pt2_archive._package import package_pt2
 
     package_pt2(
         f,
@@ -353,17 +292,15 @@ def save(
         pickle_protocol=pickle_protocol,
         opset_version=opset_version,
     )
-
-
 def load(
     f: FileLike,
     *,
     extra_files: dict[str, Any] | None = None,
     expected_opset_version: dict[str, int] | None = None,
     weights_only: bool = False,
-    format: Optional[str] = None,
+    format: str | None = None,
 ) -> ExportedProgram:
-    r"""
+    """
     .. warning::
         Under active development, saved files may not be usable in newer versions
         of PyTorch.
@@ -372,7 +309,7 @@ def load(
         :func:`torch.export.load()` uses pickle under the hood to load models. **Never load data from an untrusted source.**
 
     Loads an :class:`ExportedProgram` previously saved with
-    :func:`torch.export.save <torch.export.save>`.
+    :func:`torch.export.save <torch.export.load>`.
 
     Args:
         f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
@@ -385,16 +322,16 @@ def load(
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
 
-        weights_only (bool, default=False): Whether to use `weights_only=True` when
-         loading the saved file. Setting this to True can improve security by
-         preventing arbitrary code execution via pickle during loading, but may
-         fail if the saved file contains non-tensor objects that require pickle
-         to load. If loading fails with ``weights_only=True``, you may need to
-         set ``weights_only=False`` to allow loading of non-tensor objects.
+        weights_only: If True, use `torch.load(..., weights_only=True)` when
+         loading the file (default: False). This is a security feature
+         to prevent arbitrary code execution when loading the model. Note that
+         setting this to True may fail if the archive contains non-tensor data
+         (e.g., custom objects) that require pickle to load.
 
-        format (Optional[str], default=None): The format of the file to load.
-         Currently only supports the default format (`.pt2`). Specifying
-         ``format='safetensors'`` is not yet implemented.
+        format: The format of the file to load. Currently only `None` (the default)
+         and `'safetensors'` are supported. If `None`, the standard `.pt2` format
+         is assumed. If `'safetensors'`, the file is expected to be in safetensors format.
+         Note: safetensors support is not yet implemented and will raise an error.
 
     Returns:
         An :class:`ExportedProgram` object
@@ -420,28 +357,31 @@ def load(
         print(ep(torch.randn(5)))
 
     """
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
+    if format is not None and format != "pt2":
+        raise ValueError(f"Unsupported format: {format}. Only 'pt2' is currently supported.")
 
-    extra_files = extra_files or {}
+    from torch.export.pt2_archive._package import load_pt2
 
-    if format is not None and format != "safetensors":
-        raise ValueError(f"Unsupported format: {format}")
-    if format == "safetensors":
-        raise NotImplementedError(
-            "Loading from safetensors format is not yet implemented. "
-            "Please use the default format (None or omitted) for now."
+    try:
+        return load_pt2(
+            f,
+            extra_files=extra_files,
+            expected_opset_version=expected_opset_version,
+            weights_only=weights_only,
         )
+    except RuntimeError:
+        # Backward compatibility for the zip file format
+        if isinstance(f, (str, os.PathLike)):
+            f = os.fspath(f)
 
-    from .pt2_archive._package import load_pt2
+        extra_files = {} if extra_files is None else extra_files
 
-    return load_pt2(
-        f,
-        expected_opset_version=expected_opset_version,
-        weights_only=weights_only,
-    )
-
-
+        if isinstance(f, (str, os.PathLike)):
+            with open(f, "rb") as f:
+                return _load_legacy_zip(f, extra_files, expected_opset_version, weights_only)
+        else:
+            # Assume it's a file-like object
+            return _load_legacy_zip(f, extra_files, expected_opset_version, weights_only)
 def draft_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
@@ -457,15 +397,7 @@ def draft_export(
     an ExportedProgram, even if there are potential soundness issues, and to
     generate a report listing the issues found.
     """
-    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
-
     from ._draft_export import draft_export
-
-    if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
-        raise NotImplementedError(
-            f"draft_export does not support the new dynamic shapes API "
-            f"({type(dynamic_shapes).__name__}); use torch.export.export instead."
-        )
 
     return draft_export(
         mod=mod,
@@ -523,6 +455,4 @@ def register_dataclass(
         print(ep)
 
     """
-    from torch.utils._pytree import register_dataclass
-
-    register_dataclass(cls, serialized_type_name=serialized_type_name)
+    pytree.register_dataclass(cls, serialized_type_name=serialized_type_name)
