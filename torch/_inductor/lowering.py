@@ -1380,7 +1380,12 @@ def trunc(x):
 
 
 @register_lowering(aten.expand, type_promotion_kind=None)
-def expand(x, sizes):
+def expand(x, sizes, *, implicit=False):
+    # `implicit` is autograd-internal metadata (see aten::expand schema); it
+    # does not affect the produced tensor, so the lowering ignores it. Without
+    # this kwarg the lowering rejects graphs produced by dynamo autograd where
+    # aten.expand.default is emitted with implicit=False.
+    del implicit
     (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -2983,6 +2988,8 @@ make_fallback(torch.ops.streams.record_event.default)
 make_fallback(torch.ops.streams.wait_event.default)
 make_fallback(torch.ops.streams.synchronize_event.default)
 make_fallback(torch.ops.streams.synchronize_device.default)
+make_fallback(torch.ops.streams.synchronize_stream.default)
+make_fallback(torch.ops.streams.wait_stream.default)
 
 
 @register_lowering(aten.rand)
@@ -3722,6 +3729,7 @@ make_fallback(aten.linalg_lu_factor_ex)
 make_fallback(aten.linalg_lu_solve)
 make_fallback(aten.linalg_matrix_exp)
 make_fallback(aten.linalg_matrix_sqrth)
+make_fallback(aten.linalg_polar)
 make_fallback(aten.linalg_qr)
 make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
@@ -3741,8 +3749,6 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
-# Not data-dependent, but still using fallback
-make_fallback(aten.nonzero_static.default)
 # Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
 # native implementations)
 make_fallback(aten.bincount.default, warn=False)
@@ -4137,12 +4143,20 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     ranges: list[sympy.Expr] = []
 
+    _truncate_fp = dtype in (torch.bfloat16, torch.float16)
+
     if isinstance(data, sympy.Basic):
 
         def inner_fn(index):
-            return ops.index_expr(data, dtype)
+            result = ops.index_expr(data, dtype)
+            if _truncate_fp:
+                result = ops.to_dtype(result, dtype, use_compute_types=False)
+                result = ops.to_dtype(result, dtype)
+            return result
 
     elif isinstance(data, (float, int)):
+        if _truncate_fp and isinstance(data, float):
+            data = torch.tensor(data, dtype=dtype).item()
 
         def inner_fn(index):
             return ops.constant(data, dtype)
@@ -7586,6 +7600,36 @@ def _div_rn(a, b):
     return ops.div_rn(a, b)
 
 
+def _floor_div_floating(a, b):
+    nan = constant_like(float("nan"))(a)
+    neg_one = constant_like(-1.0)(a)
+    zero = constant_like(0.0)(a)
+
+    def fn(a, b, nan, neg_one, zero):
+        quotient = ops.div_rn(a, b)
+        result = ops.floor(quotient)
+        a_is_inf = ops.isinf(a)
+        a_is_finite = ops.logical_and(
+            ops.logical_not(a_is_inf), ops.logical_not(ops.isnan(a))
+        )
+        # Eager floor division uses a fmod-based implementation. For +/-inf
+        # divided by a nonzero divisor, fmod produces NaN. Keep divisor == 0
+        # unchanged because eager returns a / b directly.
+        a_inf_nonzero_b = ops.logical_and(a_is_inf, ops.ne(b, zero))
+
+        # For finite nonzero a divided by +/-inf, floor(a / b) can produce
+        # signed zero. Eager applies Python-style floor-division sign correction,
+        # so negative zero direction results become -1.
+        finite_nonzero_a_inf_b = ops.logical_and(
+            ops.logical_and(a_is_finite, ops.ne(a, zero)),
+            ops.logical_and(ops.isinf(b), ops.ne(ops.lt(a, zero), ops.lt(b, zero))),
+        )
+        result = ops.where(finite_nonzero_a_inf_b, neg_one, result)
+        return ops.where(a_inf_nonzero_b, nan, result)
+
+    return make_pointwise(fn)(a, b, nan, neg_one, zero)
+
+
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -7602,7 +7646,7 @@ def div_mode(a, b, rounding_mode=None):
         # Triton's default division uses an approximate reciprocal, which can
         # produce a result slightly below the true quotient and cause floor()
         # to round down by one.
-        return floordiv(a, b) if both_integer else floor(_div_rn(a, b))
+        return floordiv(a, b) if both_integer else _floor_div_floating(a, b)
     if rounding_mode == "trunc":
         if both_boolean:
             raise AssertionError(
@@ -9066,10 +9110,13 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
                 passthrough_vals.append(v)
     for val in passthrough_vals:
         barrier = ir.OrderingBarrier(val)
+        barrier_op = barrier.get_operation_name()
         for op in subgraph_ops:
             op_name = op.operation_name
             if op_name is not None:
-                V.graph.additional_buffer_deps[barrier.get_name()].add(op_name)
+                buf_name = op.get_buffer_name()
+                if buf_name is not None:
+                    V.graph.additional_buffer_deps[barrier_op].add(buf_name)
 
     return output
 

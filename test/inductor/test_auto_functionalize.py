@@ -2102,6 +2102,58 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     counters["inductor"]["fix_auto_functionalized_dtype_views"], 2
                 )
 
+    def test_reinplace_mutated_empty_no_self_edge(self):
+        # Regression test for a Scheduler.compute_ancestors KeyError.
+        #
+        # An auto_functionalized custom op that mutates freshly allocated (empty)
+        # output buffers whose results are then reshaped forces the reinplace pass
+        # to fold a realization back onto the op's own buffer. That produced a
+        # scheduler node with a non-weak MemoryDep on the buffer it also writes --
+        # a self-edge -- and compute_ancestors looked up name_to_ancestors[op]
+        # before it was populated, raising KeyError: 'opN'.
+        #
+        # Mirrors flash_attn._flash_attn_backward writing dq/dk/dv into empties.
+        D = 512
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::attn_bwd",
+                "(Tensor dout, Tensor(a!) dq, Tensor(b!) dk, Tensor(c!) dv) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::attn_bwd", "cpu", lib=lib)
+            def attn_bwd(dout, dq, dk, dv):
+                src = dout.reshape(dq.shape)
+                dq.copy_(src)
+                dk.copy_(src)
+                dv.copy_(src)
+                return torch.zeros_like(dq)  # workspace, discarded by caller
+
+            @torch.library.register_fake("mylib::attn_bwd", lib=lib)
+            def _(dout, dq, dk, dv):
+                return torch.empty_like(dq)
+
+            def f(dout, weight, num_heads):
+                head_dim = D // num_heads
+                seqlen = dout.shape[0]
+                dq = torch.empty(1, seqlen, num_heads, head_dim, dtype=dout.dtype)
+                dk = torch.empty(1, seqlen, num_heads, head_dim, dtype=dout.dtype)
+                dv = torch.empty(1, seqlen, num_heads, head_dim, dtype=dout.dtype)
+                torch.ops.mylib.attn_bwd(dout, dq, dk, dv)  # return discarded
+                a = dq.reshape(1, seqlen, D)
+                b = dk.reshape(1, seqlen, D)
+                c = dv.reshape(1, seqlen, D)
+                return (a + b + c) @ weight
+
+            dout = torch.randn(128, D)
+            weight = torch.randn(D, D)
+            torch._dynamo.mark_dynamic(dout, 0)
+
+            expected = f(dout, weight, 8)
+            got = torch.compile(f, fullgraph=True, dynamic=True)(dout, weight, 8)
+            self.assertEqual(got, expected)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
