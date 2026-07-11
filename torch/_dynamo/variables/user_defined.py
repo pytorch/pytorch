@@ -3353,95 +3353,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ],
         )
 
-    def generic_getattr(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        skip_getattr_fallback: bool = False,
-    ) -> VariableTracker:
-        """Dynamo implementation of CPython's PyObject_GenericGetAttr.
-
-        This mirrors object.__getattribute__ and is called from:
-        - getattro_impl (for objects without a custom __getattribute__)
-        - SuperVariable.call_method (when super().__getattribute__() resolves
-          to object.__getattribute__)
-
-        When skip_getattr_fallback is True, step 6 (__getattr__) is skipped,
-        matching object.__getattribute__ semantics (no __getattr__ fallback).
-
-        The algorithm: MRO walk -> data descriptor -> instance __dict__ ->
-        non-data descriptor / plain class attr -> dynamic fallback ->
-        __getattr__ -> AttributeError.
-        """
-        source: Source | None = AttrSource(self.source, name) if self.source else None
-
-        if name == "__dict__":
-            if not hasattr(self.value, "__dict__"):
-                raise_observed_exception(AttributeError, tx)
-            return self.get_dict_vt(tx)
-
-        # TODO(anijain2305) - Investigate if we need specialization for more
-        # dunder attrs. inspect.getattr_static does not return correct value for
-        # them.
-        if name == "__class__":
-            cls_source: Source | None = source
-            if source is None:
-                cls_source = self.cls_source
-            else:
-                cls_source = source
-            return VariableTracker.build(tx, type(self.value), cls_source)
-
+    def lookup_type_attr(self, tx: "InstructionTranslatorBase", name: str) -> object:
         from ..mutation_guard import unpatched_nn_module_init
 
-        # ---- CPython attribute lookup algorithm ----
-        # Mirror object.__getattribute__ (PyObject_GenericGetAttr):
-        #   1. type_attr = lookup name in type(obj).__mro__
-        #   2. if type_attr is a DATA descriptor → invoke it
-        #   3. if name in obj.__dict__ → return as-is (no descriptor invocation)
-        #   4. if type_attr is a non-data descriptor → invoke it
-        #   5. if type_attr is a plain class variable → return it
-        #   6. __getattr__ fallback
-        #   7. raise AttributeError
-        #
-        # Between steps 5 and 6, we also handle objects with custom storage
-        # that aren't visible via the MRO walk or instance __dict__ (step 5b).
-        #
-        # Step 1: Single MRO walk on the type (cached).
         type_attr = self.lookup_class_mro_attr(name)
-
-        # Dynamo patches nn.Module.__init__ at import time to inject tracing
-        # hooks.  Undo that here so the unpatched original is traced instead.
         if type_attr is torch.nn.Module.__init__:
             type_attr = unpatched_nn_module_init
+        return type_attr
 
-        # Step 2: Data descriptors on the type take priority over instance dict.
-        if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
-            return self.resolve_data_descriptor(tx, name, type_attr, source)
-
-        # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
-        result = self.lookup_instance_dict(tx, name)
-        if result is not None:
-            return result
-
-        # Step 4-5: Non-data descriptor or plain class attribute.
-        if type_attr is not NO_SUCH_SUBOBJ:
-            return self.resolve_type_attr(tx, name, type_attr, source)
-
-        # Step 5b: Dynamic fallback for attributes that exist on the live
-        # object but aren't visible to the static MRO walk or instance
-        # __dict__ check above.  This covers objects with custom storage
-        # backends (e.g. threading.local uses a per-thread dict not
-        # accessible via obj.__dict__) and C extensions that store data
-        # outside the normal Python object layout.
-        #
-        # This is NOT the same as the C-level data descriptor fallback in
-        # resolve_data_descriptor (step 2): that handles descriptors found
-        # on the type MRO (like member_descriptor for __slots__), while this
-        # handles attributes that aren't on the type MRO at all.
-        #
-        # Only safe when the class doesn't override __getattribute__,
-        # otherwise we'd run arbitrary user code.
-        # Skip if side effects have mutations that supersede the live object.
+    def dynamic_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        source: Source | None = AttrSource(self.source, name) if self.source else None
         has_instance_mutations = tx.output.side_effects.has_pending_mutation_of_attr(
             self,
             name,
@@ -3456,23 +3379,33 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, resolved, source)
             except AttributeError:
                 pass
-
-        # Step 6: __getattr__ fallback.
-        if not skip_getattr_fallback:
-            result = self.call_getattr_fallback(tx, name)
-            if result is not None:
-                return result
-
-        # Step 7: AttributeError.
-        raise_observed_exception(
-            AttributeError,
-            tx,
-            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
-        )
+        return None
 
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .object_protocol import object_generic_getattr
+
+        # TODO(anijain2305) - Investigate if we need specialization for more
+        # dunder attrs. inspect.getattr_static does not return correct value
+        # for them.
+        #
+        # These must come before the __getattribute__ dispatch because
+        # descriptor resolution (resolve_type_attr, resolve_data_descriptor)
+        # calls self.getattro_impl(tx, "__class__") internally.  If
+        # __getattribute__ is overridden, that dispatch would re-enter the
+        # attribute lookup and recurse infinitely.
+        if name == "__dict__":
+            if not hasattr(self.value, "__dict__"):
+                raise_observed_exception(AttributeError, tx)
+            return self.get_dict_vt(tx)
+
+        if name == "__class__":
+            cls_source = (
+                AttrSource(self.source, name) if self.source else self.cls_source
+            )
+            return VariableTracker.build(tx, type(self.value), cls_source)
+
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -3491,11 +3424,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Pass through to __getattr__ if __getattribute__ fails
                 handle_observed_exception(tx)
 
-        return self.generic_getattr(tx, name)
+        return object_generic_getattr(tx, self, name)
 
     def call_getattribute(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .object_protocol import object_generic_getattr
+
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -3509,7 +3444,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source=new_source,
             ).call_function(tx, [VariableTracker.build(tx, name)], {})
 
-        return self.generic_getattr(tx, name, skip_getattr_fallback=True)
+        return object_generic_getattr(tx, self, name, skip_getattr_fallback=True)
 
     def resolve_data_descriptor(
         self,

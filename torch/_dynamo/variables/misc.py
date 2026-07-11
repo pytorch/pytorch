@@ -75,7 +75,7 @@ from ..utils import (
 from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .object_protocol import generic_str
+from .object_protocol import generic_str, object_generic_getattr
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -370,8 +370,8 @@ class SuperVariable(VariableTracker):
             # to the shared implementation so that __dict__, __class__,
             # polyfilled C descriptors, etc. are all handled consistently.
             if isinstance(self.objvar, UserDefinedObjectVariable):
-                return self.objvar.generic_getattr(
-                    tx, attr_name, skip_getattr_fallback=True
+                return object_generic_getattr(
+                    tx, self.objvar, attr_name, skip_getattr_fallback=True
                 )
 
             attr_value = None

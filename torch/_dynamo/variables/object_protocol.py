@@ -2016,75 +2016,55 @@ def object_generic_getattr(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
     name: str,
+    skip_getattr_fallback: bool = False,
 ) -> VariableTracker:
     """Dynamo's PyObject_GenericGetAttr.
 
     https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1611-L1683
 
-    Implements the standard attribute lookup algorithm using the VT's
-    python_type() for MRO walking, and hooks on the VT for instance dict
-    and __getattr__ fallback.
+    Implements the standard attribute lookup algorithm.  Each step
+    delegates to a hook on the VT so subclasses (UDOV in particular) can
+    customize source management, side-effects, and descriptor handling.
 
     Steps:
-      1. MRO walk on python_type() for type_attr
-      2. Data descriptor -> invoke tp_descr_get
-      3. Instance dict -> obj.lookup_instance_dict(tx, name)
-      4. Non-data descriptor -> invoke tp_descr_get
-      5. Plain class variable -> wrap in VT
-      6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
+      1. obj.lookup_type_attr  — MRO walk
+      2. obj.resolve_data_descriptor — data descriptor invocation
+      3. obj.lookup_instance_dict — instance __dict__
+      4-5. obj.resolve_type_attr — non-data descriptor / plain class var
+      5b. obj.dynamic_getattr_fallback — attrs with non-standard storage
+      6. obj.call_getattr_fallback — __getattr__
       7. AttributeError
     """
     from .user_defined import is_data_descriptor
 
-    py_type = obj.python_type()
     source = obj.source and AttrSource(obj.source, name)
 
     # Step 1: MRO walk.
-    type_attr = mro_lookup(py_type, name)
+    type_attr = obj.lookup_type_attr(tx, name)
 
     # Step 2: Data descriptor takes priority over instance dict.
     if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
-        class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
-        if result is not None:
-            return result
-        raise _UnhandledDescriptorError(
-            f"object_generic_getattr: unhandled data descriptor "
-            f"{type(type_attr)} for {name}"
-        )
+        return obj.resolve_data_descriptor(tx, name, type_attr, source)
 
     # Step 3: Instance dict (tp_dictoffset).
     instance_result = obj.lookup_instance_dict(tx, name)
     if instance_result is not None:
         return instance_result
 
-    # Step 4: Non-data descriptor with __get__.
-    if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
-        # If the VT has custom call_method and this is a method, return a
-        # CallMethodVariable that dispatches through call_method instead of
-        # inlining the resolved method directly.  This preserves custom
-        # tracing logic (side effects, graph nodes, suppression) that
-        # MRO-based resolution via UserMethodVariable would bypass.
-        if _is_method_type(type_attr) and _has_custom_call_method(obj):
-            return variables.CallMethodVariable(obj, name, source=source)
-
-        class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
-        if result is not None:
-            return result
-        raise _UnhandledDescriptorError(
-            f"object_generic_getattr: unhandled non-data descriptor "
-            f"{type(type_attr)} for {name}"
-        )
-
-    # Step 5: Plain class variable (no __get__).
+    # Steps 4-5: Non-data descriptor or plain class variable.
     if type_attr is not NO_SUCH_SUBOBJ:
-        return VariableTracker.build(tx, type_attr, source)
+        return obj.resolve_type_attr(tx, name, type_attr, source)
+
+    # Step 5b: Dynamic fallback for attrs with non-standard storage.
+    dynamic_result = obj.dynamic_getattr_fallback(tx, name)
+    if dynamic_result is not None:
+        return dynamic_result
 
     # Step 6: __getattr__ fallback.
-    getattr_result = obj.call_getattr_fallback(tx, name)
-    if getattr_result is not None:
-        return getattr_result
+    if not skip_getattr_fallback:
+        getattr_result = obj.call_getattr_fallback(tx, name)
+        if getattr_result is not None:
+            return getattr_result
 
     # Step 7: Attribute not found.
     raise_observed_exception(AttributeError, tx)

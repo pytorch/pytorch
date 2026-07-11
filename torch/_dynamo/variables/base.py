@@ -626,6 +626,96 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return None
 
+    def lookup_type_attr(self, tx: InstructionTranslatorBase, name: str) -> object:
+        """Step 1 of GenericGetAttr: MRO walk on the Python type.
+
+        Base uses mro_lookup(python_type(), name).  UDOV overrides with a
+        cached version that also unpatches nn.Module.__init__.
+        """
+        from .object_protocol import mro_lookup, NO_SUCH_SUBOBJ
+
+        try:
+            py_type = self.python_type()
+        except NotImplementedError:
+            return NO_SUCH_SUBOBJ
+        return mro_lookup(py_type, name)
+
+    def resolve_data_descriptor(
+        self,
+        tx: InstructionTranslatorBase,
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Step 2 of GenericGetAttr: invoke a data descriptor.
+
+        Base wraps _resolve_descriptor_get.  UDOV overrides with
+        source management via get_source_by_walking_mro and side-effects
+        checks for member/getset descriptors.
+        """
+        from .object_protocol import _resolve_descriptor_get, _UnhandledDescriptorError
+
+        py_type = self.python_type()
+        class_vt = VariableTracker.build(tx, py_type)
+        result = _resolve_descriptor_get(tx, type_attr, self, class_vt, source)
+        if result is not None:
+            return result
+        raise _UnhandledDescriptorError(
+            f"resolve_data_descriptor: unhandled data descriptor "
+            f"{type(type_attr)} for {name}"
+        )
+
+    def resolve_type_attr(
+        self,
+        tx: InstructionTranslatorBase,
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Steps 4-5 of GenericGetAttr: non-data descriptor or plain class var.
+
+        Base handles the CallMethodVariable shortcut for VTs with custom
+        call_method, then wraps _resolve_descriptor_get, then falls through
+        to VariableTracker.build for plain class variables.
+
+        UDOV overrides with source management via get_source_by_walking_mro,
+        _torchdynamo_inline unwrapping, lru_cache, cython, and user-defined
+        descriptor handling.
+        """
+        from .object_protocol import (
+            _has_custom_call_method,
+            _is_method_type,
+            _resolve_descriptor_get,
+            _UnhandledDescriptorError,
+        )
+
+        if hasattr(type(type_attr), "__get__"):
+            if _is_method_type(type_attr) and _has_custom_call_method(self):
+                return variables.CallMethodVariable(self, name, source=source)
+
+            py_type = self.python_type()
+            class_vt = VariableTracker.build(tx, py_type)
+            result = _resolve_descriptor_get(tx, type_attr, self, class_vt, source)
+            if result is not None:
+                return result
+            raise _UnhandledDescriptorError(
+                f"resolve_type_attr: unhandled non-data descriptor "
+                f"{type(type_attr)} for {name}"
+            )
+
+        return VariableTracker.build(tx, type_attr, source)
+
+    def dynamic_getattr_fallback(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker | None:
+        """Step 5b of GenericGetAttr: fallback for attrs not on MRO or
+        instance dict (e.g. threading.local per-thread storage).
+
+        Base returns None.  UDOV overrides to try
+        type(self.value).__getattribute__(self.value, name).
+        """
+        return None
+
     def call_getattribute(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:

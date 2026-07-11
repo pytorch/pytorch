@@ -944,6 +944,62 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
         self.assertEqual(result, "caught")
 
+    def test_custom_getattribute_resolves_property(self):
+        """super().__getattribute__() inside a custom __getattribute__
+        must correctly resolve properties (data descriptors).  This
+        exercises the recursion guard: descriptor resolution internally
+        looks up __class__ via getattro_impl, which must not re-enter
+        the custom __getattribute__."""
+
+        class MyObj:
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+            @property
+            def value(self):
+                return 42
+
+        def fn(obj):
+            return obj.value
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 42)
+
+    def test_custom_getattribute_resolves_staticmethod(self):
+        """super().__getattribute__() inside a custom __getattribute__
+        must correctly resolve staticmethods (non-data descriptors)."""
+
+        class MyObj:
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+            @staticmethod
+            def compute():
+                return 99
+
+        def fn(obj):
+            return obj.compute()
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 99)
+
+    def test_custom_getattribute_resolves_instance_attr(self):
+        """super().__getattribute__() inside a custom __getattribute__
+        must find instance dict attributes."""
+
+        class MyObj:
+            def __init__(self):
+                self.x = 10
+
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(obj):
+            return obj.x
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(MyObj())
+        self.assertEqual(result, 10)
+
     # --- BoundBuiltinMethodVariable slots ---
 
     def test_bound_builtin_method_hash(self):
