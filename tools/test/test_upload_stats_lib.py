@@ -3,7 +3,9 @@ from __future__ import annotations
 import gzip
 import inspect
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.upload_metrics import add_global_metric, emit_metric, global_metrics
-from tools.stats.upload_stats_lib import get_s3_resource, remove_nan_inf
+from tools.stats.upload_stats_lib import (
+    download_s3_artifacts,
+    get_s3_resource,
+    remove_nan_inf,
+)
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -254,6 +260,41 @@ class TestUploadStats(unittest.TestCase):
         emit_metric("metric_name", metric)
 
         self.assertTrue(self.emitted_metric["did_not_emit"])
+
+    def test_download_s3_artifacts_matches_exact_job_id_suffix(
+        self, mock_resource: Any
+    ) -> None:
+        class MockBody:
+            def __init__(self, data: bytes) -> None:
+                self.data = data
+
+            def read(self) -> bytes:
+                return self.data
+
+        class MockS3Object:
+            def __init__(self, key: str) -> None:
+                self.key = key
+
+            def get(self) -> dict[str, MockBody]:
+                return {"Body": MockBody(self.key.encode())}
+
+        objects = [
+            MockS3Object("pytorch/pytorch/111/2/artifact/logs-test-run_123.zip"),
+            MockS3Object("pytorch/pytorch/111/2/artifact/logs-test-run_9123.zip"),
+            MockS3Object("pytorch/pytorch/111/2/artifact/logs-test-run_1234.zip"),
+            MockS3Object("pytorch/pytorch/111/2/artifact/logs-test-run_456.zip"),
+        ]
+        mock_resource.return_value.Bucket.return_value.objects.filter.return_value = objects
+
+        old_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.chdir(temp_dir)
+            try:
+                artifact_paths = download_s3_artifacts("logs-test", 111, 2, job_id=123)
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(artifact_paths, [Path("logs-test-run_123.zip")])
 
     def test_remove_nan_inf(self, _mocked_resource: Any) -> None:
         checks = [
