@@ -91,6 +91,9 @@ Py_ssize_t THPVariable_length(PyObject* self);
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index);
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* value);
 
-at::Scalar valueToScalar(c10::TensorOptions options, PyObject* value);
+Variable valueToTensor(
+    c10::TensorOptions options,
+    PyObject* value,
+    const at::Device& device);
 
 } // namespace torch::autograd
