@@ -2544,6 +2544,24 @@ class GraphModule(torch.nn.Module):
         out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(out_ref, out_test)
 
+    def test_wrapper_subclass_hasattr_tensor_flatten(self):
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            if is_traceable_wrapper_subclass(x):
+                return torch.add(x, 1)
+            return torch.mul(x, 2)
+
+        x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
+        result = f(x)
+        expected = torch.add(x, 1)
+        self.assertEqual(result._data, expected._data)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
     def test_support_bases(self):
         import torch.fx._symbolic_trace
 

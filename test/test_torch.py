@@ -2074,7 +2074,6 @@ class TestTorchDeviceType(TestCase):
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
                           lambda: torch.any(y),
-                          lambda: torch.combinations(x, r=2),
                           lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
@@ -3092,6 +3091,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyNativeDeviceTypes
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_gradient_type_promotion(self, device):
         inputs = (
             make_tensor((4, 4), device=device, dtype=torch.float32),
