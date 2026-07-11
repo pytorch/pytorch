@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import builtins
-import importlib.util
 import tempfile
 import unittest
 from collections.abc import Callable, Iterator
