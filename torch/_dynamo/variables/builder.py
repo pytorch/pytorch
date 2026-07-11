@@ -20,6 +20,7 @@ VariableTracker instances based on their type and usage context.
 import abc
 import collections
 import contextlib
+import contextvars
 import copy
 import dataclasses
 import enum
@@ -1860,6 +1861,11 @@ class VariableBuilder:
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
+            from torch.utils import _config_module
+
+            if isinstance(value, _config_module.ConfigModule):
+                self.install_guards(GuardBuilder.MODULE_MATCH)
+                return UserDefinedObjectVariable(value, source=self.source)
             self.install_guards(GuardBuilder.MODULE_MATCH)
             result = PythonModuleVariable(
                 # type: ignore[arg-type]
@@ -1886,6 +1892,14 @@ class VariableBuilder:
             ]
             genfn = LocalGeneratorFunctionVariable(VariableTracker.build(self.tx, fn))
             return genfn.call_function(self.tx, args, {})
+        elif isinstance(value, contextvars.ContextVar):
+            from .misc import ContextVarVariable
+
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ContextVarVariable(
+                cv_obj=value,
+                source=self.source,
+            )
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
