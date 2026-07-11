@@ -638,10 +638,6 @@ class TensorVariable(VariableTracker):
     ) -> ConstantVariable:
         from . import GetAttrVariable
 
-        # TODO - This is not a good solution but solves an accuracy issue.
-        # Today, getattro_impl returns GetAttrVariable for both non-existent
-        # attributes and existing attributes. This is a bug and requires more
-        # deep dive.
         if name in all_tensor_attrs:
             return ConstantVariable.create(True)
 
@@ -649,9 +645,20 @@ class TensorVariable(VariableTracker):
             var = VariableTracker.build(tx, getattr).call_function(
                 tx, [self, VariableTracker.build(tx, name)], {}
             )
-            # in the event that TensorVariable returns NotImplemented
-            # GetAttrBuiltinVariable.call_function returns GetAttrVariable
-            ret_val = not isinstance(var, GetAttrVariable)
+            # getattro_impl returns GetAttrVariable as a fallback for both
+            # non-existent and existing-but-unhandled attributes. When that
+            # happens, disambiguate by checking the fake tensor directly.
+            # Only do this for wrapper subclasses to avoid leaking
+            # FakeTensor-internal attributes (e.g. fake_device).
+            if isinstance(var, GetAttrVariable):
+                fake_val = self.as_proxy().node.meta.get("example_value")
+                ret_val = (
+                    fake_val is not None
+                    and is_traceable_wrapper_subclass(fake_val)
+                    and hasattr(fake_val, name)
+                )
+            else:
+                ret_val = True
         except (AttributeError, ObservedAttributeError):
             ret_val = False
 
