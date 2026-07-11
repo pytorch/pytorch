@@ -143,10 +143,3 @@ troubleshooting_faqs
 
 api_reference
 ```
-
-`torch.compiler` also includes an ahead-of-time API,
-`torch.compiler.precompile`, which captures `fn(*example_inputs)` -- where the model(s)
-are among `example_inputs`, e.g. `precompile(lambda model, x: model(x), model, x)` --
-and lowers it to a self-contained, runnable Python source artifact plus an acceleration
-cache (reload with `torch.compiler.precompile.load`; you pass the model again at
-runtime, so no weights are baked in). See the API reference for details.
