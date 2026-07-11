@@ -705,6 +705,7 @@ def make_graphed_callables(
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
+    capture_error_mode: str = "global",
 ) -> _ModuleOrCallable: ...
 
 
@@ -715,6 +716,7 @@ def make_graphed_callables(
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
+    capture_error_mode: str = "global",
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
@@ -724,6 +726,7 @@ def make_graphed_callables(
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
     pool: _GraphPool | None = None,
+    capture_error_mode: str = "global",
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -892,7 +895,12 @@ def make_graphed_callables(
     per_callable_static_outputs = []
     per_callable_output_unflatten_spec = []
     for func, args, fwd_graph in zip(callables, _sample_args, fwd_graphs):
-        with torch.cuda.graph(fwd_graph, stream=stream, pool=mempool):
+        with torch.cuda.graph(
+            fwd_graph,
+            stream=stream,
+            pool=mempool,
+            capture_error_mode=capture_error_mode,
+        ):
             func_outputs = func(*args)
 
         flatten_outputs, spec = torch.utils._pytree.tree_flatten(func_outputs)
@@ -916,7 +924,12 @@ def make_graphed_callables(
         outputs_grad = tuple(o for o in static_outputs if o.requires_grad)
         grad_inputs = None
         if len(outputs_grad) > 0:
-            with torch.cuda.graph(bwd_graph, stream=stream, pool=mempool):
+            with torch.cuda.graph(
+                bwd_graph,
+                stream=stream,
+                pool=mempool,
+                capture_error_mode=capture_error_mode,
+            ):
                 grad_inputs = torch.autograd.grad(
                     outputs=outputs_grad,
                     inputs=tuple(i for i in static_input_surface if i.requires_grad),
