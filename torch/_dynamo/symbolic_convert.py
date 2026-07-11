@@ -929,12 +929,18 @@ def generic_jump(
             self.jump(inst)
             return
 
-        if value.is_python_constant():
-            # ConstDictVariable is optimized to be very lazy about insertion of
-            # guards, so we have to manually insert a SEQUENCE_LENGTH guard
-            # here.
-            if isinstance(value, ConstDictVariable) and value.source:
+        if isinstance(value, ConstDictVariable):
+            # Dict truthiness only depends on length. Avoid materializing keys
+            # here; nn.Module hook dictionaries can contain internal
+            # RemovableHandle id keys that are intentionally not exposed as
+            # Python constants.
+            if value.source:
                 install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            if truth_fn(value.len()):
+                if push:
+                    self.push(value)
+                self.jump(inst)
+        elif value.is_python_constant():
             if truth_fn(value.as_python_constant()):
                 if push:
                     self.push(value)
@@ -3174,6 +3180,22 @@ class InstructionTranslatorBase(
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
+        # Keep this outside the Unsupported fallback below: class attributes are
+        # Python constants, so the fallback would otherwise constant-fold the
+        # graph break from UserDefinedClassVariable.getattro_impl.
+        if (
+            isinstance(obj, UserDefinedClassVariable)
+            and obj.value is torch.utils.hooks.RemovableHandle
+            and attr == "next_id"
+            and self.output.side_effects.removable_handle_next_id_increments
+        ):
+            unimplemented(
+                gb_type="Read RemovableHandle.next_id after handle allocation",
+                context="RemovableHandle.next_id",
+                explanation="Dynamo cannot trace reads of RemovableHandle.next_id after "
+                "a modeled RemovableHandle allocation in the same frame.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         try:
             result = generic_getattr(self, obj, attr)
         except Unsupported:
