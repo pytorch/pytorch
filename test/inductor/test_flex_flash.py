@@ -1178,6 +1178,30 @@ class TestFlexFlash(InductorTestCase):
                 out.sum().backward()
 
     @dtypes(torch.bfloat16)
+    def test_auto_deterministic_block_mask_without_write_order_falls_back(
+        self, device, dtype
+    ):
+        if torch.cuda.get_device_capability()[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        q, k, v = create_test_tensors(
+            seq_len=512,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        block_mask = _create_block_mask_for_device(
+            _causal_mask, 2, 4, 512, 512, device=device
+        )
+        compiled_fn = torch.compile(flex_attention)
+
+        with DeterministicGuard(True):
+            with cuda_kernel_profiler("flash_attncuteflash_bwd") as prof_result:
+                compiled_fn(q, k, v, block_mask=block_mask).sum().backward()
+
+        self.assertFalse(prof_result["found"])
+
+    @dtypes(torch.bfloat16)
     def test_flash_deterministic_block_mask_without_scheduler_order_raises(
         self, device, dtype
     ):
@@ -2031,6 +2055,126 @@ class TestFlexFlash(InductorTestCase):
         wrapper_code = "\n".join(codes)
         self.assertIn("reinterpret_tensor(", wrapper_code)
         self.assertNotIn("triton_poi_fused_view", wrapper_code)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_is_default_on_blackwell(self, device, dtype):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        q, k, v = create_test_tensors(dtype=dtype, device=device, requires_grad=True)
+        compiled_fn = torch.compile(flex_attention)
+
+        with cuda_kernel_profiler("flash_attncute") as fwd_prof_result:
+            compiled_fn(q, k, v, score_mod=_causal)
+        with cuda_kernel_profiler("flash_attncuteflash_bwd") as bwd_prof_result:
+            compiled_fn(q, k, v, score_mod=_causal).sum().backward()
+
+        self.assertTrue(
+            fwd_prof_result["found"],
+            f"Flash attention kernel not found. Available kernels: {fwd_prof_result['kernel_names']}",
+        )
+        self.assertTrue(
+            bwd_prof_result["found"],
+            f"Flash attention backward kernel not found. Available kernels: {bwd_prof_result['kernel_names']}",
+        )
+
+    def test_blackwell_default_supports_tensor_capture(self, device):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        q, k, v = create_test_tensors(dtype=torch.float16, device=device)
+        bias = torch.randn(q.size(1), device=device, dtype=q.dtype)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[h]
+
+        compiled_fn = torch.compile(flex_attention)
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            compiled_fn(q, k, v, score_mod=score_mod)
+
+        self.assertTrue(prof_result["found"])
+
+    def test_blackwell_default_restores_view_capture_after_template_rejection(
+        self, device
+    ):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        q, k, v = create_test_tensors(dtype=torch.float16, device=device)
+        bias = torch.randn(q.size(1) * 2, device=device, dtype=q.dtype)[::2]
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[h]
+
+        compiled_fn = torch.compile(flex_attention)
+        with mock.patch.object(
+            flex_flash_attention_module.flash_attention_cutedsl_template,
+            "maybe_append_choice",
+            return_value=NotImplementedError("forced rejection"),
+        ):
+            with cuda_kernel_profiler("flash_attncute") as prof_result:
+                actual = compiled_fn(q, k, v, score_mod=score_mod)
+
+        self.assertEqual(
+            actual,
+            flex_attention(q, k, v, score_mod=score_mod),
+            atol=2e-2,
+            rtol=2e-2,
+        )
+        self.assertFalse(prof_result["found"])
+
+    def test_blackwell_default_falls_back_for_float32(self, device):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        q, k, v = create_test_tensors(dtype=torch.float32, device=device)
+        compiled_fn = torch.compile(flex_attention)
+
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            actual = compiled_fn(q, k, v, score_mod=_causal)
+
+        self.assertEqual(actual, flex_attention(q, k, v, score_mod=_causal))
+        self.assertFalse(prof_result["found"])
+
+    def test_blackwell_default_falls_back_for_unsupported_head_dim(self, device):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        q, k, v = create_test_tensors(dim=160, dtype=torch.float16, device=device)
+        compiled_fn = torch.compile(flex_attention)
+
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            actual = compiled_fn(q, k, v, score_mod=_causal)
+
+        self.assertEqual(
+            actual,
+            flex_attention(q, k, v, score_mod=_causal),
+            atol=2e-2,
+            rtol=2e-2,
+        )
+        self.assertFalse(prof_result["found"])
+
+    def test_blackwell_default_falls_back_for_grad_capture(self, device):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        q, k, v = create_test_tensors(dtype=torch.float16, device=device)
+        bias = torch.randn(q.size(1), device=device, dtype=q.dtype, requires_grad=True)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[h]
+
+        compiled_fn = torch.compile(flex_attention)
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            actual = compiled_fn(q, k, v, score_mod=score_mod)
+
+        self.assertEqual(
+            actual,
+            flex_attention(q, k, v, score_mod=score_mod),
+            atol=2e-2,
+            rtol=2e-2,
+        )
+        self.assertFalse(prof_result["found"])
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
@@ -3043,10 +3187,22 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
 
 class TestHierarchicalIndex(InductorTestCase):
-    def test_flash_attention_unavailable_message_has_install_link(self):
+    def test_flash_attention_requires_pinned_package_version(self):
+        ensure_flash_available.cache_clear()
+        try:
+            with mock.patch.object(
+                flex_flash_attention_module.importlib.metadata,
+                "version",
+                return_value="4.0.0b20",
+            ):
+                self.assertFalse(ensure_flash_available())
+        finally:
+            ensure_flash_available.cache_clear()
+
+    def test_flash_attention_unavailable_message_has_install_instructions(self):
         message = _flash_attention_unavailable_message()
-        self.assertIn("pip install --pre flash-attn-4", message)
-        self.assertIn("https://pypi.org/project/flash-attn-4/", message)
+        self.assertIn("flash-attn-4==4.0.0b21", message)
+        self.assertIn("flash-attn-4[cu13]==4.0.0b21", message)
 
     def test_hierarchical_index_preserves_args(self):
         from sympy import Symbol

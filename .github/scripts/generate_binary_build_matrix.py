@@ -51,6 +51,18 @@ CUDA_AARCH64_ARCHES = [
     "13.2-aarch64",
 ]
 
+_FLASH_ATTN4_MARKER = (
+    "platform_system == 'Linux' and platform_machine == 'x86_64' "
+    "and python_version < '3.14'"
+)
+
+
+def flash_attn4_requirement(cuda_major: int) -> str:
+    """Return the pinned FlashAttention-4 wheel dependency."""
+    package = "flash-attn-4[cu13]" if cuda_major == 13 else "flash-attn-4"
+    return f"{package}==4.0.0b21; {_FLASH_ATTN4_MARKER}"
+
+
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvtx]==12.6.3; platform_system == 'Linux' | "
@@ -59,7 +71,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
-        "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux'"
+        "nvidia-nvjitlink-cu12>=12.6.85,<13; platform_system == 'Linux' | "
+        + flash_attn4_requirement(12)
     ),
     "13.0": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
@@ -67,7 +80,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux' | "
+        + flash_attn4_requirement(13)
     ),
     "13.2": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
@@ -75,7 +89,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux' | "
+        + flash_attn4_requirement(13)
     ),
     "xpu": (
         "intel-cmplr-lib-rt==2026.0.0 | "

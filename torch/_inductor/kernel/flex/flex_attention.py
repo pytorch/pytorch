@@ -46,6 +46,7 @@ from .common import (
 from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
 from .flex_flash_attention import (
+    _can_prepare_flex_flash_attention,
     _use_flex_flash_attention,
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
@@ -228,17 +229,37 @@ def flex_attention(
     ) = block_mask
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    triton_score_mod_other_buffers = score_mod_other_buffers
+    triton_mask_mod_other_buffers = mask_mod_other_buffers
 
-    # Early check for FLASH backend: reject scalar captures that cannot be
-    # represented by flash-attn aux_scalars before building subgraph buffers.
-    if backend == "FLASH":
-        _check_flash_supported_scalar_captures(
+    flash_requested = backend == "FLASH" or (
+        backend == "AUTO" and kernel_options.get("PREFER_FLASH", False)
+    )
+    if flash_requested:
+        can_prepare, reason = _can_prepare_flex_flash_attention(
+            query, key, value, kernel_options
+        )
+        unsupported_scalar_capture = has_unsupported_cpu_scalar_tensor_captures(
             score_mod_other_buffers, mask_mod_other_buffers
         )
+        if backend == "FLASH":
+            if not can_prepare:
+                raise RuntimeError(
+                    f"BACKEND='FLASH' but flash attention cannot be used: {reason}"
+                )
+            _check_flash_supported_scalar_captures(
+                score_mod_other_buffers, mask_mod_other_buffers
+            )
+        elif not can_prepare or unsupported_scalar_capture:
+            kernel_options["PREFER_FLASH"] = False
 
-    if backend == "FLASH":
-        score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
-        mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
+        if backend == "FLASH" or kernel_options.get("PREFER_FLASH", False):
+            score_mod_other_buffers = realize_captures_for_cutedsl(
+                score_mod_other_buffers
+            )
+            mask_mod_other_buffers = realize_captures_for_cutedsl(
+                mask_mod_other_buffers
+            )
 
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -278,10 +299,22 @@ def flex_attention(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
 
+    use_flash = _use_flex_flash_attention(
+        query,
+        key,
+        value,
+        subgraph,
+        mask_graph,
+        kernel_options,
+        num_score_mod_placeholders=len(placeholder_inps),
+        backend=backend,
+    )
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
     )
-    use_decode = (backend == "TRITON_DECODE") or (backend == "AUTO" and can_use_decode)
+    use_decode = (backend == "TRITON_DECODE") or (
+        backend == "AUTO" and not use_flash and can_use_decode
+    )
 
     if backend == "TRITON_DECODE" and not can_use_decode:
         raise RuntimeError(
@@ -331,14 +364,8 @@ def flex_attention(
         ]
     )
 
-    if _use_flex_flash_attention(
-        subgraph,
-        mask_graph,
-        kernel_options,
-        num_score_mod_placeholders=len(placeholder_inps),
-        backend=backend,
-    ):
-        return create_flex_flash_attention_kernel(
+    if use_flash:
+        flash_result = create_flex_flash_attention_kernel(
             query,
             key,
             value,
@@ -357,7 +384,20 @@ def flex_attention(
             SPARSE_KV_BLOCK_SIZE,
             mask_graph=mask_graph,
             subgraph=subgraph,
+            fallback_on_error=backend == "AUTO",
         )
+        if flash_result is not None:
+            return flash_result
+        score_mod_other_buffers = triton_score_mod_other_buffers
+        mask_mod_other_buffers = triton_mask_mod_other_buffers
+        subgraph_buffer = build_subgraph_buffer(
+            placeholder_inps + list(score_mod_other_buffers), subgraph
+        )
+        freeze_irnodes(subgraph_buffer)
+        mask_graph_buffer = build_subgraph_buffer(
+            mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
+        )
+        freeze_irnodes(mask_graph_buffer)
 
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
@@ -817,12 +857,36 @@ def flex_attention_backward(*args, **kwargs):
         )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
-    if backend == "FLASH":
-        _check_flash_supported_scalar_captures(
-            score_mod_other_buffers, mask_mod_other_buffers, backward=True
+    triton_score_mod_other_buffers = score_mod_other_buffers
+    triton_mask_mod_other_buffers = mask_mod_other_buffers
+    flash_requested = backend == "FLASH" or (
+        backend == "AUTO" and kernel_options.get("PREFER_FLASH", False)
+    )
+    if flash_requested:
+        can_prepare, reason = _can_prepare_flex_flash_attention(
+            query, key, value, kernel_options
         )
-        score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
-        mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
+        unsupported_scalar_capture = has_unsupported_cpu_scalar_tensor_captures(
+            score_mod_other_buffers, mask_mod_other_buffers
+        )
+        if backend == "FLASH":
+            if not can_prepare:
+                raise RuntimeError(
+                    f"BACKEND='FLASH' but flash attention backward cannot be used: {reason}"
+                )
+            _check_flash_supported_scalar_captures(
+                score_mod_other_buffers, mask_mod_other_buffers, backward=True
+            )
+        elif not can_prepare or unsupported_scalar_capture:
+            kernel_options["PREFER_FLASH"] = False
+
+        if backend == "FLASH" or kernel_options.get("PREFER_FLASH", False):
+            score_mod_other_buffers = realize_captures_for_cutedsl(
+                score_mod_other_buffers
+            )
+            mask_mod_other_buffers = realize_captures_for_cutedsl(
+                mask_mod_other_buffers
+            )
 
     # Add check for mixed dtypes
     if query.dtype != key.dtype or query.dtype != value.dtype:
@@ -899,11 +963,16 @@ def flex_attention_backward(*args, **kwargs):
     freeze_irnodes(mask_graph_buffer)
 
     if _use_flex_flash_attention_backward(
+        query,
+        key,
+        value,
         fw_graph,
         mask_graph,
+        kernel_options,
         backend=backend,
         joint_outputs=joint_outputs,
         score_mod_other_buffers=score_mod_other_buffers,
+        grad_logsumexp=grad_logsumexp,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
 
@@ -917,7 +986,7 @@ def flex_attention_backward(*args, **kwargs):
                 "Use BACKEND='TRITON' or avoid differentiating through logsumexp."
             )
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
-        return create_flex_flash_attention_backward_kernel(
+        flash_result = create_flex_flash_attention_backward_kernel(
             query,
             key,
             value,
@@ -943,7 +1012,27 @@ def flex_attention_backward(*args, **kwargs):
             dq_write_order_full=dq_write_order_full if needs_block_mask else None,
             dq_kv_order=dq_kv_order if needs_block_mask else None,
             dq_kv_order_spt=dq_kv_order_spt,
+            fallback_on_error=backend == "AUTO",
         )
+        if flash_result is not None:
+            return flash_result
+        score_mod_other_buffers = triton_score_mod_other_buffers
+        mask_mod_other_buffers = triton_mask_mod_other_buffers
+        fw_subgraph_buffer = build_subgraph_buffer(
+            fwd_placeholder_inps + list(score_mod_other_buffers), fw_graph
+        )
+        freeze_irnodes(fw_subgraph_buffer)
+        all_joint_outputs = build_subgraph_buffer(
+            joint_placeholder_inps + list(score_mod_other_buffers), joint_graph
+        )
+        freeze_irnodes(all_joint_outputs)
+        joint_outputs = process_joint_outputs(
+            all_joint_outputs, len(joint_placeholder_inps)
+        )
+        mask_graph_buffer = build_subgraph_buffer(
+            mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
+        )
+        freeze_irnodes(mask_graph_buffer)
 
     # Construct layout with stride order matching K
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]

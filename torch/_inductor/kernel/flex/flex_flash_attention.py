@@ -4,6 +4,7 @@
 import dataclasses
 import functools
 import importlib
+import importlib.metadata
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -16,6 +17,7 @@ from sympy import Expr, Integer
 import torch
 from torch.fx import GraphModule
 
+from ...._vendor.packaging.version import Version
 from ...codegen.cutedsl.aux_scalars import CuteDSLAuxScalarBindings
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
@@ -142,10 +144,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 FLASH_ATTENTION_INSTALL_MESSAGE = (
-    "Install a compatible Flash Attention package, for example "
-    '`pip install --pre flash-attn-4` (`pip install --pre "flash-attn-4[cu13]"` '
-    "for CUDA 13), and see https://pypi.org/project/flash-attn-4/ "
-    "for PyPI packaging details."
+    "Install flash-attn-4==4.0.0b21, or flash-attn-4[cu13]==4.0.0b21 for CUDA 13."
 )
 
 
@@ -158,14 +157,15 @@ def _flash_attention_unavailable_message() -> str:
 
 @functools.lru_cache(maxsize=1)
 def ensure_flash_available() -> bool:
-    """Check if flash-attn is importable; cache the result for reuse.
-
-    Call ensure_flash_available.cache_clear() after installing flash-attn
-    in the same interpreter to retry the import.
-    """
+    """Check whether the pinned external FA4 package is usable."""
     try:
-        return importlib.util.find_spec("flash_attn.cute") is not None  # type: ignore[attr-defined]
-    except ImportError:
+        if Version(importlib.metadata.version("flash-attn-4")) != Version("4.0.0b21"):
+            return False
+        if Version(importlib.metadata.version("quack-kernels")) < Version("0.5.3"):
+            return False
+        importlib.import_module("flash_attn.cute.interface")
+        return True
+    except (ImportError, OSError, importlib.metadata.PackageNotFoundError):
         return False
 
 
@@ -341,9 +341,55 @@ def has_unsupported_cpu_scalar_tensor_captures(
     return False
 
 
+def _can_prepare_flex_flash_attention(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
+    kernel_options: dict[str, Any],
+) -> tuple[bool, str]:
+    """Check constraints needed before preparing captures for FA4."""
+    if not ensure_flash_available():
+        return False, _flash_attention_unavailable_message()
+    if query.get_dtype() not in (torch.float16, torch.bfloat16):
+        return False, "query dtype must be float16 or bfloat16"
+    if query.get_dtype() != key.get_dtype() or query.get_dtype() != value.get_dtype():
+        return (
+            False,
+            "Mixed query, key, and value dtype is not supported on this platform",
+        )
+    if kernel_options.get("OUTPUT_MAX", False):
+        return False, "returning max scores is not supported"
+
+    device = query.get_device()
+    if (
+        device is not None
+        and device.type == "cuda"
+        and torch.cuda.get_device_capability(device)[0] == 10
+    ):
+        head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
+        value_head_dim = V.graph.sizevars.guard_int(value.get_size()[-1])
+        standard = 8 <= head_dim <= 128 and 8 <= value_head_dim <= 128
+        specialized = (head_dim, value_head_dim) in ((192, 128), (256, 256))
+        mla = value_head_dim == 512 and head_dim in (64, 512)
+        if not (standard or specialized or mla):
+            return False, "unsupported query or value head dimension"
+        if head_dim % 8 != 0 or value_head_dim % 8 != 0:
+            return False, "query and value head dimensions must be divisible by 8"
+        query_heads = V.graph.sizevars.guard_int(query.get_size()[1])
+        key_heads = V.graph.sizevars.guard_int(key.get_size()[1])
+        if query_heads % key_heads != 0:
+            return False, "query heads must be divisible by key/value heads"
+
+    return True, ""
+
+
 def _can_use_flex_flash_attention(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
     subgraph: Subgraph,
     mask_graph: Subgraph,
+    kernel_options: dict[str, Any],
     num_score_mod_placeholders: int,
 ) -> tuple[bool, str]:
     """Check if flex flash attention can be used for the given inputs.
@@ -351,8 +397,11 @@ def _can_use_flex_flash_attention(
     Returns:
         tuple: (can_use, reason) where reason explains why it can't be used if can_use is False
     """
-    if not ensure_flash_available():
-        return False, _flash_attention_unavailable_message()
+    can_prepare, reason = _can_prepare_flex_flash_attention(
+        query, key, value, kernel_options
+    )
+    if not can_prepare:
+        return False, reason
 
     if input_buffers_require_grads(subgraph.graph_module, num_score_mod_placeholders):
         return (
@@ -364,6 +413,9 @@ def _can_use_flex_flash_attention(
 
 
 def _use_flex_flash_attention(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
     subgraph: Subgraph,
     mask_graph: Subgraph,
     kernel_options: dict[str, Any],
@@ -382,22 +434,33 @@ def _use_flex_flash_attention(
     Returns:
         True if flash attention should be used, False otherwise
     """
-    # Flash is experimental and must be explicitly requested
-    if backend != "FLASH":
+    if backend not in ("AUTO", "FLASH"):
         return False
+    if backend == "AUTO":
+        device = query.get_device()
+        if (
+            not kernel_options.get("PREFER_FLASH", False)
+            or device is None
+            or device.type != "cuda"
+            or torch.version.hip is not None
+            or torch.cuda.get_device_capability(device)[0] != 10
+        ):
+            return False
 
     can_use, reason = _can_use_flex_flash_attention(
+        query,
+        key,
+        value,
         subgraph,
         mask_graph,
+        kernel_options,
         num_score_mod_placeholders,
     )
-
-    if not can_use:
-        raise RuntimeError(
-            f"BACKEND='FLASH' but flash attention cannot be used: {reason}"
-        )
-
-    return True
+    if can_use:
+        return True
+    if backend == "AUTO":
+        return False
+    raise RuntimeError(f"BACKEND='FLASH' but flash attention cannot be used: {reason}")
 
 
 def create_flex_flash_attention_kernel(
@@ -419,7 +482,8 @@ def create_flex_flash_attention_kernel(
     sparse_kv_block_size: int,
     mask_graph: Subgraph,
     subgraph: Subgraph | None = None,
-) -> tuple[TensorBox, TensorBox]:
+    fallback_on_error: bool = False,
+) -> tuple[TensorBox, TensorBox] | None:
     """Create a flex flash attention kernel using CuteDSL template."""
     if query.dtype != key.dtype or query.dtype != value.dtype:
         raise ValueError(
@@ -556,12 +620,16 @@ def create_flex_flash_attention_kernel(
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
             )
         if error is not None and len(configs) == 1:
+            if fallback_on_error:
+                return None
             raise RuntimeError(f"CuteDSL template failed: {error}")
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)
 
     if not choices:
+        if fallback_on_error:
+            return None
         raise RuntimeError(f"CuteDSL template failed: {error}")
 
     input_gen_fns: dict[int, Callable] | None = None
@@ -591,14 +659,20 @@ def create_flex_flash_attention_kernel(
 
 
 def _can_use_flex_flash_attention_backward(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
     joint_outputs: Any | None = None,
     score_mod_other_buffers: Sequence[TensorBox] | None = None,
     num_score_mod_placeholders: int = 5,
 ) -> tuple[bool, str]:
-    if not ensure_flash_available():
-        return False, _flash_attention_unavailable_message()
+    can_prepare, reason = _can_prepare_flex_flash_attention(
+        query, key, value, kernel_options={}
+    )
+    if not can_prepare:
+        return False, reason
 
     if input_buffers_require_grads(
         fw_subgraph.graph_module, num_score_mod_placeholders
@@ -624,11 +698,16 @@ def _can_use_flex_flash_attention_backward(
 
 
 def _use_flex_flash_attention_backward(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
+    kernel_options: dict[str, Any],
     backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
     joint_outputs: Any | None = None,
     score_mod_other_buffers: Sequence[TensorBox] | None = None,
+    grad_logsumexp: TensorBox | None = None,
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
@@ -642,23 +721,34 @@ def _use_flex_flash_attention_backward(
     Returns:
         True if flash attention should be used, False otherwise
     """
-    # Flash is experimental and must be explicitly requested
-    if backend != "FLASH":
+    if backend not in ("AUTO", "FLASH"):
         return False
+    if backend == "AUTO":
+        device = query.get_device()
+        if (
+            not kernel_options.get("PREFER_FLASH", False)
+            or grad_logsumexp is not None
+            or device is None
+            or device.type != "cuda"
+            or torch.version.hip is not None
+            or torch.cuda.get_device_capability(device)[0] != 10
+        ):
+            return False
 
     can_use, reason = _can_use_flex_flash_attention_backward(
+        query,
+        key,
+        value,
         fw_subgraph,
         mask_graph,
         joint_outputs,
         score_mod_other_buffers,
     )
-
-    if not can_use:
-        raise RuntimeError(
-            f"BACKEND='FLASH' but flash attention cannot be used: {reason}"
-        )
-
-    return True
+    if can_use:
+        return True
+    if backend == "AUTO":
+        return False
+    raise RuntimeError(f"BACKEND='FLASH' but flash attention cannot be used: {reason}")
 
 
 def create_flex_flash_attention_backward_kernel(
@@ -685,7 +775,8 @@ def create_flex_flash_attention_backward_kernel(
     dq_write_order_full: TensorBox | None = None,
     dq_kv_order: TensorBox | None = None,
     dq_kv_order_spt: bool | None = None,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
+    fallback_on_error: bool = False,
+) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple] | None:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
         raise RuntimeError(_flash_attention_unavailable_message())
@@ -790,12 +881,16 @@ def create_flex_flash_attention_backward_kernel(
         supports_dq_kv_order = "dq_kv_order" in block_sparse_fields
         supports_spt = "spt" in block_sparse_fields
         if has_dq_kv_order and not supports_dq_kv_order:
+            if fallback_on_error:
+                return None
             raise NotImplementedError(
                 "Explicit tensor dq_kv_order requires flash-attn-4 with dq_kv_order support"
             )
         if dq_kv_order_spt_for_flash is not None and not (
             supports_dq_kv_order or supports_spt
         ):
+            if fallback_on_error:
+                return None
             raise NotImplementedError(
                 "Boolean dq_kv_order requires flash-attn-4 with dq_kv_order or spt support"
             )
@@ -814,6 +909,8 @@ def create_flex_flash_attention_backward_kernel(
         if major < 10:
             if warn_only:
                 deterministic_backward_enabled = False
+            elif fallback_on_error:
+                return None
             else:
                 raise NotImplementedError(
                     "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
@@ -823,6 +920,8 @@ def create_flex_flash_attention_backward_kernel(
         elif missing_dq_write_order:
             if warn_only:
                 deterministic_backward_enabled = False
+            elif fallback_on_error:
+                return None
             else:
                 raise ValueError(
                     "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
@@ -832,6 +931,8 @@ def create_flex_flash_attention_backward_kernel(
         elif missing_dq_kv_order:
             if warn_only:
                 deterministic_backward_enabled = False
+            elif fallback_on_error:
+                return None
             else:
                 raise ValueError(
                     "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
@@ -889,12 +990,16 @@ def create_flex_flash_attention_backward_kernel(
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
             )
         if error is not None and len(configs) == 1:
+            if fallback_on_error:
+                return None
             raise RuntimeError(f"CuteDSL template failed: {error}")
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)
 
     if not choices:
+        if fallback_on_error:
+            return None
         raise RuntimeError(f"CuteDSL template failed: {error}")
 
     input_gen_fns: dict[int, Callable] | None = None

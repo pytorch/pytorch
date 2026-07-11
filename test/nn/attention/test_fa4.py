@@ -22,7 +22,7 @@ def _fa4_dependencies_available() -> bool:
         return False
     try:
         importlib.import_module("flash_attn.cute.interface")
-    except ModuleNotFoundError:
+    except ImportError:
         return False
     return True
 
@@ -140,6 +140,8 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
                         dtype=torch.float32,
                         device=device,
                     ),
+                    None,
+                    None,
                 )
                 mock_module._flash_attn_bwd.return_value = (
                     torch.randn_like(q_transposed),

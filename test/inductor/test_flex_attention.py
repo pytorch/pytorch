@@ -37,6 +37,7 @@ from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
     _mask_mod_signature,
+    _prefer_flash_attention,
     _score_mod_signature,
     and_masks,
     AuxOutput,
@@ -5136,6 +5137,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query, key, value, return_lse=True, kernel_options={}
         )
         self.assertEqual(kernel_options["BACKEND"], "AUTO")
+        self.assertEqual(kernel_options["PREFER_FLASH"], _prefer_flash_attention(query))
+
+        if device.type != "cpu":
+            max_options = _apply_kernel_options(
+                query,
+                key,
+                value,
+                return_lse=True,
+                kernel_options={},
+                return_aux=AuxRequest(max_scores=True),
+            )
+            self.assertEqual(max_options["BACKEND"], "AUTO")
+            self.assertFalse(max_options["PREFER_FLASH"])
 
         with self.assertRaisesRegex(ValueError, r"Invalid BACKEND value 'INVALID'"):
             _apply_kernel_options(
