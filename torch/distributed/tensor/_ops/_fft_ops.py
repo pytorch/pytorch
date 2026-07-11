@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-from typing import Any
+from typing import cast
 
 import torch
 from torch.distributed.tensor._dtensor_spec import TensorMeta
@@ -11,6 +11,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor._ops.utils import normalize_dims
 from torch.distributed.tensor.placement_types import Placement
+
 
 aten = torch.ops.aten
 
@@ -22,18 +23,13 @@ aten = torch.ops.aten
 )
 def fft_c2c_single_dim_strategy(
     _op: torch._ops.OpOverload,
-    args_schema: tuple[
-        TensorMeta,
-        int | list[int] | tuple[int, ...],
-        Any,
-        Any,
-    ],
-    _kwargs_schema: dict[str, Any],
+    args_schema: tuple[object, ...],
+    _kwargs_schema: dict[str, object],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    input_meta = args_schema[0]
-    ndim = len(input_meta.shape)
+    input_meta = cast(TensorMeta, args_schema[0])
+    dims_arg = cast(int | list[int] | tuple[int, ...], args_schema[1])
 
-    dims_arg = args_schema[1]
+    ndim = len(input_meta.shape)
     fft_dims = set(normalize_dims(dims_arg, ndim))
 
     return [
