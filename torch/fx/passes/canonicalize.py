@@ -28,21 +28,39 @@ def _computation_node_key(
     return (2, node.graph._target_to_str(node.target), input_indices)
 
 
-def rename_nodes_to_canonical(graph: fx.Graph) -> None:
+def rename_nodes_to_canonical(
+    graph: fx.Graph,
+    skip_ops: frozenset[str] = frozenset(),
+) -> dict[str, str]:
     """Rename all nodes in the graph to canonical names based on their target.
 
     Uses the same naming scheme as FX ``Graph.create_node`` (auto-generated
     names from the target string). After renaming, replaces the graph's
     namespace so future node creation stays consistent.
+
+    Args:
+        graph: The FX graph whose nodes to rename.
+        skip_ops: Node ops to skip renaming (their names are reserved in the
+            new namespace but left unchanged).
+
+    Returns a mapping from old name to new name for nodes that were renamed.
     """
     from torch.fx.graph import _Namespace
 
+    renamed: dict[str, str] = {}
     ns = _Namespace()
     for node in graph.nodes:
+        if node.op in skip_ops:
+            ns.create_name(node.name, node)
+            continue
+        old_name = node.name
         candidate = graph._target_to_str(node.target)
         new_name = ns.create_name(candidate, node)
+        if new_name != old_name:
+            renamed[old_name] = new_name
         node.name = new_name
     graph._graph_namespace = ns
+    return renamed
 
 
 def _sink_get_attr_nodes(order: list[fx.Node]) -> None:
@@ -83,7 +101,8 @@ def canonicalize_graph(
     is_safe_to_reorder: Callable[[fx.Node], bool],
     *,
     rename: bool = True,
-) -> fx.Graph:
+    skip_rename_ops: frozenset[str] = frozenset(),
+) -> dict[str, str]:
     """Reorder graph nodes into a canonical topological order and rename them.
 
     This ensures that structurally equivalent graphs produce identical node
@@ -104,11 +123,13 @@ def canonicalize_graph(
             pure nodes are confined to their barrier segment.
         rename: If ``True`` (default), rename nodes after reordering via
             ``rename_nodes_to_canonical``. Pass ``False`` to reorder only,
-            preserving existing node names (needed when names are externally
-            referenced, e.g. by an ``ExportGraphSignature``).
+            preserving all existing node names.
+        skip_rename_ops: Node ops to skip renaming (only applies when
+            ``rename=True``). Skipped nodes keep their original names.
 
     Returns:
-        The same ``graph`` object, reordered (and optionally renamed) in-place.
+        A mapping from old node name to new node name for nodes that were
+        renamed.  Empty when ``rename=False``.
     """
     indeg: dict[fx.Node, int] = {
         node: len(node.all_input_nodes) for node in graph.nodes
@@ -198,6 +219,6 @@ def canonicalize_graph(
         cursor = node
 
     if rename:
-        rename_nodes_to_canonical(graph)
+        return rename_nodes_to_canonical(graph, skip_ops=skip_rename_ops)
 
-    return graph
+    return {}
