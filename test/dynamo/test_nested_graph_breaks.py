@@ -1692,6 +1692,53 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, x + 2)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_tree_map_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def fn():
+            inps = [torch.randn(3)]
+            return tree_map(lambda x: torch.zeros_like(x, requires_grad=True), inps)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=cnts)()
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], torch.Tensor)
+        self.assertEqual(result[0].shape, (3,))
+        self.assertTrue(result[0].requires_grad)
+
+    def test_tree_map_graph_break_nested_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def fn():
+            inps = {"a": [torch.randn(3)], "b": (torch.randn(2), torch.randn(4))}
+            return tree_map(lambda x: torch.zeros_like(x, requires_grad=True), inps)
+
+        result = torch.compile(fn, backend="eager")()
+        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result["a"], list)
+        self.assertEqual(len(result["a"]), 1)
+        self.assertIsInstance(result["b"], tuple)
+        self.assertEqual(len(result["b"]), 2)
+        self.assertEqual(result["b"][0].shape, (2,))
+        self.assertEqual(result["b"][1].shape, (4,))
+
+    def test_tree_map_with_path_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map_with_path
+
+        def fn():
+            inps = [torch.randn(3), torch.randn(2)]
+            return tree_map_with_path(
+                lambda path, x: torch.zeros_like(x, requires_grad=True), inps
+            )
+
+        result = torch.compile(fn, backend="eager")()
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0].shape, (3,))
+        self.assertEqual(result[1].shape, (2,))
+        self.assertTrue(result[0].requires_grad)
+
     def test_cxx_pytree_treespec_leaf_namespace(self):
         import torch.utils._cxx_pytree as cxx_pytree
 
