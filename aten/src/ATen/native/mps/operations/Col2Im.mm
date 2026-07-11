@@ -68,13 +68,15 @@ static void col2im_out_mps_template(const Tensor& input,
   output.resize_({batch_size, n_output_plane, output_height, output_width});
   auto output_batch_stride = output.stride(0);
 
-  auto height_col = (output_height + 2 * pad_height - (dilation_height * (kernel_height - 1) + 1)) / stride_height + 1;
-  auto width_col = (output_width + 2 * pad_width - (dilation_width * (kernel_width - 1) + 1)) / stride_width + 1;
+  auto height_col = sliding_window_count(output_height, pad_height, dilation_height, kernel_height, stride_height);
+  auto width_col = sliding_window_count(output_width, pad_width, dilation_width, kernel_width, stride_width);
 
   auto stream = getCurrentMPSStream();
+  const bool use_u32 = offsetsFitIn<uint32_t>(col_tensor, output);
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      auto col2imPSO = lib.getPipelineStateForFunc("col2im_kernel_" + mps::scalarToMetalTypeString(input));
+      auto col2imPSO = lib.getPipelineStateForFunc(
+          fmt::format("col2im_kernel_{}{}", scalarToMetalTypeString(input), mtlIdxSuffix(use_u32)));
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:col2imPSO];
       const uint32_t gridWidth = static_cast<uint32_t>(output_width);
@@ -86,24 +88,26 @@ static void col2im_out_mps_template(const Tensor& input,
       uint32_t tgWidth = std::min(gridWidth, threadExecutionWidth);
       uint32_t tgHeight = std::min(gridHeight, maxThreadsPerGroup / tgWidth);
       MTLSize threadgroupSize = MTLSizeMake(tgWidth, tgHeight, 1);
-      mtl_setArgs(
-          computeEncoder,
-          col_tensor,
-          output,
-          input_batch_stride,
-          n_output_plane,
-          std::array<uint32_t, 2>{static_cast<uint32_t>(output_height), static_cast<uint32_t>(output_width)}, // im_hw
-          std::array<uint32_t, 2>{static_cast<uint32_t>(kernel_height),
-                                  static_cast<uint32_t>(kernel_width)}, // kernel_hw
-          std::array<uint32_t, 2>{static_cast<uint32_t>(pad_height), static_cast<uint32_t>(pad_width)}, // pad_hw
-          std::array<uint32_t, 2>{static_cast<uint32_t>(stride_height),
-                                  static_cast<uint32_t>(stride_width)}, // stride_hw
-          std::array<uint32_t, 2>{static_cast<uint32_t>(dilation_height),
-                                  static_cast<uint32_t>(dilation_width)}, // dilation_hw
-          std::array<uint32_t, 2>{static_cast<uint32_t>(height_col), static_cast<uint32_t>(width_col)}, // col_hw
-          output_batch_stride,
-          std::array<uint32_t, 2>{static_cast<uint32_t>(input_channel_stride),
-                                  static_cast<uint32_t>(input_spatial_stride)}); // col_inner_strides
+      mtlDispatchByIndexWidth<uint32_t, uint64_t>(use_u32, [&](auto idx_tag) {
+        using idx_t = typename decltype(idx_tag)::type;
+        mtl_setArgs(
+            computeEncoder,
+            col_tensor,
+            output,
+            idx_t(input_batch_stride),
+            n_output_plane,
+            std::array<uint32_t, 2>{static_cast<uint32_t>(output_height), static_cast<uint32_t>(output_width)}, // im_hw
+            std::array<uint32_t, 2>{static_cast<uint32_t>(kernel_height),
+                                    static_cast<uint32_t>(kernel_width)}, // kernel_hw
+            std::array<uint32_t, 2>{static_cast<uint32_t>(pad_height), static_cast<uint32_t>(pad_width)}, // pad_hw
+            std::array<uint32_t, 2>{static_cast<uint32_t>(stride_height),
+                                    static_cast<uint32_t>(stride_width)}, // stride_hw
+            std::array<uint32_t, 2>{static_cast<uint32_t>(dilation_height),
+                                    static_cast<uint32_t>(dilation_width)}, // dilation_hw
+            std::array<uint32_t, 2>{static_cast<uint32_t>(height_col), static_cast<uint32_t>(width_col)}, // col_hw
+            idx_t(output_batch_stride),
+            std::array<idx_t, 2>{idx_t(input_channel_stride), idx_t(input_spatial_stride)});
+      });
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     }
   });

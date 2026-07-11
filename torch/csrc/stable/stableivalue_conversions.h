@@ -3,6 +3,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
+#include <torch/csrc/stable/generator_struct.h>
 #include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/DeviceType.h>
@@ -261,9 +262,20 @@ struct FromImpl<std::optional<T>> {
     if (!val.has_value()) {
       return torch::stable::detail::from(std::nullopt);
     }
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+    const StableIValue value = detail::FromImpl<T>::call(
+        val.value(), extension_build_version, is_internal);
+
+    StableIValue* ivalue_ptr = nullptr;
+    TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&ivalue_ptr));
+    *ivalue_ptr = value;
+    return torch::stable::detail::from(ivalue_ptr);
+#else
     return torch::stable::detail::from(
         new StableIValue(detail::FromImpl<T>::call(
             val.value(), extension_build_version, is_internal)));
+#endif
   }
 };
 
@@ -281,6 +293,23 @@ struct FromImpl<torch::stable::Tensor> {
     return torch::stable::detail::from(new_ath);
   }
 };
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+// Specialization for torch::stable::Generator => StableIValue
+// Returns a new owning reference of the underlying Generator.
+template <>
+struct FromImpl<torch::stable::Generator> {
+  static StableIValue call(
+      const torch::stable::Generator& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    AtenGeneratorHandle new_gen = nullptr;
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        torch_new_generator_handle(val.get(), &new_gen));
+    return torch::stable::detail::from(new_gen);
+  }
+};
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 // =============================================================================
 // FROM CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
@@ -614,8 +643,12 @@ struct ToImpl<std::optional<T>> {
     auto inner_val =
         detail::ToImpl<T>::call(*sivp, extension_build_version, is_internal);
 
-    // free the memory associated with StableIValue* sivp
+// free the memory associated with StableIValue* sivp
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+    TORCH_ERROR_CODE_CHECK(torch_delete_stable_ivalue(sivp));
+#else
     delete sivp;
+#endif
 
     return std::make_optional(inner_val);
   }
@@ -634,6 +667,22 @@ struct ToImpl<torch::stable::Tensor> {
         torch::stable::detail::to<AtenTensorHandle>(val));
   }
 };
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+// Specialization for StableIValue => torch::stable::Generator
+// The resulting stable::Generator steals ownership of the input's
+// underlying AtenGeneratorHandle.
+template <>
+struct ToImpl<torch::stable::Generator> {
+  static torch::stable::Generator call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    return torch::stable::Generator(
+        torch::stable::detail::to<AtenGeneratorHandle>(val));
+  }
+};
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 // =============================================================================
 // TO CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0

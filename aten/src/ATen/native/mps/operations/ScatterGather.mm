@@ -206,7 +206,7 @@ static void scatter_reduce_metal(const Tensor& self,
   // intrinsic is only available at runtime on macOS 15+.
   const bool needs_signbit_xor = self.scalar_type() == ScalarType::Long && (op == "amin" || op == "amax");
   if (needs_signbit_xor) {
-    TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS),
+    TORCH_CHECK(is_macos_at_least(MacOSVersion::MACOS_15_0),
                 "scatter_reduce(amin/amax) on int64 requires macOS 15 or newer");
     TORCH_CHECK(self.is_contiguous(), "scatter_reduce(amin/amax) on int64 currently requires contiguous self");
   }
@@ -443,6 +443,14 @@ static void scatter_reduce_dispatch(const Tensor& self,
                                     const ReductionType& reduce) {
   if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) {
     return;
+  }
+  // sum/prod/mean accumulate via atomics so order matters for floating/complex
+  // dtypes (fp add/mul are non-associative). Integer arithmetic is associative
+  // and stays deterministic
+  const auto dtype = self.scalar_type();
+  if ((reduce == ReductionType::SUM || reduce == ReductionType::PROD || reduce == ReductionType::MEAN) &&
+      (at::isFloatingType(dtype) || at::isComplexType(dtype))) {
+    at::globalContext().alertNotDeterministic("scatter_reduce_mps");
   }
   // Match CPU: scatter_reduce(mean) isn't defined for bool.
   TORCH_CHECK(reduce != ReductionType::MEAN || self.scalar_type() != ScalarType::Bool,
