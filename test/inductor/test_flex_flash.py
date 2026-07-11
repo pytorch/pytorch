@@ -2114,6 +2114,29 @@ class TestFlexFlash(InductorTestCase):
         self.assertFalse(prof_result["found"])
         self.assertEqual(out, ref)
 
+    def test_blackwell_default_falls_back_for_gqa_value_head_dim(self, device):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("FlashAttention-4 defaults on SM100-SM109")
+
+        make_tensor = functools.partial(torch.randn, device=device, dtype=torch.float16)
+        q = make_tensor(1, 4, 256, 64)
+        k = make_tensor(1, 2, 256, 64)
+        v = make_tensor(1, 2, 256, 128)
+        compiled_fn = torch.compile(flex_attention)
+
+        with cuda_kernel_profiler("flash_attncute") as prof_result:
+            out = compiled_fn(q, k, v, enable_gqa=True)
+        ref = compiled_fn(
+            q,
+            k,
+            v,
+            enable_gqa=True,
+            kernel_options={"BACKEND": "TRITON"},
+        )
+
+        self.assertFalse(prof_result["found"])
+        self.assertEqual(out, ref)
+
     def test_blackwell_default_falls_back_for_tensor_capture(self, device):
         if torch.cuda.get_device_capability(device)[0] != 10:
             self.skipTest("FlashAttention-4 defaults on SM100-SM109")

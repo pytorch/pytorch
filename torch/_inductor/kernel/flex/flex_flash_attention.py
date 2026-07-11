@@ -412,6 +412,26 @@ def _can_use_flex_flash_attention(
     return True, ""
 
 
+def _auto_supports_flex_flash(
+    query: TensorBox, key: TensorBox, value: TensorBox
+) -> bool:
+    """Return whether AUTO can safely prefer FA4 for these inputs."""
+    device = query.get_device()
+    if (
+        device is None
+        or device.type != "cuda"
+        or torch.version.hip is not None
+        or torch.cuda.get_device_capability(device)[0] != 10
+    ):
+        return False
+
+    query_heads = V.graph.sizevars.guard_int(query.get_size()[1])
+    key_heads = V.graph.sizevars.guard_int(key.get_size()[1])
+    query_head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
+    value_head_dim = V.graph.sizevars.guard_int(value.get_size()[-1])
+    return query_heads == key_heads or query_head_dim == value_head_dim
+
+
 def _use_flex_flash_attention(
     query: TensorBox,
     key: TensorBox,
@@ -436,15 +456,8 @@ def _use_flex_flash_attention(
     """
     if backend not in ("AUTO", "FLASH"):
         return False
-    if backend == "AUTO":
-        device = query.get_device()
-        if (
-            device is None
-            or device.type != "cuda"
-            or torch.version.hip is not None
-            or torch.cuda.get_device_capability(device)[0] != 10
-        ):
-            return False
+    if backend == "AUTO" and not _auto_supports_flex_flash(query, key, value):
+        return False
 
     can_use, reason = _can_use_flex_flash_attention(
         query,
@@ -716,15 +729,8 @@ def _use_flex_flash_attention_backward(
     """
     if backend not in ("AUTO", "FLASH"):
         return False
-    if backend == "AUTO":
-        device = query.get_device()
-        if (
-            device is None
-            or device.type != "cuda"
-            or torch.version.hip is not None
-            or torch.cuda.get_device_capability(device)[0] != 10
-        ):
-            return False
+    if backend == "AUTO" and not _auto_supports_flex_flash(query, key, value):
+        return False
 
     can_use, reason = _can_use_flex_flash_attention_backward(
         query,
