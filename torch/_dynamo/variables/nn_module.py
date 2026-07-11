@@ -81,7 +81,6 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .constant import ConstantVariable
-    from .dicts import DunderDictVariable
 
 
 def initialize_lazy_module(
@@ -281,11 +280,6 @@ class NNModuleVariable(VariableTracker):
         # everywhere else with asserts
         self.source: Source = self.source
         self.nn_module_stack_source = self.source
-
-    def get_dict_vt(self, tx: "InstructionTranslatorBase") -> "DunderDictVariable":
-        if not hasattr(self, "dict_vt"):
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
-        return self.dict_vt
 
     def get_nn_module_stack_source(self) -> Source:
         res = self.nn_module_stack_source or self.source
@@ -1408,14 +1402,18 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
-                    if self.source:
-                        hooks_source = AttrSource(self.source, name)
+                    hooks_source = (
+                        AttrSource(self.source, name) if self.source else None
+                    )
+                    if hooks_source:
                         install_guard(
                             hooks_source.make_guard(
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    return variables.ConstDictVariable({}, user_cls=type(hooks_dict))
+                    return variables.ConstDictVariable(
+                        {}, user_cls=type(hooks_dict), source=hooks_source
+                    )
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
