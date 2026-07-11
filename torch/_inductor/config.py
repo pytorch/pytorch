@@ -415,6 +415,13 @@ mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
 
+# Decompose DTensor Shard(dim) -> Shard(other_dim) all-to-all into explicit
+# layout ops plus _c10d_functional.all_to_all_single/wait_tensor. This is
+# experimental and intentionally opt-in.
+decompose_shard_dim_alltoall = (
+    os.environ.get("TORCHINDUCTOR_DECOMPOSE_SHARD_DIM_ALLTOALL", "0") == "1"
+)
+
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
@@ -1173,7 +1180,7 @@ _fuse_ddp_communication = False
 _fuse_ddp_bucket_size = 25
 
 # Flag to control which fusion passes to apply. Functions in the list will
-# be applied in order. There are two different different fusion passes
+# be applied in order. There are two different fusion passes
 # --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalesced_op". The default
 # one is "fuse_ddp_with_concat_op". Users can also change this to a customized
 # fusion function.
@@ -1846,6 +1853,12 @@ class triton:
     """
     Config specific to codegen/triton.py
     """
+
+    # No-op unless fbtriton (a Triton fork) is installed
+    tlx_mode: Literal["default", "allow", "force"] = cast(
+        Literal["default", "allow", "force"],
+        os.environ.get("TORCHINDUCTOR_TLX_MODE", "default"),
+    )
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
@@ -2694,7 +2707,7 @@ class rocm:
     # reducing autotuning cost while keeping runtime within ~5% of full
     # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
     # toggling at runtime via config.patch has no effect because the rocm-origami
-    # module import is cached at template_heuristics/triton.py load time.
+    # module import is cached at heuristics/template/triton.py load time.
     #
     # Active only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
