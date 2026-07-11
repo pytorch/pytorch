@@ -8,6 +8,8 @@ from ... import cutedsl_utils as cu
 _BLOCKWISE_1X32 = 3
 _SWIZZLE_32_4_4 = 1
 _SUPPORTED_CAPABILITIES = {(10, 0), (10, 3)}
+_TMA_CAPABILITIES = {(10, 3)}
+_TMA_SHAPES = {(4608, 8192), (4096, 8192)}
 
 
 def _blocked_scale_numel(rows: int, k: int) -> int:
@@ -27,7 +29,7 @@ def _scale_is_supported(
     )
 
 
-def _cond(
+def _tc_cond(
     self: torch.Tensor,
     mat2: torch.Tensor,
     scale_a: list[torch.Tensor],
@@ -82,7 +84,7 @@ def _cond(
     return bias is None and out_dtype == torch.bfloat16 and len(contraction_dim) == 0
 
 
-def _impl(
+def _tc_impl(
     self: torch.Tensor,
     mat2: torch.Tensor,
     scale_a: list[torch.Tensor],
@@ -105,12 +107,71 @@ def _impl(
     return mxfp8_small_m_scaled_mm(self, mat2, scale_a[0], scale_b[0], output)
 
 
-def register_to_dispatch() -> None:
-    cu.register_op_override(
-        "aten",
-        "_scaled_mm_v2",
-        "CUDA",
-        cond=_cond,
-        impl=_impl,
-        allow_multiple_override=True,
+def _tma_cond(
+    self: torch.Tensor,
+    mat2: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    bias: torch.Tensor | None,
+    out_dtype: torch.dtype | None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+) -> bool:
+    """Prefer the CUDA-core TMA kernel for its tuned SM103 M=1 contract."""
+    if not _tc_cond(
+        self,
+        mat2,
+        scale_a,
+        recipe_a,
+        swizzle_a,
+        scale_b,
+        recipe_b,
+        swizzle_b,
+        bias,
+        out_dtype,
+        contraction_dim,
+        use_fast_accum,
+    ):
+        return False
+    return bool(
+        torch.cuda.get_device_capability(self.device) in _TMA_CAPABILITIES
+        and self.shape[0] == 1
+        and (mat2.shape[1], self.shape[1]) in _TMA_SHAPES
     )
+
+
+def _tma_impl(
+    self: torch.Tensor,
+    mat2: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    bias: torch.Tensor | None,
+    out_dtype: torch.dtype | None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+) -> torch.Tensor:
+    """Allocate the public result and launch the M=1 TMA kernel."""
+    from .cutedsl_tma_kernel import mxfp8_tma_m1_scaled_mm
+
+    output = torch.empty((1, mat2.shape[1]), dtype=torch.bfloat16, device=self.device)
+    return mxfp8_tma_m1_scaled_mm(self, mat2, scale_a[0], scale_b[0], output)
+
+
+def register_to_dispatch() -> None:
+    for cond, impl in ((_tma_cond, _tma_impl), (_tc_cond, _tc_impl)):
+        cu.register_op_override(
+            "aten",
+            "_scaled_mm_v2",
+            "CUDA",
+            cond=cond,
+            impl=impl,
+            allow_multiple_override=True,
+        )

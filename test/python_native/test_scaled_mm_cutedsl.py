@@ -70,10 +70,10 @@ class TestCuTeDSLMxfp8ScaledMM(TestCase):
         actual = F.scaled_mm(*args, **kwargs)
         self.assertEqual(actual, expected, atol=1.0, rtol=0.05)
 
-    def test_dispatches_through_native_kernel(self) -> None:
+    def test_dispatches_m2_through_tensor_core_kernel(self) -> None:
         from torch._native.ops.scaled_mm import cutedsl_kernel
 
-        args, kwargs = _scaled_mm_args(3, 128, 1024)
+        args, kwargs = _scaled_mm_args(2, 128, 1024)
         with mock.patch.object(
             cutedsl_kernel,
             "mxfp8_small_m_scaled_mm",
@@ -82,22 +82,65 @@ class TestCuTeDSLMxfp8ScaledMM(TestCase):
             F.scaled_mm(*args, **kwargs)
         launch.assert_called_once()
 
+    @parametrize("n", [4096, 4608])
+    def test_dispatches_m1_through_capability_selected_kernel(self, n: int) -> None:
+        from torch._native.ops.scaled_mm import cutedsl_kernel, cutedsl_tma_kernel
+
+        args, kwargs = _scaled_mm_args(1, n, 8192)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = F.scaled_mm(*args, **kwargs)
+        with (
+            mock.patch.object(
+                cutedsl_tma_kernel,
+                "mxfp8_tma_m1_scaled_mm",
+                wraps=cutedsl_tma_kernel.mxfp8_tma_m1_scaled_mm,
+            ) as tma_launch,
+            mock.patch.object(
+                cutedsl_kernel,
+                "mxfp8_small_m_scaled_mm",
+                wraps=cutedsl_kernel.mxfp8_small_m_scaled_mm,
+            ) as tc_launch,
+        ):
+            actual = F.scaled_mm(*args, **kwargs)
+        if torch.cuda.get_device_capability() == (10, 3):
+            tma_launch.assert_called_once()
+            tc_launch.assert_not_called()
+        else:
+            tc_launch.assert_called_once()
+            tma_launch.assert_not_called()
+        self.assertEqual(actual, expected, atol=1.0, rtol=0.05)
+
+    def test_tma_dispatch_integration(self) -> None:
+        from torch._native.ops.scaled_mm import cutedsl_impl, cutedsl_tma_kernel
+
+        args, kwargs = _scaled_mm_args(1, 4096, 8192)
+        capability = torch.cuda.get_device_capability()
+        with (
+            mock.patch.object(cutedsl_impl, "_TMA_CAPABILITIES", {capability}),
+            mock.patch.object(
+                cutedsl_tma_kernel,
+                "mxfp8_tma_m1_scaled_mm",
+                wraps=cutedsl_tma_kernel.mxfp8_tma_m1_scaled_mm,
+            ) as launch,
+        ):
+            F.scaled_mm(*args, **kwargs)
+        launch.assert_called_once()
+
     def test_dynamic_m_reuses_one_compilation(self) -> None:
         from torch._native.ops.scaled_mm import cutedsl_kernel
 
         before = cutedsl_kernel._compile_mxfp8_small_m.cache_info()
-        for m in (1, 8):
+        for m in (2, 8):
             args, kwargs = _scaled_mm_args(m, 256, 1024)
             F.scaled_mm(*args, **kwargs)
         after = cutedsl_kernel._compile_mxfp8_small_m.cache_info()
         self.assertEqual(after.currsize - before.currsize, 1)
-        self.assertEqual(
-            (after.hits + after.misses) - (before.hits + before.misses), 2
-        )
+        self.assertEqual((after.hits + after.misses) - (before.hits + before.misses), 2)
         self.assertGreaterEqual(after.hits - before.hits, 1)
 
-    def test_cuda_graph_replay_uses_updated_input(self) -> None:
-        args, kwargs = _scaled_mm_args(3, 128, 1024)
+    @parametrize("m,n,k", [(1, 4096, 8192), (3, 128, 1024)])
+    def test_cuda_graph_replay_uses_updated_input(self, m: int, n: int, k: int) -> None:
+        args, kwargs = _scaled_mm_args(m, n, k)
         graph = torch.cuda.CUDAGraph()
         torch.cuda.synchronize()
         with torch.cuda.graph(graph):
@@ -106,6 +149,52 @@ class TestCuTeDSLMxfp8ScaledMM(TestCase):
         graph.replay()
         torch.cuda.synchronize()
         self.assertEqual(output, torch.zeros_like(output))
+
+    def test_tma_preserves_e8m0_nan_encoding(self) -> None:
+        from torch._native.ops.scaled_mm.cutedsl_tma_kernel import (
+            mxfp8_tma_m1_scaled_mm,
+        )
+
+        k, n = 2048, 128
+        q_input = torch.ones((1, k), dtype=torch.float8_e4m3fn, device="cuda")
+        weight = torch.ones((n, k), dtype=torch.float8_e4m3fn, device="cuda")
+        input_scale = to_blocked(
+            torch.full((1, k // 32), 255, dtype=torch.uint8, device="cuda").view(
+                torch.float8_e8m0fnu
+            )
+        )
+        weight_scale = to_blocked(
+            torch.full((n, k // 32), 127, dtype=torch.uint8, device="cuda").view(
+                torch.float8_e8m0fnu
+            )
+        )
+        output = torch.empty((1, n), dtype=torch.bfloat16, device="cuda")
+        mxfp8_tma_m1_scaled_mm(q_input, weight.T, input_scale, weight_scale, output)
+        torch.cuda.synchronize()
+        self.assertTrue(output.isnan().all())
+
+    def test_tma_combines_extreme_scales_before_multiplication(self) -> None:
+        from torch._native.ops.scaled_mm.cutedsl_tma_kernel import (
+            mxfp8_tma_m1_scaled_mm,
+        )
+
+        n, k = 4096, 8192
+        q_input = torch.ones((1, k), dtype=torch.float8_e4m3fn, device="cuda")
+        weight = torch.ones((n, k), dtype=torch.float8_e4m3fn, device="cuda")
+        output = torch.empty((1, n), dtype=torch.bfloat16, device="cuda")
+        for input_byte, weight_byte in ((254, 0), (0, 254)):
+            input_scale = to_blocked(
+                torch.full(
+                    (1, k // 32), input_byte, dtype=torch.uint8, device="cuda"
+                ).view(torch.float8_e8m0fnu)
+            )
+            weight_scale = to_blocked(
+                torch.full(
+                    (n, k // 32), weight_byte, dtype=torch.uint8, device="cuda"
+                ).view(torch.float8_e8m0fnu)
+            )
+            mxfp8_tma_m1_scaled_mm(q_input, weight.T, input_scale, weight_scale, output)
+            self.assertEqual(output, torch.full_like(output, k))
 
     def test_export_routes_to_native_op(self) -> None:
         class ScaledMM(torch.nn.Module):
