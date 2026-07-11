@@ -1325,6 +1325,23 @@ class TestMPS(TestCaseMPS):
         out_cpu = a.cpu() @ b.cpu()
         self.assertEqual(out_cpu, out_mps.cpu(), **tol)
 
+    def test_mps_benchmark_flag(self):
+        original = torch.backends.mps.benchmark
+        with torch.backends.mps.flags(benchmark=not original):
+            self.assertEqual(torch.backends.mps.benchmark, not original)
+        self.assertEqual(torch.backends.mps.benchmark, original)
+        with self.assertRaisesRegex(RuntimeError, "set_benchmark_mps expects a bool"):
+            with torch.backends.mps.flags(benchmark=1):
+                pass
+
+    def test_mps_autotune_trace_validation(self):
+        with self.assertRaisesRegex(TypeError, "max_entries must be an int"):
+            torch.backends.mps.autotune_trace(max_entries=True)
+        with self.assertRaisesRegex(ValueError, "greater than zero"):
+            torch.backends.mps.autotune_trace(max_entries=0)
+        with self.assertRaisesRegex(TypeError, "must be a bool"):
+            torch.backends.mps.autotune_trace(wait_until_completed=1)
+
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("transpose", [False, True])
     def test_gemv_mm(self, dtype, transpose):
@@ -11344,6 +11361,160 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
 
 
 class TestLinalgMPS(TestCaseMPS):
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("transpose", [False, True])
+    def test_gemv_benchmark(self, device, dtype, transpose):
+        with torch.backends.mps.flags(benchmark=True):
+            torch.backends.mps._clear_autotune_cache()
+            a = torch.randn(1, 257, device=device, dtype=dtype)
+            if transpose:
+                b = torch.randn(513, 257, device=device, dtype=dtype).t()
+            else:
+                b = torch.randn(257, 513, device=device, dtype=dtype)
+            expected = a.cpu() @ b.cpu()
+            records = []
+            for _ in range(50):
+                with torch.backends.mps.autotune_trace(max_entries=2) as trace:
+                    result = a @ b
+                records.extend(trace.records)
+                if any(record["event"] == "selection" for record in trace.records):
+                    break
+            with torch.backends.mps.autotune_trace(max_entries=1) as cached_trace:
+                cached = a @ b
+            tol = (
+                dict(atol=2e-2, rtol=2e-2)
+                if dtype == torch.bfloat16
+                else dict(atol=1e-3, rtol=1e-4)
+            )
+            self.assertEqual(expected, result.cpu(), **tol)
+            self.assertEqual(expected, cached.cpu(), **tol)
+        selections = [
+            record for record in records if record["event"] == "selection"
+        ]
+        self.assertEqual(len(selections), 1)
+        self.assertEqual(cached_trace.records[0]["phase"], "cached")
+        selection = selections[0]
+        self.assertIn(selection["config"], selection["candidates"])
+        self.assertLessEqual(
+            sum(result["samples"] for result in selection["results"]), 50
+        )
+        self.assertGreaterEqual(
+            min(result["samples"] for result in selection["results"]), 4
+        )
+        selected_result = next(
+            result
+            for result in selection["results"]
+            if result["config"] == selection["config"]
+        )
+        self.assertEqual(selection["kernel"], selected_result["kernel"])
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("transpose", [False, True])
+    @parametrize("vector_side", ["left", "right"])
+    def test_gemv_autotune_candidates(
+        self, device, dtype, transpose, vector_side
+    ):
+        K, outlen = 256, 512
+        if vector_side == "left":
+            a = torch.randn(1, K, device=device, dtype=dtype)
+            if transpose:
+                b = torch.randn(outlen, K, device=device, dtype=dtype).t()
+            else:
+                b = torch.randn(K, outlen, device=device, dtype=dtype)
+        else:
+            if transpose:
+                a = torch.randn(K, outlen, device=device, dtype=dtype).t()
+            else:
+                a = torch.randn(outlen, K, device=device, dtype=dtype)
+            b = torch.randn(K, 1, device=device, dtype=dtype)
+        expected = a.cpu() @ b.cpu()
+        tol = (
+            dict(atol=2e-2, rtol=2e-2)
+            if dtype == torch.bfloat16
+            else dict(atol=1e-2, rtol=1e-2)
+            if dtype == torch.float16
+            else dict(atol=1e-3, rtol=1e-4)
+        )
+        bias = torch.randn(expected.shape, device=device, dtype=dtype)
+        expected_addmm = torch.addmm(
+            bias.cpu(), a.cpu(), b.cpu(), beta=0.7, alpha=1.3
+        )
+
+        with torch.backends.mps.flags(benchmark=False):
+            with torch.backends.mps.autotune_trace() as trace:
+                self.assertEqual(expected, (a @ b).cpu(), **tol)
+            launch = trace.records[-1]
+            configs = launch["candidates"]
+            self.assertGreater(len(configs), 1)
+            self.assertEqual(len(configs), len(set(configs)))
+            self.assertEqual(launch["operation"], "gemv")
+            self.assertEqual(launch["phase"], "heuristic")
+            self.assertIn(launch["config"], configs)
+            self.assertTrue(launch["kernel"].startswith("gemv_"))
+
+        with torch.backends.mps.flags(benchmark=True):
+            with torch.backends.mps.autotune_trace(
+                max_entries=2 * len(configs)
+            ) as forced_trace:
+                for config in configs:
+                    with torch.backends.mps._autotune_override("gemv", config):
+                        self.assertEqual(expected, (a @ b).cpu(), **tol)
+                        result = torch.addmm(
+                            bias, a, b, beta=0.7, alpha=1.3
+                        )
+                        self.assertEqual(expected_addmm, result.cpu(), **tol)
+
+        self.assertEqual(
+            [record["config"] for record in forced_trace.records],
+            [config for config in configs for _ in range(2)],
+        )
+        self.assertEqual(
+            [record["phase"] for record in forced_trace.records],
+            ["forced"] * (2 * len(configs)),
+        )
+        for mm_record, addmm_record in zip(
+            forced_trace.records[::2], forced_trace.records[1::2]
+        ):
+            self.assertIn("_none", mm_record["kernel"])
+            self.assertIn("_ab", addmm_record["kernel"])
+
+    def test_gemv_autotune_override_validation(self, device):
+        a = torch.randn(1, 256, device=device)
+        b = torch.randn(256, 512, device=device)
+        with torch.backends.mps._autotune_override("gemv", "invalid"):
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid forced GEMV autotune config"
+            ):
+                _ = a @ b
+
+    def test_gemv_autotune_cache_clear(self, device):
+        a = torch.randn(1, 256, device=device)
+        b = torch.randn(256, 512, device=device)
+        with torch.backends.mps.flags(benchmark=True):
+            torch.backends.mps._clear_autotune_cache()
+            with torch.backends.mps.autotune_trace() as first:
+                _ = a @ b
+            torch.backends.mps._clear_autotune_cache()
+            with torch.backends.mps.autotune_trace() as second:
+                _ = a @ b
+        self.assertEqual(first.records[-1]["phase"], "explore")
+        self.assertEqual(second.records[-1]["phase"], "explore")
+        self.assertEqual(first.records[-1]["config"], second.records[-1]["config"])
+
+    def test_gemv_autotune_trace_limit(self, device):
+        a = torch.randn(1, 256, device=device)
+        b = torch.randn(256, 512, device=device)
+        with torch.backends.mps.flags(benchmark=False):
+            with torch.backends.mps.autotune_trace(max_entries=2) as trace:
+                for _ in range(3):
+                    _ = a @ b
+        self.assertEqual(trace.schema_version, 1)
+        self.assertEqual(len(trace.records), 2)
+        self.assertEqual(trace.dropped, 1)
+        self.assertEqual(
+            [record["sequence"] for record in trace.records], [2, 3]
+        )
+
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
         numpy_dtype = dtype

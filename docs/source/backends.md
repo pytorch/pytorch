@@ -318,6 +318,27 @@ These backends include:
 ```
 
 ```{eval-rst}
+.. attribute:: benchmark
+
+    A :class:`bool` that enables MPS kernel tile autotuning. For each eligible
+    operation and input shape, the first executions benchmark multiple kernel
+    and tile configurations and cache the fastest one. The setting applies to
+    MPS operations that implement autotuning. The default value is False.
+```
+
+```{eval-rst}
+.. autofunction::  torch.backends.mps.flags
+```
+
+```{eval-rst}
+.. autofunction::  torch.backends.mps.set_flags
+```
+
+```{eval-rst}
+.. autofunction::  torch.backends.mps.autotune_trace
+```
+
+```{eval-rst}
 .. autofunction::  torch.backends.mps.is_available
 ```
 

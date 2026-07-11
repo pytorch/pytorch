@@ -337,6 +337,14 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
+bool Context::benchmarkMPS() const {
+  return benchmark_mps;
+}
+
+void Context::setBenchmarkMPS(bool b) {
+  benchmark_mps = b;
+}
+
 int Context::benchmarkLimitCuDNN() const {
   return benchmark_limit_cudnn;
 }

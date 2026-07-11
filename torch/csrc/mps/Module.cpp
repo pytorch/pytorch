@@ -14,6 +14,7 @@
 
 #ifdef USE_MPS
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSAutotune.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
@@ -418,6 +419,61 @@ struct OptionalArgCaster {
   std::unordered_map<unsigned, std::string> cast_map;
 };
 
+py::dict autotune_record_to_python(const at::mps::MPSAutotuneRecord& record) {
+  py::dict result;
+  result["sequence"] = record.sequence;
+  result["event"] = record.event;
+  result["operation"] = record.operation;
+  result["phase"] = record.phase;
+  result["config"] = record.config;
+  result["kernel"] = record.kernel;
+
+  py::list tensors;
+  for (const auto& tensor : record.tensors) {
+    py::dict value;
+    value["name"] = tensor.name;
+    value["dtype"] = tensor.dtype;
+    value["sizes"] = tensor.sizes;
+    value["strides"] = tensor.strides;
+    value["storage_offset"] = tensor.storage_offset;
+    tensors.append(std::move(value));
+  }
+  result["tensors"] = std::move(tensors);
+
+  py::dict attributes;
+  for (const auto& [name, value] : record.attributes) {
+    attributes[name.c_str()] = value;
+  }
+  result["attributes"] = std::move(attributes);
+  result["candidates"] = record.candidates;
+
+  py::list candidate_results;
+  for (const auto& candidate : record.results) {
+    py::dict value;
+    value["config"] = candidate.config;
+    value["kernel"] = candidate.kernel;
+    value["median_us"] = candidate.median_us;
+    value["samples"] = candidate.samples;
+    value["active"] = candidate.active;
+    candidate_results.append(std::move(value));
+  }
+  result["results"] = std::move(candidate_results);
+  return result;
+}
+
+py::dict autotune_snapshot_to_python(
+    const at::mps::MPSAutotuneSnapshot& snapshot) {
+  py::list records;
+  for (const auto& record : snapshot.records) {
+    records.append(autotune_record_to_python(record));
+  }
+  py::dict result;
+  result["schema_version"] = 1;
+  result["records"] = std::move(records);
+  result["dropped"] = snapshot.dropped;
+  return result;
+}
+
 } // namespace
 
 void initModule(PyObject* module) {
@@ -551,6 +607,31 @@ void initModule(PyObject* module) {
   });
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
+  });
+  m.def("_mps_start_autotune_trace", [](size_t max_entries) {
+    at::mps::startMPSAutotuneTrace(max_entries);
+  });
+  m.def("_mps_stop_autotune_trace", [](bool wait_for_callbacks) {
+    return autotune_snapshot_to_python(
+        at::mps::stopMPSAutotuneTrace(wait_for_callbacks));
+  });
+  m.def(
+      "_mps_get_autotune_override",
+      [](const std::string& operation) -> py::object {
+        auto config = at::mps::getMPSAutotuneOverride(operation);
+        return config.has_value() ? py::cast(*config) : py::none();
+      });
+  m.def(
+      "_mps_set_autotune_override",
+      [](const std::string& operation, const py::object& config) {
+        at::mps::setMPSAutotuneOverride(
+            operation,
+            config.is_none()
+                ? std::nullopt
+                : std::optional<std::string>(config.cast<std::string>()));
+      });
+  m.def("_mps_clear_autotune_cache", []() {
+    at::mps::clearMPSAutotuneCaches();
   });
   m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
     PyObject* obj = py_storage.ptr();
