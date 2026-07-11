@@ -218,7 +218,7 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
-from .dicts import ConstDictVariable, MappingProxyVariable, SetVariable
+from .dicts import ConstDictVariable, MappingProxyVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
@@ -290,6 +290,7 @@ from .sets import (
     FrozensetVariable,
     OrderedSetClassVariable,
     OrderedSetVariable,
+    SetVariable,
 )
 from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
