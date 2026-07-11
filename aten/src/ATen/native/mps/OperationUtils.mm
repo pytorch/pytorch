@@ -1431,12 +1431,28 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const bool ic_applicable = !use_scalar_kernel && !use_broadcast_kernel && !cast_needed && !alpha.has_value() &&
       !output_cast_needed && !iter.is_contiguous() && isInnerContiguous(iter);
   bool inner_contiguous = ic_applicable && iter.shape()[0] >= INNER_CONTIGUOUS_MIN_EXTENT;
-  if (ic_applicable) {
+  // inner_strided: same tier and gates as the ternary path (see
+  // exec_ternary_kernel): correct for any strided layout, selected for the
+  // unit-or-broadcast inner family (load locality) or any cast layout (the
+  // per-element runtime-type switch dominates, so the amortized outer decode
+  // wins regardless of locality). Scalar/broadcast specializations and the
+  // castout tier still preempt it.
+  const bool is_structural = !use_scalar_kernel && !use_broadcast_kernel && !alpha.has_value() && !output_cast_needed &&
+      !iter.is_contiguous() && iter.ndim() > 0 && iter.strides(0)[0] != 0;
+  bool inner_strided = is_structural && !inner_contiguous && (cast_needed || isInnerUnitOrBroadcast(iter)) &&
+      iter.shape()[0] >= INNER_STRIDED_MIN_EXTENT;
+  if (ic_applicable || is_structural) {
     if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
-      if (force.value() == "strided")
+      if (force.value() == "strided") {
         inner_contiguous = false;
-      else if (force.value() == "inner_contiguous")
+        inner_strided = false;
+      } else if (force.value() == "inner_contiguous" && ic_applicable) {
         inner_contiguous = true;
+        inner_strided = false;
+      } else if (force.value() == "inner_strided" && is_structural) {
+        inner_strided = true;
+        inner_contiguous = false;
+      }
     }
   }
 
@@ -1451,6 +1467,16 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       fmt::format("{}_{}",
                   scalarToMetalTypeString(out),
                   scalarToMetalTypeString(out.scalar_type() == kBool ? iter.common_dtype() : out.scalar_type()));
+  // inner_strided kernels are opt-in per op (REGISTER_BINARY_INNER_STRIDED_OP,
+  // arithmetic core only -- blanket registration measured +11 MB of metallib).
+  // Probe the library and fall back to the generic strided kernel when this
+  // op didn't register them; applies to env-forced runs too.
+  if (inner_strided) {
+    const auto probe = cast_needed
+        ? fmt::format("{}_inner_strided_cast_{}", name, cast_suffix_type)
+        : fmt::format("{}_inner_strided_{}_{}", name, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+    inner_strided = hasFunction(probe);
+  }
   std::string kernel_name;
   if (output_cast_needed) {
     // Force the strided castout path regardless of contiguity / scalar /
@@ -1493,8 +1519,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     // TODO: Implicitly pass both input and output types to non-cast kernels
     // The ILP suffix carries the unroll width (e.g. dense_ilp4) so future
     // variants (ilp8, ...) can coexist; see C10_METAL_ILP_PER_THREAD_STR.
-    const auto suffix = iter.is_contiguous() ? (dense_ilp ? "dense_ilp" C10_METAL_ILP_PER_THREAD_STR : "dense")
-                                             : (inner_contiguous ? "inner_contiguous" : "strided");
+    const auto suffix = iter.is_contiguous()
+        ? (dense_ilp ? "dense_ilp" C10_METAL_ILP_PER_THREAD_STR : "dense")
+        : (inner_contiguous ? "inner_contiguous" : (inner_strided ? "inner_strided" : "strided"));
     kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, cast_suffix_type, alpha_suffix)
                               : fmt::format("{}_{}_{}_{}{}",
                                             name,
@@ -1593,7 +1620,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           }
         }
       }
-      if (inner_contiguous) {
+      if (inner_contiguous || inner_strided) {
         const auto inner = static_cast<uint32_t>(iter.shape()[0]);
         const auto inner_tiles =
             (static_cast<NSUInteger>(inner) + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD;

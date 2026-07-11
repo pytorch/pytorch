@@ -6656,6 +6656,35 @@ class TestMPS(TestCaseMPS):
             # mixed dtype (cast kernels): float bounds on half/float input
             helper(x, full[0].float(), full[1].float())
 
+    def test_add_binary_flavor_parity(self):
+        # Exercises the binary noncontiguous dispatch flavors (strided,
+        # inner_contiguous, inner_strided) against the CPU reference on the
+        # layouts each serves, using the bench-only forcing knob to bypass
+        # the profitability gates.
+        def helper(x, y):
+            expect = torch.add(x, y)
+            for flavor in ["strided", "inner_contiguous", "inner_strided"]:
+                with self.subTest(dtype=x.dtype, flavor=flavor, shapes=(x.shape, y.shape)):
+                    os.environ["PYTORCH_BINARY_FORCE_FLAVOR"] = flavor
+                    try:
+                        got = torch.add(x.to("mps"), y.to("mps"))
+                    finally:
+                        del os.environ["PYTORCH_BINARY_FORCE_FLAVOR"]
+                    self.assertEqual(got.cpu(), expect)
+
+        for dtype in [torch.float32, torch.float16]:
+            x = torch.randn(8, 6, 17, dtype=dtype)
+            # channel broadcast: y strides {0, e, 0} (inner_strided family)
+            helper(x, torch.randn(1, 6, 1, dtype=dtype))
+            # trailing-dim broadcast: all unit-inner (inner_contiguous), with
+            # inner extents around the ILP tile boundary
+            for inner in [15, 16, 17]:
+                helper(torch.randn(7, inner, dtype=dtype), torch.randn(inner, dtype=dtype))
+            # transposed operand: layout mismatch, no broadcast
+            helper(x.transpose(0, 2), torch.randn(17, 6, 8, dtype=dtype))
+        # mixed dtype (cast kernels), transposed operand
+        helper(torch.randn(64, 48, dtype=torch.float16), torch.randn(48, 64).t())
+
     def test_divmode(self):
         def helper(shape, rounding_mode):
             for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
