@@ -1413,6 +1413,7 @@ class TestMeta(TestCase):
 
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True, False], [True, False], [True, False])))
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_layer_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_layer_norm
 
@@ -1446,6 +1447,7 @@ class TestMeta(TestCase):
 
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True, False], [True, False], [True, False])))
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_group_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_group_norm
 
@@ -1477,6 +1479,7 @@ class TestMeta(TestCase):
 
     @onlyCPU
     @parametrize("output_mask", list(itertools.product([True], [True, False], [True, False])))
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_batch_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
 
