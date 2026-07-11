@@ -516,7 +516,7 @@ class TestDefaultBackend(torch._dynamo.test_case.TestCase):
         def f(x):
             return torch.relu(x)
 
-        opt_f = torch.compile(f)
+        opt_f = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
         opt_f(torch.randn(3, 3))
         self.assertEqual(cnt.frame_count, 1)
 

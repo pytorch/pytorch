@@ -1168,12 +1168,12 @@ def forward(self, L_x_ : torch.Tensor):
             torch._dynamo.reset()
             counters.clear()
             x = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn, fullgraph=True)(x).backward()
+            torch.compile(fn, fullgraph=True)(x).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # Second compile (force recompile to test cache)
             torch._dynamo.reset()
             x2 = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn, fullgraph=True)(x2).backward()
+            torch.compile(fn, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
 
             aot_counters = counters["aot_autograd"]
             self.assertEqual(aot_counters.get("autograd_cache_bypass", 0), 0)
@@ -1201,11 +1201,11 @@ def forward(self, L_x_ : torch.Tensor):
 
             # Compile fn_a
             x = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn_a, fullgraph=True)(x).backward()
+            torch.compile(fn_a, fullgraph=True)(x).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # Compile fn_b (different hook — must NOT cache hit from fn_a)
             x2 = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn_b, fullgraph=True)(x2).backward()
+            torch.compile(fn_b, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # fn_b should give grad = 2 * 3.0 = 6.0, not 2 * 0.5 = 1.0
             self.assertEqual(x2.grad, torch.tensor([6.0] * 4, device="cuda"))
