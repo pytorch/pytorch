@@ -1506,6 +1506,83 @@ class TestPrecompile(TestCase):
         )
         self.assertTrue(any("untrusted" in line.lower() for line in cm.output))
 
+    def test_tied_weights_single_input_single_grad(self):
+        # Invariants 1/2/5: a weight tied across two layers is interned by identity to a
+        # SINGLE graph input (PARAM_NAMES lists the first name once) and accumulates ONE
+        # grad -- the sum of both uses -- matching an eager backward, not one grad per name.
+        class Tied(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4, bias=False)
+                self.l2 = torch.nn.Linear(4, 4, bias=False)
+                self.l2.weight = self.l1.weight  # tie: same tensor, two names
+
+            def forward(self, x):
+                return self.l2(self.l1(x))
+
+        m = Tied()
+        t = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            lambda model, t: model(t).sum().backward(), m, t
+        )
+        self.assertIn("PARAM_NAMES = ['l1.weight']", code)  # tie collapsed to one
+
+        ref = copy.deepcopy(m)  # deepcopy preserves the tie within the object graph
+        ref(t).sum().backward()
+
+        torch.compiler.precompile.load(code, cache)(m, t)  # one call: tied grad
+        self.assertEqual(m.l1.weight.grad, ref.l1.weight.grad)
+        self.assertIs(m.l1.weight, m.l2.weight)  # still one tensor at runtime
+
+    def test_multiple_module_args_all_lifted(self):
+        # The multi=True naming branch: two DIFFERENT nn.Module args are BOTH lifted, their
+        # positions recorded in MODULE_POSITIONS, and their params disambiguated as m0.* /
+        # m1.* (per-module prefixes). Loaded artifact matches eager m2(m1(t)).
+        torch.manual_seed(0)
+        m1 = torch.nn.Linear(4, 4)
+        m2 = torch.nn.Linear(4, 3)
+        t = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(lambda a, b, t: b(a(t)), m1, m2, t)
+        self.assertIn("MODULE_POSITIONS = [0, 1]", code)
+        self.assertIn("m0.weight", code)  # first module's params prefixed m0.*
+        self.assertIn("m1.weight", code)  # second module's params prefixed m1.*
+        f_c = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(f_c(m1, m2, t), m2(m1(t)))
+
+    def test_frozen_param_keeps_none_grad(self):
+        # Invariant 5 with a mix: only params that received a gradient are harvested
+        # (recorded in GRAD_PARAM_INDICES), so a frozen (requires_grad=False) param keeps
+        # .grad is None while a trainable param gets a grad matching an eager backward.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.frozen = torch.nn.Linear(4, 4)
+                self.trainable = torch.nn.Linear(4, 4)
+                for p in self.frozen.parameters():
+                    p.requires_grad_(False)
+
+            def forward(self, x):
+                return self.trainable(self.frozen(x))
+
+        m = M()
+        t = torch.randn(5, 4)
+        code, cache = torch.compiler.precompile(
+            lambda model, t: model(t).sum().backward(), m, t
+        )
+
+        ref = copy.deepcopy(m)
+        ref(t).sum().backward()
+
+        torch.compiler.precompile.load(code, cache)(m, t)
+        for p in m.frozen.parameters():
+            self.assertIsNone(p.grad)  # frozen: never harvested
+        for p in m.trainable.parameters():
+            self.assertIsNotNone(p.grad)
+        for (n, p), (_, rp) in zip(
+            m.trainable.named_parameters(), ref.trainable.named_parameters()
+        ):
+            self.assertEqual(p.grad, rp.grad, n)
+
 
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
