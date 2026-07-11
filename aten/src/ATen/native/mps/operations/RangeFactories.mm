@@ -163,14 +163,11 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     AT_DISPATCH_INTEGRAL_TYPES(result.scalar_type(), "linspace_mps", [&]() {
       const int64_t s = static_cast<int64_t>(start.to<scalar_t>());
       const int64_t e = static_cast<int64_t>(end.to<scalar_t>());
-      const uint64_t distance =
-          e >= s ? static_cast<uint64_t>(e) - static_cast<uint64_t>(s)
-                 : static_cast<uint64_t>(s) - static_cast<uint64_t>(e);
+      const uint64_t distance = e >= s ? static_cast<uint64_t>(e) - static_cast<uint64_t>(s)
+                                       : static_cast<uint64_t>(s) - static_cast<uint64_t>(e);
       const uint64_t denominator = static_cast<uint64_t>(steps - 1);
-      integral_params = {static_cast<uint64_t>(s),
-                         static_cast<uint64_t>(e),
-                         distance / denominator,
-                         distance % denominator};
+      integral_params = {
+          static_cast<uint64_t>(s), static_cast<uint64_t>(e), distance / denominator, distance % denominator};
     });
   } else {
     const float s = start.to<float>();
@@ -210,8 +207,8 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       }
     });
   } else {
-    auto pso = lib.getPipelineStateForFunc(
-        is_integral ? "linspace_integral_strided_" + tname : "linspace_strided_" + tname);
+    auto pso =
+        lib.getPipelineStateForFunc(is_integral ? "linspace_integral_strided_" + tname : "linspace_strided_" + tname);
     const auto ndim = static_cast<int>(result.dim());
     // offset_from_thread_index treats dim 0 as innermost; pass reversed.
     const std::vector<int64_t> sizes(result.sizes().rbegin(), result.sizes().rend());

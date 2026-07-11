@@ -12,7 +12,10 @@ inline float linspace_value(I i, constant array<float, 3>& v, I steps) {
 }
 
 template <typename T, typename I>
-inline T integral_linspace_value(I i, constant array<ulong, 4>& params, I steps) {
+inline T integral_linspace_value(
+    I i,
+    constant array<ulong, 4>& params,
+    I steps) {
   // params = {start bits, end bits, distance quotient, distance remainder}.
   const long start = as_type<long>(params[0]);
   const long end = as_type<long>(params[1]);
@@ -29,7 +32,8 @@ inline T integral_linspace_value(I i, constant array<ulong, 4>& params, I steps)
     has_fraction = fractional_product % denominator != 0;
   }
   const bool add = from_start ? increasing : !increasing;
-  long value = as_type<long>(add ? as_type<ulong>(base) + offset : as_type<ulong>(base) - offset);
+  long value = as_type<long>(
+      add ? as_type<ulong>(base) + offset : as_type<ulong>(base) - offset);
 
   if (has_fraction) {
     if (add && value < 0) {
@@ -86,7 +90,8 @@ kernel void linspace_integral_strided(
     constant long* sizes [[buffer(4)]],
     constant long* strides [[buffer(5)]],
     uint index [[thread_position_in_grid]]) {
-  const long off = c10::metal::offset_from_thread_index(index, sizes, strides, ndim);
+  const long off =
+      c10::metal::offset_from_thread_index(index, sizes, strides, ndim);
   out[off] = integral_linspace_value<T>(index, params, steps);
 }
 
@@ -137,27 +142,27 @@ kernel void arange_strided(
       constant long* strides [[buffer(5)]],                      \
       uint index [[thread_position_in_grid]]);
 
-#define REGISTER_INTEGRAL_LINSPACE_OP(DTYPE)                               \
+#define REGISTER_INTEGRAL_LINSPACE_OP(DTYPE)                              \
   template [[host_name("linspace_integral_" #DTYPE "_i32")]] kernel void  \
-  linspace_integral<DTYPE, int>(                                            \
-      device DTYPE * out [[buffer(0)]],                                     \
-      constant array<ulong, 4> & params [[buffer(1)]],                      \
-      constant array<int, 2> & p [[buffer(2)]],                             \
-      uint index [[thread_position_in_grid]]);                              \
+  linspace_integral<DTYPE, int>(                                          \
+      device DTYPE * out [[buffer(0)]],                                   \
+      constant array<ulong, 4> & params [[buffer(1)]],                    \
+      constant array<int, 2> & p [[buffer(2)]],                           \
+      uint index [[thread_position_in_grid]]);                            \
   template [[host_name("linspace_integral_" #DTYPE "_i64")]] kernel void  \
-  linspace_integral<DTYPE, long>(                                           \
-      device DTYPE * out [[buffer(0)]],                                     \
-      constant array<ulong, 4> & params [[buffer(1)]],                      \
-      constant array<long, 2> & p [[buffer(2)]],                            \
-      uint index [[thread_position_in_grid]]);                              \
+  linspace_integral<DTYPE, long>(                                         \
+      device DTYPE * out [[buffer(0)]],                                   \
+      constant array<ulong, 4> & params [[buffer(1)]],                    \
+      constant array<long, 2> & p [[buffer(2)]],                          \
+      uint index [[thread_position_in_grid]]);                            \
   template [[host_name("linspace_integral_strided_" #DTYPE)]] kernel void \
-  linspace_integral_strided<DTYPE>(                                         \
-      device DTYPE * out [[buffer(0)]],                                     \
-      constant array<ulong, 4> & params [[buffer(1)]],                      \
-      constant uint & steps [[buffer(2)]],                                  \
-      constant int& ndim [[buffer(3)]],                                     \
-      constant long* sizes [[buffer(4)]],                                   \
-      constant long* strides [[buffer(5)]],                                 \
+  linspace_integral_strided<DTYPE>(                                       \
+      device DTYPE * out [[buffer(0)]],                                   \
+      constant array<ulong, 4> & params [[buffer(1)]],                    \
+      constant uint & steps [[buffer(2)]],                                \
+      constant int& ndim [[buffer(3)]],                                   \
+      constant long* sizes [[buffer(4)]],                                 \
+      constant long* strides [[buffer(5)]],                               \
       uint index [[thread_position_in_grid]]);
 
 #define REGISTER_ARANGE_OP(DTYPE, CTYPE)                       \
