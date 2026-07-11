@@ -719,10 +719,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   }
 
   const auto outer_dims = enable_gqa ? 3 : 2;
-  auto outer_shape = at::infer_size_dimvector(
-      query.sizes().slice(0, query.dim() - outer_dims), key_.sizes().slice(0, key_.dim() - outer_dims));
-  outer_shape =
-      at::infer_size_dimvector(outer_shape, value_.sizes().slice(0, value_.dim() - outer_dims));
+  auto outer_shape = at::infer_size_dimvector(query.sizes().slice(0, query.dim() - outer_dims),
+                                              key_.sizes().slice(0, key_.dim() - outer_dims));
+  outer_shape = at::infer_size_dimvector(outer_shape, value_.sizes().slice(0, value_.dim() - outer_dims));
 
   auto broadcast = [&](const Tensor& t) {
     auto shape = outer_shape;
