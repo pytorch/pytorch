@@ -20,6 +20,7 @@ from typing import (
     ClassVar,
     Literal,
     overload,
+    Protocol,
     SupportsFloat,
     SupportsInt,
     TYPE_CHECKING,
@@ -53,7 +54,7 @@ from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
-from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
 from torch._prims_common import (
     compute_required_storage_length,
@@ -132,6 +133,7 @@ from .utils import (
     sympy_product,
     sympy_subs,
     tensor_is_aligned,
+    VarRanges,
 )
 from .virtualized import ops, OpsValue, V
 
@@ -4158,6 +4160,29 @@ class SliceView(View):
     """
 
     @classmethod
+    def create_with_size(
+        cls,
+        x: IRNode,
+        dim: int,
+        start: Expr,
+        size: Expr,
+        step: Expr,
+    ) -> IRNode:
+        new_size = list(x.get_size())
+        new_size[dim] = size
+
+        def reindex(
+            index: Sequence[Expr],
+        ) -> Sequence[Expr]:
+            if len(index) != len(new_size):
+                raise AssertionError(f"wrong ndim {index} {new_size}")
+            index = list(index)
+            index[dim] = index[dim] * step + start
+            return index
+
+        return cls(data=x, size=new_size, reindex=reindex)
+
+    @classmethod
     def normalize_start_end(
         cls, x: IRNode, dim: int, start: int, end: int
     ) -> tuple[int, int]:
@@ -4251,17 +4276,8 @@ class SliceView(View):
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
-        def reindex(
-            index: Sequence[Expr],
-        ) -> Sequence[Expr]:
-            if len(index) != len(new_size):
-                raise AssertionError(f"wrong ndim {index} {new_size}")
-            index = list(index)
-            index[dim] = index[dim] * step + start
-            return index
-
         # redirect to a generic view
-        return SliceView(data=x, size=new_size, reindex=reindex)
+        return cls.create_with_size(x, dim, start, new_size[dim], step)
 
 
 @ir_dataclass
@@ -5336,6 +5352,19 @@ class ShapeAsConstantBuffer(IRNode):
         return False
 
 
+@dataclasses.dataclass(frozen=True)
+class ExtraIndexingConstraints:
+    """Extra indexing constraints appended during simplify_and_reorder.
+
+    Produced by the cpp fusion path to force compatible index/reduce ranges
+    across scheduler nodes, then threaded through simplify_and_reorder and
+    recompute_size_and_body. Replaces a bare tuple[VarRanges, list[Expr]].
+    """
+
+    ranges: VarRanges
+    exprs: list[sympy.Expr]
+
+
 @ir_dataclass(frozen=False)
 class ComputedBuffer(OperationBuffer):
     """
@@ -5578,7 +5607,7 @@ class ComputedBuffer(OperationBuffer):
 
     def simplify_and_reorder(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[..., Any] | None = None,
     ) -> tuple[tuple[list[Expr], list[Expr]], LoopBody | None]:
         """
@@ -5615,34 +5644,17 @@ class ComputedBuffer(OperationBuffer):
 
         index_formulas = [*body.indexing_exprs.values()]
         if extra_indexing_constraints is not None:
-            if not (
-                isinstance(extra_indexing_constraints, tuple)
-                and len(extra_indexing_constraints) == 2
-            ):
-                raise AssertionError(
-                    "Expected isinstance(extra_indexing_constraints, tuple) and len(extra_indexing_constraints) == 2"
-                )
-            extra_indexing_ranges, extra_indexing_expr = extra_indexing_constraints
-            if not isinstance(extra_indexing_ranges, dict):
-                raise AssertionError(type(extra_indexing_ranges))
-            if not isinstance(extra_indexing_expr, list):
-                raise AssertionError(type(extra_indexing_expr))
-            if not all(isinstance(f, Expr) for f in extra_indexing_expr):
-                raise AssertionError(
-                    "Expected all(isinstance(f, Expr) for f in extra_indexing_expr)"
-                )
-
             expected_var_ranges = body.var_ranges
-            if expected_var_ranges != extra_indexing_ranges:
+            if expected_var_ranges != extra_indexing_constraints.ranges:
                 raise AssertionError(
                     (
                         expected_var_ranges,
-                        extra_indexing_ranges,
+                        extra_indexing_constraints.ranges,
                     )
                 )
             # remove already existing expressions
             extra_indexing_expr = [
-                e for e in extra_indexing_expr if e not in index_formulas
+                e for e in extra_indexing_constraints.exprs if e not in index_formulas
             ]
             index_formulas += extra_indexing_expr
 
@@ -5811,6 +5823,17 @@ class FinalizeCodegenResult:
     call_args: list[str]
 
 
+class _HasAliasingOrMutation(Protocol):
+    """Minimal view of scheduler.BaseSchedulerNode used by prologue fusion.
+
+    ir.py cannot import scheduler (circular), so this documents the single
+    method consumed by has_aliasing_or_mutation_for_prologue_fusion instead
+    of typing the argument as Any.
+    """
+
+    def has_aliasing_or_mutation(self) -> bool: ...
+
+
 class TemplateBuffer(OperationBuffer):
     """
     Base class for template operators that support epilogue and prologue fusion.
@@ -5951,7 +5974,7 @@ class TemplateBuffer(OperationBuffer):
 
     def simplify_and_reorder(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[..., Any] | None = None,
     ) -> tuple[tuple[Sequence[Expr], list[Expr]], LoopBody | None]:
         return (
@@ -5969,7 +5992,9 @@ class TemplateBuffer(OperationBuffer):
     def get_allowed_prologue_inps(self) -> OrderedSet[str]:
         return self.allowed_prologue_inps
 
-    def has_aliasing_or_mutation_for_prologue_fusion(self, scheduler_node: Any) -> bool:
+    def has_aliasing_or_mutation_for_prologue_fusion(
+        self, scheduler_node: _HasAliasingOrMutation
+    ) -> bool:
         """Return whether this template's aliasing/mutation blocks prologue fusion.
 
         The default preserves the scheduler's conservative behavior. External
@@ -6896,6 +6921,22 @@ def _fallback_kernel_symbol_tracking_context(
     return nullcontext()
 
 
+@dataclasses.dataclass(frozen=True)
+class ProcessKernelResult:
+    """Structured result of ExternKernel.process_kernel.
+
+    Replaces the positional 5-tuple that was unpacked at every call site.
+    unflatten_args(new_tensor_args, new_non_tensor_args) reconstructs the
+    original (args, kwargs) tree from replacement lists.
+    """
+
+    example_output: Any
+    tensor_args: list[IRNode]
+    non_tensor_args: list[object]
+    unflatten_args: Callable[[Any, Any], Any]
+    unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None
+
+
 @ir_dataclass(frozen=False)
 class ExternKernel(InputsKernel):
     """
@@ -7129,19 +7170,10 @@ class ExternKernel(InputsKernel):
     @classmethod
     def process_kernel(
         cls, kernel: _OpOverloads, *args: Any, **kwargs: Any
-    ) -> tuple[
-        Any,
-        list[Any],
-        list[Any],
-        Callable[[Any, Any], Any],
-        dict[sympy.Symbol, pytree.KeyPath] | None,
-    ]:
+    ) -> ProcessKernelResult:
         """Partition kernel args into tensor and non-tensor, realize tensor inputs,
-        re-run fake tensor propagation with the realized strides, and return
-        (example_output, tensor_args, non_tensor_args, unflatten_args, unbacked_bindings).
-
-        unflatten_args(new_tensor_args, new_non_tensor_args) reconstructs the
-        original (args, kwargs) tree from replacement lists.
+        re-run fake tensor propagation with the realized strides, and return a
+        ProcessKernelResult (see that class for field semantics).
         """
         binded_args = {"args": args, "kwargs": kwargs}
 
@@ -7224,6 +7256,13 @@ class ExternKernel(InputsKernel):
         # We need to retain the constant values of fake tensors that we originally
         # propagated the graph with, because for some operators running without a
         # constant would trigger an error / DataDependentException
+        # TorchBind fake objects are mutable and may have been advanced by AOT
+        # tracing. Replay effectful ops on a fresh per-graph copy of the guarded
+        # object state instead of the already-mutated lowering value.
+        replay_torchbind = (
+            isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
+            or V.current_node.target is torch._higher_order_ops.effects.with_effects
+        )
         for x in tensor_args:
             # if x is a view of a constant, we need to realize the view
             # (we can't pass the constant into the kernel directly)
@@ -7235,7 +7274,15 @@ class ExternKernel(InputsKernel):
             ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, TorchBindObject):
-                example_args.append(x.get_value())
+                if replay_torchbind:
+                    replay_objects = V.graph.torchbind_replay_objects
+                    if x.get_name() not in replay_objects:
+                        replay_objects[x.get_name()] = maybe_to_fake_obj(
+                            V.fake_mode, x.get_real_obj()
+                        )
+                    example_args.append(replay_objects[x.get_name()])
+                else:
+                    example_args.append(x.get_value())
             elif isinstance(x, OpaqueMultiOutput):
                 example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
@@ -7290,12 +7337,12 @@ class ExternKernel(InputsKernel):
                     msg = f"{msg} Found from : \n {stack_trace}"
                 V.graph.disable_cudagraphs_reason = msg
 
-        return (
-            example_output,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-            unbacked_bindings,
+        return ProcessKernelResult(
+            example_output=example_output,
+            tensor_args=tensor_args,
+            non_tensor_args=non_tensor_args,
+            unflatten_args=unflatten_args,
+            unbacked_bindings=unbacked_bindings,
         )
 
     @classmethod
@@ -7820,27 +7867,45 @@ class ExternKernel(InputsKernel):
             op_name = "unknown_op"
         return op_name
 
+    def is_inplace_view(self) -> bool:
+        return (
+            isinstance(self.op_overload, torch._ops.OpOverload)
+            and torch.Tag.inplace_view in self.op_overload.tags
+        )
+
+    def should_assert_dtype(self, op_name: str) -> bool:
+        # FakeTensor does not support quantized meta tensors today, so
+        # quantize_per_tensor's fake dtype intentionally remains non-quantized.
+        return (
+            not self.is_inplace_view()
+            and not op_name.startswith("torch.ops.aten.quantize_per_tensor.")
+            and (
+                self.op_overload
+                not in (
+                    torch.ops.aten.quantize_per_tensor.default,
+                    torch.ops.aten.quantize_per_tensor.tensor_qparams,
+                )
+            )
+        )
+
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.size_asserts:
             return
-        # comparing strides for 0 size tensor is tricky. Ignore them for now.
-        if sympy_product(self.get_size()) == 0:
+        if self.is_inplace_view() and not V.graph.cpp_wrapper:
             return
-        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         op_name = self.get_op_name()
         name = self.get_name()
         if V.graph.cpp_wrapper:
             # inplace_view ops (e.g. set_.source_Tensor) don't declare an
             # output variable; assert on the mutated input instead.
-            if isinstance(self.op_overload, torch._ops.OpOverload):
-                if torch.Tag.inplace_view in self.op_overload.tags:
-                    if not isinstance(self.inputs[0], IRNode):
-                        raise AssertionError(
-                            "Expected isinstance(self.inputs[0], IRNode)"
-                        )
-                    name = self.inputs[0].get_name()
-        wrapper.write_assert_size_stride(name, size, stride, op_name)
+            if self.is_inplace_view():
+                if not isinstance(self.inputs[0], IRNode):
+                    raise AssertionError("Expected isinstance(self.inputs[0], IRNode)")
+                name = self.inputs[0].get_name()
+        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
+        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
+        dtype = self.get_dtype() if self.should_assert_dtype(op_name) else None
+        wrapper.write_assert_size_stride(name, size, stride, op_name, dtype)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if config.alignment_asserts and not V.graph.cpp_wrapper:
@@ -9396,7 +9461,7 @@ class FallbackKernel(ExternKernelAlloc):
 
     @staticmethod
     def find_device(
-        tensor_args: Sequence[torch.Tensor] | None, example_output: Sequence[Any]
+        tensor_args: Sequence[IRNode] | None, example_output: Sequence[Any]
     ) -> Any:
         non_torch_bind_tensor_args = (
             [t for t in tensor_args if not isinstance(t, TorchBindObject)]
@@ -9771,13 +9836,12 @@ class FallbackKernel(ExternKernelAlloc):
             context = nullcontext()
 
         with context:
-            (
-                example_output,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                unbacked_bindings,
-            ) = cls.process_kernel(kernel, *args, **kwargs)
+            result = cls.process_kernel(kernel, *args, **kwargs)
+        example_output = result.example_output
+        tensor_args = result.tensor_args
+        non_tensor_args = result.non_tensor_args
+        unflatten_args = result.unflatten_args
+        unbacked_bindings = result.unbacked_bindings
 
         # For ops with registered symm_mem args, realize those args as
         # symmetric memory buffers before creating the FallbackKernel.
@@ -11489,15 +11553,12 @@ class _CollectiveKernel(FallbackKernel):
         **kwargs: Any,
     ) -> None:
         with V.graph.fake_mode:
-            (
-                _example_output,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                unbacked_bindings,
-            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
-        if unbacked_bindings:
-            raise AssertionError(f"{kernel} {unbacked_bindings}")
+            result = cls.process_kernel(kernel, inputs, *args, **kwargs)
+        tensor_args = result.tensor_args
+        non_tensor_args = result.non_tensor_args
+        unflatten_args = result.unflatten_args
+        if result.unbacked_bindings:
+            raise AssertionError(f"{kernel} {result.unbacked_bindings}")
         device = None
         for tensor_arg in tensor_args:
             if isinstance(tensor_arg, NonTensorObj):
@@ -11564,15 +11625,13 @@ class _CollectiveKernel(FallbackKernel):
         **kwargs: Any,
     ) -> list[MultiOutput] | _CollectiveKernel:
         with V.graph.fake_mode:
-            (
-                example_output,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                unbacked_bindings,
-            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
-        if unbacked_bindings:
-            raise AssertionError(f"{kernel}, {unbacked_bindings}")
+            result = cls.process_kernel(kernel, inputs, *args, **kwargs)
+        example_output = result.example_output
+        tensor_args = result.tensor_args
+        non_tensor_args = result.non_tensor_args
+        unflatten_args = result.unflatten_args
+        if result.unbacked_bindings:
+            raise AssertionError(f"{kernel}, {result.unbacked_bindings}")
         for tensor_arg in tensor_args:
             if not isinstance(tensor_arg, TorchBindObject):
                 tensor_arg.realize()
@@ -11740,21 +11799,15 @@ class _WaitKernel(_CollectiveKernel):
     @classmethod
     def create_wait(cls, kernel: _OpOverloads, inp: TensorBox) -> None:
         with V.graph.fake_mode:
-            (
-                _example_output,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                unbacked_bindings,
-            ) = cls.process_kernel(kernel, inp)
-        if unbacked_bindings:
-            raise AssertionError(f"{kernel} {unbacked_bindings}")
+            result = cls.process_kernel(kernel, inp)
+        if result.unbacked_bindings:
+            raise AssertionError(f"{kernel} {result.unbacked_bindings}")
         packed = cls(
             NoneLayout(device=inp.get_device()),
             kernel,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
+            result.tensor_args,
+            result.non_tensor_args,
+            result.unflatten_args,
         )
         packed.mutation_outputs.append(
             MutationOutput(NoneLayout(device=inp.get_device()), inp, packed)
