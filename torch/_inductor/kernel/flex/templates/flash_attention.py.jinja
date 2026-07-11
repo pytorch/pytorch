@@ -5,12 +5,12 @@
 {% else %}
 {{def_kernel("Q", "K", "V", "LOGSUMEXP")}}
 {% endif %}
-    from flash_attn.cute.interface import _flash_attn_fwd
+    from torch._vendor.flash_attn.cute.interface import _flash_attn_fwd
     {% if NEEDS_BLOCK_MASK %}
-    from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
+    from torch._vendor.flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
     {% endif %}
     {% if MASK_MOD_PACKED_INTERVALS is not none %}
-    import flash_attn.cute.utils as utils
+    import torch._vendor.flash_attn.cute.utils as utils
     {% endif %}
 
     # Transpose tensors for _flash_attn_fwd compatibility (B,H,M,D) -> (B,M,H,D)

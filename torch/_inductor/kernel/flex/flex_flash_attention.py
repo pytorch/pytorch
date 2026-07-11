@@ -4,6 +4,7 @@
 import dataclasses
 import functools
 import importlib
+import importlib.metadata
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -16,6 +17,8 @@ from sympy import Expr, Integer
 import torch
 from torch.fx import GraphModule
 
+from ...._native.cutedsl_utils import runtime_available, runtime_version
+from ...._vendor.packaging.version import Version
 from ...codegen.cutedsl.aux_scalars import CuteDSLAuxScalarBindings
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
@@ -142,10 +145,8 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 FLASH_ATTENTION_INSTALL_MESSAGE = (
-    "Install a compatible Flash Attention package, for example "
-    '`pip install --pre flash-attn-4` (`pip install --pre "flash-attn-4[cu13]"` '
-    "for CUDA 13), and see https://pypi.org/project/flash-attn-4/ "
-    "for PyPI packaging details."
+    "Install nvidia-cutlass-dsl==4.6.0.dev0, apache-tvm-ffi>=0.1.12,<0.2, "
+    "and torch-c-dlpack-ext."
 )
 
 
@@ -158,14 +159,17 @@ def _flash_attention_unavailable_message() -> str:
 
 @functools.lru_cache(maxsize=1)
 def ensure_flash_available() -> bool:
-    """Check if flash-attn is importable; cache the result for reuse.
-
-    Call ensure_flash_available.cache_clear() after installing flash-attn
-    in the same interpreter to retry the import.
-    """
+    """Check whether the vendored FA4 implementation and runtime are usable."""
     try:
-        return importlib.util.find_spec("flash_attn.cute") is not None  # type: ignore[attr-defined]
-    except ImportError:
+        if not runtime_available() or runtime_version() != Version("4.6.0.dev0"):
+            return False
+        tvm_ffi_version = Version(importlib.metadata.version("apache-tvm-ffi"))
+        if not Version("0.1.12") <= tvm_ffi_version < Version("0.2"):
+            return False
+        importlib.metadata.distribution("torch-c-dlpack-ext")
+        importlib.import_module("torch._vendor.flash_attn.cute.interface")
+        return True
+    except (ImportError, OSError, importlib.metadata.PackageNotFoundError):
         return False
 
 
@@ -173,7 +177,7 @@ def ensure_flash_available() -> bool:
 def flash_supports_aux_scalars() -> bool:
     """Check whether the installed FA4 package supports scalar captures."""
     try:
-        interface = importlib.import_module("flash_attn.cute.interface")
+        interface = importlib.import_module("torch._vendor.flash_attn.cute.interface")
     except ImportError:
         return False
     return (
@@ -363,7 +367,47 @@ def _can_use_flex_flash_attention(
     return True, ""
 
 
+def _auto_supports_flex_flash(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
+    kernel_options: dict[str, Any],
+) -> bool:
+    """Return whether AUTO can safely prefer FA4 for these inputs."""
+    device = query.get_device()
+    if (
+        device is None
+        or device.type != "cuda"
+        or torch.version.hip is not None
+        or torch.cuda.get_device_capability(device)[0] != 10
+    ):
+        return False
+    if query.get_dtype() not in (torch.float16, torch.bfloat16):
+        return False
+    if query.get_dtype() != key.get_dtype() or query.get_dtype() != value.get_dtype():
+        return False
+    if kernel_options.get("OUTPUT_MAX", False):
+        return False
+
+    head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
+    value_head_dim = V.graph.sizevars.guard_int(value.get_size()[-1])
+    standard = 8 <= head_dim <= 128 and 8 <= value_head_dim <= 128
+    specialized = (head_dim, value_head_dim) in ((192, 128), (256, 256))
+    mla = value_head_dim == 512 and head_dim in (64, 512)
+    if not (standard or specialized or mla):
+        return False
+    if head_dim % 8 != 0 or value_head_dim % 8 != 0:
+        return False
+
+    query_heads = V.graph.sizevars.guard_int(query.get_size()[1])
+    key_heads = V.graph.sizevars.guard_int(key.get_size()[1])
+    return query_heads % key_heads == 0
+
+
 def _use_flex_flash_attention(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
     subgraph: Subgraph,
     mask_graph: Subgraph,
     kernel_options: dict[str, Any],
@@ -382,8 +426,11 @@ def _use_flex_flash_attention(
     Returns:
         True if flash attention should be used, False otherwise
     """
-    # Flash is experimental and must be explicitly requested
-    if backend != "FLASH":
+    if backend not in ("AUTO", "FLASH"):
+        return False
+    if backend == "AUTO" and not _auto_supports_flex_flash(
+        query, key, value, kernel_options
+    ):
         return False
 
     can_use, reason = _can_use_flex_flash_attention(
@@ -391,13 +438,11 @@ def _use_flex_flash_attention(
         mask_graph,
         num_score_mod_placeholders,
     )
-
-    if not can_use:
-        raise RuntimeError(
-            f"BACKEND='FLASH' but flash attention cannot be used: {reason}"
-        )
-
-    return True
+    if can_use:
+        return True
+    if backend == "AUTO":
+        return False
+    raise RuntimeError(f"BACKEND='FLASH' but flash attention cannot be used: {reason}")
 
 
 def create_flex_flash_attention_kernel(
@@ -624,8 +669,12 @@ def _can_use_flex_flash_attention_backward(
 
 
 def _use_flex_flash_attention_backward(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
+    kernel_options: dict[str, Any],
     backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
     joint_outputs: Any | None = None,
     score_mod_other_buffers: Sequence[TensorBox] | None = None,
@@ -642,8 +691,11 @@ def _use_flex_flash_attention_backward(
     Returns:
         True if flash attention should be used, False otherwise
     """
-    # Flash is experimental and must be explicitly requested
-    if backend != "FLASH":
+    if backend not in ("AUTO", "FLASH"):
+        return False
+    if backend == "AUTO" and not _auto_supports_flex_flash(
+        query, key, value, kernel_options
+    ):
         return False
 
     can_use, reason = _can_use_flex_flash_attention_backward(
@@ -652,13 +704,11 @@ def _use_flex_flash_attention_backward(
         joint_outputs,
         score_mod_other_buffers,
     )
-
-    if not can_use:
-        raise RuntimeError(
-            f"BACKEND='FLASH' but flash attention cannot be used: {reason}"
-        )
-
-    return True
+    if can_use:
+        return True
+    if backend == "AUTO":
+        return False
+    raise RuntimeError(f"BACKEND='FLASH' but flash attention cannot be used: {reason}")
 
 
 def create_flex_flash_attention_backward_kernel(
@@ -667,6 +717,7 @@ def create_flex_flash_attention_backward_kernel(
     value: TensorBox,
     out: TensorBox,
     logsumexp: TensorBox,
+    grad_logsumexp: TensorBox | None,
     grad_out: TensorBox,
     scale: float,
     kernel_options: dict[str, Any],
@@ -747,6 +798,7 @@ def create_flex_flash_attention_backward_kernel(
         out,
         grad_out,
         logsumexp,
+        grad_logsumexp if grad_logsumexp is not None else logsumexp,
         grad_key,
         grad_value,
     ]
@@ -784,7 +836,7 @@ def create_flex_flash_attention_backward_kernel(
     supports_spt = False
     if has_block_mask:
         # pyrefly: ignore[missing-import]
-        from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
+        from torch._vendor.flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
 
         block_sparse_fields = getattr(BlockSparseTensorsTorch, "_fields", ())
         supports_dq_kv_order = "dq_kv_order" in block_sparse_fields
@@ -875,6 +927,7 @@ def create_flex_flash_attention_backward_kernel(
                 subgraphs=subgraphs or None,
                 SM_SCALE=scale,
                 HAS_SCORE_MOD=has_score_mod,
+                HAS_DLSE=grad_logsumexp is not None,
                 SCORE_MOD_VEC_SIZE=conf.score_mod_vec_size,
                 HAS_BLOCK_MASK=has_block_mask,
                 HAS_DQ_WRITE_ORDER=has_dq_write_order,
@@ -900,10 +953,10 @@ def create_flex_flash_attention_backward_kernel(
     input_gen_fns: dict[int, Callable] | None = None
     if has_block_mask:
         input_gen_fns = {
-            8: create_num_blocks_fake_generator(q_indices),
-            9: create_indices_fake,
-            10: create_num_blocks_fake_generator(full_q_indices),
-            11: create_indices_fake,
+            9: create_num_blocks_fake_generator(q_indices),
+            10: create_indices_fake,
+            11: create_num_blocks_fake_generator(full_q_indices),
+            12: create_indices_fake,
         }
 
     template_output, _ = autotune_select_algorithm(

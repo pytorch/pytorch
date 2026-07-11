@@ -218,10 +218,10 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-        _,  # dq_write_order (backward-only)
-        _,  # dq_write_order_full (backward-only)
-        _,  # dq_kv_order (backward-only)
-        _,  # dq_kv_order_spt (backward-only)
+        dq_write_order,
+        dq_write_order_full,
+        dq_kv_order,
+        dq_kv_order_spt,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -229,14 +229,49 @@ def flex_attention(
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
 
-    # Early check for FLASH backend: reject scalar captures that cannot be
-    # represented by flash-attn aux_scalars before building subgraph buffers.
-    if backend == "FLASH":
-        _check_flash_supported_scalar_captures(
-            score_mod_other_buffers, mask_mod_other_buffers
+    needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
+    missing_deterministic_dq_order = needs_block_mask and (
+        dq_write_order is None
+        or (full_q_num_blocks is not None and dq_write_order_full is None)
+        or (dq_kv_order is None and dq_kv_order_spt is None)
+    )
+    auto_flash_eligible = backend != "AUTO" or (
+        (
+            not needs_block_mask
+            or (
+                V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE) == 256
+                and V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE) == 128
+            )
         )
+        and all(
+            isinstance(buffer, sympy.Expr)
+            for buffer in list(score_mod_other_buffers) + list(mask_mod_other_buffers)
+        )
+        and not (
+            torch.are_deterministic_algorithms_enabled()
+            and missing_deterministic_dq_order
+        )
+    )
+    use_flash = auto_flash_eligible and _use_flex_flash_attention(
+        query,
+        key,
+        value,
+        subgraph,
+        mask_graph,
+        kernel_options,
+        num_score_mod_placeholders=5,
+        backend=backend,
+    )
+    if use_flash and has_unsupported_cpu_scalar_tensor_captures(
+        score_mod_other_buffers, mask_mod_other_buffers
+    ):
+        if backend == "FLASH":
+            _check_flash_supported_scalar_captures(
+                score_mod_other_buffers, mask_mod_other_buffers
+            )
+        use_flash = False
 
-    if backend == "FLASH":
+    if use_flash:
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
         mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
 
@@ -281,7 +316,9 @@ def flex_attention(
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
     )
-    use_decode = (backend == "TRITON_DECODE") or (backend == "AUTO" and can_use_decode)
+    use_decode = (backend == "TRITON_DECODE") or (
+        backend == "AUTO" and not use_flash and can_use_decode
+    )
 
     if backend == "TRITON_DECODE" and not can_use_decode:
         raise RuntimeError(
@@ -331,14 +368,8 @@ def flex_attention(
         ]
     )
 
-    if _use_flex_flash_attention(
-        subgraph,
-        mask_graph,
-        kernel_options,
-        num_score_mod_placeholders=len(placeholder_inps),
-        backend=backend,
-    ):
-        return create_flex_flash_attention_kernel(
+    if use_flash:
+        flash_out, flash_lse = create_flex_flash_attention_kernel(
             query,
             key,
             value,
@@ -358,6 +389,9 @@ def flex_attention(
             mask_graph=mask_graph,
             subgraph=subgraph,
         )
+        if backend == "AUTO":
+            flash_lse = lowerings[aten.mul.Scalar](flash_lse, 1 / math.log(2))
+        return flash_out, flash_lse
 
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
@@ -898,31 +932,63 @@ def flex_attention_backward(*args, **kwargs):
     )
     freeze_irnodes(mask_graph_buffer)
 
-    if _use_flex_flash_attention_backward(
+    needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
+    missing_deterministic_dq_order = needs_block_mask and (
+        dq_write_order is None
+        or (full_q_num_blocks is not None and dq_write_order_full is None)
+        or (dq_kv_order is None and dq_kv_order_spt is None)
+    )
+    auto_flash_eligible = backend != "AUTO" or (
+        (
+            not needs_block_mask
+            or (
+                V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE) == 256
+                and V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE) == 128
+            )
+        )
+        and all(
+            isinstance(buffer, sympy.Expr)
+            for buffer in list(score_mod_other_buffers) + list(mask_mod_other_buffers)
+        )
+        and not (
+            torch.are_deterministic_algorithms_enabled()
+            and missing_deterministic_dq_order
+        )
+    )
+    use_flash = auto_flash_eligible and _use_flex_flash_attention_backward(
+        query,
+        key,
+        value,
         fw_graph,
         mask_graph,
+        kernel_options,
         backend=backend,
         joint_outputs=joint_outputs,
         score_mod_other_buffers=score_mod_other_buffers,
-    ):
-        needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
-
-        # TODO: Implement dLSE support in flash-attention backward by folding
-        # grad_logsumexp into the dPsum preprocess step.
-        if grad_logsumexp is not None:
-            raise NotImplementedError(
-                "FLASH backend backward does not support differentiating through "
-                "logsumexp (dLSE). This happens when the loss depends on the LSE "
-                "output of flex_attention. "
-                "Use BACKEND='TRITON' or avoid differentiating through logsumexp."
-            )
+    )
+    if use_flash:
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
+        flash_logsumexp = logsumexp
+        flash_grad_logsumexp = grad_logsumexp
+        if backend == "AUTO":
+            flash_logsumexp = TensorBox(flash_logsumexp)
+            flash_logsumexp = lowerings[aten.mul.Scalar](flash_logsumexp, math.log(2))
+            flash_logsumexp = ExternKernel.require_contiguous(flash_logsumexp)
+            if flash_grad_logsumexp is not None:
+                flash_grad_logsumexp = TensorBox(flash_grad_logsumexp)
+                flash_grad_logsumexp = lowerings[aten.mul.Scalar](
+                    flash_grad_logsumexp, 1 / math.log(2)
+                )
+                flash_grad_logsumexp = ExternKernel.require_contiguous(
+                    flash_grad_logsumexp
+                )
         return create_flex_flash_attention_backward_kernel(
             query,
             key,
             value,
             out,
-            logsumexp,
+            flash_logsumexp,
+            flash_grad_logsumexp,
             grad_out,
             scale,
             kernel_options,
