@@ -539,12 +539,7 @@ graph():
 
         inputs = (torch.arange(10), torch.tensor(2))
 
-        # See https://github.com/pytorch/pytorch/issues/154574
-        # # Without transforming the unbacked int expression, we can't export.
-        # with self.assertRaisesRegex(
-        #     RuntimeError, escape("Could not guard on data-dependent expression")
-        # ):
-        #     export(Module(identity), inputs, strict=True)
+        export(Module(identity), inputs, strict=True)
 
         # It works if we transform the whole unbacked int expression into
         # an unbacked int.
@@ -1336,7 +1331,8 @@ def forward(self, x):
     _remove_batch_dim_1 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim, 3, 128, 0);  _remove_batch_dim = None
     _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
     _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0)
-    expand = torch.ops.aten.expand.default(_remove_batch_dim_1, [1, 128, 128]);  _remove_batch_dim_1 = expand = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(_remove_batch_dim_1, 0);  _remove_batch_dim_1 = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 128, 128]);  unsqueeze = expand = None
     _vmap_decrement_nesting_2 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
     _remove_batch_dim_3 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_2, 1, 2, 0);  _remove_batch_dim_2 = None
     _vmap_decrement_nesting_3 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
@@ -1378,13 +1374,13 @@ def forward(self, x):
     _add_batch_dim_7 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_5, 0, 2);  _add_batch_dim_5 = None
     new_zeros = torch.ops.aten.new_zeros.default(_add_batch_dim_7, [1, 2], dtype = torch.int32, pin_memory = False)
     arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
     arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
-    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_1);  arange_5 = unsqueeze_1 = None
+    unsqueeze_2 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
+    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_2);  arange_5 = unsqueeze_2 = None
     where = torch.ops.aten.where.ScalarOther(lt_1, _add_batch_dim_7, 1);  lt_1 = _add_batch_dim_7 = None
     new_ones = torch.ops.aten.new_ones.default(new_zeros, [], pin_memory = False)
-    index_put_ = torch.ops.aten.index_put_.default(new_zeros, [unsqueeze, where], new_ones);  new_zeros = unsqueeze = where = new_ones = None
+    index_put_ = torch.ops.aten.index_put_.default(new_zeros, [unsqueeze_1, where], new_ones);  new_zeros = unsqueeze_1 = where = new_ones = None
     slice_1 = torch.ops.aten.slice.Tensor(index_put_, 1, 0, 1);  index_put_ = None
     _remove_batch_dim_4 = torch._functorch.predispatch._remove_batch_dim(slice_1, 2, 1, 0);  slice_1 = None
     _vmap_decrement_nesting_4 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_4 = None
@@ -1409,13 +1405,13 @@ def forward(self, x):
     _add_batch_dim_11 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_9, 0, 2);  _add_batch_dim_9 = None
     new_zeros_1 = torch.ops.aten.new_zeros.default(_add_batch_dim_11, [1, 2], dtype = torch.int32, pin_memory = False)
     arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
+    unsqueeze_3 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
     arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    unsqueeze_3 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
-    lt_2 = torch.ops.aten.lt.Tensor(arange_7, unsqueeze_3);  arange_7 = unsqueeze_3 = None
+    unsqueeze_4 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
+    lt_2 = torch.ops.aten.lt.Tensor(arange_7, unsqueeze_4);  arange_7 = unsqueeze_4 = None
     where_1 = torch.ops.aten.where.ScalarOther(lt_2, _add_batch_dim_11, 1);  lt_2 = _add_batch_dim_11 = None
     new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [], pin_memory = False)
-    index_put__1 = torch.ops.aten.index_put_.default(new_zeros_1, [unsqueeze_2, where_1], new_ones_1);  new_zeros_1 = unsqueeze_2 = where_1 = new_ones_1 = None
+    index_put__1 = torch.ops.aten.index_put_.default(new_zeros_1, [unsqueeze_3, where_1], new_ones_1);  new_zeros_1 = unsqueeze_3 = where_1 = new_ones_1 = None
     slice_2 = torch.ops.aten.slice.Tensor(index_put__1, 1, 0, 1);  index_put__1 = None
     _remove_batch_dim_6 = torch._functorch.predispatch._remove_batch_dim(slice_2, 2, 1, 0);  slice_2 = None
     _vmap_decrement_nesting_6 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_6 = None
@@ -2160,9 +2156,15 @@ graph():
 
         f = Basic()
         args = (torch.randn(1, 3),)
-        # strict-mode will error out because foo is registered as parameter
-        # in dynamo (a behavior that's different from eager). We decided to
-        # follow eager behavior.
+        # foo is registered as a parameter in Dynamo, but not in eager.
+        # Follow eager behavior and treat it as a lifted tensor constant.
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        self.assertEqual(gm(*args), f(*args))
+
         ep = export(f, args, strict=False)
         gm = ep.module()
         self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
@@ -2180,6 +2182,46 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lifted_tensor_0), kwargs = {})
     return (add,)""",
         )
+
+    def test_strict_export_unregistered_module_list_parameters(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.ones(3, 3))
+
+            def forward(self, x):
+                return x + self.a
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.models = [A(), A()]
+
+            def forward(self, x):
+                for m in self.models:
+                    x = m(x)
+                return x
+
+        f = M()
+        args = (torch.ones(3, 3),)
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+
+        self.assertEqual(
+            [spec.kind for spec in ep.graph_signature.input_specs],
+            [
+                InputKind.CONSTANT_TENSOR,
+                InputKind.CONSTANT_TENSOR,
+                InputKind.USER_INPUT,
+            ],
+        )
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 2)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        for constant in ep.constants.values():
+            self.assertFalse(isinstance(constant, torch.nn.Parameter))
+        self.assertEqual(gm(*args), f(*args))
 
     def test_int_shape_specialization(self):
         class M(torch.nn.Module):
@@ -10762,6 +10804,40 @@ def forward(self, b_a_buffer, x):
                 1,
             )
 
+    # associative_scan is not supported by the cpp (NativeRT) runtime yet
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_pointwise_cpu(self):
+        # combine_mode="pointwise" only has Inductor codegen on backends with
+        # scan support (CUDA/XPU), but the device constraint is enforced in the
+        # lowering rather than the eager wrapper, so the HOP can be captured on
+        # other devices. See https://github.com/pytorch/pytorch/issues/186594.
+        def combine_fn(x, y):
+            return x + y
+
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+        xs = torch.randn(8, 4)
+
+        # A pure-eager (non-exported) CPU call runs via the generic fallback.
+        self.assertEqual(M()(xs), torch.cumsum(xs, dim=0))
+
+        # Export succeeds and retains the associative_scan HOP.
+        ep = export(M(), (xs,))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.associative_scan
+                for node in ep.graph_module.graph.nodes
+            ),
+            "exported graph should retain the associative_scan HOP",
+        )
+
+        # The exported program runs on CPU via the HOP's eager fallback and
+        # matches the reference scan.
+        self.assertEqual(ep.module()(xs), torch.cumsum(xs, dim=0))
+
     # scan is not supported in sigmoid yet
     @testing.expectedFailureCppRuntime
     def test_export_scan_pytree_output(self):
@@ -11117,6 +11193,33 @@ def forward(self, b_a_buffer, x):
         )
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
+
+    def test_export_decomps_linalg_vector_norm(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.vector_norm(x, ord=2, dim=1, keepdim=True)
+
+        inp = (torch.randn(2, 3),)
+        m = M()
+        ep = export(m, inp)
+        self.assertTrue(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in ep.graph.nodes
+            )
+        )
+
+        core_aten_ep = ep.run_decompositions()
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in core_aten_ep.graph.nodes
+            )
+        )
+        FileCheck().check("torch.ops.aten.pow.Tensor_Scalar").check(
+            "torch.ops.aten.sum.dim_IntList"
+        ).run(core_aten_ep.graph_module.code)
+        self.assertEqual(core_aten_ep.module()(*inp), m(*inp))
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):
@@ -14494,7 +14597,7 @@ graph():
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_opaque_obj(self):
         @dataclass(frozen=True)
-        class MyInput(torch._opaque_base.OpaqueBase):
+        class MyInput(torch._custom_class_base.CustomClassBase):
             int_1: int
             int_2: int
 
@@ -14511,7 +14614,7 @@ graph():
             def forward(self, x, f):
                 return x + f.int_1 + f.int_2
 
-        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        torch._library.opaque_object.register_custom_class(MyInput, typ="constant")
         self.addCleanup(
             lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
                 torch._C._unregister_opaque_type(name),

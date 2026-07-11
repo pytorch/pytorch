@@ -32,6 +32,12 @@ on:
         required: true
         type: string
         default: h100,b200
+      refresh_hf_cache:
+        description: |
+          Download models from HF (online) and sync the shared HF cache back to S3, instead of reading the offline cache. Scheduled runs always refresh.
+        required: false
+        type: boolean
+        default: false
   schedule:
     # Run daily at 5:15 AM PST
     - cron: '15 13 * * *'
@@ -43,7 +49,9 @@ concurrency:
 jobs:
   set-parameters:
     if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
-    runs-on: linux.c7i.2xlarge
+    runs-on: mt-l-x86iamx-8-16
+    container:
+      image: ghcr.io/actions/actions-runner:latest
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       docker_image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -86,20 +94,26 @@ jobs:
           ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
           show-progress: false
 
-      - name: Calculate docker image
+      - name: Compute docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        with:
-          working-directory: pytorch/pytorch
-          docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm
+        working-directory: pytorch/pytorch
+        shell: bash
+        run: |
+          set -eux
+          DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
+          IMAGE="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm-${DOCKER_TAG}"
+          echo "docker-image=${IMAGE}" >> "${GITHUB_OUTPUT}"
 
   build:
     name: Build PyTorch and vLLM
     needs:
       - set-parameters
+    permissions:
+      id-token: write
+      contents: read
     uses: ./.github/workflows/_vllm-build.yml
     with:
-      runner: linux.24xlarge.memory
+      runner: mt-l-x86iavx512-94-768
       docker_image: ${{ needs.set-parameters.outputs.docker_image }}
       build_environment: ${{ needs.set-parameters.outputs.build_environment }}
       pytorch_branch: ${{ inputs.pytorch_branch }}
@@ -127,5 +141,5 @@ jobs:
       pytorch_commit: ${{ inputs.pytorch_commit }}
       models: ${{ matrix.models }}
       compilation_config: ${{ inputs.compilation_config }}
-      is_nightly: ${{ github.event_name == 'schedule' }}
+      refresh_hf_cache: ${{ inputs.refresh_hf_cache || false }}
     secrets: inherit

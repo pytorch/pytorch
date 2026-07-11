@@ -1274,15 +1274,18 @@ class TritonKernelWrapperMutation(_TritonKernelWrapper):
         kwargs: dict[str, Any],
         launch_kwargs: tuple[str, ...] | None = None,
     ) -> Any:
+        hop_kwargs: dict[str, Any] = {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "tma_descriptor_metadata": tma_descriptor_metadata,
+            "kwargs": kwargs,
+        }
+        if launch_kwargs:
+            hop_kwargs["launch_kwargs"] = launch_kwargs
+
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            tma_descriptor_metadata=tma_descriptor_metadata,
-            kwargs=kwargs,
-            launch_kwargs=() if launch_kwargs is None else launch_kwargs,
-        )
+        return super().__call__(**hop_kwargs)
 
 
 triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
@@ -1303,16 +1306,19 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
         tensors_to_clone: list[str],
         launch_kwargs: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
+        hop_kwargs: dict[str, Any] = {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "tma_descriptor_metadata": tma_descriptor_metadata,
+            "kwargs": kwargs,
+            "tensors_to_clone": tensors_to_clone,
+        }
+        if launch_kwargs:
+            hop_kwargs["launch_kwargs"] = launch_kwargs
+
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            tma_descriptor_metadata=tma_descriptor_metadata,
-            kwargs=kwargs,
-            tensors_to_clone=tensors_to_clone,
-            launch_kwargs=() if launch_kwargs is None else launch_kwargs,
-        )
+        return super().__call__(**hop_kwargs)
 
 
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
@@ -1487,17 +1493,20 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
+    node_args: dict[str, Any] = {
+        "kernel_idx": kernel_idx,
+        "constant_args_idx": constant_args_idx,
+        "grid": grid,
+        "tma_descriptor_metadata": tma_descriptor_metadata,
+        "kwargs": kwargs,
+    }
+    if launch_kwargs:
+        node_args["launch_kwargs"] = launch_kwargs
+
     trace_triton_kernel_wrapper(
         mode,
         triton_kernel_wrapper_mutation,
-        {
-            "kernel_idx": kernel_idx,
-            "constant_args_idx": constant_args_idx,
-            "grid": grid,
-            "tma_descriptor_metadata": tma_descriptor_metadata,
-            "kwargs": kwargs,
-            "launch_kwargs": () if launch_kwargs is None else launch_kwargs,
-        },
+        node_args,
     )
 
     return None
@@ -1542,15 +1551,17 @@ def triton_kernel_wrapper_mutation_functionalize(
         kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
     )
     with ctx.redispatch_to_next():
-        unwrapped_outputs = triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            tma_descriptor_metadata=tma_descriptor_metadata,
-            kwargs=unwrapped_kwargs,
-            tensors_to_clone=tensors_to_clone,
-            launch_kwargs=() if launch_kwargs is None else launch_kwargs,
-        )
+        functional_kwargs: dict[str, Any] = {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "tma_descriptor_metadata": tma_descriptor_metadata,
+            "kwargs": unwrapped_kwargs,
+            "tensors_to_clone": tensors_to_clone,
+        }
+        if launch_kwargs:
+            functional_kwargs["launch_kwargs"] = launch_kwargs
+        unwrapped_outputs = triton_kernel_wrapper_functional(**functional_kwargs)
 
     if not set(unwrapped_outputs.keys()).issubset(set(kwargs.keys())):
         raise AssertionError(
@@ -1592,14 +1603,16 @@ def triton_kernel_wrapper_functional_dense(
         key: (clone_preserve_strides(val) if key in tensors_to_clone else val)
         for key, val in kwargs.items()
     }
-    triton_kernel_wrapper_mutation(
-        kernel_idx=kernel_idx,
-        constant_args_idx=constant_args_idx,
-        grid=grid,
-        tma_descriptor_metadata=tma_descriptor_metadata,
-        kwargs=kwargs,
-        launch_kwargs=() if launch_kwargs is None else launch_kwargs,
-    )
+    mutation_kwargs: dict[str, Any] = {
+        "kernel_idx": kernel_idx,
+        "constant_args_idx": constant_args_idx,
+        "grid": grid,
+        "tma_descriptor_metadata": tma_descriptor_metadata,
+        "kwargs": kwargs,
+    }
+    if launch_kwargs:
+        mutation_kwargs["launch_kwargs"] = launch_kwargs
+    triton_kernel_wrapper_mutation(**mutation_kwargs)
     return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
 
@@ -1637,18 +1650,21 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     tensors_to_clone: list[str],
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
+    node_args: dict[str, Any] = {
+        "kernel_idx": kernel_idx,
+        "constant_args_idx": constant_args_idx,
+        "grid": grid,
+        "tma_descriptor_metadata": tma_descriptor_metadata,
+        "kwargs": kwargs,
+        "tensors_to_clone": tensors_to_clone,
+    }
+    if launch_kwargs:
+        node_args["launch_kwargs"] = launch_kwargs
+
     ret = trace_triton_kernel_wrapper(
         mode,
         triton_kernel_wrapper_functional,
-        {
-            "kernel_idx": kernel_idx,
-            "constant_args_idx": constant_args_idx,
-            "grid": grid,
-            "tma_descriptor_metadata": tma_descriptor_metadata,
-            "kwargs": kwargs,
-            "tensors_to_clone": tensors_to_clone,
-            "launch_kwargs": () if launch_kwargs is None else launch_kwargs,
-        },
+        node_args,
     )
     if ret is None:
         raise AssertionError("trace_triton_kernel_wrapper returned None")
@@ -1668,15 +1684,17 @@ def triton_kernel_wrapper_functional_functionalize(
 ) -> dict[str, Any]:
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     with ctx.redispatch_to_next():
-        outputs = triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx,
-            constant_args_idx=constant_args_idx,
-            grid=grid,
-            tma_descriptor_metadata=tma_descriptor_metadata,
-            kwargs=unwrapped_kwargs,
-            tensors_to_clone=tensors_to_clone,
-            launch_kwargs=() if launch_kwargs is None else launch_kwargs,
-        )
+        functional_kwargs: dict[str, Any] = {
+            "kernel_idx": kernel_idx,
+            "constant_args_idx": constant_args_idx,
+            "grid": grid,
+            "tma_descriptor_metadata": tma_descriptor_metadata,
+            "kwargs": unwrapped_kwargs,
+            "tensors_to_clone": tensors_to_clone,
+        }
+        if launch_kwargs:
+            functional_kwargs["launch_kwargs"] = launch_kwargs
+        outputs = triton_kernel_wrapper_functional(**functional_kwargs)
         return ctx.wrap_tensors(outputs)  # type: ignore[return-value,arg-type]
 
 

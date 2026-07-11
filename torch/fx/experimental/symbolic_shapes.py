@@ -57,11 +57,11 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtrackingtensor
+from torch._custom_class_base import CustomClassBase
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-from torch._opaque_base import OpaqueBase
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
@@ -1007,7 +1007,7 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
     elif val is None:
         pass
     # see Note: [Generator arguments in AOTDispatcher]
-    elif isinstance(val, torch.Generator) or is_opaque_value(val):
+    elif isinstance(val, torch.Generator) or is_custom_class_obj(val):
         pass
     elif isinstance(val, FakeScriptObject):
         pass
@@ -1335,11 +1335,11 @@ def _free_unbacked_symbols_with_path(
         and not is_batchedtensor(a)
         and not is_gradtrackingtensor(a)
     ):
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import FakeTensor, maybe_get_real_tensor
 
         if not isinstance(a, FakeTensor):
             raise AssertionError(f"Expected FakeTensor, got {type(a)}")
-        match_tensor(a, a.real_tensor)
+        match_tensor(a, maybe_get_real_tensor(a))
     elif (
         isinstance(a, (torch.SymInt, torch.SymFloat))
         and isinstance(s := expr(a), sympy.Symbol)
@@ -6471,11 +6471,11 @@ class ShapeEnv:
                                     inner_context.constraint_strides,  # type: ignore[attr-defined]
                                 )
                             )
-                        case OpaqueBase():
+                        case CustomClassBase():
                             pass
                         case unexpected:
                             raise AssertionError(
-                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                                f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                             )
             else:
                 sources_tensors_constraints = [
@@ -7291,7 +7291,12 @@ class ShapeEnv:
         # axioms with compute hint NYE
         if compute_hint and axioms:
             raise AssertionError("compute_hint and axioms cannot both be set")
-        expr = self.simplify(expr, size_oblivious)
+        expr = self.simplify(
+            expr,
+            size_oblivious,
+            axioms=axioms,
+            var_to_range=var_to_range,
+        )
 
         if compute_hint:
             expr = expr.xreplace(self.backed_var_to_val).xreplace(
@@ -7394,7 +7399,14 @@ class ShapeEnv:
         self._update_version_counter()
 
     @_lru_cache
-    def simplify(self, expr: _SympyT, size_oblivious: bool = False) -> _SympyT:
+    def simplify(
+        self,
+        expr: _SympyT,
+        size_oblivious: bool = False,
+        *,
+        axioms: tuple[SympyBoolean] | None = None,
+        var_to_range: tuple[tuple[sympy.Symbol, ValueRanges[sympy.Expr]]] | None = None,
+    ) -> _SympyT:
         """Use known constraints and replacements to simplify the given expr"""
         expr = safe_expand(expr)
         expr = self.replace(expr)
@@ -7410,9 +7422,17 @@ class ShapeEnv:
                 if b == 1 or b == 0:
                     a, b = b, a
 
-                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1)):
+                if a == 1 and self._maybe_evaluate_static(
+                    sympy.Ge(b, 1),
+                    axioms=axioms,
+                    var_to_range=var_to_range,
+                ):
                     min_max_replacements[atom] = b
-                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
+                if a == 0 and self._maybe_evaluate_static(
+                    sympy.Ge(b, 0),
+                    axioms=axioms,
+                    var_to_range=var_to_range,
+                ):
                     min_max_replacements[atom] = b
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
@@ -9158,9 +9178,9 @@ def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
     shape_env = sym_node.shape_env
     if shape_env is None:
         raise AssertionError("shape_env is required for _get_placeholder_expr")
-    result = sym_node._expr
-    if result in shape_env.unbacked_renamings:
-        return shape_env.unbacked_renamings[result]
+    result = cast(sympy.Expr, sym_node._expr)
+    if shape_env.unbacked_renamings:
+        return result.xreplace(shape_env.unbacked_renamings)
     return result
 
 
