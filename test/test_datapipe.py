@@ -2892,7 +2892,7 @@ class TestGraph(TestCase):
         source_iter_dp = dp.iter.IterableWrapper(list(range(10)))
         circular_dp = TestGraph.CustomIterDataPipe(source_iter_dp)
         graph = traverse_dps(circular_dp)
-        # See issue: https://github.com/pytorch/data/issues/535
+        # Regression test for circular DataPipe traversal.
         expected: dict[Any, Any] = {
             id(circular_dp): (
                 circular_dp,
