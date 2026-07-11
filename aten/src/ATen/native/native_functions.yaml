@@ -11672,6 +11672,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_clone_slow
     CUDA: foreach_tensor_clone_cuda
+    XPU: foreach_tensor_clone_xpu
   autogen: _foreach_clone.out
 
 - func: _foreach_copy_(Tensor(a!)[] self, Tensor[] src, bool non_blocking=False) -> ()
