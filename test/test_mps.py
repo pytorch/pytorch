@@ -6621,6 +6621,41 @@ class TestMPS(TestCaseMPS):
         torch.clamp(mps_x, min=mps_min_t, max=mps_max_t, out=mps_out)
         self.assertEqual(mps_out.cpu(), cpu_out)
 
+    def test_clamp_tensor_bounds_flavor_parity(self):
+        # Exercises every ternary dispatch flavor (dense, dense_ilp,
+        # inner_contiguous, inner_strided, strided) against the CPU reference
+        # on the layouts each one serves, using the bench-only forcing knob to
+        # bypass the size thresholds.
+        def helper(x, min_t, max_t):
+            expect = torch.clamp(x, min=min_t, max=max_t)
+            for flavor in ["scalar", "strided", "ilp", "inner_contiguous", "inner_strided"]:
+                with self.subTest(dtype=x.dtype, flavor=flavor, shapes=(x.shape, min_t.shape)):
+                    os.environ["PYTORCH_TERNARY_FORCE_FLAVOR"] = flavor
+                    try:
+                        got = torch.clamp(x.to("mps"), min=min_t.to("mps"), max=max_t.to("mps"))
+                    finally:
+                        del os.environ["PYTORCH_TERNARY_FORCE_FLAVOR"]
+                    self.assertEqual(got.cpu(), expect)
+
+        for dtype in [torch.float32, torch.float16]:
+            x = torch.randn(8, 6, 17, dtype=dtype)
+            full = (torch.rand_like(x) - 0.75, torch.rand_like(x) + 0.75)
+            # dense contiguous, ragged tail (numel % 4 != 0)
+            helper(x, *full)
+            # NCHW-style channel bounds: {0, e, 0} strides (inner_strided)
+            helper(x, torch.randn(1, 6, 1, dtype=dtype) - 0.75, torch.randn(1, 6, 1, dtype=dtype) + 0.75)
+            # trailing-dim bounds: all operands unit-inner (inner_contiguous),
+            # inner extents around the ILP tile boundary
+            for inner in [15, 16, 17]:
+                xi = torch.randn(7, inner, dtype=dtype)
+                helper(xi, torch.randn(inner, dtype=dtype) - 0.75, torch.randn(inner, dtype=dtype) + 0.75)
+            # transposed input: pure layout mismatch, no broadcast
+            helper(x.transpose(0, 2), full[0].transpose(0, 2).contiguous(), full[1].transpose(0, 2).contiguous())
+            # 0-dim tensor bounds: 1D iterator with stride-0 operands
+            helper(x, torch.tensor(-0.5, dtype=dtype), torch.tensor(0.5, dtype=dtype))
+            # mixed dtype (cast kernels): float bounds on half/float input
+            helper(x, full[0].float(), full[1].float())
+
     def test_divmode(self):
         def helper(shape, rounding_mode):
             for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:

@@ -996,6 +996,32 @@ class BundledShaderLibrary : public MetalShaderLibrary {
 // Measured safe for both unary and binary, so a single shared value suffices.
 static constexpr int64_t INNER_CONTIGUOUS_MIN_EXTENT = 16;
 
+// Inner extent below which the generic per-element strided kernel is kept over
+// the inner_strided ILP tile. Measured on M-series with
+// benchmarks/mps/bench_ternary_infra.py --sweep (clamp, f32, stride-0 inner
+// bounds, numel 2^22): inner_strided wins 1.89-2.21x at every measured extent
+// down to 8; below 8 is unmeasured, so the per-element kernel keeps it.
+static constexpr int64_t INNER_STRIDED_MIN_EXTENT = 8;
+
+// True when every operand's innermost-dim stride is either 0 (broadcast) or
+// its element size (unit). This is the layout family where the inner_strided
+// tile's loads have locality and the flavor wins big (1.9-3.3x measured); on
+// large-stride inner runs (e.g. a transposed operand) the loads are scattered
+// gathers and inner_strided measures 4-7% BEHIND the 2D strided kernel, so
+// those layouts stay generic.
+static bool isInnerUnitOrBroadcast(const TensorIteratorBase& iter) {
+  if (iter.ndim() == 0) {
+    return false;
+  }
+  for (const auto i : c10::irange(iter.ntensors())) {
+    const auto s = iter.strides(i)[0];
+    if (s != 0 && s != static_cast<int64_t>(iter.element_size(i))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // True for a strided view whose innermost coalesced dim is unit-stride for every
 // operand, which the inner_contiguous kernels exploit.
 static bool isInnerContiguous(const TensorIteratorBase& iter) {
@@ -1582,7 +1608,11 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   });
 }
 
-void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name) {
+void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
+                                             const std::string& name,
+                                             const std::optional<c10::Scalar> alpha,
+                                             const std::optional<c10::ScalarType> scalar_arg_type,
+                                             const std::optional<uint32_t> ilp_threshold) {
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1594,11 +1624,12 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   }
 
   // Decompose 64-bit tensor into 32-bit ones. Must recurse into the ternary
-  // exec: a binary dispatch here would look up nonexistent 2-input kernel
-  // names for the 3-input op and fail at pipeline creation.
+  // exec (forwarding every option): a binary dispatch here would look up
+  // nonexistent 2-input kernel names for the 3-input op and fail at pipeline
+  // creation.
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_ternary_kernel(sub_iter, name);
+      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type, ilp_threshold);
     }
     return;
   }
@@ -1629,23 +1660,84 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   // the _cast_{out} instantiations read the runtime input types anyway.
   const auto cast_needed = (input.scalar_type() != other1.scalar_type()) ||
       (input.scalar_type() != other2.scalar_type()) || (input.scalar_type() != out.scalar_type());
-  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  const auto alpha_type = scalar_arg_type.value_or(alpha.has_value() ? alpha->type() : iter.common_dtype());
+  const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
+  const bool contig = iter.is_contiguous();
+  // Flavor selection, mirroring exec_binary_kernel. Every specialized flavor
+  // requires !alpha: the alpha family registers only the per-element
+  // dense/strided kernels.
+  // Dense ILP is strictly opt-in per call site: trivial-ALU bandwidth-bound
+  // functors pass a crossover threshold, std::nullopt disables the flavor.
+  bool dense_ilp = contig && !cast_needed && !alpha.has_value() && ilp_threshold.has_value() &&
+      iter.numel() >= static_cast<int64_t>(ilp_threshold.value());
+  // inner_contiguous: every operand is unit-stride in the innermost dim, so
+  // the ILP tile runs over typed consecutive (vectorizable) loads.
+  const bool ic_applicable = !contig && !cast_needed && !alpha.has_value() && isInnerContiguous(iter);
+  bool inner_contiguous = ic_applicable && iter.shape()[0] >= INNER_CONTIGUOUS_MIN_EXTENT;
+  // inner_strided: the kernel decodes the outer coordinate once per thread
+  // and walks the inner run by each operand's constant dim-0 stride. It is
+  // correct for any strided layout; selected by default (a) for the
+  // unit-or-broadcast inner family where its loads have locality (see
+  // isInnerUnitOrBroadcast) and (b) for every cast layout: cast loads pay a
+  // per-element runtime-type switch that dominates the gather cost, so the
+  // amortized decode wins even without locality (measured 1.07x clamp
+  // half-vs-float transposed, 1.48x where with a transposed operand vs the
+  // 2D strided_cast kernel). Non-cast layouts outside (a), e.g. a transposed
+  // operand, measure 4-7% behind the 2D strided kernel and stay generic. The
+  // nonzero output inner stride keeps tile lanes from storing to one
+  // address -- unreachable through public ops (TensorIterator rejects
+  // internal output overlap) but kept as a defensive gate.
+  const bool is_structural = !contig && !alpha.has_value() && iter.ndim() > 0 && iter.strides(0)[0] != 0;
+  bool inner_strided = is_structural && !inner_contiguous && (cast_needed || isInnerUnitOrBroadcast(iter)) &&
+      iter.shape()[0] >= INNER_STRIDED_MIN_EXTENT;
+  // Bench-only override (PYTORCH_TERNARY_FORCE_FLAVOR): pin a flavor for A/B.
+  // A force applies only where the flavor is structurally correct but
+  // bypasses its profitability gates (size thresholds, and the
+  // unit-or-broadcast layout gate for inner_strided); "scalar"/"strided" pin
+  // the per-element kernels.
+  if (auto force = c10::utils::get_env("PYTORCH_TERNARY_FORCE_FLAVOR")) {
+    const auto& fv = force.value();
+    if (fv == "scalar" || fv == "strided") {
+      dense_ilp = false;
+      inner_contiguous = false;
+      inner_strided = false;
+    } else if (fv == "ilp") {
+      dense_ilp = contig && !cast_needed && !alpha.has_value();
+    } else if (fv == "inner_contiguous") {
+      inner_contiguous = ic_applicable;
+      inner_strided = false;
+    } else if (fv == "inner_strided") {
+      inner_strided = is_structural;
+      inner_contiguous = false;
+    }
+  }
+  const char* suffix = contig ? (dense_ilp ? "dense_ilp" C10_METAL_ILP_PER_THREAD_STR : "dense")
+                              : (inner_contiguous ? "inner_contiguous" : (inner_strided ? "inner_strided" : "strided"));
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto kernel_name = cast_needed
-      ? fmt::format("{}_{}_cast_{}", name, suffix, scalarToMetalTypeString(out))
-      : fmt::format("{}_{}_{}_{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+      ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
+      : fmt::format(
+            "{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      auto binaryPSO = getPipelineStateForFunc(kernel_name);
+      auto ternaryPSO = getPipelineStateForFunc(kernel_name);
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other1, other2});
-      [computeEncoder setComputePipelineState:binaryPSO];
+      getMPSProfiler().beginProfileKernel(ternaryPSO, kernel_name, {input, other1, other2});
+      [computeEncoder setComputePipelineState:ternaryPSO];
       // Set input and output tensors
       bind_iter_tensors(computeEncoder, iter);
+      // Alpha rides at buffer 4 (right after the tensors); the shape/type
+      // extras shift to 5 in the _alpha kernel variants.
+      if (alpha) {
+        mtl_setArgs<4>(computeEncoder, getMPSScalar(*alpha, alpha_type));
+      }
       // Iterator is contiguous if all of its elements are dense in storage,
       // i.e. it's true for both row-first and column-first tensors
-      if (iter.is_contiguous()) {
+      if (contig) {
+        if (dense_ilp) {
+          mtl_setBytes(computeEncoder, static_cast<uint32_t>(iter.numel()), 4);
+        }
         if (cast_needed) {
           std::array<int, 3> sizes = {static_cast<int>(c10::elementSize(input.scalar_type())),
                                       static_cast<int>(c10::elementSize(other1.scalar_type())),
@@ -1653,27 +1745,63 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
           std::array<int, 3> types = {static_cast<int>(input.scalar_type()),
                                       static_cast<int>(other1.scalar_type()),
                                       static_cast<int>(other2.scalar_type())};
-          mtl_setArgs<4>(computeEncoder, sizes, types);
+          if (alpha) {
+            mtl_setArgs<5>(computeEncoder, sizes, types);
+          } else {
+            mtl_setArgs<4>(computeEncoder, sizes, types);
+          }
         }
+      } else if (inner_contiguous) {
+        const std::array<uint32_t, 2> packed = {static_cast<uint32_t>(iter.ndim() - 1),
+                                                static_cast<uint32_t>(iter.shape()[0])};
+        mtl_setBytes(computeEncoder, packed, bindInnerContiguousOuter(computeEncoder, iter, 4, {0, 1, 2, 3}));
       } else {
-        // Please note that shapes and strides of the iterator might be
-        // different than that of its operands, for example binary op
-        // between 4x4 tensor and scalar will result in 1D 16 element iterator
+        // Shared by inner_strided and the generic strided kernel: identical
+        // buffer tables (the non-cast kernels simply don't declare the types
+        // buffer). Please note that shapes and strides of the iterator might
+        // be different than that of its operands, for example a ternary op
+        // involving a scalar will result in a flat 1D iterator.
         std::array<int, 4> types = {static_cast<int>(input.scalar_type()),
                                     static_cast<int>(other1.scalar_type()),
                                     static_cast<int>(other2.scalar_type()),
                                     static_cast<int>(out.scalar_type())};
-        mtl_setArgs<4>(computeEncoder,
-                       iter.shape(),
-                       iter.strides(0),
-                       iter.strides(1),
-                       iter.strides(2),
-                       iter.strides(3),
-                       iter.ndim(),
-                       types);
+        if (alpha) {
+          mtl_setArgs<5>(computeEncoder,
+                         iter.shape(),
+                         iter.strides(0),
+                         iter.strides(1),
+                         iter.strides(2),
+                         iter.strides(3),
+                         iter.ndim(),
+                         types);
+        } else {
+          mtl_setArgs<4>(computeEncoder,
+                         iter.shape(),
+                         iter.strides(0),
+                         iter.strides(1),
+                         iter.strides(2),
+                         iter.strides(3),
+                         iter.ndim(),
+                         types);
+        }
       }
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
-      getMPSProfiler().endProfileKernel(binaryPSO);
+      if (inner_contiguous || inner_strided) {
+        const auto inner = static_cast<NSUInteger>(iter.shape()[0]);
+        const auto inner_tiles = (inner + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD;
+        mtl_dispatch2DJob(computeEncoder, ternaryPSO, inner_tiles, static_cast<NSUInteger>(iter.numel()) / inner);
+      } else if (!contig && !alpha) {
+        // 2D strided dispatch: thread_pos.x is the innermost coordinate,
+        // saving one div+mod per element in the kernel decode. The alpha
+        // strided kernels are still 1D, hence the !alpha above.
+        const auto inner = static_cast<NSUInteger>(iter.shape()[0]);
+        mtl_dispatch2DJob(computeEncoder, ternaryPSO, inner, static_cast<NSUInteger>(iter.numel()) / inner);
+      } else {
+        mtl_dispatch1DJob(
+            computeEncoder,
+            ternaryPSO,
+            dense_ilp ? (iter.numel() + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD : iter.numel());
+      }
+      getMPSProfiler().endProfileKernel(ternaryPSO);
     }
   });
 }

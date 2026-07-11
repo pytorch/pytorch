@@ -1437,13 +1437,19 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           uint tid)
 
 // Ternary elementwise ops kernels
-// Right now there are 4 flavors available:
-// - ternary_dense where both input, other1, other2, and output are dense and
-// share the same type
-// - ternary_strided when all inputs are of the same types, but some elements
-// are strided
-// - ternary_dense_cast - inputs are dense, but of different dtypes
-// - ternary_strided_cast - inputs or output are strided and of different dtypes
+// Flavors, mirroring the binary family above:
+// - ternary_dense: input, other1, other2, and output are all dense and share
+// the same type
+// - ternary_dense_ilp: dense ILP_PER_THREAD-wide tile; host-selected only when
+// the caller opts in via ilp_threshold (see exec_ternary_kernel)
+// - ternary_strided: same types, but some operand is strided
+// - ternary_inner_contiguous: strided, but the innermost dim is unit-stride
+// for every operand; runs the ILP tile over the contiguous inner run
+// - ternary_inner_strided: strided with any constant dim-0 strides (stride 0
+// for a broadcast input is fine); decodes the outer coordinate once per thread
+// and walks ILP_PER_THREAD elements of the inner run
+// - ternary_dense_cast / ternary_strided_cast / ternary_inner_strided_cast -
+// as above, but operands are of different dtypes
 // Note about accuracy (for more info see
 // https://github.com/pytorch/pytorch/issues/152736) Sometimes when kernel is
 // invoked to produce `half` output, but one of the arguments is float arguments
@@ -1463,11 +1469,11 @@ kernel void ternary_strided(
     constant long* other1_strides [[buffer(7)]],
     constant long* other2_strides [[buffer(8)]],
     constant uint& ndim [[buffer(9)]],
-    uint index [[thread_position_in_grid]]) {
+    uint2 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T, T>;
   int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim);
+  pos_from_thread_index(thread_pos, pos, sizes, ndim);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim);
   const auto other1_offs = offset_from_coord(pos, other1_strides, ndim);
   const auto other2_offs = offset_from_coord(pos, other2_strides, ndim);
@@ -1492,11 +1498,11 @@ kernel void ternary_strided_cast(
     constant long* other2_strides [[buffer(8)]],
     constant uint& ndim [[buffer(9)]],
     constant uint4& types [[buffer(10)]],
-    uint index [[thread_position_in_grid]]) {
+    uint2 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T, T>;
   int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim);
+  pos_from_thread_index(thread_pos, pos, sizes, ndim);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim);
   const auto other1_offs = offset_from_coord(pos, other1_strides, ndim);
   const auto other2_offs = offset_from_coord(pos, other2_strides, ndim);
@@ -1510,6 +1516,134 @@ kernel void ternary_strided_cast(
   ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a, b, c));
 }
 
+// Strided-ILP flavor: decode the outer coordinate once per thread, then walk
+// ILP_PER_THREAD elements of the innermost run via each operand's constant
+// dim-0 byte stride. Accepts any layout the generic strided kernel does
+// (a stride-0 broadcast input just re-reads the same address), amortizing the
+// per-element coordinate decode over the tile. Loads are per-element gathers
+// (not vectorizable), so the host applies a higher inner-extent gate than
+// inner_contiguous. The host guarantees a nonzero output dim-0 stride so tile
+// lanes never store to the same address. Buffer table matches ternary_strided.
+template <typename T, typename F, typename om_t = T>
+kernel void ternary_inner_strided(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other1 [[buffer(2)]],
+    constant void* other2 [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* output_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant long* other1_strides [[buffer(7)]],
+    constant long* other2_strides [[buffer(8)]],
+    constant uint& ndim [[buffer(9)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(uint2(0, thread_pos.y), pos, sizes, ndim);
+  const auto out_base = offset_from_coord(pos, output_strides, ndim);
+  const auto in_base = offset_from_coord(pos, input_strides, ndim);
+  const auto o1_base = offset_from_coord(pos, other1_strides, ndim);
+  const auto o2_base = offset_from_coord(pos, other2_strides, ndim);
+  const int out_s = int(output_strides[0]);
+  const int in_s = int(input_strides[0]);
+  const int o1_s = int(other1_strides[0]);
+  const int o2_s = int(other2_strides[0]);
+  const int inner = int(sizes[0]);
+  const int base = int(thread_pos.x) * ILP_PER_THREAD;
+  if (base + int(ILP_PER_THREAD) <= inner) {
+    array<T, ILP_PER_THREAD> ta;
+    array<T, ILP_PER_THREAD> tb;
+    array<T, ILP_PER_THREAD> tc;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      const int i = base + int(j);
+      ta[j] = val_at_offs<T>(input, in_base + i * in_s);
+      tb[j] = val_at_offs<T>(other1, o1_base + i * o1_s);
+      tc[j] = val_at_offs<T>(other2, o2_base + i * o2_s);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      ref_at_offs<res_t>(output, out_base + (base + int(j)) * out_s) =
+          static_cast<res_t>(f(om_t(ta[j]), om_t(tb[j]), om_t(tc[j])));
+    }
+  } else {
+    for (int i = base; i < inner; ++i) {
+      const auto a = val_at_offs<T>(input, in_base + i * in_s);
+      const auto b = val_at_offs<T>(other1, o1_base + i * o1_s);
+      const auto c = val_at_offs<T>(other2, o2_base + i * o2_s);
+      ref_at_offs<res_t>(output, out_base + i * out_s) =
+          static_cast<res_t>(f(om_t(a), om_t(b), om_t(c)));
+    }
+  }
+}
+
+// Cast variant of ternary_inner_strided: operands are read at their runtime
+// dtypes (types.x/y/z) into om_t. There is deliberately no
+// ternary_inner_contiguous_cast: runtime-typed loads go through a per-element
+// switch and cannot vectorize, so this kernel is the single cast-side fast
+// path for unit-inner layouts too.
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void ternary_inner_strided_cast(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other1 [[buffer(2)]],
+    constant void* other2 [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* output_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant long* other1_strides [[buffer(7)]],
+    constant long* other2_strides [[buffer(8)]],
+    constant uint& ndim [[buffer(9)]],
+    constant uint4& types [[buffer(10)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(uint2(0, thread_pos.y), pos, sizes, ndim);
+  const auto out_base = offset_from_coord(pos, output_strides, ndim);
+  const auto in_base = offset_from_coord(pos, input_strides, ndim);
+  const auto o1_base = offset_from_coord(pos, other1_strides, ndim);
+  const auto o2_base = offset_from_coord(pos, other2_strides, ndim);
+  const int out_s = int(output_strides[0]);
+  const int in_s = int(input_strides[0]);
+  const int o1_s = int(other1_strides[0]);
+  const int o2_s = int(other2_strides[0]);
+  const int inner = int(sizes[0]);
+  const int base = int(thread_pos.x) * ILP_PER_THREAD;
+  if (base + int(ILP_PER_THREAD) <= inner) {
+    array<om_t, ILP_PER_THREAD> ta;
+    array<om_t, ILP_PER_THREAD> tb;
+    array<om_t, ILP_PER_THREAD> tc;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      const int i = base + int(j);
+      ta[j] = val_at_offs<om_t>(
+          input, in_base + i * in_s, static_cast<ScalarType>(types.x));
+      tb[j] = val_at_offs<om_t>(
+          other1, o1_base + i * o1_s, static_cast<ScalarType>(types.y));
+      tc[j] = val_at_offs<om_t>(
+          other2, o2_base + i * o2_s, static_cast<ScalarType>(types.z));
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      ref_at_offs<res_t>(output, out_base + (base + int(j)) * out_s) =
+          static_cast<res_t>(f(ta[j], tb[j], tc[j]));
+    }
+  } else {
+    for (int i = base; i < inner; ++i) {
+      const auto a = val_at_offs<om_t>(
+          input, in_base + i * in_s, static_cast<ScalarType>(types.x));
+      const auto b = val_at_offs<om_t>(
+          other1, o1_base + i * o1_s, static_cast<ScalarType>(types.y));
+      const auto c = val_at_offs<om_t>(
+          other2, o2_base + i * o2_s, static_cast<ScalarType>(types.z));
+      ref_at_offs<res_t>(output, out_base + i * out_s) =
+          static_cast<res_t>(f(a, b, c));
+    }
+  }
+}
+
 template <typename T, typename F, typename om_t = opmath_t<T>>
 kernel void ternary_dense(
     device result_of<F, T, T, T>* out [[buffer(0)]],
@@ -1521,6 +1655,114 @@ kernel void ternary_dense(
   using res_t = result_of<F, T, T, T>;
   out[tid] = static_cast<res_t>(
       f(om_t(input[tid]), om_t(other1[tid]), om_t(other2[tid])));
+}
+
+// ILP variant of ternary_dense; mirrors binary_dense_ilp. Selected by the
+// host only when the caller opts in via ilp_threshold (see
+// exec_ternary_kernel). The host-side kernel name encodes the unroll width
+// (e.g. `..._dense_ilp4_...`) so future variants (ilp8, etc.) can coexist.
+template <
+    typename T,
+    typename F,
+    typename om_t = opmath_t<T>,
+    unsigned ILP = ILP_PER_THREAD>
+kernel void ternary_dense_ilp(
+    device result_of<F, T, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other1 [[buffer(2)]],
+    constant T* other2 [[buffer(3)]],
+    constant uint& numel [[buffer(4)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T>;
+  uint base = index * ILP;
+  if (base + ILP <= numel) {
+    array<T, ILP> ta;
+    array<T, ILP> tb;
+    array<T, ILP> tc;
+    array<res_t, ILP> to;
+#pragma unroll
+    for (uint j = 0; j < ILP; ++j) {
+      ta[j] = input[base + j];
+      tb[j] = other1[base + j];
+      tc[j] = other2[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP; ++j) {
+      to[j] = static_cast<res_t>(f(om_t(ta[j]), om_t(tb[j]), om_t(tc[j])));
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP; ++j) {
+      out[base + j] = to[j];
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      out[i] = static_cast<res_t>(
+          f(om_t(input[i]), om_t(other1[i]), om_t(other2[i])));
+    }
+  }
+}
+
+// Inner-contiguous ternary: like binary_inner_contiguous, but with a third
+// operand. All four operands are unit-stride in dim 0, so the ILP tile runs
+// over typed consecutive loads that the compiler can vectorize.
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void ternary_inner_contiguous(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other1 [[buffer(2)]],
+    constant void* other2 [[buffer(3)]],
+    constant long* outer_sizes [[buffer(4)]],
+    constant long* output_outer_strides [[buffer(5)]],
+    constant long* input_outer_strides [[buffer(6)]],
+    constant long* other1_outer_strides [[buffer(7)]],
+    constant long* other2_outer_strides [[buffer(8)]],
+    constant uint2& ndim_outer_inner [[buffer(9)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T>;
+  const uint ndim_outer = ndim_outer_inner.x;
+  const uint inner = ndim_outer_inner.y;
+  int pos[max_ndim];
+  pos_from_thread_index(int(thread_pos.y), pos, outer_sizes, ndim_outer);
+  const auto out_base =
+      offset_from_coord(pos, output_outer_strides, ndim_outer);
+  const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
+  const auto o1_base = offset_from_coord(pos, other1_outer_strides, ndim_outer);
+  const auto o2_base = offset_from_coord(pos, other2_outer_strides, ndim_outer);
+  device res_t* out = reinterpret_cast<device res_t*>(
+      static_cast<device char*>(output) + out_base);
+  constant T* a = reinterpret_cast<constant T*>(
+      static_cast<constant char*>(input) + in_base);
+  constant T* b = reinterpret_cast<constant T*>(
+      static_cast<constant char*>(other1) + o1_base);
+  constant T* c = reinterpret_cast<constant T*>(
+      static_cast<constant char*>(other2) + o2_base);
+  uint base = thread_pos.x * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= inner) {
+    array<T, ILP_PER_THREAD> ta;
+    array<T, ILP_PER_THREAD> tb;
+    array<T, ILP_PER_THREAD> tc;
+    array<res_t, ILP_PER_THREAD> to;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      ta[j] = a[base + j];
+      tb[j] = b[base + j];
+      tc[j] = c[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      to[j] = static_cast<res_t>(f(om_t(ta[j]), om_t(tb[j]), om_t(tc[j])));
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      out[base + j] = to[j];
+    }
+  } else {
+    for (uint j = base; j < inner; ++j) {
+      out[j] = static_cast<res_t>(f(om_t(a[j]), om_t(b[j]), om_t(c[j])));
+    }
+  }
 }
 
 template <typename T, typename F, typename om_t = T>
@@ -1561,7 +1803,7 @@ kernel void ternary_dense_cast(
           constant long* other1_strides,                                       \
           constant long* other2_strides,                                       \
           constant uint& ndim,                                                 \
-          uint tid);                                                           \
+          uint2 tid);                                                          \
   template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
       metal::ternary_strided_cast<DTYPEI, NAME##_functor, OMT>(                \
           device void* out,                                                    \
@@ -1575,7 +1817,50 @@ kernel void ternary_dense_cast(
           constant long* other2_strides,                                       \
           constant uint& ndim,                                                 \
           constant uint4& types,                                               \
-          uint tid);                                                           \
+          uint2 tid);                                                          \
+  template [[host_name(#NAME "_inner_strided_" #DTYPEO "_" #DTYPEI)]]          \
+  kernel void ::c10::metal::                                                   \
+      ternary_inner_strided<DTYPEI, NAME##_functor, OMT>(                      \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant void* other1,                                               \
+          constant void* other2,                                               \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant long* other1_strides,                                       \
+          constant long* other2_strides,                                       \
+          constant uint& ndim,                                                 \
+          uint2 tid);                                                          \
+  template [[host_name(#NAME "_inner_strided_cast_" #DTYPEI)]]                 \
+  kernel void ::c10::metal::                                                   \
+      ternary_inner_strided_cast<DTYPEI, NAME##_functor, OMT>(                 \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant void* other1,                                               \
+          constant void* other2,                                               \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant long* other1_strides,                                       \
+          constant long* other2_strides,                                       \
+          constant uint& ndim,                                                 \
+          constant uint4& types,                                               \
+          uint2 tid);                                                          \
+  template [[host_name(#NAME "_inner_contiguous_" #DTYPEO "_" #DTYPEI)]]       \
+  kernel void ::c10::metal::                                                   \
+      ternary_inner_contiguous<DTYPEI, NAME##_functor, OMT>(                   \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant void* other1,                                               \
+          constant void* other2,                                               \
+          constant long* outer_sizes,                                          \
+          constant long* output_outer_strides,                                 \
+          constant long* input_outer_strides,                                  \
+          constant long* other1_outer_strides,                                 \
+          constant long* other2_outer_strides,                                 \
+          constant uint2& ndim_outer_inner,                                    \
+          uint2 tid);                                                          \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
       c10::metal::ternary_dense<DTYPEI, NAME##_functor, OMT>(                  \
           device ::c10::metal::                                                \
@@ -1584,6 +1869,17 @@ kernel void ternary_dense_cast(
           constant DTYPEI * input_,                                            \
           constant DTYPEI * other1_,                                           \
           constant DTYPEI * other2_,                                           \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_ilp" C10_METAL_ILP_PER_THREAD_STR         \
+                             "_" #DTYPEO "_" #DTYPEI)]] kernel void ::c10::    \
+      metal::ternary_dense_ilp<DTYPEI, NAME##_functor, OMT>(                   \
+          device ::c10::metal::                                                \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI> *          \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI * other1_,                                           \
+          constant DTYPEI * other2_,                                           \
+          constant uint & numel,                                               \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
       metal::ternary_dense_cast<DTYPEI, NAME##_functor, OMT>(                  \
