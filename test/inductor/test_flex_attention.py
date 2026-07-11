@@ -7247,13 +7247,26 @@ class TestBlockMask(InductorTestCase):
         super().setUp()
 
     @supported_platform
+    def test_default_block_size(self, device):
+        block_mask = create_block_mask(_causal_mask, 1, 1, 512, 512, device=device)
+        expected = (
+            (256, 128)
+            if torch.device(device).type == "cuda"
+            and torch.cuda.get_device_capability(device)[0] == 10
+            else (128, 128)
+        )
+        self.assertEqual(block_mask.BLOCK_SIZE, expected)
+
+    @supported_platform
     def test_block_mask_attributes(self, device):
         offset = torch.zeros(8, device=device)
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048, device=device)
+        block_mask = create_block_mask(
+            causal_mask, 4, 2, 2048, 2048, device=device, BLOCK_SIZE=128
+        )
         self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
         self.assertEqual(block_mask[0].shape, (1, 2, 2048, 2048))
         self.assertEqual(block_mask[0, 0].shape, (1, 1, 2048, 2048))
@@ -7264,7 +7277,9 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), block_mask[1].sparsity())
 
         offset = torch.arange(8, device=device)
-        block_mask = create_block_mask(causal_mask, 8, 1, 2048, 2048, device=device)
+        block_mask = create_block_mask(
+            causal_mask, 8, 1, 2048, 2048, device=device, BLOCK_SIZE=128
+        )
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
@@ -7386,7 +7401,9 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device=device)
+        block_mask = create_block_mask(
+            causal_mask, 4, 2, 512, 512, device=device, BLOCK_SIZE=128
+        )
         if block_mask.kv_num_blocks.shape != (4, 2, 4):
             raise AssertionError(
                 f"Expected shape (4, 2, 4), got {block_mask.kv_num_blocks.shape}"
@@ -7626,7 +7643,7 @@ class TestBlockMask(InductorTestCase):
             return (q >= kv) & (seq[q] == seq[kv])
 
         block_mask = torch.compile(create_block_mask, fullgraph=True)(
-            mask_mod, 1, 1, 512, 512, device=device
+            mask_mod, 1, 1, 512, 512, device=device, BLOCK_SIZE=128
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
@@ -7639,7 +7656,7 @@ class TestBlockMask(InductorTestCase):
 
         torch._dynamo.reset()
         block_mask = torch.compile(create_block_mask)(
-            mask_mod, 2, 4, 1024, 1024, device=device
+            mask_mod, 2, 4, 1024, 1024, device=device, BLOCK_SIZE=128
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
@@ -7648,7 +7665,7 @@ class TestBlockMask(InductorTestCase):
 
         # automatic dynamic shapes triggered and recompilation.
         block_mask = torch.compile(create_block_mask)(
-            mask_mod, 4, 8, 2048, 2048, device=device
+            mask_mod, 4, 8, 2048, 2048, device=device, BLOCK_SIZE=128
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
@@ -7657,7 +7674,7 @@ class TestBlockMask(InductorTestCase):
 
         # no recompilation.
         block_mask = torch.compile(create_block_mask)(
-            mask_mod, 6, 16, 3072, 3072, device=device
+            mask_mod, 6, 16, 3072, 3072, device=device, BLOCK_SIZE=128
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
@@ -7669,7 +7686,9 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device)
+        block_mask = create_block_mask(
+            causal_mask, 1, 1, 2048, 2048, device=device, BLOCK_SIZE=128
+        )
 
         def replace_non_printable(s):
             def replace(c):
@@ -7711,7 +7730,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             return (q + offset[b] * 128) >= kv
 
         block_mask = create_block_mask(
-            causal_offset_mask, 8, 1, 2048, 2048, device=device
+            causal_offset_mask, 8, 1, 2048, 2048, device=device, BLOCK_SIZE=128
         )
         str_block_mask = str(block_mask)
         self.assertTrue("sparsity=29.10" in str_block_mask)
@@ -8154,7 +8173,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         ) -> torch.Tensor:
             return q >= kv
 
-        block_mask = create_block_mask(causal, B, H, S, S, device=device)
+        block_mask = create_block_mask(
+            causal, B, H, S, S, device=device, BLOCK_SIZE=128
+        )
         out = torch.compile(flex_attention)(
             q, k, v, score_mod=score_mod, block_mask=block_mask
         )
@@ -8190,7 +8211,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         ) -> torch.Tensor:
             return q >= kv
 
-        block_mask = create_block_mask(causal, B, H, S, S, device=device)
+        block_mask = create_block_mask(
+            causal, B, H, S, S, device=device, BLOCK_SIZE=128
+        )
         out = torch.compile(flex_attention, backend="inductor")(
             q, k, v, score_mod=score_mod, block_mask=block_mask
         )
@@ -8224,7 +8247,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         ) -> torch.Tensor:
             return q >= kv
 
-        block_mask = create_block_mask(causal, B, H, S, S, device=device)
+        block_mask = create_block_mask(
+            causal, B, H, S, S, device=device, BLOCK_SIZE=128
+        )
         out = torch.compile(flex_attention, backend="inductor")(
             q, k, v, score_mod=score_mod, block_mask=block_mask
         )

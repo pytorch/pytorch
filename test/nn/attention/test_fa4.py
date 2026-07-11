@@ -22,8 +22,15 @@ def _fa4_dependencies_available() -> bool:
         return False
     try:
         importlib.import_module("flash_attn.cute.interface")
-    except ModuleNotFoundError:
-        return False
+    except ModuleNotFoundError as error:
+        if error.name and error.name.split(".")[0] in {
+            "cuda",
+            "cutlass",
+            "flash_attn",
+            "tvm_ffi",
+        }:
+            return False
+        raise
     return True
 
 
@@ -140,6 +147,8 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
                         dtype=torch.float32,
                         device=device,
                     ),
+                    None,
+                    None,
                 )
                 mock_module._flash_attn_bwd.return_value = (
                     torch.randn_like(q_transposed),
