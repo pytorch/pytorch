@@ -1928,7 +1928,7 @@ def create_block_mask(
     Q_LEN: int,
     KV_LEN: int,
     device: DeviceLikeType | None = None,
-    BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
+    BLOCK_SIZE: int | tuple[int, int] | None = None,
     _compile=False,
     separate_full_blocks: bool = True,
     compute_dq_write_order: bool = False,
@@ -1988,6 +1988,14 @@ def create_block_mask(
         B = 1
     if H is None:
         H = 1
+    if BLOCK_SIZE is None:
+        block_device = torch.device(device)
+        BLOCK_SIZE = (
+            (256, _DEFAULT_SPARSE_BLOCK_SIZE)
+            if block_device.type == "cuda"
+            and torch.cuda.get_device_capability(block_device)[0] == 10
+            else _DEFAULT_SPARSE_BLOCK_SIZE
+        )
     if isinstance(BLOCK_SIZE, int):
         Q_BLOCK_SIZE = BLOCK_SIZE
         KV_BLOCK_SIZE = BLOCK_SIZE
