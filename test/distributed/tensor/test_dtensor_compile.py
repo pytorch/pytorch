@@ -2753,7 +2753,7 @@ class outer_fn(torch.nn.Module):
         h1 = dt._stable_hash_for_caching()
         self.assertNotEqual(h0, h1)
 
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
     def test_stable_hash_for_caching_cuda_ranks(self):
         # Exercise the exact scenario from #188390: two DTensors with identical
         # global specs but local tensors on cuda:0 vs cuda:1 must produce
