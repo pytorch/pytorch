@@ -7138,6 +7138,11 @@ class Scheduler:
         producer domain [B, S, H] makes its read dependency match the producer
         write while preserving the final contiguous output store.
         """
+        # Note [Targeted transpose-contiguous clone reindexing]
+        # This intentionally matches only the common attention layout above when
+        # its sizes and index polynomials can be proven statically. Other layouts
+        # fail closed; broader matching belongs in the general reindexing machinery
+        # rather than as additional special cases here.
         if not isinstance(node2, SchedulerNode):
             return -1
 
