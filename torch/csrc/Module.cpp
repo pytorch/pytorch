@@ -15,6 +15,7 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/FakeTensorDispatchTables.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
 
@@ -1455,6 +1456,31 @@ static PyObject* THPModule_allowTF32CuBLAS(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setPreferCublasltGroupedGemm(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_prefer_cublaslt_grouped_gemm expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setPreferCublasltGroupedGemm(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_preferCublasltGroupedGemm(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().preferCublasltGroupedGemm()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* args) {
@@ -2162,6 +2188,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_warn_deprecation", THPModule_warnDeprecation, METH_NOARGS, nullptr},
     {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS, nullptr},
     {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O, nullptr},
+    {"_get_cublaslt_prefer_grouped_gemm",
+     THPModule_preferCublasltGroupedGemm,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cublaslt_prefer_grouped_gemm",
+     THPModule_setPreferCublasltGroupedGemm,
+     METH_O,
+     nullptr},
     {"_get_float32_matmul_precision",
      THPModule_float32MatmulPrecision,
      METH_NOARGS,
@@ -2657,6 +2691,33 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
+
+  {
+    using at::impl::FakeDispatchCategory;
+    auto add_for = [](FakeDispatchCategory category) {
+      return [category](const std::string& name, const std::string& overload) {
+        at::impl::fakeDispatchTableAdd(
+            category, c10::OperatorName(name, overload));
+      };
+    };
+    py_module.def(
+        "_fake_dispatch_register_decomp",
+        add_for(FakeDispatchCategory::Decomp));
+    py_module.def(
+        "_fake_dispatch_register_meta", add_for(FakeDispatchCategory::Meta));
+    py_module.def(
+        "_fake_dispatch_register_op_impl",
+        add_for(FakeDispatchCategory::OpImpl));
+    py_module.def(
+        "_fake_dispatch_register_prim_meta",
+        add_for(FakeDispatchCategory::PrimMeta));
+    py_module.def(
+        "_fake_dispatch_deregister_op_impl",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::OpImpl, c10::OperatorName(name, overload));
+        });
+  }
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def(
