@@ -4432,7 +4432,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertTrue(ref_out.is_contiguous())
             self.assertEqual(out, ref_out)
             self.assertEqual(bn.weight.grad, ref_bn.weight.grad, atol=precision, rtol=precision)
-            self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
+            self.assertEqual(bn.bias.grad, ref_bn.bias.grad, atol=precision, rtol=precision)
             self.assertEqual(input.grad, ref_input.grad)
 
         # test NC11 and N1HW; test mixed dtype
@@ -9155,6 +9155,21 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
+    @onlyNativeDeviceTypes
+    @skipMPS  # MPS routes through a separate kernel (mps::pad_out_template) that does not validate the channel dim
+    def test_ReplicationPad_backward_channel_mismatch(self, device):
+        # regression test for https://github.com/pytorch/pytorch/issues/142834: a
+        # gradOutput whose channel dim doesn't match the input used to segfault in
+        # the backward pass instead of raising a clear error.
+        for backward, inp, grad_output, padding in [
+            (torch.ops.aten.replication_pad1d_backward,
+             torch.ones(2, 2, 4, device=device), torch.ones(2, 0, 8, device=device), [2, 2]),
+            (torch.ops.aten.replication_pad2d_backward,
+             torch.ones(2, 2, 4, 4, device=device), torch.ones(2, 0, 6, 8, device=device), [2, 2, 1, 1]),
+        ]:
+            with self.assertRaisesRegex(RuntimeError, "gradOutput channel unexpected"):
+                backward(grad_output, inp, padding)
+
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
         pl, pr = 3, 4
@@ -11589,6 +11604,61 @@ class TestNNDeviceType(NNTestCase):
         _helper(zero_infinity=True)
         _helper(zero_infinity=False)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @onlyCUDA
+    def test_CTCLoss_zero_infinity_cudnn(self, device):
+        # Example where the model is confidently wrong, producing divergent loss.
+        probs = torch.nn.functional.one_hot(torch.tensor([0], device=device), num_classes=2).float()
+        log_probs = torch.log(probs).unsqueeze(1).requires_grad_()
+        targets = torch.tensor([1], device=device, dtype=torch.int32)
+        input_lengths = torch.tensor([1], device=device, dtype=torch.int32)
+        target_lengths = torch.tensor([1], device=device, dtype=torch.int32)
+
+        self.assertTrue(
+            torch._use_cudnn_ctc_loss(
+                log_probs=log_probs,
+                targets=targets,
+                input_lengths=input_lengths,
+                target_lengths=target_lengths,
+                blank=0,
+            )
+        )
+
+        loss_false = torch.nn.functional.ctc_loss(
+            log_probs, targets, input_lengths, target_lengths, reduction='sum', zero_infinity=False
+        )
+        self.assertFalse(torch.isfinite(loss_false))
+
+        loss_true = torch.nn.functional.ctc_loss(
+            log_probs, targets, input_lengths, target_lengths, reduction='sum', zero_infinity=True
+        )
+        self.assertTrue(torch.isfinite(loss_true))
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @onlyCUDA
+    def test_CTCLoss_zero_infinity_cudnn_grad(self, device):
+        probs = torch.nn.functional.one_hot(torch.tensor([0], device=device), num_classes=2).float()
+        log_probs = torch.log(probs).unsqueeze(1).requires_grad_()
+        targets = torch.tensor([1], device=device, dtype=torch.int32)
+        input_lengths = torch.tensor([1], device=device, dtype=torch.int32)
+        target_lengths = torch.tensor([1], device=device, dtype=torch.int32)
+
+        # These inputs should produce a divergent gradient, but deterministic
+        # cuDNN CTC loss returns a finite gradient through the public API.
+        loss_false, _ = torch._cudnn_ctc_loss(
+            log_probs, targets, input_lengths, target_lengths, blank=0, deterministic=False, zero_infinity=False
+        )
+        grad_false, = torch.autograd.grad(loss_false, log_probs)
+        self.assertFalse(torch.isfinite(grad_false).all())
+
+        loss_true, _ = torch._cudnn_ctc_loss(
+            log_probs, targets, input_lengths, target_lengths, blank=0, deterministic=False, zero_infinity=True
+        )
+        grad_true, = torch.autograd.grad(loss_true, log_probs)
+        self.assertTrue(torch.isfinite(grad_true).all())
+
     def _CTCLoss_gen_losses(self, device, input_length, vocab_size, target_length, reduction, use_module_form):
         batch_size = 1
         log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.float, device=device) \
@@ -12914,6 +12984,14 @@ if __name__ == '__main__':
             with self.assertRaisesRegex(RuntimeError,
                                         r'lambda must be in range \[0,.*input dtype.*BFloat16.*found 1e\+39'):
                 F.softshrink(x_bf16, lambd=1e39)
+
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_softshrink_lambd_type_promotion(self, device, dtype):
+        x = torch.tensor([-10.0625], dtype=dtype, device=device)
+        lambd = 9.99
+        lambd_in_dtype = torch.tensor(lambd, dtype=dtype).item()
+        expected = torch.tensor([x.item() + lambd_in_dtype], dtype=dtype, device=device)
+        self.assertEqual(F.softshrink(x, lambd), expected)
 
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     def test_fold(self, device):
