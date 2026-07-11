@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from functools import lru_cache
@@ -258,10 +259,10 @@ def unzip_artifact_and_replace_files() -> None:
         # Remove the old wheel (which is now a zip file)
         os.remove(zip_path)
 
-        # Copy python files into the artifact
-        subprocess.check_output(
-            ["rsync", "-avz", "torch", f"artifacts/dist/{old_stem}"],
-        )
+        # Copy python files into the artifact. Use shutil rather than rsync so
+        # the script works on container images that don't ship rsync (e.g. the
+        # OSDC ARC builder image).
+        shutil.copytree("torch", f"artifacts/dist/{old_stem}/torch", dirs_exist_ok=True)
 
         change_content_to_new_version(f"artifacts/dist/{old_stem}/torch/version.py")
 

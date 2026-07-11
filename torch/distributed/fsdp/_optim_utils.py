@@ -226,9 +226,7 @@ def _communicate_optim_state(
             # has the same shape as the sharded flat parameter
             buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
             tensor_buffer = value.new_zeros(*buffer_size)
-            dist.all_gather_into_tensor(
-                tensor_buffer, value, group=fsdp_state.process_group
-            )
+            dist.all_gather_single(tensor_buffer, value, group=fsdp_state.process_group)
             fsdp_state._device_handle.synchronize()
             unpadded_numel = cast(
                 nn.Parameter, flat_param._unpadded_unsharded_size
@@ -1441,7 +1439,7 @@ def _unflatten_orig_param_states(
     cpu_offload: bool,
 ) -> None:
     """
-    Given a output state dict, ``output_states``, which the keys are FQNs to the
+    Given an output state dict, ``output_states``, which the keys are FQNs to the
     original parameters (not FlatParameters nor parameter ID), and the values
     are gathered states, unflatten the states to the original dimensions.
 
@@ -1648,7 +1646,7 @@ def _allgather_orig_param_states(
             )
         fsdp_state._device_handle.synchronize()
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
-            dist.all_gather_into_tensor(
+            dist.all_gather_single(
                 gathered_tensor, local_shard, group=fsdp_state.process_group
             )
             # Synchronize can be slow but this will be easier for us to debug.

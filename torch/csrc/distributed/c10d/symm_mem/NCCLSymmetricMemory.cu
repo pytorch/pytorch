@@ -6,7 +6,6 @@
 #include <vector_types.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
@@ -176,10 +175,22 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     auto group = resolve_process_group(group_name_);
     rank_ = group->getRank();
     world_size_ = group->getSize();
-    auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
-        group->getBackend(c10::DeviceType::CUDA).get());
-    TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
-    comm_ = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
+    // Look up the host ncclComm by group name in NCCLDevCommManager. Any
+    // backend that owns a NCCL-compatible communicator (ProcessGroupNCCL, or
+    // an external library exposing its ncclComm — torchcomms is one such
+    // example) publishes into this registry at comm-init time, so symm_mem
+    // doesn't need to know which backend the PG is wrapping.
+    auto& mgr = NCCLDevCommManager::get(
+        c10::Device(c10::DeviceType::CUDA, device_idx_));
+    comm_ = mgr.get_comm(group_name_);
+    TORCH_CHECK(
+        comm_ != nullptr,
+        "NCCL symmetric memory: NCCLDevCommManager returned a null comm for "
+        "group '",
+        group_name_,
+        "'. If you are using ProcessGroups, please make sure its backend has "
+        "been eagerly initialized by filling `device_id` in the "
+        "`init_process_group` call.");
 
     // Register a single window over the combined buffer + signal pad region.
     // Layout inside the registration:
@@ -203,10 +214,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     signal_pad_ptr_ = static_cast<char*>(allocation->ptr) + aligned_buffer_size;
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // Register the host-side communicator for device communicator management.
-    // `ncclDevCommCreate` will require it.
-    auto& manager = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
-    manager.register_comm(group_name_, comm_);
+    // (Host comm is already published into NCCLDevCommManager by the
+    // owning backend at comm-init time. The earlier mgr.get_comm() call
+    // above relied on that. No re-register here.)
 
     // Starting from NCCL 2.28, we can get peer pointers.
     const size_t arr_size = sizeof(void*) * world_size_;
@@ -368,7 +378,28 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  TORCH_CHECK(
+      pai_->signal_pads_dev_ != nullptr,
+      "NCCLSymmetricMemory::barrier requires peer signal pad pointers, which "
+      "are only populated when peers are accessible over the symmetric-memory "
+      "(LSA/NVLink) domain.");
+  check_channel(channel, world_size_, get_signal_pad_size());
+  c10::cuda::CUDAGuard device_guard(device_idx_);
+  barrier_kernel<<<
+      1,
+      std::max(at::cuda::warp_size(), world_size_),
+      0,
+      at::cuda::getCurrentCUDAStream()>>>(
+      reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+      channel,
+      rank_,
+      world_size_,
+      timeout_ms);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
   TORCH_CHECK(false, "NYI");
+#endif
 }
 
 void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_ms) {
@@ -466,10 +497,16 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // A single window is registered over the whole region at rendezvous
     // time, so only the base pointer (already granularity-aligned by
     // ncclMemAlloc) needs to satisfy NCCL's window-alignment requirement.
+    const size_t aligned_buffer_size = at::round_up(size, 16UL);
     const size_t signal_pad_size = get_signal_pad_size();
-    const size_t total_size = at::round_up(size, 16UL) + signal_pad_size;
+    const size_t total_size = aligned_buffer_size + signal_pad_size;
     void* ptr;
     C10D_NCCL_CHECK(ncclMemAlloc(&ptr, total_size), "ncclMemAlloc");
+    // ncclMemAlloc does not zero memory. Zero the signal pad so the CAS-based
+    // barrier() protocol starts from a known (all-zero) state on first use
+    // (CUDASymmetricMemory zeroes its whole allocation for the same reason).
+    C10_CUDA_CHECK(cudaMemset(
+        static_cast<char*>(ptr) + aligned_buffer_size, 0, signal_pad_size));
     {
       std::lock_guard<std::mutex> lock(mutex_);
       allocations_.emplace(

@@ -34,6 +34,23 @@ inline void pos_from_thread_index(
   }
 }
 
+// 2D dispatch overload: thread_pos.x maps directly to pos[0] (innermost dim),
+// thread_pos.y is decomposed across the remaining outer dims. Skips one
+// div/mod per element vs the 1D form.
+template <typename T>
+inline void pos_from_thread_index(
+    uint2 thread_pos,
+    thread T pos[max_ndim],
+    constant long* sizes,
+    uint ndim) {
+  pos[0] = static_cast<T>(thread_pos.x);
+  auto idx = static_cast<T>(thread_pos.y);
+  for (uint i = 1; i < ndim; ++i) {
+    pos[i] = idx % T(sizes[i]);
+    idx /= T(sizes[i]);
+  }
+}
+
 inline long offset_from_thread_index(
     long idx,
     constant long* sizes,
@@ -104,6 +121,10 @@ kernel void unary_dense(
   }
 }
 
+// 2D-grid variant: grid.x = thread_pos.x runs along the fastest-varying
+// (innermost) dim, grid.y enumerates the product of the remaining outer dims.
+// Saves one div+mod per thread vs the 1D form, and lets the SIMD-group walk
+// consecutive elements on the dense side (better memory coalescing).
 template <typename T, typename F>
 kernel void unary_strided(
     device void* output [[buffer(0)]],
@@ -112,17 +133,112 @@ kernel void unary_strided(
     constant long* input_strides [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
     constant uint& ndim [[buffer(5)]],
-    uint index [[thread_position_in_grid]]) {
+    uint2 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T>;
   int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim);
+  pos_from_thread_index(thread_pos, pos, sizes, ndim);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim);
   ref_at_offs<res_t>(output, output_offs) =
       f(val_at_offs<T>(input, input_offs));
 }
 
+// Innermost dim is unit-stride for both operands (a slice/narrow view): compute
+// each operand's outer base offset once, then run unary_dense's ILP tile over
+// the contiguous inner run. Sits between unary_dense (fully contiguous) and
+// unary_strided (per-element offset calc). grid.x = inner tile, grid.y = linear
+// outer index; outer_* describe dims [1..ndim), inner is dim 0.
+template <typename T, typename F>
+kernel void unary_inner_contiguous(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant long* outer_sizes [[buffer(2)]],
+    constant long* input_outer_strides [[buffer(3)]],
+    constant long* output_outer_strides [[buffer(4)]],
+    constant uint2& ndim_outer_inner [[buffer(5)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T>;
+  const uint ndim_outer = ndim_outer_inner.x;
+  const uint inner = ndim_outer_inner.y;
+  int pos[max_ndim];
+  pos_from_thread_index(int(thread_pos.y), pos, outer_sizes, ndim_outer);
+  const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
+  const auto out_base =
+      offset_from_coord(pos, output_outer_strides, ndim_outer);
+  constant T* in = reinterpret_cast<constant T*>(
+      static_cast<constant char*>(input) + in_base);
+  device res_t* out = reinterpret_cast<device res_t*>(
+      static_cast<device char*>(output) + out_base);
+  uint base = thread_pos.x * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= inner) {
+    array<T, ILP_PER_THREAD> tmp_in;
+    array<res_t, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = in[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j]);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      out[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint j = base; j < inner; ++j) {
+      out[j] = f(in[j]);
+    }
+  }
+}
+
+// Forward declarations for the castout templates (defined after store_at_offs,
+// which they call). REGISTER_UNARY_OP expands to explicit template
+// instantiations of these, so they must be declared before the macro is used.
+template <typename Tin, typename F>
+kernel void unary_dense_castout(
+    device void* output,
+    constant Tin* input,
+    constant uint2& size_outtype,
+    uint index);
+
+// ILP-wide castout. size_outtype_numel.x=elem_size, .y=out_type, .z=numel.
+template <typename Tin, typename F>
+kernel void unary_dense_castout_ilp(
+    device void* output,
+    constant Tin* input,
+    constant uint3& size_outtype_numel,
+    uint index);
+
+template <typename Tin, typename F>
+kernel void unary_strided_castout(
+    device void* output,
+    constant void* input,
+    constant long* sizes,
+    constant long* input_strides,
+    constant long* output_strides,
+    constant uint2& ndim_outtype,
+    uint2 thread_pos);
+
+template <typename Tin, typename F>
+kernel void unary_inner_contiguous_castout(
+    device void* output,
+    constant void* input,
+    constant long* outer_sizes,
+    constant long* input_outer_strides,
+    constant long* output_outer_strides,
+    constant uint4& ndimO_inner_elem_outtype,
+    uint2 thread_pos);
+
+// Registers the direct per-(out,in) unary kernels and the castout variants
+// keyed on the input dtype. Castout kernels compute the functor in DTYPE0
+// precision and cast the result to the user-supplied output dtype on store via
+// store_at_offs (runtime ScalarType switch), matching CPU semantics for
+// cross-dtype unary ops. Each (NAME, DTYPE0) pair must be registered at most
+// once across the library, since the castout host_names are keyed only on
+// DTYPE0.
 #define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1)                                \
   static_assert(                                                               \
       ::metal::                                                                \
@@ -148,7 +264,47 @@ kernel void unary_strided(
           constant long* input_strides,                                        \
           constant long* output_strides,                                       \
           constant uint& ndim,                                                 \
-          uint index)
+          uint2 thread_pos);                                                   \
+  template [[host_name(#NAME "_inner_contiguous_" #DTYPE1 "_" #DTYPE0)]]       \
+  kernel void ::c10::metal::unary_inner_contiguous<DTYPE0, NAME##_functor>(    \
+      device void* output,                                                     \
+      constant void* input,                                                    \
+      constant long* outer_sizes,                                              \
+      constant long* input_outer_strides,                                      \
+      constant long* output_outer_strides,                                     \
+      constant uint2& ndim_outer_inner,                                        \
+      uint2 thread_pos);                                                       \
+  template [[host_name(#NAME "_dense_castout_" #DTYPE0)]] kernel void ::c10::  \
+      metal::unary_dense_castout<DTYPE0, NAME##_functor>(                      \
+          device void* output,                                                 \
+          constant DTYPE0* input,                                              \
+          constant uint2& size_outtype,                                        \
+          uint index);                                                         \
+  template [[host_name(#NAME "_dense_castout_ilp_" #DTYPE0)]] kernel void ::   \
+      c10::metal::unary_dense_castout_ilp<DTYPE0, NAME##_functor>(             \
+          device void* output,                                                 \
+          constant DTYPE0* input,                                              \
+          constant uint3& size_outtype_numel,                                  \
+          uint index);                                                         \
+  template [[host_name(#NAME "_strided_castout_" #DTYPE0)]] kernel void ::     \
+      c10::metal::unary_strided_castout<DTYPE0, NAME##_functor>(               \
+          device void* output,                                                 \
+          constant void* input,                                                \
+          constant long* sizes,                                                \
+          constant long* input_strides,                                        \
+          constant long* output_strides,                                       \
+          constant uint2& ndim_outtype,                                        \
+          uint2 thread_pos);                                                   \
+  template [[host_name(#NAME "_inner_contiguous_castout_" #DTYPE0)]]           \
+  kernel void ::c10::metal::                                                   \
+      unary_inner_contiguous_castout<DTYPE0, NAME##_functor>(                  \
+          device void* output,                                                 \
+          constant void* input,                                                \
+          constant long* outer_sizes,                                          \
+          constant long* input_outer_strides,                                  \
+          constant long* output_outer_strides,                                 \
+          constant uint4& ndimO_inner_elem_outtype,                            \
+          uint2 thread_pos)
 
 #define DEFINE_UNARY_FLOATING_FUNCTOR(NAME)                                     \
   struct NAME##_functor {                                                       \
@@ -191,11 +347,11 @@ kernel void unary_alpha_strided(
     constant long* output_strides [[buffer(4)]],
     constant uint& ndim [[buffer(5)]],
     constant T2& alpha [[buffer(6)]],
-    uint index [[thread_position_in_grid]]) {
+    uint2 thread_pos [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T2>;
   int pos[max_ndim];
-  pos_from_thread_index(int(index), pos, sizes, ndim);
+  pos_from_thread_index(thread_pos, pos, sizes, ndim);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim);
   ref_at_offs<res_t>(output, output_offs) =
@@ -226,7 +382,7 @@ kernel void unary_alpha_strided(
           constant long* output_strides,                                   \
           constant uint& ndim,                                             \
           constant DTYPEA& alpha,                                          \
-          uint index)
+          uint2 thread_pos)
 
 // Value at offset with dynamic cast from provided type
 template <typename T, typename P>
@@ -259,12 +415,147 @@ inline void store_at_offs(
   }
 }
 
+// Castout variants of the unary kernels: input is loaded at compile-time Tin
+// precision (no cast), the functor runs in Tin precision, and the result
+// (result_of<F, Tin>) is cast to the user-supplied output dtype on store via
+// store_at_offs (runtime ScalarType switch). Matches CPU semantics for
+// cross-dtype unary ops (compute in input precision, cast on store). Mirrors
+// binary_*_castout but is keyed per input dtype, since unary has no separate
+// common-compute dtype.
+template <typename Tin, typename F>
+kernel void unary_dense_castout(
+    device void* output [[buffer(0)]],
+    constant Tin* input [[buffer(1)]],
+    constant uint2& size_outtype [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, Tin>;
+  store_at_offs<res_t>(
+      output,
+      long(index) * size_outtype.x,
+      static_cast<ScalarType>(size_outtype.y),
+      f(input[index]));
+}
+
+// ILP-wide castout: mirrors unary_dense's per-thread tile but stores via the
+// runtime ScalarType switch. The out_type is uniform across all threads so the
+// compiler can hoist the switch out of the unrolled inner loop.
+template <typename Tin, typename F>
+kernel void unary_dense_castout_ilp(
+    device void* output [[buffer(0)]],
+    constant Tin* input [[buffer(1)]],
+    constant uint3& size_outtype_numel [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, Tin>;
+  const uint elem_size = size_outtype_numel.x;
+  const auto out_type = static_cast<ScalarType>(size_outtype_numel.y);
+  const uint numel = size_outtype_numel.z;
+  uint base = index * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<Tin, ILP_PER_THREAD> tmp_in;
+    array<res_t, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = input[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j]);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      store_at_offs<res_t>(
+          output, long(base + j) * elem_size, out_type, tmp_out[j]);
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      store_at_offs<res_t>(output, long(i) * elem_size, out_type, f(input[i]));
+    }
+  }
+}
+
+template <typename Tin, typename F>
+kernel void unary_strided_castout(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant long* sizes [[buffer(2)]],
+    constant long* input_strides [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant uint2& ndim_outtype [[buffer(5)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, Tin>;
+  int pos[max_ndim];
+  pos_from_thread_index(thread_pos, pos, sizes, ndim_outtype.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_outtype.x);
+  const auto output_offs =
+      offset_from_coord(pos, output_strides, ndim_outtype.x);
+  store_at_offs<res_t>(
+      output,
+      output_offs,
+      static_cast<ScalarType>(ndim_outtype.y),
+      f(val_at_offs<Tin>(input, input_offs)));
+}
+
+// Castout variant of unary_inner_contiguous: output dtype is runtime (stored
+// via store_at_offs). ndimO_inner_elem_outtype = {outer ndim, inner extent,
+// output elem size (bytes), output ScalarType}.
+template <typename Tin, typename F>
+kernel void unary_inner_contiguous_castout(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant long* outer_sizes [[buffer(2)]],
+    constant long* input_outer_strides [[buffer(3)]],
+    constant long* output_outer_strides [[buffer(4)]],
+    constant uint4& ndimO_inner_elem_outtype [[buffer(5)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, Tin>;
+  const uint ndim_outer = ndimO_inner_elem_outtype.x;
+  const uint inner = ndimO_inner_elem_outtype.y;
+  const uint elem = ndimO_inner_elem_outtype.z;
+  const auto out_type = static_cast<ScalarType>(ndimO_inner_elem_outtype.w);
+  int pos[max_ndim];
+  pos_from_thread_index(int(thread_pos.y), pos, outer_sizes, ndim_outer);
+  const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
+  const auto out_base =
+      offset_from_coord(pos, output_outer_strides, ndim_outer);
+  constant Tin* in = reinterpret_cast<constant Tin*>(
+      static_cast<constant char*>(input) + in_base);
+  uint base = thread_pos.x * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= inner) {
+    array<Tin, ILP_PER_THREAD> tmp_in;
+    array<res_t, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = in[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j]);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      store_at_offs<res_t>(
+          output, out_base + long(base + j) * elem, out_type, tmp_out[j]);
+    }
+  } else {
+    for (uint j = base; j < inner; ++j) {
+      store_at_offs<res_t>(
+          output, out_base + long(j) * elem, out_type, f(in[j]));
+    }
+  }
+}
+
 // Binary elementwise ops kernels
-// Right now there are 4 flavors available:
+// Right now the following flavors are available:
 // - binary_dense where both input, other and output are dense and share the
 // same type
 // - binary_strided when all inputs are of the same types, but some elements are
 // strided
+// - binary_inner_contiguous - strided, but the innermost dim is unit-stride for
+// every operand (a slice/narrow view)
 // - binary_dense_cast - inputs are dense, but of different dtypes
 // - binary_strided_cast - inputs or output are strided and of different dtypes
 // - binary_dense_broadcast - one input is dense, another one is broadcastable
@@ -461,6 +752,61 @@ kernel void binary_dense_ilp(
   } else {
     for (uint i = base; i < numel; ++i) {
       out[i] = static_cast<res_t>(f(om_t(input[i]), om_t(other[i])));
+    }
+  }
+}
+
+// Inner-contiguous binary: like unary_inner_contiguous, but runs
+// binary_dense_ilp's tile over the contiguous inner run (all three operands
+// unit-stride in dim 0).
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_inner_contiguous(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
+    constant long* outer_sizes [[buffer(3)]],
+    constant long* output_outer_strides [[buffer(4)]],
+    constant long* input_outer_strides [[buffer(5)]],
+    constant long* other_outer_strides [[buffer(6)]],
+    constant uint2& ndim_outer_inner [[buffer(7)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  const uint ndim_outer = ndim_outer_inner.x;
+  const uint inner = ndim_outer_inner.y;
+  int pos[max_ndim];
+  pos_from_thread_index(int(thread_pos.y), pos, outer_sizes, ndim_outer);
+  const auto out_base =
+      offset_from_coord(pos, output_outer_strides, ndim_outer);
+  const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
+  const auto oth_base = offset_from_coord(pos, other_outer_strides, ndim_outer);
+  device res_t* out = reinterpret_cast<device res_t*>(
+      static_cast<device char*>(output) + out_base);
+  constant T* a = reinterpret_cast<constant T*>(
+      static_cast<constant char*>(input) + in_base);
+  constant T* b = reinterpret_cast<constant T*>(
+      static_cast<constant char*>(other) + oth_base);
+  uint base = thread_pos.x * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= inner) {
+    array<T, ILP_PER_THREAD> ta;
+    array<T, ILP_PER_THREAD> tb;
+    array<res_t, ILP_PER_THREAD> to;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      ta[j] = a[base + j];
+      tb[j] = b[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      to[j] = static_cast<res_t>(f(om_t(ta[j]), om_t(tb[j])));
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      out[base + j] = to[j];
+    }
+  } else {
+    for (uint j = base; j < inner; ++j) {
+      out[j] = static_cast<res_t>(f(om_t(a[j]), om_t(b[j])));
     }
   }
 }
@@ -759,6 +1105,18 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant long* other_strides,                                        \
           constant uint3& ndim,                                                \
           uint tid);                                                           \
+  template [[host_name(#NAME "_inner_contiguous_" #DTYPEO "_" #DTYPEI)]]       \
+  kernel void ::c10::metal::                                                   \
+      binary_inner_contiguous<DTYPEI, NAME##_functor, OMT>(                    \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant void* other,                                                \
+          constant long* outer_sizes,                                          \
+          constant long* output_outer_strides,                                 \
+          constant long* input_outer_strides,                                  \
+          constant long* other_outer_strides,                                  \
+          constant uint2& ndim_outer_inner,                                    \
+          uint2 thread_pos);                                                   \
   template                                                                     \
       [[host_name(#NAME "_strided_cast_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
           c10::metal::binary_strided_cast<DTYPEI, NAME##_functor, OMT>(        \

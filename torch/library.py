@@ -97,9 +97,7 @@ def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"Got: {schema}"
         )
     unsupported_mutable = [
-        arg
-        for arg in mutable_args
-        if isinstance(arg.type, (torch.OptionalType, torch.ListType))
+        arg for arg in mutable_args if not isinstance(arg.type, torch.TensorType)
     ]
     if unsupported_mutable:
         names = [a.name for a in unsupported_mutable]
@@ -177,10 +175,20 @@ def _validate_inplace_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"(the first argument). Got {len(returns)} returns. Got: {schema}"
         )
     ret = returns[0]
+    if not isinstance(ret.type, torch.TensorType):
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return must be a Tensor, got type '{ret.type}'). Got: {schema}"
+        )
     if ret.alias_info is None:
         raise ValueError(
             f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
             f"(return must alias the first argument). Got: {schema}"
+        )
+    if not ret.alias_info.is_write:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return must be a mutable alias, e.g., Tensor(a!)). Got: {schema}"
         )
     if ret.alias_info.before_set != first_arg.alias_info.before_set:
         raise ValueError(
@@ -304,7 +312,9 @@ class Library:
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
-        qualname = self.ns + "::" + name
+        # C++ accepts a name prefixed with the matching namespace ("ns::foo");
+        # don't double-prepend the namespace in that case.
+        qualname = name if "::" in name else f"{self.ns}::{name}"
 
         # If the OpOverloadPacket exists already, then this means we're adding a
         # new OpOverload for it. Refresh the packet to include the new OpOverload.
@@ -612,12 +622,22 @@ def _clear_torch_ops_cache(op_defs):
     # That's OK - the next time torch.ops.ns.foo gets called, it'll be
     # recomputed to point at the right collection of overloads.
     for qualname in op_defs:
-        ns, name_with_overload = qualname.split("::")
+        splits = qualname.split("::")
+        if len(splits) != 2:
+            # Defense-in-depth: this runs in a shutdown-time finalizer that must
+            # never raise, so tolerate any qualname that isn't a clean
+            # "namespace::name" instead of unpacking blindly.
+            continue
+        ns, name_with_overload = splits
         name = name_with_overload.split(".")[0]
         if not hasattr(torch.ops, ns):
             continue
         namespace = getattr(torch.ops, ns)
-        if not hasattr(namespace, name):
+        # Use vars() to check the instance dict directly, avoiding
+        # __getattr__ which calls into C++ via _jit_get_operation.
+        # During interpreter shutdown the C++ runtime may already be
+        # torn down, causing UnicodeDecodeError or segfaults.
+        if name not in vars(namespace):
             continue
         delattr(namespace, name)
         if name in namespace._dir:
@@ -1397,6 +1417,11 @@ def register_autograd(
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
     schema = op._schema
+    if _library.utils.is_out(op):
+        raise RuntimeError(
+            f"Cannot register autograd formula for operator tagged with "
+            f"torch.Tag.out: {op}. Out variants do not support autograd."
+        )
     if not _library.utils.is_functional_schema(schema):
         raise RuntimeError(
             f"Cannot register autograd formula for non-functional operator "
