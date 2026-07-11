@@ -819,7 +819,7 @@ class TestInductorConfigOverrideIntegration(TestCase):
             patch.object(compile_fx_mod, "compile_fx", tracking_compile_fx),
             patch.object(torch._functorch.config, "enable_autograd_cache", False),
         ):
-            compiled_fn = torch.compile(fn)
+            compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
             x = torch.randn(10, device=device, requires_grad=True)
             result = compiled_fn(x)
             result.backward()

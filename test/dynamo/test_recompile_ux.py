@@ -567,7 +567,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         @cache
         def factory(key):
-            @torch.compile(fullgraph=True, dynamic=False, isolate_recompiles=True)
+            @torch.compile(fullgraph=True, dynamic=False, isolate_recompiles=True)  # noqa: UNSPECIFIED_BACKEND
             def frontend(x, n):
                 return core(x) + n
 

@@ -1938,3 +1938,15 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'UNSPECIFIED_BACKEND'
+include_patterns = [
+    'test/dynamo/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/unspecified_backend_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
