@@ -2921,7 +2921,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     def test_structseq2(self):
         def fn(x, y):
-            return tuple(torch.return_types.qr((2 * x, y - 1)))
+            return tuple(torch.return_types.linalg_qr((2 * x, y - 1)))
 
         x = torch.randn(3, 2)
         y = torch.randn(2, 4)
@@ -4717,7 +4717,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
         self.assertEqual(o, x * y)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -9575,7 +9574,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_cast_no_recompile_after_graph_break(self):
         # In FSDP, cast(nn.Module, self) can be called after a
         # graph break. Without the polyfill + skip_code fix, PEP 523 compiles
@@ -9610,11 +9608,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4)
         fn(a, x)
         fn(b, x)
-        self.assertEqual(cnt.frame_count, 1)
-        # 5 frames: fn (x2), get_state before graph_break (x2),
-        # get_state resume after graph_break (x1, no recompile).
-        # Without skip_code, typing.cast would add 2 more frames (7 total).
-        self.assertEqual(counters["frames"]["total"], 5)
+        if torch._dynamo.config.nested_graph_breaks:
+            # NGB inlines get_state() and handles the graph break inline,
+            # producing 2 subgraphs (before/after break) per call.
+            self.assertEqual(cnt.frame_count, 2)
+        else:
+            self.assertEqual(cnt.frame_count, 1)
+            # 5 frames: fn (x2), get_state before graph_break (x2),
+            # get_state resume after graph_break (x1, no recompile).
+            # Without skip_code, typing.cast would add 2 more frames (7 total).
+            self.assertEqual(counters["frames"]["total"], 5)
 
     def test_T_tensor_attribute(self):
         def fn(x, y):
@@ -12787,6 +12790,48 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_repeat_length_hint(self):
+        def fn():
+            return (
+                operator.length_hint(itertools.repeat(None, 50)),
+                operator.length_hint(itertools.repeat(None, 0)),
+                operator.length_hint(itertools.repeat(None, -3)),
+                operator.length_hint(itertools.repeat(None), 12),
+            )
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), compiled_fn())
+        self.assertEqual(compiled_fn(), (50, 0, 0, 12))
+
+    def test_itertools_repeat_repr(self):
+        def fn():
+            r = itertools.repeat("a", -1)
+            bounded = repr(r)
+            unbounded = repr(itertools.repeat(1 + 0j))
+            return bounded, unbounded
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), compiled_fn())
+        self.assertEqual(compiled_fn(), ("repeat('a', 0)", "repeat((1+0j))"))
+
+    def test_itertools_repeat_bounded_exhausts(self):
+        def fn():
+            return list(itertools.repeat("a", 3)) + list(itertools.repeat("b", -2))
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), compiled_fn())
+        self.assertEqual(compiled_fn(), ["a", "a", "a"])
+
+    def test_itertools_repeat_partial_iteration(self):
+        def fn():
+            r = itertools.repeat("a", 3)
+            next(r)
+            return operator.length_hint(r), repr(r)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), compiled_fn())
+        self.assertEqual(compiled_fn(), (2, "repeat('a', 2)"))
+
     def test_itertools_infinite_count(self):
         for args in ([], [10], [5, -1]):
             counters.clear()
@@ -12841,6 +12886,50 @@ def ___make_guard_fn():
         self.assertEqual(compiled_fn(x), x * 3)  # next(counter) = 2
         self.assertEqual(compiled_fn(x), x * 4)  # next(counter) = 3
         self.assertEqual(next(counter), 4)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_count_kwargs(self):
+        counters.clear()
+
+        def fn():
+            return (
+                list(zip("abc", itertools.count(start=2, step=3))),
+                list(zip("abc", itertools.count(step=-1))),
+                list(zip("abc", itertools.count(2, step=3))),
+            )
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(), fn())
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_count_repr(self):
+        counters.clear()
+
+        def fn():
+            c = itertools.count(3)
+            r0 = repr(c)
+            next(c)
+            r1 = repr(c)
+            d = itertools.count(3, 5)
+            r2 = repr(d)
+            next(d)
+            r3 = repr(d)
+            # step==1 (int) is suppressed; a float step (even 1.0) is shown.
+            r4 = repr(itertools.count(10.5, 1))
+            r5 = repr(itertools.count(10, 1.0))
+            return r0, r1, r2, r3, r4, r5
+
+        expected = (
+            "count(3)",
+            "count(4)",
+            "count(3, 5)",
+            "count(8, 5)",
+            "count(10.5)",
+            "count(10, 1.0)",
+        )
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(), fn())
+        self.assertEqual(compiled_fn(), expected)
         self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_itertools_infinite_cycle(self):
@@ -16558,6 +16647,80 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(r9.item(), 4)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_sequence_iter_setstate_negative_clamps(self):
+        # CPython iter_setstate clamps a negative index to 0.
+        class Seq:
+            def __getitem__(self, i):
+                return i
+
+        def fn():
+            it = iter(Seq())
+            it.__setstate__(-42)
+            return next(it), next(it)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), (0, 1))
+
+    def test_sequence_iter_setstate_positive(self):
+        class Seq:
+            def __getitem__(self, i):
+                return i
+
+        def fn():
+            it = iter(Seq())
+            it.__setstate__(5)
+            return next(it), next(it)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), (5, 6))
+
+    def test_sequence_iter_overflow(self):
+        # CPython iter_iternext raises OverflowError once the index reaches
+        # sys.maxsize (PY_SSIZE_T_MAX) and cannot advance further.
+        class Seq:
+            def __getitem__(self, i):
+                return i
+
+        def fn():
+            it = iter(Seq())
+            it.__setstate__(sys.maxsize - 2)
+            vals = [next(it), next(it)]
+            try:
+                next(it)
+            except OverflowError:
+                vals.append("overflow")
+            return vals
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), [sys.maxsize - 2, sys.maxsize - 1, "overflow"])
+
+    def test_callable_iter_reentrant_exhaustion(self):
+        # gh-101892: a two-argument iter() whose callable reentrantly exhausts
+        # the iterator must raise StopIteration even when the outer call then
+        # returns a non-sentinel value.
+        HAS_MORE = 1
+        NO_MORE = 2
+
+        def fn():
+            state = {"recursive": False, "it": None}
+
+            def spam():
+                if state["recursive"]:
+                    return NO_MORE
+                state["recursive"] = True
+                list(state["it"])
+                return HAS_MORE
+
+            state["it"] = iter(spam, NO_MORE)
+            try:
+                next(state["it"])
+            except StopIteration:
+                return "stopped"
+            return "no stop"
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "stopped")
+
     def test_re_module_constant_fold(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -16855,7 +17018,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.qr((2 * x, None)),
+                        "e": torch.return_types.linalg_qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -16883,7 +17046,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.qr((2 * x, None)),
+                        "e": torch.return_types.linalg_qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -16934,7 +17097,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                 ),
                 "d": collections.OrderedDict(
                     {
-                        "e": torch.return_types.qr((2 * x, None)),
+                        "e": torch.return_types.linalg_qr((2 * x, None)),
                         "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                     },
                 ),
@@ -16948,7 +17111,7 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
                         "d",
                         {
                             "f": MyTuple(torch.ones(4, 3), -y, y + 1),
-                            "e": torch.return_types.qr((2 * y, None)),
+                            "e": torch.return_types.linalg_qr((2 * y, None)),
                         },
                     ),
                 ],

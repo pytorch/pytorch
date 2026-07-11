@@ -189,7 +189,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("nn.functional.softplus"),
     xfail("nn.functional.softshrink"),
     xfail("ormqr"),
-    xfail("qr"),
     xfail("renorm"),
     xfail("round"),
     xfail("round", "decimals_0"),
