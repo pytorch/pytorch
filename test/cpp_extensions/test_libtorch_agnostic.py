@@ -455,6 +455,67 @@ class TestLibtorchAgnostic(TestCase):
 
         self.assertEqual(stream_id, expected_stream_id)
 
+    @skipIfTorchVersionLessThan(2, 13)
+    @onlyCUDA
+    def test_stream_native_handle(self, device):
+        import libtorch_agn_2_13 as libtorch_agnostic
+
+        device_idx = torch.cuda.current_device()
+        streams = [torch.cuda.Stream(device=device_idx) for _ in range(3)]
+
+        native_handles = []
+        for stream in streams:
+            with torch.cuda.stream(stream):
+                expected = torch.accelerator.current_stream(device_idx).native_handle
+                nh = libtorch_agnostic.ops.test_stream_native_handle(device_idx)
+
+            self.assertEqual(nh, expected)
+            self.assertNotIn(nh, native_handles)
+            native_handles.append(nh)
+
+    @skipIfTorchVersionLessThan(2, 13)
+    @onlyCUDA
+    def test_kernel_launch_on_custom_stream(self, device):
+        import libtorch_agn_2_13 as libtorch_agnostic
+
+        device_idx = torch.cuda.current_device()
+        fill_value = 42
+
+        input_tensor = torch.zeros(1024, dtype=torch.int32, device=f"cuda:{device_idx}")
+        custom_stream = torch.cuda.Stream(device=device_idx)
+
+        with torch.cuda.stream(custom_stream):
+            output = libtorch_agnostic.ops.test_kernel_launch_on_stream(
+                input_tensor, fill_value
+            )
+
+        custom_stream.synchronize()
+        self.assertEqual(output, torch.full_like(input_tensor, fill_value))
+
+    @skipIfTorchVersionLessThan(2, 13)
+    def test_my_rand_with_generator(self, device):
+        import libtorch_agn_2_13 as libtorch_agnostic
+
+        g1 = torch.Generator(device=device)
+        g1.manual_seed(42)
+        g2 = torch.Generator(device=device)
+        g2.manual_seed(42)
+
+        out = libtorch_agnostic.ops.my_rand_with_generator([2, 3], g1)
+        expected = torch.rand(2, 3, generator=g2, device=device)
+
+        # Generator threaded through correctly => exact match with same seed.
+        self.assertEqual(out, expected)
+        # Output device is derived from the generator via Generator::device().
+        self.assertEqual(out.device.type, torch.device(device).type)
+
+        # Generator state advances across calls, and re-seeding reproduces.
+        out2 = libtorch_agnostic.ops.my_rand_with_generator([2, 3], g1)
+        self.assertFalse(torch.equal(out, out2))
+        g1.manual_seed(42)
+        out3 = libtorch_agnostic.ops.my_rand_with_generator([2, 3], g1)
+        self.assertEqual(out, out3)
+
     @onlyCUDA
     @deviceCountAtLeast(2)
     def test_get_current_device_index(self, device):
@@ -647,13 +708,6 @@ class TestLibtorchAgnostic(TestCase):
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCPU
-    # TODO: Debug this:
-    # Dynamo failed to run FX node with fake tensors:
-    # call_function libtorch_agnostic.test_parallel_for.default(*(100, 10), **{}):
-    # got RuntimeError('libtorch_agnostic::test_parallel_for() expected at most
-    # 2 argument(s) but received 3 argument(s).
-    # Declaration: libtorch_agnostic::test_parallel_for(int size, int grain_size) -> Tensor')
-    @xfailIfTorchDynamo
     def test_parallel_for(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
@@ -2032,8 +2086,18 @@ except RuntimeError as e:
             "^The size of tensor a \\(\\d\\) must match the size of "
             "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
         )
-        # Verify that an operation using STABLE_TORCH_ERROR_CHECK provides detailed errors.
-        self.assertRaisesRegex(RuntimeError, expect_re, make_exception_stable)
+        # Verify that an operation using STABLE_TORCH_ERROR_CODE_CHECK provides the
+        # detailed error AND wraps it with the "(originally from ...)" annotation
+        # naming the failing shim call and its source location.
+        with self.assertRaises(RuntimeError) as cm:
+            make_exception_stable()
+        stable_msg = str(cm.exception)
+        self.assertRegex(stable_msg, expect_re)
+        self.assertRegex(
+            stable_msg,
+            r" \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
+            r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
+        )
 
         # Retrieve the exception message directly.
         self.assertEqual(
@@ -2046,6 +2110,60 @@ except RuntimeError as e:
         self.assertTrue(
             with_backtrace.count("\n") > 10
         )  # Conservative, backtrace is 25 lines.
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_dynamic_version_call_error_message(self, device):
+        """Exercise the dynamic version call (dlsym) path.
+
+        our_subtract_stable_error_check lives in the 2.10 extension, which
+        targets 2.10 -- older than the 2.13 torch_exception_get_what* shims that
+        STABLE_TORCH_ERROR_CODE_CHECK relies on. It therefore reaches them via
+        TORCH_DYNAMIC_VERSION_CALL (a runtime symbol lookup). When the running
+        libtorch is >= 2.13 the lookup succeeds and we get the detailed message;
+        against an older runtime it falls back to the simple call-site message.
+        """
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        # Mismatched shapes so the subtract errors.
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(1, 2, device=device)
+        self.assertRaises(RuntimeError, lambda: torch.subtract(a, b))
+
+        # The non-stable check always yields the simple call-site message.
+        simple_re = (
+            "aoti_torch_aten_subtract_Tensor\\(self.get\\(\\), other.get\\(\\), alpha, &ret0\\)"
+            " API call failed at .+?, line \\d+$"
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            simple_re,
+            lambda: libtorch_agnostic.ops.our_subtract_torch_error_check(a, b),
+        )
+
+        def make_exception_stable():
+            libtorch_agnostic.ops.our_subtract_stable_error_check(a, b)
+
+        if _torchVersionLessThan(2, 13):
+            # Runtime predates the shim: dlsym returns null, so we fall back to
+            # the same simple call-site message as the non-stable check.
+            self.assertRaisesRegex(RuntimeError, simple_re, make_exception_stable)
+        else:
+            # Runtime has the shim: the dynamic lookup succeeds and we get the
+            # detailed error retrieved across the C ABI boundary, wrapped with the
+            # "(originally from ...)" annotation naming the failing shim call.
+            detailed_re = (
+                "^The size of tensor a \\(\\d\\) must match the size of "
+                "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
+            )
+            with self.assertRaises(RuntimeError) as cm:
+                make_exception_stable()
+            stable_msg = str(cm.exception)
+            self.assertRegex(stable_msg, detailed_re)
+            self.assertRegex(
+                stable_msg,
+                r" \(originally from aoti_torch_aten_subtract_Tensor\(.*\) "
+                r"API call failed at .*my_stable_error_check\.cpp, line \d+\)$",
+            )
 
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)

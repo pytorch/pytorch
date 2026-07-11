@@ -1175,7 +1175,6 @@ def discover_test_cases_recursively(suite_or_case):
         return [suite_or_case]
     rc = []
     for element in suite_or_case:
-        print(element)
         rc.extend(discover_test_cases_recursively(element))
     return rc
 
@@ -1537,6 +1536,7 @@ TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
 TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
+ACCELERATOR_TYPE = LazyVal(lambda: acc.type if (acc := torch.accelerator.current_accelerator(check_available=True)) else None)
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = _is_privateuse1_backend_available()
 TEST_PRIVATEUSE1_DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
@@ -1686,21 +1686,15 @@ TEST_SKIP_CUDAGRAPH: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_SKIP_CUDAGRAPH",
 )
 TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
-    torch.version.cuda or
-    (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
+    torch.version.cuda or torch.version.hip
 )
 
-TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
-TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and (
-    torch.version.cuda and (
-        (int(torch.version.cuda.split(".")[0]) >= 12 and int(torch.version.cuda.split(".")[1]) >= 4) or
-        (int(torch.version.cuda.split(".")[0]) >= 13)
-    )
-)
+TEST_CUDA_CUDSS = TEST_CUDA and torch.version.cuda is not None
+TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and torch.version.cuda is not None
 
-TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and (
-    torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12
-)
+TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and torch.version.cuda is not None
+TEST_NVMATH = _check_module_exists("nvmath.bindings") and torch.version.cuda is not None
+skipIfNoNvmath = unittest.skipIf(not TEST_NVMATH, "nvmath-python not available")
 
 if TEST_CUDA_PYTHON_BINDINGS:
     def cuda_python_error_check(function_call_output):
@@ -2724,6 +2718,44 @@ def set_default_dtype(dtype):
         yield
     finally:
         torch.set_default_dtype(saved_dtype)
+
+
+class set_default_dtype_if_supported:
+    """Decorator like set_default_dtype, but only sets the dtype if the device
+    supports it.
+
+    Calls the test object's `DeviceTypeTestBase.get_primary_device()` method at
+    call time, so this only works on test classes that have had
+    `instantiate_device_type_tests` applied to them.
+    """
+
+    def __init__(self, dtype):
+        self._dtype = dtype
+
+    def __call__(self, fn):
+        @functools.wraps(fn)
+        def wrapper(test_self, *args, **kwargs):
+            device = test_self.get_primary_device()
+            dtype_supported = True
+            try:
+                torch.empty(0, device=device, dtype=self._dtype)
+            except TypeError:
+                dtype_supported = False
+
+            saved_dtype = None
+
+            if dtype_supported:
+                saved_dtype = torch.get_default_dtype()
+                torch.set_default_dtype(self._dtype)
+
+            try:
+                return fn(test_self, *args, **kwargs)
+            finally:
+                if saved_dtype is not None:
+                    torch.set_default_dtype(saved_dtype)
+
+        return wrapper
+
 
 @contextlib.contextmanager
 def set_default_tensor_type(tensor_type):
@@ -4585,6 +4617,12 @@ class TestCase(expecttest.TestCase):
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
+    def _formatMessage(self, msg, standardMsg) -> str:  # type: ignore[override]
+        # Allow a callable msg, invoked lazily on failure to build the message.
+        if callable(msg):
+            return msg(standardMsg)
+        return super()._formatMessage(msg, standardMsg)
+
     def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() is y.type()
         self.assertEqual(x.device, y.device)
@@ -5792,14 +5830,18 @@ def get_cycles_per_ms(device: str = "cuda") -> float:
             return cycles_per_ms
     else:
         def measure() -> float:
-            start = torch.cuda.Event(enable_timing=True)
-            end = torch.cuda.Event(enable_timing=True)
-            start.record()
-            torch.cuda._sleep(test_cycles)
-            end.record()
-            end.synchronize()
-            cycles_per_ms = test_cycles / start.elapsed_time(end)
-            return cycles_per_ms
+            if hasattr(torch.get_device_module(device), "_sleep"):
+                start = torch.Event(enable_timing=True)
+                end = torch.Event(enable_timing=True)
+                start.record()
+                torch.get_device_module(device)._sleep(test_cycles)
+                end.record()
+                end.synchronize()
+                cycles_per_ms = test_cycles / start.elapsed_time(end)
+                return cycles_per_ms
+            else:
+                cycles_per_ms = 1000000.0
+                return cycles_per_ms
 
     # Get 10 values and remove the 2 max and 2 min and return the avg.
     # This is to avoid system disturbance that skew the results, e.g.

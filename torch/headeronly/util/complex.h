@@ -3,6 +3,7 @@
 #include <complex>
 
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Half.h>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -578,6 +579,60 @@ struct alignas(4) complex<Half> {
   }
 
   C10_HOST_DEVICE complex<Half>& operator*=(const complex<Half>& other) {
+    auto a = static_cast<float>(real_);
+    auto b = static_cast<float>(imag_);
+    auto c = static_cast<float>(other.real());
+    auto d = static_cast<float>(other.imag());
+    real_ = a * c - b * d;
+    imag_ = a * d + b * c;
+    return *this;
+  }
+};
+
+template <>
+struct alignas(4) complex<BFloat16> {
+  BFloat16 real_;
+  BFloat16 imag_;
+
+  // Constructors
+  complex() = default;
+  // BFloat16 constructor is not constexpr so the following constructor can't
+  // be constexpr
+  C10_HOST_DEVICE explicit inline complex(
+      const BFloat16& real,
+      const BFloat16& imag)
+      : real_(real), imag_(imag) {}
+  C10_HOST_DEVICE inline complex(const c10::complex<float>& value)
+      : real_(value.real()), imag_(value.imag()) {}
+
+  // Conversion operator
+  inline C10_HOST_DEVICE operator c10::complex<float>() const {
+    return {real_, imag_};
+  }
+
+  constexpr C10_HOST_DEVICE BFloat16 real() const {
+    return real_;
+  }
+  constexpr C10_HOST_DEVICE BFloat16 imag() const {
+    return imag_;
+  }
+
+  C10_HOST_DEVICE complex<BFloat16>& operator+=(
+      const complex<BFloat16>& other) {
+    real_ = static_cast<float>(real_) + static_cast<float>(other.real_);
+    imag_ = static_cast<float>(imag_) + static_cast<float>(other.imag_);
+    return *this;
+  }
+
+  C10_HOST_DEVICE complex<BFloat16>& operator-=(
+      const complex<BFloat16>& other) {
+    real_ = static_cast<float>(real_) - static_cast<float>(other.real_);
+    imag_ = static_cast<float>(imag_) - static_cast<float>(other.imag_);
+    return *this;
+  }
+
+  C10_HOST_DEVICE complex<BFloat16>& operator*=(
+      const complex<BFloat16>& other) {
     auto a = static_cast<float>(real_);
     auto b = static_cast<float>(imag_);
     auto c = static_cast<float>(other.real());

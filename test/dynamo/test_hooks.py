@@ -362,11 +362,11 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    y = l_x_ * 2;  l_x_ = None
-    a = y * 3
+    mul = l_x_ * 2;  l_x_ = None
+    mul_1 = mul * 3
     hook_body_0 = self.hook_body_0
-    register_hook = torch.ops.higher_order.register_hook(y, hook_body_0);  y = hook_body_0 = None
-    add = a + register_hook;  a = None
+    register_hook = torch.ops.higher_order.register_hook(mul, hook_body_0);  mul = hook_body_0 = None
+    add = mul_1 + register_hook;  mul_1 = None
     sum_1 = add.sum();  add = None
     return (sum_1, register_hook)""",
         )
@@ -509,13 +509,13 @@ def forward(self, L_x_ : torch.Tensor):
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     split = l_x_.split(2);  l_x_ = None
-    y = split[0]
+    getitem = split[0]
     getitem_1 = split[1]
     getitem_2 = split[2];  split = None
-    result = torch.cat((y, getitem_1, getitem_2));  getitem_1 = getitem_2 = None
+    cat = torch.cat((getitem, getitem_1, getitem_2));  getitem_1 = getitem_2 = None
     hook_body_0 = self.hook_body_0
-    register_hook = torch.ops.higher_order.register_hook(y, hook_body_0);  y = hook_body_0 = None
-    sum_1 = result.sum();  result = None
+    register_hook = torch.ops.higher_order.register_hook(getitem, hook_body_0);  getitem = hook_body_0 = None
+    sum_1 = cat.sum();  cat = None
     sum_2 = register_hook.sum();  register_hook = None
     add = sum_1 + sum_2;  sum_1 = sum_2 = None
     return (add,)""",
@@ -730,7 +730,7 @@ def forward(self, L_x_ : torch.Tensor):
         with compiled_autograd._enable(compiler_fn):
             dynamo_out = torch.compile(mod, backend="inductor", fullgraph=True)(x2, obj)
             with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, "Failed to trace builtin operator"
+                torch._dynamo.exc.Unsupported, r"repr\(\) on tensor"
             ):
                 dynamo_out[0].backward(torch.ones(4))
 
