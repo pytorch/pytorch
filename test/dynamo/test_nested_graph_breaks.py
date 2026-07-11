@@ -1309,7 +1309,8 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend=cnts)
         def gn(x):
             x = torch.no_grad()(_skipped_function_for_test_reconstruct)(fn, x)
-            assert torch.compiler.is_compiling()  # noqa: S101
+            # gn's resume is 0-op and permanently skipped (NGB optimization),
+            # so is_compiling() is False here.
             assert torch.is_grad_enabled()  # noqa: S101
             return x
 
@@ -1747,6 +1748,93 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
         result = fn()
         self.assertEqual(result.shape, torch.Size([1, 2]))
+
+    def test_load_attr_method_variant_nested_graph_break(self):
+        """Resume-into-resume with LOAD_ATTR method variant.
+
+        Two graph breaks inside a method called via obj.method(x) test that the
+        resume prefix correctly pushes NULL/self for the method call stack layout.
+        """
+
+        class Foo:
+            def method(self, x):
+                torch._dynamo.graph_break()
+                y = x + 1
+                torch._dynamo.graph_break()
+                return y + 1
+
+        obj = Foo()
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            return obj.method(x)
+
+        x = torch.randn(3)
+        result = fn(x)
+        self.assertEqual(result, x + 2)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_tree_map_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def fn():
+            inps = [torch.randn(3)]
+            return tree_map(lambda x: torch.zeros_like(x, requires_grad=True), inps)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=cnts)()
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], torch.Tensor)
+        self.assertEqual(result[0].shape, (3,))
+        self.assertTrue(result[0].requires_grad)
+
+    def test_tree_map_graph_break_nested_structure(self):
+        from torch.utils._pytree import tree_map
+
+        def fn():
+            inps = {"a": [torch.randn(3)], "b": (torch.randn(2), torch.randn(4))}
+            return tree_map(lambda x: torch.zeros_like(x, requires_grad=True), inps)
+
+        result = torch.compile(fn, backend="eager")()
+        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result["a"], list)
+        self.assertEqual(len(result["a"]), 1)
+        self.assertIsInstance(result["b"], tuple)
+        self.assertEqual(len(result["b"]), 2)
+        self.assertEqual(result["b"][0].shape, (2,))
+        self.assertEqual(result["b"][1].shape, (4,))
+
+    def test_tree_map_with_path_graph_break_preserves_structure(self):
+        from torch.utils._pytree import tree_map_with_path
+
+        def fn():
+            inps = [torch.randn(3), torch.randn(2)]
+            return tree_map_with_path(
+                lambda path, x: torch.zeros_like(x, requires_grad=True), inps
+            )
+
+        result = torch.compile(fn, backend="eager")()
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0].shape, (3,))
+        self.assertEqual(result[1].shape, (2,))
+        self.assertTrue(result[0].requires_grad)
+
+    def test_cxx_pytree_treespec_leaf_namespace(self):
+        import torch.utils._cxx_pytree as cxx_pytree
+
+        def fn():
+            values, treespec = cxx_pytree.tree_flatten(1)
+            leaf = cxx_pytree.treespec_leaf()
+            torch._dynamo.graph_break()
+            return values, treespec == leaf
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        values, specs_equal = torch.compile(fn, backend=cnts)()
+        self.assertEqual(values, [1])
+        self.assertTrue(specs_equal)
 
 
 if __name__ == "__main__":
