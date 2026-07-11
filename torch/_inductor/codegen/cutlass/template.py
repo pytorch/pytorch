@@ -153,10 +153,13 @@ class CUTLASSTemplate(KernelTemplate):
             unique(self.input_nodes[idx].get_name() for idx in input_reorder)
         )
         expected_args.extend([self.output_node.get_name()])
-        assert list(call_args)[: len(expected_args)] == expected_args, (
-            call_args,
-            expected_args,
-        )
+        if list(call_args)[: len(expected_args)] != expected_args:
+            raise AssertionError(
+                (
+                    call_args,
+                    expected_args,
+                )
+            )
         # Resolve symbolic sizes to concrete ints for benchmarking only.
         V.graph.sizevars.optimization_hints(
             map(sympy.expand, call_args[len(expected_args) :])
@@ -232,9 +235,8 @@ class CUTLASSTemplate(KernelTemplate):
             template_node: CUTLASSTemplateBuffer,
             epilogue_nodes: list[BaseSchedulerNode] | None = None,
         ) -> tuple[CUTLASSTemplateKernel, functools.partial[str]]:
-            assert supports_epilogue_fusion or not epilogue_nodes, (
-                "epilogue fusion is not supported for this kernel"
-            )
+            if not supports_epilogue_fusion and epilogue_nodes:
+                raise AssertionError("epilogue fusion is not supported for this kernel")
             kernel = CUTLASSTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 runtime_arg_info=self.get_runtime_arg_info(),

@@ -90,7 +90,7 @@ static c10::IValue preprocess(
       py::cast<torch::jit::Module>(nnapi_processed[0].attr("_c"));
   std::stringstream ss;
   shape_compute_module._save_for_mobile(ss);
-  dict.insert("shape_compute_module", ss.str());
+  dict.insert("shape_compute_module", std::move(ss).str());
 
   // transform Python lists to C++ c10::List
   c10::List<at::Tensor> weights(

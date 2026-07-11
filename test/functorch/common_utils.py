@@ -19,7 +19,11 @@ from functorch import vmap
 from torch.testing._internal.common_device_type import toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_modules import module_db
-from torch.testing._internal.opinfo.core import sample_skips_and_xfails, XFailRule
+from torch.testing._internal.opinfo.core import (
+    sample_skips_and_xfails,
+    SkipRule,
+    XFailRule,
+)
 
 
 IS_FBCODE = os.getenv("FUNCTORCH_TEST_FBCODE") == "1"
@@ -498,6 +502,25 @@ def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
         op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.skip("Skipped!"),
+        device_type=device_type,
+        dtypes=dtypes,
+    )
+
+
+def skipIf(op_name, fail_fn, variant_name="", *, device_type=None, dtypes=None):
+    return decorate(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=sample_skips_and_xfails(
+            [
+                SkipRule(
+                    # op matching is already handled by DecorateMeta
+                    op_match_fn=lambda device, op: True,
+                    # device matching is already handled by DecorateMeta
+                    sample_match_fn=lambda device, sample: fail_fn(sample),
+                )
+            ]
+        ),
         device_type=device_type,
         dtypes=dtypes,
     )

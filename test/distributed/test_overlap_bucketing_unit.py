@@ -40,7 +40,7 @@ aten = torch.ops.aten
 from torch.testing._internal.common_fsdp import get_devtype
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 
 import torch
@@ -468,6 +468,82 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         FileCheck().check("cat.default").check("all_reduce.default").check(
             "split_with_sizes"
         ).check_count("%mm", 2).run(graph_str)
+
+    def test_manual_bucket_splits_dependent_all_reduce(self):
+        """Bucketing must split dependent same-key all_reduces, not fuse them.
+
+        Reproduces the loss-parallel cross-entropy pattern with two independent
+        chunks: a "sumexp" all_reduce whose result feeds a "result" all_reduce.
+        All four are sum/same-group/same-dtype (one bucket key), but fusing a
+        sumexp with its dependent result would make the merged collective's
+        input depend on its own output -- a cycle that failed region
+        topological sort ("stable topological sort of region failed").
+
+        Correct partitioning fuses the two independent sumexps into one bucket
+        and the two independent results into another, so four all_reduces
+        collapse to exactly two bucketed all_reduces (via two cats), no cycle.
+        """
+
+        def func(a, b, c, d):
+            group_name = "0"
+            ar = torch.ops._c10d_functional.all_reduce
+            wait = torch.ops._c10d_functional.wait_tensor
+            sumexp0 = wait(ar(a, "sum", group_name))
+            sumexp1 = wait(ar(b, "sum", group_name))
+            result0 = wait(ar(sumexp0 + c, "sum", group_name))
+            result1 = wait(ar(sumexp1 + d, "sum", group_name))
+            return result0.sum() + result1.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            d = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b, c, d)
+
+        collective_info = build_collective_info(traced.graph, {})
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            ManualOverlapPreservingBucketer,
+        )
+
+        bucketer = ManualOverlapPreservingBucketer(
+            traced.graph, collective_info, scheduled
+        )
+
+        # find_nodes returns nodes in graph (topological) order.
+        sumexp0, sumexp1, result0, result1 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+
+        # The partition itself: independent sumexps in one bucket, dependent
+        # results in another -- a sumexp is never grouped with its own result.
+        buckets = bucketer._split_independent_collectives(
+            OrderedSet([sumexp0, sumexp1, result0, result1]),
+            list(traced.graph.nodes),
+        )
+        bucket_sets = [set(b) for b in buckets]
+        self.assertEqual(len(buckets), 2)
+        self.assertIn({sumexp0, sumexp1}, bucket_sets)
+        self.assertIn({result0, result1}, bucket_sets)
+
+        # End to end: bucketing must not raise, and the partition above means the
+        # two independent pairs each fuse (two cats) while the dependent pairs
+        # stay separate, so four all_reduces collapse to exactly two.
+        bucketer.manual_bucket_collectives(list(traced.graph.nodes))
+        traced.graph.lint()
+
+        all_reduces = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        cats = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.cat.default
+        )
+        self.assertEqual(len(all_reduces), 2)
+        self.assertEqual(len(cats), 2)
 
     def test_no_cross_type_bucketing_ar_and_rs(self):
         """
@@ -1227,6 +1303,81 @@ class TestCrossPGOverlap(InductorTestCase):
             f"Off-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
         )
 
+    @torch._inductor.config.patch(
+        {"test_configs.assume_bucketing_reduces_latency": False}
+    )
+    def test_prefetch_prioritizes_larger_hidden_time(self):
+        """
+        When multiple future collectives have the same semantic priority, choose
+        the one that can consume more of the current overlap window first.
+        """
+        group_name = self.pg1_name
+
+        def func(a, b, c):
+            group_size = 1
+            mm = torch.mm(a, a)
+
+            ag_small = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+            ag_large = torch.ops._c10d_functional.all_gather_into_tensor(
+                c, group_size, group_name
+            )
+
+            wait_small = torch.ops._c10d_functional.wait_tensor(ag_small)
+            wait_large = torch.ops._c10d_functional.wait_tensor(ag_large)
+            return mm.sum() + wait_small.sum() + wait_large.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b, c)
+
+        ag_small, ag_large = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        (mm,) = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if node is ag_small:
+                return 1.0
+            if node is ag_large:
+                return 8.0
+            if node.target == torch.ops.aten.mm.default:
+                return 8.0
+            return 0.0
+
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            # Each all_gather has a 128B footprint in this graph.  Limit in-flight
+            # collectives to one so picking the larger hidden-time candidate
+            # reduces total exposed time, rather than only changing order.
+            max_in_flight_gb=0.0000002,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        )
+        scheduler.run()
+
+        self.assertIn(mm, scheduler.collective_info[ag_large].hiding_nodes)
+        self.assertNotIn(mm, scheduler.collective_info[ag_small].hiding_nodes)
+        self.assertEqual(scheduler.collective_info[ag_large].exposed_time_ms, 0.0)
+        self.assertEqual(scheduler.collective_info[ag_small].exposed_time_ms, 1.0)
+        self.assertEqual(
+            sum(info.exposed_time_ms for info in scheduler.collective_info.values()),
+            1.0,
+        )
+
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1651,6 +1802,65 @@ class TestOverlapSchedulingFixes(InductorTestCase):
             "Cycle: pre_bucket <-> new_start via data + extra deps",
         )
 
+    def test_graphsafe_rng_state_with_insert_overlap_deps(self):
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+        torch.cuda.init()
+
+        def func(a, b, rng_state):
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(a, 1, "0")
+            rng = graphsafe_run_with_rng_state(
+                torch.ops.aten.mm.default, a, b, rng_state=rng_state
+            )
+            wait = torch.ops._c10d_functional.wait_tensor(ag)
+            return rng + wait
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            a = torch.empty(4, 4, device=self.device)
+            b = torch.empty(4, 4, device=self.device)
+            gen = torch.cuda.default_generators[0].clone_state()
+            traced = make_fx(func)(a, b, gen)
+
+        def custom_runtime_estimation(
+            node: fx.Node, override_size: int | None
+        ) -> float | None:
+            if node.op != "call_function":
+                return None
+            if node.target is graphsafe_run_with_rng_state:
+                return 10.0
+            if node.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+                return 10.0
+            return None
+
+        schedule_overlap_bucketing(
+            traced,
+            insert_overlap_deps=True,
+            collective_bucketing=False,
+            custom_runtime_estimation=custom_runtime_estimation,
+            collective_estimator="analytical",
+            compute_estimator="analytical",
+            pre_bucketing_fsdp_collectives=False,
+        )
+
+        rng_placeholder = next(
+            n
+            for n in traced.graph.nodes
+            if n.op == "placeholder" and isinstance(n.meta.get("val"), torch.Generator)
+        )
+        user = next(iter(rng_placeholder.users))
+        self.assertIs(user.target, control_deps)
+
+        graph = GraphLowering(traced, [a, b, gen])
+        with V.set_fake_mode(fake_mode), V.set_graph_handler(graph):
+            graph.run(a, b, gen)
+
 
 class TestForeachGroupsUnit(InductorTestCase):
     """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
@@ -1684,6 +1894,25 @@ class TestForeachGroupsUnit(InductorTestCase):
             ag_ins, 2, torch.float32, out_dtype_ints, 0, None
         )
         self.assertTrue(torch.allclose(result_with, result_without))
+
+
+class TestNodeRuntimeEstimationUnit(InductorTestCase):
+    def test_compute_estimation_logging_handles_symbolic_scalar_meta(self):
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            _log_compute_estimations,
+        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        x.meta["val"] = torch.empty(2, 3)
+        y.meta["val"] = ShapeEnv().create_unbacked_symint()
+        add = graph.call_function(torch.ops.aten.add.Tensor, (x, y))
+        add.meta["val"] = torch.empty(2, 3)
+        graph.output(add)
+
+        _log_compute_estimations([add], [1.0], [1.0])
 
 
 def _make_pge_trace(
@@ -2303,6 +2532,131 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
         pre_bucket_fsdp_collectives(traced, bucket_cap_mb=2000.0)
 
         self.assertEqual(count_ag(fsdp_group), 1)
+
+
+class TestBitsetAncestors(TestCase):
+    """Tests for BitsetAncestors -- int-bitset transitive ancestor sets."""
+
+    def _make_graph(self):
+        """Build a small diamond graph for testing.
+
+        Graph topology (edges go downward):
+              a
+             / \\
+            b   c
+             \\ /
+              d
+              |
+              e
+        """
+        g = fx.Graph()
+        a = g.placeholder("a")
+        b = g.call_function(torch.relu, (a,))
+        c = g.call_function(torch.neg, (a,))
+        d = g.call_function(torch.add, (b, c))
+        e = g.call_function(torch.abs, (d,))
+        g.output(e)
+        return g, [a, b, c, d, e]
+
+    def test_membership(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        self.assertTrue(ancestors.is_ancestor(a, b))
+        self.assertTrue(ancestors.is_ancestor(a, c))
+        self.assertTrue(ancestors.is_ancestor(a, d))
+        self.assertTrue(ancestors.is_ancestor(b, d))
+        self.assertTrue(ancestors.is_ancestor(c, d))
+        self.assertTrue(ancestors.is_ancestor(a, e))
+        self.assertTrue(ancestors.is_ancestor(d, e))
+
+        self.assertFalse(ancestors.is_ancestor(b, c))
+        self.assertFalse(ancestors.is_ancestor(c, b))
+        self.assertFalse(ancestors.is_ancestor(d, a))
+        self.assertFalse(ancestors.is_ancestor(e, a))
+
+    def test_empty_ancestors(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        self.assertEqual(list(ancestors.iter_ancestors(a)), [])
+
+    def test_iteration(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        d_ancestors = list(ancestors.iter_ancestors(d))
+        self.assertEqual(len(d_ancestors), 3)
+        self.assertIn(a, d_ancestors)
+        self.assertIn(b, d_ancestors)
+        self.assertIn(c, d_ancestors)
+
+    def test_len(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        self.assertEqual(len(list(ancestors.iter_ancestors(a))), 0)
+        self.assertEqual(len(list(ancestors.iter_ancestors(b))), 1)
+        self.assertEqual(len(list(ancestors.iter_ancestors(d))), 3)
+        self.assertEqual(len(list(ancestors.iter_ancestors(e))), 4)
+
+    def test_has_dep(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        self.assertTrue(ancestors.has_dep(a, d))
+        self.assertTrue(ancestors.has_dep(d, a))
+        self.assertFalse(ancestors.has_dep(b, c))
+        self.assertFalse(ancestors.has_dep(c, b))
+
+    def test_intersection(self):
+        """Verifies bitwise AND of ancestor sets matches expected common ancestors."""
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        common_bits = ancestors.get_ancestor_bits(d) & ancestors.get_ancestor_bits(e)
+        self.assertEqual(common_bits.bit_count(), 3)
+
+    def test_extra_inputs(self):
+        """Extra edges beyond the FX graph (e.g. hiding-interval deps)."""
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+        from torch.utils._ordered_set import OrderedSet
+
+        g, [a, b, c, d, e] = self._make_graph()
+        extra = {e: OrderedSet([c])}
+        ancestors = BitsetAncestors([a, b, c, d, e], extra_inputs=extra)
+
+        self.assertTrue(ancestors.is_ancestor(c, e))
+        self.assertTrue(ancestors.is_ancestor(a, e))
+
+    def test_linear_chain(self):
+        """N-node linear chain: node i's ancestors are 0..i-1."""
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g = fx.Graph()
+        nodes = [g.placeholder("x")]
+        for i in range(99):
+            nodes.append(g.call_function(torch.relu, (nodes[-1],)))
+        g.output(nodes[-1])
+
+        ancestors = BitsetAncestors(nodes)
+        self.assertEqual(len(list(ancestors.iter_ancestors(nodes[0]))), 0)
+        self.assertEqual(len(list(ancestors.iter_ancestors(nodes[50]))), 50)
+        self.assertEqual(len(list(ancestors.iter_ancestors(nodes[99]))), 99)
+        self.assertTrue(ancestors.is_ancestor(nodes[0], nodes[99]))
+        self.assertFalse(ancestors.is_ancestor(nodes[99], nodes[0]))
 
 
 if __name__ == "__main__":

@@ -42,9 +42,11 @@ class PreservesZeros(SymPyOps, DefaultHandler):
     def store(
         self, name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
     ) -> None:
-        assert isinstance(self, PreservesZeros)
+        if not isinstance(self, PreservesZeros):
+            raise AssertionError(f"expected PreservesZeros, got {type(self)}")
         # should only have a single store in prologue
-        assert self.store_preserves_zeros is None
+        if self.store_preserves_zeros is not None:
+            raise AssertionError("prologue should only have a single store")
         self.store_preserves_zeros = value.is_constant() and value.expr == 0
 
     def indirect_indexing(self, *args: Any, **kwargs: Any) -> sympy.Expr:
@@ -69,7 +71,10 @@ def prologue_preserves_zero_mask(prologue: "SchedulerNode") -> bool:
         prologue._body(*prologue.get_ranges())
 
     store_preserves_zeros = preserves_zeros.store_preserves_zeros
-    assert isinstance(store_preserves_zeros, bool)
+    if not isinstance(store_preserves_zeros, bool):
+        raise AssertionError(
+            f"expected bool store_preserves_zeros, got {type(store_preserves_zeros)}"
+        )
 
     return store_preserves_zeros
 
