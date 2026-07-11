@@ -79,7 +79,9 @@ class TestFakeTensor(TestCase):
         torch._utils.set_tensor_metadata(x, metadata)
         fn(x)
 
-        self.assertEqual(captured, [metadata])
+        # fake_clone is added by clone_for_fake(), confirming the layout metadata
+        # reached the compiler backend through the fakeification path.
+        self.assertEqual(captured, [{**metadata, "fake_clone": True}])
 
     def test_fake_tensor_mode(self):
         with torch._subclasses.fake_tensor.FakeTensorMode():

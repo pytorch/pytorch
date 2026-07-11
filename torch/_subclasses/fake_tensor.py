@@ -570,9 +570,9 @@ class FakeTensorConverter:
             out.grad_dtype = inner_t.grad_dtype
 
         # Propagate backend-specific metadata (e.g. PrivateUse1 BackendMeta) from
-        # the (unwrapped) real tensor onto the fake tensor; a no-op when there is
-        # none.
-        torch._utils.copy_backend_meta(inner_t, out)
+        # the (unwrapped) real tensor onto the fake tensor. for_fake lets the
+        # backend drop data that is invalid on a fake; a no-op when there is none.
+        torch._utils.copy_backend_meta(inner_t, out, for_fake=True)
 
         from torch._dynamo.source import RandomValueSource
 
