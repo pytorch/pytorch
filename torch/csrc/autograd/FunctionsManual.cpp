@@ -305,6 +305,174 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(
       x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.mT().matmul(x1)};
 }
 
+// Double backward for _cdist_backward, whose first backward is
+//   grad_x1_ik = sum_j grad_output_ij * sgn(diff)|diff|^(p-1) / cdist_ij^(p-1),
+// diff_ijk = x1_ik - x2_jk. cdist is an independent input here; its x1/x2
+// dependence flows through the cdist slot of _cdist_forward's backward.
+// Negative powers are masked to 0 at exact zeros, per the forward subgradient
+// convention.
+std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
+    const Tensor& grad,
+    const Tensor& grad_output,
+    const Tensor& x1,
+    const Tensor& x2,
+    const double p,
+    const Tensor& cdist,
+    std::array<bool, 4> output_mask) {
+  const bool need_go = output_mask[0];
+  const bool need_x1 = output_mask[1];
+  const bool need_x2 = output_mask[2];
+  const bool need_cdist = output_mask[3];
+  if (!grad.defined() || !(need_go || need_x1 || need_x2 || need_cdist)) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor());
+  }
+
+  Tensor grad_grad_output, grad_x1, grad_x2, grad_cdist;
+  auto zero = cdist == 0;
+
+  if (p == 0.0) {
+    // First backward is identically zero, so every second-order grad vanishes.
+    if (need_go)
+      grad_grad_output = at::zeros_like(grad_output);
+    if (need_x1)
+      grad_x1 = at::zeros_like(x1);
+    if (need_x2)
+      grad_x2 = at::zeros_like(x2);
+    if (need_cdist)
+      grad_cdist = at::zeros_like(cdist);
+  } else if (p == 2.0) {
+    // Closed form via matmuls, avoiding the (r1, r2, m) materialization below.
+    auto W = (grad_output / cdist).masked_fill(zero, 0);
+    Tensor P;
+
+    if (need_go || need_cdist) {
+      P = ((grad * x1).sum(-1, true) - grad.matmul(x2.mT())) / cdist;
+      P = P.masked_fill(zero, 0);
+    }
+    if (need_go)
+      grad_grad_output = P;
+    if (need_cdist)
+      grad_cdist = -(W * P);
+    if (need_x1)
+      grad_x1 = grad * W.sum(-1, true);
+    if (need_x2)
+      grad_x2 = -(W.mT().matmul(grad));
+  } else if (p == 1.0 || std::isinf(p)) {
+    // First backward is piecewise constant in x1/x2/cdist; only grad_output is
+    // (a.e.) nonzero.
+    if (need_go) {
+      auto diff = x1.unsqueeze(-2) - x2.unsqueeze(-3);
+      auto s = diff.sgn();
+
+      if (std::isinf(p)) {
+        s = s * (diff.abs() == cdist.unsqueeze(-1));
+      }
+
+      grad_grad_output = (grad.unsqueeze(-2) * s).sum(-1);
+    }
+    if (need_x1)
+      grad_x1 = at::zeros_like(x1);
+    if (need_x2)
+      grad_x2 = at::zeros_like(x2);
+    if (need_cdist)
+      grad_cdist = at::zeros_like(cdist);
+  } else {
+    auto diff = x1.unsqueeze(-2) - x2.unsqueeze(-3);
+    auto adiff = diff.abs();
+    auto diff_zero = diff == 0;
+    auto cdist_pow = cdist.pow(p - 1);
+    auto W = (grad_output / cdist_pow).masked_fill(zero, 0);
+    Tensor P;
+
+    if (need_go || need_cdist) {
+      auto signpow = (diff.sgn() * adiff.pow(p - 1)).masked_fill(diff_zero, 0);
+      auto num = (grad.unsqueeze(-2) * signpow).sum(-1);
+
+      P = (num / cdist_pow).masked_fill(zero, 0);
+    }
+    if (need_go)
+      grad_grad_output = P;
+    if (need_cdist)
+      grad_cdist = -(p - 1) * (grad_output / cdist).masked_fill(zero, 0) * P;
+    if (need_x1 || need_x2) {
+      auto adpow = adiff.pow(p - 2).masked_fill(diff_zero, 0);
+      auto weighted = W.unsqueeze(-1) * adpow;
+
+      if (need_x1)
+        grad_x1 = (p - 1) * grad * weighted.sum(-2);
+      if (need_x2)
+        grad_x2 = -(p - 1) * (weighted * grad.unsqueeze(-2)).sum(-3);
+    }
+  }
+  return std::make_tuple(
+      std::move(grad_grad_output),
+      std::move(grad_x1),
+      std::move(grad_x2),
+      std::move(grad_cdist));
+}
+
+// Double backward for _pdist_backward. pdist is cdist of `self` with itself,
+// packed over the strict upper triangle. We scatter grad_output/pdist into
+// symmetric (n, n) matrices, reuse the cdist double backward with x1 == x2 ==
+// self, and fold back to the packed layout; grad_self sums the x1 and x2 slots
+// since self is both endpoints.
+std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
+    const Tensor& grad,
+    const Tensor& grad_output,
+    const Tensor& self,
+    const double p,
+    const Tensor& pdist,
+    std::array<bool, 3> output_mask) {
+  const bool need_go = output_mask[0];
+  const bool need_self = output_mask[1];
+  const bool need_pdist = output_mask[2];
+  if (!grad.defined() || !(need_go || need_self || need_pdist)) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor());
+  }
+
+  int64_t n = self.size(0);
+  Tensor grad_grad_output, grad_self, grad_pdist;
+
+  if (n <= 1 || p == 0.0 || self.size(1) == 0) {
+    if (need_go)
+      grad_grad_output = at::zeros_like(grad_output);
+    if (need_self)
+      grad_self = at::zeros_like(self);
+    if (need_pdist)
+      grad_pdist = at::zeros_like(pdist);
+    return std::make_tuple(
+        std::move(grad_grad_output),
+        std::move(grad_self),
+        std::move(grad_pdist));
+  }
+
+  auto idx = at::triu_indices(n, n, 1, self.options().dtype(at::kLong));
+  torch::List<std::optional<Tensor>> ij({idx.select(0, 0), idx.select(0, 1)});
+
+  auto to_symmetric = [&](const Tensor& packed) {
+    auto upper = packed.new_zeros({n, n}).index_put(ij, packed);
+    return upper + upper.mT();
+  };
+
+  auto [P, gx1, gx2, Cd] = _cdist_backward_backward(
+      grad,
+      to_symmetric(grad_output),
+      self,
+      self,
+      p,
+      to_symmetric(pdist),
+      {need_go, need_self, need_self, need_pdist});
+
+  if (need_go)
+    grad_grad_output = (P + P.mT()).index(ij);
+  if (need_self)
+    grad_self = gx1 + gx2;
+  if (need_pdist)
+    grad_pdist = (Cd + Cd.mT()).index(ij);
+  return std::make_tuple(
+      std::move(grad_grad_output), std::move(grad_self), std::move(grad_pdist));
+}
+
 Tensor norm_backward(
     const Tensor& grad,
     const Tensor& self,
