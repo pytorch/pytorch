@@ -4919,15 +4919,29 @@ class TestMetadataJsonFormat(TestCase):
 
     def _get_kernel_metadata(self):
         x = torch.randn(64, 64, device="cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-            torch.mm(x, x)
-            torch.cuda.synchronize()
+        # The first profiled iteration(s) can drop CUDA kernels while CUPTI
+        # warms up, so retry a few times before giving up.
+        activities = []
+        for _ in range(3):
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+            ) as prof:
+                torch.mm(x, x)
+                torch.cuda.synchronize()
+            activities = prof.profiler.kineto_results.trace_activities()
+            for act in activities:
+                if act.type() == "kernel":
+                    return act.metadata_json()
 
-        activities = prof.profiler.kineto_results.trace_activities()
-        for act in activities:
-            if act.type() == "kernel":
-                return act.metadata_json()
-        self.fail("No kernel activity found in trace")
+        raw_types = collections.Counter(act.type() for act in activities)
+        event_cats = collections.Counter(
+            e.activity_type for e in prof.events() if getattr(e, "activity_type", None)
+        )
+        self.fail(
+            f"No kernel activity found. cuda={torch.version.cuda} "
+            f"supported={supported_activities()} n={len(activities)} "
+            f"trace_activities_types={dict(raw_types)} events_cats={dict(event_cats)}"
+        )
 
     def test_metadata_json_is_valid_json_fragment(self):
         md = self._get_kernel_metadata()
