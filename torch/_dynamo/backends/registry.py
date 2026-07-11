@@ -129,9 +129,7 @@ def lookup_backend(compiler_fn: str | CompilerFn) -> CompilerFn:
 
             from ..exc import InvalidBackend
 
-            suggestions = difflib.get_close_matches(
-                compiler_fn, list_backends(exclude_tags=()), n=2
-            )
+            suggestions = difflib.get_close_matches(compiler_fn, list_backends(), n=2)
             raise InvalidBackend(name=compiler_fn, suggestions=suggestions)
 
         if compiler_fn not in _COMPILER_FNS:

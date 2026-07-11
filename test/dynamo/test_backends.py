@@ -345,6 +345,10 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(InvalidBackend, "did you mean: 'inductor'"):
             lookup_backend("indutcor")
 
+        with self.assertRaises(InvalidBackend) as cm:
+            lookup_backend("zzzzzzzz")
+        self.assertNotIn("did you mean", str(cm.exception))
+
     def test_lookup_custom_backend(self):
         from torch._dynamo import list_backends
 
