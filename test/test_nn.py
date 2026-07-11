@@ -2084,62 +2084,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inputs = torch.randn((), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_data_parallel_with_empty_parameter_shapes(self):
-        class MyModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param_2d = nn.Parameter(torch.zeros(0, 16))
-                self.param_3d = nn.Parameter(torch.zeros(3, 0, 8))
-                self.param_4d = nn.Parameter(torch.zeros(2, 0, 4, 5))
-                self.param_normal = nn.Parameter(torch.ones(2, 3))
-
-            def forward(self, x):
-                return x + self.param_normal.sum()
-
-        model = MyModule()
-        devices = [0, 1]
-        model_parallel = nn.DataParallel(model, device_ids=devices)
-        model_parallel.cuda(devices[0])
-        input_tensor = torch.ones(4, 2, device=f'cuda:{devices[0]}')
-        output = model_parallel(input_tensor)
-        self.assertEqual(model_parallel.module.param_2d.shape, torch.Size([0, 16]))
-        self.assertEqual(model_parallel.module.param_3d.shape, torch.Size([3, 0, 8]))
-        self.assertEqual(model_parallel.module.param_4d.shape, torch.Size([2, 0, 4, 5]))
-        self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_broadcast_double_backwards_gpu(self):
-        tensors = (torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
-                   torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
-                   torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double))
-        # TODO(#50743): the following segfaults with check_batched_grad=True
-        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors,
-                                     check_batched_grad=False)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_broadcast_not_requiring_grad(self):
-        variables = [
-            torch.randn(1, 2, device='cuda', requires_grad=True),
-            torch.randn(1, 2, device='cuda', requires_grad=False),
-            torch.randn(1, 2, device='cuda', requires_grad=False),
-            torch.randn(1, 2, device='cuda', requires_grad=True),
-            torch.randn(1, 2, device='cuda', requires_grad=True),
-        ]
-        broadcasted_variables = Broadcast.apply((0, 1), *variables)
-        for output_idx, broadcasted_var in enumerate(broadcasted_variables):
-            input_var = variables[output_idx % len(variables)]
-            self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_broadcast_no_grad(self):
-        x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device='cuda')
-        with torch.no_grad():
-            broadcasted = Broadcast.apply((0, 1), x)
-        self.assertTrue(x.requires_grad)
-        for output in broadcasted:
-            self.assertFalse(output.requires_grad)
-
     def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
@@ -3497,91 +3441,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         hidden_h_shape = correct_hidden_h_shape
         hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
         test(input_shape, hidden_h_shape, hidden_c_shape)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_rnn_check_device(self):
-        import copy
-        input_size = 3
-        hidden_size = 5
-        num_layers = 2
-        batch_size = 4
-        seq_len = 6
-        num_directions = 1
-
-        correct_input_shape = (seq_len, batch_size, input_size)
-        correct_hidden_shape = (num_layers * num_directions, batch_size, hidden_size)
-        rnn_modes = ['RNN', 'GRU', 'LSTM']
-
-        for mode in rnn_modes:
-            model = getattr(nn, mode)(input_size, hidden_size, num_layers)
-            model_cuda = copy.deepcopy(model).to('cuda:0')
-            input = torch.randn(correct_input_shape)
-            hidden = torch.randn(correct_hidden_shape)
-
-            # input and weights are not at the same device
-            rnn_param_device_msg = (
-                r"(?:Input and parameter tensors are not at the same device|"
-                r"Expected all tensors to be on the same device)"
-            )
-            with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
-                model(input.to('cuda:0'))
-            with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
-                model_cuda(input)
-
-            # input and hiddens are not at the same device
-            rnn_hidden_device_msg = (
-                r"(?:Input and hidden tensors are not at the same device|"
-                r"Expected all tensors to be on the same device)"
-            )
-            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
-                if mode == 'LSTM':
-                    model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
-                else:
-                    model(input, (hidden.to('cuda:0')))
-            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
-                if mode == 'LSTM':
-                    model_cuda(input.to('cuda:0'), (hidden, hidden))
-                else:
-                    model_cuda(input.to('cuda:0'), (hidden))
-
-            # hidden tensors are not at the same CUDA device
-            if mode == 'LSTM':
-                with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
-                    model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_projections_lstm_check_device(self):
-        input_size = 3
-        hidden_size = 5
-        proj_size = 2
-        num_layers = 2
-        batch_size = 4
-        seq_len = 6
-        num_directions = 1
-
-        correct_input_shape = (seq_len, batch_size, input_size)
-        correct_hidden_h_shape = (num_layers * num_directions, batch_size, proj_size)
-        correct_hidden_c_shape = (num_layers * num_directions, batch_size, hidden_size)
-
-        model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size)
-        input = torch.randn(correct_input_shape)
-        hidden_h = torch.randn(correct_hidden_h_shape)
-        hidden_c = torch.randn(correct_hidden_c_shape)
-
-        # input and weights are not at the same device
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Input and parameter tensors are not at the same device"):
-            model(input.to('cuda:0'))
-
-        # input and hiddens are not at the same device
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"Input and hidden tensors are not at the same device"):
-            model(input, (hidden_h.to('cuda:0'), hidden_c.to('cuda:0')))
-
-        # hidden tensors are not at the same CUDA device
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Input and hidden tensors are not at the same device"):
-            model(input.to('cuda:0'), (hidden_h.to('cuda:0'), hidden_c.to('cuda:1')))
 
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
@@ -15933,6 +15792,149 @@ if __name__ == '__main__':
         m.eval()
         output = m(input)
         self.assertEqualTypeString(output, input)
+
+    @onlyAccelerator
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    def test_data_parallel_with_empty_parameter_shapes(self, device):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param_2d = nn.Parameter(torch.zeros(0, 16))
+                self.param_3d = nn.Parameter(torch.zeros(3, 0, 8))
+                self.param_4d = nn.Parameter(torch.zeros(2, 0, 4, 5))
+                self.param_normal = nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x):
+                return x + self.param_normal.sum()
+
+        model = MyModule()
+        model_parallel = nn.DataParallel(model, device_ids=[0, 1])
+        model_parallel.to(device)
+        input_tensor = torch.ones(4, 2, device=device)
+        model_parallel(input_tensor)
+        self.assertEqual(model_parallel.module.param_2d.shape, torch.Size([0, 16]))
+        self.assertEqual(model_parallel.module.param_3d.shape, torch.Size([3, 0, 8]))
+        self.assertEqual(model_parallel.module.param_4d.shape, torch.Size([2, 0, 4, 5]))
+        self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
+
+    @onlyAccelerator
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    def test_broadcast_double_backwards(self, device):
+        tensors = (torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
+                   torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
+                   torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double))
+        # TODO(#50743): the following segfaults with check_batched_grad=True
+        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors,
+                                     check_batched_grad=False)
+
+    @onlyAccelerator
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    def test_broadcast_not_requiring_grad(self, device):
+        variables = [
+            torch.randn(1, 2, device=device, requires_grad=True),
+            torch.randn(1, 2, device=device, requires_grad=False),
+            torch.randn(1, 2, device=device, requires_grad=False),
+            torch.randn(1, 2, device=device, requires_grad=True),
+            torch.randn(1, 2, device=device, requires_grad=True),
+        ]
+        broadcasted_variables = Broadcast.apply((0, 1), *variables)
+        for output_idx, broadcasted_var in enumerate(broadcasted_variables):
+            input_var = variables[output_idx % len(variables)]
+            self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
+
+    @onlyAccelerator
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    def test_broadcast_no_grad(self, device):
+        x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device=device)
+        with torch.no_grad():
+            broadcasted = Broadcast.apply((0, 1), x)
+        self.assertTrue(x.requires_grad)
+        for output in broadcasted:
+            self.assertFalse(output.requires_grad)
+
+    @deviceCountAtLeast(2)
+    @parametrize_test('mode', ['RNN', 'GRU', 'LSTM'])
+    def test_rnn_check_device(self, devices, mode):
+        import copy
+        input_size = 3
+        hidden_size = 5
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_shape = (num_layers * num_directions, batch_size, hidden_size)
+
+        model = getattr(nn, mode)(input_size, hidden_size, num_layers)
+        model_device = copy.deepcopy(model).to(devices[0])
+        input = torch.randn(correct_input_shape)
+        hidden = torch.randn(correct_hidden_shape)
+
+        # input and weights are not at the same device
+        rnn_param_device_msg = (
+            r"(?:Input and parameter tensors are not at the same device|"
+            r"Expected all tensors to be on the same device)"
+        )
+        with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
+            model(input.to(devices[0]))
+        with self.assertRaisesRegex(RuntimeError, rnn_param_device_msg):
+            model_device(input)
+
+        # input and hiddens are not at the same device
+        rnn_hidden_device_msg = (
+            r"(?:Input and hidden tensors are not at the same device|"
+            r"Expected all tensors to be on the same device)"
+        )
+        with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
+            if mode == 'LSTM':
+                model(input, (hidden.to(devices[0]), hidden.to(devices[0])))
+            else:
+                model(input, (hidden.to(devices[0])))
+        with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
+            if mode == 'LSTM':
+                model_device(input.to(devices[0]), (hidden, hidden))
+            else:
+                model_device(input.to(devices[0]), (hidden))
+
+        # hidden tensors are not at the same accelerator device
+        if mode == 'LSTM':
+            with self.assertRaisesRegex(RuntimeError, rnn_hidden_device_msg):
+                model(input.to(devices[0]), (hidden.to(devices[0]), hidden.to(devices[1])))
+
+    @deviceCountAtLeast(2)
+    def test_projections_lstm_check_device(self, devices):
+        input_size = 3
+        hidden_size = 5
+        proj_size = 2
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_h_shape = (num_layers * num_directions, batch_size, proj_size)
+        correct_hidden_c_shape = (num_layers * num_directions, batch_size, hidden_size)
+
+        model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size)
+        input = torch.randn(correct_input_shape)
+        hidden_h = torch.randn(correct_hidden_h_shape)
+        hidden_c = torch.randn(correct_hidden_c_shape)
+
+        # input and weights are not at the same device
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Input and parameter tensors are not at the same device"):
+            model(input.to(devices[0]))
+
+        # input and hiddens are not at the same device
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Input and hidden tensors are not at the same device"):
+            model(input, (hidden_h.to(devices[0]), hidden_c.to(devices[0])))
+
+        # hidden tensors are not at the same accelerator device
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Input and hidden tensors are not at the same device"):
+            model(input.to(devices[0]), (hidden_h.to(devices[0]), hidden_c.to(devices[1])))
 
 
 class TestFunctionalPickle(TestCase):
