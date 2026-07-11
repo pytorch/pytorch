@@ -478,13 +478,13 @@ def add(x, y):
 
         arg = torch.randn(3, 2, device=device)
         expected = fn(arg)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(compiled_fn(arg), expected)
         total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         with torch.compiler.set_stance("fail_on_recompile"):
             result = compiled_fn(arg)
             self.assertEqual(result, expected)
