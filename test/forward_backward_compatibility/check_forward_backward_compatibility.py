@@ -90,6 +90,8 @@ ALLOW_LIST = [
     ("aten::qr.Q", datetime.date(9999, 1, 1), None, True),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
+    ("aten::_cdist_backward", datetime.date(9999, 1, 1)),
+    ("aten::_pdist_backward", datetime.date(9999, 1, 1)),
     ("aten::matrix_rank", datetime.date(9999, 1, 1)),
     ("aten::matrix_rank.tol", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
