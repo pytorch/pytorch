@@ -15773,7 +15773,7 @@ if __name__ == '__main__':
         self.assertEqualTypeString(output, input)
 
     @onlyAccelerator
-    @unittest.skipUnless(TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
     def test_data_parallel_with_empty_parameter_shapes(self, device):
         class MyModule(nn.Module):
             def __init__(self):
@@ -15797,7 +15797,7 @@ if __name__ == '__main__':
         self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
 
     @onlyAccelerator
-    @unittest.skipUnless(TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
     def test_broadcast_double_backwards(self, device):
         tensors = (torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
                    torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
@@ -15807,7 +15807,7 @@ if __name__ == '__main__':
                                      check_batched_grad=False)
 
     @onlyAccelerator
-    @unittest.skipUnless(TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
     def test_broadcast_not_requiring_grad(self, device):
         variables = [
             torch.randn(1, 2, device=device, requires_grad=True),
@@ -15822,7 +15822,7 @@ if __name__ == '__main__':
             self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
 
     @onlyAccelerator
-    @unittest.skipUnless(TEST_MULTIACCELERATOR, "multi-accelerator not supported")
+    @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
     def test_broadcast_no_grad(self, device):
         x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device=device)
         with torch.no_grad():
