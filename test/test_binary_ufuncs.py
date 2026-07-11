@@ -3605,6 +3605,19 @@ class TestBinaryUfuncsDevice(TestCase):
         )
         self.assertEqual(torch.ldexp(mantissas, exponents), expected)
 
+    @deviceCountAtLeast(2)
+    @onlyOn(["cuda", "xpu"])
+    def test_ldexp_off_current_device(self, devices):
+        # ldexp has no codegen device guard; verify it targets the operand device, not the current one.
+        mantissas = torch.randn(2048)
+        exponents = torch.randint(0, 5, (2048,), dtype=torch.int32)
+        ref = torch.ldexp(mantissas, exponents)
+        target = torch.device(devices[1])
+        with torch.accelerator.device_index(torch.device(devices[0]).index):
+            out = torch.ldexp(mantissas.to(target), exponents.to(target))
+            self.assertEqual(out.device, target)
+            self.assertEqual(out.cpu(), ref)
+
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_lerp(self, device, dtype):
         start_end_weight_shapes = [(), (5,), (5, 5)]

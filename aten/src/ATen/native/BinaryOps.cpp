@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/DeviceGuard.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
@@ -1572,6 +1573,8 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
 // This function is used to dispatch to kernels that use std::ldexp on CPU and the global namespaces ::ldexp on CUDA
 // Both of these require floating types for 'self' and integer types for 'other'.
 static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
+  // ldexp is CompositeExplicitAutograd (no codegen guard), but this launches a device kernel.
+  const OptionalDeviceGuard device_guard(device_of(self));
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(result)
