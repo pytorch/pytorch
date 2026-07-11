@@ -261,5 +261,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # Python/DSL native ops
 /torch/_native/ @slayton58 @drisspg
 
-# Vendored quack library
+# Vendored CuTeDSL libraries
 /torch/_vendor/quack/ @slayton58 @drisspg
+/torch/_vendor/flash_attn/ @slayton58 @drisspg

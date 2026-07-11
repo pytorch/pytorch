@@ -53,3 +53,25 @@ Instructions to update the subset of quack being vendored:
   - Update the `rewrite_imports` methods is there are more patterns required
 - Add QuACK feature deltas needed for FlexGEMM to `tools/vendoring/quack/flex_gemm_patches`
 - Add PyTorch-only vendoring/runtime deltas to `tools/vendoring/quack/patches`
+
+## `flash_attn`
+
+PyTorch vendors the FlashAttention-4 CuTe implementation together with the
+QuACK utility subset it requires. This is a separate dependency universe from
+`torch._vendor.quack`: the two pins can evolve independently, while FA4 and its
+private QuACK subset are updated together.
+
+The pinned upstream tags and commits are recorded in
+`tools/vendoring/flash_attn4/vendor.sh` and in the generated package metadata.
+Only CuTeDSL, TVM-FFI, DLPack, and einops remain external runtime dependencies.
+
+Instructions to update:
+
+```
+tools/vendoring/flash_attn4/vendor.sh
+
+# Or reuse existing checkouts:
+tools/vendoring/flash_attn4/vendor.sh \
+  --src-fa /path/to/flash-attention \
+  --src-quack /path/to/quack
+```
