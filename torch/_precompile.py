@@ -79,18 +79,20 @@ graph under foreign metadata.
 #    requires_grad (invariant 5), so flipping a param's requires_grad at runtime does
 #    not change what the artifact computes. ENFORCED: the driver compares the runtime
 #    model's full param/buffer NAME list (order and identity, tied weights collapsed)
-#    against the traced list, AND each runtime param/buffer's SHAPE and DTYPE against the
-#    baked example values, so a reordered or otherwise structurally-different model --
-#    even one with the same count and names but a differently shaped or typed weight (e.g.
-#    a Linear(4,4) swapped for a Linear(4,8)) -- is rejected (it cannot silently scatter
-#    grads onto the wrong slot or compute the wrong thing). Different WEIGHT VALUES with the
-#    same shapes/dtypes are the intended use -- WITH ONE INDUCTOR-BACKEND CAVEAT: the
-#    inductor backend ALSO specializes each param/buffer's LAYOUT (memory format), since it
-#    bakes assert_size_stride on every weight the graph reads. So a same-shape/same-dtype
-#    checkpoint whose weight has a DIFFERENT layout (e.g. a non-contiguous view, or a
-#    channels_last weight where the example was contiguous) is REJECTED at runtime by the
-#    inductor backend (invariant 6). Match the example weight's layout (.contiguous() to
-#    match a contiguous example), or use backend='eager' for layout-flexible weights.
+#    against the traced list, AND each runtime param/buffer's SHAPE, DTYPE, AND DEVICE
+#    against the baked example values, so a reordered or otherwise structurally-different
+#    model -- even one with the same count and names but a differently shaped, typed, or
+#    placed weight (e.g. a Linear(4,4) swapped for a Linear(4,8), or a CPU weight where a
+#    CUDA one was traced) -- is rejected (it cannot silently scatter grads onto the wrong
+#    slot, fail deep in a kernel, or compute the wrong thing). Different WEIGHT VALUES with
+#    the same shapes/dtypes/devices are the intended use -- WITH ONE INDUCTOR-BACKEND
+#    CAVEAT: the inductor backend ALSO specializes each param/buffer's LAYOUT (memory
+#    format), since it bakes assert_size_stride on every weight the graph reads. So a
+#    same-shape/same-dtype checkpoint whose weight has a DIFFERENT layout (e.g. a
+#    non-contiguous view, or a channels_last weight where the example was contiguous) is
+#    REJECTED at runtime by the inductor backend (invariant 6). Match the example weight's
+#    layout (.contiguous() to match a contiguous example), or use backend='eager' for
+#    layout-flexible weights.
 #
 # 3. Control flow and shapes are specialized to the example. A non-strict trace follows
 #    the single path taken for the example inputs: Python ``if``/``for`` over tensor
@@ -454,15 +456,18 @@ def _capture(
         _intern_param_buffers(mods)
     )
     num_pb = len(pb_flat)
-    # Record each interned param's / buffer's example SHAPE and DTYPE (aligned to
+    # Record each interned param's / buffer's example SHAPE, DTYPE, and DEVICE (aligned to
     # param_names / buffer_names) so the structural check (invariant 2) compares not just
-    # names but also each runtime tensor's shape and dtype. The graph is specialized to the
-    # example param/buffer shapes; a same-named runtime tensor with a different shape would
-    # otherwise silently compute the wrong thing (eager has no assert_size_stride backstop).
+    # names but also each runtime tensor's shape, dtype, and device. The graph is specialized
+    # to the example param/buffer shapes (and can bake a device literal via a factory op), so
+    # a same-named runtime tensor with a different shape / dtype / device would otherwise
+    # silently compute the wrong thing (eager has no assert_size_stride backstop).
     param_shapes = [tuple(t.shape) for t in pb_flat[:num_params]]
     buffer_shapes = [tuple(t.shape) for t in pb_flat[num_params:]]
     param_dtypes = [str(t.dtype) for t in pb_flat[:num_params]]
     buffer_dtypes = [str(t.dtype) for t in pb_flat[num_params:]]
+    param_devices = [str(t.device) for t in pb_flat[:num_params]]
+    buffer_devices = [str(t.device) for t in pb_flat[num_params:]]
 
     user_flat, in_spec = pytree.tree_flatten(user_inputs)
     flat_args = [*pb_flat, *user_flat]
@@ -581,6 +586,8 @@ def _capture(
         buffer_shapes=buffer_shapes,
         param_dtypes=param_dtypes,
         buffer_dtypes=buffer_dtypes,
+        param_devices=param_devices,
+        buffer_devices=buffer_devices,
         in_spec=in_spec,
         out_spec=out_spec_holder["spec"],
         grad_param_indices=out_spec_holder["grad_param_indices"],
@@ -603,6 +610,8 @@ class _Capture:
         buffer_shapes: list[Any],
         param_dtypes: list[str],
         buffer_dtypes: list[str],
+        param_devices: list[str],
+        buffer_devices: list[str],
         in_spec: pytree.TreeSpec,
         out_spec: pytree.TreeSpec,
         grad_param_indices: list[int],
@@ -620,6 +629,8 @@ class _Capture:
         self.buffer_shapes = buffer_shapes
         self.param_dtypes = param_dtypes
         self.buffer_dtypes = buffer_dtypes
+        self.param_devices = param_devices
+        self.buffer_devices = buffer_devices
         self.in_spec = in_spec
         self.out_spec = out_spec
         self.grad_param_indices = grad_param_indices
@@ -722,6 +733,12 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
         f"BUFFER_SHAPES = {compiled._buffer_shapes!r}",
         f"PARAM_DTYPES = {compiled._param_dtypes!r}",
         f"BUFFER_DTYPES = {compiled._buffer_dtypes!r}",
+        # Per interned param / buffer example device (a string, e.g. "cuda:0"), aligned to
+        # PARAM_NAMES / BUFFER_NAMES. Device is now part of the structural contract
+        # (invariant 2): a same-named runtime tensor on a different device than traced is
+        # rejected up front rather than failing deep in a kernel.
+        f"PARAM_DEVICES = {compiled._param_devices!r}",
+        f"BUFFER_DEVICES = {compiled._buffer_devices!r}",
         # Which unique-param index each trailing grad output belongs to (its length is
         # the number of grad outputs); the driver scatters grad k onto
         # params/buffers[GRAD_PARAM_INDICES[k]] so frozen / non-contributing params
@@ -769,6 +786,8 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, Any]:
         "BUFFER_SHAPES",
         "PARAM_DTYPES",
         "BUFFER_DTYPES",
+        "PARAM_DEVICES",
+        "BUFFER_DEVICES",
         "GRAD_PARAM_INDICES",
         "IN_SPEC",
         "OUT_SPEC",
@@ -929,9 +948,10 @@ def _check_structure(pb, names):
     # Verify the runtime model's extracted param/buffer NAMES match the baked
     # PARAM_NAMES + BUFFER_NAMES (count AND order/identity), so a reordered or
     # structurally-drifted same-count model is caught precisely (invariant 2) rather
-    # than scattering grads onto the wrong slot. Then check each tensor's SHAPE and DTYPE
-    # against the baked example: the graph is specialized to the example shapes, so a
-    # same-named but differently shaped/typed runtime tensor would silently miscompute.
+    # than scattering grads onto the wrong slot. Then check each tensor's SHAPE, DTYPE and
+    # DEVICE against the baked example: the graph is specialized to the example shapes and
+    # can bake a device literal, so a same-named but differently shaped/typed/placed
+    # runtime tensor would silently miscompute or fail deep in a kernel.
     expected = list(PARAM_NAMES) + list(BUFFER_NAMES)  # noqa: F821
     if names != expected:
         _fail(
@@ -941,7 +961,10 @@ def _check_structure(pb, names):
         )
     expected_shapes = list(PARAM_SHAPES) + list(BUFFER_SHAPES)  # noqa: F821
     expected_dtypes = list(PARAM_DTYPES) + list(BUFFER_DTYPES)  # noqa: F821
-    for _nm, _t, _shp, _dt in zip(names, pb, expected_shapes, expected_dtypes):
+    expected_devices = list(PARAM_DEVICES) + list(BUFFER_DEVICES)  # noqa: F821
+    for _nm, _t, _shp, _dt, _dev in zip(
+        names, pb, expected_shapes, expected_dtypes, expected_devices
+    ):
         if tuple(_t.shape) != tuple(_shp):
             _fail(
                 "precompile: the runtime param/buffer %r has shape %s but the traced "
@@ -953,6 +976,12 @@ def _check_structure(pb, names):
                 "precompile: the runtime param/buffer %r has dtype %s but the traced "
                 "model's was %s; the runtime model must be structurally identical to the "
                 "traced model (invariant 2)." % (_nm, str(_t.dtype), _dt)
+            )
+        if str(_t.device) != _dev:
+            _fail(
+                "precompile: the runtime param/buffer %r is on device %s but the traced "
+                "model's was %s; the runtime model must be structurally identical to the "
+                "traced model (invariant 2)." % (_nm, str(_t.device), _dev)
             )
 
 
@@ -1020,8 +1049,8 @@ def forward(*args):
             )
         if _dev is not None and str(_t.device) != _dev:
             _fail(
-                "precompile: a runtime input is on device %r but the artifact was traced "
-                "on device %r; the graph is specialized to the example device "
+                "precompile: a runtime input is on device %s but the artifact was traced "
+                "on device %s; the graph is specialized to the example device "
                 "(invariant 6). Move the input to the traced device, or retrace."
                 % (str(_t.device), _dev)
             )
@@ -1084,9 +1113,10 @@ def _check_structure(pb, names):
     # Verify the runtime model's extracted param/buffer NAMES match the baked
     # PARAM_NAMES + BUFFER_NAMES (count AND order/identity), so a reordered or
     # structurally-drifted same-count model is caught precisely (invariant 2) rather
-    # than scattering grads onto the wrong slot. Then check each tensor's SHAPE and DTYPE
-    # against the baked example: the graph is specialized to the example shapes, so a
-    # same-named but differently shaped/typed runtime tensor would silently miscompute.
+    # than scattering grads onto the wrong slot. Then check each tensor's SHAPE, DTYPE and
+    # DEVICE against the baked example: the graph is specialized to the example shapes and
+    # can bake a device literal, so a same-named but differently shaped/typed/placed
+    # runtime tensor would silently miscompute or fail deep in a kernel.
     expected = list(PARAM_NAMES) + list(BUFFER_NAMES)  # noqa: F821
     if names != expected:
         _fail(
@@ -1096,7 +1126,10 @@ def _check_structure(pb, names):
         )
     expected_shapes = list(PARAM_SHAPES) + list(BUFFER_SHAPES)  # noqa: F821
     expected_dtypes = list(PARAM_DTYPES) + list(BUFFER_DTYPES)  # noqa: F821
-    for _nm, _t, _shp, _dt in zip(names, pb, expected_shapes, expected_dtypes):
+    expected_devices = list(PARAM_DEVICES) + list(BUFFER_DEVICES)  # noqa: F821
+    for _nm, _t, _shp, _dt, _dev in zip(
+        names, pb, expected_shapes, expected_dtypes, expected_devices
+    ):
         if tuple(_t.shape) != tuple(_shp):
             _fail(
                 "precompile: the runtime param/buffer %r has shape %s but the traced "
@@ -1108,6 +1141,12 @@ def _check_structure(pb, names):
                 "precompile: the runtime param/buffer %r has dtype %s but the traced "
                 "model's was %s; the runtime model must be structurally identical to the "
                 "traced model (invariant 2)." % (_nm, str(_t.dtype), _dt)
+            )
+        if str(_t.device) != _dev:
+            _fail(
+                "precompile: the runtime param/buffer %r is on device %s but the traced "
+                "model's was %s; the runtime model must be structurally identical to the "
+                "traced model (invariant 2)." % (_nm, str(_t.device), _dev)
             )
 
 
@@ -1295,6 +1334,13 @@ class PrecompiledModule:
         self._buffer_shapes: list[Any] = []
         self._param_dtypes: list[str] = []
         self._buffer_dtypes: list[str] = []
+        # Per interned param / buffer example device (a string, e.g. "cuda:0"), aligned
+        # to _param_names / _buffer_names. The structural check (invariant 2) now also
+        # compares device, so a same-named tensor on a different device than traced is
+        # rejected up front rather than failing deep in a kernel (a captured graph can
+        # bake a device literal via factory ops like torch.zeros(..., device=...)).
+        self._param_devices: list[str] = []
+        self._buffer_devices: list[str] = []
         self._in_spec: pytree.TreeSpec | None = None
         self._out_spec: pytree.TreeSpec | None = None
         self._gm: torch.fx.GraphModule | None = None
@@ -1366,6 +1412,8 @@ class PrecompiledModule:
         self._buffer_shapes = capture.buffer_shapes
         self._param_dtypes = capture.param_dtypes
         self._buffer_dtypes = capture.buffer_dtypes
+        self._param_devices = capture.param_devices
+        self._buffer_devices = capture.buffer_devices
         self._user_input_shapes = capture.user_input_shapes
         self._user_input_dtypes = capture.user_input_dtypes
         self._user_input_devices = capture.user_input_devices
@@ -1657,7 +1705,10 @@ class _PrecompileApi:
         the rest are the runtime inputs. The reloaded callable is invoked with the SAME
         argument structure -- pass the model(s) again at runtime, e.g.
         ``f_c(model, x)``, and that runtime model must match the example model's
-        parameter/buffer structure (invariant 2). If ``fn`` ran a backward, the
+        parameter/buffer structure (invariant 2). Arguments are matched POSITIONALLY:
+        pass the model(s) and inputs positionally both here and at load time; keyword-
+        argument calling conventions are not supported (a fn that relies on them would
+        surface as a raw arity error). If ``fn`` ran a backward, the
         resulting parameter gradients are scattered (accumulated) onto that runtime
         model's ``parameters()`` ``.grad`` fields, exactly like eager ``.backward()``,
         so a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged; the artifact
