@@ -234,16 +234,23 @@ def create_libtorch_zip(
     return zip_path
 
 
-def compute_zip_prefix(platform: str, desired_cuda: str, libtorch_variant: str) -> str:
+def compute_zip_prefix(
+    platform: str, desired_cuda: str, libtorch_variant: str, arch: str
+) -> str:
     """Compute the zip filename prefix matching existing naming conventions.
 
     Linux:  libtorch-shared-with-deps
     macOS:  libtorch-macos-arm64
     Windows: libtorch-win-shared-with-deps (or libtorch-win-arm64-shared-with-deps)
+
+    The arch component keeps the Windows x86_64 and arm64 packages from
+    sharing a filename and overwriting each other in the upload bucket.
     """
     if platform == "macos":
         return "libtorch-macos-arm64"
     elif platform == "windows":
+        if arch == "arm64":
+            return f"libtorch-win-arm64-{libtorch_variant}"
         return f"libtorch-win-{libtorch_variant}"
     else:
         return f"libtorch-{libtorch_variant}"
@@ -272,6 +279,12 @@ def main() -> None:
         "--libtorch-variant",
         default="shared-with-deps",
         help="Libtorch variant (shared-with-deps, etc.)",
+    )
+    parser.add_argument(
+        "--arch",
+        default="x86_64",
+        choices=["x86_64", "arm64"],
+        help="Target architecture (used to disambiguate Windows package names)",
     )
     parser.add_argument(
         "--git-hash",
@@ -316,7 +329,7 @@ def main() -> None:
 
         # Compute zip prefix
         zip_prefix = compute_zip_prefix(
-            args.platform, args.desired_cuda, args.libtorch_variant
+            args.platform, args.desired_cuda, args.libtorch_variant, args.arch
         )
 
         # Split debug symbols on Linux

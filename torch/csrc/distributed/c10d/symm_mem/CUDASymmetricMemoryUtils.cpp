@@ -291,12 +291,6 @@ void map_block(
       0,
       reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
       0ULL));
-  C10_CUDA_CHECK(hipMemMap(
-      *ptr,
-      size,
-      0,
-      reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
-      0ULL));
 
   hipMemAccessDesc desc;
   desc.location.type = hipMemLocationTypeDevice;

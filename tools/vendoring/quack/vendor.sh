@@ -14,10 +14,10 @@
 #   1. verify the pinned SHA is reachable from upstream main
 #   2. fetch upstream main and check out the pinned SHA
 #   3. copy whitelisted modules + LICENSE into torch/_vendor/quack/
-#   4. apply tools/vendoring/quack/flex_gemm_patches/*.patch
-#          (FlexGEMM QuACK feature deltas not yet merged upstream)
-#   5. apply tools/vendoring/quack/patches/*.patch
+#   4. apply tools/vendoring/quack/patches/*.patch
 #          (PyTorch vendoring/runtime patches only)
+#   5. apply tools/vendoring/quack/flex_gemm_patches/series
+#          (FlexGEMM QuACK feature deltas and runtime support patches)
 #   6. rewrite `quack.*` imports to package-relative
 #   7. verify copyright/license notices still match upstream
 #   8. write a fresh __init__.py recording the SHA and upstream version
@@ -194,16 +194,46 @@ copy_pytorch_only() {
     done
 }
 
+apply_patch_file() {
+    local patch_file=$1
+    patch -p1 -d "$DEST" --no-backup-if-mismatch --forward < "$patch_file"
+}
+
 apply_patch_dir() {
     local dir=$1 p
     for p in "$dir"/*.patch; do
         [[ -e "$p" ]] || continue
-        patch -p1 -d "$DEST" --no-backup-if-mismatch --forward < "$p"
+        apply_patch_file "$p"
+    done
+}
+
+apply_patch_series() {
+    local dir=$1 line patch_name p seen_patches=""
+    local series="$dir/series"
+    [[ -f "$series" ]] || die "missing patch series: $series"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line=${line%%#*}
+        patch_name=$(printf "%s" "$line" | sed -E "s/^[[:space:]]+//;s/[[:space:]]+$//")
+        [[ -z "$patch_name" ]] && continue
+        [[ "$patch_name" == */* ]] && die "patch series entries must be filenames: $patch_name"
+        [[ "$patch_name" == *.patch ]] || die "patch series entry must end in .patch: $patch_name"
+        [[ -f "$dir/$patch_name" ]] || die "patch listed in $series not found: $patch_name"
+        if printf "%s" "$seen_patches" | grep -Fxq "$patch_name"; then
+            die "duplicate patch in $series: $patch_name"
+        fi
+        seen_patches="${seen_patches}${patch_name}"$'\n'
+        apply_patch_file "$dir/$patch_name"
+    done < "$series"
+    for p in "$dir"/*.patch; do
+        [[ -e "$p" ]] || continue
+        patch_name=$(basename "$p")
+        printf "%s" "$seen_patches" | grep -Fxq "$patch_name" \
+            || die "patch missing from $series: $patch_name"
     done
 }
 
 apply_flex_gemm_patches() {
-    apply_patch_dir "$FLEX_GEMM_PATCHES_DIR"
+    apply_patch_series "$FLEX_GEMM_PATCHES_DIR"
 }
 
 apply_patches() {
@@ -317,7 +347,12 @@ from . import cute_dsl_mlir_threading
 cute_dsl_elf_fix.patch()
 cute_dsl_mlir_threading.patch()
 
-from .rmsnorm import rmsnorm  # noqa: E402
+def __getattr__(name):
+    if name == "rmsnorm":
+        from .rmsnorm import rmsnorm
+
+        return rmsnorm
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
@@ -332,9 +367,9 @@ render() {
     mkdir -p "$DEST"
     find "$DEST" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
     copy_pristine "$upstream"
-    apply_flex_gemm_patches
     copy_pytorch_only
     apply_patches
+    apply_flex_gemm_patches
     rewrite_imports
     verify_notices "$upstream"
     write_init "$sha" "$version"
@@ -349,7 +384,7 @@ assert_matches() {
     fi
     echo "vendor_quack: re-vendoring does not match $committed:" >&2
     echo "$drift" >&2
-    die "edit tools/vendoring/quack/patches, not the vendored files"
+    die "edit tools/vendoring/quack patches, not the vendored files"
 }
 
 main() {

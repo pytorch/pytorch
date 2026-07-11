@@ -84,12 +84,13 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "mt-"
       # Use a bigger runner here because CUDA_ARCH 9.0 is only built for H100
       # or newer GPUs, so it doesn't benefit much from existing compiler cache
       # from trunk. Also use a memory-intensive runner here because memory is
       # usually the bottleneck
-      runner: linux.12xlarge.memory
+      runner: l-x86iavx512-48-384
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks
       cuda-arch-list: '10.0'

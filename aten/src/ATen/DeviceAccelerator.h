@@ -6,6 +6,7 @@
 #include <c10/macros/Macros.h>
 
 #include <ATen/accelerator/Graph.h>
+#include <ATen/core/Generator.h>
 #include <optional>
 
 namespace at::accelerator {
@@ -36,8 +37,12 @@ inline bool isAcceleratorExcluded(
     c10::DeviceType device_type,
     c10::DeviceType first_excluded,
     T... rest_excluded) {
-  return isAccelerator(device_type) && (device_type != first_excluded) &&
-      ((device_type != rest_excluded) && ...);
+  if constexpr (sizeof...(rest_excluded) > 0) {
+    return device_type != first_excluded &&
+        isAcceleratorExcluded(device_type, rest_excluded...);
+  } else {
+    return device_type != first_excluded && isAccelerator(device_type);
+  }
 }
 
 // Return the number of the device available. Note that this is *REQUIRED* to
@@ -108,6 +113,10 @@ TORCH_API inline std::pair<size_t, size_t> getMemoryInfo(
   const auto device_type = getAccelerator(true).value();
   return at::getDeviceAllocator(device_type)->getMemoryInfo(device_index);
 }
+
+TORCH_API const at::Generator& getDefaultGenerator(
+    c10::DeviceIndex device_index);
+
 } // namespace at::accelerator
 
 namespace at {

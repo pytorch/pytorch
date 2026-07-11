@@ -153,7 +153,7 @@ class TestScheduler(TestCase):
         backend = Mock()
         backend.fuse.return_value = node3
         scheduler.get_backend = Mock(return_value=backend)
-        scheduler.node_to_stream = {}
+        scheduler.node_to_stream = {node1: 0, node2: 0}
         scheduler.node_to_mempool = {node1: (7, 0), node2: (7, 0)}
         scheduler.name_to_fused_node = {}
         fused_nodes = OrderedSet([node1, node2])
@@ -163,6 +163,7 @@ class TestScheduler(TestCase):
         )
 
         self.assertEqual(scheduler.node_to_mempool[node3], (7, 0))
+        self.assertEqual(scheduler.node_to_stream[node3], 0)
         self.assertIn(node3, fused_nodes)
         self.assertNotIn(node1, fused_nodes)
         self.assertNotIn(node2, fused_nodes)
@@ -184,6 +185,7 @@ class TestScheduler(TestCase):
             default_node: 0,
             other_pool_node: 0,
         }
+        scheduler.get_node_stream.side_effect = scheduler.node_to_stream.__getitem__
         scheduler.node_to_mempool = {
             pool_node1: (7, 0),
             pool_node2: (7, 0),
@@ -645,10 +647,12 @@ class TestScheduler(TestCase):
             self.assertEqual(
                 reference_flops,
                 counters["inductor"]["flop_count"],
-                msg=f"op = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
+                msg=lambda msg: f"{msg}\nop = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
             )
             if op != torch.add:
-                self.assertNotEqual(reference_flops, 0, msg=f"op = {op} is 0 flops")
+                self.assertNotEqual(
+                    reference_flops, 0, msg=lambda msg: f"{msg}\nop = {op} is 0 flops"
+                )
             counters["inductor"]["flop_count"] = 0
         torch._logging.set_logs()
 

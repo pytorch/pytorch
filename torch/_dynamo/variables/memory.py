@@ -98,7 +98,12 @@ class CUDAMemPoolVariable(VariableTracker):
             if self.source:
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
             return ConstantVariable.create(self.value.id)
-        return super().var_getattr(tx, name)
+        unimplemented(
+            gb_type="unsupported torch.cuda.MemPool attribute",
+            context=f"torch.cuda.MemPool.{name}",
+            explanation="Dynamo only supports reading torch.cuda.MemPool.id.",
+            hints=[],
+        )
 
     def as_proxy(self) -> Proxy:
         return self.proxy
