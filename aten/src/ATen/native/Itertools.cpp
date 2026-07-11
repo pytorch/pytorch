@@ -11,10 +11,10 @@
 #include <ATen/ops/combinations_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
-#include <ATen/ops/meshgrid.h>
-#include <ATen/ops/stack.h>
 #include <ATen/ops/index.h>
+#include <ATen/ops/meshgrid.h>
 #include <ATen/ops/nonzero_static.h>
+#include <ATen/ops/stack.h>
 #endif
 
 #include <vector>
