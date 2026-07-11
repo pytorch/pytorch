@@ -8,28 +8,32 @@ precompile captures your computation with ``make_fx`` (the default tracer; a
 Dynamo-based tracer is planned), which is a NON-STRICT trace: it records the ATen ops
 that actually run when ``fn`` executes once on the example inputs. It does not analyze
 your Python. There is therefore a small, explicit contract -- the programming model --
-that the caller must follow: stay inside it and the artifact faithfully reproduces
-``fn``; step outside it and the trace silently bakes assumptions and you get an
-artifact that computes the wrong thing. This is by design: a precise contract.
+that the caller must follow. Stay
+inside it and the artifact faithfully reproduces ``fn``; step outside it and the
+trace silently bakes assumptions, and you get a fast artifact that computes the
+wrong thing. This is by design: a precise contract instead of best-effort magic.
 
-This module implements the ``backend="eager"`` path: capture keeps the ATen graph and
-``precompile`` returns a self-contained, executable Python source string that inlines
-that graph -- it runs on its own. (An inductor backend that lowers the graph to kernels
-is added in a follow-up.) The companion binary ``cache`` is an integrity-tagged
-envelope; the eager backend has no kernels to accelerate, so it carries no compiled
-artifact (NO model weights -- you pass the model again at runtime). Reload with
+The captured graph is lowered through the AOT backend contract
+(``torch._functorch.aot_autograd.compile_to_python``, which drives AOTAutograd +
+Inductor and composes the runtime prelude/epilogue into the emitted source).
+``precompile`` returns a self-contained, executable Python source string -- which
+runs on its own, JIT-compiling kernels -- and a binary cache that is purely an
+acceleration (the real compiled artifact, so ``load`` skips JIT; NO model weights --
+you pass the model again at runtime). Reload with
 ``torch.compiler.precompile.load(python_code, cache)``.
 
 The full contract is in Note [precompile programming model] below; every public
 entry point and guard references it.
 
-``python_code`` is the single source of truth for the calling convention, and ``load``
-reads it back from there (parsing, not exec'ing). The cache envelope carries a
-``code_hash`` (``sha256`` of the ``python_code`` it accompanies) in addition to a
-format/version + backend tag; ``load`` recomputes the hash and raises
-``PrecompileError`` if a cache is paired with a different ``python_code``, so a
-mismatched (code, cache) pair fails loudly rather than silently running under foreign
-metadata.
+The cache carries ONLY the compiled/captured artifact -- no calling-convention
+metadata and no weights. ``python_code`` is the single source of truth for the
+calling convention, and ``load`` reads it back from there (parsing, not exec'ing),
+so the calling-convention metadata is single-sourced in ``python_code``. The cache
+envelope carries a ``code_hash`` (``sha256`` of the ``python_code`` it accelerates)
+in addition to a format/version + backend tag; ``load`` recomputes the hash and
+raises ``PrecompileError`` if a cache is paired with a different ``python_code``, so
+a mismatched (code, cache) pair fails loudly rather than silently running the cache's
+graph under foreign metadata.
 """
 
 # Note [precompile programming model]
@@ -79,27 +83,41 @@ metadata.
 #    even one with the same count and names but a differently shaped or typed weight (e.g.
 #    a Linear(4,4) swapped for a Linear(4,8)) -- is rejected (it cannot silently scatter
 #    grads onto the wrong slot or compute the wrong thing). Different WEIGHT VALUES with the
-#    same shapes/dtypes are the intended use (the eager backend is layout-flexible).
+#    same shapes/dtypes are the intended use -- WITH ONE INDUCTOR-BACKEND CAVEAT: the
+#    inductor backend ALSO specializes each param/buffer's LAYOUT (memory format), since it
+#    bakes assert_size_stride on every weight the graph reads. So a same-shape/same-dtype
+#    checkpoint whose weight has a DIFFERENT layout (e.g. a non-contiguous view, or a
+#    channels_last weight where the example was contiguous) is REJECTED at runtime by the
+#    inductor backend (invariant 6). Match the example weight's layout (.contiguous() to
+#    match a contiguous example), or use backend='eager' for layout-flexible weights.
 #
 # 3. Control flow and shapes are specialized to the example. A non-strict trace follows
 #    the single path taken for the example inputs: Python ``if``/``for`` over tensor
 #    values, ``.item()``, and shape-dependent branching are resolved at trace time and
 #    baked. Shapes are STATIC (capture uses make_fx in its "real" mode, so each size is
 #    baked as a constant); inputs that would take a different path, or a different shape,
-#    yield a wrong result (a static-shape mismatch is rejected up front by the driver).
-#    Each dense user-input leaf's DTYPE and DEVICE are also baked at capture: a runtime
-#    input whose dtype or device differs from the example is rejected up front with a
-#    PrecompileError, since the graph is specialized to them. Control flow is NOT enforced
-#    -- this is the defining property of a non-strict trace. Capture also EXECUTES ``fn``
-#    once on the example inputs, so any in-place mutation of an input or other side effect
-#    ``fn`` performs (e.g. ``x.add_(1)``, printing, RNG advancement) happens to the
-#    example inputs / external state at capture time; pass throwaway example inputs if
-#    that matters.
+#    yield a wrong result (an inductor-backend static-dim mismatch is rejected up front;
+#    see invariant 6). Each dense user-input leaf's DTYPE and DEVICE are also baked at
+#    capture: a runtime input whose dtype or device differs from the example is rejected
+#    up front with a PrecompileError (both backends), since the graph is specialized to
+#    them. Control flow is NOT enforced -- this is the defining property of a non-strict
+#    trace. Capture also EXECUTES ``fn`` once on the example inputs, so any in-place
+#    mutation of an input or other side effect ``fn`` performs (e.g. ``x.add_(1)``,
+#    printing, RNG advancement) happens to the example inputs / external state at capture
+#    time; pass throwaway example inputs if that matters.
 #
-# 4. Boundary effects. The eager backend runs the captured ATen graph as-is on the
-#    (subclass-level) inputs, so tensor subclasses (e.g. DTensor) pass through unchanged.
-#    Effectful ops are not supported yet and raise at capture time (_assert_supported)
-#    with a concrete reason; this is an implementation gap, not a fundamental limit.
+# 4. Boundary effects. Input mutation (including module buffers -- e.g. BatchNorm
+#    running stats in training mode), tensor-subclass wrap/unwrap (e.g. DTensor),
+#    outputs that alias inputs, and functionalized RNG are SUPPORTED: the inductor
+#    backend lowers through torch._functorch.aot_autograd.compile_to_python, which
+#    composes AOTAutograd's own codegen'd prelude/epilogue into the artifact (the
+#    effect is reflected onto the runtime model / inputs). Effectful ops are not
+#    supported yet and raise at capture time (_assert_supported) with a concrete
+#    reason; this is an implementation gap, not a fundamental limit. Every other
+#    runtime wrapper that can appear in a composable (cacheable) forward graph is
+#    codegen'd as source and composed in; the one non-codegen'd wrapper
+#    (FakifiedOutWrapper) only activates under fakify_first_call, which makes the graph
+#    non-cacheable, so such a graph is rejected before composition ever runs.
 #
 # 5. Backward is part of the computation. If ``fn`` runs a backward, the parameter
 #    gradients are harvested inside the (functional) graph as extra outputs, and the
@@ -111,39 +129,76 @@ metadata.
 #    exactly as eager leaves it -- precompile does NOT zero-fill such params. The
 #    artifact therefore returns ``fn``'s own result (``None`` for a bare ``.backward()``
 #    step), not the grads. The grad scatter is the ONLY mutation precompile performs,
-#    and it happens in Python outside the graph, so the graph stays functional.
-#    precompile does not own optimizer state; bring your own optimizer and zero grads
-#    as usual.
+#    and it happens in Python outside the graph, so the graph stays functional
+#    (invariant 4 is about in-graph mutation and is unaffected). precompile does not
+#    own optimizer state; bring your own optimizer and zero grads as usual.
 #
-# 6. Each dense user-input leaf's shape, dtype, and device are recorded at capture and
-#    checked at runtime: a shape / dtype / device-mismatched input is rejected with a
-#    PrecompileError rather than crashing deep in a kernel or reading a wrong value. The
-#    graph is specialized to the example input shapes (invariant 3); a different runtime
-#    shape is undefined and rejected. The eager backend is layout-flexible (it does not
-#    specialize on stride / memory format).
+# 6. Shapes are static, each input's dtype/device is baked, and the inductor backend also
+#    specializes on input layout. Each dense user-input leaf's dtype and device are
+#    recorded at capture and checked at runtime (both backends): a dtype- or
+#    device-mismatched input is rejected with a PrecompileError rather than crashing deep
+#    in a kernel or reading a wrong value. The graph is specialized to the example input
+#    shapes (invariant 3); tensor-
+#    subclass outputs in particular are rebuilt with constant outer sizes/strides, so
+#    a different runtime shape is undefined. The inductor backend ADDITIONALLY bakes
+#    each read input's stride / memory format (it emits assert_size_stride) -- and this
+#    applies to model PARAMETERS/BUFFERS too, not only user inputs, since they are graph
+#    inputs the kernels read. So a same-shape runtime input OR a same-shape/same-dtype
+#    checkpoint WEIGHT with a DIFFERENT layout (e.g. a contiguous tensor when the example
+#    was transposed or channels_last, or a non-contiguous view of a weight) is rejected
+#    with a clear PrecompileError; match the example layout or use backend='eager'.
+#    This guard is deliberately CONSERVATIVE: a layout-agnostic kernel (e.g. matmul) may
+#    well have computed the right answer on the new layout, but precompile cannot
+#    recompile to specialize it the way torch.compile does, so it rejects to stay safe
+#    rather than risk a silently-wrong result from a layout-sensitive kernel. Pass inputs
+#    in the example's layout (``.contiguous()`` to match a contiguous example), or use the
+#    layout-flexible eager backend. ENFORCED for read inputs (a layout mismatch raises
+#    rather than crashing in assert_size_stride or reading wrong strides).
 #
 # 7. Both python_code and the cache are trusted, EXECUTABLE input to load(). The cache
 #    outer envelope is a plain {"artifact": bytes, ...} dict (read with
 #    weights_only=True) carrying a format/version + backend tag AND a code_hash
-#    (sha256 of the python_code it accompanies) that load() verifies (raising
-#    PrecompileError on mismatch). load() then EXECs python_code -- treat it like code
-#    you are about to run. The code_hash binds the cache to its python_code: load()
-#    rejects a (code, cache) pair from different precompile() calls (same backend)
-#    rather than running under foreign metadata.
+#    (sha256 of the python_code it accelerates) that load() verifies (raising
+#    PrecompileError on mismatch). load() feeds those bytes to
+#    torch.compiler.load_cache_artifacts to PRIME the inductor kernel caches, then always
+#    EXECs python_code -- with the caches primed the kernels load from the precompiled
+#    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
+#    code you supplied; treat both python_code and the cache like code you are about to
+#    run. The code_hash binds the cache to its python_code:
+#    load() rejects a (code, cache) pair from different precompile() calls (same
+#    backend) rather than silently running the cache's graph under foreign metadata.
 #
-# self-contained: ``python_code`` runs on its own -- it inlines the captured graph
-# (eager) plus all calling-convention metadata. It NEVER reads the cache, and it is the
-# SINGLE SOURCE OF TRUTH for the calling convention. The eager backend has no kernels to
-# accelerate, so the eager cache carries no compiled artifact (artifact=None) but is
-# still a full integrity-tagged envelope, and load() always runs the graph inlined in
-# python_code. The metadata lives in one place (python_code); the envelope carries a
-# code_hash (sha256 of python_code) alongside the format/version + backend tag, so
-# load() rejects a (python_code, cache) pair that did not come from the same
-# precompile() call.
+# self-contained: ``python_code`` runs on its own -- it inlines the composed graph
+# module (inductor: kernels JIT-compiled on first call, plus AOTAutograd's codegen'd
+# prelude/epilogue) or the captured graph (eager), plus all calling-convention
+# metadata. It NEVER reads the cache, and it is the SINGLE SOURCE OF TRUTH for the
+# calling convention. The ``cache`` holds ONLY the compiled INDUCTOR artifact and is
+# purely an ACCELERATION consumed only by load(): load AST-scrapes the module-level
+# calling convention out of python_code, primes the inductor kernel caches from the bundle
+# (torch.compiler.load_cache_artifacts), then execs python_code -- so its kernels load
+# from the precompiled binaries instead of JIT. With the cache you skip JIT; with only
+# python_code you JIT -- same results either way. The
+# eager backend has no kernels to accelerate, so the eager cache carries no compiled
+# artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
+# always runs the graph inlined in python_code. The metadata
+# lives in one place (python_code); the envelope carries a code_hash (sha256 of
+# python_code) alongside the format/version + backend tag, so load() rejects a
+# (python_code, cache) pair that did not come from the same precompile() call.
 #
-# backend: "eager" (the only backend today) skips lowering and runs the captured ATen
-# graph as-is (analogous to torch.compile(backend="eager")), for inspecting or debugging
-# exactly what was traced. An inductor backend is added in a follow-up.
+# backend: "inductor" (default) lowers the captured graph through
+# torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
+# self-contained module). "eager" skips lowering and runs the captured
+# ATen graph as-is (analogous to torch.compile(backend="eager")), for inspecting or
+# debugging exactly what was traced. The contract above is identical for both
+# backends with ONE exception (invariant 6): the inductor backend additionally
+# specializes on each input's stride / memory format, while the eager backend is
+# layout-flexible. Otherwise the same graph is captured; only its realization differs.
+# Two mechanical consequences: the eager backend runs the graph directly on the
+# (subclass-level) inputs, so it does not exercise the dense subclass
+# flatten/unflatten path that the inductor backend's calling convention requires;
+# and because there are no kernels, the eager cache carries no compiled artifact
+# (artifact=None) but is still a full integrity-tagged envelope (python_code is the
+# whole runnable artifact).
 #
 # tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
 # non-strict trace and is the only tracer implemented today -- everything above (the
@@ -193,18 +248,20 @@ _CACHE_VERSION = 1
 class PrecompileError(RuntimeError):
     """The error type raised by ``torch.compiler.precompile`` and its artifacts.
 
-    Raised when capture, ``load``, or a runtime call violates the precompile contract --
-    e.g. a tensor baked as a constant (invariant 1), an unsupported / effectful op, or a
-    runtime input whose shape / dtype / device differs from the example (invariants 3 and
-    6). See Note [precompile programming model] in this module for the full contract.
+    Raised when capture, lowering, ``load``, or a runtime call violates the precompile
+    contract -- e.g. a tensor baked as a constant (invariant 1), an unsupported /
+    effectful op, a non-tensor output the inductor backend cannot lower, or a runtime
+    input whose shape or memory format differs from the example (invariants 3 and 6).
+    See Note [precompile programming model] in this module for the full contract.
     """
 
 
 def _dense_shape(t: Any) -> tuple[int, ...] | None:
     """Return the shape of a plain dense tensor, else ``None`` (non-tensor / subclass).
 
-    Tensor subclasses (e.g. DTensor) carry an outer shape that is not a plain dense
-    shape; record ``None`` and skip them in the shape check.
+    Tensor subclasses (e.g. DTensor) go through AOTAutograd's flatten path, so their
+    outer shape is not the dense shape the inductor artifact bakes; record ``None`` and
+    skip them in the shape check.
     """
     if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
         return tuple(t.shape)
@@ -274,8 +331,9 @@ def _assert_no_control_flow_subgraphs(gm: torch.fx.GraphModule) -> None:
 
     They appear as ``get_attr`` nodes pointing at nested ``GraphModule`` submodules.
     The eager backend inlines ``gm.code`` and cannot reach such submodules (they are
-    not on the standalone ``_GraphSelf`` holder), so the artifact would crash at
-    runtime. Fail at capture with a concrete reason instead, like ``_assert_supported``.
+    not on the standalone ``_GraphSelf`` holder), and the standalone composition does
+    not inline them either, so the artifact would crash at runtime. Fail at capture
+    with a concrete reason instead, like ``_assert_supported``.
     """
     # Resolve the target the same way as _check_no_constant_tensors (dotted walk), so a
     # nested-qualname subgraph is not silently missed.
@@ -311,8 +369,9 @@ def _intern_param_buffers(
 
     INVARIANT: the all-modules' params then all-modules' buffers, dedup-by-id ordering
     here is load-bearing and is reproduced VERBATIM by the embedded
-    ``_extract_param_buffers`` in _EAGER_DRIVER_SOURCE (the inlined eager load path), so
-    the two must stay in sync.
+    ``_extract_param_buffers`` in both _DRIVER_SOURCE and _EAGER_DRIVER_SOURCE (the
+    inlined/eager load paths). The cached load path uses this function directly, so all
+    three must stay in sync; ``test_cached_and_inlined_paths_agree`` cross-checks them.
     """
     multi = len(mods) > 1
 
@@ -399,9 +458,11 @@ def _capture(
     # snapshot/clear/restore block below protects the real example model's .grad fields
     # (those are what the user owns and what a backward in fn populates).
     real_flat = [*pb_flat, *user_flat]
-    # Record the example user inputs' dense shapes/dtypes/devices so the driver can
-    # reject a shape (invariant 3) or dtype/device mismatch up front; see the inlined
-    # _EAGER_DRIVER_SOURCE checks. Subclasses -> None.
+    # Record the example user inputs' dense shapes/dtypes/devices so the drivers can
+    # reject a shape (invariant 3) or dtype/device (invariant 6) mismatch up front; see
+    # the inlined _DRIVER_SOURCE / _EAGER_DRIVER_SOURCE checks. Stride is NOT recorded --
+    # memory-format mismatches are enforced by inductor's own (pinned-on)
+    # assert_size_stride. Subclasses -> None.
     user_input_shapes = [_dense_shape(t) for t in user_flat]
     user_input_dtypes = [_dense_dtype(t) for t in user_flat]
     user_input_devices = [_dense_device(t) for t in user_flat]
@@ -555,6 +616,44 @@ class _Capture:
         self.user_input_devices = user_input_devices
 
 
+_GENERATED_HEADER = """\
+# Generated by torch.compiler.precompile -- do not edit.
+#
+# This is a SELF-CONTAINED, EXECUTABLE artifact: it runs on its own, needing no
+# companion cache. You provide the model(s) at runtime, exactly as the original fn
+# took them, e.g.:
+#
+#     ns = {}
+#     exec(open("this_file.py").read(), ns)
+#     out = ns["forward"](model, my_input)      # same args as the traced fn
+#
+# The runtime model must be STRUCTURALLY IDENTICAL to the one precompile traced
+# (same parameter/buffer names, order, and weight tying); only the weight VALUES
+# may differ (swap in a checkpoint). This artifact was produced by a non-strict
+# make_fx trace, so control flow and shapes are specialized to the example inputs,
+# and (inductor backend) each input's stride / memory format is baked too: pass
+# runtime inputs in the example's layout (.contiguous() to match a contiguous
+# example). See Note [precompile programming model] in torch/_precompile.py.
+#
+# It contains, in order:
+#   1. The composed graph module from aot_autograd.compile_to_python: the inlined
+#      Inductor kernels (JIT-compiled from the embedded source on first use -- no
+#      external cache required) plus AOTAutograd's own codegen'd prelude/epilogue
+#      (tensor-subclass wrap/unwrap, input-mutation reflection, output aliasing),
+#      exposing ``call(flat_inputs) -> outputs``.
+#   2. Calling-convention metadata.
+#   3. A small driver that extracts each runtime module's params/buffers (in the
+#      same order as capture), passes them with the runtime inputs to ``call``, and
+#      scatters any harvested gradients onto the model's .grad fields. No model
+#      weights are embedded (you bring the model).
+#
+# The companion ``cache`` returned by precompile is purely an ACCELERATION used by
+# torch.compiler.precompile.load: it primes the inductor kernel caches so exec'ing this
+# file loads its kernels from the precompiled binaries (no JIT). This file does not read
+# it; running this file alone just JITs.
+"""
+
+
 def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
     if compiled._out_spec is None or compiled._in_spec is None:
         raise PrecompileError("internal: cannot build metadata before _compile()")
@@ -623,12 +722,13 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
         f"IN_SPEC = {in_spec_str!r}",
         f"OUT_SPEC = {out_spec_str!r}",
         # Per user-input-leaf example shape (None for a non-tensor / subclass leaf). The
-        # driver rejects a runtime input whose shape differs (invariant 3); see the
-        # inlined driver checks.
+        # inductor driver rejects a runtime input whose shape differs (invariant 3); see
+        # the inlined driver checks. Memory-format mismatches are caught by the inductor
+        # artifact's own assert_size_stride (pinned on at capture).
         f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}",
         # Per user-input-leaf example dtype (as a string, e.g. "torch.float32") and
-        # device (as a string), None for a subclass/non-tensor leaf. The driver rejects a
-        # dtype or device mismatch up front; see the inlined driver checks.
+        # device (as a string), None for a subclass/non-tensor leaf. The drivers reject a
+        # dtype or device mismatch (invariant 6) up front; see the inlined driver checks.
         f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}",
         f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}",
         "",
@@ -638,11 +738,12 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
 
 def _parse_artifact_metadata(python_code: str) -> dict[str, Any]:
     """Read the calling-convention constants back out of ``python_code`` WITHOUT
-    executing it (exec'ing the inlined graph would run it, not just read metadata).
+    executing it (exec'ing the inlined Inductor output would JIT the kernels, the
+    very work the cache exists to skip).
 
     python_code is the single source of truth: ``_build_metadata_section`` emits the
     constants below as top-level literal assignments, so an AST walk + literal_eval
-    recovers them safely.
+    recovers them safely. The cache then only needs to carry the compiled artifact.
     """
     import ast
 
@@ -684,6 +785,29 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, Any]:
             "it does not look like a torch.compiler.precompile artifact."
         )
     return found
+
+
+def _build_python_source(
+    compiled: PrecompiledModule,
+    graph_python: str,
+) -> str:
+    parts = [_GENERATED_HEADER, ""]
+    parts.append("# " + "=" * 70)
+    parts.append("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
+    parts.append("# " + "=" * 70)
+    # The composed graph module from aot_autograd.compile_to_python: the inlined
+    # Inductor kernels plus AOTAutograd's codegen'd prelude/epilogue, exposing
+    # ``call(flat_inputs) -> outputs`` (subclass + mutation handled inside).
+    parts.append(graph_python)
+    parts.append("")
+    parts.extend(_build_metadata_section(compiled))
+    parts.append("# " + "=" * 70)
+    parts.append(
+        "# 3. Driver: module params/buffers + grad scatter + calling convention"
+    )
+    parts.append("# " + "=" * 70)
+    parts.append(_DRIVER_SOURCE)
+    return "\n".join(parts)
 
 
 _EAGER_GENERATED_HEADER = """\
@@ -852,8 +976,9 @@ def forward(*args):
             "precompile: runtime inputs have a different structure than the traced "
             "example inputs (invariant 3); they must match in nesting and count."
         )
-    # Reject a SHAPE / DTYPE / DEVICE mismatch (invariants 3 and 6) up front. The eager
-    # backend is layout-flexible, so stride / memory format is not checked.
+    # Reject a SHAPE / DTYPE / DEVICE mismatch (invariants 3 and 6) up front. Mirrors the
+    # inductor _DRIVER_SOURCE checks (keep the two inlined drivers in sync). The eager
+    # backend has no assert_size_stride, so only these are checked (layout-flexible).
     if len(user_flat) != len(USER_INPUT_SHAPES):  # noqa: F821
         _fail(
             "precompile: runtime inputs flattened to a different number of leaves than "
@@ -905,14 +1030,194 @@ if __name__ == "__main__":
 '''
 
 
+_DRIVER_SOURCE = '''
+def _extract_param_buffers(mods):
+    """Lift the runtime modules' params then buffers, interning by identity, in the
+    same order as capture, so the dense list lines up with the compiled graph. Returns
+    (pb, names) where names mirrors PARAM_NAMES + BUFFER_NAMES. This ordering AND the
+    naming must match torch._precompile._intern_param_buffers verbatim (its INVARIANT)."""
+    multi = len(mods) > 1
+    seen = set()
+    pb = []
+    names = []
+    def intern(mi, n, t):
+        if id(t) not in seen:
+            seen.add(id(t))
+            pb.append(t)
+            names.append(("m%d.%s" % (mi, n)) if multi else n)
+    for mi, m in enumerate(mods):
+        for n, p in m.named_parameters(remove_duplicate=False):
+            intern(mi, n, p)
+    for mi, m in enumerate(mods):
+        for n, b in m.named_buffers(remove_duplicate=False):
+            intern(mi, n, b)
+    return pb, names
+
+
+def _fail(msg):
+    # Imported lazily (only when a guard fails) so a normal run does not couple the
+    # standalone artifact to torch._precompile's import surface.
+    from torch._precompile import PrecompileError as _PrecompileError
+
+    raise _PrecompileError(msg)
+
+
+def _check_structure(pb, names):
+    # Verify the runtime model's extracted param/buffer NAMES match the baked
+    # PARAM_NAMES + BUFFER_NAMES (count AND order/identity), so a reordered or
+    # structurally-drifted same-count model is caught precisely (invariant 2) rather
+    # than scattering grads onto the wrong slot. Then check each tensor's SHAPE and DTYPE
+    # against the baked example: the graph is specialized to the example shapes, so a
+    # same-named but differently shaped/typed runtime tensor would silently miscompute.
+    expected = list(PARAM_NAMES) + list(BUFFER_NAMES)  # noqa: F821
+    if names != expected:
+        _fail(
+            "precompile: the runtime model's param/buffer names %r do not match the "
+            "traced model's %r; the runtime model must be structurally identical to the "
+            "traced model (invariant 2)." % (names, expected)
+        )
+    expected_shapes = list(PARAM_SHAPES) + list(BUFFER_SHAPES)  # noqa: F821
+    expected_dtypes = list(PARAM_DTYPES) + list(BUFFER_DTYPES)  # noqa: F821
+    for _nm, _t, _shp, _dt in zip(names, pb, expected_shapes, expected_dtypes):
+        if tuple(_t.shape) != tuple(_shp):
+            _fail(
+                "precompile: the runtime param/buffer %r has shape %s but the traced "
+                "model's was %s; the runtime model must be structurally identical to the "
+                "traced model (invariant 2)." % (_nm, tuple(_t.shape), tuple(_shp))
+            )
+        if str(_t.dtype) != _dt:
+            _fail(
+                "precompile: the runtime param/buffer %r has dtype %s but the traced "
+                "model's was %s; the runtime model must be structurally identical to the "
+                "traced model (invariant 2)." % (_nm, str(_t.dtype), _dt)
+            )
+
+
+def forward(*args):
+    """Run the compiled computation. Pass the same args the traced fn took -- the
+    module(s) in the same positions plus the runtime inputs. The module(s) must be
+    structurally identical to the ones precompile traced (same param/buffer order
+    and tying); only the weight values may differ.
+
+    Module params/buffers are extracted (no weights are baked into the artifact) and,
+    together with the runtime inputs, passed to the composed ``call`` -- which is the
+    AOTAutograd+Inductor graph with its own prelude/epilogue, so it handles tensor-
+    subclass wrap/unwrap and input mutation (e.g. BatchNorm running stats) internally
+    and disables grad itself. If fn ran a backward, the trailing grad outputs (one per
+    GRAD_PARAM_INDICES entry) are parameter grads: they are scattered (accumulated)
+    onto the params that received one, mirroring eager .backward() (frozen /
+    non-contributing params keep .grad = None), and the artifact returns fn's own
+    result. Nothing here reads an external cache: the kernels JIT-compile from the
+    inlined source on first call. A runtime input whose shape, dtype, or device differs
+    from the traced example is rejected up front (invariants 3 and 6), and a differing
+    stride / memory format is rejected via the inlined assert_size_stride (invariant 6);
+    use backend="eager" for layout-flexible execution."""
+    if len(args) != NUM_POSITIONAL_ARGS:  # noqa: F821
+        _fail(
+            "precompile: expected %d positional args (the same as the traced fn), got "
+            "%d (invariant 2)." % (NUM_POSITIONAL_ARGS, len(args))  # noqa: F821
+        )
+    mods = []
+    for _i in MODULE_POSITIONS:  # noqa: F821
+        if not isinstance(args[_i], _torch.nn.Module):
+            _fail(
+                "precompile: argument at position %d must be the nn.Module the traced "
+                "fn took (invariant 2), got %s." % (_i, type(args[_i]).__name__)
+            )
+        mods.append(args[_i])
+    user_inputs = [a for i, a in enumerate(args) if i not in set(MODULE_POSITIONS)]  # noqa: F821
+    user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
+    if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):  # noqa: F821
+        _fail(
+            "precompile: runtime inputs have a different structure than the traced "
+            "example inputs (invariant 3); they must match in nesting and count."
+        )
+    # Reject a SHAPE / DTYPE / DEVICE mismatch (invariants 3 and 6) up front. Mirrors the
+    # eager _EAGER_DRIVER_SOURCE checks (keep the two inlined drivers in sync).
+    # Stride/memory-format is enforced by the inlined assert_size_stride (pinned at capture).
+    if len(user_flat) != len(USER_INPUT_SHAPES):  # noqa: F821
+        _fail(
+            "precompile: runtime inputs flattened to a different number of leaves than "
+            "the traced example (invariant 3); they must match the traced structure."
+        )
+    for _t, _shp, _dt, _dev in zip(
+        user_flat, USER_INPUT_SHAPES, USER_INPUT_DTYPES, USER_INPUT_DEVICES  # noqa: F821
+    ):
+        if _shp is None or not isinstance(_t, _torch.Tensor):
+            continue
+        _act = tuple(_t.shape)
+        if len(_act) != len(_shp) or any(a != e for a, e in zip(_act, _shp)):
+            _fail(
+                "precompile: a runtime input has shape %s but the artifact was traced "
+                "with shape %s; the graph is specialized to the static dims (invariant "
+                "3). Retrace for this shape, or use backend='eager'." % (_act, tuple(_shp))
+            )
+        if _dt is not None and str(_t.dtype) != _dt:
+            _fail(
+                "precompile: a runtime input has dtype %s but the artifact was traced "
+                "with dtype %s; the graph is specialized to the example dtype "
+                "(invariant 6). Cast the input to the traced dtype, or retrace."
+                % (str(_t.dtype), _dt)
+            )
+        if _dev is not None and str(_t.device) != _dev:
+            _fail(
+                "precompile: a runtime input is on device %r but the artifact was traced "
+                "on device %r; the graph is specialized to the example device "
+                "(invariant 6). Move the input to the traced device, or retrace."
+                % (str(_t.device), _dev)
+            )
+    pb, _names = _extract_param_buffers(mods)
+    _check_structure(pb, _names)
+    try:
+        out = list(call([*pb, *user_flat]))  # noqa: F821 (inlined composed entry point)
+    except AssertionError as _e:
+        # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
+        # mismatch; invariants 3 and 6). assert_size_stride raises one of two messages
+        # -- "expected size A==B, stride C==D at dim=N" or "wrong number of dimensions" --
+        # so match those. Any OTHER AssertionError (a user torch._assert, an internal
+        # inductor invariant) is re-raised unchanged so its real message is not mislabeled.
+        _m = str(_e)
+        if not (("expected size" in _m and "stride" in _m) or "wrong number of dimensions" in _m):  # noqa: B950
+            raise
+        _fail(
+            "precompile: a runtime tensor's shape or memory format differs from the "
+            "traced example; the inductor backend specializes on input shape and memory "
+            "format (invariants 3 and 6). The mismatch can be a user INPUT or a model "
+            "PARAMETER/BUFFER whose layout (memory format) differs from the example "
+            "weight, since the inductor backend also bakes each param/buffer's layout. "
+            "Pass the model/inputs in the example's shape and layout (.contiguous() to "
+            "match a contiguous example, or match the example weight's layout), or use "
+            "backend='eager'. Underlying: %s" % str(_e)
+        )
+    if GRAD_PARAM_INDICES:  # noqa: F821
+        n = len(GRAD_PARAM_INDICES)  # noqa: F821
+        grads = out[len(out) - n:]
+        out = out[:len(out) - n]
+        for idx, g in zip(GRAD_PARAM_INDICES, grads):  # noqa: F821
+            p = pb[idx]
+            p.grad = g if p.grad is None else p.grad + g
+    return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))  # noqa: F821
+
+
+if __name__ == "__main__":
+    print("forward() is ready; call it with the model(s) and inputs the traced")
+    print("fn took, e.g. forward(model, x).")
+'''
+
+
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
     """Enforce invariant 4 of Note [precompile programming model]: reject boundary
-    effects the standalone eager artifact does not handle. Detected directly from the
-    captured graph.
+    effects the AOT backend's standalone composition does not handle. Detected
+    directly from the captured graph -- no AOTAutograd coupling.
+
+    Input mutation (incl. module buffers, e.g. BatchNorm running stats), tensor-
+    subclass wrap/unwrap, output aliasing, and functionalized RNG are SUPPORTED:
+    AOTAutograd's codegen'd prelude/epilogue is composed into the artifact (see
+    torch._functorch.aot_autograd.compile_to_python), so they are not rejected here.
 
     Effectful ops are not supported yet (an implementation gap, not a fundamental
     limit), so raise here with a concrete reason rather than let the failure surface
-    later. See _unsupported for the mechanical cause.
+    deep in the cache layer. See _unsupported for the mechanical cause.
     """
     from torch._higher_order_ops.effects import _get_effect
 
@@ -929,8 +1234,9 @@ def _assert_supported(gm: torch.fx.GraphModule) -> None:
 def _unsupported(reason: str) -> PrecompileError:
     return PrecompileError(
         f"precompile cannot compile this computation: {reason}. The graph contains an "
-        "effectful op, which is not supported yet: its with_effects HOP cannot be "
-        "lowered to standalone source."
+        "effectful op, which is not supported yet: its with_effects HOP is "
+        "non-cacheable, so the compiled artifact cannot be saved and lowered to "
+        "standalone source."
     )
 
 
@@ -941,7 +1247,7 @@ class PrecompiledModule:
         self,
         fn: Callable[..., Any],
         *,
-        backend: str = "eager",
+        backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
     ) -> None:
@@ -949,8 +1255,9 @@ class PrecompiledModule:
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
         # step that computes a loss and torch.autograd.grad).
         self._fn = fn
-        # "eager" keeps the captured ATen graph and runs it as-is (see Note [precompile
-        # programming model], "backend"). The inductor backend is added in a follow-up.
+        # "inductor" (default) lowers the captured graph through
+        # standalone_compile; "eager" keeps the captured ATen graph and runs it
+        # as-is (see Note [precompile programming model], "backend").
         self._backend = backend
         # "make_fx" (default) is the only implemented capture tracer; "dynamo" is
         # planned (see Note [precompile programming model], "tracer"). _compile rejects
@@ -973,8 +1280,10 @@ class PrecompiledModule:
         self._in_spec: pytree.TreeSpec | None = None
         self._out_spec: pytree.TreeSpec | None = None
         self._gm: torch.fx.GraphModule | None = None
-        # The eager backend has no kernels to accelerate, so the cache carries no compiled
-        # artifact (always None here); it is still a full integrity-tagged envelope.
+        # Inductor backend: the composed self-contained graph module (from
+        # aot_autograd.compile_to_python, exposing ``call(flat_inputs)``) and the
+        # opaque artifact-cache bytes (None if uncacheable), populated by _compile().
+        self._graph_python: str = ""
         self._artifact_bytes: bytes | None = None
         # Which unique-param index each emitted (trailing) grad output belongs to; its
         # length is the number of grad outputs. Lets the driver scatter grads onto
@@ -982,12 +1291,12 @@ class PrecompiledModule:
         # params' .grad as None.
         self._grad_param_indices: list[int] = []
         # Per user-input-leaf example dense shape (None for a subclass/non-tensor leaf;
-        # size only -- the eager backend is layout-flexible, so stride / memory format is
-        # not recorded). The driver rejects a runtime shape mismatch (invariant 3) up
-        # front. Populated by _compile().
+        # size only -- stride / memory format is enforced by the inductor artifact's own
+        # assert_size_stride, not recorded here). The driver rejects a runtime shape
+        # mismatch (invariant 3) up front. Populated by _compile().
         self._user_input_shapes: list[Any] = []
         # Per user-input-leaf example dtype and device (string), None for a subclass/
-        # non-tensor leaf. The driver rejects a dtype/device mismatch (invariant 6) up
+        # non-tensor leaf. The drivers reject a dtype/device mismatch (invariant 6) up
         # front. Populated by _compile().
         self._user_input_dtypes: list[Any] = []
         self._user_input_devices: list[Any] = []
@@ -1046,10 +1355,66 @@ class PrecompiledModule:
         self._out_spec = capture.out_spec
         self._grad_param_indices = capture.grad_param_indices
         self._gm = capture.gm
-        # The eager backend does no Inductor lowering: the captured ATen graph IS the
-        # artifact. It is run directly on the (subclass-level) inputs, so there is no
-        # inductor ``call`` to inline and no dense flatten/unflatten -- the graph runs
-        # exactly as captured (see Note [precompile programming model]).
+
+        if self._backend == "eager":
+            # No Inductor lowering: the captured ATen graph IS the artifact. It is
+            # run directly on the (subclass-level) inputs, so there is no inductor
+            # ``call`` to inline and no dense flatten/unflatten -- the graph runs
+            # exactly as captured (see Note [precompile programming model]).
+            return
+
+        # Lower through the AOT backend contract: it returns a self-contained module
+        # exposing ``call(flat_inputs) -> outputs`` (with AOTAutograd's own codegen'd
+        # prelude/epilogue -- subclass wrap/unwrap, input-mutation reflection, output
+        # aliasing -- composed in, not reimplemented here) plus an opaque cache (the
+        # save_cache_artifacts bundle that primes the inductor cache on load, or None
+        # for uncacheable graphs).
+        from torch._functorch import aot_autograd
+        from torch._inductor.exc import InductorError
+        from torch._inductor.standalone_compile import NoRunnableInductorModuleError
+
+        # Pin size_asserts ON so the artifact ALWAYS bakes assert_size_stride for the
+        # inputs the graph reads -- this enforces the input memory-format contract
+        # (invariant 6) at runtime regardless of the user's ambient size_asserts config
+        # (off would otherwise elide the asserts and silently read wrong strides). The
+        # guard is conservative (see the inlined driver checks): an input the graph never
+        # reads gets no assert and stays layout-flexible, but a read input is asserted on
+        # the example layout even for layout-agnostic ops (matmul/addmm), since precompile
+        # cannot recompile to specialize a new layout the way torch.compile would.
+        #
+        # This is an inductor config key, so it rides in as ``options`` (aot_autograd.
+        # compile_to_python merges it into the inductor config.patch it wraps the compile
+        # in) rather than being patched around the call. The graph is specialized to the
+        # example shapes.
+        options: dict[str, Any] = {"size_asserts": True}
+        try:
+            self._graph_python, self._artifact_bytes = aot_autograd.compile_to_python(
+                capture.gm, capture.flat_args, options=options
+            )
+        except NoRunnableInductorModuleError as e:
+            # Inductor emits no runnable module for a graph with no compute to lower --
+            # one that returns inputs or Python constants unchanged (e.g. ``lambda x: x``,
+            # ``x.detach()``, ``return 7``, or a bare ``return None``). The eager backend
+            # (above) handles these; surface a clear PrecompileError instead of the raw
+            # lowering error.
+            raise PrecompileError(
+                "the inductor backend cannot lower a graph with no compute -- the traced "
+                "fn returns its inputs or Python constants unchanged, producing no "
+                "Inductor kernel. Return a computed tensor, or use backend='eager'."
+            ) from e
+        except InductorError as e:
+            # Inductor codegen asserts on certain non-tensor Python values in the output
+            # structure ("Unexpected output types: [<class 'float'>]" -- also complex,
+            # str, ...); int/bool/None outputs lower fine, and the eager backend handles
+            # them too. Surface a clear PrecompileError instead of the raw assertion.
+            if "Unexpected output types" in str(e):
+                raise PrecompileError(
+                    "the inductor backend cannot lower a graph whose output mixes a "
+                    "non-tensor Python value (e.g. float / complex / str) with computed "
+                    "tensors (int / bool / None outputs are fine). Return only tensors, "
+                    "or use backend='eager'."
+                ) from e
+            raise
 
     def __call__(self, *args: Any) -> Any:
         # A PrecompiledModule is runnable only after load(); precompile() itself
@@ -1065,10 +1430,13 @@ class PrecompiledModule:
         """Return the self-contained, executable Python artifact as a string.
 
         It runs on its own, needing no cache (Note [precompile programming model],
-        "self-contained"). For the eager backend it embeds the captured ATen graph
-        (both readable and executable) plus a driver that runs it eagerly and a
-        ``forward()`` that takes the same args the traced fn took (the model(s) plus
-        runtime inputs). No weights are embedded.
+        "self-contained"). For the inductor backend it embeds the composed graph
+        module from aot_autograd.compile_to_python (kernels JIT-compile on first
+        call; AOTAutograd's prelude/epilogue inlined), the calling-convention
+        metadata, and a ``forward()`` that takes the same args the traced fn took
+        (the model(s) plus runtime inputs). For the eager backend it embeds the
+        captured ATen graph (both readable and executable) plus a driver that runs it
+        eagerly. No weights are embedded.
         """
         if self._loaded_forward is not None:
             raise PrecompileError(
@@ -1076,30 +1444,43 @@ class PrecompiledModule:
                 "python_code you passed in is the source artifact (load() does not "
                 "re-capture, so there is no python_code to re-emit from this object)."
             )
-        if self._gm is None:
+        if self._backend == "eager":
+            if self._gm is None:
+                raise PrecompileError("internal: not compiled; call _compile() first")
+            return _build_eager_python_source(self)
+        if not self._graph_python:
             raise PrecompileError("internal: not compiled; call _compile() first")
-        return _build_eager_python_source(self)
+        return _build_python_source(self, self._graph_python)
 
     def to_cache_bytes(self, python_code: str | None = None) -> bytes:
         """Return the binary cache as bytes -- an ACCELERATION, not required to run.
 
         ``python_code`` already runs standalone AND is the single source of truth for
-        the calling convention, so the cache holds ONLY the compiled artifact -- no
-        calling-convention metadata, no model weights. The eager backend has no kernels
-        to accelerate, so the eager cache carries no compiled artifact (artifact=None)
-        but is still a full integrity-tagged envelope, and load() runs the graph inlined
-        in python_code.
+        the calling convention, so the cache holds ONLY the compiled inductor artifact
+        -- no calling-convention metadata, no model weights. load() recovers the
+        calling convention by parsing python_code (``_parse_artifact_metadata``) and
+        uses this artifact solely to skip kernel JIT/recompile. For the inductor backend
+        the artifact is the ``save_cache_artifacts`` bundle (load feeds it to
+        ``load_cache_artifacts`` to prime the inductor kernel caches, so the exec of
+        python_code loads its kernels -- on GPU, the bundled Triton kernels -- from the
+        precompiled binaries instead of recompiling); ``None`` if the graph is
+        uncacheable, in which case load() falls back to the standalone python. The
+        eager backend has no kernels to accelerate, so the eager cache carries no
+        compiled artifact (artifact=None) but is still a full integrity-tagged envelope,
+        and load() runs the graph inlined in python_code.
 
         ``python_code`` is the exact string ``to_python_code()`` returned for this same
         object; the caller (``__call__``) builds it ONCE and threads it in so code_hash
-        is sha256 of the bytes actually returned to the user and the whole metadata is
-        not rebuilt a second time here. It defaults to None only for direct callers, in
-        which case it is rebuilt.
+        is sha256 of the bytes actually returned to the user and the whole metadata +
+        embedded kernel source is not rebuilt a second time here. It defaults to None
+        only for direct callers, in which case it is rebuilt.
         """
-        # The eager backend has no kernels to cache, so ``_artifact_bytes`` is always
-        # None; load() executes the self-contained python_code. The format/version/backend
-        # tag is a lightweight integrity check verified by load() (see _CACHE_FORMAT); all
-        # values are plain str/int/bytes so the envelope stays weights_only-safe.
+        # The opaque artifact-cache bytes from aot_autograd.compile_to_python (None
+        # for an uncacheable inductor graph, and always None for the eager backend,
+        # which has no kernels to cache); load() then falls back to executing the
+        # self-contained python_code. The format/version/backend tag is a lightweight
+        # integrity check verified by load() (see _CACHE_FORMAT); all values are plain
+        # str/int/bytes so the envelope stays weights_only-safe.
         #
         # code_hash binds this cache to the EXACT python_code it accelerates: load()
         # recomputes sha256(python_code) and rejects a cache paired with a different
@@ -1129,17 +1510,18 @@ class PrecompiledModule:
 
 
 def _make_inlined_forward(python_code: str) -> Callable[..., Any]:
-    """Execute the self-contained python string and hand back its ``forward``.
+    """Fallback: execute the self-contained python string (JITs kernels).
 
-    ``python_code`` needs no cache -- the captured graph (eager) is inlined, so we just
-    exec it and hand back its ``forward``. The returned ``forward`` takes the same args
-    the traced fn took (model(s) plus runtime inputs)."""
+    ``python_code`` needs no cache -- the kernels (inductor) or graph (eager) are
+    inlined, so we just exec it and hand back its ``forward``. The returned
+    ``forward`` takes the same args the traced fn took (model(s) plus runtime
+    inputs)."""
     # python_code is untrusted EXECUTABLE input -- exec'ing it runs whatever it contains
-    # (running the inlined graph). Warn per load (not warning_once) before the exec so the
-    # load path is never silent about it.
+    # (JIT-compiling inlined kernels or running the inlined graph). Warn per load (not
+    # warning_once) before the exec so the inlined fallback is never silent about it.
     log.warning(
         "torch.compiler.precompile.load is about to EXEC python_code, which is untrusted "
-        "executable input (it runs inlined graph code). Only exec python_code "
+        "executable input (it runs inlined kernels / graph code). Only exec python_code "
         "you produced or otherwise trust (Note [precompile programming model], "
         "invariant 7)."
     )
@@ -1181,7 +1563,7 @@ class _PrecompileApi:
         self,
         fn: Callable[..., Any],
         *example_inputs: Any,
-        backend: str = "eager",
+        backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
     ) -> tuple[str, bytes]:
@@ -1190,21 +1572,34 @@ class _PrecompileApi:
         .. note::
 
             ``torch.compiler.precompile`` is NOT
-            ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching
-            mode); it captures ``fn`` ahead of time to a self-contained source artifact.
+            ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
+            guard-serialization caching mode); it captures ``fn`` ahead of time and
+            lowers it to a self-contained Python source artifact.
 
         With the default ``make_fx`` tracer this is a non-strict trace with an explicit
         contract; read Note [precompile programming model] before using it. The artifact
         faithfully reproduces ``fn`` only for callers that uphold that contract.
 
+        THREADING: the inductor lowering step drives process-global compiler state
+        and is serialized by an internal lock, so concurrent ``backend="inductor"``
+        calls lower one at a time. The make_fx capture phase and the ``backend="eager"``
+        path are NOT serialized.
+
         ``backend`` selects how the captured graph is realized:
 
-        - ``"eager"`` (default): keep the captured ATen graph and run it as-is
+        - ``"inductor"`` (default): lower the graph through
+          ``torch._functorch.aot_autograd.compile_to_python`` (the full AOTAutograd +
+          Inductor pipeline, composed into one self-contained module). ``python_code``
+          is the inlined Inductor output with AOTAutograd's prelude/epilogue; the cache
+          holds the save_cache_artifacts bundle that primes the inductor cache on load.
+        - ``"eager"``: do NOT lower -- keep the captured ATen graph and run it as-is
           (analogous to ``torch.compile(backend="eager")``). ``python_code`` inlines
-          the readable captured graph (both the inspectable rendering and the executable
-          artifact); the eager cache carries no compiled artifact (artifact=None) but is
-          still a full integrity-tagged envelope. The inductor backend is added in a
-          follow-up.
+          the readable captured graph (both the inspectable rendering and the
+          executable artifact); the eager cache carries no compiled artifact
+          (artifact=None) but is still a full integrity-tagged envelope -- with no
+          kernels there is nothing to accelerate, so ``load`` runs the inlined graph.
+          Useful for
+          inspecting/debugging exactly what was traced without an Inductor dependency.
 
         ``tracer`` selects the capture front-end:
 
@@ -1249,13 +1644,25 @@ class _PrecompileApi:
         model's ``parameters()`` ``.grad`` fields, exactly like eager ``.backward()``,
         so a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged; the artifact
         returns ``fn``'s own result (``None`` for a bare ``.backward()`` step), not the
-        grads (invariant 5). Caller responsibilities NOT checked here, and violations
-        that ARE checked (a baked constant, effectful ops), are in Note [precompile
-        programming model].
+        grads (invariant 5).
+
+        Input mutation (incl. module buffers, e.g. BatchNorm running stats in
+        training mode), tensor subclasses (e.g. DTensor), and outputs aliasing inputs
+        are supported -- AOTAutograd's prelude/epilogue is composed into the artifact
+        (invariant 4), as is functionalized RNG. Caller responsibilities NOT checked
+        here (see the Note): the runtime model must be structurally identical to the
+        example, and control flow / shapes are specialized to ``example_inputs``
+        (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
+        tensor baked
+        as a constant (invariant 1), effectful ops (invariant 4), and -- for the
+        inductor backend -- a runtime input whose stride / memory format differs from
+        the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
-        if backend != "eager":
-            raise ValueError(f"precompile backend must be 'eager', got {backend!r}.")
+        if backend not in ("inductor", "eager"):
+            raise ValueError(
+                f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
+            )
         if tracer not in ("make_fx", "dynamo"):
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
@@ -1275,10 +1682,18 @@ class _PrecompileApi:
 
         The driver runs from ``python_code`` -- the single source of truth -- which
         ``_parse_artifact_metadata`` also AST-scrapes for the module-level calling
-        convention (backend, module positions, out_spec, grad indices). The eager
-        ``cache`` carries no compiled artifact (artifact=None) but is still a full
-        integrity-tagged envelope (no kernels to accelerate), so ``load`` runs the graph
-        inlined in ``python_code``.
+        convention (backend, module positions, out_spec, grad indices). The ``cache``
+        carries ONLY the compiled inductor artifact and is a pure acceleration (Note
+        [precompile programming model], "self-contained"): for the inductor backend it is
+        the ``save_cache_artifacts`` bundle, fed to ``torch.compiler.load_cache_artifacts``
+        to PRIME the inductor kernel caches (restores the bundled Triton kernels /
+        autotune results), then ``python_code`` is exec'd -- its inlined driver rebuilds
+        the full AOTAutograd runtime (subclass wrap/unwrap, so tensor subclasses / DTensor
+        work) and its kernels load from the primed cache instead of JIT-compiling. The eager
+        cache carries no compiled artifact (artifact=None) but is still a full
+        integrity-tagged envelope (no kernels to accelerate). With no artifact in the cache,
+        exec'ing ``python_code`` JITs the kernels (inductor) or runs the inlined graph
+        (eager) -- same result, just without the cache's speedup.
 
         Call the result with the SAME argument structure ``fn`` took -- the
         model(s) in their original positions plus the runtime inputs. Per invariant
@@ -1286,17 +1701,25 @@ class _PrecompileApi:
         example model's parameter/buffer structure; precompile re-derives the
         param/buffer list from it (same interning/order as capture).
 
-        Raises ``PrecompileError`` if ``python_code`` is malformed / not a
-        ``torch.compiler.precompile`` artifact, or if the cache's ``backend`` /
-        ``code_hash`` does not match ``python_code`` (a cache and python_code from
-        different ``precompile()`` calls). A ``format``/``version`` mismatch (a foreign
-        or different-build envelope) is NOT fatal: the cache is acceleration only, so
-        ``load`` degrades rather than crashing.
+        Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
+        ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
+        calling-convention metadata), if the cache's ``backend`` tag does not match
+        ``python_code``, or if the cache's ``code_hash`` does not match
+        ``sha256(python_code)`` -- i.e. the cache and python_code came from different
+        ``precompile()`` calls. A cache whose ``format``/``version`` does not match (a
+        foreign or different-build envelope) is NOT fatal: the cache is acceleration
+        only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
         """
+        # Unpickling the cache references classes in AOTAutograd's runtime; import
+        # dynamo first so that import completes in a non-circular order (otherwise
+        # a cold load can hit a runtime_wrappers <-> _dynamo circular import).
+        import torch._dynamo
+
         # Only the metadata that drives the loaded module is unpacked here; the input /
         # param / buffer contract metadata (USER_INPUT_*, PARAM_*, BUFFER_*, IN_SPEC) is
-        # consumed by the driver INLINED in python_code (_EAGER_DRIVER_SOURCE), so load()
-        # does not re-derive those checks separately.
+        # consumed by the driver INLINED in python_code (_DRIVER_SOURCE / _EAGER_DRIVER_
+        # SOURCE), which runs in both the cache-primed and JIT load paths, so load() no
+        # longer re-derives those checks separately.
         meta = _parse_artifact_metadata(python_code)
         backend = meta["BACKEND"]
         module_positions = meta["MODULE_POSITIONS"]
@@ -1304,15 +1727,20 @@ class _PrecompileApi:
         grad_param_indices = meta["GRAD_PARAM_INDICES"]
         out_spec = pytree.treespec_loads(meta["OUT_SPEC"])
 
-        # The envelope is a plain str/int/bytes dict, so weights_only=True is safe here.
-        # The eager cache carries no compiled artifact (artifact=None), so there is
-        # nothing to prime -- load() always runs the graph inlined in python_code. The
-        # cache is purely an integrity-tagged envelope, so a corrupt/truncated envelope
-        # must degrade to the plain path rather than crash. A FORMAT or VERSION mismatch
-        # is likewise treated as an unusable cache and degrades (a newer/older or foreign
-        # envelope must not crash a load that python_code alone can serve). A BACKEND or
-        # CODE_HASH mismatch is different: it signals a genuinely wrong (python_code,
-        # cache) PAIRING, so it hard-fails rather than running under foreign metadata.
+        # The envelope is a plain str/int/bytes dict, so weights_only=True is safe here;
+        # the executable artifact is the inner bytes -- the save_cache_artifacts bundle
+        # aot_autograd.compile_to_python returned. Use it to PRIME the inductor kernel
+        # caches (torch.compiler.load_cache_artifacts) so exec'ing python_code below loads
+        # the precompiled kernels instead of JIT-compiling them; either
+        # way the same self-contained python_code runs. The cache is purely an acceleration,
+        # so a corrupt/truncated envelope must degrade to the plain JIT path rather than
+        # crash -- recover here too, not only at priming. A FORMAT or VERSION mismatch is
+        # likewise treated as an unusable cache and degrades to the python_code JIT path
+        # (the cache is acceleration only; a newer/older or foreign envelope must not
+        # crash a load that python_code alone can serve). A BACKEND or CODE_HASH mismatch
+        # is different: it signals a genuinely wrong (python_code, cache) PAIRING, so it
+        # hard-fails rather than silently running the cache's graph under foreign metadata.
+        artifact = None
         try:
             blob = torch.load(io.BytesIO(cache), weights_only=True)
             if blob.get("format") != _CACHE_FORMAT or blob.get("version") != (
@@ -1349,6 +1777,7 @@ class _PrecompileApi:
                         "different precompile() calls. Pair each cache with the "
                         "python_code from the same precompile() call."
                     )
+                artifact = blob.get("artifact")
         except PrecompileError:
             raise
         except Exception as e:
@@ -1359,10 +1788,29 @@ class _PrecompileApi:
                 type(e).__name__,
                 e,
             )
-        # The eager envelope carries no compiled artifact to prime. Run the driver inlined
-        # in python_code: it carries the full calling convention and runtime safety checks
-        # (subclass pass-through, param/buffer lifting, grad harvest, input/model
-        # validation) and runs the inlined captured graph.
+        if artifact is not None:
+            # Prime the inductor kernel caches from the bundle so the exec of python_code
+            # below loads the precompiled kernels (Triton binaries / autotune results)
+            # instead of recompiling them. The composed python_code runs its inlined
+            # kernels directly (no compile_fx re-entry, so no FxGraphCache lookup); the
+            # acceleration is the warm kernel cache. This is a pure acceleration: a stale /
+            # cross-torch-version / corrupt bundle that fails to load just leaves the caches
+            # cold, and python_code JITs -- same result, no crash.
+            try:
+                torch.compiler.load_cache_artifacts(artifact)
+            except Exception as e:
+                log.warning(
+                    "torch.compiler.precompile.load could not prime the cache from the "
+                    "artifact bundle (%s: %s); it is likely stale or from a different "
+                    "torch build. Falling back to JIT from python_code.",
+                    type(e).__name__,
+                    e,
+                )
+        # Run the driver inlined in python_code. It carries the full calling convention and
+        # runtime safety checks (subclass wrap/unwrap, param/buffer lifting, grad harvest,
+        # input/model validation) and JITs the kernels -- which hit the primed cache when
+        # the bundle above loaded, so the "cache" path is exec-with-warm-kernels rather than
+        # a separate runtime.
         forward = _make_inlined_forward(python_code)
 
         return PrecompiledModule._from_loaded(
