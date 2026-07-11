@@ -47,14 +47,15 @@ metadata.
 # raises PrecompileError); the rest are the caller's responsibility and, if broken,
 # produce a SILENTLY INCORRECT artifact -- the ordinary consequence of tracing.
 #
-# 1. Everything live is an input. Every tensor the computation reads must reach the
-#    graph as a parameter/buffer of a module argument or as an explicit tensor
-#    argument. For an nn.Module argument you do NOT enumerate its tensors yourself:
-#    precompile lifts every registered parameter and buffer (recursively, including
-#    submodules, tied weights collapsed by identity) to explicit graph inputs for you
-#    via functional reparametrization, and re-derives the same list from the runtime
-#    model you pass to load(). Passing the module is enough -- that is the whole point
-#    of accepting modules as arguments. What is NOT lifted is anything not reachable
+# 1. Everything live is an input. Every tensor the computation reads must be passed to
+#    fn as an explicit tensor argument -- EXCEPT tensors held inside an nn.Module
+#    argument, which precompile handles for you. For an nn.Module argument you do NOT
+#    enumerate its tensors yourself: precompile lifts every registered parameter and
+#    buffer (recursively, including submodules, tied weights collapsed by identity) to
+#    explicit graph inputs for you via functional reparametrization, and re-derives the
+#    same list from the runtime model you pass to load(). Passing the module is enough --
+#    that is the whole point of accepting modules as arguments. What is NOT lifted is
+#    anything not reachable
 #    through that protocol: tensors closed over by ``fn`` (globals, captured locals)
 #    and plain (non-registered) module attributes -- a bare ``self.weight = t`` rather
 #    than a registered parameter/buffer. Those are not inputs; a vanilla make_fx trace
@@ -84,9 +85,11 @@ metadata.
 # 3. Control flow and shapes are specialized to the example. A non-strict trace follows
 #    the single path taken for the example inputs: Python ``if``/``for`` over tensor
 #    values, ``.item()``, and shape-dependent branching are resolved at trace time and
-#    baked. Shapes are STATIC (capture uses make_fx in its "real" mode, so each size is
-#    baked as a constant); inputs that would take a different path, or a different shape,
-#    yield a wrong result (a static-shape mismatch is rejected up front by the driver).
+#    baked. Shapes are STATIC for now (capture uses make_fx in its "real" mode, so each
+#    size is baked as a constant); inputs that would take a different path, or a different
+#    shape, yield a wrong result (a static-shape mismatch is rejected up front by the
+#    driver). Dynamic-shape support (symbolic sizes that need not be retraced per shape)
+#    is planned in a follow-up later in this stack.
 #    Each dense user-input leaf's DTYPE and DEVICE are also baked at capture: a runtime
 #    input whose dtype or device differs from the example is rejected up front with a
 #    PrecompileError, since the graph is specialized to them. Control flow is NOT enforced
@@ -100,20 +103,29 @@ metadata.
 #    (subclass-level) inputs, so tensor subclasses (e.g. DTensor) pass through unchanged.
 #    Effectful ops are not supported yet and raise at capture time (_assert_supported)
 #    with a concrete reason; this is an implementation gap, not a fundamental limit.
+#    Distributed capture: a ``compile_on_one_rank`` flag (trace on a single rank and
+#    broadcast the artifact to the rest, so every rank need not re-capture) is
+#    anticipated and scheduled for a follow-up later in this stack.
 #
-# 5. Backward is part of the computation. If ``fn`` runs a backward, the parameter
+# 5. Backward is part of the computation. Yes: if you trace ``forward -> loss ->
+#    backward``, running the artifact re-runs that whole computation and puts the
+#    resulting parameter gradients onto the runtime model. Concretely: the parameter
 #    gradients are harvested inside the (functional) graph as extra outputs, and the
 #    driver scatters them back onto the runtime model's ``parameters()`` ``.grad``
-#    fields -- accumulating (``p.grad += g``) exactly like eager ``.backward()``, so
-#    a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged. Only params that
-#    actually received a gradient at trace time are harvested (recorded by index); a
-#    frozen (``requires_grad=False``) or non-contributing param keeps ``.grad = None``,
-#    exactly as eager leaves it -- precompile does NOT zero-fill such params. The
-#    artifact therefore returns ``fn``'s own result (``None`` for a bare ``.backward()``
-#    step), not the grads. The grad scatter is the ONLY mutation precompile performs,
-#    and it happens in Python outside the graph, so the graph stays functional.
-#    precompile does not own optimizer state; bring your own optimizer and zero grads
-#    as usual.
+#    fields -- ACCUMULATING (``p.grad += g``), not overwriting, exactly like eager
+#    ``.backward()``, so a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged
+#    (skip the zero and grads pile up, by design). WHICH params get a grad is fixed at
+#    TRACE time, not runtime: only params that actually received a gradient during the
+#    traced backward are harvested (recorded by index in GRAD_PARAM_INDICES); a frozen
+#    (``requires_grad=False``) or non-contributing param keeps ``.grad = None``, exactly
+#    as eager leaves it -- precompile does NOT zero-fill such params, and flipping a
+#    param's requires_grad at runtime does not change what gets scattered (invariant 2).
+#    Buffers are never harvested (a requires_grad buffer that got a grad is rejected at
+#    capture). The artifact therefore returns ``fn``'s own result (``None`` for a bare
+#    ``.backward()`` step), not the grads. The grad scatter is the ONLY mutation
+#    precompile performs, and it happens in Python outside the graph, so the graph stays
+#    functional. precompile does not own optimizer state; bring your own optimizer and
+#    zero grads as usual.
 #
 # 6. Each dense user-input leaf's shape, dtype, and device are recorded at capture and
 #    checked at runtime: a shape / dtype / device-mismatched input is rejected with a
@@ -131,15 +143,19 @@ metadata.
 #    rejects a (code, cache) pair from different precompile() calls (same backend)
 #    rather than running under foreign metadata.
 #
-# self-contained: ``python_code`` runs on its own -- it inlines the captured graph
-# (eager) plus all calling-convention metadata. It NEVER reads the cache, and it is the
-# SINGLE SOURCE OF TRUTH for the calling convention. The eager backend has no kernels to
-# accelerate, so the eager cache carries no compiled artifact (artifact=None) but is
-# still a full integrity-tagged envelope, and load() always runs the graph inlined in
-# python_code. The metadata lives in one place (python_code); the envelope carries a
-# code_hash (sha256 of python_code) alongside the format/version + backend tag, so
-# load() rejects a (python_code, cache) pair that did not come from the same
-# precompile() call.
+# self-contained (eager backend): ``python_code`` runs on its own -- it inlines the
+# captured graph plus all calling-convention metadata, and at RUNTIME it never reads the
+# cache (the eager backend has no kernels, so artifact=None and the driver just runs the
+# inlined ATen graph). This is an eager-backend property, NOT a general one: the inductor
+# backend's generated python_code will carry @triton_heuristics-decorated kernels that
+# consult a kernel cache and JIT on a miss, so there python_code is coupled to the cache
+# (a miss recompiles rather than failing). Regardless of backend, python_code is the
+# SINGLE SOURCE OF TRUTH for the calling convention: that metadata lives in one place
+# (python_code), and the envelope carries a code_hash (sha256 of python_code) alongside
+# the format/version + backend tag, so load() rejects a (python_code, cache) pair that
+# did not come from the same precompile() call. The eager cache is still a full
+# integrity-tagged envelope (just with artifact=None), and load() reads the metadata back
+# out of python_code (parsing, not exec'ing) rather than from the cache.
 #
 # backend: "eager" (the only backend today) skips lowering and runs the captured ATen
 # graph as-is (analogous to torch.compile(backend="eager")), for inspecting or debugging
