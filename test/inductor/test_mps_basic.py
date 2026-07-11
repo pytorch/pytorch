@@ -296,6 +296,27 @@ class MPSBasicTests(TestCase):
         mask = torch.zeros(B, 1, S, S, device=self.device, dtype=dtype)
         self.assertEqual(torch.compile(fn)(q, k, v, mask), fn(q, k, v, mask))
 
+    @parametrize(
+        "q_shape,kv_shape",
+        [
+            ((1, 4, 4, 64), (2, 4, 16, 64)),
+            ((2, 1, 4, 64), (2, 4, 16, 64)),
+            ((2, 4, 4, 64), (2, 1, 16, 64)),
+            ((4, 4, 64), (2, 4, 16, 64)),
+            ((2, 1, 4, 4, 64), (1, 3, 4, 16, 64)),
+            ((2, 0, 4, 8), (2, 1, 16, 8)),
+        ],
+    )
+    def test_sdpa_broadcast_batch_and_heads(self, q_shape, kv_shape):
+        torch.manual_seed(0)
+
+        def fn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(q, k, v)
+
+        q = torch.randn(q_shape, device=self.device)
+        k = torch.randn(kv_shape, device=self.device)
+        self.assertEqual(torch.compile(fn)(q, k, k), fn(q, k, k))
+
     def test_nested_masked_cat(self):
         # Regression test for YOLOv3 compilation failure on MPS.
         # See https://github.com/pytorch/pytorch/actions/runs/23477894502

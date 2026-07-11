@@ -4,6 +4,7 @@
 #include <iostream>
 #include <optional>
 
+#include <ATen/ExpandUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/transformers/attention.h>
@@ -16,6 +17,7 @@
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at {
@@ -34,7 +36,7 @@ static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
     return {x.unsqueeze(0), true};
   } else if (x.dim() > 4) {
     auto batchSize = c10::multiply_integers(x.sizes().begin(), x.sizes().end() - 3);
-    return {x.view({batchSize, x.size(-3), x.size(-2), x.size(-1)}), true};
+    return {x.reshape({batchSize, x.size(-3), x.size(-2), x.size(-1)}), true};
   } else {
     return {x, false};
   }
@@ -716,22 +718,45 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                     ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
   }
 
-  auto query_tuple = ensure_4d(query);
+  const auto outer_dims = enable_gqa ? 3 : 2;
+  auto outer_shape = at::infer_size_dimvector(
+      query.sizes().slice(0, query.dim() - outer_dims), key_.sizes().slice(0, key_.dim() - outer_dims));
+  outer_shape =
+      at::infer_size_dimvector(outer_shape, value_.sizes().slice(0, value_.dim() - outer_dims));
+
+  auto broadcast = [&](const Tensor& t) {
+    auto shape = outer_shape;
+    if (enable_gqa) {
+      shape.push_back(t.size(-3) == 1 ? query.size(-3) : t.size(-3));
+    }
+    shape.append({t.size(-2), t.size(-1)});
+    return t.expand(shape);
+  };
+
+  Tensor query_expanded = broadcast(query);
+  auto query_tuple = ensure_4d(query_expanded);
   Tensor q_ = std::get<0>(query_tuple);
   bool unsqueezed = std::get<1>(query_tuple);
 
-  auto key_tuple = ensure_4d(key_);
+  auto key_tuple = ensure_4d(broadcast(key_));
   Tensor k_ = std::get<0>(key_tuple);
 
-  auto value_tuple = ensure_4d(value_);
+  auto value_tuple = ensure_4d(broadcast(value_));
   Tensor v_ = std::get<0>(value_tuple);
+
+  if (q_.size(0) == 0 || q_.size(1) == 0 || q_.size(2) == 0 || k_.size(2) == 0 || v_.size(3) == 0) {
+    auto out_shape = query_expanded.sizes().vec();
+    out_shape.back() = v_.size(3);
+    auto attn_shape = query_expanded.sizes().vec();
+    attn_shape.back() = k_.size(2);
+    return {at::zeros(out_shape, query.options()), at::zeros(attn_shape, query.options())};
+  }
 
   std::optional<Tensor> mask_;
   if (attn_mask) {
-    auto maskExpandedDims = query.sizes().vec();
-    maskExpandedDims[maskExpandedDims.size() - 1] = k_.size(2);
-    mask_ = attn_mask->expand(maskExpandedDims);
-    std::tie(*mask_, std::ignore) = ensure_4d(*mask_);
+    auto mask_shape = query_expanded.sizes().vec();
+    mask_shape.back() = k_.size(2);
+    mask_ = std::get<0>(ensure_4d(attn_mask->expand(mask_shape)));
   }
 
   int query_head_dim = q_.size(3);
@@ -777,7 +802,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       prefill_mask_compatible && prefill_head_dim_supported && prefill_q_long_enough && (k_.size(2) > 0);
 
   if (!supports_fast_sdpa && !supports_prefill) {
-    return sdpa_general_mps(q_, k_, v_, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
+    return sdpa_general_mps(q_, k_, v_, mask_, dropout_p, is_causal, dropout_mask, scale, query_expanded, unsqueezed);
   }
 
   // Kernels load head-dim elements linearly, so stride(-1) == 1 is the only hard requirement
@@ -788,16 +813,16 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   Tensor v_contig = can_use_kernel_strides(v_) ? v_ : v_.contiguous();
 
   if (supports_prefill) {
-    return sdpa_prefill_mps(q_contig, k_contig, v_contig, mask_, is_causal, scale, query, unsqueezed);
+    return sdpa_prefill_mps(q_contig, k_contig, v_contig, mask_, is_causal, scale, query_expanded, unsqueezed);
   }
 
   // for short sequences, differentiate based on key sequence length
   if ((k_.size(2) >= 1024) || (k_.size(1) < q_.size(1) && k_.size(2) >= 4096)) {
     return sdpa_vector_2pass_mps(
-        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
+        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query_expanded, unsqueezed);
   } else {
     return sdpa_vector_fast_mps(
-        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
+        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query_expanded, unsqueezed);
   }
 }
 } // namespace native
