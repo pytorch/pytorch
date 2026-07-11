@@ -52,14 +52,50 @@ def tvm(
     if options is None:
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
     try:
-        import tvm  # type: ignore[import]
-        from tvm import relay  # type: ignore[import]
-        from tvm.contrib import graph_executor  # type: ignore[import]
+        import tvm  # type: ignore[import]  # noqa: F401
     except ImportError as e:
         raise ImportError(
             "Please install apache-tvm to use the tvm backend. "
             "See https://tvm.apache.org/docs/install/index.html for instructions."
         ) from e
+
+    # relay was removed in TVM 0.20; newer pip wheels only ship the relax
+    # frontend, so dispatch on whichever API the installed TVM provides.
+    if importlib.util.find_spec("tvm.relay") is not None:
+        return _tvm_relay_compile(gm, example_inputs, options)
+    if importlib.util.find_spec("tvm.relax.frontend.torch") is not None:
+        return _tvm_relax_compile(gm, example_inputs, options)
+    raise ImportError(
+        "The installed apache-tvm provides neither the legacy relay frontend nor "
+        "the relax torch frontend, so the tvm backend cannot compile this graph."
+    )
+
+
+def _tvm_relax_compile(
+    gm: fx.GraphModule,
+    example_inputs: list[torch.Tensor],
+    options: MappingProxyType[str, Any],
+) -> Callable[..., Any]:
+    from tvm.relax.frontend.torch import relax_dynamo  # type: ignore[import]
+
+    scheduler = options.get("scheduler", None) or os.environ.get("TVM_SCHEDULER", None)
+    if scheduler in ("auto_scheduler", "meta_schedule"):
+        log.warning(
+            "scheduler=%s has no equivalent in the relax TVM backend; "
+            "falling back to the default relax pipeline.",
+            scheduler,
+        )
+    return relax_dynamo()(gm, example_inputs)
+
+
+def _tvm_relay_compile(
+    gm: fx.GraphModule,
+    example_inputs: list[torch.Tensor],
+    options: MappingProxyType[str, Any],
+) -> Callable[..., Any]:
+    import tvm  # type: ignore[import]
+    from tvm import relay  # type: ignore[import]
+    from tvm.contrib import graph_executor  # type: ignore[import]
 
     jit_mod = torch.jit.trace(gm, example_inputs)
     device = device_from_inputs(example_inputs)
