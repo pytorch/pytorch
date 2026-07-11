@@ -57,9 +57,6 @@ on:
       runner-label:
         description: Fully qualified runner label derived from runner_config
         value: ${{ jobs.runner-determinator.outputs.runner-label }}
-      use-arc:
-        description: Whether to use ARC runners
-        value: ${{ jobs.runner-determinator.outputs.use-arc }}
       amd-do-label-type:
         description: Runner prefix for the "amd-do" experiment (empty when not enabled)
         value: ${{ jobs.runner-determinator.outputs.amd-do-label-type }}
@@ -71,13 +68,12 @@ jobs:
   runner-determinator:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       label-type: ${{ steps.set-condition.outputs.label-type }}
       runner-config: ${{ steps.set-runner-info.outputs.runner-config }}
       runner-type: ${{ steps.set-runner-info.outputs.runner-type }}
       runner-label: ${{ steps.set-runner-info.outputs.runner-label }}
-      use-arc: ${{ steps.set-condition.outputs.use-arc }}
       amd-do-label-type: ${{ steps.set-condition.outputs.amd-do-label-type }}
       ci-docker-hash: ${{ steps.ci-docker-hash.outputs.ci-docker-hash }}
     env:
