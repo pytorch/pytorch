@@ -13772,15 +13772,7 @@ op_db: list[OpInfo] = [
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            supports_out=False,
-           sample_inputs_func=sample_inputs_combinations,
-           decorators=[
-               DecorateInfo(
-                   toleranceOverride({torch.float16: tol(atol=5e-4, rtol=2e-3)}),
-                   device_type='cuda',
-                   dtypes=(torch.float16,),
-                   active_if=TEST_WITH_ROCM,
-               ),
-           ]),
+           sample_inputs_func=sample_inputs_combinations),
     OpInfo('cartesian_prod',
            op=torch.cartesian_prod,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
