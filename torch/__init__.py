@@ -180,6 +180,7 @@ else:
 if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
+        import importlib.util
         import sysconfig
 
         from torch.version import cuda as cuda_version
@@ -187,6 +188,13 @@ if sys.platform == "win32":
         pfiles_path = os.getenv("ProgramFiles", r"C:\Program Files")
         py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
         th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
+        # Anchor the DLL dir on the compiled _C extension rather than __file__:
+        # editable installs (e.g. scikit-build-core) run this __init__ from the
+        # source tree, whose lib/ is empty, while _C and its dependent DLLs live
+        # in the installed tree. In a wheel install both resolve to the same dir.
+        _spec = importlib.util.find_spec("torch._C")
+        if _spec is not None and _spec.origin:
+            th_dll_path = os.path.join(os.path.dirname(_spec.origin), "lib")
         usebase_path = os.path.join(
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
@@ -475,6 +483,26 @@ def _load_global_deps() -> None:
     lib_name = f"libtorch_global_deps{lib_ext}"
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
+
+    # In scikit-build-core editable installs with redirect mode, native libs are
+    # installed to the dist package location rather than relative to __file__.
+    if not os.path.exists(global_deps_lib_path):
+        try:
+            from importlib.metadata import distribution
+
+            installed = distribution("torch").locate_file(
+                os.path.join("torch", "lib", lib_name)
+            )
+            # The importlib metadata SimplePath protocol was missing the exists
+            # method in older versions; however, the actual Path implementation
+            # has it and newer versions of importlib metadata have added it to
+            # the protocol, making the following ignore unnecessary from
+            # importlib_metadata 7.0.1 and Python 3.13 onwards.
+            # pyrefly: ignore[missing-attribute]
+            if installed.exists():
+                global_deps_lib_path = str(installed)
+        except Exception:
+            pass
 
     # TheRock ROCm wheels keep the runtime in _rocm_sdk_core, which is not on the
     # loader search path; front-load it so libtorch_global_deps' NEEDED entries
