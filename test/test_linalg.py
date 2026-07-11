@@ -41,7 +41,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import CDNA2OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -73,6 +73,8 @@ def blaslt_supported_device():
                 archs.extend(['gfx110', 'gfx120'])
             if ROCM_VERSION >= (6, 5):
                 archs.append('gfx95')
+            if ROCM_VERSION >= (7, 14):
+                archs.append('gfx1250')
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
@@ -6705,6 +6707,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
+        if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
+            self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
+
         if TEST_WITH_ROCM and self.device_type == 'cuda' and not CDNA2OrLater():
             self.skipTest("_convert_weight_to_int4pack_cuda is supported only for CDNA2 or later")
 
@@ -6773,6 +6778,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_compile_int4_mm(self, device, m, k, n):
         if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
+
+        if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
+            self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and not CDNA2OrLater():
             self.skipTest("_convert_weight_to_int4pack_cuda supported only for CDNA2 or later")
@@ -9061,6 +9069,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         n = 50_000
         A = torch.ones(n, n, dtype=dtype, device=device)
         B = torch.randn(n, dtype=dtype, device=device)
+
+        if (
+            torch.device(device).type == "cuda"
+            and dtype == torch.float32
+            and not TEST_WITH_ROCM
+            and torch.cuda.get_device_capability(device) == (11, 0)
+        ):
+            # Remove this sentinel when zero-workspace cublasSgemv works on SM 11.0.
+            previous_workspace_size = torch.backends.cuda.cublas_workspace_size()
+            cublas_error = "CUBLAS_STATUS_NOT_SUPPORTED.*cublasSgemv"
+            try:
+                torch.backends.cuda.cublas_workspace_size(0)
+                with self.assertRaisesRegex(RuntimeError, cublas_error):
+                    torch.matmul(A, B)
+            finally:
+                torch.backends.cuda.cublas_workspace_size(previous_workspace_size)
+                torch._C._cuda_clearCublasWorkspaces()
+
         C = torch.matmul(A, B)
 
         # Sanity Checks
