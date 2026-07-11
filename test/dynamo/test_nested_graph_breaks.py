@@ -1692,6 +1692,20 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, x + 2)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_cxx_pytree_treespec_leaf_namespace(self):
+        import torch.utils._cxx_pytree as cxx_pytree
+
+        def fn():
+            values, treespec = cxx_pytree.tree_flatten(1)
+            leaf = cxx_pytree.treespec_leaf()
+            torch._dynamo.graph_break()
+            return values, treespec == leaf
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        values, specs_equal = torch.compile(fn, backend=cnts)()
+        self.assertEqual(values, [1])
+        self.assertTrue(specs_equal)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
