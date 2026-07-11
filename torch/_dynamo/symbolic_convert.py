@@ -3193,7 +3193,11 @@ class InstructionTranslatorBase(
                 # supports 0 or 1 outputs). Use step() fallback.
                 self.LOAD_METHOD(inst)
                 return
-        if self.should_compile_partial_graph() and self.is_non_empty_graph() and not self.stack:
+        if (
+            self.should_compile_partial_graph()
+            and self.is_non_empty_graph()
+            and not self.stack
+        ):
             self._load_attr_break_graph_if_unsupported(inst)
         else:
             self._load_attr(inst.argval)
