@@ -5199,6 +5199,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(theta_grad_cf, theta_grad_cl)
 
     @set_default_dtype(torch.double)
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_grid_sample(self):
         # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
         # so we test both cases.
@@ -15042,6 +15043,7 @@ if __name__ == '__main__':
         ref = (torch.logsumexp(z, 1) - (p.cpu().double() * z).sum(1)).mean()
         self.assertEqual(loss.cpu().double(), ref, rtol=5e-3, atol=0.5)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_linear_cross_entropy_prob_target_dispatch(self, device):
         """Probability-target dispatch edges. The harness covers the
         supported configurations; this covers the gate itself: supported
