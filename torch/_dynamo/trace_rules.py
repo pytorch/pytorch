@@ -2227,7 +2227,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.q_per_channel_zero_points",
         "torch.q_scale",
         "torch.q_zero_point",
-        "torch.qr",
         "torch.quantile",
         "torch.quantize_per_channel",
         "torch.quantize_per_tensor_dynamic",
@@ -3734,7 +3733,9 @@ SKIP_DIRS = [
 ]
 SKIP_DIRS.extend(map(_as_posix_path, filter(None, map(_module_dir, BUILTIN_SKIPLIST))))
 
-BUILTIN_INLINE_WHEN_CALLED.update(filter(None, (_module_dir(copy),)))
+BUILTIN_INLINE_WHEN_CALLED.update(
+    filter(None, (_module_dir(copy), _as_posix_path(_config_module.__file__)))
+)
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
