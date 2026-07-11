@@ -343,7 +343,7 @@ ModelCompatCheckResult is_compatible(
     s << "model bytecode version " << model_info.bytecode_version
       << "is greater than the max supported bytecode version in runtimes "
       << runtime_info.min_max_supported_bytecode_version.second;
-    result.errors.emplace_back(s.str());
+    result.errors.emplace_back(std::move(s).str());
   } else if (
       model_info.bytecode_version <
       runtime_info.min_max_supported_bytecode_version.first) {
@@ -352,7 +352,7 @@ ModelCompatCheckResult is_compatible(
     s << "model bytecode version " << model_info.bytecode_version
       << "is less than the minimum supported bytecode version in runtime "
       << runtime_info.min_max_supported_bytecode_version.first;
-    result.errors.emplace_back(s.str());
+    result.errors.emplace_back(std::move(s).str());
   }
 
   std::unordered_set<std::string> supported_type = runtime_info.supported_types;
@@ -364,7 +364,7 @@ ModelCompatCheckResult is_compatible(
       std::ostringstream s;
       s << "Primitive type: '" << type_name
         << "' is not supported in current runtime";
-      result.errors.push_back(s.str());
+      result.errors.push_back(std::move(s).str());
     }
   }
 
@@ -381,7 +381,7 @@ ModelCompatCheckResult is_compatible(
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
       s << "Operator '" << op_name << "' missing from runtime (not found)";
-      result.errors.push_back(s.str());
+      result.errors.push_back(std::move(s).str());
     } else {
       OperatorInfo runtime_op_info = runtime_info.operator_info.at(op_name);
 
@@ -392,7 +392,7 @@ ModelCompatCheckResult is_compatible(
         std::ostringstream s;
         s << "Operator '" << op_name
           << "' missing from runtime (missing schema)";
-        result.errors.push_back(s.str());
+        result.errors.push_back(std::move(s).str());
       } else {
         // Check if the model operator has schema information. If it doesn't
         // then the model is from a bytecode version < 6 and we are done. If the
@@ -408,7 +408,7 @@ ModelCompatCheckResult is_compatible(
             << model_op_info.num_schema_args.value()
             << " args in model but only "
             << runtime_op_info.num_schema_args.value() << " in the runtime";
-          result.errors.push_back(s.str());
+          result.errors.push_back(std::move(s).str());
         }
       }
     }
@@ -425,7 +425,7 @@ ModelCompatCheckResult is_compatible(
       << "is not within supported version range of the runtime "
       << runtime_info.min_max_supported_operator_versions.first << " to "
       << runtime_info.min_max_supported_operator_versions.second;
-    result.errors.push_back(s.str());
+    result.errors.push_back(std::move(s).str());
   }
 
   return result;
