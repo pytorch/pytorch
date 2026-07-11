@@ -69,7 +69,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
@@ -627,11 +627,12 @@ def _canonical_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
     elif node.op == "output":
         return (3,)
     else:
-        input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-        return (2, node.graph._target_to_str(node.target), input_indices)
+        from torch.fx.passes.canonicalize import _computation_node_key
+
+        return _computation_node_key(node, canonical_idx)
 
 
-def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
+def _canonicalize_graph(graph: fx.Graph) -> None:
     """Canonicalize a Dynamo output graph's node order and names.
 
     Delegates to ``torch.fx.passes.canonicalize.canonicalize_graph`` with
@@ -639,7 +640,7 @@ def _canonicalize_graph(graph: fx.Graph) -> fx.Graph:
     """
     from torch.fx.passes.canonicalize import canonicalize_graph
 
-    return canonicalize_graph(graph, _canonical_key, _is_safe_to_reorder)
+    canonicalize_graph(graph, _canonical_key, _is_safe_to_reorder)
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
@@ -1766,7 +1767,7 @@ class OutputGraph(OutputGraphCommon):
                 )
 
             # HACKY CODE REGION END
-        elif is_opaque_type(type(target)):
+        elif is_custom_class(type(target)):
             # HACKY CODE REGION BEGIN
             # Same as SymInt/SymFloat above: piggybacking on self.nn_modules
             # to store opaque objects as graph attributes.
@@ -1781,7 +1782,7 @@ class OutputGraph(OutputGraphCommon):
                 )
                 proxy = tracer.create_proxy("get_attr", module_key, (), {})
                 set_example_value(proxy.node, fake_script_obj)
-                return torch._dynamo.variables.script_object.TorchScriptObjectVariable.create(
+                return torch._dynamo.variables.script_object.CustomClassObjectVariable.create(
                     proxy, fake_script_obj, tx=self.root_tx, **options
                 )
 
@@ -2906,9 +2907,14 @@ class OutputGraph(OutputGraphCommon):
             # CA backward graphs have side-effecting ops (call_accumulate_grad,
             # call_hook) that is_impure() doesn't flag, and a fixed positional
             # placeholder layout that must not be reordered.
+            #
+            # Export canonicalizes in torch.export._trace._produce_aten_artifact
+            # so both strict and non-strict export produce the same node order.
             if (
                 config.canonicalize_output_graph_node_order
                 and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+                and not self.export
+                and not torch.compiler.is_exporting()
             ):
                 _canonicalize_graph(self.graph)
 
@@ -3458,7 +3464,7 @@ class OutputGraph(OutputGraphCommon):
                                     fake_attr_val,
                                 )
                         continue
-                    if is_opaque_type(type(node.meta["grapharg"].example)):
+                    if is_custom_class(type(node.meta["grapharg"].example)):
                         continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example

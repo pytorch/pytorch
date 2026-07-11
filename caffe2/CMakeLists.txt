@@ -389,6 +389,45 @@ add_custom_target(
   DEPENDS ${TORCH_GENERATED_CODE}
   )
 
+# Generate torch/profiler/_cupti/_cupti_stubs.py (the CUPTI CUpti_Activity*FieldIds and
+# CUpti_ActivityAttribute enums) from the CUPTI ABI header shipped by nvidia-cuda-cupti.
+# gen_cupti_stubs.py resolves the header itself (tools.setup_helpers.cupti.find_cupti_header,
+# which applies the version floor) and writes the module only when a sufficiently-new header
+# is present -- otherwise it skips and clears any stale output. It parses the header with the
+# clang python bindings from the libclang wheel (a build dep; bundles libclang.so, loaded
+# automatically). We run it at configure time and gate on whether the stub file was produced.
+if(USE_CUDA AND BUILD_PYTHON)
+  set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_stubs.py")
+  # Re-run configure (which re-runs codegen below) when the codegen or the header resolver
+  # changes. The resolved CUPTI header is added as a dependency too, once the script reports it.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${TORCH_ROOT}/tools/gen_cupti_stubs.py"
+    "${TORCH_ROOT}/tools/setup_helpers/cupti.py")
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" tools/gen_cupti_stubs.py --output "${CUPTI_STUBS_PY}"
+    WORKING_DIRECTORY "${TORCH_ROOT}"
+    RESULT_VARIABLE CUPTI_STUBS_RC
+    OUTPUT_VARIABLE CUPTI_STUBS_OUT
+    ERROR_VARIABLE CUPTI_STUBS_ERR)
+  if(NOT CUPTI_STUBS_RC EQUAL 0)
+    # A real codegen failure (e.g. header present but libclang broken); the CUPTI monitor will
+    # be unavailable, but it degrades gracefully at runtime so this is not fatal to the build.
+    message(WARNING "CUPTI stub codegen failed; the CUPTI monitor will be unavailable:\n${CUPTI_STUBS_OUT}${CUPTI_STUBS_ERR}")
+  elseif(EXISTS "${CUPTI_STUBS_PY}")
+    message(STATUS "Generated CUPTI stub module: ${CUPTI_STUBS_PY}")
+    # Regenerate when the resolved header (or its version header) changes: adding them to
+    # CMAKE_CONFIGURE_DEPENDS makes a later build auto-reconfigure and re-run the codegen.
+    string(REGEX MATCH "CUPTI_MONITOR_STUBS_HEADER=([^\r\n]+)" _ "${CUPTI_STUBS_OUT}")
+    if(CMAKE_MATCH_1)
+      get_filename_component(CUPTI_INCLUDE_DIR "${CMAKE_MATCH_1}" DIRECTORY)
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_MATCH_1}" "${CUPTI_INCLUDE_DIR}/cupti_version.h")
+    endif()
+  else()
+    message(STATUS "No sufficiently-new CUPTI header; skipping CUPTI stub codegen")
+  endif()
+endif()
+
 set(TORCH_SRCS ${GENERATED_CXX_TORCH})
 list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
 list(APPEND LIBTORCH_CMAKE_SRCS "")
@@ -581,6 +620,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_all_to_all_nd.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -1849,6 +1889,10 @@ if(USE_ROCM)
 
   if(TARGET ck_sdpa)
     target_link_libraries(torch_hip PRIVATE ck_sdpa)
+  endif()
+
+  if(TARGET ck_gemm)
+    target_link_libraries(torch_hip PRIVATE ck_gemm)
   endif()
 
   if(USE_MSLK)
