@@ -6,33 +6,16 @@ import sys
 import unittest
 
 import torch
+from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-# cupti-python imports its enums at module load, so the import itself gates on the
-# package being installed.
-try:
+# These tests drive the real libcupti through _PyLibCupti, so they import its symbols;
+# cupti-python imports its enums at load, so guard the import on TEST_CUPTI. TEST_CUPTI_V13_3
+# additionally requires a loaded libcupti >= 13.3 (the v2 user-defined-record API the wrapper
+# targets) -- e.g. the 13.3 wheel LD_PRELOADed; torch's bundled libcupti is typically 13.1.
+if TEST_CUPTI:
     from torch.profiler._cupti.cupti_python import CUPTI_SUCCESS, CuptiError, pylibcupti
-
-    _HAS_CUPTI = True
-except ModuleNotFoundError:
-    _HAS_CUPTI = False
-
-
-def _cupti_version() -> int:
-    if not _HAS_CUPTI:
-        return 0
-    try:
-        return pylibcupti().get_version()
-    except Exception:
-        return 0
-
-
-# These tests drive the real libcupti through _PyLibCupti. The wrapper targets the
-# v2 user-defined-record API, so gate on the same >= 13.3 floor the monitor uses:
-# only run when an adequate libcupti is actually loaded (e.g. the 13.3 wheel is
-# LD_PRELOADed); the torch-bundled libcupti is typically 13.1 and skips.
-TEST_CUPTI_V13_3 = _cupti_version() >= 130300
 
 
 @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
