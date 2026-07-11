@@ -1316,10 +1316,10 @@ alias_default = alias_default_1 = foo_default = None
                     self.assertExpectedInline(
                         graph_aot,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 10][10, 1]cpu"):
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 1, _x_slice_start = 0, _x_slice_end = 4, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 4, _y_slice_end = 10, _all_bases = [arg1_1])
+def forward(self, arg0_1: "f32[s77, 10][10, 1]cpu", arg1_1: "Sym(s77)"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 1, _x_slice_start = 0, _x_slice_end = 4, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 4, _y_slice_end = 10, _all_bases = [arg0_1])
         getitem_3: "f32[s77, 10][10, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-        copy_: "f32[s77, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_3);  arg1_1 = copy_ = None
+        copy_: "f32[s77, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = copy_ = None
         split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1)
         getitem_4: "f32[s77, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
         split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(getitem_3, [4, 6], 1);  getitem_3 = None
@@ -1351,14 +1351,14 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                     self.assertExpectedInline(
                         graph_inductor,
                         """\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 10][10, 1]cpu"):
-        slice_tensor: "f32[s77, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 0, 4)
-        slice_tensor_1: "f32[s77, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 4, 10)
+def forward(self, arg0_1: "f32[s77, 10][10, 1]cpu", arg1_1: "Sym(s77)"):
+        slice_tensor: "f32[s77, 4][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 0, 4)
+        slice_tensor_1: "f32[s77, 6][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 4, 10)
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
-        copy_: "f32[s77, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  copy_ = None
-        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg1_1, [4, 6], 1)
+        copy_: "f32[s77, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
+        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1)
         getitem_4: "f32[s77, 4][10, 1]cpu" = split_with_sizes_1[0];  split_with_sizes_1 = None
-        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(arg1_1, [4, 6], 1);  arg1_1 = None
+        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(arg0_1, [4, 6], 1);  arg0_1 = None
         getitem_7: "f32[s77, 6][10, 1]cpu" = split_with_sizes_2[1];  split_with_sizes_2 = None
         return (getitem_4, getitem_7)""",
                         ignore_comments=True,
@@ -2099,6 +2099,58 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                 self.assertEqual(
                     counters["inductor"]["fix_auto_functionalized_dtype_views"], 2
                 )
+
+    def test_reinplace_mutated_empty_no_self_edge(self):
+        # Regression test for a Scheduler.compute_ancestors KeyError.
+        #
+        # An auto_functionalized custom op that mutates freshly allocated (empty)
+        # output buffers whose results are then reshaped forces the reinplace pass
+        # to fold a realization back onto the op's own buffer. That produced a
+        # scheduler node with a non-weak MemoryDep on the buffer it also writes --
+        # a self-edge -- and compute_ancestors looked up name_to_ancestors[op]
+        # before it was populated, raising KeyError: 'opN'.
+        #
+        # Mirrors flash_attn._flash_attn_backward writing dq/dk/dv into empties.
+        D = 512
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::attn_bwd",
+                "(Tensor dout, Tensor(a!) dq, Tensor(b!) dk, Tensor(c!) dv) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::attn_bwd", "cpu", lib=lib)
+            def attn_bwd(dout, dq, dk, dv):
+                src = dout.reshape(dq.shape)
+                dq.copy_(src)
+                dk.copy_(src)
+                dv.copy_(src)
+                return torch.zeros_like(dq)  # workspace, discarded by caller
+
+            @torch.library.register_fake("mylib::attn_bwd", lib=lib)
+            def _(dout, dq, dk, dv):
+                return torch.empty_like(dq)
+
+            def f(dout, weight, num_heads):
+                head_dim = D // num_heads
+                seqlen = dout.shape[0]
+                dq = torch.empty(1, seqlen, num_heads, head_dim, dtype=dout.dtype)
+                dk = torch.empty(1, seqlen, num_heads, head_dim, dtype=dout.dtype)
+                dv = torch.empty(1, seqlen, num_heads, head_dim, dtype=dout.dtype)
+                torch.ops.mylib.attn_bwd(dout, dq, dk, dv)  # return discarded
+                a = dq.reshape(1, seqlen, D)
+                b = dk.reshape(1, seqlen, D)
+                c = dv.reshape(1, seqlen, D)
+                return (a + b + c) @ weight
+
+            dout = torch.randn(128, D)
+            weight = torch.randn(D, D)
+            torch._dynamo.mark_dynamic(dout, 0)
+
+            expected = f(dout, weight, 8)
+            got = torch.compile(f, fullgraph=True, dynamic=True)(dout, weight, 8)
+            self.assertEqual(got, expected)
 
 
 if __name__ == "__main__":

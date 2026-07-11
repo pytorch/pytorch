@@ -7985,6 +7985,22 @@ class ShapeEnv:
             # 1 puts ephemeral sourced symbols first when sorting in reverse
             return (1 if has_only_ephemeral_sources else 0, size, name)
 
+        def _has_only_ephemeral_sources(x: sympy.Symbol) -> bool:
+            return x in self.var_to_sources and all(
+                s.is_ephemeral() for s in self.var_to_sources[x]
+            )
+
+        def _floor_div_exact_solution(expr: sympy.Expr) -> sympy.Expr | None:
+            numerator, denominator = expr.as_numer_denom()
+            if not isinstance(denominator, sympy.Integer):
+                return None
+            if denominator == 1:
+                return expr
+            if denominator < 0:
+                numerator = -numerator
+                denominator = -denominator
+            return FloorDiv(numerator, denominator)
+
         free = sorted(free, key=_smart_symbol_sort, reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
@@ -8041,13 +8057,25 @@ class ShapeEnv:
                     self._set_replacement(rhs, self._find(lhs), "trivial_rhs")
                 else:
                     r = try_solve(expr, free[0], floordiv_inequality=False)
-                    if r is not None and all(
-                        t.is_integer for t in sympy.preorder_traversal(r[1])
-                    ):
+                    if r is not None:
                         new_var = self._find(r[1])
                         ok = len(free_unbacked_symbols(new_var)) == 0
                         if ok:
-                            self._set_replacement(free[0], new_var, "solve")
+                            if all(
+                                t.is_integer for t in sympy.preorder_traversal(new_var)
+                            ):
+                                self._set_replacement(free[0], new_var, "solve")
+                            elif _has_only_ephemeral_sources(free[0]):
+                                floor_div_solution = _floor_div_exact_solution(new_var)
+                                if floor_div_solution is not None and all(
+                                    t.is_integer
+                                    for t in sympy.preorder_traversal(
+                                        floor_div_solution
+                                    )
+                                ):
+                                    self._set_replacement(
+                                        free[0], floor_div_solution, "solve"
+                                    )
 
             except NotImplementedError:
                 pass

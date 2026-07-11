@@ -7963,7 +7963,10 @@ SavedForBackwardsNoVcCheckAOTOutput(idx=3)
 SavedForBackwardsNoVcCheckAOTOutput(idx=4)
 SavedForBackwardsAOTOutput(idx=5)
 SavedForBackwardsAOTOutput(idx=6)
-SavedForBackwardsAOTOutput(idx=7)""",
+SavedForBackwardsAOTOutput(idx=7)
+SavedForBackwardsAOTOutput(idx=8)
+SavedForBackwardsAOTOutput(idx=9)
+SavedForBackwardsAOTOutput(idx=10)""",
             )
 
     def test_move_tensor_subclass_parameter_after_compile(self):

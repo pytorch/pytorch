@@ -1531,22 +1531,28 @@ class MetaConverter(Generic[_TensorT]):
                 # for symbolic SymInts or fake tensors.
                 if t.view_func is None:
                     raise AssertionError("t.view_func must not be None for view replay")
-                # NB: we do NOT suppress guards here, we need to remove ephemeral
-                # sources
-                fake_t = t.view_func.apply(
-                    t,
-                    base,
-                    # pyrefly: ignore[bad-argument-type]
-                    symint_visitor_fn,
-                    tensor_visitor_fn,
-                )
+                # Replay may emit guards on the ephemeral symbols we create for
+                # closed-over view metadata. Suppress those replay-local guards
+                # and register source-backed relationships with the checks below.
+                with maybe_suppress():
+                    fake_t = t.view_func.apply(
+                        t,
+                        base,
+                        # pyrefly: ignore[bad-argument-type]
+                        symint_visitor_fn,
+                        tensor_visitor_fn,
+                    )
 
                 # Ensure the output has symbolic shapes according to the outer symbolic context.
                 # These checks should simplify out any symbols created for closed-over view func
                 # SymInts.
+                torch._check(sym_eq(fake_t.storage_offset(), storage_offset))
                 torch._check(sym_eq(fake_t.size(), sizes))
                 torch._check(sym_eq(fake_t.stride(), strides))
-                torch._check(sym_eq(fake_t.storage_offset(), storage_offset))
+                if t.is_traceable_wrapper_subclass and not t.is_nested:
+                    fake_t = self._checked_cast_tensor_t(
+                        fake_t.as_strided(sizes, strides, storage_offset)
+                    )
                 return fake_t
 
         if self.get_tensor_memo(t) is None:
