@@ -2234,6 +2234,7 @@ class TestSDPAFailureModes(NNTestCase):
         # before the fix, all rows past 2**32 // seq_len were garbage
         self.assertEqual(out, ref, atol=5e-3, rtol=5e-3)
 
+    @largeTensorTest("12GB", "cuda")
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_dropout_rng_offset_no_overflow(self):
