@@ -1256,11 +1256,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             rest,
             tree_map_kwargs,
         )
-        return tree_map_fn_copy.call_function(
-            tx,
-            [map_fn, self, *rest],
-            tree_map_kwargs,
-        )
+        # The fallback inlines tree_map normally, creating a proper frame,
+        # so NGB can work correctly here -- clear the fast path flag.
+        prev = tx._tree_map_fast_path_active
+        tx._tree_map_fast_path_active = False
+        try:
+            return tree_map_fn_copy.call_function(
+                tx,
+                [map_fn, self, *rest],
+                tree_map_kwargs,
+            )
+        finally:
+            tx._tree_map_fast_path_active = prev
 
     def call_tree_map_with_path(
         self,
@@ -1334,11 +1341,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             tree_map_kwargs,
             keypath,
         )
-        return tree_map_fn_copy.call_function(
-            tx,
-            [map_fn, self, *rest],
-            tree_map_kwargs,
-        )
+        prev = tx._tree_map_fast_path_active
+        tx._tree_map_fast_path_active = False
+        try:
+            return tree_map_fn_copy.call_function(
+                tx,
+                [map_fn, self, *rest],
+                tree_map_kwargs,
+            )
+        finally:
+            tx._tree_map_fast_path_active = prev
 
     def set_name_hint(self, name: str) -> None:
         pass
