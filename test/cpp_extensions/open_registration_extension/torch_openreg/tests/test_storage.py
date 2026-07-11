@@ -73,10 +73,20 @@ class TestSerialization(TestCase):
         torch._utils.set_tensor_metadata(src, metadata)
         self.assertEqual(torch._utils.get_tensor_metadata(src), metadata)
 
+        # Default (for_fake=False) uses BackendMeta::clone(): a faithful copy.
         dst = torch.empty(3, 3, device="openreg")
         self.assertEqual(torch._utils.get_tensor_metadata(dst), {})
         torch._C._copy_backend_meta(src, dst)
         self.assertEqual(torch._utils.get_tensor_metadata(dst), metadata)
+
+        # for_fake=True uses BackendMeta::clone_for_fake(), which OpenReg tags
+        # with fake_clone so the fake-copy path is distinguishable from clone().
+        dst_fake = torch.empty(3, 3, device="openreg")
+        torch._C._copy_backend_meta(src, dst_fake, for_fake=True)
+        self.assertEqual(
+            torch._utils.get_tensor_metadata(dst_fake),
+            {**metadata, "fake_clone": True},
+        )
 
     @skipIfTorchDynamo()
     @unittest.skipIf(
@@ -207,7 +217,11 @@ class TestSerialization(TestCase):
         with FakeTensorMode() as mode:
             fake_tensor = mode.from_tensor(tensor)
         self.assertIsInstance(fake_tensor, FakeTensor)
-        self.assertEqual(torch._utils.get_tensor_metadata(fake_tensor), metadata)
+        # fake_clone confirms the metadata arrived via clone_for_fake(), not clone().
+        self.assertEqual(
+            torch._utils.get_tensor_metadata(fake_tensor),
+            {**metadata, "fake_clone": True},
+        )
 
     def test_fake_tensor_metadata_preservation_functional(self):
         """Test backend metadata propagation when fakeifying a FunctionalTensor.
@@ -233,7 +247,10 @@ class TestSerialization(TestCase):
             with FakeTensorMode() as mode:
                 fake_tensor = mode.from_tensor(functional_tensor)
         self.assertIsInstance(fake_tensor, FakeTensor)
-        self.assertEqual(torch._utils.get_tensor_metadata(fake_tensor), metadata)
+        self.assertEqual(
+            torch._utils.get_tensor_metadata(fake_tensor),
+            {**metadata, "fake_clone": True},
+        )
 
     def test_serialization_map_location_cpu(self):
         """Test serialization with map_location to CPU"""
