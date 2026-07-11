@@ -2509,10 +2509,7 @@ class OutputGraph(OutputGraphCommon):
                             raise AssertionError(
                                 "cur_tx.post_prune_cell_and_freevars must be set for nested frames"
                             )
-                        var = cur_tx.post_prune_cell_and_freevars[cell]
-                        if isinstance(var, NullVariable):
-                            raise AssertionError("Can't codegen null cell")
-                        cg(var)
+                        cg(cur_tx.post_prune_cell_and_freevars[cell])
                 cg.append_output(create_build_tuple(len(freevars)))
                 cur_tx = cur_tx.parent
                 tx_cnt += 1
