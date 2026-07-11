@@ -18,7 +18,7 @@ inline std::string shapes_as_str(TensorList tensors) {
       first = false;
     }
   }
-  return os.str();
+  return std::move(os).str();
 }
 #endif
 } // anonymous namespace
