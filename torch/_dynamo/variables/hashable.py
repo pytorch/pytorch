@@ -118,16 +118,14 @@ class HashableTracker:
             self.vt = vt
             return
 
-        # Compute hash via the tp_hash slot (generic_hash_impl).
+        # Compute hash via the container-key protocol.
         # For unhashable types, hash_impl raises ObservedTypeError.
         from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        from .object_protocol import generic_hash_impl
 
         tx = InstructionTranslator.current_tx()
         # is_fake marks an identity-based hash (e.g. id(fake_tensor)); such VTs
         # have no python-constant value, so their key equality is identity.
-        self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
+        self._hash, self._hash_is_identity = vt.container_key_hash_impl(tx)
         self.vt = vt
 
     @classmethod
