@@ -1205,6 +1205,7 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoFFT
     @dtypes(torch.cdouble)
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_complex_istft_real_equiv(self, device, dtype):
         test_args = list(product(
             # input
