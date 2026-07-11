@@ -16,8 +16,8 @@ if __name__ == "__main__":
     # before instantiating tests.
     parse_cmd_line_args()
 
-from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, IS_WINDOWS, TemporaryDirectoryName, shell
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
+    enable_profiling_mode_for_profiling_tests, IS_WINDOWS, TemporaryDirectoryName, shell, skipIfSandcastle
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, _inline_everything, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward
 from textwrap import dedent
@@ -68,13 +68,13 @@ class TestFuser(JitTestCase):
         scripted = self.checkScript(func, (a,))
         self.assertAllFused(scripted.graph_for(a))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_abs_cpu(self):
         self._test_fused_abs()
 
     @unittest.skipIf(not IS_WINDOWS, "This is meant to be Windows-specific")
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_abs_cpu_unicode_temp_dir(self):
         with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname:
@@ -248,7 +248,7 @@ class TestFuser(JitTestCase):
             for fn in fns:
                 self.checkScript(fn, [tensor])
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_chunk_correctness(self):
         return self._test_chunk_correctness(self, 'cpu')
@@ -598,7 +598,7 @@ class TestFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                   "aten::_size_if_not_equal"))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser CPU support for Sandcastle")
     @unittest.skip("deduplicating introduces aliasing in backward graph's outputs")
     @enable_cpu_fuser
     def test_fuser_deduplication(self):
@@ -621,7 +621,7 @@ class TestFuser(JitTestCase):
         # check that a, b share storage, i.e. were generated as a single output in the fuser
         self.assertEqual(ga2.data_ptr(), gb2.data_ptr())
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     @unittest.skip("temporarily disabled because fusion was restricted in fixing #22833")
     def test_fuser_iou(self):
@@ -792,7 +792,7 @@ class TestFuser(JitTestCase):
             .check_not("aten::tanh").check("FusionGroup").check_next("TupleConstruct") \
             .check_next("return").check_not("FusionGroup_2").run(str(graph))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser CPU support for Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
     @enable_cpu_fuser
     def test_lstm_traced_cpu(self):
@@ -894,7 +894,7 @@ class TestFuser(JitTestCase):
         out = script_f(x, y)
         self.assertEqual(out[0], out[1])
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_scalar(self):
         def fn(x, y):
@@ -940,7 +940,7 @@ class TestFuser(JitTestCase):
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), 'prim::FusionGroup', 0, consider_subgraphs=True)
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
     def test_where_and_typing(self):
         def f(x, y):
