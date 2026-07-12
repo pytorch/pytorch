@@ -10,15 +10,14 @@
 # read the same tile coords in lockstep.
 #
 # This file provides:
-#   - SchedulingMode enum (STATIC vs CLC) for runtime selection
 #   - ClcState dataclass wrapping the CuTeDSL hardware scheduler + async
-#     pipeline + producer/consumer states; provides the small surface that
-#     consumer warps and the dedicated producer warp need.
+#     pipeline + producer/consumer states.
+#   - helpers for constructing the CLC problem shape and response pipeline.
 #
-# Phase 1 of the grouped-MM CLC migration uses this scaffolding without any
-# additional payload (group-info broadcast). Phase 2 will add a smem
-# side-table written by one warp so consumer warps can skip the per-tile
-# delinearize_z prefix-sum scan.
+# The grouped kernel uses two CLC layouts. Uniform-M/N groups use direct
+# (M, N, group) CLC coordinates. Non-uniform groups flatten work into L, and
+# the mainload warp broadcasts group/tile metadata through shared memory so
+# other consumer warps avoid repeating the group search.
 
 from dataclasses import dataclass
 
@@ -30,13 +29,6 @@ from cutlass.utils import (
     ClcDynamicPersistentTileScheduler,
     ClcDynamicPersistentTileSchedulerParams,
 )
-
-
-class SchedulingMode:
-    """Pseudo-enum (CuTeDSL @cute.jit doesn't always play well with stdlib Enum)."""
-
-    STATIC = 0
-    CLC = 1
 
 
 @dataclass

@@ -171,6 +171,37 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             with patch.dict(sys.modules, {"tvm": None}):
                 self.assertRaises(ImportError, backend, gm, [torch.randn(2)])
 
+    def test_tvm_dispatches_relay_or_relax(self, device):
+        import torch._dynamo.backends.tvm as tvm_backend
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        sentinel = object()
+
+        def find_spec(present):
+            return lambda name: MagicMock() if name == present else None
+
+        with (
+            patch.dict(sys.modules, {"tvm": MagicMock()}),
+            patch.object(
+                tvm_backend, "_tvm_relay_compile", return_value=sentinel
+            ) as relay,
+            patch.object(
+                tvm_backend, "_tvm_relax_compile", return_value=sentinel
+            ) as relax,
+        ):
+            with patch("importlib.util.find_spec", side_effect=find_spec("tvm.relay")):
+                self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
+            relay.assert_called_once()
+            relax.assert_not_called()
+
+            with patch(
+                "importlib.util.find_spec",
+                side_effect=find_spec("tvm.relax.frontend.torch"),
+            ):
+                self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
+            relax.assert_called_once()
+            relay.assert_called_once()
+
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
         self._check_backend_works("hpu_backend", device)
@@ -337,6 +368,17 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend=my_compiler)
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
+
+    def test_lookup_backend_suggestion(self):
+        from torch._dynamo.backends.registry import lookup_backend
+        from torch._dynamo.exc import InvalidBackend
+
+        with self.assertRaisesRegex(InvalidBackend, "did you mean: 'inductor'"):
+            lookup_backend("indutcor")
+
+        with self.assertRaises(InvalidBackend) as cm:
+            lookup_backend("zzzzzzzz")
+        self.assertNotIn("did you mean", str(cm.exception))
 
     def test_lookup_custom_backend(self):
         from torch._dynamo import list_backends

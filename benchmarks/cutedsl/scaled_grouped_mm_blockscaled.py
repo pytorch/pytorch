@@ -7,6 +7,9 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 import torch
+from torch._native.ops.scaled_grouped_mm._cpp_utils import (
+    _call_cpp_scaled_grouped_mm_v2,
+)
 from torch.nn.functional import scaled_grouped_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
@@ -15,7 +18,6 @@ from torch.testing._internal.common_quantized import (
 )
 
 
-_CPP_SCALED_GROUPED_MM_V2_KERNEL = None
 _BENCH_SETTLE_SECONDS = 0.1
 
 
@@ -96,10 +98,6 @@ class BenchResult(NamedTuple):
 
 
 def _percentile(sorted_samples: list[float], pct: float) -> float:
-    if not sorted_samples:
-        return float("nan")
-    if len(sorted_samples) == 1:
-        return sorted_samples[0]
     idx = (len(sorted_samples) - 1) * pct / 100.0
     lo = int(idx)
     hi = min(lo + 1, len(sorted_samples) - 1)
@@ -127,26 +125,6 @@ def _summarize(samples_us: list[float], stat: str) -> BenchResult:
 
 
 def _do_bench_cuda(fn, warmup=10, rep=100, stat: str = "median") -> BenchResult:
-    if isinstance(fn, (list, tuple)):
-        if len(fn) == 0:
-            raise ValueError("fn list for benchmarking cannot be empty")
-        fns = fn
-        for i in range(warmup):
-            time.sleep(_BENCH_SETTLE_SECONDS)
-            fns[i % len(fns)]()
-        torch.cuda.synchronize()
-        samples_us = []
-        for i in range(rep):
-            start = torch.cuda.Event(enable_timing=True)
-            end = torch.cuda.Event(enable_timing=True)
-            time.sleep(_BENCH_SETTLE_SECONDS)
-            start.record()
-            fns[i % len(fns)]()
-            end.record()
-            torch.cuda.synchronize()
-            samples_us.append(start.elapsed_time(end) * 1e3)
-        return _summarize(samples_us, stat)
-
     for _ in range(warmup):
         time.sleep(_BENCH_SETTLE_SECONDS)
         fn()
@@ -164,61 +142,29 @@ def _do_bench_cuda(fn, warmup=10, rep=100, stat: str = "median") -> BenchResult:
     return _summarize(samples_us, stat)
 
 
-def _run_with_cuda_profiler(fn):
-    torch.cuda.synchronize()
-    torch.cuda.cudart().cudaProfilerStart()
-    try:
-        out = fn()
-        torch.cuda.synchronize()
-        return out
-    finally:
-        torch.cuda.cudart().cudaProfilerStop()
-
-
-def _get_cpp_scaled_grouped_mm_v2_kernel():
-    global _CPP_SCALED_GROUPED_MM_V2_KERNEL
-    if _CPP_SCALED_GROUPED_MM_V2_KERNEL is None:
-        from torch._native import registry
-
-        registry.deregister_op_overrides(disable_dsl_names="cutedsl")
-        try:
-            _CPP_SCALED_GROUPED_MM_V2_KERNEL = torch._C._dispatch_get_computed_kernel_for_dispatch_key(  # pyrefly: ignore [missing-module-attribute]
-                "aten::_scaled_grouped_mm_v2", "CUDA"
-            )
-        finally:
-            registry.reenable_op_overrides(enable_dsl_names="cutedsl")
-    return _CPP_SCALED_GROUPED_MM_V2_KERNEL
-
-
 def _require_cutedsl_scaled_grouped_mm_override():
     from torch._native import cutedsl_utils as cu, registry
+    from torch._native.common_utils import check_native_jit_disabled
 
     if not cu.runtime_available():
         raise RuntimeError(
-            "--backend cute requested, but CuTeDSL runtime dependencies are not "
-            "available. Install nvidia-cutlass-dsl and apache-tvm-ffi."
+            "--backend cute requested, but CuTeDSL runtime dependencies "
+            "are not available. Install nvidia-cutlass-dsl and "
+            "apache-tvm-ffi."
+        )
+    if check_native_jit_disabled():
+        raise RuntimeError(
+            "--backend cute requested, but native DSL overrides are disabled "
+            "by TORCH_DISABLE_NATIVE_JIT=1."
         )
     if "_scaled_grouped_mm_v2" not in registry.get_dsl_operations("cutedsl"):
+        version = cu.runtime_version()
         raise RuntimeError(
             "--backend cute requested, but the CuTeDSL override for "
-            "aten::_scaled_grouped_mm_v2 is not registered. Check the CuTeDSL "
-            "version and TORCH_NATIVE_* override settings."
+            "aten::_scaled_grouped_mm_v2 is not registered. Current "
+            f"nvidia-cutlass-dsl version: {version}. If this is a newer "
+            "local test version, rerun with TORCH_NATIVE_SKIP_VERSION_CHECK=1."
         )
-
-
-def _cuda_dispatch_keyset(device_type: str):
-    dispatch_key = torch._C._dispatch_key_for_device(
-        device_type
-    )  # pyrefly: ignore [missing-module-attribute]
-    dispatch_key = getattr(
-        torch._C.DispatchKey, dispatch_key
-    )  # pyrefly: ignore [missing-module-attribute]
-    return torch._C.DispatchKeySet(
-        dispatch_key
-    )  # pyrefly: ignore [missing-module-attribute]
-
-
-_get_cpp_scaled_grouped_mm_v2_kernel()
 
 
 def _maybe_wrap_cuda_graph(fn, label: str, use_cuda_graphs: bool):
@@ -227,10 +173,6 @@ def _maybe_wrap_cuda_graph(fn, label: str, use_cuda_graphs: bool):
 
     keep_alive = [None]
     try:
-        # Multiple eager warmups before capture: fire lazy paths (CUDA module
-        # registration, first-touch page faults, allocator path selection) so
-        # they don't get baked into the captured graph and produce
-        # capture-to-capture variance across processes.
         for _ in range(5):
             keep_alive[0] = fn()
         torch.cuda.synchronize()
@@ -243,8 +185,6 @@ def _maybe_wrap_cuda_graph(fn, label: str, use_cuda_graphs: bool):
                 keep_alive[0] = fn()
         torch.cuda.current_stream().wait_stream(capture_stream)
 
-        # Warm the replay path so driver-side state around graph launch
-        # stabilizes before the timed loop.
         for _ in range(5):
             graph.replay()
         torch.cuda.synchronize()
@@ -280,8 +220,8 @@ def _generate_offsets(total, groups, device, mode="balanced", align=1):
                 warnings.warn(
                     (
                         f"grouping='balanced' with M={total}, G={groups}: "
-                        f"using base size {base} and placing tail {remainder} "
-                        "in the last group"
+                        f"using base size {base} and placing tail "
+                        f"{remainder} in the last group"
                     ),
                     stacklevel=2,
                 )
@@ -301,9 +241,12 @@ def _generate_offsets(total, groups, device, mode="balanced", align=1):
             if remainder != 0 or extra_units != 0:
                 warnings.warn(
                     (
-                        f"grouping='balanced' with M={total}, G={groups}, align={align}: "
-                        f"using aligned base size {base_units * align} and placing "
-                        f"{extra_units * align + remainder} values in the last groups"
+                        f"grouping='balanced' with M={total}, G={groups}, "
+                        f"align={align}: "
+                        f"using aligned base size {base_units * align} "
+                        "and placing "
+                        f"{extra_units * align + remainder} values in "
+                        "the last groups"
                     ),
                     stacklevel=2,
                 )
@@ -384,60 +327,6 @@ def _convert_to_blockscaled(t, block_size: int, format: str):
         t_lp, t_scale, t_global_scale = _convert_to_nvfp4(t, block_size)
         return t_lp, t_scale, t_global_scale
     raise ValueError(f"Unsupported format: {format}")
-
-
-def _align_blocked_scale_stride_16b(t: torch.Tensor) -> torch.Tensor:
-    if t.dim() == 2:
-        rows, cols = t.shape
-        stride1 = 1
-        stride0 = ((cols * t.element_size() + 15) // 16) * (16 // t.element_size())
-        out = torch.empty_strided(
-            (rows, cols), (stride0, stride1), device=t.device, dtype=t.dtype
-        )
-        out.copy_(t)
-        return out
-    if t.dim() == 3:
-        groups, rows, cols = t.shape
-        stride2 = 1
-        stride1 = ((cols * t.element_size() + 15) // 16) * (16 // t.element_size())
-        stride0 = rows * stride1
-        out = torch.empty_strided(
-            (groups, rows, cols),
-            (stride0, stride1, stride2),
-            device=t.device,
-            dtype=t.dtype,
-        )
-        out.copy_(t)
-        return out
-    return t
-
-
-def _align_packed_fp4_stride_16b(t: torch.Tensor) -> torch.Tensor:
-    if t.dtype != torch.float4_e2m1fn_x2:
-        return t
-    if t.dim() == 2:
-        rows, cols = t.shape
-        stride1 = 1
-        stride0 = ((cols * t.element_size() + 15) // 16) * (16 // t.element_size())
-        out = torch.empty_strided(
-            (rows, cols), (stride0, stride1), device=t.device, dtype=t.dtype
-        )
-        out.copy_(t)
-        return out
-    if t.dim() == 3:
-        groups, rows, cols = t.shape
-        stride2 = 1
-        stride1 = ((cols * t.element_size() + 15) // 16) * (16 // t.element_size())
-        stride0 = rows * stride1
-        out = torch.empty_strided(
-            (groups, rows, cols),
-            (stride0, stride1, stride2),
-            device=t.device,
-            dtype=t.dtype,
-        )
-        out.copy_(t)
-        return out
-    return t
 
 
 def _prepare_inputs(
@@ -535,8 +424,6 @@ def _prepare_inputs(
         if k_eff > k:
             x[:, k:] = 0
             w[:, k:] = 0
-        # Match the grouped 2d/2d tests: K-group boundaries are kept on 32-value
-        # boundaries even for FP4 formats so packed input offsets stay 16B aligned.
         offs_align = 32 if format in ("mxfp4", "nvfp4") else block_size
         offs = _generate_offsets(k_eff, g, device, mode=grouping, align=offs_align)
         m_rounded = ((m + 127) // 128) * 128
@@ -619,23 +506,18 @@ def benchmark_scaled_grouped_mm(
     transpose_ab: bool | None = None,
     layout_mode: str = "2d/3d",
     format: str = "mxfp8",
-    cuda_profiler_backend: str | None = None,
     stat: str = "median",
 ):
     if dtype is None:
         dtype = torch.bfloat16
     if backend not in ("both", "cpp", "cute"):
         raise ValueError(f"backend must be one of both/cpp/cute, got {backend}")
-    if cuda_profiler_backend not in (None, "cpp", "cute", "both"):
-        raise ValueError(
-            "cuda_profiler_backend must be one of None/cpp/cute/both, "
-            f"got {cuda_profiler_backend}"
-        )
     if stat not in _STAT_CHOICES:
         raise ValueError(f"stat must be one of {_STAT_CHOICES}, got {stat}")
     if (mma_tile_mn is None) != (cluster_shape_mn is None):
         raise ValueError(
-            "mma_tile_mn and cluster_shape_mn must be provided together or omitted together"
+            "mma_tile_mn and cluster_shape_mn must be provided "
+            "together or omitted together"
         )
 
     if gmnk is None:
@@ -755,11 +637,7 @@ def benchmark_scaled_grouped_mm(
                 _prepared_k_eff,
             ) = prepared_inputs
 
-            cpp_kernel = _get_cpp_scaled_grouped_mm_v2_kernel()
-            cpp_dispatch_keys = _cuda_dispatch_keyset(xq.device.type)
-
-            fn_cpp = lambda: cpp_kernel.call_boxed(  # noqa: E731
-                cpp_dispatch_keys,
+            fn_cpp = lambda: _call_cpp_scaled_grouped_mm_v2(  # noqa: E731
                 xq,
                 wq.transpose(-2, -1),
                 (
@@ -776,11 +654,11 @@ def benchmark_scaled_grouped_mm(
                 ),
                 scale_recipe_int,
                 swizzle_int,
-                offs,
-                None,
-                torch.bfloat16,
-                [],
-                False,
+                offs=offs,
+                bias=None,
+                out_dtype=torch.bfloat16,
+                contraction_dim=[],
+                use_fast_accum=False,
             )
 
             fn_cute_base = lambda: scaled_grouped_mm(  # noqa: E731
@@ -819,25 +697,22 @@ def benchmark_scaled_grouped_mm(
             else None
         )
         if run_cpp:
-            if cuda_profiler_backend in ("cpp", "both"):
-                _run_with_cuda_profiler(bench_fn_cpp)
             res_cpp = _do_bench_cuda(bench_fn_cpp, warmup=warmup, rep=rep, stat=stat)
             us_cpp = res_cpp.value
         if run_cute:
             if run_cpp:
-                # In --backend both, CuTeDSL inherits state left by C++ that
-                # inflates CuTeDSL's median/max even though C++ itself is
-                # unaffected. Drop two sources: (1) the graph-wrapped C++
-                # bench fn keeps a CUDA graph (and its private memory pool
-                # from torch.cuda.graph()) alive, doubling GPU memory
-                # pressure during CuTeDSL replays; (2) the caching allocator
-                # pool shape left by C++ perturbs CuTeDSL's per-iteration
-                # output allocs.
+                # In --backend both, CuTeDSL inherits state left by
+                # C++ that inflates CuTeDSL's median/max even though
+                # C++ itself is unaffected. Drop two sources:
+                # 1. the graph-wrapped C++ bench fn keeps a CUDA graph
+                #    (and its private memory pool from
+                #    torch.cuda.graph()) alive, doubling GPU memory
+                #    pressure during CuTeDSL replays
+                # 2. the caching allocator pool shape left by C++
+                #    perturbs CuTeDSL's per-iteration output allocs.
                 bench_fn_cpp = None
                 gc.collect()
                 torch.cuda.empty_cache()
-            if cuda_profiler_backend in ("cute", "both"):
-                _run_with_cuda_profiler(bench_fn_cute)
             res_cute = _do_bench_cuda(bench_fn_cute, warmup=warmup, rep=rep, stat=stat)
             us_cute = res_cute.value
 
@@ -845,9 +720,8 @@ def benchmark_scaled_grouped_mm(
 
         if emit_us_only:
             print(f"{us_cpp if run_cpp else us_cute}")
-            return [
-                {"G": g, "M": m, "N": n, "K": k, "us": us_cpp if run_cpp else us_cute}
-            ]
+            us = us_cpp if run_cpp else us_cute
+            return [{"G": g, "M": m, "N": n, "K": k, "us": us}]
 
         if us_cpp is not None:
             print(
@@ -895,9 +769,8 @@ def benchmark_scaled_grouped_mm(
         df[col] = df[col].astype("int64")
     for col in df.columns:
         if col not in ("G", "M", "N", "K"):
-            df[col] = df[col].map(
-                lambda x: f"{x:.3f}" if x is not None and pd.notna(x) else "nan"
-            )
+            fmt_value = lambda x: f"{x:.3f}" if x is not None and pd.notna(x) else "nan"  # noqa: E731
+            df[col] = df[col].map(fmt_value)
     print(
         df.to_markdown(
             index=False,
@@ -912,7 +785,7 @@ def benchmark_scaled_grouped_mm(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Benchmark scaled grouped MM (blockscaled) C++ vs CuTeDSL."
+        description=("Benchmark scaled grouped MM (blockscaled) C++ vs CuTeDSL.")
     )
     parser.add_argument(
         "--format",
@@ -973,7 +846,7 @@ if __name__ == "__main__":
         "--grouping",
         choices=["balanced", "random"],
         default="balanced",
-        help="How to split the grouped dimension: M for 2d/3d, K for 2d/2d.",
+        help=("How to split the grouped dimension: M for 2d/3d, K for 2d/2d."),
     )
     parser.add_argument(
         "--layout-mode",
@@ -985,7 +858,7 @@ if __name__ == "__main__":
         "--use-cuda-graphs",
         action="store_true",
         default=False,
-        help="Capture backend call in a CUDA graph and benchmark replay().",
+        help=("Capture backend call in a CUDA graph and benchmark replay()."),
     )
     parser.add_argument(
         "--warmup",
@@ -1003,7 +876,7 @@ if __name__ == "__main__":
         "--backend",
         choices=["both", "cpp", "cute"],
         default="both",
-        help=argparse.SUPPRESS,
+        help="Backend to benchmark: both, cpp, or cute.",
     )
     parser.add_argument(
         "--emit-us-only",
@@ -1012,16 +885,13 @@ if __name__ == "__main__":
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--cuda-profiler-backend",
-        choices=["cpp", "cute", "both"],
-        default=None,
-        help="Issue one cudaProfilerStart/Stop bracket around the selected backend before timing.",
-    )
-    parser.add_argument(
         "--stat",
         choices=list(_STAT_CHOICES),
         default="median",
-        help="Summary statistic to report per backend (default: median). min/max are always shown alongside.",
+        help=(
+            "Summary statistic to report per backend (default: median). "
+            "Min/max are always shown alongside."
+        ),
     )
     args = parser.parse_args()
     if (args.mma_tile_mn is None) != (args.cluster_shape_mn is None):
@@ -1045,6 +915,5 @@ if __name__ == "__main__":
         transpose_ab=(None if args.transpose_ab is None else args.transpose_ab == "on"),
         layout_mode=args.layout_mode,
         format=args.format,
-        cuda_profiler_backend=args.cuda_profiler_backend,
         stat=args.stat,
     )

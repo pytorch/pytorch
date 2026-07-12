@@ -10,6 +10,9 @@ import unittest
 
 import torch
 
+from torch._native.ops.scaled_grouped_mm._cpp_utils import (
+    _call_cpp_scaled_grouped_mm_v2,
+)
 
 from torch.nn.functional import (
     grouped_mm,
@@ -294,44 +297,6 @@ def scaled_grouped_mm_wrap(
             use_fast_accum=use_fast_accum)
 
 
-_CPP_SCALED_GROUPED_MM_V2_KERNEL = None
-
-
-def _get_cpp_scaled_grouped_mm_v2_kernel():
-    global _CPP_SCALED_GROUPED_MM_V2_KERNEL
-    if _CPP_SCALED_GROUPED_MM_V2_KERNEL is None:
-        from torch._native import registry
-
-        registry.deregister_op_overrides(disable_dsl_names="cutedsl")
-        try:
-            _CPP_SCALED_GROUPED_MM_V2_KERNEL = torch._C._dispatch_get_computed_kernel_for_dispatch_key(  # pyrefly: ignore [missing-module-attribute]
-                "aten::_scaled_grouped_mm_v2", "CUDA"
-            )
-        finally:
-            registry.reenable_op_overrides(enable_dsl_names="cutedsl")
-    return _CPP_SCALED_GROUPED_MM_V2_KERNEL
-
-
-def _cuda_dispatch_keyset(device_type: str):
-    dispatch_key = torch._C._dispatch_key_for_device(
-        device_type
-    )  # pyrefly: ignore [missing-module-attribute]
-    dispatch_key = getattr(
-        torch._C.DispatchKey, dispatch_key
-    )  # pyrefly: ignore [missing-module-attribute]
-    return torch._C.DispatchKeySet(
-        dispatch_key
-    )  # pyrefly: ignore [missing-module-attribute]
-
-
-def _as_arg_list(value):
-    return value if isinstance(value, list) else [value]
-
-
-def _enum_values(value):
-    return [v.value if hasattr(v, "value") else v for v in _as_arg_list(value)]
-
-
 def scaled_grouped_mm_cpp_wrap(
     a,
     b,
@@ -366,21 +331,20 @@ def scaled_grouped_mm_cpp_wrap(
             wrap_v2=wrap_v2,
         )
 
-    return _get_cpp_scaled_grouped_mm_v2_kernel().call_boxed(
-        _cuda_dispatch_keyset(a.device.type),
+    return _call_cpp_scaled_grouped_mm_v2(
         a,
         b,
-        _as_arg_list(scale_a),
-        _enum_values(scale_recipe_a),
-        _enum_values(swizzle_a),
-        _as_arg_list(scale_b),
-        _enum_values(scale_recipe_b),
-        _enum_values(swizzle_b),
-        offs,
-        bias,
-        out_dtype,
-        [],
-        use_fast_accum,
+        scale_a,
+        scale_recipe_a,
+        swizzle_a,
+        scale_b,
+        scale_recipe_b,
+        swizzle_b,
+        offs=offs,
+        bias=bias,
+        out_dtype=out_dtype,
+        contraction_dim=[],
+        use_fast_accum=use_fast_accum,
     )
 
 
@@ -1049,8 +1013,8 @@ class TestFP8Matmul(TestCase):
         )
 
         # Assert outputs are close.
-        torch.testing.assert_close(y_lp, y_cpp, atol=8.0e-2, rtol=8.0e-2)
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
+        torch.testing.assert_close(y_cpp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])

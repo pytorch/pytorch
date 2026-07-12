@@ -85,42 +85,73 @@ def _get_blockscaled_format(
     scale_recipe_a: Sequence[ScalingType | int],
     scale_recipe_b: Sequence[ScalingType | int],
 ) -> _BlockScaledFormat | None:
-    def _recipe_matches(value: ScalingType | int, expected: ScalingType) -> bool:
-        return value == expected or value == expected.value
+    mat_a_dtype = mat_a.dtype
+    if mat_a_dtype != mat_b.dtype:
+        return None
 
-    for fmt in _BLOCKSCALED_FORMATS:
-        if fmt.torch_global_scale_dtype is None:
-            if len(scale_a) != 1 or len(scale_b) != 1:
-                continue
-            if len(scale_recipe_a) != 1 or len(scale_recipe_b) != 1:
-                continue
-            if (
-                mat_a.dtype == fmt.torch_ab_dtype
-                and mat_b.dtype == fmt.torch_ab_dtype
-                and scale_a[0].dtype == fmt.torch_scale_ab_dtype
-                and scale_b[0].dtype == fmt.torch_scale_ab_dtype
-                and _recipe_matches(scale_recipe_a[0], fmt.scale_ab_recipe)
-                and _recipe_matches(scale_recipe_b[0], fmt.scale_ab_recipe)
-            ):
-                return fmt
-            continue
-        if len(scale_a) != 2 or len(scale_b) != 2:
-            continue
-        if len(scale_recipe_a) != 2 or len(scale_recipe_b) != 2:
-            continue
-        if (
-            mat_a.dtype == fmt.torch_ab_dtype
-            and mat_b.dtype == fmt.torch_ab_dtype
-            and scale_a[0].dtype == fmt.torch_scale_ab_dtype
-            and scale_b[0].dtype == fmt.torch_scale_ab_dtype
-            and scale_a[1].dtype == fmt.torch_global_scale_dtype
-            and scale_b[1].dtype == fmt.torch_global_scale_dtype
-            and _recipe_matches(scale_recipe_a[0], fmt.scale_ab_recipe)
-            and _recipe_matches(scale_recipe_a[1], ScalingType.TensorWise)
-            and _recipe_matches(scale_recipe_b[0], fmt.scale_ab_recipe)
-            and _recipe_matches(scale_recipe_b[1], ScalingType.TensorWise)
+    scale_a_len = len(scale_a)
+    scale_b_len = len(scale_b)
+    scale_recipe_a_len = len(scale_recipe_a)
+    scale_recipe_b_len = len(scale_recipe_b)
+
+    if (
+        scale_a_len == 1
+        and scale_b_len == 1
+        and scale_recipe_a_len == 1
+        and scale_recipe_b_len == 1
+    ):
+        scale_a_dtype = scale_a[0].dtype
+        if scale_a_dtype != scale_b[0].dtype:
+            return None
+        recipe_a = scale_recipe_a[0]
+        recipe_b = scale_recipe_b[0]
+        blockwise_1x32 = ScalingType.BlockWise1x32
+        if not (
+            (recipe_a == blockwise_1x32 or recipe_a == blockwise_1x32.value)
+            and (recipe_b == blockwise_1x32 or recipe_b == blockwise_1x32.value)
         ):
-            return fmt
+            return None
+        if mat_a_dtype == torch.float8_e4m3fn and scale_a_dtype == torch.float8_e8m0fnu:
+            return _BLOCKSCALED_FORMATS[0]
+        if (
+            mat_a_dtype == torch.float4_e2m1fn_x2
+            and scale_a_dtype == torch.float8_e8m0fnu
+        ):
+            return _BLOCKSCALED_FORMATS[1]
+        return None
+
+    if (
+        scale_a_len != 2
+        or scale_b_len != 2
+        or scale_recipe_a_len != 2
+        or scale_recipe_b_len != 2
+    ):
+        return None
+
+    if mat_a_dtype != torch.float4_e2m1fn_x2:
+        return None
+    if scale_a[0].dtype != torch.float8_e4m3fn:
+        return None
+    if scale_b[0].dtype != torch.float8_e4m3fn:
+        return None
+    if scale_a[1].dtype != torch.float32:
+        return None
+    if scale_b[1].dtype != torch.float32:
+        return None
+
+    blockwise_1x16 = ScalingType.BlockWise1x16
+    tensorwise = ScalingType.TensorWise
+    recipe_a0 = scale_recipe_a[0]
+    recipe_a1 = scale_recipe_a[1]
+    recipe_b0 = scale_recipe_b[0]
+    recipe_b1 = scale_recipe_b[1]
+    if (
+        (recipe_a0 == blockwise_1x16 or recipe_a0 == blockwise_1x16.value)
+        and (recipe_a1 == tensorwise or recipe_a1 == tensorwise.value)
+        and (recipe_b0 == blockwise_1x16 or recipe_b0 == blockwise_1x16.value)
+        and (recipe_b1 == tensorwise or recipe_b1 == tensorwise.value)
+    ):
+        return _BLOCKSCALED_FORMATS[2]
     return None
 
 
@@ -492,8 +523,8 @@ def _select_kernel_config_fp8(M: int, N: int, K: int) -> _KernelConfig:
 
 
 def _select_kernel_config_fp4(M: int, N: int, K: int) -> _KernelConfig:
-    # Port of MSLK f4f4bf16_grouped::get_kernel_via_heuristics().
-    # The FP4 kernel family carries its K-tiling in the compiled
+    # Port of MSLK f4f4bf16_grouped::get_kernel_via_heuristics().  The
+    # FP4 kernel family carries its K-tiling in the compiled
     # dtype-specific kernel, so the MSLK 256x256x128 vs 256x256x256
     # distinction collapses to a single 256x256 choice here.
     cfg_128_64 = _KernelConfig((128, 64), (1, 1), True)
@@ -709,8 +740,9 @@ def _ceil_div_int(a: int, b: int) -> int:
 
 
 def _with_l_dim(t: Tensor) -> Tensor:
-    # Kernel expects L as the last dimension. Use a stride-0 L to avoid
-    # ambiguous layouts (multiple stride==1) for mark_layout_dynamic.
+    # Kernel expects L as the last dimension.  Use a stride-0 L to
+    # avoid ambiguous layouts (multiple stride==1) for
+    # mark_layout_dynamic.
     return t.as_strided((*t.size(), 1), (*t.stride(), 0))
 
 
@@ -1133,6 +1165,8 @@ def _should_use_cutedsl_scaled_grouped_mm_blockscaled(
     swizzle_b: object,
     offs: object,
     bias: object,
+    out_dtype: object,
+    contraction_dim: object,
     use_fast_accum: object,
 ) -> bool:
     if not isinstance(mat_a, Tensor) or not isinstance(mat_b, Tensor):
@@ -1145,6 +1179,18 @@ def _should_use_cutedsl_scaled_grouped_mm_blockscaled(
     b_is_2d = mat_b.dim() == 2
     b_dim = mat_b.dim()
     if not a_is_2d or (not b_is_2d and b_dim != 3):
+        return False
+    requested_out_dtype = out_dtype or torch.bfloat16
+    if not any(requested_out_dtype == dtype for dtype in _TORCH_TO_CUTLASS_DTYPE_NAME):
+        return False
+    if not isinstance(contraction_dim, Sequence):
+        return False
+    if (
+        a_is_2d
+        and not b_is_2d
+        and contraction_dim
+        and tuple(cast(Sequence[int], contraction_dim)) != (-1, -2)
+    ):
         return False
     device_id = (
         mat_a.device.index

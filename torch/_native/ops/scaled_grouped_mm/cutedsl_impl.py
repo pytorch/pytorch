@@ -41,6 +41,8 @@ def _cond(
         swizzle_b,
         offs,
         bias,
+        out_dtype,
+        contraction_dim,
         use_fast_accum,
     )
 

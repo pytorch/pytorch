@@ -1,6 +1,6 @@
 def _compile_with_safe_names(compile_fn):
     # CuTeDSL pretty-printing can throw on ScaledBasis during
-    # compilation-time naming/printing. Patch temporarily.
+    # compilation-time naming/printing.  Patch temporarily.
     import cutlass.cute.core as cute_core
     from cutlass.base_dsl import dsl as base_dsl
 
