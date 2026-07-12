@@ -364,7 +364,7 @@ now). The `Graph` may also weakly reference other `Function`s through
 function calls.
 
 **`ClassType`**: A definition of a type. This could refer to a user-defined
-TorchScript class, or a `ScriptModule`. Owns other its attribute types
+TorchScript class, or a `ScriptModule`. Owns its other attribute types
 (including other ClassTypes). Weakly references the class’s methods
 (`Function`s).
 

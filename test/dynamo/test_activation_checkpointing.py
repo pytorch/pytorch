@@ -6,6 +6,7 @@ import math
 import re
 import unittest
 from importlib import import_module
+from types import SimpleNamespace
 
 import torch
 import torch._dynamo.config
@@ -21,12 +22,21 @@ from functorch.compile import (
     nop,
 )
 from torch._dynamo.backends.common import aot_autograd
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounterWithBackend,
     normalize_gm,
 )
+from torch._functorch.partitioners import has_recomputable_rng_ops, is_rng_op
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
+from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
@@ -858,7 +868,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             additional_saved_tensors,
             expected_additional_saved_tensors,
-            f"""
+            lambda msg: f"""{msg}\n
 Expected additional saved tensors: {expected_additional_saved_tensors} but got: {additional_saved_tensors}.
 Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
 Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
@@ -1830,6 +1840,45 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             self.assertEqual(ref, res)
 
     @requires_cuda_and_triton
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "This platform doesn't support efficient attention",
+    )
+    def test_compile_checkpoint_mem_eff_attention_no_dropout(self, device):
+        def eager_attn(x):
+            return torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                x, x, x, None, True, dropout_p=0.0
+            )[0]
+
+        @torch.compile(mode="reduce-overhead")
+        def attn(x):
+            return eager_attn(x)
+
+        def block(x):
+            return x + attn(x)
+
+        x_ref = torch.randn(3, 1, 77, 64, device=device, requires_grad=True)
+        _, _, philox_seed, philox_offset = (
+            torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                x_ref, x_ref, x_ref, None, True, dropout_p=0.0
+            )
+        )
+        self.assertEqual(philox_seed, torch.zeros((), device=device, dtype=torch.int64))
+        self.assertEqual(
+            philox_offset, torch.zeros((), device=device, dtype=torch.int64)
+        )
+
+        ref = x_ref + eager_attn(x_ref)
+        ref.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        y = checkpoint(block, x, use_reentrant=False)
+        y.sum().backward()
+
+        self.assertEqual(ref, y)
+        self.assertEqual(x_ref.grad, x.grad)
+
+    @requires_cuda_and_triton
     def test_error_msg(self, device):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2119,12 +2168,13 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
-        getitem_6: "f32[4, 4]" = tag_activation_checkpoint[0]
-        getitem_7: "f32[4, 4]" = tag_activation_checkpoint[1]
-        getitem_8: "f32[4, 4]" = tag_activation_checkpoint[2];  tag_activation_checkpoint = None
+        getitem_3: "f32[4, 4]" = tag_activation_checkpoint[0]
+        getitem_4: "f32[4, 4]" = tag_activation_checkpoint[1]
 
-        add: "f32[4, 4]" = getitem_6 + getitem_7;  getitem_6 = getitem_7 = None
-        return (add, getitem_8)
+        add: "f32[4, 4]" = getitem_3 + getitem_4;  getitem_3 = getitem_4 = None
+
+        getitem_5: "f32[4, 4]" = tag_activation_checkpoint[2];  tag_activation_checkpoint = None
+        return (add, getitem_5)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[4, 4]"):
@@ -2733,6 +2783,190 @@ def forward(self, arg0_1, arg1_1):
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
 
+    def test_ac_rematerialize_sdpa_rng_classification(self):
+        sdpa_ops = [
+            torch.ops.aten.scaled_dot_product_attention.default,
+            torch.ops.aten._scaled_dot_product_attention_math_for_mps.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention_backward.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.quantized,
+            torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            torch.ops.aten._scaled_dot_product_efficient_attention_backward.default,
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+            torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
+            torch.ops.aten._flash_attention_forward.default,
+            torch.ops.aten._flash_attention_forward.quantized,
+            torch.ops.aten._flash_attention_forward_no_dropout_inplace.default,
+            torch.ops.aten._efficient_attention_forward.default,
+            torch.ops.aten._cudnn_attention_forward.default,
+        ]
+        shape_env = ShapeEnv()
+        zero_symbol = shape_env.create_symbol(
+            0.0,
+            source=ConstantSource("dropout_zero"),
+            dynamic_dim=DimDynamic.DUCK,
+            constraint_dim=None,
+        )
+        nonzero_symbol = shape_env.create_symbol(
+            0.1,
+            source=ConstantSource("dropout_nonzero"),
+            dynamic_dim=DimDynamic.DUCK,
+            constraint_dim=None,
+        )
+        symfloat_zero = torch.SymFloat(SymNode(zero_symbol, shape_env, float, hint=0.0))
+        symfloat_nonzero = torch.SymFloat(
+            SymNode(nonzero_symbol, shape_env, float, hint=0.1)
+        )
+        dropout_cases = [
+            (0, False),
+            (0.0, False),
+            (-0.0, False),
+            (1e-12, True),
+            (0.1, True),
+            (float("nan"), True),
+        ]
+
+        for op in sdpa_ops:
+            dropout_arg_idx = next(
+                idx
+                for idx, arg in enumerate(op._schema.arguments)
+                if arg.name == "dropout_p"
+            )
+            for dropout_p, expected in dropout_cases:
+                with self.subTest(op=op, dropout_p=dropout_p):
+                    graph = torch.fx.Graph()
+                    q = graph.placeholder("q")
+                    args = [q] * (dropout_arg_idx + 1)
+                    args[dropout_arg_idx] = dropout_p
+                    node = graph.call_function(op, tuple(args), {})
+                    node.meta["recompute"] = (
+                        torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                    )
+                    graph.output(node)
+                    gm = torch.fx.GraphModule({}, graph)
+
+                    self.assertEqual(has_recomputable_rng_ops(gm), expected)
+
+            with self.subTest(op=op, dropout_p="dynamic"):
+                graph = torch.fx.Graph()
+                q = graph.placeholder("q")
+                dropout_p = graph.placeholder("dropout_p")
+                args = [q] * (dropout_arg_idx + 1)
+                args[dropout_arg_idx] = dropout_p
+                node = graph.call_function(op, tuple(args), {})
+                node.meta["recompute"] = (
+                    torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                )
+                graph.output(node)
+                gm = torch.fx.GraphModule({}, graph)
+
+                self.assertTrue(has_recomputable_rng_ops(gm))
+
+            for dropout_p, expected in dropout_cases:
+                with self.subTest(op=op, kwarg_dropout_p=dropout_p):
+                    graph = torch.fx.Graph()
+                    q = graph.placeholder("q")
+                    node = graph.call_function(
+                        op, tuple([q] * dropout_arg_idx), {"dropout_p": dropout_p}
+                    )
+                    node.meta["recompute"] = (
+                        torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+                    )
+                    graph.output(node)
+                    gm = torch.fx.GraphModule({}, graph)
+
+                    self.assertEqual(has_recomputable_rng_ops(gm), expected)
+
+            for dropout_p, expected in [
+                (symfloat_zero, False),
+                (symfloat_nonzero, True),
+            ]:
+                with self.subTest(op=op, symfloat_dropout_p=dropout_p):
+                    args = [None] * (dropout_arg_idx + 1)
+                    args[dropout_arg_idx] = dropout_p
+                    node = SimpleNamespace(target=op, args=tuple(args), kwargs={})
+
+                    self.assertEqual(is_rng_op(node), expected)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_ac_rematerialize_with_sdpa_dropout_zero(self):
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        cases = []
+        if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+            cases.append((SDPBackend.EFFICIENT_ATTENTION, torch.float32))
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            cases.append((SDPBackend.FLASH_ATTENTION, torch.float16))
+        if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+            cases.append((SDPBackend.CUDNN_ATTENTION, torch.float16))
+        if not cases:
+            self.skipTest("No fused SDPA backends available")
+        sdpa_ops = {
+            torch.ops.aten.scaled_dot_product_attention.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.default,
+            torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+        }
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op in sdpa_ops:
+                return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+            return torch.utils.checkpoint.CheckpointPolicy.PREFER_SAVE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
+        for backend, dtype in cases:
+            with self.subTest(backend=backend, dtype=dtype):
+                torch._dynamo.reset()
+                q = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                k = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                v = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+
+                def fwd_bwd_with_sdpa(q, k, v):
+                    with sdpa_kernel(backend):
+                        z = torch.utils.checkpoint.checkpoint(
+                            lambda q, k, v: F.scaled_dot_product_attention(
+                                q, k, v, dropout_p=0.0
+                            ),
+                            q,
+                            k,
+                            v,
+                            use_reentrant=False,
+                            context_fn=context_fn,
+                        )
+                        loss = z.sum()
+                        dq, dk, dv = _grad(loss, (q, k, v))
+
+                    return z.detach(), dq, dk, dv
+
+                result_with, gm_with = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, True, (q, k, v)
+                )
+                torch._dynamo.reset()
+                result_without, _ = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, False, (q, k, v)
+                )
+                eager_inputs = tuple(
+                    t.detach().clone().requires_grad_(True) for t in (q, k, v)
+                )
+                result_eager = fwd_bwd_with_sdpa(*eager_inputs)
+
+                for actual, expected in zip(result_with, result_without):
+                    self.assertEqual(actual, expected)
+                for actual, expected in zip(result_with, result_eager):
+                    self.assertEqual(actual, expected)
+                self.assertEqual(sum(self.count_op(gm_with, op) for op in sdpa_ops), 2)
+
     def test_ac_rematerialize_with_no_annotations(self):
         x = torch.randn(4, 4, requires_grad=True)
 
@@ -3036,27 +3270,27 @@ def forward(self, arg0_1):
             gm_with.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    mm = torch.ops.aten.mm.default(arg2_1, arg0_1)
     sin = torch.ops.aten.sin.default(mm);  mm = None
-    mm_1 = torch.ops.aten.mm.default(arg0_1, arg2_1)
-    sigmoid = torch.ops.aten.sigmoid.default(mm_1);  mm_1 = None
-    detach_4 = torch.ops.aten.detach.default(sigmoid)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    sum_2 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
-    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1);  arg0_1 = None
+    mm_recomputed = torch.ops.aten.mm.default(arg2_1, arg0_1)
     cos = torch.ops.aten.cos.default(mm_recomputed);  mm_recomputed = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
-    t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
-    mm_3 = torch.ops.aten.mm.default(mul, t);  mul = t = None
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    mm_2 = torch.ops.aten.mm.default(mul, t);  mul = t = None
+    mm_3 = torch.ops.aten.mm.default(arg2_1, arg1_1);  arg2_1 = None
+    sigmoid = torch.ops.aten.sigmoid.default(mm_3);  mm_3 = None
+    detach_4 = torch.ops.aten.detach.default(sigmoid)
+    sum_2 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
     ones_like_1 = torch.ops.aten.ones_like.default(sum_2, pin_memory = False, memory_format = torch.preserve_format);  sum_2 = None
     expand_1 = torch.ops.aten.expand.default(ones_like_1, [4, 4]);  ones_like_1 = None
     detach_5 = torch.ops.aten.detach.default(detach_4);  detach_4 = None
     sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand_1, detach_5);  expand_1 = detach_5 = None
-    t_1 = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_4 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
-    add = torch.ops.aten.add.Tensor(mm_3, mm_4);  mm_3 = mm_4 = None
+    add = torch.ops.aten.add.Tensor(mm_2, mm_4);  mm_2 = mm_4 = None
     detach_6 = torch.ops.aten.detach.default(add);  add = None
     return (detach_6,)""",
         )
