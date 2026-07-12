@@ -3,6 +3,8 @@ import signal
 from threading import Thread
 from time import sleep
 
+from torch._inductor.compile_worker import watchdog
+
 
 _IN_TOPLEVEL_PROCESS = True
 
@@ -56,6 +58,10 @@ def _async_compile_initializer(orig_ppid: int, close_fds: tuple[int, ...] = ()) 
     # Set a bit to distinguish async_compile subprocesses from the toplevel process.
     global _IN_TOPLEVEL_PROCESS
     _IN_TOPLEVEL_PROCESS = False
+
+    # Claim a heartbeat slot so the sidecar watchdog can report this worker's
+    # compile phase (no-op unless the sidecar allocated the shared buffer).
+    watchdog.init_worker_slot()
 
 
 _watchdog_thread: Thread | None = None

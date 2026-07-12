@@ -366,6 +366,9 @@ def check_autotune_cache(
     ):
         configs_hash = hash_configs(configs)
 
+        from torch._inductor.compile_worker import watchdog
+
+        watchdog.report_phase(watchdog.Phase.QUERYING_CACHE)
         autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
         if autotune_cache:
             if best_config := autotune_cache.read_best(inductor_meta, configs):

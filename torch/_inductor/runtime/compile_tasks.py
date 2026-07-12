@@ -195,6 +195,7 @@ def _worker_compile_triton(
         except ImportError:
             pass
     from torch._inductor import config
+    from torch._inductor.compile_worker import watchdog
     from torch._inductor.runtime import triton_helpers
 
     with config.patch(extra_config):
@@ -205,6 +206,7 @@ def _worker_compile_triton(
             # but compile workers only need to warm the compile cache.
             with triton_helpers.skip_gpu_driver_setup():
                 kernel = load_kernel()
+                watchdog.report_phase(watchdog.Phase.COMPILING)
                 kernel.precompile(warm_cache_only=True)
             elapsed_ns = time.time_ns() - start_ns
             kernel.prepare_for_pickle()
