@@ -6603,6 +6603,23 @@ class TestMPS(TestCaseMPS):
         helper((4, 2, 3), (1, 2, 3))
         helper((2, 3), (2, 3))
 
+    def test_clamp_tensor_bounds_out_dtype(self):
+        # Regression test: ternary ops with an out= dtype differing from the
+        # (matching) input dtypes must route to the _cast_ kernel. Previously
+        # the dispatcher only compared the inputs against each other and
+        # formatted an unregistered non-cast kernel name, failing at pipeline
+        # creation.
+        cpu_x = torch.randn(4, 5, device="cpu", dtype=torch.float32)
+        cpu_min_t = torch.full((4, 5), -0.5, device="cpu", dtype=torch.float32)
+        cpu_max_t = torch.full((4, 5), 0.5, device="cpu", dtype=torch.float32)
+        cpu_out = torch.empty(4, 5, device="cpu", dtype=torch.float16)
+        mps_x = cpu_x.to("mps")
+        mps_min_t = cpu_min_t.to("mps")
+        mps_max_t = cpu_max_t.to("mps")
+        mps_out = torch.empty(4, 5, device="mps", dtype=torch.float16)
+        torch.clamp(cpu_x, min=cpu_min_t, max=cpu_max_t, out=cpu_out)
+        torch.clamp(mps_x, min=mps_min_t, max=mps_max_t, out=mps_out)
+        self.assertEqual(mps_out.cpu(), cpu_out)
 
     def test_divmode(self):
         def helper(shape, rounding_mode):

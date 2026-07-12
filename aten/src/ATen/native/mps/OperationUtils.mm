@@ -1593,10 +1593,12 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
     return;
   }
 
-  // Decompose 64-bit tensor into 32-bit ones
+  // Decompose 64-bit tensor into 32-bit ones. Must recurse into the ternary
+  // exec: a binary dispatch here would look up nonexistent 2-input kernel
+  // names for the 3-input op and fail at pipeline creation.
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_binary_kernel(sub_iter, name);
+      exec_ternary_kernel(sub_iter, name);
     }
     return;
   }
@@ -1622,8 +1624,11 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   convert_double_scalar(other2);
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  const auto cast_needed =
-      (input.scalar_type() != other1.scalar_type()) || (input.scalar_type() != other2.scalar_type());
+  // An out= dtype differing from the (matching) inputs also needs the cast
+  // kernel: non-cast names are only registered for matching in/out pairs, and
+  // the _cast_{out} instantiations read the runtime input types anyway.
+  const auto cast_needed = (input.scalar_type() != other1.scalar_type()) ||
+      (input.scalar_type() != other2.scalar_type()) || (input.scalar_type() != out.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   // TODO: Implicitly pass both input and output types to non-cast kernels
   const auto kernel_name = cast_needed
