@@ -191,7 +191,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("nn.functional.softplus"),
     xfail("nn.functional.softshrink"),
     xfail("ormqr"),
-    xfail("qr"),
     xfail("renorm"),
     xfail("round"),
     xfail("round", "decimals_0"),
@@ -2776,6 +2775,7 @@ fake_autocast_device_skips["cuda"] = {"linalg.pinv", "pinverse"}
 dynamic_output_op_tests = (
     "argwhere",
     "bincount",
+    "combinations",
     "linalg.lstsq",
     "masked_select",
     "nonzero",

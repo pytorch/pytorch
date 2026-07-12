@@ -79,6 +79,40 @@ class TestTesting(TestCase):
         finally:
             self.longMessage = long_message
 
+    def test_callable_msg(self):
+        # A callable msg is invoked only on failure, across all assert* methods.
+        invoked = []
+
+        def lazy(standard_msg):
+            invoked.append(standard_msg)
+            return f"{standard_msg}\nsentinel"
+
+        # Passing: callable not invoked.
+        self.assertEqual(1, 1, msg=lazy)
+        self.assertTrue(True, msg=lazy)
+        self.assertIn(1, [1, 2], msg=lazy)
+        self.assertGreater(2, 1, msg=lazy)
+        self.assertIsNone(None, msg=lazy)
+        self.assertEqual(invoked, [])
+
+        # Failing: callable invoked once with the standard message.
+        failing = [
+            lambda: self.assertTrue(False, msg=lazy),
+            lambda: self.assertIn(9, [1, 2], msg=lazy),
+            lambda: self.assertGreater(1, 2, msg=lazy),
+            lambda: self.assertEqual(1, 2, msg=lazy),
+        ]
+        for fail in failing:
+            invoked.clear()
+            with self.assertRaises(AssertionError) as cm:
+                fail()
+            self.assertEqual(len(invoked), 1)
+            self.assertEqual(str(cm.exception), f"{invoked[0]}\nsentinel")
+
+        # A plain string msg is unchanged.
+        with self.assertRaisesRegex(AssertionError, re.escape("True is not false : plain")):
+            self.assertFalse(True, msg="plain")
+
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
             a = torch.tensor((test[0],), device=device, dtype=dtype)

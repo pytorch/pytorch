@@ -19,6 +19,8 @@ from contextlib import closing, redirect_stderr, redirect_stdout
 from unittest import mock, skipIf
 from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+
 import torch
 import torch.distributed.run as launch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
@@ -689,6 +691,11 @@ class ElasticLaunchTest(TestCase):
     )
     @skipIf(not TEST_CUDA, "requires CUDA")
     @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    # ElasticLaunchTest is a plain TestCase, but this test launches
+    # `torchrun --nproc-per-node=2` which needs 2 GPUs. That process spawning
+    # happens via torchrun, not MultiProcessTestCase, so the conftest heuristic
+    # (see test/conftest.py) can't detect it; mark it multigpu explicitly.
+    @pytest.mark.multigpu
     def test_virtual_local_rank(self):
         """
         Test that virtual-local-rank ensures consistent device IDs across ranks.
