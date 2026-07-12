@@ -357,13 +357,6 @@ coverage_ignore_functions = [
     # torch.ao.quantization.fuse_modules
     "fuse_known_modules",
     "fuse_modules_qat",
-    # torch.ao.quantization.fuser_method_mappings
-    "fuse_conv_bn",
-    "fuse_conv_bn_relu",
-    "fuse_convtranspose_bn",
-    "fuse_linear_bn",
-    "get_fuser_method",
-    "get_fuser_method_new",
     # torch.ao.quantization.fx.convert
     "convert",
     "convert_custom_module",

@@ -180,6 +180,26 @@ Quantization to work with this as well.
 
 ```
 
+## torch.ao.quantization.fuser_method_mappings
+```{eval-rst}
+.. currentmodule:: torch.ao.quantization.fuser_method_mappings
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    fuse_conv_bn
+    fuse_conv_bn_relu
+    fuse_convtranspose_bn
+    fuse_linear_bn
+    get_fuser_method
+    get_fuser_method_new
+
+```
+
 ## torch.ao.quantization.fx.custom_config
 
 This module contains a few CustomConfig classes that's used in both eager mode and FX graph mode quantization
