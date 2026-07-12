@@ -543,6 +543,37 @@ class TestModuleHooks(TestCase):
         self.assertEqual(len(w), 1)
         self.assertTrue("should be a Tensor or a tuple of Tensors" in str(w[0].message))
 
+    def test_full_backward_pre_hook_no_warning_without_input_grad(self):
+        # A module with only a full backward *pre*-hook must not emit the
+        # "Full backward hook is firing" warning when no input requires grad:
+        # that warning is only relevant to full backward hooks, which receive
+        # grad_input. Pre-hooks only receive grad_output, so firing from the
+        # output side is expected. See
+        # https://github.com/pytorch/pytorch/issues/189093
+        def pre_hook(module, grad_output):
+            return None
+
+        def hook(module, grad_input, grad_output):
+            return None
+
+        warn_text = "Full backward hook is firing"
+        x = torch.randn(2, 4)  # does not require grad
+
+        model = nn.Linear(4, 4, bias=False)
+        model.register_full_backward_pre_hook(pre_hook)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            model(x).sum().backward()
+        self.assertEqual([m for m in w if warn_text in str(m.message)], [])
+
+        # A full backward hook with no input grads should still warn.
+        model = nn.Linear(4, 4, bias=False)
+        model.register_full_backward_hook(hook)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            model(x).sum().backward()
+        self.assertEqual(len([m for m in w if warn_text in str(m.message)]), 1)
+
 
 def _hook_to_pickle(*args, **kwargs):
     pass

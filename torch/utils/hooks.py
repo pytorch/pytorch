@@ -223,11 +223,14 @@ class BackwardHook:
                 # Special case if no input required gradients, this hook should call the user
                 # hook directly
                 if self.input_tensors_index is None:
-                    warnings.warn("Full backward hook is firing when gradients are computed "
-                                  "with respect to module outputs since no inputs require gradients. See "
-                                  "https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook "
-                                  "for more details.",
-                                  stacklevel=5)
+                    # Only full backward hooks (not pre-hooks) receive grad_input
+                    # here, so only warn about them firing without input grads.
+                    if self.user_hooks:
+                        warnings.warn("Full backward hook is firing when gradients are computed "
+                                      "with respect to module outputs since no inputs require gradients. See "
+                                      "https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook "
+                                      "for more details.",
+                                      stacklevel=5)
                     grad_inputs = self._pack_with_none([], [], self.n_inputs)
                     for user_hook in self.user_hooks:
                         res = user_hook(self.module, grad_inputs, self.grad_outputs)
