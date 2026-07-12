@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import importlib.util
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
@@ -160,6 +161,22 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("tvm", device)
         self._check_backend_works("tvm", device, options={"scheduler": None})
         self._check_backend_works("tvm", device, options={"opt_level": 0})
+
+    @unittest.skipIf(not has_tvm(), "requires tvm")
+    def test_tvm_relax_pipeline_option(self, device):
+        if importlib.util.find_spec("tvm.relax.frontend.torch") is None:
+            self.skipTest("requires the tvm relax frontend")
+        import tvm
+
+        model = Seq().eval().to(device)
+        x = torch.randn(2, 10, device=device)
+        expected = model(x)
+        for pipeline in ("zero", tvm.relax.get_pipeline("zero")):
+            torch._dynamo.reset()
+            compiled = torch.compile(
+                model, backend="tvm", options={"pipeline": pipeline}
+            )
+            self.assertTrue(same(expected, compiled(x), tol=0.01))
 
     def test_tvm_scheduler_backends(self, device):
         from torch._dynamo.backends.tvm import tvm_auto_scheduler, tvm_meta_schedule
