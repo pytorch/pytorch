@@ -530,6 +530,59 @@ class TestSourceMatcher(JitTestCase):
             )
         )
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_get_source_partitions_deterministic_order(self):
+        """
+        Verifies that get_source_partitions() returns input_nodes, output_nodes,
+        and params in deterministic order (sorted by graph position).
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x, y):
+                out = self.linear(x)
+                a = out + y
+                b = out * 2
+                return a, b
+
+        inputs = (torch.randn(3, 3), torch.randn(3, 3))
+        gm, _ = torch._dynamo.export(M(), aten_graph=True)(*inputs)
+        gm.graph.eliminate_dead_code()
+
+        module_partitions = get_source_partitions(
+            gm.graph, [torch.nn.Linear]
+        )
+
+        linear_partition = module_partitions[torch.nn.Linear][0]
+
+        # Build graph position mapping
+        node_positions = {node: i for i, node in enumerate(gm.graph.nodes)}
+
+        def check_sorted_by_graph_position(nodes):
+            positions = [node_positions[n] for n in nodes]
+            self.assertEqual(
+                positions,
+                sorted(positions),
+                f"Nodes {[n.name for n in nodes]} are not sorted by graph position",
+            )
+
+        # Verify all three lists are sorted by graph position
+        check_sorted_by_graph_position(linear_partition.input_nodes)
+        check_sorted_by_graph_position(linear_partition.output_nodes)
+        check_sorted_by_graph_position(linear_partition.params)
+
+        # Specifically verify that params are ordered correctly: weight before bias
+        param_names = [n.name for n in linear_partition.params]
+        if len(param_names) >= 2:
+            self.assertLess(
+                node_positions[linear_partition.params[0]],
+                node_positions[linear_partition.params[1]],
+                "Params should be ordered by graph position (weight before bias)",
+            )
+
 
 instantiate_parametrized_tests(TestSourceMatcher)
 

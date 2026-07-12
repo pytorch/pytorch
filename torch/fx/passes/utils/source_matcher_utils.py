@@ -148,9 +148,9 @@ def get_source_partitions(
         return SourcePartition(
             nodes,
             module_type,
-            list(input_nodes),
-            list(output_nodes),
-            list(params),  # type: ignore[arg-type]
+            sorted(input_nodes, key=sort_key),
+            sorted(output_nodes, key=sort_key),
+            sorted(params, key=sort_key),  # type: ignore[arg-type]
         )
 
     ret: dict[type[Any], list[SourcePartition]] = {}
@@ -167,6 +167,11 @@ def get_source_partitions(
             }
             filtered_modules[tp] = filtered_name_to_partition
         modules = filtered_modules
+
+    node_positions = {node: i for i, node in enumerate(graph.nodes)}
+
+    def sort_key(n: Node) -> int:
+        return node_positions.get(n, len(node_positions))
 
     for k, v in modules.items():
         ret[k] = [make_partition(partition, k) for partition in v.values()]
