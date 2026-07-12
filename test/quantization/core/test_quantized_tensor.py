@@ -298,16 +298,16 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
         self.assertFalse(r.is_quantized)
-        self.assertEqual(qr.storage().size(), rows * math.ceil(cols / elements_per_byte), f"with {dtype}, {elements_per_byte}")
+        self.assertEqual(qr.storage().size(), rows * math.ceil(cols / elements_per_byte), lambda msg: f"{msg}\nwith {dtype}, {elements_per_byte}")
 
         int_repr = qr.int_repr()
         self.assertEqual(int_repr.numel(), len(expected_packed_vals))
         for num, expected in zip(int_repr, expected_packed_vals):
-            self.assertEqual(num, expected, f"with dtype={dtype}, elements_per_byte={elements_per_byte}, rows={rows}, cols={cols}")
+            self.assertEqual(num, expected, lambda msg: f"{msg}\nwith dtype={dtype}, elements_per_byte={elements_per_byte}, rows={rows}, cols={cols}")
 
         # Test tensor creation
         q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point, dtype=dtype)
-        self.assertEqual(q.storage().size(), math.ceil(num_elements / elements_per_byte), f"with {dtype}, {elements_per_byte}")
+        self.assertEqual(q.storage().size(), math.ceil(num_elements / elements_per_byte), lambda msg: f"{msg}\nwith {dtype}, {elements_per_byte}")
 
         # Test save/load
         with tempfile.NamedTemporaryFile() as f:

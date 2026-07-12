@@ -68,6 +68,7 @@ from torch.compiler._cache import (
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
 from torch.fx.traceback import _get_memory_budget_annotation
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -397,23 +398,43 @@ def _collect_saved_tensors_hooks_fx_wrap_cache_hashes(
     )
 
 
+InputTensorAliasInfo = tuple[
+    list[int],
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, int], ...],
+]
+InputTensorAliasCacheKey = tuple[
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, ...], ...],
+    tuple[tuple[int, int], ...],
+]
+
+
 def _collect_input_tensor_alias_info(
     example_inputs: Sequence[Any],
-) -> tuple[list[int], tuple[tuple[int, ...], ...], tuple[tuple[int, int], ...]]:
+) -> InputTensorAliasInfo:
     tensor_input_positions: list[int] = []
     tensor_inputs: list[torch.Tensor] = []
     object_id_to_input_positions: dict[int, list[int]] = {}
+    storage_ref_to_input_positions: dict[StorageWeakRef, list[int]] = {}
     for pos, example_input in enumerate(example_inputs):
         if not isinstance(example_input, torch.Tensor):
             continue
         tensor_input_positions.append(pos)
         tensor_inputs.append(example_input)
         object_id_to_input_positions.setdefault(id(example_input), []).append(pos)
+        storage_ref = StorageWeakRef(example_input.untyped_storage())
+        storage_ref_to_input_positions.setdefault(storage_ref, []).append(pos)
 
     duplicate_input_groups = tuple(
         tuple(input_positions)
         for input_positions in object_id_to_input_positions.values()
         if len(input_positions) > 1
+    )
+    storage_alias_groups = tuple(
+        tuple(input_positions)
+        for input_positions in storage_ref_to_input_positions.values()
     )
 
     storage_overlapping_input_pairs: list[tuple[int, int]] = []
@@ -435,17 +456,18 @@ def _collect_input_tensor_alias_info(
     return (
         tensor_input_positions,
         duplicate_input_groups,
+        storage_alias_groups,
         tuple(storage_overlapping_input_pairs),
     )
 
 
 def _compute_input_tensor_alias_cache_key(
     example_inputs: Sequence[Any],
-) -> tuple[tuple[tuple[int, ...], ...], tuple[tuple[int, int], ...]]:
-    _, duplicate_input_groups, storage_overlapping_input_pairs = (
+) -> InputTensorAliasCacheKey:
+    _, duplicate_input_groups, storage_alias_groups, storage_overlapping_input_pairs = (
         _collect_input_tensor_alias_info(example_inputs)
     )
-    return duplicate_input_groups, storage_overlapping_input_pairs
+    return duplicate_input_groups, storage_alias_groups, storage_overlapping_input_pairs
 
 
 def _get_input_sources(
@@ -726,14 +748,14 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
 
     def _stable_hash_for_cache_value(self, obj: Any) -> str:
         """Get a stable hash for an object used inside tensor subclass metadata."""
-        from torch._opaque_base import OpaqueBase
+        from torch._custom_class_base import CustomClassBase
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         if hasattr(obj, "_stable_hash_for_caching"):
             return obj._stable_hash_for_caching()
         if isinstance(obj, torch.Tensor) and is_traceable_wrapper_subclass(obj):
             return self._default_stable_hash_for_caching(obj)
-        if isinstance(obj, OpaqueBase):
+        if isinstance(obj, CustomClassBase):
             # Opaque objects are runtime pass-throughs; only the type matters
             # for cache key purposes, not the instance identity or value.
             return self._hash_bytes_for_cache(type(obj).__qualname__.encode())
@@ -770,9 +792,9 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return inner_hashes
 
     def _stabilize_tensor_subclass_metadata(self, obj: Any) -> Any:
-        from torch._opaque_base import OpaqueBase
+        from torch._custom_class_base import CustomClassBase
 
-        if isinstance(obj, OpaqueBase):
+        if isinstance(obj, CustomClassBase):
             return type(obj).__qualname__
         if isinstance(obj, tuple):
             return tuple(self._stabilize_tensor_subclass_metadata(x) for x in obj)
@@ -1316,6 +1338,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         (
             tensor_input_positions,
             duplicate_input_groups,
+            _storage_alias_groups,
             storage_overlapping_input_pairs,
         ) = _collect_input_tensor_alias_info(args)
 

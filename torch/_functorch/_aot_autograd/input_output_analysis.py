@@ -194,6 +194,11 @@ def create_synthetic_base_metadata(
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutates_storage_metadata
             ),
+            mutation_is_shallow_copy_data=(
+                False
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutation_is_shallow_copy_data
+            ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
@@ -374,9 +379,6 @@ def compute_overlapping_inputs(
     aot_config: AOTConfig,
     fwd_inputs: list[Any],
     aliased_input_indices: list[int],
-    *,
-    emit_guard: bool = True,
-    check_many_aliases: bool = True,
 ) -> set[int]:
     num_aliases = len(aliased_input_indices)
 
@@ -399,7 +401,7 @@ def compute_overlapping_inputs(
         input_has_symbolic_metadata(fwd_inputs[i]) for i in aliased_input_indices
     )
 
-    if check_many_aliases and torch._inductor.config.is_fbcode():
+    if torch._inductor.config.is_fbcode():
         if symbolic and num_aliases > 400:
             from torch._subclasses.fake_tensor import (
                 UnsupportedMutationAliasingException,
@@ -421,10 +423,9 @@ def compute_overlapping_inputs(
             for i in compute_overlapping_tensors(aliased_fwd_inputs, symbolic=symbolic)
         }
 
-    if emit_guard:
-        _append_storage_overlap_guard(
-            aot_config, aliased_input_indices, actual_aliased_indices
-        )
+    _append_storage_overlap_guard(
+        aot_config, aliased_input_indices, actual_aliased_indices
+    )
 
     return actual_aliased_indices
 

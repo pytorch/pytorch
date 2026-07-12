@@ -337,6 +337,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 mutations_under_no_grad_or_inference_mode=False,
                 mutation_inductor_storage_resize=False,
                 mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
                 requires_grad=False,
                 keep_input_mutations=False,
             )
@@ -404,6 +405,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 mutations_under_no_grad_or_inference_mode=False,
                 mutation_inductor_storage_resize=False,
                 mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
                 requires_grad=False,
                 keep_input_mutations=False,
             )
@@ -460,6 +462,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 mutations_under_no_grad_or_inference_mode=False,
                 mutation_inductor_storage_resize=False,
                 mutates_storage_metadata=False,
+                mutation_is_shallow_copy_data=False,
                 requires_grad=False,
                 keep_input_mutations=False,
             )
@@ -719,6 +722,43 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_storage_partition_change_misses_cache(self):
+        def fn(t0, t1, t2):
+            t0.add_(10)
+            return t2.clone()
+
+        def false_sharing_args():
+            base = torch.arange(8.0)
+            return base[0:2], base[1:3], base[4:6]
+
+        def split_storage_args():
+            base01 = torch.arange(8.0)
+            base2 = torch.arange(8.0) + 100
+            return base01[0:2], base01[1:3], base2[4:6]
+
+        with fresh_cache():
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            self.assertEqual(
+                fn(*false_sharing_args()),
+                compiled_fn(*false_sharing_args()),
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            self._clear_dynamo_and_codecache()
+            self.assertEqual(
+                fn(*split_storage_args()),
+                compiled_fn(*split_storage_args()),
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
     @functorch_config.patch({"enable_autograd_cache": True})
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
@@ -835,6 +875,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
     def test_multi_graph_specialization(self):
         """
         Verify multi graph specializations all cache hit
@@ -3823,6 +3864,38 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c1 = self.gen_cache_key(fn, config, inputs=[torch.ones(3)])
         c2 = self.gen_cache_key(fn, config, inputs=[torch.ones(2)])
         self.assertNotEqual(c1, c2)
+
+    def test_input_alias_cache_key_includes_storage_partition(self):
+        base = torch.arange(8.0)
+        false_sharing_inputs = [base[0:2], base[1:3], base[4:6]]
+
+        base_again = torch.arange(8.0)
+        same_partition_inputs = [base_again[0:2], base_again[1:3], base_again[4:6]]
+
+        split_storage_base = torch.arange(8.0)
+        split_storage_inputs = [
+            split_storage_base[0:2],
+            split_storage_base[1:3],
+            torch.arange(2.0),
+        ]
+
+        false_sharing_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            false_sharing_inputs
+        )
+        same_partition_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            same_partition_inputs
+        )
+        split_storage_key = autograd_cache._compute_input_tensor_alias_cache_key(
+            split_storage_inputs
+        )
+
+        self.assertEqual(false_sharing_key, same_partition_key)
+        self.assertEqual(false_sharing_key[0], split_storage_key[0])
+        self.assertEqual(false_sharing_key[2], split_storage_key[2])
+        self.assertEqual(false_sharing_key[2], ((0, 1),))
+        self.assertEqual(false_sharing_key[1], ((0, 1, 2),))
+        self.assertEqual(split_storage_key[1], ((0, 1), (2,)))
+        self.assertNotEqual(false_sharing_key, split_storage_key)
 
     def test_different_global_configs(self):
         def fn(x):

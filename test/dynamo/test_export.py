@@ -4607,7 +4607,7 @@ torch.testing.assert_close(out_export, out_orig)
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"strict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}",
+            msg=lambda msg: f"{msg}\nstrict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}",
         )
 
 

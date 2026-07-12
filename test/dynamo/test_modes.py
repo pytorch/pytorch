@@ -1533,7 +1533,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1629,7 +1629,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")

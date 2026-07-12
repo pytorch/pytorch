@@ -14,8 +14,8 @@ from typing import Any, TypeGuard
 import torch
 from torch import Tensor
 from torch._C import _functionalization
+from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
-from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -53,11 +53,11 @@ def sync_functional_tensor(t: torch.Tensor) -> None:
             match getattr(t, attr):
                 case Tensor() as inner:
                     sync_functional_tensor(inner)
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
     else:
         torch._sync(t)
@@ -103,11 +103,11 @@ def is_fun(t: object) -> TypeGuard[FunctionalTensor | Tensor]:
                         raise AssertionError(
                             "mixed functional/non-functional inner tensors"
                         )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return got_fun or False
 
@@ -127,11 +127,11 @@ def has_data_mutation(t: object) -> bool:
                 case Tensor() as v:
                     if has_data_mutation(v):
                         return True
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     else:
@@ -151,11 +151,11 @@ def are_all_mutations_hidden_from_autograd(t: object) -> bool:
                 case Tensor() as v:
                     if not are_all_mutations_hidden_from_autograd(v):
                         return False
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return True
     elif isinstance(t, torch.Tensor):
@@ -174,11 +174,11 @@ def are_all_mutations_under_no_grad_or_inference_mode(t: torch.Tensor) -> bool:
                 case Tensor() as v:
                     if not are_all_mutations_under_no_grad_or_inference_mode(v):
                         return False
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return True
     else:
@@ -199,11 +199,11 @@ def was_inductor_storage_resized(t: object) -> bool:
                         raise RuntimeError(
                             f"storage resizing is not supported on tensor subclass: {type(t)}"
                         )
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     elif not isinstance(t, torch.Tensor):
@@ -212,6 +212,16 @@ def was_inductor_storage_resized(t: object) -> bool:
         if not isinstance(t, FunctionalTensor):
             raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
         return torch._functionalize_was_inductor_storage_resized(t.elem)
+
+
+def was_shallow_copy_data(t: object) -> bool:
+    if is_traceable_wrapper_subclass(t):
+        return False
+    if not isinstance(t, torch.Tensor):
+        return False
+    if not isinstance(t, FunctionalTensor):
+        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
+    return torch._functionalize_was_shallow_copy_data(t.elem)  # type: ignore[attr-defined]
 
 
 # f_arg here is either
@@ -239,11 +249,11 @@ def has_metadata_mutation(
                         check_only_storage_mutation=check_only_storage_mutation,
                     ):
                         return True
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     else:
@@ -479,6 +489,21 @@ class ViewMetaSequence:
 
         return self.metadata == other.metadata
 
+    @classmethod
+    def _from_parts(
+        cls, sequence: list[_functionalization.ViewMeta], metadata: MetadataKey
+    ) -> ViewMetaSequence:
+        # Rebuild a ViewMetaSequence directly from its parts, bypassing the
+        # FunctionalTensor-based __init__. This lets the recipe be reconstructed from
+        # plain values rather than from a live FunctionalTensor or an embedded pickle.
+        # Sole caller: torch._functorch._aot_autograd.source_emit, when baking a
+        # ViewMetaSequence into standalone source; keep the attributes set here in sync
+        # with __init__ (sequence, metadata) or the reconstructed object diverges.
+        self = cls.__new__(cls)
+        self.sequence = sequence
+        self.metadata = metadata
+        return self
+
 
 # new_arg and arg here are either:
 # (1) both a FakeTensor
@@ -509,11 +534,11 @@ def was_tensor_updated(arg: torch.Tensor, new_arg: torch.Tensor) -> bool:
                 case Tensor() as v:
                     if was_tensor_updated(v, getattr(new_arg, attr)):
                         return True
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     else:
@@ -543,11 +568,11 @@ def was_tensor_metadata_updated(arg: Any, new_arg: Any) -> bool:
                 case Tensor() as v:
                     if was_tensor_metadata_updated(v, getattr(new_arg, attr)):
                         return True
-                case OpaqueBase():
+                case CustomClassBase():
                     pass
                 case unexpected:
                     raise AssertionError(
-                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                     )
         return False
     else:
@@ -561,6 +586,7 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
     allowed_mutation_ops = [
         torch.ops.aten.copy_.default,
         torch.ops.aten.set_.source_Tensor,
+        torch.ops.aten.shallow_copy_data_.default,
     ]
     if hasattr(torch.ops.fsdp, "copy_"):
         allowed_mutation_ops.append(torch.ops.fsdp.copy_.default)
