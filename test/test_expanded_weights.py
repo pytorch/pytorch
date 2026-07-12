@@ -969,9 +969,7 @@ class TestExpandedWeightModule(TestCase):
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
         self.test_cpu = kwargs.get("test_cpu", True)
-        self.test_accelerator = kwargs.get(
-            "test_accelerator", kwargs.get("test_cuda", True)
-        )
+        self.test_device = kwargs.get("test_device", True)
         super().__init__(*args, **kwargs)
 
     @property
@@ -1056,14 +1054,14 @@ for test_param in supported_tests:
                 )
             ),
         )
-    if TEST_ACCELERATOR and test.test_accelerator:
+    if TEST_ACCELERATOR and test.test_device:
         # since this checks derivatives, only use double for precision
         setattr(
             TestExpandedWeightModule,
-            test_name + f"_{accelerator}_double",
+            test_name + "_accelerator_double",
             decorator(
-                lambda self, test=test, acc=accelerator: test.test_context_manager(
-                    self, acc
+                lambda self, test=test: test.test_context_manager(
+                    self, torch.accelerator.current_accelerator()
                 )
             ),
         )
