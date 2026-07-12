@@ -35,7 +35,8 @@ void binary_op_kernel(const std::string func_name,
                       const Tensor& input,
                       const Tensor& other,
                       const Tensor& output,
-                      const std::optional<Scalar> alpha) {
+                      const std::optional<Scalar> alpha,
+                      std::optional<uint32_t> ilp_threshold) {
   auto new_size = at::infer_size(input.sizes(), other.sizes());
   if (!output.sizes().equals(new_size)) {
     output.resize_(new_size);
@@ -54,7 +55,47 @@ void binary_op_kernel(const std::string func_name,
                   .promote_inputs_to_common_dtype(true)
                   .build();
 
-  lib.exec_binary_kernel(iter, func_name, alpha);
+  lib.exec_binary_kernel(iter, func_name, alpha, std::nullopt, std::nullopt, ilp_threshold);
+}
+
+void ternary_op_kernel(const std::string func_name,
+                       const Tensor& input,
+                       const Tensor& other1,
+                       const Tensor& other2,
+                       const Tensor& output,
+                       std::optional<uint32_t> ilp_threshold) {
+  // Match binary_op_kernel (and CPU's out= semantics): resize the output to
+  // the broadcast shape before the empty check, so an empty out tensor is
+  // filled rather than silently left empty.
+  auto new_size = at::infer_size(at::infer_size(input.sizes(), other1.sizes()), other2.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  if (output.numel() == 0) {
+    return;
+  }
+
+  auto iter = TensorIteratorConfig()
+                  .allow_cpu_scalars(true)
+                  .add_output(output)
+                  .add_input(input)
+                  .add_input(other1)
+                  .add_input(other2)
+                  .check_all_same_dtype(false)
+                  .promote_inputs_to_common_dtype(true)
+                  // Match the CPU iterator's error class for un-castable
+                  // outputs (e.g. an integral out tensor) instead of failing
+                  // at Metal pipeline creation with an unregistered name.
+                  .enforce_safe_casting_to_output(true)
+                  // The output was already resized to the broadcast shape
+                  // above. The default (true) lets the iterator restride a
+                  // layout-mismatched output into an internal temp, which the
+                  // Metal exec path writes and never copies back — the
+                  // caller's tensor would silently stay untouched.
+                  .resize_outputs(false)
+                  .build();
+
+  lib.exec_ternary_kernel(iter, func_name, ilp_threshold);
 }
 
 } // namespace mps

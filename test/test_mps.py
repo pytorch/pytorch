@@ -5014,6 +5014,241 @@ class TestMPS(TestCaseMPS):
         helper([8, 4, 5, 7, 6], 'mean')
 
     # Mean Squared Error
+    def test_mse_loss_metal_paths(self):
+        # Committed coverage for the native Metal mse_loss kernels: all
+        # reductions x {f32,f16,bf16} fwd+bwd vs fp32 CPU, plus a large shape
+        # that reaches fused_loss_pass1 plus the shared sum_reduction pass-2
+        # path (OpInfo samples are too small to reach it), plus non-contiguous
+        # operands that reach the strided pass-1 loads and the strided fused
+        # ternary backward.
+        def run(shape, reduction, dtype, noncontig=False):
+            xc = torch.randn(shape, dtype=torch.float32, requires_grad=True)
+            tc = torch.randn(shape, dtype=torch.float32)
+            xm = xc.detach().to("mps", dtype)
+            tm = tc.detach().to("mps", dtype)
+            if noncontig:
+                # Same logical values through a transposed (non-contiguous) view.
+                xm = xm.t().contiguous().t()
+                tm = tm.t().contiguous().t()
+                self.assertFalse(xm.is_contiguous())
+            xm.requires_grad_()
+            tol = dict(atol=5e-2, rtol=5e-2) if dtype != torch.float32 else {}
+            oc = F.mse_loss(xc, tc, reduction=reduction)
+            om = F.mse_loss(xm, tm, reduction=reduction)
+            self.assertEqual(om.float(), oc, **tol)
+            g = torch.ones_like(oc)
+            oc.backward(g)
+            om.backward(g.to("mps", dtype))
+            self.assertEqual(xm.grad.float(), xc.grad, **tol)
+
+        for reduction in ("none", "mean", "sum"):
+            for dtype in (torch.float32, torch.float16, torch.bfloat16):
+                run((64, 33), reduction, dtype)
+                run((64, 33), reduction, dtype, noncontig=True)
+        run((4096, 4096), "mean", torch.float32)  # large -> multi-threadgroup reduce
+        run((4096, 4096), "sum", torch.float32)
+        run((4096, 4096), "mean", torch.float16)  # large reduce, fp32 accumulation
+        run((4096, 4096), "mean", torch.float32, noncontig=True)  # large strided reduce
+        run((4096, 4096), "sum", torch.bfloat16, noncontig=True)
+
+        # Mixed input/target dtypes: the parent MPSGraph backward hard-crashed
+        # here; the fused-loss fallback computes in the promoted dtype.
+        def run_mixed(reduction):
+            xc = torch.randn(64, 33, dtype=torch.float32, requires_grad=True)
+            tc = torch.randn(64, 33, dtype=torch.float32)
+            xm = xc.detach().to("mps", torch.float16).requires_grad_()
+            tm = tc.detach().to("mps")
+            oc = F.mse_loss(xc, tc, reduction=reduction)
+            om = F.mse_loss(xm, tm.float(), reduction=reduction)
+            self.assertEqual(om.float(), oc, atol=5e-2, rtol=5e-2)
+            g = torch.ones_like(oc)
+            oc.backward(g)
+            om.backward(g.to("mps"))
+            self.assertEqual(xm.grad.float(), xc.grad, atol=5e-2, rtol=5e-2)
+
+        for reduction in ("none", "mean", "sum"):
+            run_mixed(reduction)
+
+        # Out-variant with a grad_input dtype differing from same-dtype
+        # inputs: exercises the ternary fallback's cast-kernel selection by
+        # output dtype (matching CPU's cast_common_dtype_to_outputs support).
+        for reduction_val in (0, 1, 2):  # none, mean, sum
+            xh = torch.randn(64, 33, device="mps", dtype=torch.float16)
+            th = torch.randn(64, 33, device="mps", dtype=torch.float16)
+            gh = torch.ones((), device="mps", dtype=torch.float16) if reduction_val else \
+                torch.ones(64, 33, device="mps", dtype=torch.float16)
+            gi = torch.empty(64, 33, device="mps", dtype=torch.float32)
+            torch.ops.aten.mse_loss_backward.grad_input(gh, xh, th, reduction_val, grad_input=gi)
+            gi_cpu = torch.empty(64, 33, dtype=torch.float32)
+            torch.ops.aten.mse_loss_backward.grad_input(
+                gh.cpu(), xh.cpu(), th.cpu(), reduction_val, grad_input=gi_cpu)
+            self.assertEqual(gi.cpu(), gi_cpu, atol=5e-2, rtol=5e-2)
+
+        # An un-castable (integral) grad_input raises CPU's clean cast error,
+        # not a Metal pipeline-creation failure.
+        gi_int = torch.empty(64, 33, device="mps", dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            torch.ops.aten.mse_loss_backward.grad_input(
+                torch.ones((), device="mps", dtype=torch.float16),
+                torch.randn(64, 33, device="mps", dtype=torch.float16),
+                torch.randn(64, 33, device="mps", dtype=torch.float16),
+                1, grad_input=gi_int)
+
+        # An empty out tensor is resized and filled (CPU out= semantics),
+        # not silently left empty.
+        xe = torch.randn(64, 33, device="mps")
+        te = torch.randn(64, 33, device="mps")
+        gi_empty = torch.empty(0, device="mps")
+        torch.ops.aten.mse_loss_backward.grad_input(
+            torch.ones((), device="mps"), xe, te, 1, grad_input=gi_empty)
+        gi_ref = torch.empty(0)
+        torch.ops.aten.mse_loss_backward.grad_input(
+            torch.ones(()), xe.cpu(), te.cpu(), 1, grad_input=gi_ref)
+        self.assertEqual(gi_empty.shape, gi_ref.shape)
+        self.assertEqual(gi_empty.cpu(), gi_ref)
+
+        # Mixed layouts (contiguous input, transposed target): must NOT take
+        # the physical-order walk — element pairing would break.
+        xmix_c = torch.randn(64, 33)
+        tmix_c = torch.randn(64, 33)
+        xmix = xmix_c.to("mps")
+        tmix = tmix_c.to("mps").t().contiguous().t()
+        self.assertFalse(tmix.is_contiguous())
+        for reduction in ("mean", "sum"):
+            self.assertEqual(
+                F.mse_loss(xmix, tmix, reduction=reduction).cpu(),
+                F.mse_loss(xmix_c, tmix_c, reduction=reduction))
+
+        # Storage offsets off the vec4 alignment (slice views): the kernels
+        # must take the scalar path and still match CPU.
+        base_x = torch.randn(64 * 33 + 1)
+        base_t = torch.randn(64 * 33 + 1)
+        xo_c = base_x[1:].view(64, 33)
+        to_c = base_t[1:].view(64, 33)
+        xo = base_x.to("mps")[1:].view(64, 33)
+        to = base_t.to("mps")[1:].view(64, 33)
+        self.assertNotEqual(xo.storage_offset() % 4, 0)
+        for reduction in ("none", "mean", "sum"):
+            self.assertEqual(
+                F.mse_loss(xo, to, reduction=reduction).cpu(),
+                F.mse_loss(xo_c, to_c, reduction=reduction))
+
+        # Out-variant where input/target/grad_input all share a transposed
+        # dense layout but grad_output is contiguous: must take the fallback
+        # (and actually write the gradient).
+        xt = torch.randn(33, 64, device="mps").t()
+        tt = torch.randn(33, 64, device="mps").t()
+        gt = torch.ones(64, 33, device="mps")
+        git = torch.empty(33, 64, device="mps").t()
+        torch.ops.aten.mse_loss_backward.grad_input(gt, xt, tt, 0, grad_input=git)
+        git_ref = torch.empty(64, 33)
+        torch.ops.aten.mse_loss_backward.grad_input(
+            gt.cpu(), xt.cpu().contiguous(), tt.cpu().contiguous(), 0, grad_input=git_ref)
+        self.assertEqual(git.cpu(), git_ref)
+
+        # grad_output dtype differing alone must route to the promoted-dtype
+        # fallback, not the same-dtype fast path.
+        xg = torch.randn(64, 33, device="mps", dtype=torch.float16)
+        tg = torch.randn(64, 33, device="mps", dtype=torch.float16)
+        gig = torch.empty(64, 33, device="mps", dtype=torch.float16)
+        torch.ops.aten.mse_loss_backward.grad_input(
+            torch.ones((), device="mps", dtype=torch.float32), xg, tg, 2, grad_input=gig)
+        gig_ref = torch.empty(64, 33, dtype=torch.float16)
+        torch.ops.aten.mse_loss_backward.grad_input(
+            torch.ones((), dtype=torch.float32), xg.cpu(), tg.cpu(), 2, grad_input=gig_ref)
+        self.assertEqual(gig.cpu(), gig_ref, atol=5e-2, rtol=5e-2)
+
+    def test_bce_loss_metal_paths(self):
+        # Committed coverage for the native Metal binary_cross_entropy
+        # kernels: reductions x {f32,f16,bf16} x {contig,noncontig} x
+        # {unweighted, matched weight, broadcast weight} fwd+bwd vs fp32 CPU,
+        # a large shape reaching the multi-threadgroup fused reduce, and a
+        # misaligned (slice-view) case reaching the forced-copy path.
+        def run(shape, reduction, dtype, weight_kind=None, noncontig=False):
+            x0 = torch.rand(shape, dtype=torch.float32).clamp(0.01, 0.99)
+            t0 = torch.rand(shape, dtype=torch.float32)
+            wc = None
+            if weight_kind == "full":
+                wc = torch.rand(shape, dtype=torch.float32) + 0.1
+            elif weight_kind == "broadcast":
+                wc = torch.rand(shape[-1], dtype=torch.float32) + 0.1
+            xm = x0.to("mps", dtype)
+            tm = t0.to("mps", dtype)
+            wm = wc.to("mps", dtype) if wc is not None else None
+            # BCE's 1/(x*(1-x)) gradient amplifies input quantization, so the
+            # fp32 CPU reference must see the same low-precision-rounded values.
+            xc = xm.detach().cpu().float().requires_grad_()
+            tc = tm.detach().cpu().float()
+            wc = wm.cpu().float() if wm is not None else None
+            if noncontig:
+                xm = xm.t().contiguous().t()
+                tm = tm.t().contiguous().t()
+                self.assertFalse(xm.is_contiguous())
+            xm.requires_grad_()
+            tol = dict(atol=5e-2, rtol=5e-2) if dtype != torch.float32 else dict(atol=1e-4, rtol=1e-4)
+            oc = F.binary_cross_entropy(xc, tc, weight=wc, reduction=reduction)
+            om = F.binary_cross_entropy(xm, tm, weight=wm, reduction=reduction)
+            self.assertEqual(om.float(), oc, **tol)
+            g = torch.ones_like(oc)
+            oc.backward(g)
+            om.backward(g.to("mps", dtype))
+            self.assertEqual(xm.grad.float(), xc.grad, **tol)
+
+        for reduction in ("none", "mean", "sum"):
+            for dtype in (torch.float32, torch.float16):
+                for weight_kind in (None, "full", "broadcast"):
+                    run((64, 33), reduction, dtype, weight_kind)
+            run((64, 33), reduction, torch.bfloat16)
+            # contiguous weight against transposed inputs: mismatched layouts
+            # must take the materialize/fallback paths
+            run((64, 33), reduction, torch.float32, "full", noncontig=True)
+        run((2048, 2048), "mean", torch.float32)  # multi-threadgroup fused reduce
+        run((2048, 2048), "sum", torch.float32, "full")
+        # f16 large-shape uses mean: a 4M-element sum of O(1) losses overflows
+        # the f16 output range on any backend.
+        run((2048, 2048), "mean", torch.float16, "full")
+
+        # All operands (weight included) sharing one transposed dense layout:
+        # the dense walk and the weighted fused backward fast path.
+        xw = torch.rand(33, 64, device="mps").clamp(0.01, 0.99).t()
+        tw = torch.rand(33, 64, device="mps").t()
+        ww = (torch.rand(33, 64, device="mps") + 0.1).t()
+        xw.requires_grad_()
+        xw_c = xw.detach().cpu().requires_grad_()
+        for reduction in ("none", "mean", "sum"):
+            oc = F.binary_cross_entropy(xw_c, tw.cpu(), weight=ww.cpu(), reduction=reduction)
+            om = F.binary_cross_entropy(xw, tw, weight=ww, reduction=reduction)
+            self.assertEqual(om.cpu(), oc, atol=1e-4, rtol=1e-4)
+            g = torch.ones_like(oc)
+            if xw_c.grad is not None:
+                xw_c.grad = None
+                xw.grad = None
+            oc.backward(g)
+            om.backward(g.to("mps"))
+            self.assertEqual(xw.grad.cpu(), xw_c.grad, atol=1e-4, rtol=1e-4)
+
+        # Misaligned storage offsets (slice views) must take the forced-copy
+        # path in front of the vec4 kernels and still match CPU.
+        base_x = torch.rand(64 * 33 + 1).clamp(0.01, 0.99)
+        base_t = torch.rand(64 * 33 + 1)
+        xo_c = base_x[1:].view(64, 33).requires_grad_()
+        to_c = base_t[1:].view(64, 33)
+        xo = base_x.to("mps")[1:].view(64, 33).requires_grad_()
+        to = base_t.to("mps")[1:].view(64, 33)
+        self.assertNotEqual(xo.storage_offset() % 4, 0)
+        for reduction in ("none", "mean", "sum"):
+            oc = F.binary_cross_entropy(xo_c, to_c, reduction=reduction)
+            om = F.binary_cross_entropy(xo, to, reduction=reduction)
+            self.assertEqual(om.cpu(), oc, atol=1e-4, rtol=1e-4)
+        # out= variant with reduction="none" (matched shape; the legacy CPU
+        # path keeps an EMPTY out empty rather than resizing, so the empty
+        # case is intentionally not compared here).
+        le = torch.empty(64, 33, device="mps")
+        le_ref = torch.empty(64, 33)
+        torch.ops.aten.binary_cross_entropy.out(xo_c.detach(), to_c, None, 0, out=le_ref)
+        torch.ops.aten.binary_cross_entropy.out(xo.detach(), to, None, 0, out=le)
+        self.assertEqual(le.cpu(), le_ref, atol=1e-4, rtol=1e-4)
+
     def test_mse_loss(self):
         def helper(shape, reduction):
             # create the criterion
@@ -5115,6 +5350,23 @@ class TestMPS(TestCaseMPS):
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
         helper([1, 1, 32, 32], 'mean')
+
+    def test_bce_loss_endpoints(self):
+        # CPU clamps each log term at -100 (loss 100 at x=0,y=1), and the
+        # backward clamps the denominator at EPSILON=1e-12 (grad ~ -1e12).
+        # The Metal kernels must match exactly, not via an input-side clamp.
+        for reduction in ('none', 'mean', 'sum'):
+            x = torch.tensor([0.0, 1.0, 0.0, 1.0, 0.5], requires_grad=True)
+            y = torch.tensor([1.0, 0.0, 0.0, 1.0, 0.5])
+            xm = x.detach().to('mps').requires_grad_()
+            ym = y.to('mps')
+            loss_cpu = F.binary_cross_entropy(x, y, reduction=reduction)
+            loss_mps = F.binary_cross_entropy(xm, ym, reduction=reduction)
+            self.assertEqual(loss_mps.cpu(), loss_cpu)
+            if reduction != 'none':
+                loss_cpu.backward()
+                loss_mps.backward()
+                self.assertEqual(xm.grad.cpu(), x.grad)
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5, device='mps')

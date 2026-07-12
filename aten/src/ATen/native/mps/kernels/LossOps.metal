@@ -1,4 +1,6 @@
 #include <ATen/native/mps/kernels/LossOps.h>
+#include <ATen/native/mps/kernels/ReduceOps.h>
+#include <c10/metal/reduction_utils.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 
@@ -395,3 +397,191 @@ kernel void ctc_loss_backward_collect(
 INSTANTIATE_CTC_LOSS_TARGET_TYPES(float);
 INSTANTIATE_CTC_LOSS_TARGET_TYPES(bfloat);
 INSTANTIATE_CTC_LOSS_TARGET_TYPES(half);
+
+// Shared fused pointwise-loss kernels (mse/bce/smooth_l1/huber):
+// fused_loss_pass1 accumulates the elementwise loss in float32; pass 2 reuses
+// sum_reduction.
+
+// ============================================================================
+// Per-op forward functors
+// ============================================================================
+
+struct MSEOp {
+  static inline float fwd(float a, float b, constant FusedLossParams&) {
+    float d = a - b;
+    return d * d;
+  }
+  // norm * (input - target) * grad in float; one narrowing on store.
+  static inline float bwd(
+      float a,
+      float b,
+      float g,
+      constant FusedLossParams& p) {
+    return p.p0 * (a - b) * g;
+  }
+};
+
+struct BCEOp {
+  // Unweighted per-element loss; fused_loss_pass1 applies the weight and pass 2
+  // folds the mean divide. Each log term clamps at -100 like the CPU kernel.
+  static inline float fwd(float a, float b, constant FusedLossParams& p) {
+    return -b * max(log(a), -100.f) - (1.f - b) * max(log(1.f - a), -100.f);
+  }
+  // dx = (x - y) / max((1 - x) * x, 1e-12) * g, matching the CPU kernel's
+  // EPSILON-clamped denominator (Loss.cpp). The host folds the mean scale and
+  // any weight into g, so p.p0 is 1 here (the fast path's norm slot).
+  static inline float bwd(
+      float a,
+      float b,
+      float g,
+      constant FusedLossParams& p) {
+    return p.p0 * (a - b) / max((1.f - a) * a, 1e-12f) * g;
+  }
+};
+
+// ============================================================================
+// Pass 1: per-threadgroup float32 partial of the (weighted) elementwise loss
+// ============================================================================
+
+template <typename TI, typename Op>
+[[max_total_threads_per_threadgroup(MAX_THREADGROUP_SIZE)]]
+kernel void fused_loss_pass1(
+    constant TI* in0 [[buffer(0)]], // input
+    constant TI* in1 [[buffer(1)]], // target
+    constant TI* in2 [[buffer(2)]], // weight; null buffer when has_weight == 0
+    device float* partials [[buffer(3)]], // one float per threadgroup
+    constant FusedLossParams& p [[buffer(4)]],
+    uint tid [[thread_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tgsz [[threads_per_threadgroup]],
+    uint gsz [[threads_per_grid]],
+    uint tgid [[threadgroup_position_in_grid]]) {
+  threadgroup float
+      smem[32]; // up to MAX_THREADGROUP_SIZE(1024) / simdgroup(32)
+  float acc = 0.f;
+
+  using T4 = vec<TI, 4>;
+  const uint aligned_N = p.aligned ? (p.numel / 4u) * 4u : 0u;
+  const uint vec_stride = gsz * 4u;
+
+  for (uint base = tid * 4u; base + 4u <= aligned_N; base += vec_stride) {
+    const uint v = base / 4u;
+    T4 a4 = reinterpret_cast<constant const T4*>(in0)[v];
+    T4 b4 = reinterpret_cast<constant const T4*>(in1)[v];
+    float l0 = Op::fwd(float(a4.x), float(b4.x), p);
+    float l1 = Op::fwd(float(a4.y), float(b4.y), p);
+    float l2 = Op::fwd(float(a4.z), float(b4.z), p);
+    float l3 = Op::fwd(float(a4.w), float(b4.w), p);
+    if (p.has_weight) {
+      T4 w4 = reinterpret_cast<constant const T4*>(in2)[v];
+      acc += float(w4.x) * l0 + float(w4.y) * l1 + float(w4.z) * l2 +
+          float(w4.w) * l3;
+    } else {
+      acc += l0 + l1 + l2 + l3;
+    }
+  }
+  for (uint i = aligned_N + tid; i < p.numel; i += gsz) {
+    float l = Op::fwd(float(in0[i]), float(in1[i]), p);
+    acc += p.has_weight ? float(in2[i]) * l : l;
+  }
+
+  float s = c10::metal::threadgroup_sum<float>(smem, acc, lid, tgsz);
+  if (lid == 0)
+    partials[tgid] = s;
+}
+
+// ============================================================================
+// Fused elementwise loss backward (dense fast path): one pass computing
+// Op::bwd over input/target/grad_output. flag == 1 broadcasts a 0-dim
+// grad_output (mean/sum) via a uniform g[0] read; the generic TensorIterator
+// ternary path remains the fallback for mixed dtypes or mismatched layouts.
+// ============================================================================
+
+template <typename TI, typename Op>
+kernel void fused_loss_bwd(
+    constant TI* in0 [[buffer(0)]], // input
+    constant TI* in1 [[buffer(1)]], // target
+    constant TI* gout [[buffer(2)]], // grad_output (0-dim when flag == 1)
+    device TI* grad [[buffer(3)]], // grad_input
+    constant FusedLossParams& p [[buffer(4)]],
+    constant TI* wbuf [[buffer(5)]], // weight; null buffer when has_weight == 0
+    uint tid [[thread_position_in_grid]]) {
+  const float g0 = p.flag ? float(gout[0]) : 0.f;
+
+  using T4 = vec<TI, 4>;
+  if (p.aligned) {
+    // Grid is sized to ceil(numel / 4); each thread handles one vec4 block.
+    const uint base = tid * 4u;
+    if (base + 4u <= p.numel) {
+      T4 a4 = reinterpret_cast<constant const T4*>(in0)[tid];
+      T4 b4 = reinterpret_cast<constant const T4*>(in1)[tid];
+      float4 g4;
+      if (p.flag) {
+        g4 = float4(g0);
+      } else {
+        T4 gv = reinterpret_cast<constant const T4*>(gout)[tid];
+        g4 = float4(float(gv.x), float(gv.y), float(gv.z), float(gv.w));
+      }
+      if (p.has_weight) {
+        T4 w4 = reinterpret_cast<constant const T4*>(wbuf)[tid];
+        g4 *= float4(float(w4.x), float(w4.y), float(w4.z), float(w4.w));
+      }
+      T4 r;
+      r.x = TI(Op::bwd(float(a4.x), float(b4.x), g4.x, p));
+      r.y = TI(Op::bwd(float(a4.y), float(b4.y), g4.y, p));
+      r.z = TI(Op::bwd(float(a4.z), float(b4.z), g4.z, p));
+      r.w = TI(Op::bwd(float(a4.w), float(b4.w), g4.w, p));
+      reinterpret_cast<device T4*>(grad)[tid] = r;
+      return;
+    }
+    for (uint i = base; i < p.numel; ++i) {
+      float g = p.flag ? g0 : float(gout[i]);
+      if (p.has_weight) {
+        g *= float(wbuf[i]);
+      }
+      grad[i] = TI(Op::bwd(float(in0[i]), float(in1[i]), g, p));
+    }
+    return;
+  }
+  if (tid < p.numel) {
+    float g = p.flag ? g0 : float(gout[tid]);
+    if (p.has_weight) {
+      g *= float(wbuf[tid]);
+    }
+    grad[tid] = TI(Op::bwd(float(in0[tid]), float(in1[tid]), g, p));
+  }
+}
+
+#define INSTANTIATE_FUSED_LOSS_FWD(NAME, OP, TI)            \
+  template [[host_name("fused_loss_pass1_" #NAME "_" #TI)]] \
+  kernel void fused_loss_pass1<TI, OP>(                     \
+      constant TI*,                                         \
+      constant TI*,                                         \
+      constant TI*,                                         \
+      device float*,                                        \
+      constant FusedLossParams&,                            \
+      uint,                                                 \
+      uint,                                                 \
+      uint,                                                 \
+      uint,                                                 \
+      uint)
+
+#define INSTANTIATE_FUSED_LOSS(NAME, OP, TI)              \
+  INSTANTIATE_FUSED_LOSS_FWD(NAME, OP, TI);               \
+  template [[host_name("fused_loss_bwd_" #NAME "_" #TI)]] \
+  kernel void fused_loss_bwd<TI, OP>(                     \
+      constant TI*,                                       \
+      constant TI*,                                       \
+      constant TI*,                                       \
+      device TI*,                                         \
+      constant FusedLossParams&,                          \
+      constant TI*,                                       \
+      uint)
+
+INSTANTIATE_FUSED_LOSS(mse, MSEOp, float);
+INSTANTIATE_FUSED_LOSS(mse, MSEOp, half);
+INSTANTIATE_FUSED_LOSS(mse, MSEOp, bfloat);
+
+INSTANTIATE_FUSED_LOSS(bce, BCEOp, float);
+INSTANTIATE_FUSED_LOSS(bce, BCEOp, half);
+INSTANTIATE_FUSED_LOSS(bce, BCEOp, bfloat);

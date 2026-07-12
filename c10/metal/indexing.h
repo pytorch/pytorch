@@ -1480,6 +1480,43 @@ kernel void ternary_dense(
       f(om_t(input[tid]), om_t(other1[tid]), om_t(other2[tid])));
 }
 
+// ILP variant of ternary_dense; mirrors binary_dense_ilp. Selected by the
+// host only when the caller opts in via ilp_threshold (see
+// exec_ternary_kernel).
+template <typename T, typename F, typename om_t = T>
+kernel void ternary_dense_ilp(
+    device result_of<F, T, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other1 [[buffer(2)]],
+    constant T* other2 [[buffer(3)]],
+    constant uint& numel [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T, T>;
+  uint base = tid * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<T, ILP_PER_THREAD> ta;
+    array<T, ILP_PER_THREAD> tb;
+    array<T, ILP_PER_THREAD> tc;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      ta[j] = input[base + j];
+      tb[j] = other1[base + j];
+      tc[j] = other2[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      out[base + j] =
+          static_cast<res_t>(f(om_t(ta[j]), om_t(tb[j]), om_t(tc[j])));
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      out[i] = static_cast<res_t>(
+          f(om_t(input[i]), om_t(other1[i]), om_t(other2[i])));
+    }
+  }
+}
+
 template <typename T, typename F, typename om_t = T>
 kernel void ternary_dense_cast(
     device result_of<F, T, T, T>* out [[buffer(0)]],
@@ -1506,6 +1543,17 @@ kernel void ternary_dense_cast(
           DTYPEO,                                                              \
           ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI>>,    \
       "Output dtype mismatch for ternary op " #NAME " and input " #DTYPEI);    \
+  template                                                                     \
+      [[host_name(#NAME "_dense_ilp_" #DTYPEO "_" #DTYPEI)]] kernel void ::    \
+          c10::metal::ternary_dense_ilp<DTYPEI, NAME##_functor, OMT>(          \
+              device ::c10::metal::                                            \
+                      result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI> *      \
+                  out,                                                         \
+              constant DTYPEI * input,                                         \
+              constant DTYPEI * other1,                                        \
+              constant DTYPEI * other2,                                        \
+              constant uint & numel,                                           \
+              uint tid);                                                       \
   template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
       c10::metal::ternary_strided<DTYPEI, NAME##_functor, OMT>(                \
           device void* out,                                                    \

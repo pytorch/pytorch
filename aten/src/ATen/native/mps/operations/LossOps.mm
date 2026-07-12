@@ -1,8 +1,12 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LossOps.h>
+#include <ATen/native/mps/kernels/ReduceOps.h>
+#include <ATen/native/mps/operations/BinaryKernel.h>
+#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -12,6 +16,8 @@
 #include <ATen/ops/_ctc_loss_native.h>
 #include <ATen/ops/binary_cross_entropy_backward_native.h>
 #include <ATen/ops/binary_cross_entropy_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/full_like.h>
 #include <ATen/ops/huber_loss_backward_native.h>
 #include <ATen/ops/huber_loss_native.h>
@@ -21,6 +27,7 @@
 #include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss_backward_native.h>
 #include <ATen/ops/nll_loss_forward_native.h>
+#include <ATen/ops/result_type.h>
 #include <ATen/ops/smooth_l1_loss_backward_native.h>
 #include <ATen/ops/smooth_l1_loss_native.h>
 #include <ATen/ops/tensor.h>
@@ -31,9 +38,19 @@ namespace mps {
 
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
+static auto& reduce_lib = MetalShaderLibrary::getBundledLibrary();
 #else
+namespace loss_ops_metal {
 #include <ATen/native/mps/LossOps_metallib.h>
+} // namespace loss_ops_metal
+static auto& lib = loss_ops_metal::lib;
+namespace reduce_ops_metal {
+#include <ATen/native/mps/ReduceOps_metallib.h>
+} // namespace reduce_ops_metal
+static auto& reduce_lib = reduce_ops_metal::lib;
 #endif
+
+// Native Metal MSE loss path replaces the per-shape MPSGraph cache.
 
 static std::string reductionToString(int64_t reduction) {
   switch (reduction) {
@@ -65,6 +82,245 @@ static MPSGraphTensor* reduceTensor(MPSGraphTensor* tensor,
   }
 }
 
+// Generic two-stage fused pointwise-loss reduction (mean/sum) for mse/bce/
+// smooth_l1/huber: pass 1 emits float32 partials, pass 2 reuses sum_reduction.
+static constexpr uint32_t kFusedLossThreadsPerTG = 1024;
+// Bound below UINT32_MAX by one full grid's vec4 stride
+// (MAX_THREADGROUP_SIZE * kFusedLossThreadsPerTG * 4) so the kernels'
+// uint32 index math cannot wrap; larger inputs error out or fall back.
+static constexpr uint32_t kMaxFusedLossNumel =
+    std::numeric_limits<uint32_t>::max() - MAX_THREADGROUP_SIZE * kFusedLossThreadsPerTG * 4;
+
+static void fused_loss_reduce(const std::string& op,
+                              const Tensor& input,
+                              const Tensor& target,
+                              const std::optional<Tensor>& weight,
+                              const Tensor& output,
+                              FusedLossParams params) {
+  // Pass 1 reads input and target as one dtype; promote both (and any weight) to
+  // the result dtype so a mixed fp16/fp32 input/target pair is not misread.
+  const auto dt = output.scalar_type();
+  auto in = input.to(dt);
+  auto tgt = target.to(dt);
+  std::optional<Tensor> w;
+  if (weight.has_value() && weight->defined()) {
+    w = weight->expand(input.sizes()).to(dt);
+  }
+
+  // A reduction is order-free, so when every operand shares one dense layout
+  // (e.g. all transposed the same way) the kernel reads the buffers in
+  // physical order: element pairs still line up and the linear vec4 loads
+  // run at contiguous speed with no materialization. A weight participates
+  // when it has that same layout too (a broadcast weight expands to stride-0
+  // dims and is excluded by the density check); mismatched or gappy layouts
+  // fall back to contiguous copies.
+  auto same_layout_dense = [&](const Tensor& t) {
+    return t.sizes().equals(in.sizes()) && t.strides().equals(in.strides()) && t.is_non_overlapping_and_dense();
+  };
+  const bool same_dense_layout = !in.is_contiguous() && in.is_non_overlapping_and_dense() && same_layout_dense(tgt) &&
+      (!w.has_value() || same_layout_dense(*w));
+  if (!same_dense_layout) {
+    in = in.contiguous();
+    tgt = tgt.contiguous();
+    if (w.has_value()) {
+      w = w->contiguous();
+    }
+  }
+
+  TORCH_CHECK(in.numel() <= kMaxFusedLossNumel, "fused_loss_reduce: numel exceeds 32-bit kernel indexing");
+  const uint32_t numel = static_cast<uint32_t>(in.numel());
+  params.numel = numel;
+  params.has_weight = w.has_value() ? 1u : 0u;
+  // vec4 fast path is only valid when every operand's storage offset keeps the
+  // 16-byte alignment the reinterpret_cast<T4*> loads assume.
+  params.aligned = (in.storage_offset() % 4 == 0) && (tgt.storage_offset() % 4 == 0) &&
+      (!w.has_value() || w->storage_offset() % 4 == 0);
+
+  // Pass 2 reduces the partials in a single threadgroup, so cap the pool at the
+  // max threadgroup size.
+  uint32_t num_groups = (numel + kFusedLossThreadsPerTG - 1) / kFusedLossThreadsPerTG;
+  num_groups = std::clamp<uint32_t>(num_groups, 1u, MAX_THREADGROUP_SIZE);
+
+  Tensor partials = at::empty({static_cast<int64_t>(num_groups)}, in.options().dtype(kFloat));
+
+  // sum_reduction over the 1-D partials -> scalar output; p = numel folds the
+  // Mean divide in float32 (p = 0 for Sum leaves the accumulator untouched).
+  NormParams<> p2{};
+  p2.ndim = 1;
+  p2.reduction_size = num_groups;
+  p2.input_sizes[0] = num_groups;
+  p2.input_strides[0] = 1;
+  p2.output_sizes[0] = 1;
+  p2.output_strides[0] = 0;
+  p2.p = (params.reduction == Reduction::Mean) ? static_cast<float>(numel) : 0.0f;
+
+  const std::string p1name = fmt::format("fused_loss_pass1_{}_{}", op, scalarToMetalTypeString(in));
+  const std::string p2name = fmt::format("sum_reduction_float_{}", scalarToMetalTypeString(output));
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+
+      auto ps1 = lib.getPipelineStateForFunc(p1name);
+      getMPSProfiler().beginProfileKernel(ps1, op + "_fused_pass1", {in, tgt});
+      [ce setComputePipelineState:ps1];
+      mtl_setArgs(ce, in, tgt, w, partials, params); // w nulls buffer(2) when absent
+      [ce dispatchThreadgroups:MTLSizeMake(num_groups, 1, 1)
+          threadsPerThreadgroup:MTLSizeMake(kFusedLossThreadsPerTG, 1, 1)];
+      getMPSProfiler().endProfileKernel(ps1);
+
+      auto ps2 = reduce_lib.getPipelineStateForFunc(p2name);
+      getMPSProfiler().beginProfileKernel(ps2, "sum_reduction_pass2", {partials});
+      [ce setComputePipelineState:ps2];
+      mtl_setArgs(ce, partials, output, p2);
+      uint32_t tpg2 = std::min<uint32_t>(MAX_THREADGROUP_SIZE, ((num_groups + 31u) / 32u) * 32u);
+      tpg2 = std::max<uint32_t>(tpg2, 32u);
+      [ce dispatchThreads:MTLSizeMake(tpg2, 1, 1) threadsPerThreadgroup:MTLSizeMake(tpg2, 1, 1)];
+      getMPSProfiler().endProfileKernel(ps2);
+    }
+  });
+}
+
+// Dense fast path for the fused elementwise loss backward: one vec4 kernel
+// computing Op::bwd over input/target/grad_output when everything shares one
+// dtype and one dense layout (a reduction-free elementwise map is layout-
+// agnostic when all operands, including the output, agree on strides).
+// Returns false when the combination needs the generic TensorIterator
+// ternary fallback.
+static bool fused_loss_bwd_fast_path(const std::string& op,
+                                     const Tensor& input,
+                                     const Tensor& target,
+                                     const Tensor& grad_output,
+                                     const Tensor& grad_input,
+                                     double norm,
+                                     const std::optional<Tensor>& weight = std::nullopt) {
+  const auto dt = input.scalar_type();
+  if (!c10::isFloatingType(dt) || dt == kDouble) {
+    return false;
+  }
+  if (target.scalar_type() != dt || grad_input.scalar_type() != dt || grad_output.scalar_type() != dt) {
+    return false;
+  }
+  if (weight.has_value() && weight->scalar_type() != dt) {
+    return false;
+  }
+  const bool scalar_grad = grad_output.dim() == 0;
+  // Sizes must match too: a same-strides but smaller grad_input (possible
+  // when the op is called directly rather than via autograd) would otherwise
+  // pass the stride check and the kernel would write numel elements out of
+  // bounds.
+  auto dense_like_input = [&](const Tensor& t) {
+    return t.is_non_overlapping_and_dense() && t.sizes().equals(input.sizes()) && t.strides().equals(input.strides());
+  };
+  if (!input.is_non_overlapping_and_dense() || !dense_like_input(target) || !dense_like_input(grad_input)) {
+    return false;
+  }
+  if (!scalar_grad && !dense_like_input(grad_output)) {
+    return false;
+  }
+  if (weight.has_value() && !dense_like_input(*weight)) {
+    return false;
+  }
+  if (input.numel() > kMaxFusedLossNumel) {
+    return false;
+  }
+
+  FusedLossParams params{};
+  params.numel = static_cast<uint32_t>(input.numel());
+  params.flag = scalar_grad ? 1u : 0u;
+  params.has_weight = weight.has_value() ? 1u : 0u;
+  params.p0 = static_cast<float>(norm);
+  params.aligned = (input.storage_offset() % 4 == 0) && (target.storage_offset() % 4 == 0) &&
+      (grad_input.storage_offset() % 4 == 0) && (scalar_grad || grad_output.storage_offset() % 4 == 0) &&
+      (!weight.has_value() || weight->storage_offset() % 4 == 0);
+
+  const std::string name = fmt::format("fused_loss_bwd_{}_{}", op, scalarToMetalTypeString(input));
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(name);
+      getMPSProfiler().beginProfileKernel(pso, op + "_fused_bwd", {input, target, grad_output});
+      [ce setComputePipelineState:pso];
+      mtl_setArgs(ce, input, target, grad_output, grad_input, params, weight); // weight nulls buffer(5) when absent
+      const uint32_t jobs = params.aligned ? (params.numel + 3u) / 4u : params.numel;
+      mtl_dispatch1DJob(ce, pso, jobs);
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+  return true;
+}
+
+// Native BCE (forward None + backward) via standalone Metal kernels; mean/sum
+// forward reuses fused_loss_reduce. "loss" is grad_input on the backward pass.
+static Tensor& bce_loss_native(const Tensor& input,
+                               const Tensor& target,
+                               const std::optional<Tensor>& weight_opt,
+                               int64_t reduction,
+                               Tensor& loss,
+                               const std::optional<Tensor>& grad_output_opt,
+                               const std::string& op_name) {
+  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
+  const bool is_bwd = grad_output_opt.has_value();
+  c10::MaybeOwned<Tensor> wmo = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *wmo;
+  loss.resize_((reduction == Reduction::None || is_bwd) ? target.sizes() : IntArrayRef({}));
+  TORCH_CHECK(loss.is_mps());
+  if (input.numel() == 0) {
+    if (!is_bwd && reduction != Reduction::None)
+      loss.fill_(reduction == Reduction::Mean ? std::numeric_limits<float>::quiet_NaN() : 0.0f);
+    return loss;
+  }
+
+  // Mean/Sum forward goes through the shared fused reduce (handles contiguity,
+  // promotion, weight expand, the physical-order dense walk for same-layout
+  // non-contiguous operands, and the numel mean-divide).
+  if (!is_bwd && reduction != Reduction::None) {
+    FusedLossParams params{};
+    params.reduction = static_cast<uint32_t>(reduction);
+    fused_loss_reduce("bce", input, target, weight_opt, loss, params);
+    return loss;
+  }
+
+  if (!is_bwd) {
+    // reduction=None forward through the shared iterator kernels: the ternary
+    // variant broadcasts the optional weight natively, so non-contiguous and
+    // broadcast operands need no materialization.
+    if (weight.defined()) {
+      ternary_op_kernel("bce_weighted", input, target, weight, loss, /*ilp_threshold=*/1u << 18);
+    } else {
+      binary_op_kernel("bce", input, target, loss, std::nullopt, /*ilp_threshold=*/1u << 18);
+    }
+    return loss;
+  }
+
+  // Backward: grad = (x_raw - y) / (clamp(x) * (1 - clamp(x))) * g * scale.
+  // Any weight folds into g_eff (one broadcast multiply, dtype-preserving);
+  // the mean scale rides the fast path's norm slot so the common unweighted
+  // mean case keeps its dtype and stays on fused_loss_bwd. The TensorIterator
+  // fallback gets the scale pre-folded into the grad instead.
+  const double scale = (reduction == Reduction::Mean) ? 1.0 / static_cast<double>(input.numel()) : 1.0;
+  std::optional<Tensor> w_opt;
+  if (weight.defined()) {
+    w_opt = weight.expand(input.sizes()).to(input.scalar_type());
+  }
+  if (fused_loss_bwd_fast_path("bce", input, target, *grad_output_opt, loss, /*norm=*/scale, w_opt)) {
+    return loss;
+  }
+  // Fallback: fold the weight and scale into the grad for the generic
+  // TensorIterator ternary.
+  Tensor g_eff = *grad_output_opt;
+  if (w_opt.has_value()) {
+    g_eff = g_eff.mul(*w_opt);
+  }
+  if (scale != 1.0) {
+    g_eff = g_eff.to(kFloat).mul(scale);
+  }
+  ternary_op_kernel("bce_backward_scaled", input, target, g_eff, loss, /*ilp_threshold=*/1u << 18);
+  return loss;
+}
+
 static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
                                           const Tensor& input,
                                           const Tensor& target,
@@ -74,218 +330,51 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
 
+  // Empty input: gradient norm is 2/numel for mean (-> NaN as 2/0), else 0.
   if ((input.numel() == 0) || (target.numel() == 0) || (grad_output.numel() == 0)) {
     reduction == Reduction::Mean ? grad_input.fill_(std::numeric_limits<float>::quiet_NaN()) : grad_input.zero_();
     return grad_input;
   }
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor = nil, *targetTensor = nil;
-    MPSGraphTensor *gradInputTensor = nil, *gradOutputTensor = nil;
-  };
 
-  @autoreleasepool {
-    std::string key = op_name + reductionToString(reduction) + ":" + std::to_string(grad_input.sizes()[1]) +
-        getTensorsStringKey({input, target, grad_output});
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
-      newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-
-      MPSGraphTensor* normTensor = [mpsGraph constantWithScalar:norm dataType:[newCachedGraph->inputTensor dataType]];
-      MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:newCachedGraph->inputTensor
-                                                          secondaryTensor:newCachedGraph->targetTensor
-                                                                     name:nil];
-      MPSGraphTensor* diffGradientTensor = [mpsGraph multiplicationWithPrimaryTensor:diffTensor
-                                                                     secondaryTensor:newCachedGraph->gradOutputTensor
-                                                                                name:nil];
-      newCachedGraph->gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:diffGradientTensor
-                                                                  secondaryTensor:normTensor
-                                                                             name:nil];
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
-    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor, grad_input);
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor, grad_output);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder, gradOutputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, gradInputPlaceholder);
+  // grad_input = norm * (input - target) * grad_output in ONE fused pass (no
+  // MPSGraph, no materialized intermediate). For mean, match the CPU
+  // kernel's rounding: norm (2/N) is narrowed to the compute dtype
+  // (value.to<scalar_t>()) before it is applied -- for fp16 that rounding is
+  // visible in the gradients, and 2/N can flush to zero for huge N exactly
+  // as it does on CPU.
+  if (reduction == Reduction::Mean) {
+    const auto common = at::promoteTypes(at::result_type(input, target), grad_output.scalar_type());
+    if (common == kHalf) {
+      norm = static_cast<double>(static_cast<c10::Half>(norm));
+    } else if (common == kBFloat16) {
+      norm = static_cast<double>(static_cast<c10::BFloat16>(norm));
+    } else if (common == kFloat) {
+      norm = static_cast<double>(static_cast<float>(norm));
+    }
   }
 
+  if (fused_loss_bwd_fast_path("mse", input, target, grad_output, grad_input, norm)) {
+    return grad_input;
+  }
+
+  // Generic fallback: the TensorIterator ternary handles mixed dtypes (with
+  // a half input and a float target the subtract runs in the promoted
+  // float, fixing the mixed-dtype case the parent MPSGraph path hard-crashed
+  // on), broadcast scalar grads, and mismatched layouts. norm is exactly 2
+  // for reduction none/sum, baked into mse_backward2; for mean the 0-dim
+  // grad_output is pre-scaled by the narrowed norm in float (in the
+  // gradient's own dtype 2/N can underflow fp16/bf16; non-inplace because
+  // .to(kFloat) is a no-op for a float grad_output and mul_ would mutate the
+  // caller's tensor).
+  Tensor grad = grad_output;
+  std::string kernel = "mse_backward2";
+  if (reduction == Reduction::Mean) {
+    grad = grad_output.to(kFloat).mul(norm);
+    kernel = "mse_backward_scaled";
+  }
+  ternary_op_kernel(kernel, input, target, grad, grad_input);
   return grad_input;
 }
-
-// namespace to localize the CachedGraph struct for Binary Cross Entropy
-namespace BCELoss {
-
-struct CachedGraph : public MPSCachedGraph {
-  CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor *inputTensor = nil, *targetTensor = nil;
-  // gradOutput only used on backward pass
-  MPSGraphTensor *weightTensor = nil, *gradOutputTensor = nil;
-  // lossTensor used for forward, and gradInputTensor for backward pass
-  union {
-    MPSGraphTensor* lossTensor = nil;
-    MPSGraphTensor* gradInputTensor;
-  };
-};
-
-static MPSGraphTensor* bce_forward_mps(CachedGraph* bceGraph) {
-  MPSGraph* mpsGraph = bceGraph->graph();
-  const auto inputType = [bceGraph->inputTensor dataType];
-
-  // Forward BCE: L = -w (y ln(x) + (1-y) ln(1-x))
-  MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:inputType];
-  // -100 is the hard limit value defined in BCELoss Spec. to clamp the log
-  MPSGraphTensor* neg100 = [mpsGraph constantWithScalar:-100.0 dataType:inputType];
-  // 1 - x
-  MPSGraphTensor* one_Input = [mpsGraph subtractionWithPrimaryTensor:one
-                                                     secondaryTensor:bceGraph->inputTensor
-                                                                name:nil];
-  // log(x)
-  MPSGraphTensor* logInput = [mpsGraph logarithmWithTensor:bceGraph->inputTensor name:nil];
-  // max(log(x), -100)
-  MPSGraphTensor* clampedLogInput = [mpsGraph maximumWithPrimaryTensor:logInput secondaryTensor:neg100 name:nil];
-  // log(1 - x)
-  MPSGraphTensor* log1_Input = [mpsGraph logarithmWithTensor:one_Input name:nil];
-  // max(log(1 - x), -100)
-  MPSGraphTensor* clampedLog1_Input = [mpsGraph maximumWithPrimaryTensor:log1_Input secondaryTensor:neg100 name:nil];
-  // (y - 1) resulted from -(1 - y)
-  MPSGraphTensor* target_1 = [mpsGraph subtractionWithPrimaryTensor:bceGraph->targetTensor
-                                                    secondaryTensor:one
-                                                               name:nil];
-  // (y - 1) * max(log(1 - x), -100)
-  MPSGraphTensor* target_1TimesLog1_Input = [mpsGraph multiplicationWithPrimaryTensor:target_1
-                                                                      secondaryTensor:clampedLog1_Input
-                                                                                 name:nil];
-  // y * max(log(x), -100)
-  MPSGraphTensor* targetTimesLogInput = [mpsGraph multiplicationWithPrimaryTensor:bceGraph->targetTensor
-                                                                  secondaryTensor:clampedLogInput
-                                                                             name:nil];
-  // ((y - 1) * max(log(1 - x), -100)) - (y * max(log(x), -100))
-  MPSGraphTensor* bceLoss = [mpsGraph subtractionWithPrimaryTensor:target_1TimesLog1_Input
-                                                   secondaryTensor:targetTimesLogInput
-                                                              name:nil];
-  return bceLoss;
-}
-
-static MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
-  MPSGraph* mpsGraph = bceGraph->graph();
-  const auto inputType = [bceGraph->inputTensor dataType];
-
-  // Backward BCE: d(L)/d(x) = -w (y - x) / (x - x^2)
-  MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:inputType];
-  // epsilon used to clamp the grad input denominator
-  MPSGraphTensor* epsilon = [mpsGraph constantWithScalar:1e-12 dataType:inputType];
-  // 1 - x
-  MPSGraphTensor* one_Input = [mpsGraph subtractionWithPrimaryTensor:one
-                                                     secondaryTensor:bceGraph->inputTensor
-                                                                name:nil];
-  // x * (1 - x)
-  MPSGraphTensor* inputTimes1_Input = [mpsGraph multiplicationWithPrimaryTensor:bceGraph->inputTensor
-                                                                secondaryTensor:one_Input
-                                                                           name:nil];
-  // max(x * (1 - x), epsilon)
-  MPSGraphTensor* gradInputDenominator = [mpsGraph maximumWithPrimaryTensor:inputTimes1_Input
-                                                            secondaryTensor:epsilon
-                                                                       name:nil];
-  // (x - y)
-  MPSGraphTensor* input_target = [mpsGraph subtractionWithPrimaryTensor:bceGraph->inputTensor
-                                                        secondaryTensor:bceGraph->targetTensor
-                                                                   name:nil];
-  // (x - y) / max(x * (1 - x), epsilon)
-  MPSGraphTensor* inputDivGradInputDenom = [mpsGraph divisionWithPrimaryTensor:input_target
-                                                               secondaryTensor:gradInputDenominator
-                                                                          name:nil];
-  // gradOutput * (((x - y) / max(x * (1 - x), epsilon)))
-  MPSGraphTensor* gradInput = [mpsGraph multiplicationWithPrimaryTensor:bceGraph->gradOutputTensor
-                                                        secondaryTensor:inputDivGradInputDenom
-                                                                   name:nil];
-  return gradInput;
-}
-
-// Binary Cross Enropy (Forward/Backward BCELoss)
-// NOTE: "loss" tensor would be "grad_input" if it's a backward pass
-static Tensor& bce_loss_out_impl(const Tensor& input,
-                                 const Tensor& target,
-                                 const std::optional<Tensor>& weight_opt,
-                                 int64_t reduction,
-                                 Tensor& loss,
-                                 const std::optional<Tensor>& grad_output_opt,
-                                 const std::string& op_name) {
-  // TODO: add sanity check for the elements of input tensor to be within [0..1]
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
-
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  c10::MaybeOwned<Tensor> grad_output_maybe_owned = at::borrow_from_optional_tensor(grad_output_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& grad_output = *grad_output_maybe_owned;
-
-  loss.resize_((reduction == Reduction::None || grad_output.defined()) ? target.sizes() : IntArrayRef({}));
-  TORCH_CHECK(loss.is_mps());
-
-  @autoreleasepool {
-    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
-
-      MPSGraphTensor* bceLossUnweighted = nil;
-      // if grad_output is defined, then it's a backward pass
-      if (grad_output.defined()) {
-        newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-        bceLossUnweighted = bce_backward_mps(newCachedGraph);
-      } else {
-        bceLossUnweighted = bce_forward_mps(newCachedGraph);
-      }
-
-      MPSGraphTensor* bceLoss = bceLossUnweighted;
-      if (weight.defined()) {
-        newCachedGraph->weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight);
-        bceLoss = [mpsGraph multiplicationWithPrimaryTensor:bceLossUnweighted
-                                            secondaryTensor:newCachedGraph->weightTensor
-                                                       name:nil];
-      }
-
-      if (grad_output.defined()) {
-        if (reduction == at::Reduction::Mean) {
-          MPSGraphTensor* inputNumel = [mpsGraph constantWithScalar:static_cast<double>(input.numel())
-                                                           dataType:[bceLoss dataType]];
-          newCachedGraph->gradInputTensor = [mpsGraph divisionWithPrimaryTensor:bceLoss
-                                                                secondaryTensor:inputNumel
-                                                                           name:nil];
-        } else {
-          newCachedGraph->gradInputTensor = bceLoss;
-        }
-      } else {
-        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input.sizes().size());
-      }
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
-    Placeholder lossPlaceholder = Placeholder(cachedGraph->lossTensor, loss);
-
-    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-
-    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-    feeds[targetPlaceholder.getMPSGraphTensor()] = targetPlaceholder.getMPSGraphTensorData();
-    if (weight.defined()) {
-      Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor, weight);
-      feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
-    }
-    if (grad_output.defined()) {
-      Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor, grad_output);
-      feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
-    }
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, lossPlaceholder);
-  }
-
-  return loss;
-}
-
-} // namespace BCELoss
 
 static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
   auto* div = [mpsGraph divisionWithPrimaryTensor:divident
@@ -1021,55 +1110,40 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
   return grad_input;
 }
 
-// MSELoss
+// MSELoss: reduction=None uses the `mse` binary kernel; mean/sum use the fused
+// float32 GPU reduction (no MPSGraph -> no per-shape graph cache).
 TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
   std::string op_name = "mse_loss_out_mps";
   using namespace mps;
+  // Empty input: mean is NaN (0/0), sum and none are 0. Matches CPU/CUDA.
   if ((input.numel() == 0) || (target.numel() == 0)) {
     reduction == Reduction::Mean ? output_.fill_(std::numeric_limits<float>::quiet_NaN()) : output_.zero_();
     return;
-  }
-  bool contiguousOutput = !needsGather(output_);
-  Tensor output = output_;
-  if (!contiguousOutput) {
-    output = output_.contiguous();
   }
 
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
   TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
               op_name + ": only defined for floating types");
-  TORCH_CHECK(output.is_mps());
+  TORCH_CHECK(output_.is_mps());
 
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor = nil;
-    MPSGraphTensor* targetTensor = nil;
-    MPSGraphTensor* outputTensor = nil;
-  };
-
-  @autoreleasepool {
-    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target});
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
-
-      MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:newCachedGraph->inputTensor
-                                                          secondaryTensor:newCachedGraph->targetTensor
-                                                                     name:nil];
-      MPSGraphTensor* diffSquareTensor = [mpsGraph squareWithTensor:diffTensor name:nil];
-      newCachedGraph->outputTensor = reduceTensor(diffSquareTensor, reduction, mpsGraph, input.sizes().size());
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, contiguousOutput ? output_ : output);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  if (reduction == Reduction::None) {
+    // (input - target)^2 written straight to the (possibly non-contiguous)
+    // structured output. exec_binary_kernel handles strided/broadcast inputs.
+    binary_op_kernel("mse", input, target, output_);
+    return;
   }
 
-  if (!contiguousOutput) {
-    output_.copy_(output);
-  }
+  // Mean/Sum: fused square-and-reduce in a single GPU pass (no materialized
+  // squared-difference temp). fused_loss_reduce promotes both operands to the
+  // output dtype, the kernel computes (input - target)^2 in float32,
+  // threadgroup-reduces, and (for mean) divides by numel in float32 before
+  // casting to the output dtype.
+  // This matches the fused MPSGraph square+reduce that the materialize-then-
+  // at::sum path regressed against, and keeps the float32 accumulation so
+  // large-N fp16/bf16 does not overflow. output_ is a scalar tensor.
+  FusedLossParams params{};
+  params.reduction = static_cast<uint32_t>(reduction);
+  fused_loss_reduce("mse", input, target, std::nullopt, output_, params);
 }
 
 Tensor& mse_loss_backward_out_mps(const Tensor& grad_output,
@@ -1091,7 +1165,7 @@ Tensor& binary_cross_entropy_out_mps(const Tensor& input,
                                      const std::optional<Tensor>& weight_opt,
                                      int64_t reduction,
                                      Tensor& loss) {
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
+  return mps::bce_loss_native(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
 }
 
 Tensor binary_cross_entropy_mps(const Tensor& input,
@@ -1099,7 +1173,7 @@ Tensor binary_cross_entropy_mps(const Tensor& input,
                                 const std::optional<Tensor>& weight_opt,
                                 int64_t reduction) {
   Tensor loss = at::empty_like(input);
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
+  return mps::bce_loss_native(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
 }
 
 Tensor& binary_cross_entropy_backward_out_mps(const Tensor& grad_output,
@@ -1108,7 +1182,7 @@ Tensor& binary_cross_entropy_backward_out_mps(const Tensor& grad_output,
                                               const std::optional<Tensor>& weight_opt,
                                               int64_t reduction,
                                               Tensor& grad_input) {
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
+  return mps::bce_loss_native(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
 }
 
 Tensor binary_cross_entropy_backward_mps(const Tensor& grad_output,
@@ -1117,7 +1191,7 @@ Tensor binary_cross_entropy_backward_mps(const Tensor& grad_output,
                                          const std::optional<Tensor>& weight_opt,
                                          int64_t reduction) {
   Tensor grad_input = at::empty_like(input);
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
+  return mps::bce_loss_native(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
 }
 
 // SmoothL1Loss
