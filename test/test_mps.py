@@ -16202,7 +16202,48 @@ class TestMetalLibrary(TestCaseMPS):
                 out1[idx] = rc.second;
             }}
 
+            kernel void do_threadgroup_max(device {DTYPE_TO_METAL[dtype]}* out,
+                                           constant {DTYPE_TO_METAL[dtype]}* inp,
+                                           constant uint& size [[buffer(2)]],
+                                           uint tid [[thread_position_in_threadgroup]]) {{
+                threadgroup {DTYPE_TO_METAL[dtype]} data[32];
+                if (tid < 32) {{
+                    data[tid] = static_cast<{DTYPE_TO_METAL[dtype]}>(0);
+                }}
+                ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+                {DTYPE_TO_METAL[dtype]} val =
+                    tid < size ? inp[tid] : c10::metal::max_identity<{DTYPE_TO_METAL[dtype]}>();
+                auto rc = c10::metal::threadgroup_max(data, val, tid, size);
+                if (tid == 0) {{
+                    out[0] = rc;
+                }}
+            }}
+
+            kernel void do_threadgroup_min(device {DTYPE_TO_METAL[dtype]}* out,
+                                           constant {DTYPE_TO_METAL[dtype]}* inp,
+                                           constant uint& size [[buffer(2)]],
+                                           uint tid [[thread_position_in_threadgroup]]) {{
+                threadgroup {DTYPE_TO_METAL[dtype]} data[32];
+                if (tid < 32) {{
+                    data[tid] = static_cast<{DTYPE_TO_METAL[dtype]}>(0);
+                }}
+                ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+                {DTYPE_TO_METAL[dtype]} val =
+                    tid < size ? inp[tid] : c10::metal::min_identity<{DTYPE_TO_METAL[dtype]}>();
+                auto rc = c10::metal::threadgroup_min(data, val, tid, size);
+                if (tid == 0) {{
+                    out[0] = rc;
+                }}
+            }}
         """)
+
+        def check_threadgroup_reduce(kernel, x_cpu, expected):
+            x = x_cpu.to("mps")
+            out = torch.empty(1, device="mps", dtype=dtype)
+            group_size = ((x.numel() + 31) // 32) * 32
+            kernel(out, x, x.numel(), threads=(group_size,), group_size=(group_size,))
+            self.assertEqual(out.cpu()[0], expected)
+
         x = torch.testing.make_tensor(28, device="mps", dtype=dtype)
         y = torch.empty_like(x)
         z0 = torch.empty_like(x)
@@ -16218,6 +16259,20 @@ class TestMetalLibrary(TestCaseMPS):
                         f"results are {z0}, but all elements should have been {x_max.item()}")
         self.assertTrue((z1 == x_max_idx).all().item(),
                         f"results are {z1}, but all elements should have been {x_max_idx.item()}")
+        for n in [17, 33, 64, 1000]:
+            if dtype.is_floating_point:
+                neg_inf = torch.full((n,), -float("inf"), dtype=dtype)
+                pos_inf = torch.full((n,), float("inf"), dtype=dtype)
+                check_threadgroup_reduce(lib.do_threadgroup_max, neg_inf, torch.amax(neg_inf))
+                check_threadgroup_reduce(lib.do_threadgroup_min, pos_inf, torch.amin(pos_inf))
+            else:
+                neg = -torch.arange(1, n + 1, dtype=dtype)
+                pos = torch.arange(1, n + 1, dtype=dtype)
+                check_threadgroup_reduce(lib.do_threadgroup_max, neg, torch.amax(neg))
+                check_threadgroup_reduce(lib.do_threadgroup_min, pos, torch.amin(pos))
+                check_threadgroup_reduce(lib.do_threadgroup_max, pos, torch.amax(pos))
+                check_threadgroup_reduce(lib.do_threadgroup_min, neg, torch.amin(neg))
+
         # Test nan propagation
         if not dtype.is_floating_point:
             return

@@ -208,6 +208,24 @@ inline c10::metal::pair<ARG_T, IDX_T> simd_argmax(ARG_T val, IDX_T idx_val) {
   return {rc.first, simd_broadcast(idx_val, rc.second)};
 }
 
+template <typename T>
+inline constexpr T max_identity() {
+  if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+    return T(-INFINITY);
+  } else {
+    return ::metal::numeric_limits<T>::lowest();
+  }
+}
+
+template <typename T>
+inline constexpr T min_identity() {
+  if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
+    return T(INFINITY);
+  } else {
+    return ::metal::numeric_limits<T>::max();
+  }
+}
+
 // Below algorithms are  written with hardcoded assumption that simdgroup is 32
 // and threadgroup_max is 1024, i.e. reduction can be done in two stages max
 template <typename T>
@@ -293,11 +311,13 @@ T threadgroup_max(threadgroup T* data, T val, unsigned idx, unsigned size) {
   }
   if (size > simdgroup_size) {
     ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
-      auto rc1 = simd_max(data[idx]);
-      if (idx == 0) {
-        data[0] = rc1;
-      }
+    const unsigned n_sg = (size + simdgroup_size - 1) / simdgroup_size;
+    // All lanes must call simd_max (it is simd-wide); pad out-of-range slots
+    // with the op identity so inactive in-range lanes cannot inject undefined
+    // 0 into the emulated long reduction.
+    auto rc1 = simd_max(idx < n_sg ? data[idx] : max_identity<T>());
+    if (idx == 0) {
+      data[0] = rc1;
     }
   }
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
@@ -312,11 +332,13 @@ T threadgroup_min(threadgroup T* data, T val, unsigned idx, unsigned size) {
   }
   if (size > simdgroup_size) {
     ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
-      auto rc1 = simd_min(data[idx]);
-      if (idx == 0) {
-        data[0] = rc1;
-      }
+    const unsigned n_sg = (size + simdgroup_size - 1) / simdgroup_size;
+    // All lanes must call simd_min (it is simd-wide); pad out-of-range slots
+    // with the op identity so inactive in-range lanes cannot inject undefined
+    // 0 into the emulated long reduction.
+    auto rc1 = simd_min(idx < n_sg ? data[idx] : min_identity<T>());
+    if (idx == 0) {
+      data[0] = rc1;
     }
   }
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
@@ -425,11 +447,7 @@ IDX_T threadgroup_argmin(
 template <typename T>
 struct MaxOp {
   static inline constexpr T identity() {
-    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
-      return T(-INFINITY);
-    } else {
-      return ::metal::numeric_limits<T>::lowest();
-    }
+    return max_identity<T>();
   }
 
   // Strict "should-replace" predicate: returns true iff cand strictly beats
@@ -463,11 +481,7 @@ struct MaxOp {
 template <typename T>
 struct MinOp {
   static inline constexpr T identity() {
-    if IF_CONSTEXPR (::metal::is_floating_point_v<T>) {
-      return T(INFINITY);
-    } else {
-      return ::metal::numeric_limits<T>::max();
-    }
+    return min_identity<T>();
   }
 
   static inline bool replace(T cand, T cur) {
