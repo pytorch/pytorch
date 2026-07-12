@@ -576,10 +576,12 @@ class TestScheduler(TestCase):
             self.assertEqual(
                 reference_flops,
                 counters["inductor"]["flop_count"],
-                msg=f"op = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
+                msg=lambda msg: f"{msg}\nop = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
             )
             if op != torch.add:
-                self.assertNotEqual(reference_flops, 0, msg=f"op = {op} is 0 flops")
+                self.assertNotEqual(
+                    reference_flops, 0, msg=lambda msg: f"{msg}\nop = {op} is 0 flops"
+                )
             counters["inductor"]["flop_count"] = 0
         torch._logging.set_logs()
 
@@ -807,6 +809,115 @@ class TestScheduler(TestCase):
             torch.allclose(expected, result),
             msg=f"Fusion bug detected! Expected {expected}, got {result}",
         )
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_expand_reuse_does_not_realize_before_reduction(self):
+        def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
+            input1_selected = torch.index_select(input1, 2, icrd1)
+            input2_selected = torch.index_select(input2, 2, icrd2)
+            weight_selected = torch.index_select(weight, 3, wcrd)
+
+            input1_expanded = input1_selected.view(B, U, 1, 1, -1)
+            input2_expanded = input2_selected.view(B, 1, V, 1, -1)
+            weight_expanded = weight_selected.view(1, U, V, W, -1)
+            meta_expanded = meta.view(1, 1, 1, 1, -1)
+
+            product = (
+                meta_expanded * input1_expanded * input2_expanded * weight_expanded
+            )
+            product = torch.sum(product, dim=(1, 2))
+            output.index_add_(2, ocrd, product)
+            return output
+
+        P = 20
+        M = 10
+        B = 10
+        L = 23
+        U = 4
+        V = 4
+        W = 4
+        device = "cuda"
+
+        torch.manual_seed(0)
+        input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
+        input2 = torch.rand((B, V, L), dtype=torch.float32, device=device)
+        weight = torch.rand((U, V, W, M), dtype=torch.float32, device=device)
+        output = torch.zeros((B, W, L), dtype=torch.float32, device=device)
+        meta = torch.rand((P,), dtype=torch.float32, device=device)
+        icrd1 = torch.randint(L, (P,), device=device)
+        icrd2 = torch.randint(L, (P,), device=device)
+        wcrd = torch.randint(M, (P,), device=device)
+        ocrd = torch.arange(P, device=device)
+
+        expected = fn(
+            icrd1,
+            icrd2,
+            wcrd,
+            ocrd,
+            meta,
+            input1,
+            input2,
+            weight,
+            output.clone(),
+        )
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(
+                icrd1,
+                icrd2,
+                wcrd,
+                ocrd,
+                meta,
+                input1,
+                input2,
+                weight,
+                output.clone(),
+            )
+
+        self.assertTrue(torch.allclose(expected, actual, atol=1e-4, rtol=1e-4))
+        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_expand_reuse_realizes_in_deterministic_mode(self):
+        def fn(a, b, c, d, e):
+            x = a * b * c * d * e
+            y = x.view(8, 8, 1).expand(8, 8, 16)
+            return y.sum(dim=1)
+
+        def check_realizes():
+            torch._dynamo.reset()
+            metrics.reset()
+            with fresh_inductor_cache():
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(*args)
+
+            self.assertTrue(torch.allclose(expected, actual, atol=1e-4, rtol=1e-4))
+            self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+            self.assertEqual(metrics.generated_kernel_count, 2)
+
+        device = "cuda"
+        torch.manual_seed(0)
+        args = [
+            torch.rand((8, 8), dtype=torch.float32, device=device) for _ in range(5)
+        ]
+        expected = fn(*args)
+
+        prev_deterministic = torch.are_deterministic_algorithms_enabled()
+        prev_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        try:
+            check_realizes()
+        finally:
+            torch.use_deterministic_algorithms(
+                prev_deterministic, warn_only=prev_warn_only
+            )
+
+        with inductor_config.patch(deterministic=True):
+            check_realizes()
 
 
 class TestScoreFusionMemory(TestCase):

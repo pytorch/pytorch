@@ -119,11 +119,27 @@ if(USE_ASAN OR USE_LSAN OR USE_TSAN)
   if(USE_ASAN)
     if(TARGET Sanitizer::address)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::address)
+      # torch_hip needs the sanitizer linked so HIP-side TUs participate
+      # in the libstdc++ container annotations propagated via
+      # Sanitizer::address (see cmake/Modules/FindSanitizer.cmake).
+      if(USE_ROCM)
+        list(APPEND Caffe2_HIP_DEPENDENCY_LIBS Sanitizer::address)
+        # Disable jiterator under ROCm + ASAN: jiterator JITs kernels
+        # through hiprtc and we haven't set up an ASAN-aware hiprtc
+        # runtime. Read by the AT_USE_JITERATOR() gate in
+        # aten/src/ATen/jit_macros.h.
+        add_definitions(-DAT_DISABLE_JITERATOR)
+      endif()
     else()
       message(WARNING "ASAN not found. Suppress this warning with -DUSE_ASAN=OFF.")
       caffe2_update_option(USE_ASAN OFF)
     endif()
-    if(TARGET Sanitizer::undefined)
+    # UBSan (-fsanitize=undefined) combined with ASAN on ROCm Clang
+    # causes ASAN global metadata to reference unaligned original
+    # globals instead of aligned __sanitized_padded_global copies,
+    # triggering an unconditional alignment check abort in the ASAN
+    # runtime. Skip UBSan under USE_ROCM until that interaction is fixed.
+    if(TARGET Sanitizer::undefined AND NOT USE_ROCM)
       list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::undefined)
     endif()
   endif()
@@ -485,7 +501,6 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
-  list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
 
 
@@ -796,11 +811,12 @@ endif()
 set(EIGEN_MPL2_ONLY 1)
 if(USE_SYSTEM_EIGEN_INSTALL)
   find_package(Eigen3)
-  if(EIGEN3_FOUND)
-    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+  if(Eigen3_FOUND)
+    get_target_property(EIGEN3_INCLUDE_DIR Eigen3::Eigen INTERFACE_INCLUDE_DIRECTORIES)
+    message(STATUS "Found system Eigen ${Eigen3_VERSION} at ${EIGEN3_INCLUDE_DIR}")
   else()
     message(STATUS "Did not find system Eigen. Using third party subdirectory.")
-    execute_process(COMMAND ${Python_EXECUTABLE} ../tools/optional_modules.py checkout_eigen
+    execute_process(COMMAND ${Python_EXECUTABLE} ../tools/optional_submodules.py checkout_eigen
                     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
 
     set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
@@ -1027,6 +1043,13 @@ if(USE_ROCM)
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
+    # add_definitions(-DAT_DISABLE_JITERATOR) above doesn't reliably
+    # propagate to HIP TUs; mirror the pattern used for USE_ROCM and
+    # add it explicitly so the AT_USE_JITERATOR() gate in
+    # aten/src/ATen/jit_macros.h fires under hipified .cu/.cuh TUs.
+    if(USE_ASAN)
+      list(APPEND HIP_CXX_FLAGS -DAT_DISABLE_JITERATOR)
+    endif()
     # CMAKE_HIP_FLAGS: flags passed to the HIP compiler for device code.
     # Architecture is handled by CMAKE_HIP_ARCHITECTURES (set in LoadHIP.cmake).
     string(APPEND CMAKE_HIP_FLAGS " --offload-compress -std=c++20")
@@ -1133,6 +1156,16 @@ if(USE_NCCL)
     include(${CMAKE_CURRENT_LIST_DIR}/External/rccl.cmake)
     list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl)
   endif()
+endif()
+
+# ---[ NCCL EP
+# Defines the __caffe2_nccl_ep interface target (libnccl_ep.so + headers). It is
+# NOT added to Caffe2_CUDA_DEPENDENCY_LIBS: the EP code lives in its own optional
+# extension (torch._nccl_ep, see torch/CMakeLists.txt), which links it, so
+# libtorch_cuda does not depend on libnccl_ep and torch imports without nccl4py.
+if(USE_NCCL_EP)
+  message(STATUS "USE_NCCL_EP is ON")
+  include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
 endif()
 
 # ---[ XCCL

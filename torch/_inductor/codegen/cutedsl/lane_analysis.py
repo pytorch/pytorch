@@ -83,7 +83,8 @@ def aligned_contiguous_width(
     lane_contiguity=None,
 ) -> int | None:
     """Return the largest aligned power-of-two contiguous lane width."""
-    assert max_width >= 2 and max_width.bit_count() == 1
+    if not (max_width >= 2 and max_width.bit_count() == 1):
+        raise AssertionError(f"max_width must be a power of two >= 2, got {max_width}")
     if lane_contiguity is None:
         lane_contiguity = V.graph.sizevars.analyze_lane_contiguity(expr, lane_var)
     start_expr = lane_group_start(expr, lane_var)

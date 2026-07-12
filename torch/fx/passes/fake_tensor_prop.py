@@ -86,7 +86,7 @@ class FakeTensorProp(torch.fx.Interpreter):
                 # TODO: How is it possible that we get a non fake tensor?  We
                 # should be running under the mode...
                 return snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
-            elif isinstance(obj, py_sym_types):
+            elif isinstance(obj, (*py_sym_types, int, float, bool)):
                 return obj
             else:
                 return None
@@ -109,5 +109,13 @@ class FakeTensorProp(torch.fx.Interpreter):
         return self.propagate_dont_convert_inputs(*fake_args)
 
     def propagate_dont_convert_inputs(self, *args: object) -> Any:
+        # In-place ops like shallow_copy_data_ can mutate fake_device on
+        # input FakeTensors during propagation. Save and restore so the
+        # caller's inputs are not permanently corrupted.
+        saved_devices = [(a, a.fake_device) for a in args if isinstance(a, FakeTensor)]
         with self._mode:
-            return super().run(*args)
+            try:
+                return super().run(*args)
+            finally:
+                for fake, device in saved_devices:
+                    fake.fake_device = device

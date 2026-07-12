@@ -7,12 +7,13 @@ import functools
 import operator
 import random
 import unittest
+import warnings
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
-    skipIfCrossRef
+    skipIfCrossRef, set_warn_always_context
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
@@ -466,6 +467,66 @@ class TestSparse(TestSparseBase):
             msg = "Sparse invariant checks are implicitly disabled."
             with self.assertWarnsRegex(UserWarning, msg):
                 x = torch.sparse_coo_tensor(indices, values, shape)
+
+    @dtypes(torch.float32)
+    @expectedFailureMPS
+    @skipIfCrossRef
+    def test_no_warn_when_check_invariants_is_explicit(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178274
+        def assert_invariant_warning(fn, check):
+            with torch.sparse.check_sparse_tensor_invariants(None), \
+                    set_warn_always_context(True):
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
+                    fn()
+                    invariant_warnings = [
+                        x for x in w if "implicitly disabled" in str(x.message)
+                    ]
+                    if check is None:
+                        self.assertNotEqual(len(invariant_warnings), 0)
+                    else:
+                        self.assertEqual(len(invariant_warnings), 0)
+
+        for check in [True, False, None]:
+            assert_invariant_warning(
+                lambda: torch.sparse_coo_tensor(
+                    torch.tensor([[0, 1], [2, 0]], device=device),
+                    torch.tensor([1, 2], dtype=dtype, device=device),
+                    check_invariants=check,
+                ), check
+            )
+            assert_invariant_warning(
+                lambda: torch.sparse_coo_tensor(
+                    torch.tensor([[0, 1], [2, 0]], device=device),
+                    torch.tensor([1, 2], dtype=dtype, device=device),
+                    (3, 3),
+                    check_invariants=check,
+                ), check
+            )
+            assert_invariant_warning(
+                lambda: torch.sparse_coo_tensor(
+                    (3, 3),
+                    device=device,
+                    check_invariants=check,
+                ), check
+            )
+            assert_invariant_warning(
+                lambda: torch.sparse_csr_tensor(
+                    torch.tensor([0, 2, 4], dtype=torch.int64, device=device),
+                    torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device),
+                    torch.tensor([1, 2, 3, 4], dtype=dtype, device=device),
+                    (2, 2),
+                    check_invariants=check,
+                ), check
+            )
+            assert_invariant_warning(
+                lambda: torch.sparse_csc_tensor(
+                    torch.tensor([0, 2, 4], dtype=torch.int64, device=device),
+                    torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device),
+                    torch.tensor([1, 2, 3, 4], dtype=dtype, device=device),
+                    check_invariants=check,
+                ), check
+            )
 
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
@@ -4226,7 +4287,7 @@ class TestSparse(TestSparseBase):
                 ex_layout = layout
             out_dense = out.to_dense()
             self.assertTrue(out.layout == ex_layout, f"Output layout {out.layout} expected {ex_layout}")
-            self.assertEqual(out_dense, ref_out, f"Result:\n{out_dense} does not match reference:\n{ref_out}")
+            self.assertEqual(out_dense, ref_out, lambda msg: f"{msg}\nResult:\n{out_dense} does not match reference:\n{ref_out}")
 
         def check_invalid(args, error):
             with self.assertRaisesRegex(RuntimeError, error):
@@ -5776,7 +5837,10 @@ class TestSparseAny(TestCase):
             self.assertEqual(res.shape, xs.shape + (2,))
             self.assertEqual(res._values()[..., 0], xs._values().real)
             self.assertEqual(res._values()[..., 1], xs._values().imag)
-            if not (dtype is torch.complex32 and torch.device(device).type == "cpu"):
+            if not (
+                dtype in (torch.complex32, torch.bcomplex32)
+                and torch.device(device).type == "cpu"
+            ):
                 # ComplexHalf to_dense() is not supported on CPU.
                 self.assertEqual(res.to_dense(), torch.view_as_real(xs.to_dense()))
             self.assertEqual(torch.view_as_complex(torch.view_as_real(xs)), xs)

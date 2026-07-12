@@ -24,7 +24,6 @@ from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
-from .functional_utils import has_same_metadata
 from .schemas import (
     AOTConfig,
     BackwardSignature,
@@ -39,37 +38,6 @@ from .utils import strict_zip
 
 
 zip = strict_zip
-
-
-def remap_backward_output_order(
-    backward_output_order: list[int] | None,
-    keep_arg_mask: list[bool],
-    add_dupe_map: list[int],
-) -> list[int] | None:
-    if backward_output_order is None:
-        return None
-    if len(backward_output_order) != len(add_dupe_map):
-        raise AssertionError(
-            "expected len(backward_output_order) == "
-            f"{len(add_dupe_map)}, got {len(backward_output_order)}"
-        )
-
-    num_inputs = sum(keep_arg_mask)
-    remapped: list[int] = []
-    seen: set[int] = set()
-    for input_idx in backward_output_order:
-        deduped_idx = add_dupe_map[input_idx]
-        if deduped_idx in seen:
-            continue
-        seen.add(deduped_idx)
-        remapped.append(deduped_idx)
-
-    if len(remapped) != num_inputs:
-        raise AssertionError(
-            f"expected len(remapped) == {num_inputs}, got {len(remapped)}"
-        )
-
-    return None if remapped == list(range(num_inputs)) else remapped
 
 
 def remove_dupe_metadata(
@@ -141,9 +109,9 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
-        backward_output_order=remap_backward_output_order(
-            m.backward_output_order, keep_arg_mask, add_dupe_map
-        ),
+        # The backward graph is traced after duplicate inputs are removed, so
+        # this order is computed later directly over the deduped input metadata.
+        backward_output_order=None,
     )
 
 
@@ -229,6 +197,11 @@ def create_synthetic_base_metadata(
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutates_storage_metadata
             ),
+            mutation_is_shallow_copy_data=(
+                False
+                if len(outer_indices) > 1
+                else m.input_info[outer_indices[0]].mutation_is_shallow_copy_data
+            ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
@@ -278,24 +251,14 @@ def create_synthetic_base_metadata(
                 else synthetic_base_info_for_output[0]  # type: ignore[index]
             )
         )
-        is_input_replaced_by_synthetic_base_view = (
-            o.base_idx is not None
-            and new_base_idx is not None
-            and isinstance(synthetic_base_info_for_output, tuple)
-            and (
-                outer_args[o.base_idx]._base is not None
-                or not has_same_metadata(
-                    outer_args[o.base_idx], inner_args[new_base_idx]
-                )
-            )
+        # If the original input was merged into a synthetic base, then an
+        # output that was literally that input is now a view of the base.
+        input_merged = o.base_idx is not None and isinstance(
+            synthetic_base_info[o.base_idx], tuple
         )
-        # If OutputType.is_input is remapped to another base, including a
-        # synthetic base replacing the original input view, the output must be
-        # regenerated as an alias of that base.
         new_output_type = (
             OutputType.alias_of_input
-            if o.output_type == OutputType.is_input
-            and (o.base_idx != new_base_idx or is_input_replaced_by_synthetic_base_view)
+            if o.output_type == OutputType.is_input and input_merged
             else o.output_type
         )
         existing_output_infos.append(

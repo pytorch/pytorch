@@ -487,6 +487,8 @@ class _SingleLevelFunction(
     """
     boxed_grads_call = False
 
+    _backward_next_edges_order = None
+
     @staticmethod
     def jvp(ctx: Any, *grad_inputs: Any) -> Any:
         r"""Define a formula for differentiating the operation with forward mode automatic differentiation.

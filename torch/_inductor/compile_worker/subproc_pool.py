@@ -9,12 +9,14 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import typing
 from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum, IntEnum
+from pathlib import Path
 from typing import Any, IO, TypeVar
 from typing_extensions import Never, ParamSpec
 
@@ -438,14 +440,16 @@ class SubprocMain:
             except Exception as e:
                 log.exception("Error in subprocess")
                 result = self.pickler.dumps(e)
-            assert isinstance(result, bytes)
+            if not isinstance(result, bytes):
+                raise AssertionError(f"Expected bytes result, got {type(result)}")
             with self.write_lock:
                 if self.running:
                     _send_msg(self.write_pipe, MsgHeader.JOB, job_id, result)
             return
 
         self._start_pool()
-        assert self.pool is not None
+        if self.pool is None:
+            raise AssertionError("pool must be initialized before submitting jobs")
 
         future = self.pool.submit(
             functools.partial(SubprocMain.do_job, self.pickler, data)
@@ -540,3 +544,11 @@ class TestException(RuntimeError):
 
 def raise_testexc() -> Never:
     raise TestException
+
+
+def _test_signal_then_sleep(signal_path: str, seconds: float) -> None:
+    # Test helper: announce that this worker has begun executing by creating
+    # signal_path, then block. Lets a test wait until a job is actually running
+    # in a worker before acting on the pool (e.g. shutting it down).
+    Path(signal_path).touch()
+    time.sleep(seconds)

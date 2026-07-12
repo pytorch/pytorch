@@ -35,6 +35,7 @@ __all__ = [
     "wrap_top_frame",
     "reorderable_logging_functions",
     "force_disable_caches",
+    "compile_on_one_rank",
 ]
 
 
@@ -106,6 +107,19 @@ force_disable_caches: bool = Config(
 Force disables all caching -- This will take precedence over and override any other caching flag
 """
 
+compile_on_one_rank: bool = Config(
+    default=False,
+    env_name_default=[
+        "TORCH_COMPILE_ON_ONE_RANK",
+        "TORCH_DISTRIBUTED_COMPILE_ON_ONE_RANK",
+    ],
+)
+"""
+When enabled, device- and rank-specific values (devices, process groups) are computed at
+runtime via custom ops rather than baked in at compile time, so a graph can be compiled on
+one rank and run on all ranks. Read across the stack: make_fx, inductor, and distributed.
+"""
+
 dynamic_sources: str = Config(
     env_name_default="TORCH_COMPILE_DYNAMIC_SOURCES", default=""
 )
@@ -134,6 +148,34 @@ The ``:N`` suffix is ignored for non-tensor (int/scalar) sources, which have no 
 
 Entries in this list are dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
 and force_parameter_static_shapes.
+"""
+
+dynamic_values: str = Config(
+    env_name_default="TORCH_COMPILE_DYNAMIC_VALUES", default=""
+)
+"""
+Comma delimited list of integer values that should cause any matching int source or
+tensor dim to be marked dynamic.
+
+This is useful for JIT workflows with graph breaks where you don't know up-front which
+sources need to be dynamic, but you can warm up the model with a distinctive "sentinel"
+value (e.g. an odd batch size like 1111) and have any int or tensor dim that equals one
+of those values be marked dynamic automatically. This is needed because with graph
+breaks we do not propagate dynamic properties through eager code, so an int or tensor
+derived in eager between two compiled regions cannot inherit the dynamic-ness of its
+source — matching on the sentinel value lets us recover it on the next compiled region.
+
+Example::
+
+    TORCH_COMPILE_DYNAMIC_VALUES="1111,2222"
+
+Pick sentinel values unlikely to occur as legitimate shapes/ints in your
+workload (e.g. 1111, 2222) — matching is purely by value, so any int source
+or tensor dim equal to a listed value anywhere in the program will be
+marked dynamic.
+
+unlike ``dynamic_sources``, ``dynamic_values`` does NOT override
+``force_parameter_static_shapes`` or ``force_nn_module_property_static_shapes``.
 """
 
 unbacked_sources: str = Config(

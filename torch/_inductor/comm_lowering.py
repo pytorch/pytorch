@@ -95,7 +95,8 @@ def realize_as_comm_buffer(
     """
     x.realize()
     buffer = _get_data(x)
-    assert isinstance(buffer, ir.Buffer)
+    if not isinstance(buffer, ir.Buffer):
+        raise AssertionError(f"expected an `ir.Buffer`, got {type(buffer)}")
 
     layout = buffer.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
@@ -126,7 +127,10 @@ def _get_data(x: ir.TensorBox) -> ir.IRNode:
     if isinstance(x.data, ir.BaseView):
         # TensorBox -> *View -> StorageBox -> IRNode
         node = x.data.unwrap_view()
-        assert isinstance(node, (ir.BaseView, ir.MutableBox))
+        if not isinstance(node, (ir.BaseView, ir.MutableBox)):
+            raise AssertionError(
+                f"expected an `ir.BaseView` or `ir.MutableBox`, got {type(node)}"
+            )
         return node.data
     elif isinstance(x.data, ir.StorageBox):
         # TensorBox -> StorageBox -> IRNode
@@ -185,7 +189,8 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
 
 def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
     node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
-    assert isinstance(node, ir.IRNode)
+    if not isinstance(node, ir.IRNode):
+        raise AssertionError(f"expected an `ir.IRNode`, got {type(node)}")
     return ir.TensorBox.create(node)
 
 
@@ -421,13 +426,7 @@ def register_comm_lowerings():
         tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
         kernel = c10d.batch_p2p_ops.default
         with V.graph.fake_mode:
-            (
-                example_output,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                unbacked_bindings,
-            ) = ir._CollectiveKernel.process_kernel(
+            result = ir._CollectiveKernel.process_kernel(
                 kernel,
                 op_list,
                 peer_list,
@@ -435,13 +434,18 @@ def register_comm_lowerings():
                 tensors,
                 group_name,
             )
-        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        example_output = result.example_output
+        tensor_args = result.tensor_args
+        non_tensor_args = result.non_tensor_args
+        unflatten_args = result.unflatten_args
+        if result.unbacked_bindings:
+            raise AssertionError(f"{kernel} {result.unbacked_bindings}")
         for op, tensor_arg in zip(op_list, tensor_args):
             tensor_arg.realize()
             if op == "irecv":
                 V.graph.mark_buffer_mutated(tensor_arg.get_name())
 
-        device = tensor_args[0].get_device()
+        device = tensor_args[0].get_device_or_error()
         packed = ir._CollectiveKernel(
             ir.MultiOutputLayout(device=device),
             kernel,

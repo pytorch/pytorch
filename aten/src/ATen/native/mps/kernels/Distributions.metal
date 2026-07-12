@@ -435,6 +435,39 @@ REGISTER_BERNOULLI(long);
 REGISTER_BERNOULLI(float2);
 REGISTER_BERNOULLI(half2);
 
+constant constexpr int BINOMIAL_RANDOMS_STRIDE = 32;
+
+template <typename T>
+kernel void standard_binomial(
+    device T* output [[buffer(0)]],
+    device const T* count_in [[buffer(1)]],
+    device const T* prob_in [[buffer(2)]],
+    constant long2& seed_base_offset [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  float count = static_cast<float>(count_in[tid]);
+  float prob = static_cast<float>(prob_in[tid]);
+  long seed = seed_base_offset.x;
+  long base =
+      seed_base_offset.y + static_cast<long>(tid) * BINOMIAL_RANDOMS_STRIDE;
+  BaseSampler<float, c10::metal::RandSampler> sampler(
+      c10::metal::RandSampler(seed, base));
+  output[tid] = static_cast<T>(
+      sample_binomial<float, float, RandSampler>(count, prob, sampler));
+}
+
+#define REGISTER_BINOMIAL(DTYPE)                      \
+  template [[host_name("standard_binomial_" #DTYPE)]] \
+  kernel void standard_binomial<DTYPE>(               \
+      device DTYPE*,                                  \
+      device const DTYPE*,                            \
+      device const DTYPE*,                            \
+      constant long2&,                                \
+      uint)
+
+REGISTER_BINOMIAL(float);
+REGISTER_BINOMIAL(half);
+REGISTER_BINOMIAL(bfloat);
+
 // Marsaglia & Tsang (2000) acceptance-rejection method for Gamma distribution.
 // Adapted from aten/src/ATen/native/Distributions.h sample_gamma(),
 // which originates from NumPy's random module (Copyright 2005 Robert Kern).
@@ -694,3 +727,120 @@ kernel void dirichlet_grad(
 REGISTER_DIRICHLET_GRAD(float);
 REGISTER_DIRICHLET_GRAD(half);
 REGISTER_DIRICHLET_GRAD(bfloat);
+
+// ============================================================================
+// Poisson Distribution
+// Knuth algorithm for small lambda, Hoermann (1993) PTRD for large lambda.
+// Adapted from aten/src/ATen/native/Distributions.cpp sample_poisson(), which
+// is itself adapted from NumPy's distributions.c.
+//
+// Copyright 2005 Robert Kern (robert.kern@gmail.com)
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+// IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+// CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+// TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+// SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// ============================================================================
+constant constexpr int POISSON_RANDOMS_STRIDE = 32;
+
+inline int sample_poisson_knuth(
+    float lambda,
+    long seed,
+    long base,
+    thread int& rng_idx) {
+  float enlam = ::metal::precise::exp(-lambda);
+  int x = 0;
+  float prod = 1.0f;
+  bool done = false;
+  do {
+    prod *= c10::metal::rand(seed, base + rng_idx++);
+    done = (prod <= enlam);
+    if (!done) {
+      x += 1;
+    }
+  } while (!done);
+  return x;
+}
+
+inline int sample_poisson_hormann(
+    float lambda,
+    long seed,
+    long base,
+    thread int& rng_idx) {
+  float slam = ::metal::precise::sqrt(lambda);
+  float loglam = ::metal::precise::log(lambda);
+  float b = 0.931f + 2.53f * slam;
+  float a = -0.059f + 0.02483f * b;
+  float invalpha = 1.1239f + 1.1328f / (b - 3.4f);
+  float vr = 0.9277f - 3.6224f / (b - 2.0f);
+
+  while (true) {
+    float u = c10::metal::rand(seed, base + rng_idx++) - 0.5f;
+    // v in (0, 1] so log(v) is finite (matches standard_gamma's rand pattern).
+    float v = 1.0f - c10::metal::rand(seed, base + rng_idx++);
+    float us = 0.5f - abs(u);
+    float k = floor((2.0f * a / us + b) * u + lambda + 0.43f);
+
+    if (k < 0.0f)
+      continue;
+    if ((us >= 0.07f) && (v <= vr))
+      return int(k);
+    if ((us < 0.013f) && (v > us))
+      continue;
+
+    if ((::metal::precise::log(v) + ::metal::precise::log(invalpha) -
+         ::metal::precise::log(a / (us * us) + b)) <=
+        (-lambda + k * loglam - c10::metal::log_gamma(k + 1.0f))) {
+      return int(k);
+    }
+  }
+}
+
+template <typename T>
+kernel void poisson_kernel(
+    device T* output [[buffer(0)]],
+    device const T* lambda_in [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  float lambda = static_cast<float>(lambda_in[tid]);
+  long base =
+      seed_base_offset.y + static_cast<long>(tid) * POISSON_RANDOMS_STRIDE;
+  long seed = seed_base_offset.x;
+  int rng_idx = 0;
+
+  // Mirrors CPU sample_poisson() (Distributions.cpp). CPU rejects lambda < 0
+  // via TORCH_CHECK; we can't do that on-device, and NaN / +inf would make
+  // both rejection loops below run forever, so any non-finite or
+  // non-positive lambda short-circuits to 0.
+  int result = 0;
+  if (lambda > 0.0f && isfinite(lambda)) {
+    result = lambda < 10.0f
+        ? sample_poisson_knuth(lambda, seed, base, rng_idx)
+        : sample_poisson_hormann(lambda, seed, base, rng_idx);
+  }
+
+  output[tid] = static_cast<T>(result);
+}
+
+#define REGISTER_POISSON(DTYPE)             \
+  template [[host_name("poisson_" #DTYPE)]] \
+  kernel void poisson_kernel<DTYPE>(        \
+      device DTYPE*, device const DTYPE*, constant long2&, uint)
+
+REGISTER_POISSON(float);
+REGISTER_POISSON(half);
+REGISTER_POISSON(bfloat);
