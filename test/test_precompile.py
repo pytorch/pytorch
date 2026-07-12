@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -41,6 +42,10 @@ _pytree.register_pytree_node(
 )
 
 
+# precompile drives make_fx internally, which cannot symbolically trace a
+# dynamo-optimized function; the whole suite is therefore incompatible with
+# PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
+@skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
     def test_decompositions_kwarg(self):
@@ -1584,6 +1589,7 @@ class TestPrecompile(TestCase):
             self.assertEqual(p.grad, rp.grad, n)
 
 
+@skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
