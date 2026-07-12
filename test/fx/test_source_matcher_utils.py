@@ -540,6 +540,7 @@ class TestSourceMatcher(JitTestCase):
         Verifies that get_source_partitions() returns input_nodes, output_nodes,
         and params in deterministic order (sorted by graph position).
         """
+
         # Create a model where a single linear takes input from multiple sources
         # and produces outputs consumed by multiple downstream nodes.
         # This ensures multiple input_nodes, output_nodes, and params per partition.
