@@ -67,6 +67,38 @@ std::string TURN_OFF_COMPILED_AUTOGRAD_MSG() {
   return std::string(_TURN_OFF_COMPILED_AUTOGRAD_MSG);
 }
 
+template <typename Fn>
+void for_each_next_edge_index(const Node& node, Fn fn) {
+  const auto output_order = node.next_edges_order();
+  if (output_order.empty()) {
+    for (const auto i : c10::irange(node.next_edges().size())) {
+      fn(i);
+    }
+    return;
+  }
+  TORCH_INTERNAL_ASSERT(output_order.size() == node.next_edges().size());
+  for (const auto i : output_order) {
+    fn(i);
+  }
+}
+
+template <typename Fn>
+void for_each_next_edge_index_for_worklist(const Node& node, Fn fn) {
+  const auto output_order = node.next_edges_order();
+  if (output_order.empty()) {
+    for (const auto i : c10::irange(node.next_edges().size())) {
+      fn(i);
+    }
+    return;
+  }
+  TORCH_INTERNAL_ASSERT(output_order.size() == node.next_edges().size());
+  // Nodes are popped from the back of the worklist, so reverse the push order
+  // to preserve the requested next-edge execution order.
+  for (auto it = output_order.rbegin(); it != output_order.rend(); ++it) {
+    fn(*it);
+  }
+}
+
 } // namespace
 
 // see https://github.com/pytorch/pytorch/pull/34845
@@ -923,6 +955,10 @@ static CacheNode* _compiled_autograd_impl(
       if (node_args.cond(call.needed)) {
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
+        const auto output_order = fn->next_edges_order();
+        if (!output_order.empty()) {
+          node_args.collect(output_order);
+        }
       }
       CacheKey key = node_args.key();
       if (vlogger.has_value() && !compile_reason.has_value()) {
@@ -939,26 +975,27 @@ static CacheNode* _compiled_autograd_impl(
       cache = cache->lookup(key);
     }
 
-    for (const auto& edge : fn->next_edges()) {
+    for_each_next_edge_index_for_worklist(*fn, [&](size_t i) {
+      const auto& edge = fn->next_edge(i);
       if (!edge.is_valid()) {
-        continue;
+        return;
       }
       if (check_exec_info) {
         auto it = graph_task.exec_info_.find(edge.function.get());
         if (it == graph_task.exec_info_.end() || !it->second.should_execute()) {
-          continue;
+          return;
         }
         if (!it->second.needed_) {
           compiler_call.node_calls.lookup(edge.function).needed = false;
         }
       }
       auto it = dependencies.find(edge.function.get());
-      int count = ++visited_dependencies[it->first];
+      int count{++visited_dependencies[it->first]};
       TORCH_INTERNAL_ASSERT(count <= it->second);
       if (count == it->second) {
         worklist.emplace_back(edge.function);
       }
-    }
+    });
     i++;
   }
 
@@ -1121,7 +1158,7 @@ static CacheNode* _compiled_autograd_impl(
         }
         outputs = THPVariable_UnpackList(pyoutputs);
       }
-      for (const auto i : c10::irange(outputs.size())) {
+      for_each_next_edge_index(*call.node, [&](size_t i) {
         auto& output = outputs[i];
         const auto& next = call.node->next_edge(i);
         if (next.is_valid() && output.defined()) {
@@ -1129,7 +1166,7 @@ static CacheNode* _compiled_autograd_impl(
           buffer.buffer[next.input_nr] = call_accumulate(
               py_compiler, buffer.buffer[next.input_nr], output);
         }
-      }
+      });
     }
 
     PyObject* res = check(call_end_capture(py_compiler, state.outputs));
