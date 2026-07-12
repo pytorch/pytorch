@@ -21,7 +21,7 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import FixedLayout
+from torch._inductor.ir import FixedLayout, ShapeAsConstantBuffer
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.runtime.triton_compat import Config as TritonConfig
 from torch._inductor.select_algorithm import (
@@ -33,7 +33,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateKernel,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import is_big_gpu, run_and_get_kernels
+from torch._inductor.utils import is_big_gpu, run_and_get_code, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.testing import FileCheck
@@ -116,6 +116,14 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
                     ),
                     expected,
                 )
+
+    def test_realize_inputs_preserves_shape_constant(self):
+        import sympy
+
+        out = select_algorithm.realize_inputs(sympy.Integer(2048))
+
+        self.assertIsInstance(out, ShapeAsConstantBuffer)
+        self.assertEqual(out.expr, sympy.Integer(2048))
 
 
 class TestSelectAlgorithm(TestCase):
@@ -496,11 +504,15 @@ class TestSelectAlgorithm(TestCase):
             fn = patcher(fn)
 
         # sizes picked so triton autotuning wins
-        fn(
+        _, (code,) = run_and_get_code(
+            fn,
             torch.randn(512, 1024, dtype=torch.float16, device=GPU_TYPE),
             torch.randn(384, 512, dtype=torch.float16, device=GPU_TYPE),
             torch.tensor(12345, device=GPU_TYPE),
         )
+        if GPU_TYPE == "cuda" and not torch.version.hip:
+            self.assertEqual(code.count("triton_helpers.rand4x"), 0)
+            self.assertEqual(code.count("tl.rand("), 1)
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
@@ -1048,7 +1060,7 @@ class TestDtypeViewAutotuning(TestCase):
         self.assertEqual(
             captured_results["example_dtype"],
             torch.float4_e2m1fn_x2,
-            f"benchmark_example_value should preserve float4_e2m1fn_x2 dtype "
+            lambda msg: f"{msg}\nbenchmark_example_value should preserve float4_e2m1fn_x2 dtype "
             f"after unwrapping the view, but got {captured_results['example_dtype']}",
         )
         self.assertEqual(captured_results["example_shape"], (m, k))
@@ -1240,6 +1252,41 @@ class TestTemplateRender(TestCase):
                 raise AssertionError
             FileCheck().check("triton_meta=").check(str(custom_triton_meta)).run(
                 kernels[0]
+            )
+
+    def test_subgraph_nodes_participate_in_template_index_dtype(self):
+        """Covers implicit template buffers that are not explicit arguments."""
+        import sympy
+
+        from torch._inductor import ir
+        from torch._inductor.dependencies import MemoryDep, ReadWrites
+        from torch._inductor.select_algorithm import template_subgraph_index_dtype_nodes
+        from torch._inductor.virtualized import V
+        from torch.utils._ordered_set import OrderedSet
+
+        large_capture = ir.Buffer(
+            name="large_capture",
+            layout=FixedLayout(torch.device("cpu"), torch.float32, [2**31 + 1]),
+        )
+
+        class FakeSubgraph:
+            def get_read_writes(self):
+                return ReadWrites(
+                    reads=OrderedSet(
+                        [MemoryDep("large_capture", sympy.Integer(0), (), ())]
+                    ),
+                    writes=OrderedSet(),
+                    index_exprs=OrderedSet(),
+                )
+
+        class FakeGraph:
+            def try_get_buffer(self, name):
+                return large_capture if name == "large_capture" else None
+
+        with V.set_graph_handler(FakeGraph()):
+            self.assertEqual(
+                template_subgraph_index_dtype_nodes([FakeSubgraph()]),
+                (large_capture,),
             )
 
     @unittest.skipIf(

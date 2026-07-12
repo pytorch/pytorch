@@ -368,10 +368,25 @@ def check_file_for_fixes(
     ]
 
 
+def _default_num_workers() -> int | None:
+    # Forks one process per file batch, so respect MAX_JOBS to cap parallelism.
+    max_jobs = os.environ.get("MAX_JOBS")
+    if max_jobs and max_jobs.isdigit() and int(max_jobs) > 0:
+        return int(max_jobs)
+    return os.cpu_count()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=f"Ruff linter. Linter code: {LINTER_CODE}. Use with RUFF-FIX to auto-fix issues.",
         fromfile_prefix_chars="@",
+    )
+    parser.add_argument(
+        "-j",
+        "--num-workers",
+        type=int,
+        default=None,
+        help="number of parallel workers (defaults to MAX_JOBS or the CPU count)",
     )
     parser.add_argument(
         "--config",
@@ -406,6 +421,7 @@ def main() -> None:
     )
     add_default_options(parser)
     args = parser.parse_args()
+    num_workers = args.num_workers or _default_num_workers()
 
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
@@ -443,7 +459,7 @@ def main() -> None:
 
     files_with_lints = {lint.path for lint in lint_messages if lint.path is not None}
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=num_workers,
         thread_name_prefix="Thread",
     ) as executor:
         futures = {
