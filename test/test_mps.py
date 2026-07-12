@@ -7934,6 +7934,31 @@ class TestMPS(TestCaseMPS):
             self.assertFalse(torch.isnan(x.grad).any(), f"NaN in backward for {dtype}")
             self.assertEqual(x.grad, cpu_xg.grad.to('mps'))
 
+    def test_erfc_tail_accuracy(self):
+        # gh-187806: c10::metal::erfc was 1 - erf(x), 100% relative error past
+        # erf's fp32 saturation (~3.9); compare against float64 over the
+        # fp32-normal output range
+        x = torch.arange(-9.0, 9.0, 2**-10)
+        actual = torch.erfc(x.to('mps')).cpu().double()
+        expected = torch.erfc(x.double())
+        self.assertEqual(actual, expected, rtol=1e-6, atol=0)
+        # specials and the clamped tail (t = min(|x|, 10.5) in the kernel);
+        # erfc rounds to exactly 0/2 in fp32 well before the clamp
+        vals = [0.0, float('inf'), float('-inf'), float('nan'), 10.5, -10.5, 1e30, -1e30]
+        expected_sp = torch.tensor([1.0, 0.0, 2.0, float('nan'), 0.0, 2.0, 0.0, 2.0])
+        actual_sp = torch.erfc(torch.tensor(vals, device='mps')).cpu()
+        self.assertEqual(actual_sp, expected_sp, rtol=0, atol=0)
+
+    def test_igammac_tail_accuracy(self):
+        # igamma.h evaluates 0.5 * erfc(...) on its large-a asymptotic path,
+        # so the erfc rewrite fixes the igammac tail too
+        a = torch.full((2048,), 1200.0)
+        x = torch.linspace(1150.0, 1660.0, 2048)
+        actual = torch.special.gammaincc(a.to('mps'), x.to('mps')).cpu().double()
+        expected = torch.special.gammaincc(a.double(), x.double())
+        rel = ((actual - expected) / expected).abs().max()
+        self.assertLess(rel.item(), 5e-4)
+
     # Test hardtanh
     def test_hardtanh(self):
         def helper(shape, min_val, max_val, inplace=False):
