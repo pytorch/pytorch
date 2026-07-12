@@ -607,6 +607,14 @@ class SymPyValueRangeAnalysis:
     def eq(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
+        if a.is_bool or b.is_bool:
+            if a.is_bool != b.is_bool:
+                return ValueRanges.wrap(sympy.false)
+            if a.is_singleton() and b.is_singleton():
+                return ValueRanges.wrap(
+                    sympy.true if a.lower == b.lower else sympy.false
+                )
+            return ValueRanges(sympy.false, sympy.true)
         if a.is_singleton() and b.is_singleton() and a.lower == b.lower:
             return ValueRanges.wrap(sympy.true)
         elif a.lower > b.upper or b.lower > a.upper:  # ranges disjoint

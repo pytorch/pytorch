@@ -367,6 +367,43 @@ class TestValueRanges(TestCase):
                 else:
                     self.assertEqual(len(unique), 2)
 
+    @parametrize("fn", ("eq", "ne"))
+    def test_bool_compare_ref_range(self, fn):
+        vals = [sympy.false, sympy.true]
+        for a, b in itertools.product(generate_range(vals), repeat=2):
+            with self.subTest(a=a, b=b):
+                ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                unique = set()
+                for a0, b0 in itertools.product(vals, repeat=2):
+                    if a0 not in a or b0 not in b:
+                        continue
+                    with self.subTest(a0=a0, b0=b0):
+                        if fn == "eq":
+                            r = sympy.true if a0 == b0 else sympy.false
+                        else:
+                            r = sympy.true if a0 != b0 else sympy.false
+                        self.assertIn(r, ref_r)
+                        unique.add(r)
+                if ref_r.lower == ref_r.upper:
+                    self.assertEqual(len(unique), 1)
+                else:
+                    self.assertEqual(len(unique), 2)
+
+    def test_bool_compare_non_bool_range(self):
+        for a, b in (
+            (ValueRanges.unknown_bool(), ValueRanges(0, 1)),
+            (ValueRanges(0, 1), ValueRanges.unknown_bool()),
+        ):
+            with self.subTest(a=a, b=b):
+                self.assertEqual(
+                    ValueRangeAnalysis.eq(a, b),
+                    ValueRanges.wrap(sympy.false),
+                )
+                self.assertEqual(
+                    ValueRangeAnalysis.ne(a, b),
+                    ValueRanges.wrap(sympy.true),
+                )
+
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref_range(self, fn):
         # TODO: bring back sympy.oo testing for float unary fns
