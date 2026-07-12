@@ -18,6 +18,12 @@ models on various hardware backends. This module enables:
 
 The backend can be used with torch.compile():
     model = torch.compile(model, backend="tvm")
+
+The scheduler/trials options only apply to the legacy relay frontend
+(removed in TVM 0.20). With the relax frontend, pass a TVM pipeline instead:
+
+    pipeline = tvm.relax.get_pipeline("static_shape_tuning", target="llvm", total_trials=2000)
+    model = torch.compile(model, backend="tvm", options={"pipeline": pipeline})
 """
 
 import functools
@@ -26,6 +32,7 @@ import logging
 import os
 import sys
 import tempfile
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
@@ -93,6 +100,12 @@ def _tvm_relay_compile(
     example_inputs: list[torch.Tensor],
     options: MappingProxyType[str, Any],
 ) -> Callable[..., Any]:
+    warnings.warn(
+        "The tvm backend's relay path is deprecated and will be removed; "
+        "install a recent apache-tvm to use the relax frontend instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
     import tvm  # type: ignore[import]
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
