@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/adaptive_max_pool2d_native.h>
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/avg_pool2d.h>
 #include <ATen/ops/avg_pool2d_backward.h>
@@ -482,6 +483,7 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
   params.dims = dims;
   params.pooling_dims = pooling_dims;
   params.return_indices = return_indices;
+  params.adaptive = false;
 
   for (const auto dim : c10::irange(dims)) {
     params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(input.size(dim));
@@ -508,6 +510,57 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
       [computeEncoder setComputePipelineState:maxPoolPSO];
       mtl_setArgs(
           computeEncoder, input, output, return_indices ? std::optional<Tensor>(indices) : std::nullopt, params);
+
+      mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
+      getMPSProfiler().endProfileKernel(maxPoolPSO);
+    }
+  });
+}
+
+static void adaptive_max_pool_out_mps_template(const Tensor& output,
+                                               const Tensor& indices,
+                                               const Tensor& input,
+                                               const int32_t pooling_dims,
+                                               const std::string& op_name) {
+  const auto dims = static_cast<int32_t>(input.dim());
+
+  PoolingParams<5> params;
+
+  params.dims = dims;
+  params.pooling_dims = pooling_dims;
+  params.return_indices = true;
+  params.adaptive = true;
+
+  for (const auto dim : c10::irange(dims)) {
+    params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(input.size(dim));
+    params.input_strides[dim] = safe_downcast<int32_t, int64_t>(input.stride(dim));
+    params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(output.size(dim));
+    params.output_strides[dim] = safe_downcast<int32_t, int64_t>(output.stride(dim));
+    params.indices_sizes[dim] = safe_downcast<int32_t, int64_t>(indices.size(dim));
+    params.indices_strides[dim] = safe_downcast<int32_t, int64_t>(indices.stride(dim));
+  }
+
+  for (const auto dim : c10::irange(pooling_dims)) {
+    params.kernel_size[dim] = 0;
+    params.stride[dim] = 0;
+    params.padding[dim] = 0;
+    params.dilation[dim] = 1;
+  }
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  const auto numThreads = output.numel();
+  if (numThreads == 0) {
+    return;
+  }
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto maxPoolPSO = lib.getPipelineStateForFunc("max_pool_" + scalarToMetalTypeString(input));
+
+      getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input});
+      [computeEncoder setComputePipelineState:maxPoolPSO];
+      mtl_setArgs(computeEncoder, input, output, indices, params);
 
       mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
       getMPSProfiler().endProfileKernel(maxPoolPSO);
@@ -1061,6 +1114,13 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
                        std::nullopt,
                        pooling_op_block,
                        "max_pool2d_indices_backward");
+}
+
+TORCH_IMPL_FUNC(adaptive_max_pool2d_out_mps)
+(const Tensor& input, IntArrayRef output_size, const Tensor& output, const Tensor& indices) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Adaptive max pooling for complex is not supported for MPS");
+  mps::adaptive_max_pool_out_mps_template(output, indices, input, /*pooling_dims=*/2, "adaptive_max_pool2d");
 }
 
 std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_mps(const Tensor& input,

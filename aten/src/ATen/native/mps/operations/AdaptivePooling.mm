@@ -12,10 +12,8 @@
 #include <ATen/ops/adaptive_avg_pool2d.h>
 #include <ATen/ops/adaptive_avg_pool2d_native.h>
 #include <ATen/ops/adaptive_max_pool2d_backward_native.h>
-#include <ATen/ops/adaptive_max_pool2d_native.h>
 #include <ATen/ops/avg_pool2d.h>
 #include <ATen/ops/avg_pool2d_backward.h>
-#include <ATen/ops/max_pool2d_with_indices.h>
 #include <ATen/ops/max_pool2d_with_indices_backward.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/ones_like.h>
@@ -179,39 +177,6 @@ Tensor adaptive_avg_pool2d_backward_mps(const Tensor& gradOutput, const Tensor& 
 }
 
 // Adaptive max pooling
-TORCH_IMPL_FUNC(adaptive_max_pool2d_out_mps)
-(const Tensor& input, IntArrayRef output_size, const Tensor& output, const Tensor& indices) {
-  for (int64_t i = 1; i < input.ndimension(); i++) {
-    TORCH_CHECK(input.size(i) > 0,
-                "adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
-                "but input has sizes ",
-                input.sizes(),
-                " with dimension ",
-                i,
-                " being "
-                "empty");
-  }
-
-  int64_t isizeH = input.size(-2);
-  int64_t isizeW = input.size(-1);
-  int64_t osizeH = output_size[0];
-  int64_t osizeW = output_size[1];
-
-  int64_t strideH = 0, strideW = 0;
-  int64_t kernel_sizeH = 0, kernel_sizeW = 0;
-
-  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW);
-
-  at::max_pool2d_with_indices_out(const_cast<Tensor&>(output),
-                                  const_cast<Tensor&>(indices),
-                                  input,
-                                  IntArrayRef({kernel_sizeH, kernel_sizeW}),
-                                  IntArrayRef({strideH, strideW}),
-                                  IntArrayRef({0, 0}),
-                                  IntArrayRef({1, 1}),
-                                  false);
-}
-
 TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_mps)
 (const Tensor& gradOutput, const Tensor& input, const Tensor& indices, const Tensor& gradInput) {
   int64_t isizeH = input.size(-2);

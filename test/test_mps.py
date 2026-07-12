@@ -7778,6 +7778,32 @@ class TestMPS(TestCaseMPS):
                 helper((2, 2, 16, 16), (2, 16), return_indices, dtype)
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_adaptive_max_pool2d_non_divisible(self, dtype):
+        def helper(input_shape, out_shape, channels_last=False):
+            cpu_x = torch.randn(input_shape, device='cpu', dtype=dtype)
+            if channels_last:
+                cpu_x = cpu_x.to(memory_format=torch.channels_last)
+            x = cpu_x.detach().clone().to('mps')
+
+            out_cpu, indices_cpu = F.adaptive_max_pool2d(cpu_x, out_shape, return_indices=True)
+            out, indices = F.adaptive_max_pool2d(x, out_shape, return_indices=True)
+
+            self.assertEqual(out, out_cpu)
+            self.assertEqual(indices, indices_cpu)
+
+        helper((2, 3, 7, 7), (4, 4))
+        helper((2, 3, 7, 11), (4, 5))
+        helper((3, 9, 13), (5, 4))
+        helper((2, 3, 7, 7), (4, 4), channels_last=True)
+        helper((2, 3, 4, 4), (7, 7))
+        helper((2, 3, 4, 10), (8, 5))
+        cpu_x = torch.zeros(1, 1, 7, dtype=dtype)
+        cpu_x[0, 0, 4] = 100.0
+        out_cpu = F.adaptive_max_pool1d(cpu_x, 4)
+        out = F.adaptive_max_pool1d(cpu_x.to('mps'), 4)
+        self.assertEqual(out, out_cpu)
+
     def test_gelu_simple(self):
         def helper(shape, dtype=torch.float, contiguous=True):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype)

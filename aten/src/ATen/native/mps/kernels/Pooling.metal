@@ -30,6 +30,20 @@ IterBounds<int32_t> get_input_iter_bounds(
   return IterBounds<int32_t>{start, end};
 }
 
+template <int32_t dim>
+IterBounds<int32_t> get_adaptive_input_iter_bounds(
+    constant int32_t* input_sizes,
+    constant int32_t* output_sizes,
+    thread int32_t (&pooling_dim_indices)[3]) {
+  auto in_size = static_cast<int64_t>(input_sizes[dim]);
+  auto out_size = static_cast<int64_t>(output_sizes[dim]);
+  auto out_idx = static_cast<int64_t>(pooling_dim_indices[dim]);
+  auto start = static_cast<int32_t>((out_idx * in_size) / out_size);
+  auto end =
+      static_cast<int32_t>(((out_idx + 1) * in_size + out_size - 1) / out_size);
+  return IterBounds<int32_t>{start, end};
+}
+
 // Iterates through all the input elements that this kernel needs to
 // apply max to. Specialized for 3 pooling dimensions.
 // TODO: Support any number of pooling dims
@@ -40,18 +54,41 @@ void max_pool_3d_input_iter(
     device int64_t* indices,
     constant int32_t* input_sizes,
     constant int32_t* input_strides,
+    constant int32_t* output_sizes,
     thread int32_t (&pooling_dim_indices)[3],
     constant int32_t* kernel_size,
     constant int32_t* stride,
     constant int32_t* padding,
     constant int32_t* dilation,
-    bool return_indices) {
-  auto bounds0 = get_input_iter_bounds<0>(
-      input_sizes, pooling_dim_indices, kernel_size, stride, padding, dilation);
-  auto bounds1 = get_input_iter_bounds<1>(
-      input_sizes, pooling_dim_indices, kernel_size, stride, padding, dilation);
-  auto bounds2 = get_input_iter_bounds<2>(
-      input_sizes, pooling_dim_indices, kernel_size, stride, padding, dilation);
+    bool return_indices,
+    bool adaptive) {
+  auto bounds0 = adaptive ? get_adaptive_input_iter_bounds<0>(
+                                input_sizes, output_sizes, pooling_dim_indices)
+                          : get_input_iter_bounds<0>(
+                                input_sizes,
+                                pooling_dim_indices,
+                                kernel_size,
+                                stride,
+                                padding,
+                                dilation);
+  auto bounds1 = adaptive ? get_adaptive_input_iter_bounds<1>(
+                                input_sizes, output_sizes, pooling_dim_indices)
+                          : get_input_iter_bounds<1>(
+                                input_sizes,
+                                pooling_dim_indices,
+                                kernel_size,
+                                stride,
+                                padding,
+                                dilation);
+  auto bounds2 = adaptive ? get_adaptive_input_iter_bounds<2>(
+                                input_sizes, output_sizes, pooling_dim_indices)
+                          : get_input_iter_bounds<2>(
+                                input_sizes,
+                                pooling_dim_indices,
+                                kernel_size,
+                                stride,
+                                padding,
+                                dilation);
 
   auto d0 = dilation[0];
   auto d1 = dilation[1];
@@ -97,15 +134,31 @@ void max_pool_2d_input_iter(
     device int64_t* indices,
     constant int32_t* input_sizes,
     constant int32_t* input_strides,
+    constant int32_t* output_sizes,
     thread int32_t (&pooling_dim_indices)[3],
     constant int32_t* kernel_size,
     constant int32_t* stride,
     constant int32_t* padding,
-    constant int32_t* dilation) {
-  auto bounds0 = get_input_iter_bounds<0>(
-      input_sizes, pooling_dim_indices, kernel_size, stride, padding, dilation);
-  auto bounds1 = get_input_iter_bounds<1>(
-      input_sizes, pooling_dim_indices, kernel_size, stride, padding, dilation);
+    constant int32_t* dilation,
+    bool adaptive) {
+  auto bounds0 = adaptive ? get_adaptive_input_iter_bounds<0>(
+                                input_sizes, output_sizes, pooling_dim_indices)
+                          : get_input_iter_bounds<0>(
+                                input_sizes,
+                                pooling_dim_indices,
+                                kernel_size,
+                                stride,
+                                padding,
+                                dilation);
+  auto bounds1 = adaptive ? get_adaptive_input_iter_bounds<1>(
+                                input_sizes, output_sizes, pooling_dim_indices)
+                          : get_input_iter_bounds<1>(
+                                input_sizes,
+                                pooling_dim_indices,
+                                kernel_size,
+                                stride,
+                                padding,
+                                dilation);
 
   auto d0 = dilation[0];
   auto d1 = dilation[1];
@@ -282,11 +335,13 @@ kernel void max_pool(
             indices,
             input_sizes + leading_dims,
             input_strides + leading_dims,
+            output_sizes + leading_dims,
             pooling_dim_indices,
             kernel_size,
             stride,
             padding,
-            dilation);
+            dilation,
+            params.adaptive);
       } else {
         return max_pool_2d_input_iter<T, /*return_indices=*/false>(
             input,
@@ -294,11 +349,13 @@ kernel void max_pool(
             indices,
             input_sizes + leading_dims,
             input_strides + leading_dims,
+            output_sizes + leading_dims,
             pooling_dim_indices,
             kernel_size,
             stride,
             padding,
-            dilation);
+            dilation,
+            params.adaptive);
       }
     case 3:
       return max_pool_3d_input_iter<T>(
@@ -307,12 +364,14 @@ kernel void max_pool(
           indices,
           input_sizes + leading_dims,
           input_strides + leading_dims,
+          output_sizes + leading_dims,
           pooling_dim_indices,
           kernel_size,
           stride,
           padding,
           dilation,
-          return_indices);
+          return_indices,
+          params.adaptive);
   }
 }
 
