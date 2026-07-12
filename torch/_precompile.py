@@ -147,8 +147,11 @@ graph under foreign metadata.
 #    functional. precompile does not own optimizer state; bring your own optimizer and
 #    zero grads as usual.
 #
-# 6. Shapes are static, each input's dtype/device is baked, and the inductor backend also
-#    specializes on input layout. Each dense user-input leaf's dtype and device are
+# 6. Shapes are static (for now), each input's dtype/device is baked, and the inductor
+#    backend also specializes on input layout. The static-shape restriction is temporary:
+#    dynamic-shape support (symbolic sizes that need not be retraced per shape) is planned
+#    in a follow-up later in this stack (see invariant 3). Each dense user-input leaf's
+#    dtype and device are
 #    recorded at capture and checked at runtime (both backends): a dtype- or
 #    device-mismatched input is rejected with a PrecompileError rather than crashing deep
 #    in a kernel or reading a wrong value. The graph is specialized to the example input
