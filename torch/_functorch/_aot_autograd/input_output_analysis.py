@@ -109,6 +109,9 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
+        # The backward graph is traced after duplicate inputs are removed, so
+        # this order is computed later directly over the deduped input metadata.
+        backward_output_order=None,
     )
 
 
