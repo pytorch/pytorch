@@ -17101,7 +17101,9 @@ instantiate_device_type_tests(TestAutogradCUDA, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCUDA, globals(), only_for=("cuda",)
 )
-instantiate_device_type_tests(TestAutogradMultipleDispatch, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(
+    TestAutogradMultipleDispatch, globals(), only_for=("cpu", "cuda")
+)
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None
 )
