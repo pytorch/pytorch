@@ -9791,6 +9791,35 @@ def sample_inputs_channel_shuffle(op_info, device, dtype, requires_grad, **kwarg
         for shape, groups in shapes_groups
     )
 
+
+def error_inputs_channel_shuffle(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # groups must be positive
+    yield ErrorInput(
+        SampleInput(make_arg((1, 4, 2, 2)), args=(0,)),
+        error_regex=r"Number of groups to divide channels in must be positive",
+    )
+
+    # groups must not exceed number of channels (#153231)
+    yield ErrorInput(
+        SampleInput(make_arg((1, 3, 2, 2)), args=(5,)),
+        error_regex=r"Number of groups must not exceed number of channels",
+    )
+
+    # channels must be divisible by groups
+    yield ErrorInput(
+        SampleInput(make_arg((1, 3, 2, 2)), args=(2,)),
+        error_regex=r"Number of channels must be divisible by groups",
+    )
+
+    # input must have > 2 dims
+    yield ErrorInput(
+        SampleInput(make_arg((1, 4)), args=(2,)),
+        error_regex=r"channel_shuffle expects input with > 2 dims",
+    )
+
+
 def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, logits=False, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype)
     # Lower bounds must be greater than 'eps' defined in gradcheck.py::gradgradcheck() -> eps
@@ -23730,6 +23759,7 @@ op_db: list[OpInfo] = [
     OpInfo(
         "nn.functional.channel_shuffle",
         sample_inputs_func=sample_inputs_channel_shuffle,
+        error_inputs_func=error_inputs_channel_shuffle,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,

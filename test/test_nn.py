@@ -5973,6 +5973,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             groups = 2
             torch.native_channel_shuffle(input_tensor, groups)
 
+        # Regression test for #153231: groups > channels used to FPE in the
+        # CPU kernel when channels_per_group became 0.
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of groups must not exceed number of channels.*"):
+            torch.native_channel_shuffle(input_tensor, 5)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of groups must not exceed number of channels.*"):
+            # Adversarial repro from the issue (1 channel, huge groups).
+            torch.native_channel_shuffle(
+                torch.ones([1, 1, 15, 3], dtype=torch.int32), 2615494409475630863)
+
         with self.assertRaisesRegex(RuntimeError,
                                     "channel_shuffle expects input with > 2 dims,.*"):
             input_tensor = torch.rand([1, 2])
@@ -5990,6 +6001,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError,
                                     "Number of channels must be divisible by groups.*"):
             torch.native_channel_shuffle(meta_tensor, 2)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of groups must not exceed number of channels.*"):
+            torch.native_channel_shuffle(meta_tensor, 5)
         with self.assertRaisesRegex(RuntimeError,
                                     "channel_shuffle expects input with > 2 dims,.*"):
             torch.native_channel_shuffle(torch.empty([1, 2], device="meta"), 2)
