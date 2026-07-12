@@ -58,7 +58,7 @@ COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN if [ "${ROCM_VERSION}" != "preview" ]; then bash ./install_rocm_magma.sh ${ROCM_VERSION}; fi
 RUN rm install_rocm_magma.sh
 COPY ./common/install_rocSHMEM.sh install_rocSHMEM.sh
-RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION}
+RUN if [ "${ROCM_VERSION}" != "preview" ]; then bash ./install_rocSHMEM.sh ${ROCM_VERSION}; fi
 RUN rm install_rocSHMEM.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN if [ "${ROCM_VERSION}" != "preview" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
