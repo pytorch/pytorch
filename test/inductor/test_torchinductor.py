@@ -12276,6 +12276,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             subtest(False, name="inductor", decorators=[unittest.expectedFailure]),
         ],
     )
+    @with_tf32_off
     def test_randn_order_preserved(self, fallback_random):
         if self.device == "cpu":
             raise unittest.SkipTest("conv2d randn ordering requires CUDA")
@@ -12300,6 +12301,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(compiled_out, eager_out)
 
     @config.patch(fallback_random=True)
+    @with_tf32_off
     def test_tuple_output_rng_order_preserved(self):
         if self.device == "cpu":
             raise unittest.SkipTest("conv2d randn ordering requires CUDA")
@@ -19520,6 +19522,7 @@ if RUN_GPU:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        @config.patch("triton.coalesce_tiling_analysis", True)
         def test_reduction_hint_inner_with_high_tiling_ratio(self):
             """Test inner reduction hint with high tiling score ratio."""
 
