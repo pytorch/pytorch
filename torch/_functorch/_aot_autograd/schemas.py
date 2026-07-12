@@ -893,7 +893,7 @@ class InductorFwMetadata:
     output_info: list[OutputAliasInfo]
     static_input_indices: list[int]
     num_mutated_inp_runtime_indices: int
-    bw_donated_idxs: list[int] | None
+    bw_donated_idxs: list[int] | None = None
 
     @staticmethod
     def from_view_and_mutation_meta(
