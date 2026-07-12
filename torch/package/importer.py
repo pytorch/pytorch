@@ -246,7 +246,7 @@ class OrderedImporter(Importer):
                     continue
                 return module
             except ModuleNotFoundError as err:
-                last_err = err
+                last_err = err  # noqa: EXCEPTION_TRACEBACK  # re-raised below
 
         if last_err is not None:
             raise last_err

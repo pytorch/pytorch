@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import traceback
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
@@ -90,6 +91,7 @@ def broadcast(
             except Exception as e:
                 success = False
                 exception = e
+                traceback.clear_frames(e.__traceback__)
         else:
             payload = data_or_fn
 
@@ -154,6 +156,7 @@ def all_gather(
         except Exception as e:
             success = False
             exception = e
+            traceback.clear_frames(e.__traceback__)
     else:
         payload = data_or_fn
 

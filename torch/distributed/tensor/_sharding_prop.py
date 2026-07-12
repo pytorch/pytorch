@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import threading
+import traceback
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from functools import lru_cache
@@ -802,6 +803,7 @@ class ShardingPropagator:
                     )
                 except Exception as e:
                     decomp_exception = e
+                    traceback.clear_frames(e.__traceback__)
 
         if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
