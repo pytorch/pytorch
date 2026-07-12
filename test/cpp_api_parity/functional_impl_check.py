@@ -279,7 +279,7 @@ def write_test_to_test_class(
 
         test_fn = decorate_test_fn(
             test_fn=test_fn,
-            test_cuda=test_params_dict.get("test_cuda", True),
+            test_device=test_params_dict.get("test_device", True),
             has_impl_parity=parity_table["torch::nn::functional"][functional_full_name][
                 0
             ]
