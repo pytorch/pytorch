@@ -79,6 +79,16 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     // likely empty.
     if (input.sym_numel() == 0) return false;
 
+#ifdef USE_ROCM
+    // MIOpen has no working RNN kernel for RDNA3 (gfx1100/gfx1101),
+    // causing miopenStatusUnknownError. Fall back to native implementation.
+    // See https://github.com/pytorch/pytorch/issues/189618
+    if (is_miopen_acceptable &&
+        at::detail::getCUDAHooks().isGPUArch({"gfx1100", "gfx1101"})) {
+        return false;
+    }
+#endif
+
     return is_miopen_acceptable;
 }
 
