@@ -1515,7 +1515,7 @@ Tensor narrow_copy_sparse(
   } else {
     /* This means we are narrowing on a dense dim, which is in effect just a
         regular narrow on _values() */
-    new_indices = indices;
+    new_indices = std::move(indices);
     int64_t dense_dim = dim - sparse_dim + 1;
     new_values = self._values().narrow_copy(dense_dim, start, length);
   }

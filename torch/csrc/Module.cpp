@@ -423,8 +423,11 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
+  // NOLINTBEGIN(performance-use-std-move): the extra refcount from copying
+  // (rather than moving) tmp_a/tmp_b is load-bearing, see NB comment above.
   a->cdata = tmp_b;
   b->cdata = tmp_a;
+  // NOLINTEND(performance-use-std-move)
 
   // Fix up the PyObjects associated with each TensorImpl
   a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
