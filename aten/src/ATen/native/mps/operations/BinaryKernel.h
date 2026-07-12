@@ -7,4 +7,10 @@ void binary_op_kernel(
     const Tensor& other,
     const Tensor& output,
     const std::optional<Scalar> alpha = std::nullopt);
+void ternary_op_kernel(
+    const std::string func_name,
+    const Tensor& input,
+    const Tensor& other1,
+    const Tensor& other2,
+    const Tensor& output);
 } // namespace at::native::mps
