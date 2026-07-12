@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 def replace_params_with_constants(
     gm: torch.fx.GraphModule,
     flat_params: list[Any],
-    fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
+    fw_metadata: torch._functorch._aot_autograd.schemas.InductorFwMetadata,
 ) -> list[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
