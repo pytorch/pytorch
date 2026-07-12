@@ -1168,6 +1168,15 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
+# The compile-worker sidecar runs a watchdog that, every N seconds, reports any
+# compile job still running after N seconds back to the parent, which emits it as
+# a structured-trace artifact (viewable in tlparse). This leaves a breadcrumb for
+# a stuck/slow worker that would otherwise wedge silently (the parent just blocks
+# reading the result pipe). Read in the sidecar. 0 disables the watchdog.
+compile_worker_watchdog_interval_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL", 60)
+)
+
 # Log per-operation runtime estimates for TLParse analysis.
 log_tlparse: bool = Config(
     env_name_force="LOG_TLPARSE",
