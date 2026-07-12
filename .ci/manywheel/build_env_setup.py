@@ -159,7 +159,7 @@ XPU_BUILD_ENV: dict[str, str] = {
     "USE_CUDA": "0",
     "USE_STATIC_MKL": "1",
     "USE_ONEMKL": "1",
-    "USE_XCCL": "1",
+    "USE_XCCL": "0",
     "USE_MPI": "0",
     "INSTALL_TEST": "0",
 }
