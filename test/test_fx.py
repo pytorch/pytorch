@@ -843,6 +843,31 @@ class TestFX(JitTestCase):
                     f"Expected 'test_fx.py' in node.stack_trace, got {node.stack_trace}"
                 )
 
+    def test_stack_traces_with_non_module_callable(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/130861.
+        Verifies that record_stack_traces still captures stack information when
+        tracing a callable (e.g. a plain function) without an "forward" frame.
+        """
+        def my_fn(x):
+            return torch.relu(x)
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        graph = tracer.trace(my_fn)
+        gm = GraphModule(tracer.root, graph)
+
+        for node in gm.graph.nodes:
+            if node.op in {"placeholder", "output"}:
+                continue
+            self.assertTrue(
+                node.stack_trace is not None,
+                f"Expected non-None stack_trace for node {node.name}, "
+                f"got None when tracing non-module callable",
+            )
+
+
     def test_node_pickle_type_preservation(self):
         g = Graph()
         n = g.placeholder("x")
