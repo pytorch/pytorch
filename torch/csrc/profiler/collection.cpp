@@ -1375,7 +1375,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     stacks.erase(start_tid);
     auto new_frame = event->parent_.lock();
     if (new_frame != nullptr) {
-      stacks[start_tid] = new_frame;
+      stacks[start_tid] = std::move(new_frame);
     }
   };
 
