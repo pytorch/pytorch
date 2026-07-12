@@ -27,6 +27,7 @@ from typing_extensions import Never, ParamSpec
 import torch._thread_safe_fork  # noqa: F401
 from torch._inductor import config
 from torch._inductor.codecache import torch_key
+from torch._inductor.compile_worker import watchdog
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.compile_worker.tracked_process_pool import (
     TrackedProcessPoolExecutor,
@@ -556,6 +557,10 @@ class SubprocMain:
         self._watchdog_stop = threading.Event()
 
     def main(self) -> None:
+        # Phase heartbeats rely on fork inheritance of the shared buffer; spawn
+        # workers get no buffer and degrade to duration-only reporting.
+        if self.kind == SubprocKind.FORK:
+            watchdog.create(self.nprocs)
         self._start_watchdog()
         while True:
             msg_header, job_id, data = _recv_msg(self.read_pipe)
@@ -649,13 +654,16 @@ class SubprocMain:
             raise AssertionError("pool must be initialized before submitting jobs")
 
         future = self.pool.submit(
-            functools.partial(SubprocMain.do_job, self.pickler, data)
+            functools.partial(SubprocMain.do_job, self.pickler, job_id, data)
         )
         future.add_done_callback(callback)
 
     def _start_pool(self) -> None:
         if self.pool is not None:
             return
+
+        # Recycle heartbeat slots before the new worker generation forks.
+        watchdog.reset()
 
         # Only fork workers inherit the sidecar<->parent pipe fds and must close
         # them (see _async_compile_initializer). Under spawn the workers do not
@@ -696,6 +704,8 @@ class SubprocMain:
         # tlparse artifacts). Re-reports each tick with a growing elapsed time.
         while not self._watchdog_stop.wait(interval):
             now = time.monotonic()
+            now_ns = time.monotonic_ns()
+            heartbeats = watchdog.read_heartbeats()
             with self._inflight_lock:
                 slow = [
                     (job_id, elapsed)
@@ -703,10 +713,33 @@ class SubprocMain:
                     if (elapsed := now - start) >= interval
                 ]
             for job_id, elapsed in slow:
-                self._report_status(job_id, elapsed)
+                self._report_status(job_id, elapsed, heartbeats.get(job_id), now_ns)
 
-    def _report_status(self, job_id: int, elapsed: float) -> None:
-        payload = self.pickler.dumps({"job_id": job_id, "elapsed_s": round(elapsed, 1)})
+    def _report_status(
+        self,
+        job_id: int,
+        elapsed: float,
+        heartbeat: tuple[int, int, int] | None,
+        now_ns: int,
+    ) -> None:
+        status: dict[str, Any] = {"job_id": job_id, "elapsed_s": round(elapsed, 1)}
+        if heartbeat is not None:
+            phase, phase_start_ns, worker_pid = heartbeat
+            status["phase"] = watchdog.Phase(phase).name.lower()
+            status["phase_elapsed_s"] = round((now_ns - phase_start_ns) / 1e9, 1)
+            status["worker_pid"] = worker_pid
+        elif watchdog.enabled():
+            # Heartbeats are active but this job isn't in any worker's slot. Almost
+            # always that means it's still queued in the pool -- a running (fork)
+            # worker stamps its slot before doing anything. It can also briefly
+            # mean the opposite: a job that just finished (clear_current_job ran in
+            # do_job's finally) but hasn't yet been popped from _inflight by the
+            # sidecar callback. That window is negligibly short, so we don't
+            # distinguish it.
+            status["phase"] = "queued"
+        # Otherwise phase tracking is unavailable (e.g. a spawn pool) and the
+        # report carries duration only -- we can't tell queued from running.
+        payload = self.pickler.dumps(status)
         try:
             with self.write_lock:
                 if self.running:
@@ -716,15 +749,18 @@ class SubprocMain:
             pass
 
     @staticmethod
-    def do_job(pickler: SubprocPickler, data: bytes) -> bytes:
+    def do_job(pickler: SubprocPickler, job_id: int, data: bytes) -> bytes:
         # do the pickle/unpickle in the sub-subproc
-        job = typing.cast(Callable[[], object], pickler.loads(data))
-
+        watchdog.set_current_job(job_id)
         try:
-            result = job()
-        except Exception:
-            result = _SubprocExceptionInfo(traceback.format_exc())
-        return pickler.dumps(result)
+            job = typing.cast(Callable[[], object], pickler.loads(data))
+            try:
+                result = job()
+            except Exception:
+                result = _SubprocExceptionInfo(traceback.format_exc())
+            return pickler.dumps(result)
+        finally:
+            watchdog.clear_current_job()
 
 
 AnyPool = ProcessPoolExecutor | SubprocPool
@@ -822,3 +858,10 @@ def _ignore_sigterm_and_sleep_for_test() -> None:
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     while True:
         time.sleep(3600)
+
+
+def _report_phase_and_sleep_for_test(phase: int, seconds: float) -> None:
+    # Test helper: report a heartbeat phase from a worker, then block, so the
+    # sidecar watchdog observes and reports that phase.
+    watchdog.report_phase(watchdog.Phase(phase))
+    time.sleep(seconds)
