@@ -1,6 +1,7 @@
 import base64
 import functools
 import itertools
+import json
 import logging
 import multiprocessing
 import os
@@ -32,6 +33,7 @@ from torch._inductor.compile_worker.tracked_process_pool import (
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path, python_subprocess_env
+from torch._logging import trace_structured
 from torch._utils_internal import find_compile_subproc_binary
 from torch.monitor import _WaitCounter, _WaitCounterTracker
 
@@ -48,6 +50,21 @@ class MsgHeader(IntEnum):
     QUIESCE = 2
     WAKEUP = 3
     JOB = 4
+    # Sidecar -> parent watchdog report about a still-running job (out-of-band,
+    # low volume). Payload is a pickled status dict; does not affect the future.
+    STATUS = 5
+
+
+def _current_compile_id() -> Any:
+    # Snapshotted at submit so a later watchdog STATUS report (handled on the
+    # read thread, which has no ambient compile context) can be attributed to the
+    # right compile in tlparse.
+    try:
+        from torch._guards import CompileContext
+
+        return CompileContext.current_compile_id()
+    except Exception:
+        return None
 
 
 def _pack_msg(msg_header: MsgHeader, job_id: int, length: int) -> bytes:
@@ -226,6 +243,9 @@ class SubprocPool:
 
         self.futures_lock = threading.Lock()
         self.pending_futures: dict[int, Future[Any]] = {}
+        # Compile id captured at submit so watchdog STATUS reports (handled on the
+        # read thread) attribute to the right compile in tlparse. Keyed by job_id.
+        self._job_compile_id: dict[int, Any] = {}
         # The pending waitcounter, is used to indicate the time when we have any specific job running.
         self.pending_waitcounters: dict[int, Any] = {}
         self.job_id_count = itertools.count()
@@ -270,6 +290,7 @@ class SubprocPool:
         with self.futures_lock:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
+            self._job_compile_id[job_id] = _current_compile_id()
             self.pending_waitcounters[job_id] = _WaitCounter(
                 "pytorch.wait_counter.subproc_pool.job"
             ).guard()
@@ -304,6 +325,11 @@ class SubprocPool:
                 # valid msg.
                 log.exception("failure in subproc_pool._recv_msg")
                 msg_header = MsgHeader.ERROR
+
+            if msg_header == MsgHeader.STATUS:
+                # Out-of-band watchdog report; does not touch futures.
+                self._handle_worker_status(job_id, data)
+                continue
 
             if msg_header != MsgHeader.JOB:
                 # read_pipe returned None or got exception
@@ -346,6 +372,7 @@ class SubprocPool:
                     self.firstjob_waitcounter.__exit__()
 
                 del self.pending_futures[job_id]
+                self._job_compile_id.pop(job_id, None)
 
     def _health_monitor(self) -> None:
         # Poll the sidecar for liveness. If it dies while we still think we are
@@ -392,6 +419,7 @@ class SubprocPool:
                 if waitcounter is not None:
                     waitcounter.__exit__()
             self.pending_futures.clear()
+            self._job_compile_id.clear()
         # We intentionally do not close read_pipe here. _read_thread owns it and
         # may be mid-read; closing a buffered pipe out from under a concurrent
         # read can deadlock on the buffer lock. It is a daemon thread, so leaving
@@ -415,8 +443,6 @@ class SubprocPool:
         # Surface the same info to structured tracing so production jobs (which
         # only have tlparse access) can diagnose the crash.
         try:
-            from torch._logging import trace_structured
-
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
@@ -429,6 +455,31 @@ class SubprocPool:
             )
         except Exception:
             log.warning("Failed to emit sidecar-death trace artifact", exc_info=True)
+
+    def _handle_worker_status(self, job_id: int, data: bytes) -> None:
+        # Best-effort, and runs on the read thread: a bad status report (corrupt
+        # payload or a logging failure) must not escape and kill result
+        # processing, so guard the whole thing.
+        try:
+            status = self.pickler.loads(data)
+            if not isinstance(status, dict):
+                return
+            compile_id = self._job_compile_id.get(job_id)
+            record = {**status, "compile_id": str(compile_id) if compile_id else None}
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "compile_worker_status",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(record),
+                compile_id=compile_id,
+                expect_trace_id=False,
+                suppress_context=True,
+                record_logging_overhead=False,
+            )
+        except Exception:
+            log.warning("failed to report compile worker status", exc_info=True)
 
     def quiesce(self) -> None:
         self._send(MsgHeader.QUIESCE)
@@ -476,6 +527,7 @@ class SubprocPool:
                     if not future.cancel():
                         future.set_exception(RuntimeError("SubprocPool closed"))
                 self.pending_futures.clear()
+                self._job_compile_id.clear()
 
 
 class SubprocMain:
@@ -498,8 +550,13 @@ class SubprocMain:
         self.pool: ProcessPoolExecutor | None = None
         self.pool_finalizer: Any | None = None
         self.running = True
+        # job_id -> monotonic submit time; scanned by the watchdog thread.
+        self._inflight: dict[int, float] = {}
+        self._inflight_lock = threading.Lock()
+        self._watchdog_stop = threading.Event()
 
     def main(self) -> None:
+        self._start_watchdog()
         while True:
             msg_header, job_id, data = _recv_msg(self.read_pipe)
             if msg_header == MsgHeader.JOB:
@@ -515,6 +572,7 @@ class SubprocMain:
         self._shutdown_pool(terminate_workers=False)
 
     def _shutdown(self) -> None:
+        self._watchdog_stop.set()
         with self.write_lock:
             self.running = False
             try:
@@ -545,6 +603,11 @@ class SubprocMain:
             pool.shutdown(wait=False)
 
     def submit(self, job_id: int, data: bytes) -> None:
+        # Clock starts before _start_pool/_warm_process_pool, so the first job's
+        # reported elapsed intentionally includes cold pool creation and the fork
+        # of the workers -- that wait is real and worth surfacing.
+        with self._inflight_lock:
+            self._inflight[job_id] = time.monotonic()
         while self.running:
             try:
                 self._submit_inner(job_id, data)
@@ -565,6 +628,8 @@ class SubprocMain:
 
     def _submit_inner(self, job_id: int, data: bytes) -> None:
         def callback(fut: Future[Any]) -> None:
+            with self._inflight_lock:
+                self._inflight.pop(job_id, None)
             if not self.running:
                 return
             try:
@@ -613,6 +678,42 @@ class SubprocMain:
             None, self.pool.shutdown, exitpriority=sys.maxsize
         )
         _warm_process_pool(self.pool, self.nprocs)
+
+    def _start_watchdog(self) -> None:
+        interval = config.compile_worker_watchdog_interval_seconds
+        if interval <= 0:
+            return
+        threading.Thread(
+            target=self._watchdog_loop,
+            args=(interval,),
+            name="InductorSubprocWatchdog",
+            daemon=True,
+        ).start()
+
+    def _watchdog_loop(self, interval: float) -> None:
+        # Every `interval` seconds, report any job still running past `interval`
+        # so a stuck/slow worker leaves a breadcrumb (the parent turns these into
+        # tlparse artifacts). Re-reports each tick with a growing elapsed time.
+        while not self._watchdog_stop.wait(interval):
+            now = time.monotonic()
+            with self._inflight_lock:
+                slow = [
+                    (job_id, elapsed)
+                    for job_id, start in self._inflight.items()
+                    if (elapsed := now - start) >= interval
+                ]
+            for job_id, elapsed in slow:
+                self._report_status(job_id, elapsed)
+
+    def _report_status(self, job_id: int, elapsed: float) -> None:
+        payload = self.pickler.dumps({"job_id": job_id, "elapsed_s": round(elapsed, 1)})
+        try:
+            with self.write_lock:
+                if self.running:
+                    _send_msg(self.write_pipe, MsgHeader.STATUS, job_id, payload)
+        except (OSError, ValueError):
+            # Parent gone / pipe closed; the watchdog is best-effort.
+            pass
 
     @staticmethod
     def do_job(pickler: SubprocPickler, data: bytes) -> bytes:
