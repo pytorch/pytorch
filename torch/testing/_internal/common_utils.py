@@ -2860,7 +2860,9 @@ def to_gpu(obj, type_map=None):
             raise AssertionError("expected obj to be a leaf tensor")
         t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
-            res = obj.to(dtype=t, device="cuda", copy=True)
+            device_type = acc.type if (acc := torch.accelerator.
+                                       current_accelerator(check_available=True)) else None
+            res = obj.to(dtype=t, device=device_type, copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
