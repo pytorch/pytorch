@@ -1105,12 +1105,6 @@ class ExactWeakKeyDictionary:
 def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
 
 
-@overload
-def istype(
-    obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
-) -> TypeIs[T]: ...
-
-
 # This can be simplified once TypeVarTuple objects can be expanded into TypeIs.
 @overload
 def istype(
@@ -2553,8 +2547,17 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
         # this func fails on fake tensors in __torch_dispatch__
         return x
 
+    def is_pinned_cpu_tensor(x: torch.Tensor) -> bool:
+        return (
+            x.device.type == "cpu"
+            and not is_traceable_wrapper_subclass(x)
+            and x.is_pinned()
+        )
+
     def torch_clone(x: torch.Tensor) -> torch.Tensor:
         y = torch.clone(x)
+        if is_pinned_cpu_tensor(x):
+            y = y.pin_memory()
         if x.is_leaf:
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
@@ -2601,7 +2604,10 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
             result = torch.empty_quantized((needed_size + 32,), x)
         else:
             result = torch.empty(
-                needed_size + 32, dtype=dtype or x.dtype, device=x.device
+                needed_size + 32,
+                dtype=dtype or x.dtype,
+                device=x.device,
+                pin_memory=is_pinned_cpu_tensor(x),
             )
         cache_line_offset = (
             (x.data_ptr() - result.data_ptr()) % 32
@@ -3056,6 +3062,8 @@ tuple_iterator: type[Iterator[Any]] = type(iter(()))
 # pyrefly: ignore [bad-assignment]
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
+deque_iterator = type(iter(collections.deque()))
+deque_rev_iterator = type(reversed(collections.deque()))
 object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
@@ -3079,6 +3087,10 @@ tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
 list_methods = {method for method in list.__dict__.values() if callable(method)}
 list_getitem = list.__getitem__
+
+deque_methods = {
+    method for method in collections.deque.__dict__.values() if callable(method)
+}
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 
@@ -3202,9 +3214,21 @@ def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
+def set_base_iter(s: Iterable[T]) -> Iterator[T]:
+    if isinstance(s, set):
+        return set.__iter__(s)
+    if isinstance(s, frozenset):
+        return frozenset.__iter__(s)
+    return iter(s)
+
+
 def set_getitem(s: set[T], n: int) -> T:
-    # Set ordering might not be stable
-    return list(s)[n]
+    # Set ordering might not be stable. For set/frozenset subclasses, use the
+    # base iterator so guard reconstruction observes the internal set contents.
+    try:
+        return next(itertools.islice(set_base_iter(s), n, n + 1))
+    except StopIteration:
+        raise IndexError("set index out of range") from None
 
 
 def enum_repr(value: Any, local: bool) -> str:
@@ -3263,7 +3287,7 @@ def raise_args_mismatch(
     name: str,
     expect: str = "",
     actual: str = "",
-) -> None:
+) -> NoReturn:
     from torch._dynamo.exc import raise_observed_exception
 
     msg_str = (
@@ -5193,7 +5217,12 @@ def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     )
 
 
-def get_static_address_type(t: Any) -> Any:
+# The two flavors of mark_static_address: "guarded" recompiles when the data_ptr
+# changes, "unguarded" re-records cudagraphs instead. Set in decorators.py.
+StaticInputType = Literal["guarded", "unguarded"]
+
+
+def get_static_address_type(t: Any) -> StaticInputType | None:
     if isinstance(t, torch.Tensor):
         return getattr(t, "_dynamo_static_input_type", None)
 
@@ -5643,7 +5672,14 @@ def set_feature_use(feature: str, usage: bool) -> None:
         get_metrics_context().set_key_value("feature_usage", feature, usage)
 
 
-_ddp_optimization_mode: tuple[str, ...] = (
+OptimizeDDPMode = Literal[
+    "ddp_optimizer",
+    "python_reducer",
+    "python_reducer_without_compiled_forward",
+    "no_optimization",
+]
+
+_ddp_optimization_mode: tuple[OptimizeDDPMode, ...] = (
     "ddp_optimizer",
     "python_reducer",  # experimental mode
     "python_reducer_without_compiled_forward",
@@ -5651,7 +5687,7 @@ _ddp_optimization_mode: tuple[str, ...] = (
 )
 
 
-def get_optimize_ddp_mode() -> str:
+def get_optimize_ddp_mode() -> OptimizeDDPMode:
     optimize_ddp = config.optimize_ddp
     if isinstance(optimize_ddp, bool):
         mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
@@ -5664,7 +5700,7 @@ def get_optimize_ddp_mode() -> str:
 
     if mode not in _ddp_optimization_mode:
         raise AssertionError(f"Invalid dynamo config optimize_ddp value {mode=}")
-    return mode
+    return cast("OptimizeDDPMode", mode)
 
 
 @contextmanager
@@ -5743,6 +5779,28 @@ def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
 @torch._disable_dynamo
 def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
     cm.__exit__(None, None, None)
+
+
+# Active `torch._dynamo.override_cudagraphs` override, set/restored at RUNTIME by
+# CudagraphOverrideContextManager.__enter__/__exit__ (mirrors _error_on_graph_break
+# above). This lets the override follow the dynamic call stack: a callee that
+# cannot be inlined (e.g. it contains a graph break) is compiled as a separate
+# frame and would otherwise not inherit the override, which lives lexically in a
+# caller's `with` block / decorator. OutputGraph seeds its cudagraph_annotation
+# from this value. None means no override is active; otherwise it is the
+# (fwd, bwd) pair. NOTE: we intentionally do not guard on this, so the override
+# is sticky per code object (first compile wins) for functions reached both
+# inside and outside it.
+_cudagraph_override: tuple[bool | None, bool | None] | None = None
+
+
+def _get_cudagraph_override() -> tuple[bool | None, bool | None] | None:
+    return _cudagraph_override
+
+
+def _set_cudagraph_override(value: tuple[bool | None, bool | None] | None) -> None:
+    global _cudagraph_override
+    _cudagraph_override = value
 
 
 # Returns a set of code objects present traced in the current TracingContext, or None

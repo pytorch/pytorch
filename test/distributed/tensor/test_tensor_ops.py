@@ -1596,7 +1596,7 @@ class DistBucketizeTest(LocalDTensorTestBase):
                 self.assertEqual(
                     result.placements[0].reduce_op,
                     reduce_op,
-                    f"Expected Partial({reduce_op}) output but got {result.placements[0]}",
+                    lambda msg: f"{msg}\nExpected Partial({reduce_op}) output but got {result.placements[0]}",
                 )
                 expected = torch.bucketize(input_tensor, boundaries)
                 self.assertEqual(result.full_tensor(), expected)

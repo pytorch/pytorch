@@ -139,6 +139,10 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
+from ._aot_autograd.to_standalone_python import (  # noqa: F401
+    compile_to_python,
+    load_from_python,
+)
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
     call_func_at_runtime_with_args,
@@ -547,7 +551,7 @@ def create_aot_state(
     )
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
-    from torch._library.opaque_object import is_opaque_type
+    from torch._library.opaque_object import is_custom_class
 
     # Tracing may mutate the states the fake script object,
     # so we need to duplicate the fake script objects so that subsequent tracing
@@ -555,7 +559,7 @@ def create_aot_state(
     def _dup_fake_script_obj(fake_flat_args: FakifiedFlatArgs) -> list[Any]:
         return [
             maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-            if isinstance(arg, FakeScriptObject) or is_opaque_type(type(arg))
+            if isinstance(arg, FakeScriptObject) or is_custom_class(type(arg))
             else arg
             for arg in fake_flat_args
         ]

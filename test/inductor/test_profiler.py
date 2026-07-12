@@ -275,9 +275,11 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
         def check_triton_event(e) -> None:
             args = e.get("args", {})
-            self.assertNotEqual(args, {}, msg=f"event = {e}")
+            self.assertNotEqual(args, {}, msg=lambda msg: f"{msg}\nevent = {e}")
 
-            self.assertEqual(args["kernel_backend"], "triton", msg=f"event = {e}")
+            self.assertEqual(
+                args["kernel_backend"], "triton", msg=lambda msg: f"{msg}\nevent = {e}"
+            )
 
             self.assertTrue("stream" in args, msg=f"event = {e}")
             self.assertTrue("kernel_file" in args, msg=f"event = {e}")
@@ -286,7 +288,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
             self.assertTrue("kernel_hash" in args, msg=f"event = {e}")
             self.assertEqual(
-                args["kernel_hash"], get_hash(kernel_file), msg=f"event = {e}"
+                args["kernel_hash"],
+                get_hash(kernel_file),
+                msg=lambda msg: f"{msg}\nevent = {e}",
             )
 
             self.assertTrue("kernel_kwargs" in args, msg=f"event = {e}")

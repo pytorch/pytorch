@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +11,6 @@ from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.registry import lookup_backend
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
-from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyHPU,
@@ -138,7 +138,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("eager_noexcept", device, boxed=False)
 
     @skipIfHpu
-    @_force_skip_lazy_graph_module()
     def test_torchscript(self, device):
         self._check_backend_works("ts", device, boxed=False)
 
@@ -149,7 +148,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("aot_eager_decomp_partition", device)
 
     @skipIfHpu
-    @_force_skip_lazy_graph_module()
     def test_aot_ts(self, device):
         self._check_backend_works("aot_ts", device)
 
@@ -162,6 +160,47 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("tvm", device)
         self._check_backend_works("tvm", device, options={"scheduler": None})
         self._check_backend_works("tvm", device, options={"opt_level": 0})
+
+    def test_tvm_scheduler_backends(self, device):
+        from torch._dynamo.backends.tvm import tvm_auto_scheduler, tvm_meta_schedule
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        for backend in (tvm_meta_schedule, tvm_auto_scheduler):
+            # blocking the tvm import keeps this fast and deterministic;
+            # reaching ImportError proves the partial's kwargs are valid
+            with patch.dict(sys.modules, {"tvm": None}):
+                self.assertRaises(ImportError, backend, gm, [torch.randn(2)])
+
+    def test_tvm_dispatches_relay_or_relax(self, device):
+        import torch._dynamo.backends.tvm as tvm_backend
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        sentinel = object()
+
+        def find_spec(present):
+            return lambda name: MagicMock() if name == present else None
+
+        with (
+            patch.dict(sys.modules, {"tvm": MagicMock()}),
+            patch.object(
+                tvm_backend, "_tvm_relay_compile", return_value=sentinel
+            ) as relay,
+            patch.object(
+                tvm_backend, "_tvm_relax_compile", return_value=sentinel
+            ) as relax,
+        ):
+            with patch("importlib.util.find_spec", side_effect=find_spec("tvm.relay")):
+                self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
+            relay.assert_called_once()
+            relax.assert_not_called()
+
+            with patch(
+                "importlib.util.find_spec",
+                side_effect=find_spec("tvm.relax.frontend.torch"),
+            ):
+                self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
+            relax.assert_called_once()
+            relay.assert_called_once()
 
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
@@ -329,6 +368,17 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend=my_compiler)
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
+
+    def test_lookup_backend_suggestion(self):
+        from torch._dynamo.backends.registry import lookup_backend
+        from torch._dynamo.exc import InvalidBackend
+
+        with self.assertRaisesRegex(InvalidBackend, "did you mean: 'inductor'"):
+            lookup_backend("indutcor")
+
+        with self.assertRaises(InvalidBackend) as cm:
+            lookup_backend("zzzzzzzz")
+        self.assertNotIn("did you mean", str(cm.exception))
 
     def test_lookup_custom_backend(self):
         from torch._dynamo import list_backends

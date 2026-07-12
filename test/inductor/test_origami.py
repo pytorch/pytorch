@@ -448,7 +448,7 @@ class TestOrigami(TestCase):
                     fresh_cache(),
                     config.patch(patch_config),
                     mock.patch(
-                        "torch._inductor.template_heuristics.triton.origami",
+                        "torch._inductor.heuristics.template.triton.origami",
                         None,
                     ),
                 ):
@@ -501,7 +501,7 @@ class TestOrigami(TestCase):
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
+            msg=lambda msg: f"{msg}\nsubprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}",
         )
         self.assertIn("OK", result.stdout)
 
