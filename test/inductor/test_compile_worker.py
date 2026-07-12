@@ -5,8 +5,10 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import types
 import unittest
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from threading import Event
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
+    SubprocKind,
     SubprocPool,
 )
 from torch._inductor.compile_worker.timer import Timer
@@ -67,6 +70,93 @@ class TestCompileWorker(TestCase):
             pool.shutdown()
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_sidecar_death_fails_pending_futures(self):
+        # If the sidecar (SubprocMain) process dies, its forked compile workers
+        # keep the write pipe open, so the parent never sees EOF and would
+        # otherwise block forever in _recv_msg. The liveness watchdog must
+        # detect the dead sidecar and fail pending futures instead of hanging.
+        pool = self.make_pool(2)
+        try:
+            # Warm the pool so workers are forked and holding the pipe fd.
+            self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+            fut = pool.submit(time.sleep, 600)
+            time.sleep(1.0)
+            pool.process.kill()
+            try:
+                fut.result(timeout=60)
+            except FuturesTimeoutError:
+                self.fail("pending future did not resolve after sidecar death")
+            except Exception:
+                pass  # expected: the watchdog fails the future
+            else:
+                self.fail("expected an exception after sidecar death")
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_sidecar_death_eofs_without_watchdog(self):
+        # With the liveness watchdog disabled, sidecar death must still fail
+        # pending futures via a clean pipe EOF -- which only happens if neither
+        # the parent nor the compile workers keep the result pipe's write end
+        # open. Proves the fd-close fix stands on its own.
+        with patch.object(SubprocPool, "_health_monitor", lambda self: None):
+            pool = self.make_pool(2)
+            try:
+                self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                fut = pool.submit(time.sleep, 600)
+                time.sleep(1.0)
+                pool.process.kill()
+                try:
+                    fut.result(timeout=60)
+                except FuturesTimeoutError:
+                    self.fail("future did not resolve via EOF after sidecar death")
+                except Exception:
+                    pass  # expected: EOF path fails the future
+                else:
+                    self.fail("expected an exception after sidecar death")
+            finally:
+                pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_spawn_pool_basic_jobs(self):
+        # compile_fx_subproc.py runs the pool with kind=SPAWN. The worker
+        # fd-close must be gated to fork; otherwise a spawned worker closes an
+        # unrelated (reused) fd and wedges the pool via a BrokenProcessPool loop.
+        pool = SubprocPool(2, kind=SubprocKind.SPAWN)
+        try:
+            a = pool.submit(operator.add, 100, 1)
+            b = pool.submit(operator.sub, 100, 1)
+            self.assertEqual(a.result(), 101)
+            self.assertEqual(b.result(), 99)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_fails_futures_when_no_eof(self):
+        # Isolate the liveness watchdog from the fd/EOF fix. Disabling _read_thread
+        # kills the result-pipe path entirely, standing in for the "sidecar dies
+        # but EOF never arrives" case: with that path dead, only _health_monitor
+        # -> _on_sidecar_death can resolve pending futures. (The complementary
+        # test_sidecar_death_eofs_without_watchdog covers the EOF path in
+        # isolation by disabling the watchdog instead.)
+        with patch.object(SubprocPool, "_read_thread", lambda self: None):
+            pool = self.make_pool(2)
+            try:
+                fut = pool.submit(time.sleep, 600)
+                time.sleep(1.0)  # let the sidecar fork workers and start the job
+                pool.process.kill()
+                try:
+                    fut.result(timeout=60)
+                except FuturesTimeoutError:
+                    self.fail("watchdog did not fail the future without an EOF")
+                except Exception:
+                    pass  # expected: the watchdog fails the future
+                else:
+                    self.fail("expected an exception after sidecar death")
+            finally:
+                pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_quiesce(self):
         pool = self.make_pool(2)
         try:
@@ -109,6 +199,48 @@ class TestCompileWorker(TestCase):
                 self.assertEqual(os.path.exists(temp_log.name), True)
             finally:
                 pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_shutdown_kills_wedged_worker(self):
+        # A compile worker that ignores SIGTERM must not stall pool teardown:
+        # the sidecar has to escalate to SIGKILL rather than block indefinitely
+        # in pool.shutdown(wait=True) (which the parent only bounds at 300s).
+        code = textwrap.dedent(
+            """
+            import operator
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import (
+                _ignore_sigterm_and_sleep_for_test,
+                SubprocPool,
+            )
+
+            pool = SubprocPool(2)
+            assert pool.submit(operator.add, 1, 2).result() == 3
+            pool.submit(_ignore_sigterm_and_sleep_for_test)
+            time.sleep(1.0)
+
+            start = time.time()
+            pool.shutdown()
+            elapsed = time.time() - start
+            assert elapsed < 120, f"shutdown stalled for {elapsed}s"
+            print(f"shutdown returned in {elapsed:.1f}s")
+            """
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("shutdown returned", result.stdout)
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_shutdown_terminates_sidecar_worker_pool(self):
