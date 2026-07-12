@@ -879,6 +879,35 @@ class ViewAndMutationMeta:
         )
 
 
+@dataclass
+class InductorFwMetadata:
+    """
+    Reduced-surface view of ViewAndMutationMeta containing only the fields
+    that Inductor (and other out-of-tree backends) actually consume via
+    TracingContext.fw_metadata.
+
+    See https://github.com/pytorch/pytorch/issues/114403
+    """
+
+    input_info: list[InputAliasInfo]
+    output_info: list[OutputAliasInfo]
+    static_input_indices: list[int]
+    num_mutated_inp_runtime_indices: int
+    bw_donated_idxs: list[int] | None
+
+    @staticmethod
+    def from_view_and_mutation_meta(
+        meta: "ViewAndMutationMeta",
+    ) -> "InductorFwMetadata":
+        return InductorFwMetadata(
+            input_info=meta.input_info,
+            output_info=meta.output_info,
+            static_input_indices=meta.static_input_indices,
+            num_mutated_inp_runtime_indices=meta.num_mutated_inp_runtime_indices,
+            bw_donated_idxs=meta.bw_donated_idxs,
+        )
+
+
 @dataclass(eq=False)
 class SubclassMeta:
     # A copy of all forward metadata, but computed on the *dense* tensor forward (after desugaring subclasses)

@@ -254,10 +254,10 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     # parameter locations change.
     context = torch._guards.TracingContext.try_get()
     fixed = list(range(num_fixed))
-    if not context or not context.fw_metadata:
+    if not context or not context.inductor_fw_metadata:
         return fixed
 
-    return context.fw_metadata.static_input_indices
+    return context.inductor_fw_metadata.static_input_indices
 
 
 def record_original_output_strides(gm: GraphModule) -> None:
@@ -2314,8 +2314,8 @@ def fw_compiler_freezing(
             if i not in preserved_indices_params_flat:
                 tracing_context.params_flat[i] = None
 
-        if tracing_context.fw_metadata:
-            static_input_idxs = tracing_context.fw_metadata.static_input_indices
+        if tracing_context.inductor_fw_metadata:
+            static_input_idxs = tracing_context.inductor_fw_metadata.static_input_indices
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
@@ -2621,9 +2621,9 @@ def compile_fx_forward(
 
         context = torch._guards.TracingContext.try_get()
         # See Note [User Outputs in the inductor graph]
-        if context is not None and context.fw_metadata and not is_inference:
+        if context is not None and context.inductor_fw_metadata and not is_inference:
             original_output_start_index = (
-                context.fw_metadata.num_mutated_inp_runtime_indices
+                context.inductor_fw_metadata.num_mutated_inp_runtime_indices
             )
         else:
             original_output_start_index = 0

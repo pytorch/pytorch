@@ -106,7 +106,7 @@ def _freeze(
     view_to_reshape(aot_autograd_gm)
 
     if tracing_context := torch._guards.TracingContext.try_get():
-        fw_metadata = tracing_context.fw_metadata
+        fw_metadata = tracing_context.inductor_fw_metadata
         if tracing_context.params_flat_unwrap_subclasses is None:
             raise AssertionError(
                 "expected tracing_context.params_flat_unwrap_subclasses to be set"

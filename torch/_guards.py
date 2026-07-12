@@ -40,7 +40,10 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.guards import GuardCheckSpec
     from torch._dynamo.output_graph import CodeOptions
-    from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
+    from torch._functorch._aot_autograd.schemas import (
+        InductorFwMetadata,
+        ViewAndMutationMeta,
+    )
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1110,8 +1113,14 @@ class TracingContext:
         # progress)
         self.loc_in_frame: tuple[str, int, str] | None = None
         self.loc_in_frame_positions: dis.Positions | None = None
-        # this is only set after aot_autograd
+        # this is only set after aot_autograd. Full metadata -- kept around
+        # for DDPOptimizer (torch/_dynamo/backends/distributed.py), which
+        # needs more than the reduced Inductor-facing subset below.
         self.fw_metadata: ViewAndMutationMeta | None = None
+        # Reduced-surface view of fw_metadata containing only the fields
+        # that Inductor/out-of-tree backends need. See
+        # https://github.com/pytorch/pytorch/issues/114403
+        self.inductor_fw_metadata: InductorFwMetadata | None = None
         # this is only set when the DDPOptimizer is used
         self.ddp_optimizer_ctx: DDPOptimizerContext | None = None
         # this is only set after aot_autograd

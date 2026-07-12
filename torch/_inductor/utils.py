@@ -4265,8 +4265,8 @@ def ir_dataclass(cls: type[Any] | None = None, /, *, frozen: bool = True) -> Any
 
 def get_donated_idxs() -> list[int] | None:
     tracing_context = torch._guards.TracingContext.try_get()
-    if tracing_context is not None and tracing_context.fw_metadata:
-        return tracing_context.fw_metadata.bw_donated_idxs
+    if tracing_context is not None and tracing_context.inductor_fw_metadata:
+        return tracing_context.inductor_fw_metadata.bw_donated_idxs
     return None
 
 
