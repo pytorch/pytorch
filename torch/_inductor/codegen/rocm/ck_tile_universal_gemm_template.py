@@ -20,6 +20,15 @@ from ...utils import IndentedBuffer
 log = logging.getLogger(__name__)
 
 
+def _ck_tile_universal_gemm_v2_api() -> bool:
+    # ROCm 7.14+ ck_tile headers use a simplified UniversalGemmPipelineProblem
+    # API (no has_hot_loop / tail_number template parameters).
+    if torch.version.hip is None:
+        return False
+    rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
+    return rocm_version >= (7, 14)
+
+
 def is_static_int(number):
     import sympy
 
@@ -230,18 +239,11 @@ class CKTileGemmTemplate(CKTileTemplate):
     This class is used for rendering CK-Tile Universal GEMM kernels
     """
 
-    gemm_template = r"""{{version_comment}}
-    {{headers}}
-    {{globals}}
-    {{instance_definition}}
-    extern "C" {
-    PT_EXPORT {{kernel_definition}} {
-
+    gemm_kernel_launch_v1 = r"""
         using {{instance_namespace}}::BaseGemmPipeline;
         using {{instance_namespace}}::TilePartitioner;
 
         constexpr auto TileK = {{instance_namespace}}::TileK;
-        constexpr auto kPrefetchStages = BaseGemmPipeline::PrefetchStages;
 
         const auto BiasTerms = std::array<const void*, 0> ();
         const auto BiasStrides = std::array<int32_t, 0> ();
@@ -272,7 +274,6 @@ class CKTileGemmTemplate(CKTileTemplate):
         const bool has_hot_loop            = BaseGemmPipeline::BlockHasHotloop(num_loop);
         const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
 
-        // run the kernel
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
             constexpr bool has_hot_loop_v = has_hot_loop_.value;
             constexpr auto tail_number_v = tail_number_.value;
@@ -280,7 +281,6 @@ class CKTileGemmTemplate(CKTileTemplate):
             using Kernel = {{instance_namespace}}::Kernel<has_hot_loop_v, tail_number_v>;
 
             if (!Kernel::IsSupportedArgument(kargs)) {
-                // we do our best to statically avoid this case in `filter_op`
                 throw std::runtime_error("invalid argument");
             }
             auto stream_config = ck_tile::stream_config{stream};
@@ -293,7 +293,51 @@ class CKTileGemmTemplate(CKTileTemplate):
         };
 
         BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+    """
 
+    gemm_kernel_launch_v2 = r"""
+        const auto BiasTerms = std::array<const void*, 0> ();
+        const auto BiasStrides = std::array<int32_t, 0> ();
+
+        auto kargs = ck_tile::UniversalGemmKernelArgs<> {
+           {X},
+           {W},
+           BiasTerms,
+           Y,
+           M,
+           N,
+           K,
+           {LDA},
+           {LDB},
+           BiasStrides,
+           LDC,
+           kBatch
+        };
+
+        if (workspace_size) {
+            *workspace_size = 0;
+            return 0;
+        }
+
+        using Kernel = {{instance_namespace}}::Kernel;
+
+        if (!Kernel::IsSupportedArgument(kargs)) {
+            throw std::runtime_error("invalid argument");
+        }
+        auto stream_config = ck_tile::stream_config{stream};
+        auto grid_size = Kernel::GridSize(M, N, kBatch);
+        auto block_size = Kernel::BlockSize();
+        auto gemm = ck_tile::make_kernel<1>(Kernel{}, grid_size, block_size, 0, kargs);
+        ck_tile::launch_kernel(stream_config, gemm);
+    """
+
+    gemm_template = r"""{{version_comment}}
+    {{headers}}
+    {{globals}}
+    {{instance_definition}}
+    extern "C" {
+    PT_EXPORT {{kernel_definition}} {
+{{kernel_launch}}
         return 0;
     } // kernel definition
     } // extern C
@@ -581,35 +625,21 @@ class CKTileGemmTemplate(CKTileTemplate):
                                                        TilePartitionerGroupNum,
                                                        TilePartitionerM01>;
 
-        using Traits  =
-            ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout>;
-
         using GemmUniversalTraits =
             ck_tile::TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
                                              ALayout, BLayout, CLayout, TransposeC>;
 
-        using GemmPipelineProblem =
-            ck_tile::GemmPipelineProblem<ADataType, BDataType, AccDataType, GemmShape, Traits>;
+        {{rendered_pipeline_problem}}
 
         {{rendered_scheduler}}
 
-        template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
-        using UniversalGemmProblem =
-            ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                  BDataType,
-                                                  AccDataType,
-                                                  GemmShape,
-                                                  GemmUniversalTraits,
-                                                  scheduler,
-                                                  has_hot_loop_v,
-                                                  tail_number_v>;
+        {{rendered_universal_gemm_problem}}
 
         {{rendered_pipeline}}
 
         {{rendered_epilogue}}
 
-        template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
-        using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline<has_hot_loop_v, tail_number_v>, GemmEpilogue>;
+        {{rendered_kernel}}
     }
 
 """
@@ -667,12 +697,59 @@ class CKTileGemmTemplate(CKTileTemplate):
             else:
                 raise AssertionError("Epilogue must be set")
 
-        def render_pipeline(pipeline_type):
+        def render_pipeline_v1(pipeline_type):
             return rf"""
             using BaseGemmPipeline = ck_tile::BaseGemmPipelineAgBgCr{pipeline_type}<GemmPipelineProblem>;
 
             template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
             using GemmPipeline = ck_tile::GemmPipelineAgBgCr{pipeline_type}<UniversalGemmProblem<has_hot_loop_v, tail_number_v>>;
+        """
+
+        def render_pipeline_v2(pipeline_type):
+            return rf"""
+            using UniversalGemmProblem =
+                ck_tile::UniversalGemmPipelineProblem<ADataType,
+                                                      BDataType,
+                                                      AccDataType,
+                                                      GemmShape,
+                                                      GemmUniversalTraits,
+                                                      scheduler>;
+
+            using GemmPipeline = ck_tile::GemmPipelineAgBgCr{pipeline_type}<UniversalGemmProblem>;
+        """
+
+        use_v2_api = _ck_tile_universal_gemm_v2_api()
+        if use_v2_api:
+            rendered_pipeline_problem = ""
+            rendered_universal_gemm_problem = ""
+            rendered_pipeline = render_pipeline_v2(op.pipeline)
+            rendered_kernel = (
+                "using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;"
+            )
+        else:
+            rendered_pipeline_problem = r"""
+        using Traits  =
+            ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout>;
+
+        using GemmPipelineProblem =
+            ck_tile::GemmPipelineProblem<ADataType, BDataType, AccDataType, GemmShape, Traits>;
+        """
+            rendered_universal_gemm_problem = r"""
+        template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
+        using UniversalGemmProblem =
+            ck_tile::UniversalGemmPipelineProblem<ADataType,
+                                                  BDataType,
+                                                  AccDataType,
+                                                  GemmShape,
+                                                  GemmUniversalTraits,
+                                                  scheduler,
+                                                  has_hot_loop_v,
+                                                  tail_number_v>;
+        """
+            rendered_pipeline = render_pipeline_v1(op.pipeline)
+            rendered_kernel = r"""
+        template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
+        using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline<has_hot_loop_v, tail_number_v>, GemmEpilogue>;
         """
 
         def render_scheduler(scheduler_type):
@@ -683,9 +760,12 @@ class CKTileGemmTemplate(CKTileTemplate):
         rendered_definition = self._template_from_string(template_definition).render(
             operation_name=op.name(),
             **asdict(op),
+            rendered_pipeline_problem=rendered_pipeline_problem,
             rendered_scheduler=render_scheduler(op.scheduler),
-            rendered_pipeline=render_pipeline(op.pipeline),
+            rendered_universal_gemm_problem=rendered_universal_gemm_problem,
+            rendered_pipeline=rendered_pipeline,
             rendered_epilogue=render_epilogue(op.epilogue),
+            rendered_kernel=rendered_kernel,
             has_double_smem_buffer=("true" if op.pipeline == "CompV4" else "false"),
         )
         return rendered_definition
@@ -720,6 +800,15 @@ class CKTileGemmTemplate(CKTileTemplate):
 */
 """
 
+        kernel_launch_template = (
+            self.gemm_kernel_launch_v2
+            if _ck_tile_universal_gemm_v2_api()
+            else self.gemm_kernel_launch_v1
+        )
+        kernel_launch = self._template_from_string(kernel_launch_template).render(
+            instance_namespace=op.name(),
+        )
+
         return self._template_from_string(self.gemm_template).render(
             headers=self.header().getvalue(),
             globals=self.globals().getvalue(),
@@ -733,6 +822,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 ],
             ),
             instance_namespace=op.name(),
+            kernel_launch=kernel_launch,
             version_comment=version_comment,
         )
 
