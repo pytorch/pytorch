@@ -13,7 +13,7 @@ import time
 import typing_extensions
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, Literal, NoReturn, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -26,9 +26,9 @@ from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
-    is_opaque_reference_type,
-    is_opaque_type,
-    is_opaque_value_type,
+    is_custom_class,
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
 )
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
@@ -54,6 +54,7 @@ from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._typing_utils import not_none
 
 from . import config, ir
 from .codegen.common import (
@@ -435,6 +436,9 @@ class GraphLowering(torch.fx.Interpreter):
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
         self.graph_input_storage_offsets: dict[str, Expr] = {}
+        self.symbolic_input_sources: dict[
+            sympy.Symbol, tuple[str, Literal["size", "stride"], int]
+        ] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
@@ -551,6 +555,7 @@ class GraphLowering(torch.fx.Interpreter):
         ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
+        self.kernel_free_cudagraph: bool = False
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -948,7 +953,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
         """
-        The rule to decide if an node prefer channels last is simple.
+        The rule to decide if a node prefers channels last is simple.
         1. if it's input/output of a convolution
         2. if one of its user prefers channels last
 
@@ -1277,12 +1282,7 @@ class GraphLowering(torch.fx.Interpreter):
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
-            # TODO fix partitioning issue and re-enable for backward
-            # https://github.com/pytorch/pytorch/issues/155468.
-            if not V.graph.is_backward:
-                expr = _get_placeholder_expr(example.node)
-            else:
-                expr = example.node.expr
+            expr = _get_placeholder_expr(example.node)
             self.graph_inputs[target] = expr
             self.graph_input_names.append(target)
             return expr
@@ -1310,7 +1310,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
             return gen
-        elif is_opaque_reference_type(type(example)):
+        elif is_opaque_symbolic_type(type(example)):
             opaque_obj = ir.OpaqueObjectState(name=target, value=example)
             self.graph_inputs[target] = opaque_obj  # type: ignore[assignment]
             self.graph_input_names.append(target)
@@ -1578,7 +1578,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
-        elif is_opaque_type(type(value)):
+        elif is_custom_class(type(value)):
             self.torchbind_constants[target] = value  # type: ignore[arg-type]
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)  # type: ignore[arg-type]
@@ -1632,7 +1632,9 @@ class GraphLowering(torch.fx.Interpreter):
         if not isinstance(result, (tuple, list)):
             raise AssertionError(f"Expected tuple or list, got {type(result)}")
         result = [
-            ir.OpaqueValueTypeConstant(value=x) if is_opaque_value_type(type(x)) else x
+            ir.OpaqueValueTypeConstant(value=x)
+            if is_opaque_constant_type(type(x))
+            else x
             for x in result
         ]
         _allowed_output_types = (
@@ -1782,6 +1784,20 @@ class GraphLowering(torch.fx.Interpreter):
                 f"old_kwargs length ({len(old_kwargs)}) != new_kwargs length ({len(new_kwargs)})"
             )
 
+        def already_reflected(old_arg: Any, new_arg: Any) -> bool:
+            # No propagation is needed when new_arg already reflects the
+            # mutation of old_arg: either they are the same object, or they are
+            # distinct IR nodes aliasing the same buffer (e.g. an in-place op
+            # whose output was not cloned). Emitting copy_ in the aliasing case
+            # would lower to a self-referential (buf = buf) node, which the
+            # scheduler's compute_ancestors cannot represent (self-edge).
+            if old_arg is new_arg:
+                return True
+            if isinstance(old_arg, ir.IRNode) and isinstance(new_arg, ir.IRNode):
+                name = old_arg.maybe_get_name()
+                return name is not None and name == new_arg.maybe_get_name()
+            return False
+
         if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
@@ -1798,7 +1814,7 @@ class GraphLowering(torch.fx.Interpreter):
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
                 new_arg = new_kwargs["kwargs"][name]
-                if old_arg is new_arg:
+                if already_reflected(old_arg, new_arg):
                     continue
 
                 self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
@@ -1823,7 +1839,7 @@ class GraphLowering(torch.fx.Interpreter):
                     new_arg = (new_arg,)  # type: ignore[assignment]
 
                 for old_arg_item, new_arg_item in zip(old_arg, new_arg):  # type: ignore[call-overload]
-                    if old_arg_item is new_arg_item:
+                    if already_reflected(old_arg_item, new_arg_item):
                         continue
                     self.call_function(
                         torch.ops.aten.copy_.default, (old_arg_item, new_arg_item), {}
@@ -2055,7 +2071,7 @@ class GraphLowering(torch.fx.Interpreter):
                         # require_exact_strides to handle views. But ultimately it's better to require
                         # the right strides at the tensor definition.
                         if n.meta["val"]._is_view() or isinstance(
-                            result.data,
+                            result.data,  # type: ignore[missing-attribute]
                             ir.BaseView,
                         ):
                             result = ir.ExternKernel.require_stride_order(
@@ -2532,7 +2548,7 @@ class GraphLowering(torch.fx.Interpreter):
                         return None
                     elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
-                        return x.node.hint
+                        return not_none(x.hint)
                     elif isinstance(x, FakeTensor):
                         return defake(x)
                     else:

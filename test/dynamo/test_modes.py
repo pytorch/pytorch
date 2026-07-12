@@ -138,6 +138,23 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_get_current_dispatch_mode_stack_no_graph_break(self):
+        from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            stack = _get_current_dispatch_mode_stack()
+            return x + len(stack)
+
+        x = torch.ones(2, 2)
+        result = fn(x)
+        # Stack is empty during tracing, so len([]) == 0 and result == ones(2,2)
+        self.assertEqual(result, torch.ones(2, 2))
+        # fullgraph=True would have raised if a graph break occurred
+        self.assertEqual(cnt.frame_count, 1)
+
 
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
@@ -1400,8 +1417,8 @@ class outer_fn(torch.nn.Module):
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
-            sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(arg0_1, arg1_1)
-            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1)
+            sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
             return (add, sub, mul)
 """,
         )
@@ -1516,7 +1533,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1612,7 +1629,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")

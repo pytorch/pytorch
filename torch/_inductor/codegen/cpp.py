@@ -11,7 +11,7 @@ import sys
 import warnings
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import Any, cast, ClassVar, Optional
+from typing import Any, cast, ClassVar, Literal, Optional
 
 import sympy
 
@@ -735,6 +735,15 @@ class CppOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def abs(x):
+        if isinstance(x, CppCSEVariable) and x.dtype in (
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ):
+            # abs(x) == x for unsigned types; return identity to avoid
+            # -Wtautological-compare and unsigned unary minus warnings.
+            return f"{x}"
         return f"std::abs({x})"
 
     @staticmethod
@@ -1293,6 +1302,14 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def abs(x):
+        if isinstance(x, CppCSEVariable) and x.dtype in (
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ):
+            # Unsigned identity bypass for vectorized path
+            return f"{x}"
         return f"{x}.abs()"
 
     @staticmethod
@@ -3187,6 +3204,8 @@ class CppVecKernel(CppKernel):
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
                 index = ops.index_expr(index, torch.int64).value
+                if isinstance(index, CppCSEVariable) and not index.is_vec:
+                    index = self.broadcast(index)
                 if not (isinstance(index, CppCSEVariable) and index.is_vec):
                     raise AssertionError(
                         "expected isinstance(index, CppCSEVariable) and index.is_vec"
@@ -5109,20 +5128,22 @@ class CppScheduling(BaseScheduling):
     def reset_kernel_group(self):
         self.kernel_group = KernelGroup()
 
-    def _get_indexing_ranges_exprs(self, node):
+    def _get_indexing_ranges_exprs(self, node) -> ir.ExtraIndexingConstraints:
         if isinstance(node, FusedSchedulerNode):
             if len(node.snodes) <= 0:
                 raise AssertionError(node.snodes)
             var_ranges = None
             indexing_exprs = OrderedSet[Any]()
             for snode in node.snodes:
-                v, exprs = self._get_indexing_ranges_exprs(snode)
+                constraints = self._get_indexing_ranges_exprs(snode)
                 if var_ranges is None:
-                    var_ranges = v
-                if var_ranges != v:
-                    raise AssertionError((var_ranges, v, node.snodes))
-                indexing_exprs.update(exprs)
-            return var_ranges, list(indexing_exprs)
+                    var_ranges = constraints.ranges
+                if var_ranges != constraints.ranges:
+                    raise AssertionError((var_ranges, constraints.ranges, node.snodes))
+                indexing_exprs.update(constraints.exprs)
+            if var_ranges is None:
+                raise AssertionError("expected at least one snode to set var_ranges")
+            return ir.ExtraIndexingConstraints(var_ranges, list(indexing_exprs))
 
         if not isinstance(node, SchedulerNode):
             raise AssertionError("expected isinstance(node, SchedulerNode)")
@@ -5130,7 +5151,9 @@ class CppScheduling(BaseScheduling):
         if not isinstance(comp_buffer, ir.ComputedBuffer):
             raise AssertionError("expected isinstance(comp_buffer, ir.ComputedBuffer)")
         _, body, _ = comp_buffer.get_default_sizes_body()
-        return body.var_ranges, list(body.indexing_exprs.values())
+        return ir.ExtraIndexingConstraints(
+            body.var_ranges, list(body.indexing_exprs.values())
+        )
 
     def _snapshot_node_loop_states(self, node):
         if isinstance(node, SchedulerNode):
@@ -5579,7 +5602,7 @@ class CppScheduling(BaseScheduling):
 
         if extra_indexing_ranges is None:
             raise AssertionError("extra_indexing_ranges is None")
-        extra_indexing_constraints = (
+        extra_indexing_constraints = ir.ExtraIndexingConstraints(
             extra_indexing_ranges,
             list(extra_indexing_exprs),
         )
@@ -5785,14 +5808,36 @@ class CppScheduling(BaseScheduling):
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                     nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
 
+                def fallback_without_local_buffers() -> Literal[False]:
+                    for removed_buffer in scope.removed_buffers:
+                        # Restore the removed buffers by this context before
+                        # fallback to codegen without using Local Buffer.
+                        V.graph.removed_buffers.remove(removed_buffer)
+                    return False
+
+                # Local buffers omit fused outer dimensions.  If an omitted
+                # outer loop is tiled, one local buffer slot would be reused for
+                # multiple outer elements in the same loop iteration.
+                def has_tiled_fused_outer_loop() -> bool:
+                    for cpp_kernel_proxy in cpp_kernel_proxy_list:
+                        loop_nest = cpp_kernel_proxy.loop_nest
+                        if loop_nest is None:
+                            raise AssertionError("expected loop_nest is not None")
+                        loops = loop_nest.loops
+                        if loops is None:
+                            raise AssertionError("expected loops is not None")
+                        for loop in loops[: node.outer_loop_fusion_depth]:
+                            if loop.steps != sympy.S.One:
+                                return True
+                    return False
+
+                if len(local_buffers) > 0 and has_tiled_fused_outer_loop():
+                    return fallback_without_local_buffers()
+
                 if not node.check_outer_fusion_loop_level_attr(
                     cpp_kernel_proxy_list, node.outer_loop_fusion_depth
                 ):
-                    for removed_buffer in scope.removed_buffers:
-                        # Restore the removed buffers by this context before
-                        # fallback to codegen without using Local Buffer
-                        V.graph.removed_buffers.remove(removed_buffer)
-                    return False
+                    return fallback_without_local_buffers()
                 metrics.cpp_outer_loop_fused_inner_counts.append(
                     metrics.CppOuterLoopFusedCount(
                         len(cpp_kernel_proxy_list),

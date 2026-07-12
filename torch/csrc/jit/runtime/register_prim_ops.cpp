@@ -1632,7 +1632,7 @@ constexpr c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-// Convert an python index (which may be negative) into an index usable for a
+// Convert a python index (which may be negative) into an index usable for a
 // C++ container
 int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {

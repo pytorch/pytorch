@@ -1182,6 +1182,70 @@ def forward(self, x_1, y_1):
         x = torch.randn(2, 3)
         make_fx(f, tracing_mode="symbolic")(x)
 
+    def test_scalar_placeholder_meta(self):
+        def f(x, n, alpha, flag):
+            y = x + n
+            return y * alpha if flag else y
+
+        gm = make_fx(f)(torch.ones(2), 3, 2.0, True)
+        placeholder_meta = {
+            node.target: node.meta.get("val")
+            for node in gm.graph.nodes
+            if node.op == "placeholder"
+        }
+        self.assertEqual(placeholder_meta["n_1"], 3)
+        self.assertEqual(placeholder_meta["alpha_1"], 2.0)
+        self.assertEqual(placeholder_meta["flag_1"], True)
+
+    def test_unbacked_bindings_on_multiple_token_grid_placeholders(self):
+        from torch._dynamo.source import LocalSource
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+        from torch.utils._pytree import keystr
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+
+        def fakeify(t, name):
+            return fake_mode.from_tensor(
+                t,
+                source=LocalSource(name, is_input=True),
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.UNBACKED, DimDynamic.STATIC],
+                    shape_ids={0: "token_grid_batch"},
+                ),
+            )
+
+        token_ids = fakeify(torch.randint(8, (2, 4)), "token_ids")
+        labels = fakeify(torch.randint(8, (2, 4)), "labels")
+        position_ids = fakeify(torch.arange(4).expand(2, 4), "position_ids")
+        expected_symbols = tuple(shape_env.pending_fresh_unbacked_symbols)
+
+        def fn(token_ids, labels, position_ids):
+            token_features = token_ids.to(torch.float32) + position_ids.to(
+                torch.float32
+            )
+            return torch.where(labels >= 0, token_features, token_features.neg())
+
+        with fake_mode:
+            gm = make_fx(fn)(token_ids, labels, position_ids)
+
+        placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+        self.assertEqual(len(placeholders), 3)
+        for placeholder, expected_symbol in zip(
+            placeholders, expected_symbols, strict=True
+        ):
+            bindings = placeholder.meta.get("unbacked_bindings")
+            self.assertIsNotNone(bindings)
+            self.assertEqual(len(bindings), 1)
+            self.assertEqual(set(bindings), {expected_symbol})
+            self.assertEqual(
+                [keystr(path) for path in bindings.values()], [".size()[0]"]
+            )
+
     # https://github.com/pytorch/pytorch/issues/108195
     def test_symbolic_repeat_interleave(self):
         def f(y, x):
