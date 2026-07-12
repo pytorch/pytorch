@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import json
 import operator
 import os
 import subprocess
@@ -320,6 +321,82 @@ class TestCompileWorker(TestCase):
 class TestCompileWorkerWithTimer(TestCompileWorker):
     def make_pool(self, size):
         return SubprocPool(size, quiesce=True)
+
+
+class TestCompileWorkerWatchdog(TestCase):
+    # The sidecar runs a watchdog that, every interval (shortened to 1s here via
+    # env), reports jobs still running past that interval to the parent, which
+    # turns them into a "compile_worker_status" structured-trace artifact -- so a
+    # stuck/slow worker leaves a breadcrumb in tlparse instead of silently
+    # wedging. See subproc_pool.SubprocMain._watchdog_loop.
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_reports_slow_jobs(self):
+        reports = []
+        got_report = Event()
+
+        def fake_trace_structured(name, *args, **kwargs):
+            if name != "artifact":
+                return
+            metadata = kwargs.get("metadata_fn", dict)()
+            if metadata.get("name") != "compile_worker_status":
+                return
+            reports.append(json.loads(kwargs["payload_fn"]()))
+            got_report.set()
+
+        with patch.dict(
+            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        ):
+            with patch(
+                "torch._inductor.compile_worker.subproc_pool.trace_structured",
+                fake_trace_structured,
+            ):
+                pool = SubprocPool(2)
+                try:
+                    slow = pool.submit(time.sleep, 8)
+                    self.assertTrue(
+                        got_report.wait(30), "watchdog did not report the slow job"
+                    )
+                    slow.result()
+                finally:
+                    pool.shutdown()
+
+        self.assertTrue(reports)
+        self.assertGreaterEqual(reports[-1]["elapsed_s"], 1.0)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_silent_for_fast_jobs(self):
+        reports = []
+
+        def fake_trace_structured(name, *args, **kwargs):
+            if name != "artifact":
+                return
+            metadata = kwargs.get("metadata_fn", dict)()
+            if metadata.get("name") == "compile_worker_status":
+                reports.append(metadata)
+
+        with patch.dict(
+            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        ):
+            pool = SubprocPool(2)
+            try:
+                # Warm the pool before collecting reports. The first job pays cold
+                # pool creation and the worker forks, which can exceed the
+                # (test-shortened) interval and be legitimately reported; that
+                # cost must not be attributed to the "fast" job below. The
+                # callback drops a job from _inflight before its result is sent,
+                # so once this result returns the warm-up job can no longer be
+                # reported.
+                self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                with patch(
+                    "torch._inductor.compile_worker.subproc_pool.trace_structured",
+                    fake_trace_structured,
+                ):
+                    self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                    time.sleep(2.5)  # a couple of watchdog ticks with no slow job
+            finally:
+                pool.shutdown()
+
+        self.assertEqual(reports, [])
 
 
 class TestTimer(TestCase):
