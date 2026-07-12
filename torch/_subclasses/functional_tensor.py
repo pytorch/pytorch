@@ -662,7 +662,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         ):
             input_unwrapped = torch._from_functional_tensor(args[0].elem)
             if (
-                isinstance(  # noqa-isinstance-fake: python fake .dispatch_keys
+                isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                     input_unwrapped, torch._subclasses.FakeTensor
                 )
                 and input_unwrapped.dispatch_keys is not None
@@ -672,7 +672,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                 def preserve_dispatch_keys(out: object) -> None:
                     if isinstance(out, FunctionalTensor):
                         unwrapped = torch._from_functional_tensor(out.elem)
-                        if isinstance(  # noqa-isinstance-fake: python fake .dispatch_keys
+                        if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                             unwrapped, torch._subclasses.FakeTensor
                         ):
                             unwrapped.dispatch_keys = input_dispatch_keys

@@ -4872,7 +4872,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             _wire_tensor_spec_dims(tensor_spec, fake_e)
         if (
             source is not None
-            and isinstance(fake_e, FakeTensor)  # noqa-isinstance-fake: memo
+            and isinstance(fake_e, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             and (sym_val := fake_e.item_memo) is not None
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that

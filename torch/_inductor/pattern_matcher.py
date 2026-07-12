@@ -544,7 +544,7 @@ class Ignored(PatternExpr):
 
 
 def _get_fake_tensor_constant(value: torch.Tensor) -> torch.Tensor | None:
-    if isinstance(value, FakeTensor):  # noqa-isinstance-fake: reads .constant
+    if isinstance(value, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return value.constant
     return value
 
@@ -617,7 +617,7 @@ def _tensor_constant_repr(value: torch.Tensor) -> str:
         )
     dtype = value.dtype
     device = value.device
-    if isinstance(value, FakeTensor):  # noqa-isinstance-fake: reads .constant
+    if isinstance(value, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         constant = value.constant
         if constant is None:
             raise NotImplementedError("NYI: serializing fake get_attr tensor")

@@ -728,7 +728,7 @@ command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=isinstance\([^)]*\bFakeTensor\b',
-    '--line-allowlist-pattern=noqa-isinstance-fake',
+    '--line-allowlist-pattern=noqa: ISINSTANCE_FAKE_TENSOR',
     '--linter-name=ISINSTANCE_FAKE_TENSOR',
     '--error-name=isinstance(x, FakeTensor)',
     """--error-description=\
@@ -736,7 +736,7 @@ command = [
         Python FakeTensors and misses C++ FakeTensors. \
         Use is_fake_tensor(x) for a leaf fake check. \
         If you must match only a Python FakeTensor instance, keep isinstance \
-        and add a comment # noqa-isinstance-fake: <reason> to the line.\
+        and add a `# noqa: ISINSTANCE_FAKE_TENSOR` comment to the line.\
     """,
     '--',
     '@{{PATHSFILE}}'

@@ -3497,7 +3497,7 @@ class OutputGraph(OutputGraphCommon):
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value")
             if (
-                isinstance(example_value, FakeTensor)  # noqa-isinstance-fake: memo
+                isinstance(example_value, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
                 and example_value.item_memo is not None
                 and hasattr(example_value.item_memo.node._expr, "name")
                 and all(u.target == "item" for u in node.users)
