@@ -147,7 +147,7 @@ def _torchscript_schema_to_signature_impl(
     elif len(return_types) == 1:
         return_type = return_types[0]
     else:
-        return_type = tuple(return_types)
+        return_type = tuple.__class_getitem__(tuple(return_types))
 
     return inspect.Signature(parameters, return_annotation=return_type)
 
@@ -248,7 +248,7 @@ def get_signature_for_torch_op(
     if isinstance(op, OpOverload):
         schemas = [op._schema]
     elif isinstance(op, OpOverloadPacket):
-        schemas = [getattr(op, overload)._schema for overload in op.overloads()]
+        schemas = [overload._schema for overload in op.op_overloads()]
     else:
         override = _manual_overrides.get(op)
         if override:

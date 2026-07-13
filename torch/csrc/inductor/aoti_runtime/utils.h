@@ -520,7 +520,7 @@ inline void assert_size_stride(
     AOTI_RUNTIME_CHECK(
         false,
         std::move(msg).str() + op_msg +
-            "\nThis error most often comes from a incorrect fake (aka meta) "
+            "\nThis error most often comes from an incorrect fake (aka meta) "
             "kernel for a custom op."
             "\nUse torch.library.opcheck to test your custom op."
             "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck");

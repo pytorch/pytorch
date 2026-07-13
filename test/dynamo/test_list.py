@@ -3,6 +3,8 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 
+import sys
+
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
@@ -19,6 +21,14 @@ class AlwaysEqualForListRemove:
 class NeverEqualForListRemove:
     def __eq__(self, other):
         return False
+
+
+class CmpKeyForListSort:
+    def __init__(self, v):
+        self.v = v
+
+    def __lt__(self, other):
+        return self.v % 3 < other.v % 3
 
 
 class TupleTests(torch._dynamo.test_case.TestCase):
@@ -317,6 +327,54 @@ class ListTests(TupleTests):
         self.assertEqual(p, self.thetype("abcd"))
 
     @make_dynamo_test
+    def test_sort_cmp_to_key(self):
+        from functools import cmp_to_key
+
+        def revcmp(a, b):
+            return (a < b) - (a > b)
+
+        p = self.thetype([1, 3, 2])
+        p.sort(key=cmp_to_key(revcmp))
+        self.assertEqual(p, self.thetype([3, 2, 1]))
+        p.sort(key=cmp_to_key(revcmp), reverse=True)
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+
+    @make_dynamo_test
+    def test_sort_user_defined_lt(self):
+        p = self.thetype([3, 4, 5])
+        p.sort(key=CmpKeyForListSort)
+        self.assertEqual(p, self.thetype([3, 4, 5]))
+        p.sort(key=CmpKeyForListSort, reverse=True)
+        self.assertEqual(p, self.thetype([5, 4, 3]))
+
+    @make_dynamo_test
+    def test_sort_modified_during_sort(self):
+        from functools import cmp_to_key
+
+        p = self.thetype([1, 3, 2])
+
+        def selfmodifying(a, b):
+            p.append(4)
+            return (a > b) - (a < b)
+
+        self.assertRaises(ValueError, p.sort, key=cmp_to_key(selfmodifying))
+        # items appended during the sort are discarded
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+
+    @make_dynamo_test
+    def test_sort_empty_during_sort(self):
+        p = self.thetype([1, 3, 2])
+        sizes = []
+
+        def key(x):
+            sizes.append(len(p))
+            return x
+
+        p.sort(key=key)
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+        self.assertEqual(sizes, [0, 0, 0])
+
+    @make_dynamo_test
     def test_binop_imul(self):
         p = self.thetype([1, 2, 3])
         r = p.__imul__(2)
@@ -426,6 +484,55 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.__delitem__)
         self.assertRaises(TypeError, p.__delitem__, 1.1)
         self.assertRaises(TypeError, p.__delitem__, 1, 2)
+
+    @make_dynamo_test
+    def test___setitem___slice_non_iterable(self):
+        # ref: https://github.com/python/cpython/pull/120442 (gh-120384),
+        # which fixed an array-out-of-bounds crash by moving the
+        # PySequence_Fast check ahead of the step==1 branch in
+        # list_ass_subscript. Before this landed, simple (step is None or
+        # 1) slices raised "can only assign an iterable" instead of the
+        # unified extended-slice message. Verified empirically against
+        # real CPython builds (cross-checked via two independent
+        # toolchains): the fix shipped in 3.10.20, 3.11.15, and 3.12.5
+        # (3.12.0 is the first 3.12 release, so 3.12.0-3.12.4 predate it);
+        # 3.13+ never had the bug.
+        v = sys.version_info
+        has_bug = (
+            (v[:2] == (3, 10) and v < (3, 10, 20))
+            or (v[:2] == (3, 11) and v < (3, 11, 15))
+            or (v[:2] == (3, 12) and v < (3, 12, 5))
+        )
+        p = self.thetype("abcdef")
+        if has_bug:
+            self.assertRaisesRegex(
+                TypeError,
+                "can only assign an iterable",
+                p.__setitem__,
+                slice(1, 3),
+                1,
+            )
+        else:
+            self.assertRaisesRegex(
+                TypeError,
+                "must assign iterable to extended slice",
+                p.__setitem__,
+                slice(1, 3),
+                1,
+            )
+
+        # Extended slices (step != 1) always use the extended-slice message.
+        self.assertRaisesRegex(
+            TypeError,
+            "must assign iterable to extended slice",
+            p.__setitem__,
+            slice(1, 5, 2),
+            1,
+        )
+
+        # Valid iterable assignments are unaffected.
+        p[1:3] = ["x", "y"]
+        self.assertEqual(p, ["a", "x", "y", "d", "e", "f"])
 
 
 if __name__ == "__main__":

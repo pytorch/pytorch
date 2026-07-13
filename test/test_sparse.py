@@ -4287,7 +4287,7 @@ class TestSparse(TestSparseBase):
                 ex_layout = layout
             out_dense = out.to_dense()
             self.assertTrue(out.layout == ex_layout, f"Output layout {out.layout} expected {ex_layout}")
-            self.assertEqual(out_dense, ref_out, f"Result:\n{out_dense} does not match reference:\n{ref_out}")
+            self.assertEqual(out_dense, ref_out, lambda msg: f"{msg}\nResult:\n{out_dense} does not match reference:\n{ref_out}")
 
         def check_invalid(args, error):
             with self.assertRaisesRegex(RuntimeError, error):
@@ -5837,7 +5837,10 @@ class TestSparseAny(TestCase):
             self.assertEqual(res.shape, xs.shape + (2,))
             self.assertEqual(res._values()[..., 0], xs._values().real)
             self.assertEqual(res._values()[..., 1], xs._values().imag)
-            if not (dtype is torch.complex32 and torch.device(device).type == "cpu"):
+            if not (
+                dtype in (torch.complex32, torch.bcomplex32)
+                and torch.device(device).type == "cpu"
+            ):
                 # ComplexHalf to_dense() is not supported on CPU.
                 self.assertEqual(res.to_dense(), torch.view_as_real(xs.to_dense()))
             self.assertEqual(torch.view_as_complex(torch.view_as_real(xs)), xs)
