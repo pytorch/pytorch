@@ -1887,6 +1887,21 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
     extra_check=should_prefer_unfused_baddbmm,
 )
 def unfuse_bias_baddbmm_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
+    if config.keep_addmm_fused_for_half_dtypes and inp.meta["val"].dtype in (
+        torch.bfloat16,
+        torch.float16,
+    ):
+        if inp.meta["val"].device.type != "xpu":
+            return
+        if not (
+            inp.op == "call_function"
+            and inp.target is torch.ops.prims.convert_element_type.default
+            and inp.args[0].meta["val"].dtype.is_floating_point
+            and torch.finfo(inp.args[0].meta["val"].dtype).bits
+            > torch.finfo(inp.meta["val"].dtype).bits
+        ):
+            return
+
     def repl(inp, x1, x2, alpha, beta):
         bmm_result = torch.bmm(x1, x2)
         if alpha != 1:
