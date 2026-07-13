@@ -338,6 +338,40 @@ kernel void unary_alpha_dense(
   output[index] = f(input[index], alpha);
 }
 
+// ILP variant of unary_alpha_dense; mirrors unary_dense. Selected by the host
+// only when the caller opts in via ilp_threshold (see
+// exec_unary_kernel_with_params).
+template <typename T, typename T2, typename F>
+kernel void unary_alpha_dense_ilp(
+    device result_of<F, T, T2>* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T2& alpha [[buffer(2)]],
+    constant uint& numel [[buffer(3)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  uint base = index * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= numel) {
+    array<T, ILP_PER_THREAD> tmp_in;
+    array<result_of<F, T, T2>, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = input[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j], alpha);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      output[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint i = base; i < numel; ++i) {
+      output[i] = f(input[i], alpha);
+    }
+  }
+}
+
 template <typename T, typename T2, typename F>
 kernel void unary_alpha_strided(
     device void* output [[buffer(0)]],
@@ -371,6 +405,15 @@ kernel void unary_alpha_strided(
               output,                                                      \
           constant DTYPEI * input,                                         \
           constant DTYPEA & alpha,                                         \
+          uint index);                                                     \
+  template [[host_name(#NAME "_dense_ilp_" #DTYPEO "_" #DTYPEI             \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::     \
+      unary_alpha_dense_ilp<DTYPEI, DTYPEA, NAME##_functor>(               \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEA> * \
+              output,                                                      \
+          constant DTYPEI * input,                                         \
+          constant DTYPEA & alpha,                                         \
+          constant uint & numel,                                           \
           uint index);                                                     \
   template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI               \
                              "_" #DTYPEA)]] kernel void ::c10::metal::     \
