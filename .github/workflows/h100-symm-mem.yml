@@ -32,7 +32,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf
+      check_experiments: lf
 
   linux-jammy-cuda13_0-py3_10-gcc11-sm90-build-symm:
     name: linux-jammy-cuda13.0-py3.10-gcc11-sm90-symm
