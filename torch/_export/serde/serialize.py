@@ -441,7 +441,7 @@ def deserialize_torch_artifact(
         artifact = torch.load(buffer, weights_only=False)
         log.warning(
             "Fallback to weights_only=False succeeded. "
-            "Loaded object of type %s after initial failure: %s",
+            "Loaded object of type %s after initial failure:",
             type(artifact),
             exc_info=e,
         )
