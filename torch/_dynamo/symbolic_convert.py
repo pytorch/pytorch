@@ -396,6 +396,11 @@ class LocalState:
         )
 
 
+# Transmitted between ranks by the compiler collective (all_gather_object
+# deserializes with weights_only=True by default).
+torch.serialization.add_safe_globals([LocalState])
+
+
 # Mutable box that is shared across restarts
 @dataclasses.dataclass
 class DistributedState:

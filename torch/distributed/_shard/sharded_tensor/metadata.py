@@ -92,3 +92,10 @@ class ShardedTensorMetadata:
     size: torch.Size = field(default=torch.Size([]))
 
     tensor_properties: TensorProperties = field(default_factory=TensorProperties)
+
+
+# Transmitted between ranks via the c10d object collectives (which deserialize
+# with weights_only=True by default), e.g. in ShardedTensor.gather.
+torch.serialization.add_safe_globals(
+    [MEM_FORMAT_ENCODING, TensorProperties, ShardedTensorMetadata]
+)

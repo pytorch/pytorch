@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from functools import reduce
 
+import torch
 from torch.distributed.remote_device import _remote_device
 
 
@@ -61,3 +62,6 @@ class ShardMetadata:
         res = reduce(_hash_reduce, self.shard_sizes, res)
         res = _hash_reduce(res, self.placement)
         return res
+
+
+torch.serialization.add_safe_globals([ShardMetadata, _remote_device])

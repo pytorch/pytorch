@@ -2697,7 +2697,9 @@ class OutputGraph(OutputGraphCommon):
             ):
                 all_states: list[Any] = [None] * compile_pg.size()
 
-                dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
+                dist.all_gather_object(
+                    all_states, ds.local_state, group=compile_pg, weights_only=True
+                )
 
                 ds.all_states = all_states
             # Clear speculation log, because are tracing may diverge due to
