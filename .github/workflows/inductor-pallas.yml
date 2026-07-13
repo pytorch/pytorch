@@ -63,29 +63,3 @@ jobs:
       compiler: gcc11
       cuda-version: "13.0"
     secrets: inherit
-
-  linux-jammy-py3_12-inductor-pallas-tpu-build:
-    name: pallas-tpu-py3.12-inductor
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.12-gcc11-pallas-tpu
-      docker-image-name: ci-image:pytorch-linux-jammy-tpu-py3.12-pallas
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      test-matrix: |
-        { include: [
-          { config: "inductor-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv7x.1" },
-        ]}
-      python-version: "3.12"
-    secrets: inherit
-
-  linux-jammy-py3_12-inductor-pallas-tpu-test:
-    name: pallas-tpu-py3.12-inductor
-    uses: ./.github/workflows/_tpu-test.yml
-    needs: linux-jammy-py3_12-inductor-pallas-tpu-build
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.test-matrix }}
-    secrets: inherit
