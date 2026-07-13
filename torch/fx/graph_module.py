@@ -863,7 +863,7 @@ class {module_name}(torch.nn.Module):
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.
         """
-        used: list[str] = []
+        used: set[str] = set()
 
         for node in self.graph.nodes:
             if node.op in ("call_module", "get_attr") and isinstance(node.target, str):
@@ -881,8 +881,8 @@ class {module_name}(torch.nn.Module):
                 # Progressively collect all the names of intermediate
                 # modules. For example, if we have the target
                 # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and
-                # `foo.bar.baz` to the list.
-                used.extend(itertools.accumulate(fullpath, join_fn))
+                # `foo.bar.baz` to the set.
+                used.update(itertools.accumulate(fullpath, join_fn))
 
                 # For a `call_module` node, also register all recursive submodules
                 # as used
@@ -893,7 +893,7 @@ class {module_name}(torch.nn.Module):
 
                         for submod_name, _ in submod.named_modules():
                             if submod_name != "":
-                                used.append(".".join([str_target, submod_name]))
+                                used.add(".".join([str_target, submod_name]))
                     except AttributeError:
                         # Node referenced nonexistent submodule, don't need to
                         # worry about GCing anything
