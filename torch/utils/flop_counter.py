@@ -1,4 +1,88 @@
 # mypy: allow-untyped-defs
+"""Utilities for counting theoretical floating point operations.
+
+``FlopCounterMode`` is a context manager that intercepts PyTorch operators and
+adds up their registered FLOP formulas. The result is a shape-based,
+theoretical FLOP count for the operators that ran inside the context, not a
+hardware performance measurement.
+
+The counter is useful when comparing model graphs, activation checkpointing
+plans, or shape changes with a stable FLOP accounting rule. It should not be
+read as kernel instructions, wall-clock time, memory bandwidth, achieved
+FLOP/s, Tensor Core utilization, or the exact work done by a fused kernel.
+
+Counting semantics
+------------------
+
+* Counts are produced by formulas in ``flop_registry``. Operators without a
+  formula may be decomposed into registered operators; otherwise they add zero
+  FLOPs.
+* Formula inputs have tensor arguments replaced by their shapes by default.
+  Non-tensor arguments pass through unchanged. Use
+  ``register_flop_formula(..., get_raw=True)`` only when the formula needs the
+  original tensor arguments or metadata.
+* Forward and backward operations are counted only if they execute while the
+  context manager is active.
+* The default formulas use dense, naive mathematical definitions. For example,
+  matrix multiplication counts ``2 * m * n * k`` FLOPs.
+* Counts do not automatically adjust for dtype-specific throughput, Tensor
+  Cores, sparsity, quantization, masking, skipped elements, memory movement, or
+  data-dependent early exits. A formula must explicitly model those semantics.
+  For example, the built-in attention formulas are upper bounds for causal or
+  otherwise masked attention unless the formula explicitly models the mask.
+* Higher-order operators and ``torch.compile`` may expose decomposed or fused
+  work differently from eager execution. Custom operators and custom Triton
+  kernels need a formula or a decomposition if they should contribute FLOPs.
+* Module attribution is tracked through ``ModuleTracker``. Totals are always
+  available under ``"Global"``; submodule rows are best-effort attribution for
+  module calls observed during the context.
+* The workload still executes normally. Use this mode for a few representative
+  iterations rather than long training runs if overhead or memory use matters.
+
+Example
+-------
+
+.. code-block:: python
+
+    import torch
+    from torch.utils.flop_counter import FlopCounterMode
+
+    model = torch.nn.Linear(16, 32)
+    x = torch.randn(4, 16)
+
+    with FlopCounterMode(display=False) as mode:
+        model(x).sum().backward()
+
+    print(mode.get_total_flops())
+    print(mode.get_flop_counts()["Global"])
+
+Registering a formula for a custom op
+-------------------------------------
+
+Register custom FLOP formulas before constructing ``FlopCounterMode``. The
+mode snapshots the global registry during initialization.
+
+.. code-block:: python
+
+    from math import prod
+
+    import torch
+    from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
+
+    @torch.library.custom_op("example::scale", mutates_args=())
+    def scale(x: torch.Tensor) -> torch.Tensor:
+        return x * 2
+
+    @register_flop_formula(torch.ops.example.scale)
+    def scale_flops(x_shape, *, out_shape=None) -> int:
+        return prod(x_shape)
+
+    x = torch.randn(8)
+    with FlopCounterMode(display=False) as mode:
+        scale(x)
+
+    assert mode.get_total_flops() == 8
+"""
 from types import NoneType
 import logging
 import torch
@@ -453,6 +537,10 @@ def _flash_attention_forward_flop(
 ) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
+    if cum_seq_q is None and query.ndim == 4:
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     sizes = _unpack_flash_attention_nested_shapes(
@@ -561,6 +649,11 @@ def _flash_attention_backward_flop(
     *args,
     **kwargs,
 ) -> int:
+    if cum_seq_q is None and query.ndim == 4:
+        grad_out = grad_out.transpose(-2, -3)
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     shapes = _unpack_flash_attention_nested_shapes(
@@ -792,22 +885,29 @@ def _pytreeify_preserve_structure(f):
 
 
 class FlopCounterMode:
-    """
-    ``FlopCounterMode`` is a context manager that counts the number of flops within its context.
+    """Count theoretical FLOPs for operators that run inside the context.
 
-    It does this using a ``TorchDispatchMode``.
+    ``FlopCounterMode`` uses ``TorchDispatchMode`` to intercept operations and
+    apply registered FLOP formulas. Counts are shape-based and formula-defined;
+    unsupported operations contribute zero FLOPs unless they decompose into
+    supported operations.
 
-    It also supports hierarchical output by passing a module (or list of
-    modules) to FlopCounterMode on construction. If you do not need hierarchical
-    output, you do not need to use it with a module.
+    The optional ``mods`` argument is no longer needed for module attribution.
+    When ``display`` is true, exiting the context prints a table. Use
+    ``get_total_flops()`` or ``get_flop_counts()`` to read the same information
+    programmatically.
 
-    Example usage
+    Example usage:
 
     .. code-block:: python
 
         mod = ...
-        with FlopCounterMode(mod) as flop_counter:
-            mod.sum().backward()
+        inp = ...
+
+        with FlopCounterMode(display=False) as flop_counter:
+            mod(inp).sum().backward()
+
+        total = flop_counter.get_total_flops()
 
     """
 
