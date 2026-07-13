@@ -2443,7 +2443,7 @@ main()
                             node.target is auto_functionalize_func
                             for node in gm.graph.nodes
                         ),
-                        f"{auto_functionalize_func} op not found in {gm.graph}",
+                        lambda msg: f"{msg}\n{auto_functionalize_func} op not found in {gm.graph}",
                     )
                     return compiler_fn(gm)
 
@@ -5716,11 +5716,11 @@ hop_test_hops_in_bwd_failures = {
 
 class TestCompiledAutogradOpInfo(TestCase):
     def setUp(self) -> None:
-        super(TestCase, self).setUp()
+        super().setUp()
         reset()
 
     def tearDown(self) -> None:
-        super(TestCase, self).tearDown()
+        super().tearDown()
         reset()
 
     @ops(
