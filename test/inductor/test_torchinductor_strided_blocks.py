@@ -864,12 +864,12 @@ class CommonTemplate:
             self.assertGreaterEqual(
                 block_pointer_count,
                 min_num_block_pointers,
-                f"Too few block descriptors emitted: {block_pointer_count}",
+                lambda msg: f"{msg}\nToo few block descriptors emitted: {block_pointer_count}",
             )
             self.assertLessEqual(
                 block_pointer_count,
                 max_num_block_pointers,
-                f"Too many block descriptors emitted: {block_pointer_count}",
+                lambda msg: f"{msg}\nToo many block descriptors emitted: {block_pointer_count}",
             )
 
         self._assert_reduction_ndims(code, 2)
