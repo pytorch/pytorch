@@ -1,6 +1,8 @@
 """Backward-compatible re-exports from the shared heuristics registry."""
 
-from torch._inductor.heuristics.registry import (
+from torch._inductor.heuristics.registry import (  # noqa: F401
+    _HEURISTIC_CACHE,  # noqa: F401
+    _TEMPLATE_HEURISTIC_REGISTRY,
     clear_registry,
     get_registered_heuristic_class,
     get_template_heuristic,
@@ -8,8 +10,11 @@ from torch._inductor.heuristics.registry import (
     register_template_heuristic,
 )
 
+from .base import TemplateConfigHeuristics
+
 
 __all__ = [
+    "TemplateConfigHeuristics",
     "clear_registry",
     "get_registered_heuristic_class",
     "get_template_heuristic",
