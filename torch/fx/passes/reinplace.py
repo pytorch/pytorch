@@ -262,7 +262,9 @@ def _get_view_inverse_node_usages(
         mutated_view = n.args[1]
         if not isinstance(base, Node):
             raise AssertionError(f"Expected Node for base, got {type(base)}")
-        if not is_fake_tensor(base.meta["fake_result"]):
+        if not isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            base.meta["fake_result"], FakeTensor
+        ):
             raise AssertionError("Expected FakeTensor in base.meta['fake_result']")
         if not isinstance(mutated_view, Node):
             raise AssertionError(

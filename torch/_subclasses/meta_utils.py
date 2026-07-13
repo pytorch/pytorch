@@ -60,9 +60,9 @@ if TYPE_CHECKING:
 
 
 def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
-    from torch._subclasses.fake_tensor import is_fake_tensor
+    from torch._subclasses.fake_tensor import FakeTensor
 
-    return is_fake_tensor(t)
+    return isinstance(t, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
 
 
 def _unwrap_python_functional_tensor(t: torch.Tensor) -> torch.Tensor:
@@ -2306,7 +2306,7 @@ class MetaConverter(Generic[_TensorT]):
                 # pyrefly: ignore [unbound-name]
                 if not _is_fake_tensor(r):
                     raise AssertionError("Expected r to be a FakeTensor for nested int")
-                # pyrefly: ignore [unbound-name]
+                # pyrefly: ignore [unbound-name, missing-attribute]
                 r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
                 )

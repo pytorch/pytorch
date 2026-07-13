@@ -10,6 +10,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
     is_fake_tensor,
+    maybe_get_fake_mode,
     MetadataMismatchError,
     tree_flatten_only,
     UnsupportedFakeTensorException,
@@ -129,7 +130,9 @@ def try_convert_fake_to_real(
     if fake_tensor is None:
         return ten_list
 
-    fake_mode = fake_tensor.fake_mode
+    fake_mode = maybe_get_fake_mode(fake_tensor)
+    if fake_mode is None:
+        return ten_list
     meta_converter = fake_mode.fake_tensor_converter.meta_converter
     desc = meta_converter.describer
 
