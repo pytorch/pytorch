@@ -6,15 +6,23 @@ import torch
 import torch.distributed as dist
 
 
-if not dist.is_available() or not dist.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
+if not dist.is_available() or not (
+    dist.is_nccl_available() or dist.is_xccl_available()
+):
+    print("c10d NCCL/XCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests
+
+
+_acc = torch.accelerator.current_accelerator(True)
+_DEVICE_TYPE = _acc.type if _acc else "cpu"
+_BACKEND = torch.distributed.get_default_backend_for_device(_DEVICE_TYPE)
 
 
 class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
@@ -28,6 +36,7 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def test_equivalent_allreduce_strategies(self):
         """
@@ -37,7 +46,7 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         Strategy 2: avg all_reduce * world_size
         """
         dist.init_process_group(
-            backend="nccl",
+            backend=_BACKEND,
             init_method=f"file:///tmp/test_equiv_allreduce_{self.id()}",
             world_size=self.world_size,
             rank=self.rank,
@@ -46,7 +55,7 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         dist.barrier()
 
         rank = dist.get_rank()
-        device = f"cuda:{rank}"
+        device = f"{_DEVICE_TYPE}:{rank}"
 
         from torch._C._distributed_c10d import _register_process_group
 
@@ -110,6 +119,7 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
     def test_vllm_style_allreduce(self):
         """
@@ -119,7 +129,7 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         Two implementations simulate vLLM's registered=False mode vs standard NCCL.
         """
         dist.init_process_group(
-            backend="nccl",
+            backend=_BACKEND,
             init_method=f"file:///tmp/test_vllm_allreduce_{self.id()}",
             world_size=self.world_size,
             rank=self.rank,
@@ -128,7 +138,7 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         dist.barrier()
 
         rank = dist.get_rank()
-        device = f"cuda:{rank}"
+        device = f"{_DEVICE_TYPE}:{rank}"
 
         from torch._C._distributed_c10d import _register_process_group
 
