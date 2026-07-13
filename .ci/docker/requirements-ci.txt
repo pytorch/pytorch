@@ -346,17 +346,17 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.21.0 ; platform_machine != "riscv64"
+onnx==1.21.0
 #Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
 
-onnxscript==0.6.2 ; platform_machine != "riscv64"
+onnxscript==0.6.2
 #Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
 
-onnx-ir==0.1.16 ; platform_machine != "riscv64"
+onnx-ir==0.1.16
 #Description: In-memory IR for ONNX, dependency of onnxscript. Pinned to avoid breaking changes in newer versions.
 #Pinned versions:
 #test that import:
