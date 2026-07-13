@@ -11571,6 +11571,22 @@ class TestLinalgMPS(TestCaseMPS):
             rhs = torch.exp(torch.diagonal(a.cpu(), dim1=-2, dim2=-1).sum(-1))
             self.assertEqual(lhs, rhs, atol=1e-3, rtol=1e-3)
 
+    @dtypes(torch.float32)
+    @parametrize("shape", [(4, 4), (5, 3)], name_fn=lambda shape: "x".join(map(str, shape)))
+    def test_polar_backward(self, device, dtype, shape):
+        # linalg.polar backward is real-only on MPS (the H solve routes through
+        # lu_factor, unsupported for complex on MPS), so compare A.grad against
+        # CPU for the same random output grads gU, gH.
+        torch.manual_seed(0)
+        A_cpu = torch.randn(*shape, dtype=dtype, requires_grad=True)
+        A_mps = A_cpu.detach().to(device).requires_grad_(True)
+        U_cpu, H_cpu = torch.linalg.polar(A_cpu)
+        U_mps, H_mps = torch.linalg.polar(A_mps)
+        gU, gH = torch.randn_like(U_cpu), torch.randn_like(H_cpu)
+        torch.autograd.backward([U_cpu, H_cpu], [gU, gH])
+        torch.autograd.backward([U_mps, H_mps], [gU.to(device), gH.to(device)])
+        self.assertEqual(A_mps.grad.cpu(), A_cpu.grad, atol=1e-4, rtol=1e-4)
+
     def test_matrix_rank(self, device="mps", dtype=torch.float32):
         matrix_rank = torch.linalg.matrix_rank
 

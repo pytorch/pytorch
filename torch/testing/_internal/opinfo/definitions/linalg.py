@@ -1902,8 +1902,9 @@ op_db: list[OpInfo] = [
         aten_name="linalg_polar",
         op=torch.linalg.polar,
         dtypes=floating_and_complex_types(),
-        # Forward op only; autograd is a follow-up.
-        supports_autograd=False,
+        # The backward solves with H (via linalg_solve/lu_factor), which MPS
+        # does not support for complex; the real MPS backward works.
+        backward_dtypesIfMPS=floating_types(),
         sample_inputs_func=sample_inputs_linalg_polar,
         decorators=[
             skipCUDAIfNoCusolver,

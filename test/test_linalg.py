@@ -4228,6 +4228,19 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("shape", [(4, 4), (5, 3)], name_fn=lambda shape: "x".join(map(str, shape)))
+    def test_polar_autograd(self, device, dtype, shape):
+        # Full column rank (distinct singular values) keeps A^H A positive-definite,
+        # the regime where the decomposition is differentiable.
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+        A = make_fullrank(*shape, device=device, dtype=dtype).requires_grad_(True)
+        # check_undefined_grad=False: dynamo_wrapped traces backward with grad defined.
+        self.assertTrue(torch.autograd.gradcheck(torch.linalg.polar, (A,), check_undefined_grad=False))
+        self.assertTrue(torch.autograd.gradgradcheck(torch.linalg.polar, (A,), check_undefined_grad=False))
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(torch.float, torch.double)
     def test_polar_ill_conditioned(self, device, dtype):
         # QDWH is designed to stay accurate on ill-conditioned inputs. Build a

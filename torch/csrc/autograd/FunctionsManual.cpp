@@ -4521,6 +4521,34 @@ Tensor linalg_matrix_sqrth_differential(
   return 0.5 * (out + out.mH());
 }
 
+Tensor linalg_polar_backward(
+    const Tensor& grad_U,
+    const Tensor& grad_H,
+    const Tensor& A,
+    const Tensor& U,
+    const Tensor& H) {
+  at::NoTF32Guard disable_tf32;
+  Tensor grad_H_eff = grad_H;
+  Tensor grad_A_from_U;
+  if (grad_U.defined()) {
+    // Y = grad_U H^{-1}; solve H Y^H = grad_U^H since H is Hermitian.
+    auto Y = at::linalg_solve(H, grad_U.mH()).mH();
+    grad_A_from_U = Y;
+    auto extra = -at::matmul(U.mH(), Y);
+    grad_H_eff = grad_H_eff.defined() ? grad_H_eff + extra : extra;
+  }
+  Tensor grad_A;
+  if (grad_H_eff.defined()) {
+    auto S_bar =
+        linalg_matrix_sqrth_differential(at::matmul(A.mH(), A), grad_H_eff);
+    grad_A = at::matmul(A, S_bar + S_bar.mH());
+  }
+  if (grad_A_from_U.defined()) {
+    grad_A = grad_A.defined() ? grad_A + grad_A_from_U : grad_A_from_U;
+  }
+  return grad_A;
+}
+
 template <typename F1, typename F2, typename... Ts>
 static Tensor masked_fmap(
     const Tensor& mask,
