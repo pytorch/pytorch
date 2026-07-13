@@ -297,6 +297,11 @@ endif()
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
+if(AARCH64_DEBIAN_ROOTFS AND PYTHON_CROSS_INCLUDE_DIR)
+  # pyconfig.h includes <aarch64-linux-gnu/python3.13/pyconfig.h>
+  target_include_directories(torch_python SYSTEM PRIVATE
+      "${PYTHON_CROSS_INCLUDE_DIR}")
+endif()
 if(APPLE)
   target_compile_options(torch_python PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
@@ -452,6 +457,9 @@ install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
   target_link_libraries(_C PRIVATE torch_python)
+  if(AARCH64_DEBIAN_ROOTFS AND PYTHON_CROSS_INCLUDE_DIR)
+    target_include_directories(_C SYSTEM PRIVATE "${PYTHON_CROSS_INCLUDE_DIR}")
+  endif()
   set_target_properties(_C PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
     # libtorch_python.so is installed to lib/ relative to _C, so use

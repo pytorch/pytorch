@@ -22,8 +22,16 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
     SET(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
 
     SET(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
-    SET(CMAKE_REQUIRED_FLAGS "${CMAKE_CXX_FLAGS_INIT} -march=armv8-a+sve+bf16 -msve-vector-bits=512")
-    CHECK_CXX_SOURCE_COMPILES("${SVE_BF16_CODE}" CXX_SVE512_FOUND)
+    SET(SVE_CODE "
+      #include <arm_sve.h>
+      int main()
+      {
+        svfloat64_t a = svdup_n_f64(0);
+        return 0;
+      }
+    ")
+    SET(CMAKE_REQUIRED_FLAGS "${CMAKE_CXX_FLAGS_INIT} -march=armv8-a+sve -msve-vector-bits=512")
+    CHECK_CXX_SOURCE_COMPILES("${SVE_CODE}" CXX_SVE512_FOUND)
     SET(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
 
     if(CXX_SVE256_FOUND)

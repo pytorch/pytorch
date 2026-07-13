@@ -39,7 +39,7 @@ static CPUCapability compute_cpu_capability() {
     }
 #elif defined(HAVE_SVE_CPU_DEFINITION)
     int sve_vl = cpuinfo_initialize() ? cpuinfo_get_max_arm_sve_length() : -1;
-    if (sve_vl > 0 && cpuinfo_has_arm_bf16()) {
+    if (sve_vl > 0) {
       if (envar == "sve512") {
         if (sve_vl == 512) {
           return CPUCapability::SVE512;
@@ -121,7 +121,7 @@ static CPUCapability compute_cpu_capability() {
 #endif
 
 #if defined(__linux__) && defined(HAVE_SVE_CPU_DEFINITION)
-  if (cpuinfo_initialize() && cpuinfo_has_arm_sve() && cpuinfo_has_arm_bf16()) {
+  if (cpuinfo_initialize() && cpuinfo_has_arm_sve()) {
     int sve_vl = cpuinfo_get_max_arm_sve_length();
     if (sve_vl == 512)
       return CPUCapability::SVE512;

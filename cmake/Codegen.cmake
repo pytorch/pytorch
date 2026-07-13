@@ -442,7 +442,7 @@ if(INTERN_BUILD_ATEN_OPS)
     list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -msve-vector-bits=128")
     if(CXX_SVE512_FOUND)
       list(APPEND CPU_CAPABILITY_NAMES "SVE512")
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -msve-vector-bits=512")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve -msve-vector-bits=512")
     endif()
   endif()
 

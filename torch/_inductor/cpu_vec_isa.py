@@ -244,17 +244,21 @@ class VecSVE(VecISA):
     )
 
     def __post_init__(self) -> None:
-        if self._bit_width not in (128, 256):
+        if self._bit_width not in (128, 256, 512):
             raise AssertionError(f"unsupported SVE bit width: {self._bit_width}")
         nelements = self._bit_width // 32
         self._macro = [
             "CPU_CAPABILITY_SVE",
             f"CPU_CAPABILITY_SVE{self._bit_width}",
             "AT_BUILD_ARM_VEC256_WITH_SLEEF",
-            "__ARM_FEATURE_BF16",
         ]
+        if self._has_bf16():
+            self._macro.append("__ARM_FEATURE_BF16")
         self._arch_flags = (
             f"-march=armv8-a+sve+bf16 -msve-vector-bits={self._bit_width}"
+        )
+        self._sve_arch_flags = (
+            f"-march=armv8-a+sve -msve-vector-bits={self._bit_width}"
         )
         self._armv9a_arch_flags = (
             "-march=armv9-a+sve2+fp16fml+sha3+bf16+i8mm "
@@ -265,6 +269,12 @@ class VecSVE(VecISA):
             torch.bfloat16: nelements * 2,
             torch.float16: nelements * 2,
         }
+
+    def _has_bf16(self) -> bool:
+        try:
+            return bool(torch.cpu.get_capabilities().get("bf16", False))
+        except Exception:
+            return False
 
     def __str__(self) -> str:
         if config.is_fbcode():
@@ -284,7 +294,9 @@ class VecSVE(VecISA):
     def build_arch_flags(self) -> str:
         if self._has_armv9a():
             return self._armv9a_arch_flags
-        return self._arch_flags
+        if self._has_bf16():
+            return self._arch_flags
+        return self._sve_arch_flags
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
@@ -560,6 +572,7 @@ supported_vec_isa_list = [
     VecAVX2(),
     VecNEON(),
     VecSVE(256),
+    VecSVE(512),
 ]
 
 
@@ -570,7 +583,21 @@ def get_isa_from_cpu_capability(
 ):
     # AMX setting is not supported in eager
     # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512
-    # TODO add sve256 support
+    sve_capability_map = {
+        "sve512": 512,
+        "sve256": 256,
+        "sve128": 128,
+    }
+    if capability in sve_capability_map:
+        target_width = sve_capability_map[capability]
+        for vec_isa in vec_isa_list:
+            if isinstance(vec_isa, VecSVE) and vec_isa.bit_width() == target_width:
+                return vec_isa
+    if capability == "sve":
+        sve_isas = [vec_isa for vec_isa in vec_isa_list if isinstance(vec_isa, VecSVE)]
+        if sve_isas:
+            return max(sve_isas, key=lambda vec_isa: vec_isa.bit_width())
+
     capability_to_isa_str = {
         "default": "INVALID_VEC_ISA",
         "zvector": "zvector",
@@ -623,10 +650,11 @@ def valid_vec_isa_list() -> list[VecISA]:
         isa_list.append(VecVSX())
     elif arch == "aarch64":
         caps = torch.cpu.get_capabilities()
-        if (caps.get("sve2", False) or caps.get("sve", False)) and caps.get(
-            "bf16", False
-        ):
-            if caps.get("sve_max_length") == 128:
+        if caps.get("sve2", False) or caps.get("sve", False):
+            sve_vl = caps.get("sve_max_length", 256)
+            if sve_vl == 512:
+                isa_list.append(VecSVE(512))
+            elif sve_vl == 128:
                 isa_list.append(VecSVE(128))
             else:
                 isa_list.append(VecSVE(256))
