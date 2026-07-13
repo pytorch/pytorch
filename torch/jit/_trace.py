@@ -31,7 +31,7 @@ from torch._jit_internal import (
 )
 from torch.autograd import function
 from torch.jit._script import _CachedForward, script, ScriptModule
-from torch.jit._state import _enabled, _python_cu
+from torch.jit._state import _enabled, _python_cu, _torchscript_deprecation_error
 from torch.nn import Module
 from torch.testing._comparison import default_tolerances
 
@@ -997,16 +997,13 @@ def trace(
 
     """
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        msg = (
             "`torch.jit.trace` is not supported in Python 3.14+ and may break. "
-            "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            "Please switch to `torch.compile` or `torch.export`."
         )
     else:
-        warnings.warn(
-            "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
-        )
+        msg = "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`."
+    _torchscript_deprecation_error(msg)
     if not _enabled:
         return func
     if optimize is not None:
@@ -1136,16 +1133,13 @@ def trace_module(
 
     """
     if sys.version_info >= (3, 14):
-        warnings.warn(
+        msg = (
             "`torch.jit.trace_method` is not supported in Python 3.14+ and may break. "
-            "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            "Please switch to `torch.compile` or `torch.export`."
         )
     else:
-        warnings.warn(
-            "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
-        )
+        msg = "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`."
+    _torchscript_deprecation_error(msg)
     if not _enabled:
         return mod
     if optimize is not None:

@@ -9,11 +9,10 @@ This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
-import warnings
-
 import torch
 from torch._jit_internal import Future
 from torch.jit._builtins import _register_builtin
+from torch.jit._state import _torchscript_deprecation_error
 from torch.utils import set_module
 
 
@@ -101,9 +100,8 @@ def fork(func, *args, **kwargs):
         mod = Mod()
         assert mod(input) == torch.jit.script(mod).forward(input)
     """
-    warnings.warn(
-        "`torch.jit.fork` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+    _torchscript_deprecation_error(
+        "`torch.jit.fork` is deprecated. Please use `torch.compile` instead."
     )
     return torch._C.fork(func, *args, **kwargs)
 
@@ -121,9 +119,8 @@ def wait(future):
     Returns:
         `T`: the return value of the completed task
     """
-    warnings.warn(
-        "`torch.jit.wait` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
+    _torchscript_deprecation_error(
+        "`torch.jit.wait` is deprecated. Please use `torch.compile` instead."
     )
     return torch._C.wait(future)
 
