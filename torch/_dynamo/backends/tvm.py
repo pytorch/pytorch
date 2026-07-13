@@ -85,12 +85,7 @@ def _tvm_relax_compile(
             "falling back to the default relax pipeline.",
             scheduler,
         )
-    pipeline = options.get("pipeline", None)
-    if isinstance(pipeline, str):
-        from tvm import relax  # type: ignore[import]
-
-        pipeline = relax.get_pipeline(pipeline)
-    return relax_dynamo(pipeline=pipeline)(gm, example_inputs)
+    return relax_dynamo(pipeline=options.get("pipeline", None))(gm, example_inputs)
 
 
 def _tvm_relay_compile(
