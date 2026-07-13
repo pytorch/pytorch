@@ -1190,9 +1190,9 @@ void enableProfiler(
 
   if (has_cpu) {
     auto state_info_ptr = std::make_shared<ProfilerStateInfo>();
-    state_info_ptr->state_ptr = state_ptr;
+    state_info_ptr->state_ptr = std::move(state_ptr);
     state_info_ptr->scopes = scopes;
-    profiler_state_info_ptr = state_info_ptr;
+    profiler_state_info_ptr = std::move(state_info_ptr);
   }
 }
 
