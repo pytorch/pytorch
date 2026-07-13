@@ -349,3 +349,22 @@ index 692b821..7b482fc 100644
          local_reduce_group=None,
          local_reduce_axis=None,
          local_reduce_combine_fn=None,
+
+diff --git a/gemm_act.py b/gemm_act.py
+index 9b1966e..27d1380 100644
+--- a/gemm_act.py
++++ b/gemm_act.py
+@@ -897,6 +897,13 @@ def gemm_act(
+     must be provided together, and a tensor epilogue function or registry key is
+     required.
+
++    ``local_reduce_feeds_main`` instead reduces the accumulator, broadcasts the
++    finalized group value to its member rows, and appends it as the final input
++    to the tensor epilogue. It does not request an output store by itself. This
++    mode requires a tensor epilogue and both callback keys, and currently accepts
++    only axis-0 groups that fit within one warp. The callback omission described
++    below applies only to store-only reductions.
++
+     ``local_reduce_combine_key`` and ``local_reduce_finalize_key`` identify
+     CuTeDSL callbacks registered with ``register_local_reduce_fns``. The binary
+     combine callback merges two physical partial values using the reduction

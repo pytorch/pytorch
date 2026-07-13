@@ -195,6 +195,7 @@ def flex_gemm_config_keys_for_local_reduce(
     from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
+        gemm_config_from_key,
         gemm_config_key,
     )
 
@@ -202,7 +203,7 @@ def flex_gemm_config_keys_for_local_reduce(
         default_key = default_gemm_config_key(device, m, n)
         if all(
             validate_flex_gemm_local_reduce_config(
-                dict(default_key), geometry.group, geometry.axis
+                gemm_config_from_key(default_key), geometry.group, geometry.axis
             )
             for geometry in local_reduce_geometries
         ):
