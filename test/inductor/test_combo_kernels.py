@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import torch
 import torch._inductor
+from torch._dynamo.utils import counters
 from torch._inductor.codegen.simd import NodeInfo
 from torch._inductor.codegen.triton_combo_kernel import (
     _default_custom_combo_kernel_horizontal_partition,
@@ -353,6 +354,46 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    def test_data_independent_mask_not_combined_for_attention(self):
+        # Data-independent (0-read) producers -- here iota-derived attention
+        # masks -- that feed a memory-bound extern (SDPA attention) must NOT be
+        # combo-fused: fusing hoists them to the front of the graph and they get
+        # evicted from cache before attention reads them. With the guard on they
+        # stay as separate per-consumer kernels; numerics are unchanged either
+        # way. (Producers feeding Triton / compute-bound externs are unaffected.)
+        import torch.nn.functional as F
+
+        def fn(q, k, v):
+            s = q.shape[-2]
+            idx = torch.arange(s, device=q.device)
+            base = idx[:, None] >= idx[None, :]
+            # two distinct 0-read mask producers of the same shape -> combinable
+            m1 = torch.where(base, 0.0, float("-inf")).to(q.dtype)
+            m2 = torch.where(base, 0.0, -1e4).to(q.dtype)
+            o1 = F.scaled_dot_product_attention(q, k, v, attn_mask=m1)
+            o2 = F.scaled_dot_product_attention(q, k, v, attn_mask=m2)
+            return o1 + o2
+
+        inps = [
+            torch.rand(1, 4, 128, 32, device=GPU_TYPE, dtype=torch.float16)
+            for _ in range(3)
+        ]
+        out_eager = fn(*inps)
+
+        # a combo kernel groups >=2 outputs -> its def has an `out_ptr1` arg.
+        combo_re = re.compile(r"def triton_\w+\([^)]*out_ptr1")
+
+        def num_combos(flag):
+            with torch._inductor.config.patch(combo_kernels_skip_data_independent=flag):
+                torch._dynamo.reset()
+                out, code = run_and_get_code(torch.compile(fn), *inps)
+            self.assertEqual(out_eager, out)  # numerics preserved
+            return sum(len(combo_re.findall(c)) for c in code)
+
+        # guard off: the two masks are combined; guard on: they are excluded.
+        self.assertGreater(num_combos(False), num_combos(True))
 
     @requires_gpu_and_triton
     def test_reduce_functions(self):
@@ -1816,6 +1857,194 @@ class ComboKernelDynamicShapesTestsPerSubkernelBlocks(ComboKernelDynamicShapesTe
 
 
 @instantiate_parametrized_tests
+class ComboKernelCompileTimeAutotuneTests(TestCase):
+    """Compile-time per-subkernel autotune: each combo subkernel autotunes its blocks
+    standalone at compile time; winners are stitched + baked into the combo."""
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+        self._test_stack = contextlib.ExitStack()
+        self._test_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": False,
+                    "combo_kernel_per_subkernel_blocks": True,
+                    "combo_kernel_compile_time_autotune": True,
+                }
+            )
+        )
+
+    def tearDown(self):
+        self._test_stack.close()
+        torch._inductor.metrics.reset()
+        super().tearDown()
+
+    @requires_gpu_and_triton
+    @parametrize("mode", ["default", "cdt"])
+    def test_compile_time_autotune(self, mode):
+        extra = {}
+        if mode == "cdt":
+            extra["coordinate_descent_tuning"] = True
+
+        # one fn -> a pointwise combo (a+b, c*d) AND a reduction combo (e.sum, g.amax),
+        # each with differently-shaped subkernels so their blocks differ.
+        def f(a, b, c, d, e, g):
+            return a + b, c * d, e.sum(-1), g.amax(-1)
+
+        inps = [
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(1024, 512, device=GPU_TYPE),
+            torch.randn(1024, 768, device=GPU_TYPE),
+        ]
+        counters.clear()
+        # fresh_cache so the subkernels are benchmarked (not served from a warm perf cache),
+        # which is what makes the cdt mode actually run coordinate descent.
+        with fresh_cache(), torch._inductor.config.patch(extra):
+            out, code = run_and_get_code(torch.compile(f), *inps)
+        code = " ".join(code)
+
+        self.assertEqual(out, f(*inps))
+        # all 4 subkernels were processed by the compile-time autotuner
+        processed = (
+            counters["inductor"]["combo_subkernel_autotune"]
+            + counters["inductor"]["combo_subkernel_autotune_cached"]
+        )
+        self.assertEqual(processed, 4)
+        if mode == "cdt":
+            self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_caching(self):
+        def f(a, b, c, d):
+            return a + b, c * d
+
+        # shapes distinct from the other test so these subkernels aren't already cached
+        inps = [
+            torch.randn(2048, device=GPU_TYPE),
+            torch.randn(2048, device=GPU_TYPE),
+            torch.randn(3072, device=GPU_TYPE),
+            torch.randn(3072, device=GPU_TYPE),
+        ]
+        # disable FXGraphCache so codegen re-runs and we exercise the autotune cache
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "max_autotune": True,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                }
+            ),
+        ):
+            counters.clear()
+            torch.compile(f)(*inps)  # cold: subkernels benchmarked
+            cold = counters["inductor"]["combo_subkernel_autotune"]
+            self.assertGreater(cold, 0)
+
+            torch._dynamo.reset()
+            counters.clear()
+            torch.compile(f)(*inps)  # warm: reuse .best_config, no re-benchmark
+            self.assertEqual(counters["inductor"]["combo_subkernel_autotune"], 0)
+            warm_cached = counters["inductor"]["combo_subkernel_autotune_cached"]
+            self.assertEqual(warm_cached, cold)
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_excludes_indirect_indexing(self):
+        def fn(a, b, c, idx):
+            return a[idx], b * 2.0, c + 1.0
+
+        inps = [
+            torch.randn(1024, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randint(0, 1024, (256,), device=GPU_TYPE),
+        ]
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        src = code[0]
+        # The gather is its own kernel; the combo stitches only the 2 pointwise subkernels.
+        FileCheck().check("triton_poi_fused_index").check("'num_kernels': 2").run(src)
+
+    @requires_gpu_and_triton
+    def test_register_pressure_guard_occupancy(self):
+        # Classification uses the actual gemma-3 q/k RMSNorm+rope reduction register
+        # signature we measured: 216 registers at num_warps=1 -> ~14% register-limited
+        # occupancy, which the guard flags as register-bound. A combo's winning launch
+        # config (32 registers at num_warps=4) reaches full occupancy and is not flagged.
+        from types import SimpleNamespace
+
+        from torch._inductor.codegen.simd import _register_limited_occupancy
+
+        # GB200-class register file; the math is device-portable via these props.
+        props = SimpleNamespace(
+            regs_per_multiprocessor=65536,
+            warp_size=32,
+            max_threads_per_multi_processor=2048,
+        )
+        gemma_occ = _register_limited_occupancy(216, 1, props)
+        winner_occ = _register_limited_occupancy(32, 4, props)
+        self.assertAlmostEqual(gemma_occ, 9 * 32 / 2048, places=5)  # ~0.14
+        self.assertEqual(winner_occ, 1.0)
+        self.assertLess(gemma_occ, 0.2)  # below the default ratio -> register-bound
+        self.assertGreaterEqual(winner_occ, 0.2)  # not register-bound
+        # Missing device props -> None so the caller treats it as not register-bound.
+        self.assertIsNone(
+            _register_limited_occupancy(
+                216,
+                1,
+                SimpleNamespace(
+                    regs_per_multiprocessor=None,
+                    warp_size=32,
+                    max_threads_per_multi_processor=2048,
+                ),
+            )
+        )
+
+    @requires_gpu_and_triton
+    def test_register_pressure_guard_carves_register_bound_reduction(self):
+        # Two reductions of different shapes are combo-fused by default. When a
+        # sub-kernel's register-limited occupancy is below the guard ratio it is carved
+        # out to run standalone (its faster non-combo form); numerics are unchanged.
+        def fn(a, b):
+            return a.sum(-1), b.sum(-1)
+
+        inps = [
+            torch.randn(1024, 512, device=GPU_TYPE),
+            torch.randn(1024, 768, device=GPU_TYPE),
+        ]
+
+        def run(ratio):
+            torch._dynamo.reset()
+            counters.clear()
+            with (
+                fresh_cache(),
+                torch._inductor.config.patch(
+                    combo_kernel_register_pressure_ratio=ratio
+                ),
+            ):
+                out, code = run_and_get_code(torch.compile(fn), *inps)
+            self.assertEqual(out, fn(*inps))  # numerics preserved
+            return " ".join(code), counters["inductor"]["combo_register_bound_carveout"]
+
+        # guard off: the two reductions are combo-fused, nothing carved out.
+        code_off, carve_off = run(0.0)
+        FileCheck().check("'num_kernels': 2").run(code_off)
+        self.assertEqual(carve_off, 0)
+
+        # guard on with an occupancy floor above these light reductions: both are
+        # flagged register-bound, so fewer than two remain fusable and the whole group
+        # is emitted standalone -- no combo kernel.
+        code_on, carve_on = run(0.99)
+        self.assertEqual(carve_on, 2)
+        self.assertNotIn("num_kernels", code_on)
+
+
+@instantiate_parametrized_tests
 class ComboKernelPDLTests(TestCase):
     """Tests for PDL (Programmatic Dependent Launch) support in combo kernels."""
 
@@ -1844,7 +2073,8 @@ class ComboKernelPDLTests(TestCase):
     @requires_gpu_and_triton
     @skipIfRocm
     @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
-    def test_pdl_codegen_in_combo_kernel(self):
+    @parametrize("per_subkernel_blocks", [False, True])
+    def test_pdl_codegen_in_combo_kernel(self, per_subkernel_blocks):
         """Test that PDL flag and gdc calls are generated in combo kernels."""
 
         def fn(a, b):
@@ -1855,16 +2085,28 @@ class ComboKernelPDLTests(TestCase):
             torch.rand(1024, device=GPU_TYPE),
         ]
 
-        fn_c = torch.compile(fn)
-        _, code = run_and_get_code(fn_c, *inps)
+        # per_subkernel_blocks is not part of the fx-graph cache key, so a fresh
+        # cache and dynamo reset are needed for each parametrization to recompile.
+        torch._dynamo.reset()
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                "combo_kernel_per_subkernel_blocks", per_subkernel_blocks
+            ),
+        ):
+            _, code = run_and_get_code(torch.compile(fn), *inps)
         code = " ".join(code)
 
         # Check that launch_pdl is True and PDL API calls are generated
         FileCheck().check("'launch_pdl': True").run(code)
 
         # Each sub-kernel should have exactly one gdc_wait followed by one
-        # gdc_launch_dependents, with no redundant waits in between.
-        # Uses round-robin dispatch (pid % 2) since both tensors are same size.
+        # gdc_launch_dependents, with no redundant waits in between. Per-subkernel
+        # blocks use flatten-grid dispatch (pid < num_blocks_i); equal-sized
+        # subkernels otherwise use round-robin dispatch (pid % 2).
+        second_branch = (
+            "elif pid < num_blocks_1:" if per_subkernel_blocks else "elif pid % 2 == 1:"
+        )
         (
             FileCheck()
             .check("if pid")
@@ -1873,7 +2115,7 @@ class ComboKernelPDLTests(TestCase):
             .check_not("tl.extra.cuda.gdc_wait()")
             .check("tl.extra.cuda.gdc_launch_dependents()")
             .check_not("tl.extra.cuda.gdc_wait()")
-            .check("elif pid % 2 == 1:")
+            .check(second_branch)
             .check("tl.extra.cuda.gdc_wait()")
             .check("tl.load(")
             .check_not("tl.extra.cuda.gdc_wait()")
@@ -1884,7 +2126,8 @@ class ComboKernelPDLTests(TestCase):
     @requires_gpu_and_triton
     @skipIfRocm
     @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
-    def test_pdl_combo_kernel_pointwise(self):
+    @parametrize("per_subkernel_blocks", [False, True])
+    def test_pdl_combo_kernel_pointwise(self, per_subkernel_blocks):
         """Test that pointwise combo kernels produce correct results with PDL."""
 
         def fn(a, b, c):
@@ -1897,27 +2140,43 @@ class ComboKernelPDLTests(TestCase):
         ]
 
         out_eager = fn(*inps)
-        fn_c = torch.compile(fn)
-        out_compiled, code = run_and_get_code(fn_c, *inps)
+        # per_subkernel_blocks is not part of the fx-graph cache key, so a fresh
+        # cache and dynamo reset are needed for each parametrization to recompile.
+        torch._dynamo.reset()
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                "combo_kernel_per_subkernel_blocks", per_subkernel_blocks
+            ),
+        ):
+            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
         code = " ".join(code)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        # Compile-time autotune (default on) benches each subkernel standalone, which
+        # inflates the kernel count -- but only with per-subkernel blocks.
+        autotune = torch._inductor.config.combo_kernel_compile_time_autotune
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count,
+            4 if (autotune and per_subkernel_blocks) else 1,
+        )
 
         # Verify combo kernel structure with PDL - each sub-kernel should have
         # exactly one gdc_wait and one gdc_launch_dependents, no redundant waits.
+        # Per-subkernel blocks dispatch on num_blocks_i; otherwise on num_xblocks_i.
+        prefix = "num_blocks" if per_subkernel_blocks else "num_xblocks"
         (
             FileCheck()
             .check("'launch_pdl': True")
-            .check("if pid < num_xblocks_0:")
+            .check(f"if pid < {prefix}_0:")
             .check("tl.extra.cuda.gdc_wait()")
             .check_not("tl.extra.cuda.gdc_wait()")
             .check("tl.extra.cuda.gdc_launch_dependents()")
-            .check("elif pid < num_xblocks_1:")
+            .check(f"elif pid < {prefix}_1:")
             .check("tl.extra.cuda.gdc_wait()")
             .check_not("tl.extra.cuda.gdc_wait()")
             .check("tl.extra.cuda.gdc_launch_dependents()")
-            .check("elif pid < num_xblocks_2:")
+            .check(f"elif pid < {prefix}_2:")
             .check("tl.extra.cuda.gdc_wait()")
             .check_not("tl.extra.cuda.gdc_wait()")
             .check("tl.extra.cuda.gdc_launch_dependents()")
@@ -2286,6 +2545,9 @@ class ComboKernelTestsMaxAutotune(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+        # Compile-time autotune passes per-subkernel blocks as args, so runtime
+        # coordinate descent still refines the suffixed XBLOCK_i fields (same as
+        # the runtime per-subkernel path).
         baseline_log = next(
             msg for msg in cm.output if "Baseline Config" in msg and "XBLOCK_" in msg
         )
@@ -2830,6 +3092,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
+            base = torch.cuda.memory_allocated()
             with (
                 fresh_cache(),
                 torch._inductor.config.patch(
@@ -2839,7 +3102,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 with torch.no_grad():
                     _ = torch.compile(model)(x)
                 torch.cuda.synchronize()
-            return torch.cuda.max_memory_allocated()
+            return torch.cuda.max_memory_allocated() - base
 
         # Gating disabled: combos can co-allocate freely -> higher peak.
         peak_disabled = compile_and_measure_peak(
