@@ -2591,35 +2591,57 @@ class TestProfilerDevice(TestCase):
         for i in range(max_gpu_count):
             self.assertEqual(gpu_dict["GPU " + str(i)], 1)
 
+    def _is_secondary_profiler_event(self, traceEvent):
+        # On an XPU build the trace contains, in addition to the
+        # "PyTorch Profiler (0)" instance, the XPU profiler instance
+        # "__xpu_profiler__ (N)" plus its own "Iteration Start: __xpu_profiler__"
+        # marker. These are emitted regardless of which activities are requested
+        # and are not bounded by the PyTorch profiler window, so they must be
+        # ignored when validating the trace.
+        name = traceEvent.get("name", "")
+        return name.startswith(
+            ("__xpu_profiler__", "Iteration Start: __xpu_profiler__")
+        )
+
     def _validate_basic_json(self, traceEvents, device_available=False):
         MAX_GPU_COUNT = 8
-        PROFILER_IDX = -4
-        RECORD_END = -1
-        RECORD_START = -2
-        traceEventProfiler = traceEvents[PROFILER_IDX]
 
-        self.assertTrue(traceEventProfiler["name"] == "PyTorch Profiler (0)")
-        self.assertTrue(traceEvents[RECORD_END]["name"] == "Record Window End")
-        self.assertTrue(
-            traceEvents[RECORD_START]["name"] == "Iteration Start: PyTorch Profiler"
+        def _find_event(name):
+            for event in traceEvents:
+                if event.get("name") == name:
+                    return event
+            return None
+
+        traceEventProfiler = _find_event("PyTorch Profiler (0)")
+        recordStart = _find_event("Iteration Start: PyTorch Profiler")
+        recordEnd = _find_event("Record Window End")
+
+        self.assertIsNotNone(
+            traceEventProfiler, "missing 'PyTorch Profiler (0)' trace event"
         )
+        self.assertIsNotNone(
+            recordStart, "missing 'Iteration Start: PyTorch Profiler' trace event"
+        )
+        self.assertIsNotNone(recordEnd, "missing 'Record Window End' trace event")
+
         self.assertGreaterEqual(
             traceEventProfiler["ts"],
-            traceEvents[RECORD_START]["ts"],
+            recordStart["ts"],
             "Profiler starts before record!",
         )
         self.assertLessEqual(
             traceEventProfiler["ts"] + traceEventProfiler["dur"],
-            traceEvents[RECORD_END]["ts"],
+            recordEnd["ts"],
             "Profiler ends after record end!",
         )
 
         gpu_dict = collections.defaultdict(int)
         for i, traceEvent in enumerate(traceEvents):
-            if (
-                i == len(traceEvents) + RECORD_END
-                or i == len(traceEvents) + RECORD_START
-            ):
+            if traceEvent is recordStart or traceEvent is recordEnd:
+                continue
+            # Skip the secondary device profiler instance, which lives outside the
+            # PyTorch profiler window and would otherwise trip the bounds checks.
+            if self._is_secondary_profiler_event(traceEvent):
                 continue
             if "ts" in traceEvent:
                 self.assertGreaterEqual(
@@ -2630,7 +2652,7 @@ class TestProfilerDevice(TestCase):
             if "dur" in traceEvent:
                 self.assertLessEqual(
                     traceEvent["ts"] + traceEvent["dur"],
-                    traceEvents[RECORD_END]["ts"],
+                    recordEnd["ts"],
                     "Trace event ends too late!",
                 )
             gpu_value = traceEvent.get("args", {}).get("labels", None)
@@ -4897,15 +4919,29 @@ class TestMetadataJsonFormat(TestCase):
 
     def _get_kernel_metadata(self):
         x = torch.randn(64, 64, device="cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-            torch.mm(x, x)
-            torch.cuda.synchronize()
+        # The first profiled iteration(s) can drop CUDA kernels while CUPTI
+        # warms up, so retry a few times before giving up.
+        activities = []
+        for _ in range(3):
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+            ) as prof:
+                torch.mm(x, x)
+                torch.cuda.synchronize()
+            activities = prof.profiler.kineto_results.trace_activities()
+            for act in activities:
+                if act.type() == "kernel":
+                    return act.metadata_json()
 
-        activities = prof.profiler.kineto_results.trace_activities()
-        for act in activities:
-            if act.type() == "kernel":
-                return act.metadata_json()
-        self.fail("No kernel activity found in trace")
+        raw_types = collections.Counter(act.type() for act in activities)
+        event_cats = collections.Counter(
+            e.activity_type for e in prof.events() if getattr(e, "activity_type", None)
+        )
+        self.fail(
+            f"No kernel activity found. cuda={torch.version.cuda} "
+            f"supported={supported_activities()} n={len(activities)} "
+            f"trace_activities_types={dict(raw_types)} events_cats={dict(event_cats)}"
+        )
 
     def test_metadata_json_is_valid_json_fragment(self):
         md = self._get_kernel_metadata()
