@@ -2315,7 +2315,9 @@ def fw_compiler_freezing(
                 tracing_context.params_flat[i] = None
 
         if tracing_context.inductor_fw_metadata:
-            static_input_idxs = tracing_context.inductor_fw_metadata.static_input_indices
+            static_input_idxs = (
+                tracing_context.inductor_fw_metadata.static_input_indices
+            )
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(

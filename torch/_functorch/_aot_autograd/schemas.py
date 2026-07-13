@@ -897,8 +897,8 @@ class InductorFwMetadata:
 
     @staticmethod
     def from_view_and_mutation_meta(
-        meta: "ViewAndMutationMeta",
-    ) -> "InductorFwMetadata":
+        meta: ViewAndMutationMeta,
+    ) -> InductorFwMetadata:
         return InductorFwMetadata(
             input_info=meta.input_info,
             output_info=meta.output_info,
