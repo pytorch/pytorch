@@ -6,7 +6,7 @@ from math import prod
 import torch
 import torch._functorch.config as config
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
@@ -27,9 +27,9 @@ def compile_with_ac(f, memory_budget):
 def get_act_mem(f):
     out = f()
     out.backward()
-    start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+    start_mem = torch.accelerator.memory_stats()["requested_bytes.all.current"]
     out = f()
-    cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+    cur_mem = torch.accelerator.memory_stats()["requested_bytes.all.current"]
     act_mem = (cur_mem - start_mem) / (1024 * 1024)
     out.backward()
     return act_mem
@@ -67,7 +67,7 @@ def get_mem_and_flops(f, memory_budget=None):
 class MemoryBudgetTest(TestCase):
     def setUp(self):
         super().setUp()
-        torch.set_default_device("cuda")
+        torch.set_default_device(GPU_TYPE)
 
     def tearDown(self):
         torch.set_default_device(None)
@@ -246,9 +246,9 @@ class MemoryBudgetTest(TestCase):
                 x = torch.ops.testac.triton_relu(torch.mm(x, w))
             return x.sum()
 
-        x = torch.randn(512, 512, requires_grad=True, device="cuda")
+        x = torch.randn(512, 512, requires_grad=True, device=GPU_TYPE)
         ws = [
-            torch.randn(512, 512, requires_grad=True, device="cuda") for _ in range(5)
+            torch.randn(512, 512, requires_grad=True, device=GPU_TYPE) for _ in range(5)
         ]
 
         def call():
@@ -409,5 +409,5 @@ class MemoryBudgetTest(TestCase):
 
 if __name__ == "__main__":
     # I'm using the cuda memory allocator to verify memory allocations
-    if HAS_CUDA_AND_TRITON and not TEST_WITH_ROCM:
+    if HAS_GPU and not TEST_WITH_ROCM:
         run_tests()
