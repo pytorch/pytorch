@@ -4988,7 +4988,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         c.bmreq.kernel, c.bmreq.input_tensor_meta[0].device
                     )
                     future = async_compile.nvgemm_precompile(
-                        kernel_name=c.bmreq.kernel.metadata.kernel_name,
+                        kernel_name=c.bmreq.kernel.metadata.operator_name,
                         variant_name=c.bmreq.variant.name,
                         accumulator_type=c.bmreq.accumulator_type,
                         input_tensor_meta=c.bmreq.input_tensor_meta,
@@ -4998,6 +4998,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         scale_type_b=c.bmreq.scale_type_b,
                         swizzle_type_a=c.bmreq.swizzle_type_a,
                         swizzle_type_b=c.bmreq.swizzle_type_b,
+                        has_bias_epilogue=c.bmreq.has_bias_epilogue,
                     )
                     log.debug(
                         "Submitted nvgemm subprocess precompile for choice: %s", c
