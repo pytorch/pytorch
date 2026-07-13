@@ -35,8 +35,7 @@ Notes:
 """
 
 import warnings
-from functools import cache
-from typing import Literal
+from typing import Literal, Optional
 
 import torch
 
@@ -50,10 +49,46 @@ _NVMATH_DEPS = [
     ("nvmath-python", "nvmath.bindings"),
 ]
 
+# Probe result cache: None = not yet probed. Availability is a process-global
+# property of the loaded cuBLASLt, so it is resolved once and reused.
+_nvmath_available: Optional[bool] = None
 
-@cache
+
+def _probe_grouped_matrix_layout() -> bool:
+    """True iff the loaded cuBLASLt exposes cublasLtGroupedMatrixLayoutCreate.
+
+    nvmath resolves cuBLASLt symbols lazily, so on toolkits that predate grouped
+    GEMM the missing entrypoint only surfaces as a FunctionNotFoundError when the
+    kernel runs. Probe once with a minimal valid 1-group layout (valid device
+    pointers, so it is safe when the symbol exists); only a missing-symbol error
+    means unavailable -- any other error implies the entrypoint is present.
+    """
+    if not torch.cuda.is_available():
+        return False
+    try:
+        from cuda.bindings.runtime import cudaDataType
+        from nvmath.bindings import cublasLt
+    except Exception:
+        return False
+    dims = torch.ones(1, dtype=torch.int32, device="cuda")
+    p = dims.data_ptr()
+    try:
+        layout = cublasLt.grouped_matrix_layout_create(
+            cudaDataType.CUDA_R_16BF, 1, p, p, p
+        )
+    except Exception as e:
+        return type(e).__name__ != "FunctionNotFoundError"
+    cublasLt.matrix_layout_destroy(layout)
+    return True
+
+
 def _check_nvmath_cublaslt() -> bool:
-    return _unavailable_reason(_NVMATH_DEPS) is None
+    global _nvmath_available
+    if _nvmath_available is None:
+        _nvmath_available = (
+            _unavailable_reason(_NVMATH_DEPS) is None and _probe_grouped_matrix_layout()
+        )
+    return _nvmath_available
 
 
 def _k_n_16_byte_aligned(a: torch.Tensor, b: torch.Tensor, elem_size: int) -> bool:
@@ -218,7 +253,10 @@ def _warn_nvmath_unavailable_once() -> None:
     if _nvmath_warned:
         return
     _nvmath_warned = True
-    reason = _unavailable_reason(_NVMATH_DEPS)
+    reason = (
+        _unavailable_reason(_NVMATH_DEPS)
+        or "cuBLASLt lacks cublasLtGroupedMatrixLayoutCreate"
+    )
     warnings.warn(
         f"_foreach_mm: nvmath cublasLt grouped GEMM unavailable ({reason}), "
         f"using slower fallback.",
