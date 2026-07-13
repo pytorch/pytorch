@@ -2085,7 +2085,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         opt_fn = (
             torch.compile(fn, backend=backend, fullgraph=True)
             if backend is not None
-            else torch.compile(fn, fullgraph=True)
+            else torch.compile(fn, backend="inductor", fullgraph=True)
         )
         res = opt_fn(pool)
         torch.cuda.synchronize()
@@ -2121,7 +2121,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
                 "torch.cuda.use_mem_pool is not supported with C\\+\\+ wrapper codegen",
             ),
         ):
-            torch.compile(fn, fullgraph=True)(pool)
+            torch.compile(fn, backend="inductor", fullgraph=True)(pool)
 
     @requires_cuda_and_triton
     def test_cuda_use_mem_pool_realize_at_boundary_inductor(self):
@@ -2134,7 +2134,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
 
         pool = torch.cuda.MemPool()
         inp = torch.ones(16, device="cuda")
-        res = torch.compile(fn, fullgraph=True)(pool, inp)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, inp)
         torch.cuda.synchronize()
         self.assertEqual(res, torch.full((16,), 3.0, device="cuda"))
         self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
@@ -2150,7 +2150,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
 
         pool = torch.cuda.MemPool()
         inp = torch.arange(16, device="cuda", dtype=torch.float32) % 4
-        res = torch.compile(fn, fullgraph=True)(pool, inp)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, inp)
         torch.cuda.synchronize()
         self.assertEqual(res, torch.full((4,), 4.0, device="cuda"))
         self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
@@ -2169,7 +2169,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             torch.ones(64, device="cuda"),
             torch.full((64,), 2.0, device="cuda"),
         ]
-        res = torch.compile(fn, fullgraph=True)(pool, xs)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool, xs)
         torch.cuda.synchronize()
         self.assertEqual(res[0], torch.full((64,), 2.0, device="cuda"))
         self.assertEqual(res[1], torch.full((64,), 3.0, device="cuda"))
@@ -2193,9 +2193,12 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
                 "triton.native_matmul": False,
             }
         ):
-            res = torch.compile(fn, mode="max-autotune-no-cudagraphs", fullgraph=True)(
-                pool, x, y
-            )
+            res = torch.compile(
+                fn,
+                backend="inductor",
+                mode="max-autotune-no-cudagraphs",
+                fullgraph=True,
+            )(pool, x, y)
         torch.cuda.synchronize()
         self.assertEqual(res, x @ y, atol=1e-4, rtol=1e-4)
         self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
@@ -2216,7 +2219,9 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         outer_pool = torch.cuda.MemPool()
         inner_pool = torch.cuda.MemPool()
         inp = torch.ones(16, device="cuda")
-        outer, inner = torch.compile(fn, fullgraph=True)(outer_pool, inner_pool, inp)
+        outer, inner = torch.compile(fn, backend="inductor", fullgraph=True)(
+            outer_pool, inner_pool, inp
+        )
         torch.cuda.synchronize()
         self.assertEqual(outer, torch.full((16,), 5.0, device="cuda"))
         self.assertEqual(inner, torch.full((16,), 3.0, device="cuda"))
@@ -2239,7 +2244,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         pool_a = torch.cuda.MemPool()
         pool_b = torch.cuda.MemPool()
         inp = torch.ones(16, device="cuda")
-        res = torch.compile(fn, fullgraph=True)(pool_a, pool_b, inp)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(pool_a, pool_b, inp)
         torch.cuda.synchronize()
         self.assertEqual(res, torch.full((16,), 4.0, device="cuda"))
         self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool_a.id)), 0)
@@ -2259,7 +2264,9 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(64, 64, device="cuda")
         w = torch.randn(64, 64, device="cuda")
         with torch._inductor.config.patch({"triton.slow_path_cudagraph_asserts": True}):
-            opt_fn = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            opt_fn = torch.compile(
+                fn, backend="inductor", mode="reduce-overhead", fullgraph=True
+            )
             res = opt_fn(pool, x, w)
             res_second = opt_fn(pool, x, w)
         torch.cuda.synchronize()
@@ -2291,7 +2298,10 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
                 pool = torch.cuda.MemPool()
                 expected = fn(pool, stream, inp)
                 actual, source_codes = run_and_get_code(
-                    torch.compile(fn, fullgraph=True), pool, stream, inp
+                    torch.compile(fn, backend="inductor", fullgraph=True),
+                    pool,
+                    stream,
+                    inp,
                 )
                 torch.cuda.synchronize()
                 self.assertEqual(actual, expected)
@@ -2317,7 +2327,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
 
         with torch.cuda.device(1):
             pool = torch.cuda.MemPool()
-            res = torch.compile(fn, fullgraph=True)(pool)
+            res = torch.compile(fn, backend="inductor", fullgraph=True)(pool)
         torch.cuda.synchronize(0)
         torch.cuda.synchronize(1)
         self.assertEqual(res, torch.ones(16, device="cuda:0"))
