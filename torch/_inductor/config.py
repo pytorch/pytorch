@@ -670,6 +670,11 @@ nvgemm_supplement_configs: bool = (
     os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
 )
 
+# When enabled, adds swap_ab NVGEMM choices that swap A/B operands so the
+# large N dimension goes on the M-axis. Improves tile utilization for
+# small-M decode shapes typical in LLM inference (M << N).
+nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
+
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
 _conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
