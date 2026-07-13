@@ -1763,8 +1763,12 @@ void LayerNormBackwardKernelImplInternal(
               warp_size);
           }
       } else {
+        T* dgamma_data =
+          dgamma.defined() ? dgamma.template data_ptr<T>() : nullptr;
+        T* dbeta_data =
+          dbeta.defined() ? dbeta.template data_ptr<T>() : nullptr;
         LaunchTwoPassGammaBetaBackwardCUDAKernel<T, T_ACC, rms_norm>(
-          dY_data, X_data, X, gamma, mean_data, rstd_data, M, N, dgamma_data, dbeta_data, cuda_stream);        
+          dY_data, X_data, X, gamma_data, mean_data, rstd_data, M, N, dgamma_data, dbeta_data, cuda_stream);
       }
     }
 #else
