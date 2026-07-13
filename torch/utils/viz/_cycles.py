@@ -316,7 +316,7 @@ def is_cuda_tensor(obj):
     return (
         isinstance(obj, torch.Tensor) and
         obj.device.type == "cuda" and
-        not torch._subclasses.fake_tensor.is_fake_tensor(obj)
+        not isinstance(obj, torch._subclasses.FakeTensor)
     )
 
 def cuda_allocation_context():
