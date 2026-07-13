@@ -21,11 +21,11 @@ if TYPE_CHECKING:
     from .template.base import TemplateConfigHeuristics
 
 
-_REGISTRY: dict[tuple[str | None, ...], Any] = {}
+_HEURISTIC_REGISTRY: dict[tuple[str | None, ...], Any] = {}
 # Alias so tests can snapshot/restore the shared registry via the old name.
 # This intentionally covers both template and codegen entries.
-_TEMPLATE_HEURISTIC_REGISTRY = _REGISTRY
-_CACHE: dict[tuple[str | None, ...], Any] = {}
+_TEMPLATE_HEURISTIC_REGISTRY = _HEURISTIC_REGISTRY
+_HEURISTIC_CACHE: dict[tuple[str | None, ...], Any] = {}
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def _register(
     key: tuple[str | None, ...],
     target: Any,
 ) -> None:
-    _REGISTRY[key] = target
+    _HEURISTIC_REGISTRY[key] = target
 
 
 def _lookup(name: str, device_type: str, op_name: str | None) -> Any | None:
@@ -51,8 +51,8 @@ def _lookup(name: str, device_type: str, op_name: str | None) -> Any | None:
         (name, None, None),
     ]
     for key in keys:
-        if key in _REGISTRY:
-            return _REGISTRY[key]
+        if key in _HEURISTIC_REGISTRY:
+            return _HEURISTIC_REGISTRY[key]
     return None
 
 
@@ -110,8 +110,8 @@ def get_template_heuristic(
     Returns a cached instance. Falls back to TemplateConfigHeuristics() if not found.
     """
     cache_key: tuple[str | None, ...] = (template_name, device_type, op_name)
-    if cache_key in _CACHE:
-        return _CACHE[cache_key]
+    if cache_key in _HEURISTIC_CACHE:
+        return _HEURISTIC_CACHE[cache_key]
 
     heuristic_class = _lookup(template_name, device_type, op_name)
 
@@ -124,12 +124,12 @@ def get_template_heuristic(
             template_name,
             device_type,
             op_name,
-            list(_REGISTRY.keys()),
+            list(_HEURISTIC_REGISTRY.keys()),
         )
         return _Base()
 
     instance = heuristic_class()
-    _CACHE[cache_key] = instance
+    _HEURISTIC_CACHE[cache_key] = instance
     return instance
 
 
@@ -203,8 +203,8 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
         (name, device_type, None) -> (name, None, None)
     """
     cache_key: tuple[str | None, ...] = (name, device_type, None)
-    if cache_key in _CACHE:
-        return _CACHE[cache_key]
+    if cache_key in _HEURISTIC_CACHE:
+        return _HEURISTIC_CACHE[cache_key]
 
     heuristic_class = _lookup(name, device_type, None)
 
@@ -217,11 +217,11 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
     if heuristic_class is None:
         raise ValueError(
             f"No codegen heuristic found - name={name}, device_type={device_type}. "
-            f"Available: {list(_REGISTRY.keys())}"
+            f"Available: {list(_HEURISTIC_REGISTRY.keys())}"
         )
 
     instance = heuristic_class()
-    _CACHE[cache_key] = instance
+    _HEURISTIC_CACHE[cache_key] = instance
     return instance
 
 
@@ -232,8 +232,8 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
 
 def clear_registry() -> None:
     """Clear all registered heuristics. Primarily for testing."""
-    _REGISTRY.clear()
-    _CACHE.clear()
+    _HEURISTIC_REGISTRY.clear()
+    _HEURISTIC_CACHE.clear()
 
 
 @contextlib.contextmanager
@@ -258,21 +258,21 @@ def override_template_heuristics(
     new_keys: list[tuple[str | None, ...]] = []
     # Clears the shared cache (both template and codegen instances).
     # Codegen instances are stateless so re-creation is cheap.
-    _CACHE.clear()
+    _HEURISTIC_CACHE.clear()
     try:
         for template_name, op_name in template_op_pairs:
             if op_name is None:
                 raise AssertionError("op_name must not be None")
             key: tuple[str | None, ...] = (template_name, device_type, op_name)
-            if key in _REGISTRY:
-                original_entries[key] = _REGISTRY[key]
-            _REGISTRY[key] = override_heuristic_class
+            if key in _HEURISTIC_REGISTRY:
+                original_entries[key] = _HEURISTIC_REGISTRY[key]
+            _HEURISTIC_REGISTRY[key] = override_heuristic_class
             new_keys.append(key)
         yield
     finally:
         for key in new_keys:
-            _REGISTRY.pop(key, None)
+            _HEURISTIC_REGISTRY.pop(key, None)
             if key in original_entries:
-                _REGISTRY[key] = original_entries[key]
+                _HEURISTIC_REGISTRY[key] = original_entries[key]
         # Same shared-cache clear on exit; see entry comment above.
-        _CACHE.clear()
+        _HEURISTIC_CACHE.clear()
