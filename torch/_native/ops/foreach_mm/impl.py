@@ -49,46 +49,32 @@ _NVMATH_DEPS = [
     ("nvmath-python", "nvmath.bindings"),
 ]
 
-# Probe result cache: None = not yet probed. Availability is a process-global
-# property of the loaded cuBLASLt, so it is resolved once and reused.
+# cublasLtGroupedMatrixLayoutCreate, used by the nvmath grouped GEMM path, was
+# introduced in cuBLAS 13.2.0 (CUDA 13.1) and is experimental as of that release.
+# cublasLtGetVersion() encodes the version as 10000*major + 100*minor + patch.
+# This is the cuBLAS library version, not the CUDA toolkit version.
+_MIN_CUBLASLT_GROUPED_GEMM_VERSION = 130200
+
+# Availability is a process-global property of the loaded cuBLASLt; resolve once.
 _nvmath_available: bool | None = None
-
-
-def _probe_grouped_matrix_layout() -> bool:
-    """True iff the loaded cuBLASLt exposes cublasLtGroupedMatrixLayoutCreate.
-
-    nvmath resolves cuBLASLt symbols lazily, so on toolkits that predate grouped
-    GEMM the missing entrypoint only surfaces as a FunctionNotFoundError when the
-    kernel runs. Probe once with a minimal valid 1-group layout (valid device
-    pointers, so it is safe when the symbol exists); only a missing-symbol error
-    means unavailable -- any other error implies the entrypoint is present.
-    """
-    if not torch.cuda.is_available():
-        return False
-    try:
-        from cuda.bindings import runtime  # pyrefly: ignore[missing-import]
-        from nvmath.bindings import cublasLt  # pyrefly: ignore[missing-import]
-    except Exception:
-        return False
-    dims = torch.ones(1, dtype=torch.int32, device="cuda")
-    p = dims.data_ptr()
-    try:
-        layout = cublasLt.grouped_matrix_layout_create(
-            runtime.cudaDataType.CUDA_R_16BF, 1, p, p, p
-        )
-    except Exception as e:
-        return type(e).__name__ != "FunctionNotFoundError"
-    cublasLt.matrix_layout_destroy(layout)
-    return True
 
 
 def _check_nvmath_cublaslt() -> bool:
     global _nvmath_available
     if _nvmath_available is None:
-        _nvmath_available = (
-            _unavailable_reason(_NVMATH_DEPS) is None and _probe_grouped_matrix_layout()
-        )
+        _nvmath_available = _nvmath_grouped_gemm_available()
     return _nvmath_available
+
+
+def _nvmath_grouped_gemm_available() -> bool:
+    if _unavailable_reason(_NVMATH_DEPS) is not None:
+        return False
+    try:
+        from nvmath.bindings import cublasLt  # pyrefly: ignore[missing-import]
+
+        return cublasLt.get_version() >= _MIN_CUBLASLT_GROUPED_GEMM_VERSION
+    except Exception:
+        return False
 
 
 def _k_n_16_byte_aligned(a: torch.Tensor, b: torch.Tensor, elem_size: int) -> bool:
