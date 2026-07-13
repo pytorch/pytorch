@@ -4430,34 +4430,6 @@ triton_native_bmm_configs = _config_helper(bmm=True, persistent=False)
 triton_native_persistent_bmm_configs = _config_helper(bmm=True, persistent=True)
 
 
-# Backwards-compatibility shim.  The 4/N reduction refactor moved several helpers
-# out of this module and dropped some re-exported names.  External code may still
-# import these by their original names from this module, so resolve them lazily
-# from their new homes.  Lazy resolution via module __getattr__ avoids an import
-# cycle at module load time.
-_MOVED_REDUCTION_HELPERS = {
-    "match_target_block_product": "_match_target_block_product",
-    "adapt_config_for_tiling": "_adapt_config_for_tiling",
-    "_get_tiling_scores": "_get_tiling_scores",
-}
-
-
-def __getattr__(name: str) -> Any:
-    if name in _MOVED_REDUCTION_HELPERS:
-        from torch._inductor.heuristics.triton_codegen import reduction
-
-        return getattr(reduction, _MOVED_REDUCTION_HELPERS[name])
-    if name == "last_power_of_2":
-        from torch._inductor.runtime.runtime_utils import last_power_of_2
-
-        return last_power_of_2
-    if name == "TRITON_MAX_RSPLIT":
-        from torch._inductor.runtime.hints import TRITON_MAX_RSPLIT
-
-        return TRITON_MAX_RSPLIT
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 def _reduction_configs(
     *,
     size_hints: dict[str, int],
