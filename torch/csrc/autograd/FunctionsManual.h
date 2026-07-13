@@ -920,6 +920,10 @@ Tensor i1_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);
+Tensor bessel_j1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
 Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
