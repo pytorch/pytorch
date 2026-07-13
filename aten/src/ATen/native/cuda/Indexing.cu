@@ -715,7 +715,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
       const int warp_size = at::cuda::warp_size();
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
-           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+           std::clamp<int>(nElemBefore, 1, at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
 #ifdef USE_ROCM
@@ -919,7 +919,7 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
       const int warp_size = at::cuda::warp_size();
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
-           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+           std::clamp<int>(nElemBefore, 1, at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
       AT_DISPATCH_QINT_TYPES(
@@ -1182,35 +1182,6 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   const bool indContig = index.is_contiguous();
 
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
-  // Fast path: index_add_(0, idx, src) with alpha == 1 is equivalent to
-  // self.scatter_add_(0, idx.view({n, 1, ...}).expand_as(src), src). Delegate
-  // so scatter_add's own TMA/vectorized eligibility check + dispatch is the
-  // single source of truth (see PR #182675). Pattern from
-  // pytorch/pytorch#180430.
-  // Gated on CUDA >= 12.8: pre-12.8 builds compile out the TMA branch in
-  // scatter_add and fall back to its vectorized atomicAdd path, which
-  // regresses skewed/high-contention workloads vs indexFunc{Small,Large}Index
-  // (warp-per-entry scheduling concentrates atomic contention on hot rows).
-  // Older builds therefore stay on the existing indexFunc dispatch.
-  // index_add supports {complex64, complex128, ComplexHalf, Bool} that
-  // scatter_add does not, so exclude those and let them use indexFunc.
-  // The dtype check is ordered FIRST so short-circuit evaluation skips
-  // alpha.equal(1) for complex `self`, where alpha may itself be a
-  // complex Scalar and the equality comparison would be ill-defined.
-  const auto stype = self_.scalar_type();
-  const bool dtype_supported_by_scatter_add =
-      !c10::isComplexType(stype) && stype != at::kBool;
-  if (dtype_supported_by_scatter_add && dim == 0 &&
-      alpha.equal(1) && numIndex > 0 &&
-      index.dim() <= 1 && indContig) {
-    std::vector<int64_t> idx_shape(source_.dim(), 1);
-    idx_shape[0] = static_cast<int64_t>(numIndex);
-    self_.scatter_add_(0, index.view(idx_shape).expand_as(source_), source_);
-    return;
-  }
-#endif
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \

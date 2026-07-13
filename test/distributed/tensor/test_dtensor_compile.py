@@ -76,7 +76,7 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
-class PytreeTuple(torch._opaque_base.OpaqueBase):
+class PytreeTuple(torch._custom_class_base.CustomClassBase):
     """
     Tuple-like values that are treated as leaves of a PyTree.
     """
@@ -140,12 +140,12 @@ class PytreeTuple(torch._opaque_base.OpaqueBase):
 
 # Register PytreeTuple as an opaque value type to enable Dynamo to handle
 # instances created during tracing
-from torch._library.opaque_object import MemberType, register_opaque_type
+from torch._library.opaque_object import MemberType, register_custom_class
 
 
-register_opaque_type(
+register_custom_class(
     PytreeTuple,
-    typ="value",
+    typ="constant",
     members={
         "__getitem__": MemberType.USE_REAL,
         "__iter__": MemberType.USE_REAL,
@@ -222,12 +222,14 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
         super().tearDown()
         dist.destroy_process_group()
 
@@ -2086,7 +2088,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     def test_device_mesh_slice(self):
