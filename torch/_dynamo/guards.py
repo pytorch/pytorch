@@ -101,7 +101,7 @@ from torch._guards import (
 )
 from torch._inductor.utils import IndentedBuffer
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import get_opaque_obj_info, is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -129,6 +129,7 @@ from .source import (
     CodeSource,
     ConstantSource,
     ConstDictKeySource,
+    ContextVarGetSource,
     CurrentStreamSource,
     DataclassFieldsSource,
     DefaultsSource,
@@ -1965,6 +1966,24 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, ContextVarGetSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            if source.has_default:
+                default_val = source.default_value
+                out = base_guard_manager.lambda_manager(
+                    python_lambda=lambda x, d=default_val: x.get(d),
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
+            else:
+                out = base_guard_manager.lambda_manager(
+                    python_lambda=lambda x: x.get(),
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
         elif istype(source, FloatTensorSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
@@ -2772,7 +2791,7 @@ class GuardBuilder(GuardBuilderBase):
         if not (
             isinstance(val, ok_types)
             or pytree.is_constant_class(type(val))
-            or is_opaque_value_type(type(val))
+            or is_opaque_constant_type(type(val))
         ):
             raise AssertionError(f"Unexpected type {type(val)}")
 
