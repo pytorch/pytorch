@@ -18,7 +18,7 @@ from torch._inductor.utils import (
     fresh_inductor_cache,
     run_and_get_triton_code,
 )
-from torch.distributed._functional_collectives import all_gather_tensor
+from torch.distributed._functional_collectives import all_gather_single
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
@@ -26,6 +26,10 @@ from torch.distributed._symmetric_memory import (
     _test_mode,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
+)
+from torch.distributed._symmetric_memory._nccl import (
+    NcclCommRegistration,
+    register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_cuda import (
@@ -503,6 +507,83 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             self.assertTrue(buf.eq(peer_rank).all())
         else:
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_get(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        # Full-buffer get from a peer's allocation.
+        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        hdl = symm_mem.rendezvous(src, group=group_name)
+        dist.barrier()
+
+        if self.rank == 0:
+            dst = torch.empty_like(src)
+            symm_mem.get(dst, hdl, peer=1)
+            torch.testing.assert_close(dst, torch.ones_like(dst))
+
+        dist.barrier()
+
+        # Offset get: copy a sub-region of the peer's allocation.
+        src_base = symm_mem.empty(2 * numel, dtype=dtype, device=self.device)
+        src_base.copy_(
+            torch.arange(2 * numel, dtype=dtype, device=self.device)
+            + self.rank * 2 * numel
+        )
+        hdl = symm_mem.rendezvous(src_base, group=group_name)
+        dist.barrier()
+
+        if self.rank == 0:
+            offset = numel // 2
+            dst = torch.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.get(dst, hdl, peer=1, offset=offset)
+            expected = (
+                torch.arange(offset, offset + numel, dtype=dtype, device=self.device)
+                + 2 * numel
+            )
+            torch.testing.assert_close(dst, expected)
+
+            # Filling a sub-region: pass a view; the rest of dst is untouched.
+            larger_dst = torch.full((numel + 1,), -1, dtype=dtype, device=self.device)
+            symm_mem.get(larger_dst[:numel], hdl, peer=1, offset=offset)
+            self.assertEqual(larger_dst[:numel], expected)
+            self.assertEqual(larger_dst[numel], -1)
+
+            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[::2]
+            with self.assertRaisesRegex(ValueError, "contiguous"):
+                symm_mem.get(noncontig_dst, hdl, peer=1)
+
+            with self.assertRaisesRegex(ValueError, "non-negative"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    hdl,
+                    peer=1,
+                    offset=-1,
+                )
+
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                symm_mem.get(
+                    torch.empty(1, dtype=dtype, device=self.device),
+                    hdl,
+                    peer=1,
+                    offset=hdl.buffer_size // dst.element_size(),
+                )
+
+            with self.assertRaisesRegex(ValueError, "invalid peer"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    hdl,
+                    peer=hdl.world_size,
+                )
+
+        dist.barrier()
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -1184,7 +1265,7 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 
         res = torch.ops.symm_mem.multimem_one_shot_all_reduce(inp, "sum", group_name)
 
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         # Only verify that the results are close to the sum of inputs across
         # ranks (see Note [multimem_one_shot_all_reduce]).
         torch.testing.assert_close(
@@ -1214,7 +1295,7 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             inp, "sum", root, group_name, out
         )
 
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         # Only verify that the results are close to the sum of inputs across
         # ranks (see Note [multimem_one_shot_all_reduce]).
         if self.rank == root:
@@ -1295,14 +1376,14 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             self._verify_all_reduce_result(inp, res if inplace else out)
 
     def _verify_all_reduce_result(self, inp, res):
-        gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, -1)
+        gathered_res = all_gather_single(res, 0, "0").view(self.world_size, -1)
         # Verify that the results across ranks are identical
         self.assertEqual(
             (gathered_res == gathered_res[0, :]).all(dim=0).sum(), inp.numel()
         )
 
         # Verify that the result are close to the sum of inputs across ranks
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, -1)
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
@@ -1371,8 +1452,8 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             torch.ops.symm_mem.reduce_scatter_out(res, group_name, True, out)
 
     def _verify_reduce_scatter_result(self, inp, res):
-        gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, *res.shape)
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, *inp.shape)
+        gathered_res = all_gather_single(res, 0, "0").view(self.world_size, *res.shape)
+        gathered_inps = all_gather_single(inp, 0, "0").view(self.world_size, *inp.shape)
         sum_inps = gathered_inps.sum(0)
         slice_width = sum_inps.shape[-1] // self.world_size
         for i in range(self.world_size):
@@ -1530,7 +1611,9 @@ class LoweringTest(MultiProcContinuousTest):
 
         p2p_matches = re.findall(r"buf\d+ = empty_strided_p2p", code_no_reuse)
         self.assertEqual(
-            len(p2p_matches), 2, f"Expected 2 p2p allocations, got {len(p2p_matches)}"
+            len(p2p_matches),
+            2,
+            lambda msg: f"{msg}\nExpected 2 p2p allocations, got {len(p2p_matches)}",
         )
 
         # Check numerical result for no_reuse path
@@ -1573,7 +1656,7 @@ class LoweringTest(MultiProcContinuousTest):
         self.assertEqual(
             len(p2p_matches_reuse),
             1,
-            f"Expected 1 p2p allocation (reuse), got {len(p2p_matches_reuse)}",
+            lambda msg: f"{msg}\nExpected 1 p2p allocation (reuse), got {len(p2p_matches_reuse)}",
         )
 
         cuda_matches = re.findall(r"buf\d+ = empty_strided_cuda", code_reuse)
@@ -2000,8 +2083,9 @@ class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 class ExternalNcclCommRegistrationTest(TestCase):
     """Tests for the external NCCL comm registration API
-    (``symm_mem._register_external_nccl_comm`` and the ``_NcclCommRegistration``
-    handle), exercised against a *real* ``ncclComm_t``.
+    (``register_external_nccl_comm`` and the ``NcclCommRegistration`` handle
+    from ``torch.distributed._symmetric_memory._nccl``), exercised against a
+    *real* ``ncclComm_t``.
 
     The comm is created in-process via NCCL's ``ncclCommInitAll`` (single
     rank, single GPU) through ctypes, so no live multi-rank job is needed.
@@ -2050,10 +2134,8 @@ class ExternalNcclCommRegistrationTest(TestCase):
 
     def test_register_unregister_real_comm(self) -> None:
         comm_ptr = self._make_real_comm()
-        reg = symm_mem._register_external_nccl_comm(
-            "ext_nccl_reg_basic", comm_ptr, "cuda:0"
-        )
-        self.assertIsInstance(reg, symm_mem._NcclCommRegistration)
+        reg = register_external_nccl_comm("ext_nccl_reg_basic", comm_ptr, "cuda:0")
+        self.assertIsInstance(reg, NcclCommRegistration)
         self.assertTrue(reg._active)
         self.assertEqual(reg._group_name, "ext_nccl_reg_basic")
         self.assertEqual(reg._device, torch.device("cuda:0"))
@@ -2068,7 +2150,7 @@ class ExternalNcclCommRegistrationTest(TestCase):
         # and releases it on unregister.
         comm_ptr = self._make_real_comm()
         sentinel = object()
-        reg = symm_mem._register_external_nccl_comm(
+        reg = register_external_nccl_comm(
             "ext_nccl_reg_ref", comm_ptr, "cuda:0", comm=sentinel
         )
         self.assertIs(reg._comm, sentinel)
@@ -2077,9 +2159,7 @@ class ExternalNcclCommRegistrationTest(TestCase):
 
     def test_context_manager_real_comm(self) -> None:
         comm_ptr = self._make_real_comm()
-        reg = symm_mem._register_external_nccl_comm(
-            "ext_nccl_reg_cm", comm_ptr, "cuda:0"
-        )
+        reg = register_external_nccl_comm("ext_nccl_reg_cm", comm_ptr, "cuda:0")
         with reg as entered:
             self.assertIs(entered, reg)
             self.assertTrue(reg._active)
@@ -2096,7 +2176,7 @@ class ExternalNcclCommRegistrationTest(TestCase):
         except ImportError:
             self.skipTest("PyTorch built without NCCL symmetric-memory device support")
         with self.assertRaises(RuntimeError):
-            symm_mem._register_external_nccl_comm("ext_nccl_reg_null", 0, "cuda:0")
+            register_external_nccl_comm("ext_nccl_reg_null", 0, "cuda:0")
 
 
 if __name__ == "__main__":

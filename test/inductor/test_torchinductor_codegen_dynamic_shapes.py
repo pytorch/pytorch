@@ -51,6 +51,7 @@ def check_codegen(
     *,
     device: torch.types.Device,
     is_cpp_code: bool,
+    copy_to_gpu: bool = True,
 ):
     kwargs = kwargs or {}
 
@@ -66,7 +67,8 @@ def check_codegen(
                 x.size(), x.stride(), device=device, dtype=x.dtype
             ).copy_(x)
 
-        example_inputs = tuple(copy_fn(x) for x in example_inputs)
+        if copy_to_gpu:
+            example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     torch._dynamo.reset()
     torch._inductor.codecache.FxGraphCache.clear()
@@ -123,6 +125,9 @@ test_failures = {
     "test_as_strided_on_split_view_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_normal_fallback_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     "test_cat_empty_1d_negative_dim_zero_output_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
@@ -150,6 +155,7 @@ test_failures = {
         ("cpu",)
     ),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
+    "test_expand_implicit_kwarg_dynamic_shapes": TestFailure(("cpu",)),
     "test_full_boolean_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
@@ -200,8 +206,15 @@ test_failures = {
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     # XPU falls back max_pool2d_with_indices_backward to ATen eager (see
     # torch/_decomp/decompositions.py), so no Triton kernel is generated.
+    "test_max_pool2d_with_indices_backward_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward2_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward3_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward4_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward_fallback_dynamic_shapes": TestFailure(
+        ("xpu",)
+    ),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -452,6 +465,8 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    # The scalar (1,) case intentionally does not generate dynamic code.
+    "test_floordiv_int_min_neg_one_cpu_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_scalar_various_values_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
@@ -526,7 +541,14 @@ if HAS_GPU and not TEST_WITH_ASAN:
         maxDiff = None
         device = GPU_TYPE
 
-        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
+        def common(
+            self: TestCase,
+            model,
+            example_inputs,
+            kwargs=None,
+            copy_to_gpu=True,
+            **_rest,
+        ):
             return check_codegen(
                 self=self,
                 model=model,
@@ -534,6 +556,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 device=self.device,
                 kwargs=kwargs,
                 is_cpp_code=False,
+                copy_to_gpu=copy_to_gpu,
             )
 
     copy_tests(

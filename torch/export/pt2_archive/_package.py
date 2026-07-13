@@ -27,7 +27,7 @@ from torch._export.serde.serialize import (
     SerializedArtifact,
 )
 from torch._inductor.cpp_builder import normalize_path_separator
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
@@ -499,7 +499,9 @@ def _package_constants(
             else:
                 raw_constants[constant_fqn] = (constant, TensorProperties(constant))
 
-        elif isinstance(constant, torch._C.ScriptObject) or is_opaque_value(constant):
+        elif isinstance(constant, torch._C.ScriptObject) or is_custom_class_obj(
+            constant
+        ):
             custom_objects.append((constant_fqn, constant))
 
         else:
@@ -1048,6 +1050,16 @@ def _load_aoti(
         file, model_name
     )
 
+    aoti_compiled_model = AOTICompiledModel(
+        torch._C._aoti.AOTIModelPackageLoader(
+            file,
+            model_name,
+            run_single_threaded,
+            num_runners,
+            device_idx,
+        )
+    )
+
     device = loaded_metadata["AOTI_DEVICE_KEY"]
     from torch._inductor.codecache import get_device_information
 
@@ -1063,16 +1075,6 @@ def _load_aoti(
                     v,
                     loaded_metadata[k],
                 )
-
-    aoti_compiled_model = AOTICompiledModel(
-        torch._C._aoti.AOTIModelPackageLoader(
-            file,
-            model_name,
-            run_single_threaded,
-            num_runners,
-            device_idx,
-        )
-    )
 
     return aoti_compiled_model
 

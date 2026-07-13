@@ -76,6 +76,10 @@ except Exception:
 _expectedFailureIf_transformers_ge_5_2 = (
     unittest.expectedFailure if _transformers_version >= (5, 2) else lambda fn: fn
 )
+_skipIf_transformers_ge_5_2 = unittest.skipIf(
+    _transformers_version >= (5, 2),
+    "transformers >= 5.2 is affected by huggingface/transformers#44188",
+)
 
 
 log = logging.getLogger(__name__)
@@ -896,7 +900,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "inductor")
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -905,7 +909,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_hf_bert_ddp_inductor(self):
         self._test_hf_bert_ddp_inductor(static_graph=False)
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -920,14 +924,14 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     def test_hf_bert_ddp_aot_eager(self):
         self._test_hf_bert_aot_eager(static_graph=False)
 
-    @_expectedFailureIf_transformers_ge_5_2
+    @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
@@ -2573,7 +2577,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             fsdp_model(inp)
         # Check for no recompiles (if there were incorrect de-dup guards, then
         # the frame count would be equal to the number of forward calls)
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_fsdp_staticmethod(self):
         """
@@ -2619,7 +2623,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             test_outs.append(fsdp_model(x))
             # Check for no recompiles, which could happen if incorrectly
             # passing args to the staticmethod (e.g. doubly passing `self`)
-            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.frame_count, 1)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
 
@@ -2778,7 +2782,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4, 4),
             "all_gather",
-            suggestion="torch.distributed._functional_collectives.all_gather_tensor",
+            suggestion="torch.distributed._functional_collectives.all_gather_single",
         )
 
     def test_nn_functional_reduce_scatter_unsupported(self):
@@ -2793,7 +2797,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             [torch.randn(4, 4), torch.randn(4, 4)],
             "reduce_scatter",
-            suggestion="torch.distributed._functional_collectives.reduce_scatter_tensor",
+            suggestion="torch.distributed._functional_collectives.reduce_scatter_single",
         )
 
     def test_nn_functional_all_to_all_single_unsupported(self):
