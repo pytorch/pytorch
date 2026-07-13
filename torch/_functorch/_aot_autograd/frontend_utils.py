@@ -26,9 +26,7 @@ if TYPE_CHECKING:
     from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 
-static_inputs_log = torch._logging.getArtifactLogger(
-    __name__, "cudagraph_static_inputs"
-)
+static_addr_log = torch._logging.getArtifactLogger(__name__, "cudagraph_static_addrs")
 
 
 def process_inputs(
@@ -316,14 +314,14 @@ def _try_get_metadata_from_dynamo(
         actual_pos = pos + len(param_keys)
 
         if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
-            "_dynamo_static_input_type", None
+            "_dynamo_static_type", None
         ):
-            static_inputs_log.debug(
+            static_addr_log.debug(
                 "Adding static input pos %s for source %s", actual_pos, source_name
             )
             static_input_indices.append(actual_pos)
         else:
-            static_inputs_log.debug(
+            static_addr_log.debug(
                 "Non-static input pos %s for source %s", actual_pos, source_name
             )
 

@@ -5219,12 +5219,12 @@ def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
 
 # The two flavors of mark_static_address: "guarded" recompiles when the data_ptr
 # changes, "unguarded" re-records cudagraphs instead. Set in decorators.py.
-StaticInputType = Literal["guarded", "unguarded"]
+StaticType = Literal["guarded", "unguarded"]
 
 
-def get_static_address_type(t: Any) -> StaticInputType | None:
+def get_static_address_type(t: Any) -> StaticType | None:
     if isinstance(t, torch.Tensor):
-        return getattr(t, "_dynamo_static_input_type", None)
+        return getattr(t, "_dynamo_static_type", None)
 
     return None
 
@@ -5600,7 +5600,7 @@ def call_storage_offset(x: Any) -> int:
 # To avoid ref cycles, it's important that no tensors are present here, so leave those out.
 def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     KEYS_TO_COPY = [
-        "_dynamo_static_input_type",
+        "_dynamo_static_type",
         "tag",
     ]
 

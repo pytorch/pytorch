@@ -255,7 +255,7 @@ def set_logs(
     sym_node: bool = False,
     compiled_autograd: bool = False,
     compiled_autograd_verbose: bool = False,
-    cudagraph_static_inputs: bool = False,
+    cudagraph_static_addrs: bool = False,
     benchmarking: bool = False,
     autotuning: bool = False,
     autotuning_inputs: bool = False,
@@ -454,8 +454,8 @@ def set_logs(
             needs to be set. This can be done by providing the fully-qualified module
             name as the key, with the log level as the value. Default: ``None``
 
-        cudagraph_static_inputs (:class:`bool`):
-            Whether to emit debug info for cudagraph static input detection. Default: ``False``
+        cudagraph_static_addrs (:class:`bool`):
+            Whether to emit debug info for cudagraph static tensor detection. Default: ``False``
 
         autotuning (:class:`bool`):
             Autotuning choice logs, such as kernel source, perf, and tuning parameters. Default: ``False``
@@ -591,7 +591,7 @@ def set_logs(
         cudagraphs=cudagraphs,
         compiled_autograd=compiled_autograd,
         compiled_autograd_verbose=compiled_autograd_verbose,
-        cudagraph_static_inputs=cudagraph_static_inputs,
+        cudagraph_static_addrs=cudagraph_static_addrs,
         benchmarking=benchmarking,
         autotuning=autotuning,
         autotuning_inputs=autotuning_inputs,

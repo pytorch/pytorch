@@ -69,7 +69,7 @@ if TYPE_CHECKING:
 zip = strict_zip
 
 log = logging.getLogger(__name__)
-static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
+static_addr_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_addrs")
 
 
 # Note [Tangents memory format]
@@ -818,7 +818,7 @@ from a multi-output view call"
                 if (isinstance(arg, torch.nn.Parameter) or i in passed_indices)
             ]
 
-        static_input_logger.debug(
+        static_addr_logger.debug(
             "static input indices metadata analysis: %s", static_input_indices
         )
 

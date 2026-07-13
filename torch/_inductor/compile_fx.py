@@ -241,9 +241,7 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 pre_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "pre_grad_graphs")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
-static_inputs_log = torch._logging.getArtifactLogger(
-    __name__, "cudagraph_static_inputs"
-)
+static_addr_log = torch._logging.getArtifactLogger(__name__, "cudagraph_static_addrs")
 inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metrics")
 
 
@@ -925,7 +923,7 @@ def _compile_fx_inner(
         return make_boxed_func(gm.forward)
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
-    static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
+    static_addr_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
     if not isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)):

@@ -1327,8 +1327,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",
         )
 
-    @make_logging_test(cudagraph_static_inputs=True)
-    def test_cudagraph_static_inputs(self, records):
+    @make_logging_test(cudagraph_static_addrs=True)
+    def test_cudagraph_static_addrs(self, records):
         @torch.compile(mode="reduce-overhead")
         def fn(x):
             return x + 1
@@ -1614,7 +1614,7 @@ exclusions = {
     "sym_node",
     "export",
     "trace_shape_events",
-    "cudagraph_static_inputs",
+    "cudagraph_static_addrs",
     "benchmarking",
     "loop_ordering",
     "loop_tiling",

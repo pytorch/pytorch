@@ -1886,6 +1886,75 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(node.cached_tensor_outputs, [None])
             self.assertEqual(node.unaliased_in_all_paths, [False])
 
+        def test_static_address_output_classified_as_static(self):
+            # Outputs marked as a static address should have that state
+            # propagate through the compiler.
+            pool = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool):
+                static_out = torch.zeros(20, 20, device="cuda")
+            torch._dynamo.mark_static_address(static_out)
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                static_out.copy_(x + 1)
+                return (static_out,)
+
+            foo_cg = self.cudagraphify_impl(
+                foo, [torch.zeros(20, 20, device="cuda")], ()
+            )
+            for gen in range(3):
+                inp = torch.full((20, 20), float(gen), device="cuda")
+                self.assertEqual(foo_cg([inp])[0], inp + 1)
+
+            # internal state: the marked output is classified static and kept
+            # out of the pool-managed output set (so it is never poisoned).
+            node = self.curr_node()
+            self.assertIs(node.static_output_tensors[0], static_out)
+            self.assertIsNone(node.outputs_weakrefs[0])
+            self.assertTrue(
+                torch._inductor.cudagraph_trees._is_marked_static_address(static_out)
+            )
+
+        def test_unmarked_out_of_pool_output_still_rejected(self):
+            # After support for mark_static_address on outputs was added, we
+            # need to be sure that dynamic addresses from another pool still
+            # appropriately raise errors.
+            pool = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool):
+                out_buf = torch.zeros(20, 20, device="cuda")
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                out_buf.copy_(x + 1)
+                return (out_buf,)
+
+            foo_cg = self.cudagraphify_impl(
+                foo, [torch.zeros(20, 20, device="cuda")], ()
+            )
+            with self.assertRaisesRegex(RuntimeError, "not allocated in pool"):
+                for gen in range(3):
+                    foo_cg([torch.full((20, 20), float(gen), device="cuda")])
+
+        def test_static_address_output_reduce_overhead(self):
+            # mark_static_address can be used on outputs as well, which lets
+            # users pre-allocate outputs via a custom memory pool (for
+            # example).
+            pool = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool):
+                out = torch.zeros(64, device="cuda")
+            torch._dynamo.mark_static_address(out)
+
+            @torch.compile(mode="reduce-overhead", fullgraph=True)
+            def f(x):
+                out.copy_(x + 1)
+                return out
+
+            for i in range(4):
+                x = torch.full((64,), float(i), device="cuda")
+                self.assertEqual(f(x), x + 1)
+
         def test_warmup_stream_sync(self):
             def foo(args):
                 x = args[0]

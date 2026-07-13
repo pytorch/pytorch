@@ -232,7 +232,7 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
-    "cudagraph_static_inputs",
+    "cudagraph_static_addrs",
     "Logs static inputs handling in dynamo, AOT, and cudagraphs",
     off_by_default=True,
 )

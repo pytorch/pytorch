@@ -347,9 +347,7 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
-static_inputs_log = torch._logging.getArtifactLogger(
-    __name__, "cudagraph_static_inputs"
-)
+static_addrs_log = torch._logging.getArtifactLogger(__name__, "cudagraph_static_addrs")
 symbolic_shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
 from typing import TypeVar
 
@@ -2522,7 +2520,7 @@ class VariableBuilder:
     def mark_static_input(self, value: torch.Tensor, guard: bool) -> None:
         from ..decorators import mark_static_address
 
-        static_inputs_log.debug(
+        static_addrs_log.debug(
             "Marking static input %s, id: %s)", self.source.name, id(value)
         )
         mark_static_address(value, guard=guard)
@@ -2532,9 +2530,9 @@ class VariableBuilder:
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
             # type: ignore[attr-defined]
-            var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
+            var.proxy.node.meta["tensor_dict"]["_dynamo_static_type"] = (
                 # type: ignore[attr-defined]
-                value._dynamo_static_input_type
+                value._dynamo_static_type
             )
 
     def wrap_module(self, value: torch.nn.Module) -> VariableTracker:

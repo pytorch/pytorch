@@ -105,7 +105,7 @@ Internal test-only artifacts are omitted.
   default.
 * `cudagraphs`: Logs information from wrapping Inductor generated code with
   CUDA graphs.
-* `cudagraph_static_inputs`: Logs static input handling in Dynamo, AOT, and
+* `cudagraph_static_addrs`: Logs static input handling in Dynamo, AOT, and
   CUDA graphs. Off by default.
 * `ddp_graphs`: Prints individual graphs generated when DDPOptimizer splits
   graphs to trigger communication early.

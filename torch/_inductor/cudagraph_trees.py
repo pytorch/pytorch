@@ -680,6 +680,22 @@ def map_to_ref(t: Tensor | None) -> StorageWeakRefWrapper | None:
     return StorageWeakRefWrapper(t)
 
 
+def _is_marked_static_address(t: Any) -> bool:
+    """True if ``t`` was marked with ``torch._dynamo.mark_static_address``.
+
+    Such a tensor's address is constant across calls and externally managed
+    (e.g. a parameter, or a persistent buffer a compiled wrapper allocates in
+    its header).  When one appears as a cudagraph input/output it lives outside
+    the private pool, so cudagraph_trees must treat it as a static tensor --
+    skip the pool-membership check and never deallocate/poison it across steps
+    -- rather than flag it as a leaked pool allocation.
+    """
+    return (
+        isinstance(t, torch.Tensor)
+        and getattr(t, "_dynamo_static_type", None) is not None
+    )
+
+
 # A path index of (depth, offset) indices into a graph that is `depth`` number of nodes from the root
 # at graph output offset
 PathOutputIndex = tuple[int, int]
@@ -812,6 +828,9 @@ class CUDAWarmupNode:
                 and o.is_cuda
                 and o.untyped_storage()._cdata not in non_cudagraph_inps_storage_ptrs
                 and o.untyped_storage().data_ptr() != 0
+                # mark_static_address'd outputs are externally managed and live
+                # outside the pool; don't track/lifetime-manage them
+                and not _is_marked_static_address(o)
             )
 
         self.outputs_weakrefs.extend(
@@ -1521,7 +1540,13 @@ class CUDAGraphNode:
             # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
             is_empty_storage = o.untyped_storage().data_ptr() == 0
-            if (ref and ref() is not None) or is_empty_storage:
+            # a mark_static_address'd output is externally managed (lives outside
+            # the private pool); treat it as a static output like the above
+            if (
+                (ref and ref() is not None)
+                or is_empty_storage
+                or _is_marked_static_address(o)
+            ):
                 self.output_storage_alias.append(None)
                 self.static_output_tensors[i] = o
                 continue
