@@ -224,7 +224,7 @@ class TestProfilerCUDA(TestCase):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
         self.assertTrue(
             not (is_increasing and max_diff > 100 * 1024),
-            msg=f"memory usage is increasing, {str(last_rss)}",
+            msg=lambda msg: f"{msg}\nmemory usage is increasing, {str(last_rss)}",
         )
 
     def test_custom_module_input_op_ids(self):
@@ -399,7 +399,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
             event_name = "cuda_sync" if torch.version.cuda else "hipDeviceSynchronize"
             self.assertTrue(
                 event_name in cats,
-                f"Expected to find {event_name} event found = {cats}",
+                lambda msg: f"{msg}\nExpected to find {event_name} event found = {cats}",
             )
 
         print("Testing enable_cuda_sync_events in _ExperimentalConfig")
@@ -1519,7 +1519,9 @@ class TestProfiler(TestCase):
             trace_only_counts = count_by_cat(trace_only_trace)
             for cat in ("kernel", "ac2g"):
                 self.assertGreater(
-                    default_counts[cat], 0, f"expected {cat} events in default trace"
+                    default_counts[cat],
+                    0,
+                    lambda msg: f"{msg}\nexpected {cat} events in default trace",
                 )
                 self.assertEqual(
                     default_counts[cat],
@@ -1690,7 +1692,7 @@ class TestProfiler(TestCase):
                     self.assertGreaterEqual(
                         args.get("Record function id", -1),
                         0,
-                        f"Failed finding record funciont for op = {e}",
+                        lambda msg: f"{msg}\nFailed finding record funciont for op = {e}",
                     )
 
     def test_profiler_strides(self):
@@ -2591,35 +2593,57 @@ class TestProfilerDevice(TestCase):
         for i in range(max_gpu_count):
             self.assertEqual(gpu_dict["GPU " + str(i)], 1)
 
+    def _is_secondary_profiler_event(self, traceEvent):
+        # On an XPU build the trace contains, in addition to the
+        # "PyTorch Profiler (0)" instance, the XPU profiler instance
+        # "__xpu_profiler__ (N)" plus its own "Iteration Start: __xpu_profiler__"
+        # marker. These are emitted regardless of which activities are requested
+        # and are not bounded by the PyTorch profiler window, so they must be
+        # ignored when validating the trace.
+        name = traceEvent.get("name", "")
+        return name.startswith(
+            ("__xpu_profiler__", "Iteration Start: __xpu_profiler__")
+        )
+
     def _validate_basic_json(self, traceEvents, device_available=False):
         MAX_GPU_COUNT = 8
-        PROFILER_IDX = -4
-        RECORD_END = -1
-        RECORD_START = -2
-        traceEventProfiler = traceEvents[PROFILER_IDX]
 
-        self.assertTrue(traceEventProfiler["name"] == "PyTorch Profiler (0)")
-        self.assertTrue(traceEvents[RECORD_END]["name"] == "Record Window End")
-        self.assertTrue(
-            traceEvents[RECORD_START]["name"] == "Iteration Start: PyTorch Profiler"
+        def _find_event(name):
+            for event in traceEvents:
+                if event.get("name") == name:
+                    return event
+            return None
+
+        traceEventProfiler = _find_event("PyTorch Profiler (0)")
+        recordStart = _find_event("Iteration Start: PyTorch Profiler")
+        recordEnd = _find_event("Record Window End")
+
+        self.assertIsNotNone(
+            traceEventProfiler, "missing 'PyTorch Profiler (0)' trace event"
         )
+        self.assertIsNotNone(
+            recordStart, "missing 'Iteration Start: PyTorch Profiler' trace event"
+        )
+        self.assertIsNotNone(recordEnd, "missing 'Record Window End' trace event")
+
         self.assertGreaterEqual(
             traceEventProfiler["ts"],
-            traceEvents[RECORD_START]["ts"],
+            recordStart["ts"],
             "Profiler starts before record!",
         )
         self.assertLessEqual(
             traceEventProfiler["ts"] + traceEventProfiler["dur"],
-            traceEvents[RECORD_END]["ts"],
+            recordEnd["ts"],
             "Profiler ends after record end!",
         )
 
         gpu_dict = collections.defaultdict(int)
         for i, traceEvent in enumerate(traceEvents):
-            if (
-                i == len(traceEvents) + RECORD_END
-                or i == len(traceEvents) + RECORD_START
-            ):
+            if traceEvent is recordStart or traceEvent is recordEnd:
+                continue
+            # Skip the secondary device profiler instance, which lives outside the
+            # PyTorch profiler window and would otherwise trip the bounds checks.
+            if self._is_secondary_profiler_event(traceEvent):
                 continue
             if "ts" in traceEvent:
                 self.assertGreaterEqual(
@@ -2630,7 +2654,7 @@ class TestProfilerDevice(TestCase):
             if "dur" in traceEvent:
                 self.assertLessEqual(
                     traceEvent["ts"] + traceEvent["dur"],
-                    traceEvents[RECORD_END]["ts"],
+                    recordEnd["ts"],
                     "Trace event ends too late!",
                 )
             gpu_value = traceEvent.get("args", {}).get("labels", None)
@@ -2714,13 +2738,17 @@ class TestProfilerDevice(TestCase):
                 for alloc_fn in allocs:
                     self.assertTrue(alloc_fn in stat_metrics)
                     self.assertGreater(
-                        stat_metrics[alloc_fn], 0, f"alloc_fn = {alloc_fn}"
+                        stat_metrics[alloc_fn],
+                        0,
+                        lambda msg: f"{msg}\nalloc_fn = {alloc_fn}",
                     )
             if deallocs is not None:
                 for dealloc_fn in deallocs:
                     self.assertTrue(dealloc_fn in stat_metrics)
                     self.assertLess(
-                        stat_metrics[dealloc_fn], 0, f"alloc_fn = {dealloc_fn}"
+                        stat_metrics[dealloc_fn],
+                        0,
+                        lambda msg: f"{msg}\nalloc_fn = {dealloc_fn}",
                     )
 
         def create_cpu_tensor():
@@ -3405,7 +3433,9 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 args = ke.get("args", {})
                 name = ke.get("name", "<unknown>")
                 for key in ["device", "stream", "correlation"]:
-                    self.assertIn(key, args, f"kernel '{name}' missing '{key}'")
+                    self.assertIn(
+                        key, args, lambda msg: f"{msg}\nkernel '{name}' missing '{key}'"
+                    )
                 has_grid = "grid" in args
                 has_block = "block" in args
                 self.assertEqual(
@@ -4597,7 +4627,7 @@ class TestProfilerEventsParity(TestCase):
                 self.assertIn(
                     (e.name, e.activity_type),
                     json_name_cats,
-                    f"activity_type mismatch for {e.name}",
+                    lambda msg: f"{msg}\nactivity_type mismatch for {e.name}",
                 )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
@@ -4670,7 +4700,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertNotIn(
                 key,
                 event_records,
-                f"Duplicate FunctionEvent record key encountered: {key}",
+                lambda msg: f"{msg}\nDuplicate FunctionEvent record key encountered: {key}",
             )
             event_records[key] = metadata_dict_from_function_event(fe)
 
@@ -4704,7 +4734,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertNotIn(
                 key,
                 json_records,
-                f"Duplicate Chrome trace record key encountered: {key}",
+                lambda msg: f"{msg}\nDuplicate Chrome trace record key encountered: {key}",
             )
             json_records[key] = metadata_dict_from_trace_args(args)
 
@@ -4897,15 +4927,29 @@ class TestMetadataJsonFormat(TestCase):
 
     def _get_kernel_metadata(self):
         x = torch.randn(64, 64, device="cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-            torch.mm(x, x)
-            torch.cuda.synchronize()
+        # The first profiled iteration(s) can drop CUDA kernels while CUPTI
+        # warms up, so retry a few times before giving up.
+        activities = []
+        for _ in range(3):
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+            ) as prof:
+                torch.mm(x, x)
+                torch.cuda.synchronize()
+            activities = prof.profiler.kineto_results.trace_activities()
+            for act in activities:
+                if act.type() == "kernel":
+                    return act.metadata_json()
 
-        activities = prof.profiler.kineto_results.trace_activities()
-        for act in activities:
-            if act.type() == "kernel":
-                return act.metadata_json()
-        self.fail("No kernel activity found in trace")
+        raw_types = collections.Counter(act.type() for act in activities)
+        event_cats = collections.Counter(
+            e.activity_type for e in prof.events() if getattr(e, "activity_type", None)
+        )
+        self.fail(
+            f"No kernel activity found. cuda={torch.version.cuda} "
+            f"supported={supported_activities()} n={len(activities)} "
+            f"trace_activities_types={dict(raw_types)} events_cats={dict(event_cats)}"
+        )
 
     def test_metadata_json_is_valid_json_fragment(self):
         md = self._get_kernel_metadata()
@@ -4928,7 +4972,11 @@ class TestMetadataJsonFormat(TestCase):
         ]
         expected = common_keys if TEST_WITH_ROCM else common_keys + cuda_only_keys
         for key in expected:
-            self.assertIn(key, parsed, f"Missing field '{key}' in kernel metadataJson")
+            self.assertIn(
+                key,
+                parsed,
+                lambda msg: f"{msg}\nMissing field '{key}' in kernel metadataJson",
+            )
 
     def test_kernel_metadata_field_types(self):
         md = self._get_kernel_metadata()
@@ -4948,7 +4996,7 @@ class TestMetadataJsonFormat(TestCase):
             self.assertIsInstance(
                 parsed[key],
                 int,
-                f"Expected int for '{key}', got {type(parsed[key]).__name__}",
+                lambda msg: f"{msg}\nExpected int for '{key}', got {type(parsed[key]).__name__}",
             )
         for key in ["grid", "block"]:
             self.assertIsInstance(parsed[key], list)
