@@ -604,7 +604,6 @@ class CuptiMonitor:
             self._cupti.activity_flush_all()
             self._account_dropped_records(0, 0)
             self._drain_and_dispatch()
-            self._poll_pm_sampler()
             return
         added = self._begin_fence_kind()
         try:
@@ -633,7 +632,6 @@ class CuptiMonitor:
             # The fence guarantees everything up to the sync point is decoded; hand
             # the accumulated window to the observers now.
             self._drain_and_dispatch()
-            self._poll_pm_sampler()
 
     def _begin_fence_kind(self) -> bool:
         """Enable + make decodable the SYNCHRONIZATION sync-point kind for the
@@ -842,8 +840,9 @@ class CuptiMonitor:
                 self._pm_sampler = None
 
     def _poll_pm_sampler(self) -> None:
-        """Poll every PM consumer on the monitor's flush cadence -- decode drains, so this pulls the
-        HW ring before it overflows. The final poll at release/stop catches the tail."""
+        """Poll every PM consumer on the monitor's drain cadence (folded into
+        _drain_and_dispatch) -- pulling the HW ring before it overflows. The final poll at
+        release/stop catches the tail."""
         with self._pm_lock:
             for sink, handle in self._pm_consumers.items():
                 self._deliver_pm(sink, handle.poll())
@@ -1176,6 +1175,10 @@ class CuptiMonitor:
             # drains that dispatch its trailing records (resolution reads it during
             # dispatch), so retire it a generation later, never before.
             self._gc_external_chains()
+        # PM sampling shares the drain cadence: polling the HW ring is GIL work, so it
+        # rides the drain path (foreground flush or the background drain loop) -- the
+        # native self-flush thread must not touch it.
+        self._poll_pm_sampler()
         self._maybe_warn_backpressure()
 
     def _columns_from_native(
