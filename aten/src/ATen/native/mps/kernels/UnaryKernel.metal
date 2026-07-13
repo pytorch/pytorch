@@ -1,3 +1,4 @@
+#include <ATen/native/mps/kernels/UnaryKernel.h>
 #include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
@@ -794,3 +795,33 @@ REGISTER_UNARY_ALPHA_OP(polygamma, char, int, float);
 REGISTER_UNARY_ALPHA_OP(polygamma, short, int, float);
 REGISTER_UNARY_ALPHA_OP(polygamma, int, int, float);
 REGISTER_UNARY_ALPHA_OP(polygamma, long, int, float);
+
+// Replacement values are computed per-dtype on the host and ride at float
+// (exact for half/bfloat extrema), mirroring the CUDA kernel's
+// Scalar-to-scalar_t conversion.
+inline float nan_to_num_replace(float x, NanToNumParams<float> params) {
+  return ::metal::isnan(x)
+      ? params.nan
+      : (::metal::isinf(x) ? (x > 0.0f ? params.posinf : params.neginf) : x);
+}
+
+struct nan_to_num_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x, const NanToNumParams<float> params) {
+    return static_cast<T>(nan_to_num_replace(float(x), params));
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x, const NanToNumParams<float> params) {
+    // per-component, matching CPU/CUDA
+    return T(
+        nan_to_num_replace(float(x.x), params),
+        nan_to_num_replace(float(x.y), params));
+  }
+};
+
+typedef NanToNumParams<float> NanToNumParams_float;
+REGISTER_UNARY_ALPHA_OP(nan_to_num, float, NanToNumParams_float, float);
+REGISTER_UNARY_ALPHA_OP(nan_to_num, half, NanToNumParams_float, half);
+REGISTER_UNARY_ALPHA_OP(nan_to_num, bfloat, NanToNumParams_float, bfloat);
+REGISTER_UNARY_ALPHA_OP(nan_to_num, float2, NanToNumParams_float, float2);
+REGISTER_UNARY_ALPHA_OP(nan_to_num, half2, NanToNumParams_float, half2);

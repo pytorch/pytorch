@@ -199,7 +199,8 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       T params,
-      const std::string& params_type_name);
+      const std::string& params_type_name,
+      const std::optional<uint32_t> ilp_threshold = std::nullopt);
   template <typename T>
   void exec_binary_kernel_with_params(
       TensorIteratorBase& iter,
