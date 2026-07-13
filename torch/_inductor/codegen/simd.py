@@ -3935,8 +3935,11 @@ class SIMDScheduling(BaseScheduling):
                     enable_autotune
                     and per_subkernel_blocks
                     and config.combo_kernel_compile_time_autotune
+                    and not config.deterministic
                     and not only_gen_src_code
                 ):
+                    # Deterministic mode falls through to no_bench_mode below: it bans timing-based
+                    # benchmarking, so we pick block sizes from heuristics instead of autotuning.
                     group = list(node_group)
                     tuned = self._autotune_subkernels_compile_time(
                         group, node_schedule_map
@@ -3995,10 +3998,12 @@ class SIMDScheduling(BaseScheduling):
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((co_src, co_kernel, [pn]))
                     continue
+                # Deterministic mode uses the heuristic (no-benchmark) block sizes, same as the
+                # autotune-disabled path, since it forbids timing-based benchmarking.
                 no_bench_mode = (
                     per_subkernel_blocks
-                    and not enable_autotune
                     and not only_gen_src_code
+                    and (not enable_autotune or config.deterministic)
                 )
                 fusion_pns: list[Any] = []
                 fusion_configs: list[Any] = []
@@ -4028,7 +4033,7 @@ class SIMDScheduling(BaseScheduling):
                     kernel = self._build_combo_kernel(
                         fusion_pns,
                         node_schedule_map,
-                        enable_autotune=enable_autotune,
+                        enable_autotune=enable_autotune and not config.deterministic,
                         mixed_sizes=mixed_sizes,
                         per_subkernel_blocks=per_subkernel_blocks,
                         only_gen_src_code=only_gen_src_code,
