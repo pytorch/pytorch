@@ -4531,7 +4531,7 @@
   autogen: _cdist_forward.out
   tags: core
 
-- func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
+- func: _cdist_backward(Tensor grad_output, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
   dispatch:
     CPU, CUDA, MPS, XPU: _cdist_backward
   autogen: _cdist_backward.out
@@ -4544,7 +4544,7 @@
   autogen: _pdist_forward.out
   tags: core
 
-- func: _pdist_backward(Tensor grad, Tensor self, float p, Tensor pdist) -> Tensor
+- func: _pdist_backward(Tensor grad_output, Tensor self, float p, Tensor pdist) -> Tensor
   dispatch:
     CPU, CUDA, XPU: _pdist_backward
   autogen: _pdist_backward.out

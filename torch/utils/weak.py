@@ -349,6 +349,8 @@ WeakTensorKeyDictionary = WeakIdKeyDictionary
 class _TensorWeakRef(weakref.ref):
     """Tensor-only weakref that fixes Tensor weakrefs before returning them."""
 
+    __slots__ = ()
+
     def __call__(self):
         out = super().__call__()
         if out is None:
