@@ -423,8 +423,11 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
+  // NOLINTBEGIN(performance-use-std-move): the extra refcount from copying
+  // (rather than moving) tmp_a/tmp_b is load-bearing, see NB comment above.
   a->cdata = tmp_b;
   b->cdata = tmp_a;
+  // NOLINTEND(performance-use-std-move)
 
   // Fix up the PyObjects associated with each TensorImpl
   a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
@@ -1456,6 +1459,31 @@ static PyObject* THPModule_allowTF32CuBLAS(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setPreferCublasltGroupedGemm(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_prefer_cublaslt_grouped_gemm expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setPreferCublasltGroupedGemm(Py_IsTrue(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_preferCublasltGroupedGemm(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().preferCublasltGroupedGemm()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* args) {
@@ -2163,6 +2191,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_warn_deprecation", THPModule_warnDeprecation, METH_NOARGS, nullptr},
     {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS, nullptr},
     {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O, nullptr},
+    {"_get_cublaslt_prefer_grouped_gemm",
+     THPModule_preferCublasltGroupedGemm,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cublaslt_prefer_grouped_gemm",
+     THPModule_setPreferCublasltGroupedGemm,
+     METH_O,
+     nullptr},
     {"_get_float32_matmul_precision",
      THPModule_float32MatmulPrecision,
      METH_NOARGS,
