@@ -1368,6 +1368,10 @@ class aten_distributed_optimizations:
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
 
+    # Direct-input NVLS multicast + Copy Engine variant. Requires NVSwitch /
+    # NVLink SHARP and uses cudaMemcpyAsync to the multicast pointer.
+    low_contention_all_gather_ce_multicast: bool = False
+
     # Decompose collective patterns when mathematically equivalent local
     # computation exists. See torch/_inductor/fx_passes/decomp_comms.py.
     allow_comms_decompositions: bool = False
