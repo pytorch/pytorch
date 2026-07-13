@@ -10,7 +10,6 @@ from torch._custom_class_base import CustomClassBase
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_custom_class
 from torch._subclasses import FakeTensor, FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -108,12 +107,12 @@ def process_inputs(
                 )
             if not isinstance(x, torch.Tensor):
                 return x
-            if is_fake_tensor(x):
+            if isinstance(x, FakeTensor):
                 # In the case of cross compilation we will have example inputs
                 # with a different fake mode than our tracing fake mode.
                 # In these cases we want to clone the fake tensor into our
                 # inner fake mode.
-                if maybe_get_fake_mode(x) is not fake_mode:
+                if x.fake_mode is not fake_mode:
                     return fake_mode.from_tensor(x)
                 return x
             if is_traceable_wrapper_subclass(x):
