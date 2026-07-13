@@ -41,10 +41,10 @@
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
-#include <cstring>
 #include <set>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 using torch::impl::py_context_manager;
 using torch::impl::py_context_manager_DEPRECATED;
@@ -104,6 +104,10 @@ struct EnablePreDispatch {
 
 } // namespace
 
+namespace torch::autograd {
+PyTypeObject* getAOTAutogradSavePlanType();
+} // namespace torch::autograd
+
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   using namespace torch::autograd::profiler;
   using namespace torch::profiler::impl;
@@ -136,6 +140,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
   if (!torch_C_module)
     return nullptr;
+  if (PyModule_AddType(
+          torch_C_module, torch::autograd::getAOTAutogradSavePlanType()) < 0) {
+    return nullptr;
+  }
   auto _C_m = py::handle(torch_C_module).cast<py::module>();
   auto m = _C_m.def_submodule("_autograd", "autograd bindings");
 
@@ -1711,10 +1719,64 @@ static PyObject* get_sequence_item(PyObject* obj, Py_ssize_t idx) {
   TORCH_CHECK(false, "fw_outs must be a list or tuple");
 }
 
-static int64_t read_i64(const char* ptr) {
-  int64_t result;
-  std::memcpy(&result, ptr, sizeof(result));
+static int64_t read_plan_i64(PyObject* plan, Py_ssize_t idx) {
+  PyObject* item = PyTuple_GET_ITEM(plan, idx);
+  auto result = PyLong_AsLongLong(item);
+  if (result == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
   return result;
+}
+
+struct AOTAutogradSavePlan {
+  PyObject_HEAD
+  int64_t num_vc;
+  int64_t num_no_vc;
+  int64_t num_symints;
+  int64_t num_opaque;
+  std::vector<int64_t> indices;
+  std::vector<uint8_t> is_graph_input;
+};
+
+static void AOTAutogradSavePlan_dealloc(AOTAutogradSavePlan* self) {
+  self->indices.~vector<int64_t>();
+  self->is_graph_input.~vector<uint8_t>();
+  Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
+}
+
+static PyTypeObject AOTAutogradSavePlanType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._AOTAutogradSavePlan", /* tp_name */
+    sizeof(AOTAutogradSavePlan), /* tp_basicsize */
+    0, /* tp_itemsize */
+    reinterpret_cast<destructor>(AOTAutogradSavePlan_dealloc), /* tp_dealloc */
+    0, /* tp_vectorcall_offset */
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_as_async */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash */
+    nullptr, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT, /* tp_flags */
+    nullptr, /* tp_doc */
+};
+
+PyTypeObject* getAOTAutogradSavePlanType() {
+  return &AOTAutogradSavePlanType;
+}
+
+static AOTAutogradSavePlan* unpack_save_plan(PyObject* obj) {
+  TORCH_CHECK(
+      Py_IS_TYPE(obj, &AOTAutogradSavePlanType),
+      "plan must be a torch._C._AOTAutogradSavePlan");
+  return reinterpret_cast<AOTAutogradSavePlan*>(obj);
 }
 
 static PyObject* prepare_saved_tensor(
@@ -1749,7 +1811,7 @@ static void set_list_attr_from_indices(
     PyObject* ctx,
     const char* attr,
     PyObject* fw_outs,
-    const char* indices,
+    const AOTAutogradSavePlan* plan,
     int64_t start,
     int64_t num_indices) {
   THPObjectPtr result(PyList_New(static_cast<Py_ssize_t>(num_indices)));
@@ -1757,7 +1819,7 @@ static void set_list_attr_from_indices(
     throw python_error();
   }
   for (const auto i : c10::irange(num_indices)) {
-    auto idx = read_i64(indices + (start + i) * sizeof(int64_t));
+    auto idx = plan->indices[start + i];
     PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
     Py_INCREF(item);
     PyList_SET_ITEM(result.get(), static_cast<Py_ssize_t>(i), item);
@@ -1765,6 +1827,66 @@ static void set_list_attr_from_indices(
   if (PyObject_SetAttrString(ctx, attr, result.get()) < 0) {
     throw python_error();
   }
+}
+
+static PyObject* THPModule_aot_autograd_make_save_plan(
+    PyObject* _unused,
+    PyObject* plan_obj) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(PyTuple_CheckExact(plan_obj), "plan must be a tuple");
+  const auto plan_size = PyTuple_GET_SIZE(plan_obj);
+  TORCH_CHECK(plan_size >= 4, "invalid AOTAutograd save plan");
+  // Tuple layout matches _codegen_save_from_forward:
+  //
+  //   [counts]
+  //   [fw_out indices for tensors, symints, opaque objects]
+  //   [one graph-input flag per saved tensor]
+  //
+  // Parse it once at compile time into this private C++ object so the runtime
+  // save path can use typed fields and vectors directly.
+  auto num_vc = read_plan_i64(plan_obj, 0);
+  auto num_no_vc = read_plan_i64(plan_obj, 1);
+  auto num_symints = read_plan_i64(plan_obj, 2);
+  auto num_opaque = read_plan_i64(plan_obj, 3);
+  TORCH_CHECK(
+      num_vc >= 0 && num_no_vc >= 0 && num_symints >= 0 && num_opaque >= 0,
+      "invalid AOTAutograd save plan counts");
+  const auto num_saved_tensors = num_vc + num_no_vc;
+  const auto num_indices = num_saved_tensors + num_symints + num_opaque;
+  auto expected_size =
+      static_cast<Py_ssize_t>(4 + num_indices + num_saved_tensors);
+  TORCH_CHECK(plan_size == expected_size, "invalid AOTAutograd save plan size");
+
+  auto* plan = reinterpret_cast<AOTAutogradSavePlan*>(
+      AOTAutogradSavePlanType.tp_alloc(&AOTAutogradSavePlanType, 0));
+  if (!plan) {
+    throw python_error();
+  }
+  plan->num_vc = num_vc;
+  plan->num_no_vc = num_no_vc;
+  plan->num_symints = num_symints;
+  plan->num_opaque = num_opaque;
+  new (&plan->indices) std::vector<int64_t>();
+  new (&plan->is_graph_input) std::vector<uint8_t>();
+
+  try {
+    plan->indices.reserve(num_indices);
+    for (const auto i : c10::irange(num_indices)) {
+      plan->indices.push_back(read_plan_i64(plan_obj, 4 + i));
+    }
+    plan->is_graph_input.reserve(num_saved_tensors);
+    const auto graph_input_start = 4 + num_indices;
+    for (const auto i : c10::irange(num_saved_tensors)) {
+      plan->is_graph_input.push_back(
+          read_plan_i64(plan_obj, graph_input_start + i) != 0);
+    }
+  } catch (...) {
+    Py_DECREF(reinterpret_cast<PyObject*>(plan));
+    throw;
+  }
+
+  return reinterpret_cast<PyObject*>(plan);
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_aot_autograd_save_for_backward(
@@ -1787,40 +1909,13 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
     return_saved_tensors = return_saved_tensors_int != 0;
   }
   TORCH_CHECK(THPFunction_Check(ctx), "ctx must be a torch autograd Function");
-  TORCH_CHECK(PyBytes_Check(plan_obj), "plan must be bytes");
   auto* fn = reinterpret_cast<THPFunction*>(ctx);
-
-  const auto plan_size = PyBytes_GET_SIZE(plan_obj);
-  TORCH_CHECK(
-      plan_size >= static_cast<Py_ssize_t>(4 * sizeof(int64_t)),
-      "invalid AOTAutograd save plan");
-  TORCH_CHECK(
-      plan_size % static_cast<Py_ssize_t>(sizeof(int64_t)) == 0,
-      "invalid AOTAutograd save plan");
-  const char* plan_bytes = PyBytes_AS_STRING(plan_obj);
-  // Plan layout matches _codegen_save_from_forward:
-  //
-  //   [counts]
-  //   [fw_out indices for tensors, symints, opaque objects]
-  //   [one graph-input flag per saved tensor]
-  //
-  // This keeps Python responsible for compile-time indexing decisions while
-  // this helper owns the runtime save/detach/ctx mutation work.
-  auto num_vc = read_i64(plan_bytes);
-  auto num_no_vc = read_i64(plan_bytes + sizeof(int64_t));
-  auto num_symints = read_i64(plan_bytes + 2 * sizeof(int64_t));
-  auto num_opaque = read_i64(plan_bytes + 3 * sizeof(int64_t));
-  TORCH_CHECK(
-      num_vc >= 0 && num_no_vc >= 0 && num_symints >= 0 && num_opaque >= 0,
-      "invalid AOTAutograd save plan counts");
+  const auto* plan = unpack_save_plan(plan_obj);
+  const auto num_vc = plan->num_vc;
+  const auto num_no_vc = plan->num_no_vc;
+  const auto num_symints = plan->num_symints;
+  const auto num_opaque = plan->num_opaque;
   const auto num_saved_tensors = num_vc + num_no_vc;
-  const auto num_indices = num_saved_tensors + num_symints + num_opaque;
-  auto expected_size =
-      static_cast<Py_ssize_t>(4 + num_indices + num_saved_tensors) *
-      static_cast<Py_ssize_t>(sizeof(int64_t));
-  TORCH_CHECK(plan_size == expected_size, "invalid AOTAutograd save plan size");
-  const auto* indices = plan_bytes + 4 * sizeof(int64_t);
-  const auto graph_input_start = num_indices;
   const auto no_vc_start = num_vc;
   const auto symint_start = no_vc_start + num_no_vc;
   const auto opaque_start = symint_start + num_symints;
@@ -1844,10 +1939,8 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
     }
   }
   for (const auto i : c10::irange(num_vc)) {
-    auto idx = read_i64(indices + i * sizeof(int64_t));
-    auto graph_input_idx = graph_input_start + i;
-    auto is_graph_input =
-        read_i64(indices + graph_input_idx * sizeof(int64_t)) != 0;
+    auto idx = plan->indices[i];
+    auto is_graph_input = plan->is_graph_input[i] != 0;
     PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
     PyObject* saved = prepare_saved_tensor(item, idx, is_graph_input);
     if (return_saved_tensors) {
@@ -1866,10 +1959,8 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
     throw python_error();
   }
   for (const auto i : c10::irange(num_no_vc)) {
-    auto idx = read_i64(indices + (no_vc_start + i) * sizeof(int64_t));
-    auto graph_input_idx = graph_input_start + no_vc_start + i;
-    auto is_graph_input =
-        read_i64(indices + graph_input_idx * sizeof(int64_t)) != 0;
+    auto idx = plan->indices[no_vc_start + i];
+    auto is_graph_input = plan->is_graph_input[no_vc_start + i] != 0;
     PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
     PyObject* saved = prepare_saved_tensor(item, idx, is_graph_input);
     if (return_saved_tensors) {
@@ -1886,9 +1977,9 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
   // SymInts and opaque objects do not need tensor view handling; just preserve
   // the selected fw_out objects on ctx for the backward prologue.
   set_list_attr_from_indices(
-      ctx, "symints", fw_outs, indices, symint_start, num_symints);
+      ctx, "symints", fw_outs, plan, symint_start, num_symints);
   set_list_attr_from_indices(
-      ctx, "opaque_objects", fw_outs, indices, opaque_start, num_opaque);
+      ctx, "opaque_objects", fw_outs, plan, opaque_start, num_opaque);
 
   if (return_saved_tensors) {
     return saved_tensors.release();
@@ -1969,6 +2060,10 @@ static PyMethodDef methods[] = {
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
     {"_increment_version", THPModule_increment_version, METH_O, nullptr},
+    {"_aot_autograd_make_save_plan",
+     THPModule_aot_autograd_make_save_plan,
+     METH_O,
+     nullptr},
     {"_aot_autograd_save_for_backward",
      reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)()>(
          THPModule_aot_autograd_save_for_backward)),

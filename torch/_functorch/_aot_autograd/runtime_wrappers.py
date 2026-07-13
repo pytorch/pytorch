@@ -12,7 +12,6 @@ import copy
 import functools
 import itertools
 import pprint
-import struct
 import typing
 import warnings
 import weakref
@@ -20,7 +19,7 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
@@ -103,6 +102,12 @@ from .utils import (
     strict_zip,
     without_output_descs,
 )
+
+
+if TYPE_CHECKING:
+    from torch._C import _AOTAutogradSavePlan
+else:
+    _AOTAutogradSavePlan = object
 
 
 def _snapshot_external_objects(ctx: Any) -> None:
@@ -2615,11 +2620,13 @@ class AOTDispatchAutogradCompileSpec:
 
 
 @dataclass
-class _AutogradSaveFromForward:
+class _AutogradSavedState:
     metadata: ViewAndMutationMeta
     debug_assert: bool
 
-    def save_from_forward(self, ctx: Any, fw_outs: Sequence[Any], plan: bytes) -> None:
+    def save_from_forward(
+        self, ctx: Any, fw_outs: Sequence[Any], plan: _AOTAutogradSavePlan
+    ) -> None:
         # C++ owns the actual save/detach/ctx mutation. This wrapper only keeps
         # the Python-specific debug checks and dynamic-dim attribute stamping.
         if self.debug_assert:
@@ -2627,12 +2634,10 @@ class _AutogradSaveFromForward:
 
         dynamic_saved_tensor_idxs = self.metadata.dynamic_saved_tensors_idxs
         if not dynamic_saved_tensor_idxs:
-            typing.cast(Any, torch._C)._aot_autograd_save_for_backward(
-                ctx, fw_outs, plan
-            )
+            torch._C._aot_autograd_save_for_backward(ctx, fw_outs, plan)
             return
 
-        saved_tensors = typing.cast(Any, torch._C)._aot_autograd_save_for_backward(
+        saved_tensors = torch._C._aot_autograd_save_for_backward(
             ctx, fw_outs, plan, True
         )
         for idx, dims in dynamic_saved_tensor_idxs.items():
@@ -2672,7 +2677,7 @@ def _slice_to_indices(s: slice, length: int) -> list[int]:
 def _codegen_save_from_forward(
     fw_metadata: ViewAndMutationMeta,
     num_fw_outs_saved_for_bw: int,
-) -> tuple[Callable[..., Any], bytes]:
+) -> tuple[Callable[..., Any], _AOTAutogradSavePlan]:
     total_fw_outs = fw_metadata.num_forward + num_fw_outs_saved_for_bw
     vc_idxs = _slice_to_indices(
         fw_metadata.tensors_saved_for_backwards_with_vc_check_slice,
@@ -2712,18 +2717,18 @@ def _codegen_save_from_forward(
         *opaque_idxs,
         *is_graph_input,
     )
-    packed_plan = struct.pack(f"{len(plan)}q", *plan)
+    save_plan = torch._C._aot_autograd_make_save_plan(plan)
     if not config.debug_assert and not fw_metadata.dynamic_saved_tensors_idxs:
         return (
-            typing.cast(Any, torch._C)._aot_autograd_save_for_backward,
-            packed_plan,
+            torch._C._aot_autograd_save_for_backward,
+            save_plan,
         )
 
-    save_from_forward = _AutogradSaveFromForward(
+    save_from_forward = _AutogradSavedState(
         fw_metadata,
         debug_assert=config.debug_assert,
     )
-    return save_from_forward.save_from_forward, packed_plan
+    return save_from_forward.save_from_forward, save_plan
 
 
 @dataclass
