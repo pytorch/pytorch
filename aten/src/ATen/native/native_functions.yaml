@@ -3970,11 +3970,9 @@
 - func: nanmean(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # Composite
   variants: function, method
-  tags: reduction
 
 - func: nanmean.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # Composite
-  tags: reduction
 
 - func: median(Tensor self) -> Tensor
   variants: function, method
@@ -3984,13 +3982,11 @@
     MPS: median_mps
     XPU: median_xpu
   autogen: median.out
-  tags: reduction
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: median
-  tags: reduction
 
 - func: median.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
@@ -3998,7 +3994,6 @@
     CUDA: median_out_cuda
     MPS: median_out_mps
     XPU: median_out_xpu
-  tags: reduction
 
 - func: nanmedian(Tensor self) -> Tensor
   variants: function, method
@@ -4008,13 +4003,11 @@
     MPS: nanmedian_mps
     XPU: nanmedian_xpu
   autogen: nanmedian.out
-  tags: reduction
 
 - func: nanmedian.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: nanmedian
-  tags: reduction
 
 - func: nanmedian.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
@@ -4022,7 +4015,6 @@
     CUDA: nanmedian_out_cuda
     MPS: nanmedian_out_mps
     XPU: nanmedian_out_xpu
-  tags: reduction
 
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
@@ -4247,12 +4239,10 @@
   variants: function, method
   dispatch:
     CPU, CUDA, XPU: mode
-  tags: reduction
 
 - func: mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CompositeExplicitAutograd: mode_out
-  tags: reduction
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -8903,7 +8893,6 @@
     MPS: trace_mps
     XPU: trace_xpu
   autogen: trace.out
-  tags: reduction
 
 - func: trace_backward(Tensor grad, SymInt[] sizes) -> Tensor
   variants: function
@@ -9721,7 +9710,6 @@
   dispatch:
     CompositeExplicitAutograd: dist
   autogen: dist.out
-  tags: reduction
 
 - func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -13898,11 +13886,9 @@
 - func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   python_module: special
   variants: function
-  tags: reduction
 
 - func: special_logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
-  tags: reduction
 
 - func: special_expit(Tensor self) -> Tensor
   python_module: special
