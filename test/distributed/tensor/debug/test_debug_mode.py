@@ -31,10 +31,10 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
     run_tests,
     TestCase,
 )
+from torch.testing._internal.distributed._tensor.common_dtensor import DEVICE_TYPE
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._debug_mode import (
@@ -202,7 +202,7 @@ class TestDebugModeLogSerialization(TestCase):
         self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
 
 
-@requires_cuda
+@unittest.skipUnless(DEVICE_TYPE != "cpu", "requires accelerator")
 class TestDTensorDebugMode(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -225,7 +225,7 @@ class TestDTensorDebugMode(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
+        self.device_type = DEVICE_TYPE
 
     def test_debug_mode_mm(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
