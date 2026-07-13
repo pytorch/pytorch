@@ -18,6 +18,7 @@ from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import (
     FakeTensor,
+    FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_mode,
 )
@@ -39,6 +40,16 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
     reason: str
+
+
+def _find_or_create_fake_mode() -> FakeTensorMode:
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    fake_mode = detect_fake_mode()
+    if fake_mode is None:
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    return fake_mode
 
 
 def autograd_not_implemented_inner(
@@ -1172,9 +1183,21 @@ def register_fake(hop, fn=None, *, skip_cache=False):
         raise AssertionError(f"hop {hop} already registered in registered_hop_fake_fns")
 
     def register(func: F) -> F:
+        from torch._C import DispatchKey
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         redirect_to_mode(hop, FakeTensorMode)
+
+        @hop.py_impl(DispatchKey.Fake)
+        def cpp_fake_tensor_mode(*args, **kwargs):
+            mode = _find_or_create_fake_mode()
+            maybe_ignore_fresh_unbacked_symbols = (
+                contextlib.nullcontext
+                if mode.shape_env is None
+                else mode.shape_env.ignore_fresh_unbacked_symbols
+            )
+            with maybe_ignore_fresh_unbacked_symbols():
+                return func(*args, **kwargs)
 
         registered_hop_fake_fns[hop] = func
         if skip_cache:

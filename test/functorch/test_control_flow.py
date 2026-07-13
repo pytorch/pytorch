@@ -12636,6 +12636,45 @@ class TestControlFlowAndRNG(TestCase):
             self.assertEqual(out.shape, x.shape)
 
 
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class TestControlFlowCppFakeTensor(TestCase):
+    @parametrize("op_name", ["cond", "scan", "while_loop", "while_loop_stack_output"])
+    def test_hop_registers_fake_kernel(self, op_name):
+        from torch._C import DispatchKey
+        from torch._higher_order_ops.cond import cond_op
+        from torch._higher_order_ops.scan import scan_op
+        from torch._higher_order_ops.while_loop import (
+            while_loop_op,
+            while_loop_stack_output_op,
+        )
+
+        ops = {
+            "cond": cond_op,
+            "scan": scan_op,
+            "while_loop": while_loop_op,
+            "while_loop_stack_output": while_loop_stack_output_op,
+        }
+        self.assertTrue(ops[op_name].has_kernel_for_dispatch_key(DispatchKey.Fake))
+
+    def test_register_fake_installs_fake_kernel(self):
+        from torch._C import DispatchKey
+        from torch._higher_order_ops.utils import register_fake
+        from torch._ops import HigherOrderOperator
+
+        class _RegCheckHop(HigherOrderOperator):
+            def __init__(self):
+                super().__init__("_reg_check_hop")
+
+            def __call__(self, *args, **kwargs):
+                return super().__call__(*args, **kwargs)
+
+        hop = _RegCheckHop()
+        self.assertFalse(hop.has_kernel_for_dispatch_key(DispatchKey.Fake))
+        register_fake(hop, lambda *args, **kwargs: None)
+        self.assertTrue(hop.has_kernel_for_dispatch_key(DispatchKey.Fake))
+
+
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
 instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
@@ -12644,6 +12683,7 @@ instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
 
 instantiate_parametrized_tests(TestControlFlowAndRNG)
+instantiate_parametrized_tests(TestControlFlowCppFakeTensor)
 
 if __name__ == "__main__":
     run_tests()
