@@ -10252,10 +10252,11 @@ class TestInnerContiguous(TestCaseMPS):
 
     @parametrize("dtype", [torch.int8, torch.int16, torch.float32])
     @parametrize("offset", [0, 1, 2, 4, 8])
-    @parametrize("inner", [17, 31, 48])
+    @parametrize("inner", [17, 20, 24, 28, 31, 48])
     def test_byte_copy(self, device, dtype, offset, inner):
         # offset varies the per-row base alignment to exercise the ladder, and
-        # odd inner extents make inner_bytes % 16 != 0 for narrow dtypes.
+        # the inner extents span final-chunk byte remainders (inner_bytes % 16)
+        # across 0, [4,8) and [8,16) so the partial-tail vector paths are hit.
         torch.manual_seed(0)
         R, full_w = 24, offset + inner + 8
         src = _conformance_make_tensor((R, inner), dtype)
@@ -10265,6 +10266,22 @@ class TestInnerContiguous(TestCaseMPS):
         dst_dev[:, offset:offset + inner].copy_(src.to(device))
         # whole-buffer compare also proves the copy leaves neighbors untouched
         self.assertEqual(dst_dev.cpu(), dst_cpu)
+
+    @parametrize("dtype", [torch.int8, torch.int16, torch.float32, torch.complex64])
+    @parametrize("offset", [0, 1, 2, 4])
+    def test_contiguous_copy(self, device, dtype, offset):
+        # Fully contiguous same-dtype clone hits contiguous_byte_copy; offset varies the
+        # base byte alignment and n spans sub-16B totals through the vectorized path.
+        torch.manual_seed(0)
+        for n in (1, 7, 16, 17, 1000):
+            if dtype.is_complex:
+                full = torch.randn(offset + n, dtype=dtype)
+            elif dtype.is_floating_point:
+                full = torch.randn(offset + n).to(dtype)
+            else:
+                full = torch.randint(-100, 100, (offset + n,), dtype=dtype)
+            dev = full.to(device)
+            self.assertEqual(dev[offset:].clone().cpu(), full[offset:])
 
 
 class TestLargeTensors(TestCaseMPS):
