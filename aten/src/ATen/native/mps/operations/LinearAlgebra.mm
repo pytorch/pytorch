@@ -42,6 +42,7 @@
 #include <ATen/ops/linalg_lu_solve.h>
 #include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/linalg_qr_native.h>
+#include <ATen/ops/linalg_solve_triangular.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/linalg_vector_norm.h>
@@ -61,7 +62,9 @@
 
 #include <c10/util/env.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <unordered_set>
 
@@ -1899,23 +1902,33 @@ static bool linalg_eig_hybrid_mps(Tensor& eigenvalues, Tensor& eigenvectors, Ten
   using namespace mps;
   const int64_t n64 = input.size(-1);
   int n = static_cast<int>(n64);
+  const int64_t m64 = n64 - 1; // reflector count
   const int64_t batch = std::max<int64_t>(1, batchCount(input));
   const auto cpu_f = input.options().device(at::kCPU);
-  auto A_cm = input.to(at::kCPU).mT().contiguous(); // [b] holds A column-major
-  auto Z_cm = at::empty(A_cm.sizes(), cpu_f);
-  auto refl_cm = at::empty(A_cm.sizes(), cpu_f); // gehrd reflectors (A copy)
-  auto tau = at::empty({batch, n64 - 1}, cpu_f);
+  const auto cpu_pinned = cpu_f.pinned_memory(true); // page-aligned: uploads skip staging+sync
+  // TZ[0] holds A (overwritten by the Schur T), TZ[1] the hseqr Z, both in
+  // per-matrix column-major layout, packed so the post-hseqr upload is one copy
+  auto TZ_cm = at::empty({2, batch, n64, n64}, cpu_pinned);
+  auto A_cm = TZ_cm[0];
+  auto Z_cm = TZ_cm[1];
+  A_cm.view(input.sizes()).copy_(input.mT()); // transposes on the GPU, blits into pinned
+  auto Vt_cpu = at::zeros({batch, m64, n64}, cpu_pinned); // WY reflectors, one per row
+  auto tau = at::empty({batch, m64}, cpu_pinned);
   auto bal = at::empty({batch, n64}, cpu_f);
-  auto values_cpu = at::empty(eigenvalues.sizes(), eigenvalues.options().device(at::kCPU));
+  auto aux_cpu = at::empty({batch, 5, n64}, cpu_pinned); // diag|sub|super|cnorm|row-scale
+  auto perm = at::empty({batch, n64}, cpu_f.dtype(at::kLong));
+  auto values_cpu = at::empty(eigenvalues.sizes(), eigenvalues.options().device(at::kCPU).pinned_memory(true));
   auto values_flat = values_cpu.view({batch, 2 * n64});
   std::vector<int> ilos(batch);
   std::vector<int> ihis(batch);
 
   float* a_all = A_cm.data_ptr<float>();
   float* z_all = Z_cm.data_ptr<float>();
-  float* refl_all = refl_cm.data_ptr<float>();
+  float* vt_all = Vt_cpu.data_ptr<float>();
   float* tau_all = tau.data_ptr<float>();
   float* bal_all = bal.data_ptr<float>();
+  float* aux_all = aux_cpu.data_ptr<float>();
+  int64_t* p_all = perm.data_ptr<int64_t>();
   float* val_all = values_flat.data_ptr<float>();
   char jobS = 'S';
   char compI = 'I';
@@ -1929,9 +1942,31 @@ static bool linalg_eig_hybrid_mps(Tensor& eigenvalues, Tensor& eigenvectors, Ten
   shseqr_(&jobS, &compI, &n, &ilo1, &ihi1, a_all, &n, val_all, val_all + n64, z_all, &n, &wk_hs, &lwork, &info);
   lwork = std::max({static_cast<int>(wk_hrd) + 1, static_cast<int>(wk_hs) + 1, n});
   auto work = at::empty({lwork}, cpu_f);
+  bool any_scale = false;
+  bool any_perm = false;
+  const float eig_smlnum = std::sqrt(std::numeric_limits<float>::min()) / std::numeric_limits<float>::epsilon();
+  const float eig_bignum = 1.0f / eig_smlnum;
+  std::vector<float> eig_output_scale(batch, 1.0f);
   // batch entries stay serial: concurrent Accelerate LAPACK is bit-unstable
   for (int64_t b = 0; b < batch; ++b) {
     float* a = a_all + b * n64 * n64;
+    float anrm = 0.0f;
+    for (int64_t i = 0; i < n64 * n64; ++i) {
+      anrm = std::max(anrm, std::fabs(a[i]));
+    }
+    float target = anrm;
+    if (anrm > 0.0f && anrm < eig_smlnum) {
+      target = eig_smlnum;
+    } else if (anrm > eig_bignum) {
+      target = eig_bignum;
+    }
+    if (target != anrm) {
+      const float scale = target / anrm;
+      for (int64_t i = 0; i < n64 * n64; ++i) {
+        a[i] *= scale;
+      }
+      eig_output_scale[b] = anrm / target;
+    }
     char balB = 'B';
     int ilo_b = 1;
     int ihi_b = n;
@@ -1940,95 +1975,51 @@ static bool linalg_eig_hybrid_mps(Tensor& eigenvalues, Tensor& eigenvectors, Ten
     if (info_b != 0) {
       return false;
     }
-    sgehrd_(&n, &ilo_b, &ihi_b, a, &n, tau_all + b * (n64 - 1), work.data_ptr<float>(), &lwork, &info_b);
+    sgehrd_(&n, &ilo_b, &ihi_b, a, &n, tau_all + b * m64, work.data_ptr<float>(), &lwork, &info_b);
     if (info_b != 0) {
       return false;
     }
-    std::memcpy(refl_all + b * n64 * n64, a, sizeof(float) * n64 * n64);
-    float* val_b = val_all + b * 2 * n64;
-    float* z_b = z_all + b * n64 * n64;
-    shseqr_(
-        &jobS, &compI, &n, &ilo_b, &ihi_b, a, &n, val_b, val_b + n64, z_b, &n, work.data_ptr<float>(), &lwork, &info_b);
-    if (info_b != 0) {
-      return false; // rare non-convergence: match the CPU backend exactly
-    }
     ilos[b] = ilo_b;
     ihis[b] = ihi_b;
-  }
-
-  // dense compact-WY blocks for Q: V columns get an explicit unit + zeros, so
-  // reflectors outside [ilo, ihi-1] (tau = 0, set by gehrd) stay inert and the
-  // block partition is uniform across batch entries
-  const int64_t nb = 128;
-  const int64_t nrefl = n64 - 1;
-  const int64_t nblk = (nrefl + nb - 1) / nb;
-  auto Vs = at::zeros({batch, nblk, n64, nb}, cpu_f);
-  float* vs_all = Vs.data_ptr<float>();
-  for (int64_t b = 0; b < batch; ++b) {
-    for (int64_t j = 1; j <= nrefl; ++j) { // 1-based reflector index
-      const int64_t k = (j - 1) / nb;
-      const int64_t c = (j - 1) % nb;
-      float* vcol = vs_all + ((b * nblk + k) * n64) * nb + c; // row stride nb
-      vcol[j * nb] = 1.0f;
-      const float* rcol = refl_all + b * n64 * n64 + (j - 1) * n64;
-      for (int64_t i = j + 2; i <= ihis[b]; ++i) { // 1-based rows
-        vcol[(i - 1) * nb] = rcol[i - 1];
+    // reflector rows for the single-block compact-WY Q (transposed layout, so
+    // extraction is one contiguous copy per reflector). tau == 0 reflectors
+    // (outside [ilo, ihi-1] or an exact-zero column) become v = 0 with
+    // tau = 1: H stays the identity and T_wy^-1 below stays invertible
+    float* tb = tau_all + b * m64;
+    float* vtb = vt_all + b * m64 * n64;
+    for (int64_t j = 1; j <= m64; ++j) {
+      if (tb[j - 1] == 0.0f) {
+        tb[j - 1] = 1.0f;
+        continue;
+      }
+      float* vrow = vtb + (j - 1) * n64;
+      vrow[j] = 1.0f;
+      if (ihi_b - 1 > j) {
+        std::memcpy(vrow + j + 1, a + (j - 1) * n64 + j + 1, sizeof(float) * (ihi_b - 1 - j));
       }
     }
-  }
-  auto G = Vs.mT().matmul(Vs); // per-block Gram matrices, g[r][c] = v_r . v_c
-  auto Tblk = at::zeros({batch, nblk, nb, nb}, cpu_f);
-  const float* g_all = G.data_ptr<float>();
-  float* tb_all = Tblk.data_ptr<float>();
-  for (int64_t b = 0; b < batch; ++b) {
-    for (int64_t k = 0; k < nblk; ++k) {
-      const float* g = g_all + (b * nblk + k) * nb * nb;
-      float* t = tb_all + (b * nblk + k) * nb * nb;
-      for (int64_t c = 0; c < nb; ++c) {
-        const int64_t j = k * nb + c + 1;
-        const float tj = j <= nrefl ? tau_all[b * (n64 - 1) + j - 1] : 0.0f;
-        t[c * nb + c] = tj;
-        // forward recurrence: T(0:c-1, c) = -tau_j * T(0:c-1, 0:c-1) @ g(0:c-1, c)
-        for (int64_t r = 0; r < c; ++r) {
-          float s = 0.0f;
-          for (int64_t d = r; d < c; ++d) {
-            s += t[r * nb + d] * g[d * nb + c];
-          }
-          t[r * nb + c] = -tj * s;
-        }
-      }
-    }
-  }
-
-  // sgebak('B', 'R'): per-row scaling on [ilo, ihi], then the interleaved
-  // swap sequence (ilo-1 down to 1, ihi+1 up to n), simulated into perm
-  bool any_scale = false;
-  bool any_perm = false;
-  auto row_scale = at::empty({batch, n64}, cpu_f);
-  auto perm = at::empty({batch, n64}, cpu_f.dtype(at::kLong));
-  float* rs_all = row_scale.data_ptr<float>();
-  int64_t* p_all = perm.data_ptr<int64_t>();
-  for (int64_t b = 0; b < batch; ++b) {
+    // sgebak('B', 'R') prep: per-row scaling on [ilo, ihi] into aux row 4, and
+    // the interleaved swap sequence (ilo-1 down to 1, ihi+1 up to n) into perm
     const float* sc = bal_all + b * n64;
-    float* rs = rs_all + b * n64;
+    float* rs = aux_all + (b * 5 + 4) * n64;
     int64_t* p = p_all + b * n64;
     for (int64_t i = 0; i < n64; ++i) {
       rs[i] = 1.0f;
       p[i] = i;
     }
-    if (ilos[b] != ihis[b]) {
-      for (int64_t i = ilos[b]; i <= ihis[b]; ++i) {
+    if (ilo_b != ihi_b) {
+      for (int64_t i = ilo_b; i <= ihi_b; ++i) {
         rs[i - 1] = sc[i - 1];
         any_scale |= sc[i - 1] != 1.0f;
       }
     }
     for (int64_t ii = 1; ii <= n64; ++ii) {
       int64_t i = ii;
-      if (i >= ilos[b] && i <= ihis[b]) {
+      if (i >= ilo_b && i <= ihi_b) {
         continue;
       }
-      if (i < ilos[b]) {
-        i = ilos[b] - ii;
+      if (i < ilo_b) {
+        i = ilo_b - ii;
       }
       const int64_t kk = static_cast<int64_t>(sc[i - 1]);
       if (kk == i) {
@@ -2038,14 +2029,85 @@ static bool linalg_eig_hybrid_mps(Tensor& eigenvalues, Tensor& eigenvectors, Ten
       any_perm = true;
     }
   }
+  // Q1 = H(1)...H(n-1) as one compact-WY block, encoded and committed now so
+  // the GPU forms it in the shadow of the CPU hseqr loop below. With G = V^T V,
+  // T_wy^-1 = diag(1/tau) + striu(G), and the triangular solve only reads the
+  // upper triangle, so overwriting G's diagonal with 1/tau is all the assembly
+  // needed: Q1 = I - V solve(T_wy^-1, V^T). gebak's row scaling commutes into
+  // Q1, so it is folded in here instead of a launch on the critical tail.
+  auto stream = getCurrentMPSStream();
+  const auto mps_f = input.options();
+  auto Vt_dev = at::empty(Vt_cpu.sizes(), mps_f);
+  Vt_dev.copy_(Vt_cpu, /*non_blocking=*/true);
+  auto tau_dev = at::empty(tau.sizes(), mps_f);
+  tau_dev.copy_(tau, /*non_blocking=*/true);
+  auto G = Vt_dev.matmul(Vt_dev.mT());
+  G.diagonal(0, -2, -1).copy_(tau_dev.reciprocal());
+  auto Q1 = at::eye(n64, mps_f).sub(Vt_dev.mT().matmul(at::linalg_solve_triangular(G, Vt_dev, /*upper=*/true)));
+  if (any_scale) {
+    auto rs_dev = at::empty({batch, n64}, mps_f);
+    rs_dev.copy_(aux_cpu.select(1, 4), /*non_blocking=*/true);
+    Q1.mul_(rs_dev.unsqueeze(-1));
+  }
+  stream->synchronize(SyncType::COMMIT_AND_CONTINUE);
+  for (int64_t b = 0; b < batch; ++b) {
+    float* a = a_all + b * n64 * n64;
+    float* val_b = val_all + b * 2 * n64;
+    float* z_b = z_all + b * n64 * n64;
+    int ilo_b = ilos[b];
+    int ihi_b = ihis[b];
+    int info_b = 0;
+    shseqr_(
+        &jobS, &compI, &n, &ilo_b, &ihi_b, a, &n, val_b, val_b + n64, z_b, &n, work.data_ptr<float>(), &lwork, &info_b);
+    if (info_b != 0) {
+      return false; // rare non-convergence: match the CPU backend exactly
+    }
+    if (eig_output_scale[b] != 1.0f) {
+      for (int64_t j = 0; j < 2 * n64; ++j) {
+        val_b[j] *= eig_output_scale[b];
+      }
+    }
+    // gather what the serial trevc solve reads scalar-by-scalar into contiguous
+    // arrays (strided T reads make each one a cache miss): diag, sub- and
+    // superdiagonal, plus the strict-upper column 1-norms it uses as guards
+    float* dg = aux_all + b * 5 * n64;
+    float* sb = dg + n64;
+    float* sp = dg + 2 * n64;
+    float* cw = dg + 3 * n64;
+    for (int64_t j = 0; j < n64; ++j) {
+      const float* col = a + j * n64;
+      dg[j] = col[j];
+      sb[j] = j + 1 < n64 ? col[j + 1] : 0.0f;
+      sp[j] = j + 1 < n64 ? a[j + (j + 1) * n64] : 0.0f;
+      // 4 accumulators: cnorm is only an overflow-guard magnitude, and the
+      // old on-device tree reduction reassociated the sum too
+      float s0 = 0.0f;
+      float s1 = 0.0f;
+      float s2 = 0.0f;
+      float s3 = 0.0f;
+      int64_t i = 0;
+      for (; i + 4 <= j; i += 4) {
+        s0 += std::fabs(col[i]);
+        s1 += std::fabs(col[i + 1]);
+        s2 += std::fabs(col[i + 2]);
+        s3 += std::fabs(col[i + 3]);
+      }
+      for (; i < j; ++i) {
+        s0 += std::fabs(col[i]);
+      }
+      cw[j] = (s0 + s1) + (s2 + s3);
+    }
+  }
 
   // GPU tail
-  eigenvalues.copy_(values_cpu);
-  auto T_dev = A_cm.to(at::kMPS); // [b] holds the Schur form T column-major
-  auto Z_dev = Z_cm.to(at::kMPS);
-  auto cn = T_dev.abs().tril(-1).sum(-1); // strict-upper column norms of T
-  auto X_dev = at::empty({batch, n64, n64}, input.options());
-  auto stream = getCurrentMPSStream();
+  eigenvalues.copy_(values_cpu, /*non_blocking=*/true);
+  auto TZ_dev = at::empty(TZ_cm.sizes(), mps_f);
+  TZ_dev.copy_(TZ_cm, /*non_blocking=*/true);
+  auto T_dev = TZ_dev[0]; // Schur form T, column-major
+  auto Z_dev = TZ_dev[1];
+  auto aux_dev = at::empty(aux_cpu.sizes(), mps_f);
+  aux_dev.copy_(aux_cpu, /*non_blocking=*/true);
+  auto X_dev = at::empty({batch, n64, n64}, mps_f);
   {
     auto pso = lib.getPipelineStateForFunc("eig_trevc_col_float");
     dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -2053,33 +2115,29 @@ static bool linalg_eig_hybrid_mps(Tensor& eigenvalues, Tensor& eigenvectors, Ten
         auto computeEncoder = stream->commandEncoder();
         getMPSProfiler().beginProfileKernel(pso, "eig_trevc_col", {input});
         [computeEncoder setComputePipelineState:pso];
-        mtl_setArgs(computeEncoder, T_dev, cn, X_dev, static_cast<uint32_t>(n));
+        mtl_setArgs(computeEncoder, T_dev, aux_dev, X_dev, static_cast<uint32_t>(n), 0u, static_cast<uint32_t>(n));
         [computeEncoder setThreadgroupMemoryLength:static_cast<NSUInteger>((2 * n64 * 4 + 15) / 16 * 16) atIndex:0];
         [computeEncoder dispatchThreadgroups:MTLSizeMake(n, batch, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
         getMPSProfiler().endProfileKernel(pso);
       }
     });
   }
-  // back-transform: C = Z @ X, then Q applied block by block in reverse,
-  // C := C - V (T (V^T C)). Full-height contiguous operands: narrowing V and
-  // C to the touched rows halves the flops but routes the GEMMs and sub_
-  // through strided paths that are ~20x slower than the extra work
-  auto C = Z_dev.mT().matmul(X_dev.mT());
-  auto Vs_dev = Vs.to(at::kMPS);
-  auto Tb_dev = Tblk.to(at::kMPS);
-  for (int64_t k = nblk - 1; k >= 0; --k) {
-    auto Vk = Vs_dev.select(1, k);
-    auto W = Tb_dev.select(1, k).matmul(Vk.mT().matmul(C));
-    C.sub_(Vk.matmul(W));
-  }
-  if (any_scale) {
-    C.mul_(row_scale.to(at::kMPS).unsqueeze(-1));
-  }
+  // back-transform: eigenvectors = Q1 (Z X), with Q1 (and gebak's row scaling)
+  // already formed in the hseqr shadow. Full contiguous operands: narrowing to
+  // the touched rows routes the GEMMs through strided paths ~20x slower than
+  // the extra work. The last GEMM writes straight into the column-major
+  // eigenvector buffer unless gebak permuted rows (rare).
+  auto ZX = Z_dev.mT().matmul(X_dev.mT());
   if (any_perm) {
+    auto C = Q1.matmul(ZX);
     auto idx = perm.to(at::kMPS).unsqueeze(-1).expand({batch, n64, n64}).contiguous();
-    C = C.gather(1, idx);
+    eigenvectors.copy_(C.gather(1, idx).reshape(eigenvectors.sizes()));
+  } else {
+    // the out view is C^T (row-major alias of the column-major buffer), so
+    // compute (Q1 ZX)^T = ZX^T Q1^T straight into it
+    auto out = eigenvectors.mT().reshape({batch, n64, n64});
+    at::matmul_out(out, ZX.mT(), Q1.mT());
   }
-  eigenvectors.copy_(C.reshape(eigenvectors.sizes()));
   {
     auto pso = lib.getPipelineStateForFunc("eig_normalize_float");
     dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -2118,7 +2176,9 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
   // is sequential with data-dependent deflation, and every other backend does
   // the same (CUDA/MAGMA runs it on the CPU, MLX throws Metal-NYI).
   const int64_t tg_limit = static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
-  const int64_t tg_bytes = ((compute_eigenvectors ? 2 : 1) * n * n + 8 * n + 16) * static_cast<int64_t>(sizeof(float));
+  const int64_t scratch_elems = std::max<int64_t>(8 * n, 64);
+  const int64_t tg_bytes =
+      ((compute_eigenvectors ? 2 : 1) * n * n + scratch_elems + 16) * static_cast<int64_t>(sizeof(float));
   const bool layouts_ok = eigenvalues.is_contiguous() && infos.is_contiguous() &&
       (!compute_eigenvectors || eigenvectors.mT().is_contiguous());
   // batch*n >= 1024 is the measured M5 Pro break-even: GPU wall time is flat
@@ -2139,7 +2199,7 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
         const auto align16 = [](int64_t bytes) { return static_cast<NSUInteger>((bytes + 15) / 16 * 16); };
         [computeEncoder setThreadgroupMemoryLength:align16(n * n * 4) atIndex:0];
         [computeEncoder setThreadgroupMemoryLength:align16(compute_eigenvectors ? n * n * 4 : 4) atIndex:1];
-        [computeEncoder setThreadgroupMemoryLength:align16(8 * n * 4) atIndex:2];
+        [computeEncoder setThreadgroupMemoryLength:align16(scratch_elems * 4) atIndex:2];
         [computeEncoder dispatchThreadgroups:MTLSizeMake(batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
         getMPSProfiler().endProfileKernel(pso);
       }

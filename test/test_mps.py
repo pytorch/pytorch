@@ -11394,6 +11394,23 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(w2.cpu(), w, atol=0, rtol=0)
         self.assertEqual(v2.cpu(), v, atol=0, rtol=0)
 
+    @parametrize("scale", [1e-38, 1e38])
+    def test_linalg_eig_metal_extreme_scale(self, device, scale):
+        batch = 342  # batch*n >= 1024 hits the Metal geev kernel
+        base = torch.tensor(
+            [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]
+        )
+        a = (base * scale).expand(batch, -1, -1).clone()
+        w_cpu = torch.linalg.eigvals(a)
+        w, v = torch.linalg.eig(a.to(device))
+        w, v = w.cpu(), v.cpu()
+        dmat = (w.unsqueeze(-1) - w_cpu.unsqueeze(-2)).abs() / scale
+        chamfer = torch.maximum(dmat.amin(-1).amax(-1), dmat.amin(-2).amax(-1))
+        self.assertEqual(chamfer, torch.zeros_like(chamfer), atol=5e-4, rtol=0)
+        rec = (a.to(w.dtype) @ v - v * w.unsqueeze(-2)).abs().amax(dim=(-2, -1)) / scale
+        self.assertEqual(rec, torch.zeros_like(rec), atol=2e-3, rtol=0)
+        self.assertTrue(torch.isfinite(v).all())
+
     @parametrize("shape", [(512, 512), (700, 700), (2, 520, 520)])
     def test_linalg_eig_hybrid_large(self, device, shape):
         torch.manual_seed(0)
@@ -11411,6 +11428,26 @@ class TestLinalgMPS(TestCaseMPS):
         w2, v2 = torch.linalg.eig(a.to(device))
         self.assertEqual(w2.cpu(), w, atol=0, rtol=0)
         self.assertEqual(v2.cpu(), v, atol=0, rtol=0)
+
+    @parametrize("scale", [1e-38, 1e38])
+    def test_linalg_eig_hybrid_extreme_scale(self, device, scale):
+        n = 512
+        a = torch.zeros(n, n)
+        a[:3, :3] = (
+            torch.tensor(
+                [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]
+            )
+            * scale
+        )
+        w_cpu = torch.linalg.eigvals(a)
+        w, v = torch.linalg.eig(a.to(device))
+        w, v = w.cpu(), v.cpu()
+        dmat = (w.unsqueeze(-1) - w_cpu.unsqueeze(-2)).abs() / scale
+        chamfer = torch.maximum(dmat.amin(-1).amax(-1), dmat.amin(-2).amax(-1))
+        self.assertEqual(chamfer, torch.tensor(0.0), atol=5e-4, rtol=0)
+        rec = (a.to(w.dtype) @ v - v * w.unsqueeze(-2)).abs().max() / scale
+        self.assertEqual(rec, torch.tensor(0.0), atol=2e-3, rtol=0)
+        self.assertTrue(torch.isfinite(v).all())
 
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype

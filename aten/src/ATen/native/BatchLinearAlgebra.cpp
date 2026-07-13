@@ -2939,7 +2939,9 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     auto imag_values = real_imag_values.slice(/*dim=*/-1, /*start=*/input.size(-1));
 
     // if the imaginary part is zero we don't need to do anything
-    bool is_zero_imag = at::all(imag_values == 0.0).item().toBool();
+    const bool is_zero_imag = input.is_mps()
+        ? at::all(imag_values.view(kInt).bitwise_and(0x7fffffff) == 0).item().toBool()
+        : at::all(imag_values == 0.0).item().toBool();
     if (is_zero_imag) {
       values.copy_(real_values);
       if (compute_eigenvectors) {

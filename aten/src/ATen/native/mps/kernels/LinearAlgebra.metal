@@ -3330,6 +3330,39 @@ constant float kEigOvfl = 3.40282347e+38f;
 constant float kEigLarfgSafmin = 1.9721523e-31f; // 'S' / 'E' (slarfg)
 constant float kEigRtmin = 1.08420217e-19f; // sqrt(2^-126) (slartg)
 constant float kEigRtmax = 6.51872567e+18f; // sqrt(2^126 / 2)
+constant float kEigScaleMin = 9.09494702e-13f; // sqrt('S') / 'P' (sgeev)
+constant float kEigScaleMax = 1.09951163e+12f; // 1 / kEigScaleMin
+
+static inline float eig_scale_float(float x, float scale) {
+  if (scale == 1.0f) {
+    return x;
+  }
+  const uint bits = as_type<uint>(x);
+  const uint mantissa = bits & 0x007fffffu;
+  const uint sign = bits & 0x80000000u;
+  if ((bits & 0x7f800000u) == 0u) {
+    if (mantissa == 0u) {
+      return x;
+    }
+    if (scale > 1.0f) {
+      const float magnitude = float(mantissa) * ldexp(scale, -149);
+      return sign == 0u ? magnitude : -magnitude;
+    }
+    const uint scaled_mantissa = uint(rint(float(mantissa) * scale));
+    return as_type<float>(sign | scaled_mantissa);
+  }
+  const float y = x * scale;
+  if (fabs(y) >= kEigSafmin || !isfinite(y)) {
+    return y;
+  }
+  int x_exp, scale_exp;
+  const float x_mantissa = frexp(fabs(x), x_exp);
+  const float scale_mantissa = frexp(scale, scale_exp);
+  const float units =
+      ldexp(x_mantissa * scale_mantissa, x_exp + scale_exp + 149);
+  const uint scaled_mantissa = uint(rint(units));
+  return as_type<float>(sign | scaled_mantissa);
+}
 
 // Fortran SIGN(a, b): |a| if b >= 0 else -|a| (not copysign: SIGN(x,-0)=+x)
 static inline float eig_sign(float a, float b) {
@@ -3892,9 +3925,37 @@ kernel void eig_qr_float(
 #define OUTRE(i) outre_s[(i) - 1]
 #define OUTIM(i) outim_s[(i) - 1]
 
+  uint local_max_bits = 0u;
+  for (uint idx = tid; idx < n * n; idx += nt) {
+    local_max_bits = max(local_max_bits, as_type<uint>(A_b[idx]) & 0x7fffffffu);
+  }
+  scr[tid] = as_type<float>(local_max_bits);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  uint anrm_bits = 0u;
+  for (uint t = 0; t < nt; ++t) {
+    anrm_bits = max(anrm_bits, as_type<uint>(scr[t]));
+  }
+  float input_scale = 1.0f;
+  float output_scale = 1.0f;
+  if (anrm_bits != 0u && anrm_bits < as_type<uint>(kEigScaleMin)) {
+    const float anrm = as_type<float>(anrm_bits);
+    if ((anrm_bits & 0x7f800000u) == 0u) {
+      const float mantissa = float(anrm_bits & 0x007fffffu);
+      input_scale = ldexp(kEigScaleMin, 149) / mantissa;
+      output_scale = mantissa * ldexp(kEigScaleMax, -149);
+    } else {
+      input_scale = kEigScaleMin / anrm;
+      output_scale = anrm / kEigScaleMin;
+    }
+  } else if (anrm_bits > as_type<uint>(kEigScaleMax)) {
+    const float anrm = as_type<float>(anrm_bits);
+    input_scale = kEigScaleMax / anrm;
+    output_scale = anrm / kEigScaleMax;
+  }
+
   // load A into H; init Q = I
   for (uint idx = tid; idx < n * n; idx += nt) {
-    Htg[idx] = A_b[idx];
+    Htg[idx] = eig_scale_float(A_b[idx], input_scale);
     if (wantv) {
       Qtg[idx] = (idx % n) == (idx / n) ? 1.0f : 0.0f;
     }
@@ -3903,7 +3964,7 @@ kernel void eig_qr_float(
 
   if (n == 1) {
     if (tid == 0) {
-      val_b[0] = Htg[0];
+      val_b[0] = eig_scale_float(Htg[0], output_scale);
       val_b[1] = 0.0f;
       if (wantv) {
         vec_b[0] = 1.0f;
@@ -4268,8 +4329,8 @@ kernel void eig_qr_float(
   // write eigenvalues (geev layout: wr | wi); on info > 0 the leading entries
   // are unconverged garbage, matching LAPACK (the host raises on info anyway)
   for (uint idx = 1 + tid; idx <= n; idx += nt) {
-    val_b[idx - 1] = WR1(idx);
-    val_b[n + idx - 1] = WI1(idx);
+    val_b[idx - 1] = eig_scale_float(WR1(idx), output_scale);
+    val_b[n + idx - 1] = eig_scale_float(WI1(idx), output_scale);
   }
   if (tid == 0) {
     infos[b] = info;
@@ -4629,9 +4690,10 @@ kernel void eig_make_complex_float(
   const uint off = tid % (n * n);
   const uint j = off / n;
   const float wi = values[bidx * n + j].y;
-  if (wi == 0.0f) {
+  const uint wi_bits = as_type<uint>(wi);
+  if ((wi_bits & 0x7fffffffu) == 0u) {
     out[tid] = float2(vr[tid], 0.0f);
-  } else if (wi > 0.0f) {
+  } else if ((wi_bits & 0x80000000u) == 0u) {
     out[tid] = float2(vr[tid], vr[tid + n]);
   } else {
     out[tid] = float2(vr[tid - n], -vr[tid]);
@@ -4641,32 +4703,39 @@ kernel void eig_make_complex_float(
 // Right-eigenvector backsolve for the hybrid large-matrix path.
 kernel void eig_trevc_col_float(
     device const float* T [[buffer(0)]],
-    device const float* cnorm [[buffer(1)]],
+    device const float* aux [[buffer(1)]], // [diag|sub|super|cnorm|scale] rows
     device float* X [[buffer(2)]],
     constant uint& n [[buffer(3)]],
+    constant uint& kbase [[buffer(4)]],
+    constant uint& xim_off [[buffer(5)]],
     threadgroup float* xtg [[threadgroup(0)]],
     uint3 thread_pos [[thread_position_in_threadgroup]],
     uint3 tpg [[threads_per_threadgroup]],
     uint3 tg_pos [[threadgroup_position_in_grid]]) {
   const uint tid = thread_pos.x;
   const uint nt = tpg.x;
-  const uint ki = tg_pos.x + 1; // 1-based eigenvector column
+  const uint ki = kbase + tg_pos.x + 1; // 1-based eigenvector column
   device const float* T_b = T + ulong(tg_pos.y) * n * n; // column-major, ld = n
-  device const float* cn_b = cnorm + ulong(tg_pos.y) * n;
+  device const float* aux_b = aux + ulong(tg_pos.y) * 5 * n;
   device float* X_b = X + ulong(tg_pos.y) * n * n; // column-major, ld = n
 #define TT(i, j) T_b[((i) - 1) + ((j) - 1) * n]
-#define CN1(j) cn_b[(j) - 1]
+// the serial solve reads diag/sub/superdiag entries scalar-by-scalar; strided
+// TT loads make each a fresh cache line, so they come gathered contiguous
+#define DG1(j) aux_b[(j) - 1] // TT(j, j)
+#define SB1(j) aux_b[n + (j) - 1] // TT(j+1, j)
+#define SP1(j) aux_b[2 * n + (j) - 1] // TT(j, j+1)
+#define CN1(j) aux_b[3 * n + (j) - 1]
 #define XRE(i) xtg[(i) - 1]
-#define XIM(i) xtg[n + (i) - 1]
-  if (ki < n && TT(ki + 1, ki) != 0.0f) {
+#define XIM(i) xtg[xim_off + (i) - 1]
+  if (ki < n && SB1(ki) != 0.0f) {
     return; // left column of a 2x2 block: written by the ki+1 threadgroup
   }
+  const bool pair = ki > 1 && SB1(ki - 1) != 0.0f;
   const float smlnum_tv = kEigSafmin * (float(n) / kEigUlp);
   const float bignum_tv = (1.0f - kEigUlp) / smlnum_tv;
-  const bool pair = ki > 1 && TT(ki, ki - 1) != 0.0f;
-  const float wr = TT(ki, ki);
+  const float wr = DG1(ki);
   const float wi =
-      pair ? sqrt(fabs(TT(ki, ki - 1))) * sqrt(fabs(TT(ki - 1, ki))) : 0.0f;
+      pair ? sqrt(fabs(SB1(ki - 1))) * sqrt(fabs(SP1(ki - 1))) : 0.0f;
   const float smin = max(kEigUlp * (fabs(wr) + fabs(wi)), smlnum_tv);
 
   if (!pair) {
@@ -4686,7 +4755,7 @@ kernel void eig_trevc_col_float(
       const uint ju = uint(j);
       uint j1 = ju;
       jnxt = j - 1;
-      if (j > 1 && TT(ju, ju - 1) != 0.0f) {
+      if (j > 1 && SB1(ju - 1) != 0.0f) {
         j1 = ju - 1;
         jnxt = j - 2;
       }
@@ -4702,7 +4771,7 @@ kernel void eig_trevc_col_float(
             1,
             1,
             smin,
-            TT(ju, ju),
+            DG1(ju),
             0.0f,
             0.0f,
             0.0f,
@@ -4741,10 +4810,10 @@ kernel void eig_trevc_col_float(
             2,
             1,
             smin,
-            TT(ju - 1, ju - 1),
-            TT(ju - 1, ju),
-            TT(ju, ju - 1),
-            TT(ju, ju),
+            DG1(ju - 1),
+            SP1(ju - 1),
+            SB1(ju - 1),
+            DG1(ju),
             b1,
             0.0f,
             b2,
@@ -4785,11 +4854,11 @@ kernel void eig_trevc_col_float(
   } else {
     // ---- complex right eigenvector (pair in columns ki-1, ki) ----
     float x0re, x0im; // seeds for XRE(ki-1), XIM(ki)
-    if (fabs(TT(ki - 1, ki)) >= fabs(TT(ki, ki - 1))) {
+    if (fabs(SP1(ki - 1)) >= fabs(SB1(ki - 1))) {
       x0re = 1.0f;
-      x0im = wi / TT(ki - 1, ki);
+      x0im = wi / SP1(ki - 1);
     } else {
-      x0re = -wi / TT(ki, ki - 1);
+      x0re = -wi / SB1(ki - 1);
       x0im = 1.0f;
     }
     if (tid == 0) {
@@ -4811,7 +4880,7 @@ kernel void eig_trevc_col_float(
       const uint ju = uint(j);
       uint j1 = ju;
       jnxt = j - 1;
-      if (j > 1 && TT(ju, ju - 1) != 0.0f) {
+      if (j > 1 && SB1(ju - 1) != 0.0f) {
         j1 = ju - 1;
         jnxt = j - 2;
       }
@@ -4825,7 +4894,7 @@ kernel void eig_trevc_col_float(
             1,
             2,
             smin,
-            TT(ju, ju),
+            DG1(ju),
             0.0f,
             0.0f,
             0.0f,
@@ -4870,10 +4939,10 @@ kernel void eig_trevc_col_float(
             2,
             2,
             smin,
-            TT(ju - 1, ju - 1),
-            TT(ju - 1, ju),
-            TT(ju, ju - 1),
-            TT(ju, ju),
+            DG1(ju - 1),
+            SP1(ju - 1),
+            SB1(ju - 1),
+            DG1(ju),
             b1r,
             b1i,
             b2r,
@@ -4921,6 +4990,9 @@ kernel void eig_trevc_col_float(
     }
   }
 #undef TT
+#undef DG1
+#undef SB1
+#undef SP1
 #undef CN1
 #undef XRE
 #undef XIM
