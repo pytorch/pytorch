@@ -411,6 +411,45 @@ from torch._inductor.utils import clear_on_fresh_cache
 clear_on_fresh_cache(_NVGEMMCacheWrapper())
 
 
+def _fake_epilogue_metadata(epilogue_args: Any) -> Any:
+    """Build the cached kernel's epilogue metadata from fake (meta) tensors.
+
+    The EFC kernel is cached in ``_efc_epilogue_cache`` and reused across every
+    call; the real output/aux tensors are supplied per call via the runtime
+    ``GemmArguments.epilogue``, so the cached kernel needs only the epilogue's
+    shape/dtype/layout (its IR). Building it from the real ``EpilogueArguments``
+    would make it retain those tensors forever -- ``EpilogueMetadata`` shares the
+    arguments' ``tensors`` (wrapping the output ``D`` and aux inputs) and traced
+    functor -- keeping the (often intermediate) output alive: a memory leak, and
+    it breaks CUDA graph capture (a live graph-pool allocation that is not a
+    tracked graph output). Re-trace the epilogue with meta tensors (carrying
+    dtype/layout but no device storage; the tracer reads only their metadata) so
+    the cached kernel holds nothing real.
+    """
+    from cutlass.operators.arguments.epilogue import EpilogueArguments
+    from cutlass.operators.metadata import EpilogueMetadata
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    fake_kwargs = {}
+    for name, val in epilogue_args.tensors.items():
+        tensor = (
+            getattr(val, "runtime_tensor", val)
+            if isinstance(val, TensorWrapper)
+            else val
+        )
+        fake_kwargs[name] = (
+            torch.empty_strided(
+                tensor.shape, tensor.stride(), dtype=tensor.dtype, device="meta"
+            )
+            if isinstance(tensor, torch.Tensor)
+            else tensor
+        )
+    fake_args = EpilogueArguments(epilogue_args.epilogue_fn, **fake_kwargs)
+    accum = epilogue_args.traced_epilogue.example_inputs["accum"]
+    fake_args.trace(accum.shape, accum.element)
+    return EpilogueMetadata.from_args(fake_args)
+
+
 def get_efc_kernel_with_epilogue(
     efc_kernel_name: str,
     epilogue_args: Any,
@@ -448,9 +487,9 @@ def get_efc_kernel_with_epilogue(
             log.debug("Base EFC kernel not found: %s", efc_kernel_name)
             return None
 
-        from cutlass.operators.metadata import EpilogueMetadata, OperatorMetadata
+        from cutlass.operators.metadata import OperatorMetadata
 
-        epilogue_metadata = EpilogueMetadata.from_args(epilogue_args)
+        epilogue_metadata = _fake_epilogue_metadata(epilogue_args)
 
         base_metadata = base_kernel.metadata
         new_metadata = OperatorMetadata(
