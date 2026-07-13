@@ -735,6 +735,87 @@ class TestFakePG(TestCase):
         with self.assertRaisesRegex(RuntimeError, "invalid output size"):
             dist.all_gather_coalesced(output, inputs)
 
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    @parametrize("rank", [0, 1, 2, 3])
+    def test_split_group(self, rank):
+        world_size = 4
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            rank=rank,
+            world_size=world_size,
+            store=store,
+            device_id=torch.device(device_type, 0),
+        )
+
+        parent_pg = dist.distributed_c10d._get_default_group()
+        self.assertTrue(
+            parent_pg._get_backend(torch.device(device_type)).supports_splitting
+        )
+
+        # Interleaved, unsorted subgroups: each rank shares a group with the
+        # rank two away, and is not always listed first. split_group preserves
+        # the order ranks are listed in, so the child rank is the position
+        # within the subgroup as given -- which here differs from the parent
+        # rank, making this a meaningful check of rank assignment.
+        split_ranks = [[2, 0], [3, 1]]
+        new_pg = dist.split_group(split_ranks=split_ranks)
+        self.assertIsNotNone(new_pg)
+
+        my_group = next(g for g in split_ranks if rank in g)
+        self.assertEqual(new_pg.size(), len(my_group))
+        self.assertEqual(new_pg.rank(), my_group.index(rank))
+        # Independent cross-check: the child rank must map back to this
+        # process's original global rank via the world's rank mapping, which is
+        # built separately from the C++ backend's rank.
+        self.assertEqual(
+            dist.distributed_c10d.get_global_rank(new_pg, new_pg.rank()), rank
+        )
+
+        # Collectives on the split group should still work.
+        tensor = torch.ones(3, 3)
+        dist.all_reduce(tensor, group=new_pg)
+        self.assertEqual(tuple(tensor.shape), (3, 3))
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_split_group_non_member(self):
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            rank=0,
+            world_size=4,
+            store=store,
+            device_id=torch.device(device_type, 0),
+        )
+
+        # Rank 0 is in none of the splits, so it gets None back.
+        new_pg = dist.split_group(split_ranks=[[1, 2, 3]])
+        self.assertIsNone(new_pg)
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_split_group_store_not_retained(self):
+        # split_group clones the parent's store, and the process group holds the
+        # store only at the C++ level. FakeStore.clone() must therefore be a
+        # real C++ method: a pure-Python Store.clone() override would be garbage
+        # collected once the caller drops its reference, and the split would
+        # fail with "pure virtual function Store::clone".
+        def setup():
+            dist.init_process_group(
+                backend="fake",
+                rank=0,
+                world_size=2,
+                store=FakeStore(),
+                device_id=torch.device(device_type, 0),
+            )
+
+        setup()  # the only Python reference to the store is dropped here
+        new_pg = dist.split_group(split_ranks=[[0, 1]])
+        self.assertIsNotNone(new_pg)
+        self.assertEqual(new_pg.size(), 2)
+
 
 instantiate_parametrized_tests(TestFakePG)
 
