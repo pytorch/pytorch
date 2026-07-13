@@ -110,7 +110,8 @@ class CollectTracepointsPass(PassBase):
                         path = f"{path}@{suffix}"
 
                         call_fqn = f"{fqn}@{suffix}"
-                        if call_fqn not in self.specs:
+                        # Base call-name may not be a preserved key (shared alias).
+                        if fqn in self.specs and call_fqn not in self.specs:
                             self.specs[call_fqn] = copy_sig(self.specs[fqn])
                         fqn = call_fqn
 

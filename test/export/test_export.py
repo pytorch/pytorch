@@ -14483,6 +14483,56 @@ graph():
             [("n", "p@1"), ("p", "n@1")],
         )
 
+    def test_preserve_module_call_signature_shared_alias_multicall(self):
+        """Test that CollectTracepointsPass handles a shared submodule reached
+        through an @N-suffixed alias call-name.
+
+        A submodule shared under two attribute paths, preserved under only one
+        and invoked more than once through the other, produces an `alias@N`
+        call-name whose base is absent from the preserved specs. Export must not
+        raise KeyError, and the exported/unflattened modules must match eager.
+        """
+
+        class Leaf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(4))
+
+            def forward(self, x):
+                return x + self.w
+
+        class Mid(torch.nn.Module):
+            def __init__(self, leaf):
+                super().__init__()
+                self.leaf = leaf  # alias to the same Leaf object
+
+            def forward(self, x):
+                # invoke the aliased leaf twice -> "mid.leaf" and "mid.leaf@1"
+                return self.leaf(self.leaf(x))
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()  # canonical, preserved path
+                self.mid = Mid(self.leaf)  # shares the same object
+
+            def forward(self, x):
+                x = self.leaf(x)  # call via the canonical (preserved) path
+                x = self.mid(x)  # calls via the alias twice
+                return x
+
+        m = Root()
+        inp = (torch.randn(3, 4),)
+        orig = m(*inp)
+
+        # Without the fix this raises `KeyError: 'mid.leaf'` in
+        # CollectTracepointsPass while collecting the aliased call signature.
+        ep = export(m, inp, preserve_module_call_signature=("leaf",))
+        self.assertTrue(torch.allclose(ep.module()(*inp), orig))
+
+        unf = unflatten(ep)
+        self.assertTrue(torch.allclose(unf(*inp), orig))
+
     def test_stack_trace(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
