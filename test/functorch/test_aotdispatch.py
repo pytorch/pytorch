@@ -7081,6 +7081,112 @@ def forward(self, primals_1, tangents_1):
         self.assertIsNotNone(data_dep_edge)
         self.assertEqual(data_dep_edge[2], "data dependency")
 
+    def _compile_with_corrupted_joint_graph(self, fn, inputs, corrupt):
+        """Compile fn with aot_function, mutating joint-graph node meta the way
+        a buggy FX pass or checkpoint policy would, right before the min-cut
+        partitioner runs. Runs in a temp cwd since the expected partitioner
+        failure dumps debug files there."""
+        import os
+        import tempfile
+
+        def partition_fn(joint_gm, joint_inputs, **kwargs):
+            corrupt(joint_gm)
+            return min_cut_rematerialization_partition(joint_gm, joint_inputs, **kwargs)
+
+        compiled = aot_function(
+            fn,
+            fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+            bw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+            partition_fn=partition_fn,
+        )
+        prev_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+            try:
+                compiled(*inputs).sum().backward()
+            finally:
+                os.chdir(prev_cwd)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_unbounded_conflicting_annotations(self):
+        """MUST_SAVE on a tuple producer (unsaveable: non-tensor output) plus
+        MUST_RECOMPUTE on its getitem is unsatisfiable; the error must lead
+        with the annotations and suggest concrete fixes."""
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def corrupt(gm):
+            for n in gm.graph.nodes:
+                if n.target is torch.ops.aten.var_mean.correction:
+                    n.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+                    for u in n.users:
+                        u.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
+
+        def f(x):
+            var, mean = torch.var_mean(x)
+            return x * var + mean
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"(?s)Constraints set by recompute annotations.*"
+            r"var_mean: cannot recompute: marked MUST_SAVE.*"
+            r"How to fix:.*"
+            r"Move the MUST_SAVE annotation to its tensor outputs",
+        ):
+            self._compile_with_corrupted_joint_graph(
+                f, [torch.randn(8, requires_grad=True)], corrupt
+            )
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_unbounded_banned_custom_op(self):
+        """A custom multi-output op is auto-banned from recompute (not in the
+        recomputable allowlist) and unsaveable (tuple output); marking its
+        getitems MUST_RECOMPUTE is unsatisfiable. The error must attribute the
+        ban to a partitioner heuristic and point at the annotation."""
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        @torch.library.custom_op("_partitioner_test::two_out", mutates_args=())
+        def two_out(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return x.sin(), x.cos()
+
+        @two_out.register_fake
+        def _(x):
+            return torch.empty_like(x), torch.empty_like(x)
+
+        def setup(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0])
+
+        def backward(ctx, ga, gb):
+            (x,) = ctx.saved_tensors
+            return ga * x.cos() - gb * x.sin()
+
+        torch.library.register_autograd(
+            "_partitioner_test::two_out", backward, setup_context=setup
+        )
+
+        def corrupt(gm):
+            for n in gm.graph.nodes:
+                if n.target is torch.ops._partitioner_test.two_out.default:
+                    for u in n.users:
+                        if u.target is operator.getitem:
+                            u.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
+
+        def f(x):
+            a, b = torch.ops._partitioner_test.two_out(x)
+            return a * b
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"(?s)Constraints set by recompute annotations.*"
+            r"getitem: must recompute: marked by checkpoint policy.*"
+            r"Constraints from internal partitioner heuristics.*"
+            r"two_out: cannot recompute: not in recomputable allowlist.*"
+            r"How to fix:.*"
+            r"Drop or relax the MUST_RECOMPUTE",
+        ):
+            self._compile_with_corrupted_joint_graph(
+                f, [torch.randn(8, requires_grad=True)], corrupt
+            )
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_getitem_of_banned_multi_output(self):
         """Test that getitem from a banned multi-output node doesn't cause NetworkXUnbounded.

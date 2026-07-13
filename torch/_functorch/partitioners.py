@@ -2879,147 +2879,11 @@ def solve_min_cut(
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
     except nx.NetworkXUnbounded as unbounded_exc:
-        # Check if structured tracing is enabled (for production job debugging via tlparse)
-        structured_tracing_enabled = bool(trace_log.handlers)
+        msg = _explain_unbounded_min_cut(joint_graph, nx_graph)
+        if msg is not None:
+            raise RuntimeError(msg) from unbounded_exc
 
-        # Dump the FX graph for debugging
-        fx_graph_file: str | None = None
-        fx_graph_str: str | None = None
-        joint_module = joint_graph.owning_module
-        try:
-            fx_graph_str = (
-                joint_module.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                )
-                if joint_module is not None
-                else str(joint_graph)
-            )
-            # Always log to structured trace for production debugging
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "min_cut_failed_fx_graph",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: fx_graph_str,
-            )
-            # Also write to local file for local debugging
-            fx_graph_file = _get_unique_path("min_cut_failed_graph", ".txt")
-            with open(fx_graph_file, "w") as f:
-                f.write(fx_graph_str)
-        except Exception as e:
-            fx_graph_file = f"(failed to write: {e})"
-
-        # Dump the min-cut edge list to structured trace
-        edge_list_str = "\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph))
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "min_cut_failed_edge_list",
-                "encoding": "string",
-            },
-            payload_fn=lambda: edge_list_str,
-        )
-
-        # Find and report the infinite-capacity path
-        inf_path = _find_infinite_capacity_path(nx_graph)
-        if inf_path:
-            # Group edges by FX node and format for user understanding
-            # inf_path is a list of (from_node, to_node, reason) tuples
-            #
-            # Edge types and what they mean:
-            # - source -> X_in: X cannot be recomputed
-            # - X_in -> X_out (inf): X's output cannot be saved
-            # - X_out -> Y_in: Y depends on X (data flow)
-            # - X_in -> sink: X must be computed in backward
-            # - X_out -> sink: X's output must be available for backward
-
-            # Build a user-friendly explanation grouped by FX node
-            node_constraints: dict[str, list[str]] = {}
-            raw_path_nodes = ["source"]
-
-            def get_base_name(node_name: str) -> str:
-                for suffix in ("_in", "_out"):
-                    if node_name.endswith(suffix):
-                        return node_name[: -len(suffix)]
-                return node_name
-
-            for from_node, to_node, reason in inf_path:
-                raw_path_nodes.append(to_node)
-
-                # Skip source/sink, focus on FX nodes
-                if from_node == "source":
-                    base = get_base_name(to_node)
-                    node_constraints.setdefault(base, []).append(reason)
-                elif to_node == "sink":
-                    base = get_base_name(from_node)
-                    node_constraints.setdefault(base, []).append(reason)
-                elif get_base_name(from_node) == get_base_name(to_node):
-                    # Internal edge (X_in -> X_out)
-                    base = get_base_name(from_node)
-                    node_constraints.setdefault(base, []).append(reason)
-                else:
-                    # Data dependency edge (X_out -> Y_in)
-                    from_base = get_base_name(from_node)
-                    to_base = get_base_name(to_node)
-                    node_constraints.setdefault(to_base, []).append(
-                        f"depends on {from_base}"
-                    )
-
-            # Format the constraints nicely
-            constraint_lines: list[str] = []
-            for node_name, constraints in node_constraints.items():
-                constraint_lines.append(f"  {node_name}:")
-                for c in constraints:
-                    constraint_lines.append(f"    - {c}")
-
-            constraints_str = "\n".join(constraint_lines)
-            raw_path_str = " -> ".join(raw_path_nodes)
-
-            # Try to visualize (logs to structured trace and writes local file)
-            svg_path, svg_content = visualize_min_cut_graph(nx_graph)
-            if svg_content:
-                trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": "min_cut_failed_svg",
-                        "encoding": "string",
-                    },
-                    payload_fn=lambda: svg_content,
-                )
-
-            # Build file location messages
-            local_files_msg = (
-                f"FX graph dump: {fx_graph_file}\n" if fx_graph_file else ""
-            )
-            if svg_path:
-                local_files_msg += f"Min-cut graph visualization: {svg_path}\n"
-
-            # Suggest tlparse if structured tracing is enabled
-            tlparse_msg = ""
-            if structured_tracing_enabled:
-                tlparse_msg = (
-                    "[Production debugging: Use tlparse to extract debug artifacts "
-                    "(min_cut_failed_fx_graph, min_cut_failed_edge_list, min_cut_failed_svg)]\n"
-                )
-
-            raise RuntimeError(
-                f"AOT Autograd failed to partition the joint forward-backward graph.\n\n"
-                f"The partitioner determines which intermediate values to save from the "
-                f"forward pass vs recompute in the backward pass. This error means a value "
-                f"is required for backward, but cannot be saved AND cannot be recomputed.\n\n"
-                f"This is a bug in PyTorch. Please file an issue at "
-                f"https://github.com/pytorch/pytorch/issues\n\n"
-                f"Nodes involved in the conflict:\n"
-                f"{constraints_str}\n\n"
-                f"[For PyTorch developers: one of the above constraints is wrong. "
-                f"Either the node should be recomputable, saveable, or not required for backward.]\n\n"
-                f"[Debug: min-cut path] {raw_path_str}\n"
-                f"{local_files_msg}"
-                f"{tlparse_msg}"
-            ) from unbounded_exc
-
-        # Fallback if we couldn't find the path
+        # Fallback if we couldn't find the infinite-capacity path
         log.info("Failed to compute min-cut on following graph:")
         log.info(
             "%s",
@@ -3094,6 +2958,234 @@ def _find_infinite_capacity_path(
                 visited.add(neighbor)
                 queue.append((neighbor, new_path))
     return None
+
+
+# Origin categories for the constraints on an infinite-capacity path. They
+# rank how likely each constraint is to be the actual bug:
+# - "annotation": recompute policy supplied by the user or an FX pass
+#   (CheckpointPolicy in node.meta["recompute"]); the most likely culprit.
+# - "heuristic": an internal partitioner recompute ban; if the annotations
+#   look fine, suspect these (PyTorch-side).
+# - "intrinsic": a fact about the node itself (non-tensor output, view,
+#   SymFloat, primal input, required for gradient); almost never wrong.
+# - "dependency": a data-flow edge straight from the FX graph; certainly
+#   correct, included only as context.
+@dataclass
+class _UnboundedConstraint:
+    node: str
+    constraint: str
+    origin: str
+
+
+def _classify_constraint_origin(constraint: str) -> str:
+    if "MUST_SAVE" in constraint or "checkpoint policy" in constraint:
+        return "annotation"
+    if constraint.startswith("depends on "):
+        return "dependency"
+    if constraint.startswith("cannot recompute"):
+        reason = constraint.removeprefix("cannot recompute").removeprefix(": ")
+        if reason in ("primal input", "forward RNG seed"):
+            return "intrinsic"
+        return "heuristic"
+    # "cannot save: ...", "must be computed in backward: ...",
+    # "must be available for backward: ..."
+    return "intrinsic"
+
+
+def _collect_unbounded_constraints(
+    inf_path: list[tuple[str, str, str]],
+) -> list[_UnboundedConstraint]:
+    """Translate the infinite-capacity min-cut path into per-FX-node
+    constraints, classified by origin.
+
+    Edge types and what they mean:
+    - source -> X_in: X cannot be recomputed
+    - X_in -> X_out (inf): X's output cannot be saved
+    - X_out -> Y_in: Y depends on X (data flow)
+    - X_in -> sink: X must be computed in backward
+    - X_out -> sink: X's output must be available for backward
+    """
+
+    def get_base_name(node_name: str) -> str:
+        for suffix in ("_in", "_out"):
+            if node_name.endswith(suffix):
+                return node_name[: -len(suffix)]
+        return node_name
+
+    constraints: list[_UnboundedConstraint] = []
+    for from_node, to_node, reason in inf_path:
+        if from_node == "source":
+            node = get_base_name(to_node)
+        elif to_node == "sink" or get_base_name(from_node) == get_base_name(to_node):
+            node = get_base_name(from_node)
+        else:
+            # Data dependency edge (X_out -> Y_in)
+            node = get_base_name(to_node)
+            reason = f"depends on {get_base_name(from_node)}"
+        constraints.append(
+            _UnboundedConstraint(node, reason, _classify_constraint_origin(reason))
+        )
+    return constraints
+
+
+def _explain_unbounded_min_cut(
+    joint_graph: fx.Graph, nx_graph: nx.DiGraph[str, dict[str, Any]]
+) -> str | None:
+    """Build the error message for an unbounded (infeasible) min-cut.
+
+    Dumps debug artifacts (FX graph, min-cut edge list, SVG) to structured
+    trace and local files, then walks the infinite-capacity source->sink path
+    and explains each constraint on it. Returns None if no such path exists
+    (the caller falls back to raw logging).
+    """
+    import networkx as nx
+
+    # Dump the FX graph for debugging
+    fx_graph_file: str | None = None
+    joint_module = joint_graph.owning_module
+    try:
+        fx_graph_str = (
+            joint_module.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            )
+            if joint_module is not None
+            else str(joint_graph)
+        )
+        # Always log to structured trace for production debugging
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "min_cut_failed_fx_graph",
+                "encoding": "string",
+            },
+            payload_fn=lambda: fx_graph_str,
+        )
+        # Also write to local file for local debugging
+        fx_graph_file = _get_unique_path("min_cut_failed_graph", ".txt")
+        with open(fx_graph_file, "w") as f:
+            f.write(fx_graph_str)
+    except Exception as e:
+        fx_graph_file = f"(failed to write: {e})"
+
+    # Dump the min-cut edge list to structured trace
+    edge_list_str = "\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph))
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "min_cut_failed_edge_list",
+            "encoding": "string",
+        },
+        payload_fn=lambda: edge_list_str,
+    )
+
+    inf_path = _find_infinite_capacity_path(nx_graph)
+    if inf_path is None:
+        return None
+
+    constraints = _collect_unbounded_constraints(inf_path)
+
+    annotation = [c for c in constraints if c.origin == "annotation"]
+    heuristic = [c for c in constraints if c.origin == "heuristic"]
+    facts = [c for c in constraints if c.origin in ("intrinsic", "dependency")]
+
+    def fmt(cs: list[_UnboundedConstraint]) -> str:
+        return "\n".join(f"  - {c.node}: {c.constraint}" for c in cs)
+
+    sections: list[str] = []
+    if annotation:
+        sections.append(
+            "Constraints set by recompute annotations (a selective checkpoint "
+            "policy, or an FX pass writing node.meta['recompute']). These are "
+            "the most likely to be wrong -- check them first:\n" + fmt(annotation)
+        )
+    if heuristic:
+        suspicion = (
+            " (check the annotations above first)"
+            if annotation
+            else " (with no annotations involved, this is likely a PyTorch bug)"
+        )
+        sections.append(
+            f"Constraints from internal partitioner heuristics{suspicion}:\n"
+            + fmt(heuristic)
+        )
+    if facts:
+        sections.append(
+            "Facts about the graph (almost certainly correct; shown for "
+            "context):\n" + fmt(facts)
+        )
+    sections_str = "\n\n".join(sections)
+
+    remedies: list[str] = []
+    for c in annotation:
+        if "checkpoint policy" in c.constraint:
+            remedies.append(
+                f"'{c.node}' is forced to be recomputed in the backward pass, but "
+                f"it (transitively) consumes a value that can neither be saved "
+                f"nor recomputed. Drop or relax the MUST_RECOMPUTE / "
+                f"PREFER_RECOMPUTE annotation on '{c.node}'."
+            )
+        elif "MUST_SAVE" in c.constraint:
+            remedies.append(
+                f"'{c.node}' is marked MUST_SAVE, but its output is not saveable "
+                f"(see the facts above; multi-output ops produce a non-tensor "
+                f"tuple). Move the MUST_SAVE annotation to its tensor outputs "
+                f"(the getitem nodes) instead."
+            )
+    if remedies:
+        remedy_str = "How to fix:\n" + "\n".join(f"  - {r}" for r in remedies)
+        issue_msg = (
+            "If the annotations look right to you, this is a bug in PyTorch. "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues"
+        )
+    else:
+        remedy_str = (
+            "How to fix: one of the constraints above is wrong -- the node "
+            "should be recomputable, saveable, or not required for backward."
+        )
+        issue_msg = (
+            "This is likely a bug in PyTorch. Please file an issue at "
+            "https://github.com/pytorch/pytorch/issues"
+        )
+
+    raw_path_str = " -> ".join(["source"] + [to_node for _, to_node, _ in inf_path])
+
+    # Try to visualize (logs to structured trace and writes local file)
+    svg_path, svg_content = visualize_min_cut_graph(nx_graph)
+    if svg_content:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "min_cut_failed_svg",
+                "encoding": "string",
+            },
+            payload_fn=lambda: svg_content,
+        )
+
+    local_files_msg = f"FX graph dump: {fx_graph_file}\n" if fx_graph_file else ""
+    if svg_path:
+        local_files_msg += f"Min-cut graph visualization: {svg_path}\n"
+
+    # Suggest tlparse if structured tracing is enabled (production debugging)
+    tlparse_msg = ""
+    if trace_log.handlers:
+        tlparse_msg = (
+            "[Production debugging: Use tlparse to extract debug artifacts "
+            "(min_cut_failed_fx_graph, min_cut_failed_edge_list, min_cut_failed_svg)]\n"
+        )
+
+    return (
+        f"AOT Autograd failed to partition the joint forward-backward graph.\n\n"
+        f"The partitioner decides, for each intermediate value, whether to save "
+        f"it from the forward pass or recompute it in the backward pass. A value "
+        f"needed by the backward pass can neither be saved nor recomputed, so "
+        f"there is no valid partition.\n\n"
+        f"{sections_str}\n\n"
+        f"{remedy_str}\n\n"
+        f"{issue_msg}\n\n"
+        f"[Debug: min-cut path] {raw_path_str}\n"
+        f"{local_files_msg}"
+        f"{tlparse_msg}"
+    )
 
 
 def _get_unique_path(base_name: str, extension: str) -> str:
