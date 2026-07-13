@@ -911,12 +911,15 @@ class TestFlopCounter(TestCase):
             128 * 32 * 2 * 64,
         )
 
-        self.assertEqual(torch.utils.flop_counter.bmm_flop(a, b, out), expected_bmm)
         self.assertEqual(
-            torch.utils.flop_counter.baddbmm_flop(out, a, b, out), expected_bmm
+            torch.utils.flop_counter.bmm_flop(a, b, out_shape=out), expected_bmm
         )
         self.assertEqual(
-            torch.utils.flop_counter.addmm_flop(out2, a2, b2, out2),
+            torch.utils.flop_counter.baddbmm_flop(out, a, b, out_shape=out),
+            expected_bmm,
+        )
+        self.assertEqual(
+            torch.utils.flop_counter.addmm_flop(out2, a2, b2, out_shape=out2),
             128 * 32 * 2 * 64,
         )
 
