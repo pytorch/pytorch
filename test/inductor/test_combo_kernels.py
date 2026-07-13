@@ -3049,6 +3049,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
+            base = torch.cuda.memory_allocated()
             with (
                 fresh_cache(),
                 torch._inductor.config.patch(
@@ -3058,7 +3059,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 with torch.no_grad():
                     _ = torch.compile(model)(x)
                 torch.cuda.synchronize()
-            return torch.cuda.max_memory_allocated()
+            return torch.cuda.max_memory_allocated() - base
 
         # Gating disabled: combos can co-allocate freely -> higher peak.
         peak_disabled = compile_and_measure_peak(
