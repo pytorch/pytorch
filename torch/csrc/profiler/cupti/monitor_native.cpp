@@ -279,7 +279,13 @@ void CuptiMonitorDecoder::worker_loop() {
   // distinguished by running_. On stop() the pool is shut down and the worker
   // drains every already-completed buffer before exiting.
   const bool do_flush = self_flush_;
-  const auto period = std::chrono::nanoseconds(flush_period_ns_);
+  // Floor the cadence: a configured period of 0 ("continuously") would make the
+  // bounded wait below a non-blocking poll, turning this into a busy loop that
+  // pegs a core and hammers cuptiActivityFlushAll with no backoff. 1ms is far
+  // below any useful flush cadence, so this only bites the degenerate 0 case.
+  const auto period = std::max(
+      std::chrono::nanoseconds(flush_period_ns_),
+      std::chrono::nanoseconds(std::chrono::milliseconds(1)));
   // Backdate so the first iteration flushes immediately (matters for HES, whose
   // records only surface on a flush).
   auto last_flush = std::chrono::steady_clock::now() - period;

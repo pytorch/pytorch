@@ -1130,8 +1130,11 @@ class CuptiMonitor:
         # cuptiActivityFlushAll is driven off-thread by the native flusher; this loop
         # only drains the decoded columns + dispatches them (GIL work) -- the same work
         # flush(sync=False) does after its flush, minus the flush itself.
+        # Floor the wait so a period of 0 ("continuously") doesn't busy-spin the GIL
+        # (Event.wait(0) returns immediately); 1ms is well below any useful cadence.
+        period = max(self.background_drain_period_s, 0.001)
         try:
-            while not self._drain_stop.wait(self.background_drain_period_s):
+            while not self._drain_stop.wait(period):
                 if self._started:
                     self._account_dropped_records(0, 0)
                     self._drain_and_dispatch()
