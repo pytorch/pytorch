@@ -10,7 +10,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import sympy
 
@@ -46,6 +46,7 @@ from .cpp_utils import (
     LAYOUT_TO_ATEN,
 )
 from .wrapper import (
+    _rewrite_symbol_solution_for_int_codegen,
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
     ExitSubgraphLine,
@@ -56,22 +57,11 @@ from .wrapper import (
 )
 
 
-def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
-    """
-    Convert rational divisions in a solved integer symbol expression to exact
-    integer division before C++ printing.
-    """
-    expr = sympy.together(sympy.sympify(expr))
-    numerator, denominator = sympy.fraction(expr)
-    if denominator == 1:
-        return numerator
-    return CleanDiv(numerator, denominator)
-
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
+    from ..runtime.hints import TritonMeta
 
     # At most, the list nesting can go one layer deep.
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
@@ -106,7 +96,7 @@ class DeferredCpuTritonCallWrapper:
     wrapper_name: str
     kernel_name: str
     arg_types: list[Any]
-    triton_meta: dict[str, Any] | None = None
+    triton_meta: TritonMeta | None = None
     inductor_meta: dict[str, Any] | None = None
 
     def _get_cpp_param_type(self, name: str, arg_type: Any) -> str:
@@ -432,7 +422,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         arg_types=None,
         raw_keys=None,
         raw_args=None,
-        triton_meta=None,
+        triton_meta: TritonMeta | None = None,
         inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
@@ -657,6 +647,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         name: str,
         value: ir.TensorBox,
         bound_vars: OrderedSet[sympy.Symbol],
+        deferred_symbol_assignments=None,
     ):
         """Assign symbolic shapes to C++ locals, with replacement aliases."""
         code = self.prefix
@@ -671,40 +662,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
 
-        def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
-            # Deferred runtime asserts reference pre-replacement backed
-            # symbols (e.g. s77) that were replaced to this canonical
-            # symbol (s31) during constraint solving. Emit aliases so
-            # the asserts compile. Skip unbacked symbols — they are
-            # defined separately by the unbacked symbol codegen path.
-            from torch.utils._sympy.symbol import symbol_is_type, SymT
-
-            for src, tgt in V.graph.sizevars.shape_env.replacements.items():
-                if (
-                    tgt == sym
-                    and isinstance(src, sympy.Symbol)
-                    and src not in bound_vars
-                    and not symbol_is_type(
-                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
-                    )
-                ):
-                    code.writeline(f"int64_t {src} = {sym};")
-                    bound_vars.add(src)
-
         def codegen_symbol(
             sym_or_exp: sympy.Symbol | sympy.Expr,
             base_name: str,
             name_fn: Callable[[str], str],
             dim: int,
-        ):
+            deferred_symbol_assignments=None,
+        ) -> bool:
             if isinstance(sym_or_exp, sympy.Symbol):
                 if sym_or_exp in bound_vars:
-                    return
+                    return False
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
                 if symbol_is_type(sym_or_exp, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
                     self.unbacked_symbol_decls.add(str(sym_or_exp))
-                maybe_emit_replacement_aliases(sym_or_exp)
+                self.maybe_emit_replacement_aliases(sym_or_exp, bound_vars)
+                return True
             elif isinstance(sym_or_exp, sympy.Expr):
                 undefined_symbols = [
                     sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
@@ -713,7 +686,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Skip if expression contains no symbols or if multiple
                     # symbols exists since we assume each base symbol is defined
                     # by other codegen_symbol calls.
-                    return
+                    if (
+                        len(undefined_symbols) > 1
+                        and deferred_symbol_assignments is not None
+                    ):
+
+                        def retry(deferred_symbol_assignments):
+                            return codegen_symbol(
+                                sym_or_exp,
+                                base_name,
+                                name_fn,
+                                dim,
+                                deferred_symbol_assignments,
+                            )
+
+                        deferred_symbol_assignments.append(retry)
+                    return False
 
                 from torch.utils._sympy.solve import try_solve
 
@@ -721,36 +709,38 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 base_name = name_fn(base_name)
                 # Use a size symbol to solve the free symbol
                 size_symbol = sympy.Symbol(f"{base_name}_{dim}", integer=True)
-                code.writeline(f"int64_t {size_symbol} = {base_name}[{dim}];")
                 solution = try_solve(sympy.Eq(sym_or_exp, size_symbol), free_symbol)
                 if solution is not None:
+                    code.writeline(f"int64_t {size_symbol} = {base_name}[{dim}];")
                     expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
                     code.writeline(f"int64_t {free_symbol} = {cexpr(expr)};")
                     bound_vars.add(free_symbol)
-                else:
-                    raise AssertionError(
-                        str(sympy.Eq(sym_or_exp, size_symbol)) + " is not solvable"
-                    )
+                    if symbol_is_type(
+                        free_symbol, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    ):
+                        self.unbacked_symbol_decls.add(str(free_symbol))
+                    self.maybe_emit_replacement_aliases(free_symbol, bound_vars)
+                    return True
+                return False
+            return False
 
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
-            if value.is_integer:
-                decl = "int64_t"
-            elif value.is_float:
+            if symbol_is_type(value, (SymT.FLOAT, SymT.UNBACKED_FLOAT)):
                 decl = "double"
             else:
-                raise AssertionError("Unexpected symbol type")
+                decl = "int64_t"
             code.writeline(f"{decl} {value} = {name};")
             bound_vars.add(value)
             if symbol_is_type(value, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
                 self.unbacked_symbol_decls.add(str(value))
-            maybe_emit_replacement_aliases(value)
+            self.maybe_emit_replacement_aliases(value, bound_vars)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
-                codegen_symbol(size, name, sizeof, dim)
+                codegen_symbol(size, name, sizeof, dim, deferred_symbol_assignments)
             for dim, stride in enumerate(value.get_stride()):
-                codegen_symbol(stride, name, strideof, dim)
+                codegen_symbol(stride, name, strideof, dim, deferred_symbol_assignments)
         elif isinstance(
             value, (ir.TorchBindObject, ir.GeneratorState, ir.OpaqueObjectState)
         ):
@@ -758,6 +748,59 @@ class CppWrapperCpu(PythonWrapperCodegen):
             pass
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
+
+    def maybe_emit_replacement_aliases(  # type: ignore[override]
+        self,
+        sym: sympy.Symbol,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        sizevars = getattr(V.graph, "sizevars", None)
+        shape_env = getattr(sizevars, "shape_env", None)
+        if shape_env is None:
+            return
+
+        def is_backed_symbol(s: sympy.Symbol) -> bool:
+            return not symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+
+        def decl_type(s: sympy.Symbol) -> str:
+            if symbol_is_type(s, (SymT.FLOAT, SymT.UNBACKED_FLOAT)):
+                return "double"
+            return "int64_t"
+
+        for src, tgt in shape_env.replacements.items():
+            if (
+                tgt == sym
+                and isinstance(src, sympy.Symbol)
+                and src not in bound_vars
+                and is_backed_symbol(src)
+                and is_backed_symbol(sym)
+            ):
+                self.prefix.writeline(f"{decl_type(src)} {src} = {sym};")
+                bound_vars.add(src)
+            elif (
+                src == sym
+                and isinstance(tgt, sympy.Symbol)
+                and tgt not in bound_vars
+                and is_backed_symbol(sym)
+                and is_backed_symbol(tgt)
+            ):
+                self.prefix.writeline(f"{decl_type(tgt)} {tgt} = {sym};")
+                bound_vars.add(tgt)
+
+    def bind_input_symbol(
+        self,
+        sym: sympy.Symbol,
+        input_name: str,
+        kind: Literal["size", "stride"],
+        dim: int,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        if sym in bound_vars:
+            return
+        accessor = "sizes" if kind == "size" else "strides"
+        self.prefix.writeline(f"int64_t {sym} = {input_name}.{accessor}()[{dim}];")
+        bound_vars.add(sym)
+        self.maybe_emit_replacement_aliases(sym, bound_vars)
 
     def generate_input_output_runtime_checks(self):
         """
@@ -2304,6 +2347,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 code.writeline(guarded)
         else:
             code.writeline(stmt)
+
+    def _codegen_assert_size_stride_grouped(
+        self, code: IndentedBuffer, asserts: list[tuple[str, str, str]], op_name: str
+    ) -> None:
+        for name, size, stride in asserts:
+            self._codegen_assert_size_stride(code, name, size, stride, op_name)
 
     def codegen_device(self, device):
         if device.type not in DEVICE_TO_ATEN:
