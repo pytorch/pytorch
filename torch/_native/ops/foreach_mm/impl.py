@@ -35,7 +35,7 @@ Notes:
 """
 
 import warnings
-from typing import Literal, Optional
+from typing import Literal
 
 import torch
 
@@ -51,7 +51,7 @@ _NVMATH_DEPS = [
 
 # Probe result cache: None = not yet probed. Availability is a process-global
 # property of the loaded cuBLASLt, so it is resolved once and reused.
-_nvmath_available: Optional[bool] = None
+_nvmath_available: bool | None = None
 
 
 def _probe_grouped_matrix_layout() -> bool:
@@ -66,15 +66,15 @@ def _probe_grouped_matrix_layout() -> bool:
     if not torch.cuda.is_available():
         return False
     try:
-        from cuda.bindings.runtime import cudaDataType
-        from nvmath.bindings import cublasLt
+        from cuda.bindings import runtime  # pyrefly: ignore[missing-import]
+        from nvmath.bindings import cublasLt  # pyrefly: ignore[missing-import]
     except Exception:
         return False
     dims = torch.ones(1, dtype=torch.int32, device="cuda")
     p = dims.data_ptr()
     try:
         layout = cublasLt.grouped_matrix_layout_create(
-            cudaDataType.CUDA_R_16BF, 1, p, p, p
+            runtime.cudaDataType.CUDA_R_16BF, 1, p, p, p
         )
     except Exception as e:
         return type(e).__name__ != "FunctionNotFoundError"
