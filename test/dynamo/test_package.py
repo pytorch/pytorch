@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
 )
@@ -89,7 +90,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(10, 10, device="cuda")
+                self.linear = torch.nn.Linear(10, 10, device=GPU_TYPE)
 
             def forward(self, x):
                 return self.linear(x)
@@ -97,7 +98,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         fn = MyModule()
         package = CompilePackage(fn.forward)
         compiled_fn = torch._dynamo.optimize("inductor", package=package)(fn)
-        x = torch.randn(10, 10, device="cuda")
+        x = torch.randn(10, 10, device=GPU_TYPE)
         compiled_fn(x)
 
     @parametrize("backend", ("eager", "inductor"))
