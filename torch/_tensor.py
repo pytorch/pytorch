@@ -919,6 +919,11 @@ class Tensor(torch._C.TensorBase):
 
         return eig(self, eigenvectors=eigenvectors)
 
+    def qr(self, some=True):
+        from torch._linalg_utils import qr
+
+        return qr(self, some=some)
+
     def symeig(self, eigenvectors=False):
         from torch._linalg_utils import _symeig
 
@@ -1253,10 +1258,7 @@ class Tensor(torch._C.TensorBase):
 
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
-    # NumPy 2 passes `context` and `return_scalar`; torch has no scalars and
-    # does not need the context, so both are accepted and ignored. Declaring
-    # them avoids a NumPy 2 DeprecationWarning about the old call signature.
-    def __array_wrap__(self, array, context=None, return_scalar=False):
+    def __array_wrap__(self, array):
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.__array_wrap__, (self,), self, array=array
