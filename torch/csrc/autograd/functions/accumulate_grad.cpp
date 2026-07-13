@@ -179,7 +179,7 @@ variable_list AccumulateGrad::apply_with_saved(
       grad_copy,
       grads[0],
       !post_hooks().empty());
-  variable_copy.mutable_grad() = functional_grad;
+  variable_copy.mutable_grad() = std::move(functional_grad);
 
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
