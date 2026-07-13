@@ -2523,6 +2523,35 @@ def forward(self, primals_1):
         self.assertTensorMetadataEqual(test_inp, ref_inp)
         self.assertTensorMetadataEqual(test_out, ref_out)
 
+    def test_subclass_metadata_mutation_aot_function_independent_outer_metadata(self):
+        def f(a):
+            a.transpose_(1, 0)
+            return a
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            decompositions=None,
+            keep_inference_input_mutations=True,
+            dynamic=False,
+        )
+
+        def make_input():
+            inner = torch.ones(2, 4).clone()
+            return WrapperSubclass(inner, outer_size=(2, 4), outer_stride=(1, 2))
+
+        ref_inp = make_input()
+        test_inp = make_input()
+
+        ref_out = f(ref_inp)
+        test_out = compiled_f(test_inp)
+
+        self.assertEqual(test_inp.size(), ref_inp.size())
+        self.assertEqual(test_inp.stride(), ref_inp.stride())
+        self.assertEqual(test_out.size(), ref_out.size())
+        self.assertEqual(test_out.stride(), ref_out.stride())
+
     @parametrize("req_grad", [False, True])
     @skipIfDynamoInput("Dynamo fails to fakeify non-contiguous TwoTensor inputs")
     def test_subclass_metadata_mutation_noncontiguous_input(self, req_grad):
@@ -6853,23 +6882,23 @@ def forward(self, primals_1, tangents_1):
             # Both should be quantized nodes
             self.assertTrue(
                 pos_0_node.name.startswith("fp8_quant_"),
-                f"Position 0 should be quantized node, got: {pos_0_node.name}",
+                lambda msg: f"{msg}\nPosition 0 should be quantized node, got: {pos_0_node.name}",
             )
             self.assertTrue(
                 pos_2_node.name.startswith("fp8_quant_"),
-                f"Position 2 should be quantized node, got: {pos_2_node.name}",
+                lambda msg: f"{msg}\nPosition 2 should be quantized node, got: {pos_2_node.name}",
             )
 
             # The shared quantized node should have the first occurrence position in its name
             self.assertIn(
                 "_pos_0",
                 pos_0_node.name,
-                f"Shared quantized node should have '_pos_0' in name: {pos_0_node.name}",
+                lambda msg: f"{msg}\nShared quantized node should have '_pos_0' in name: {pos_0_node.name}",
             )
             self.assertIn(
                 "_pos_2",
                 pos_2_node.name,
-                f"Shared quantized node should have '_pos_2' in name: {pos_2_node.name}",
+                lambda msg: f"{msg}\nShared quantized node should have '_pos_2' in name: {pos_2_node.name}",
             )
             # Find scale nodes in the forward output
             fwd_scale_nodes = [
@@ -6994,7 +7023,7 @@ def forward(self, primals_1, tangents_1):
                 self.assertLessEqual(
                     len(direct_users),
                     1,
-                    f"Quantized placeholder {quant_placeholder.name} should have minimal direct users",
+                    lambda msg: f"{msg}\nQuantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")

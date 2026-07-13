@@ -822,11 +822,6 @@ from a multi-output view call"
             "static input indices metadata analysis: %s", static_input_indices
         )
 
-        f_mutated_inputs = [
-            inp
-            for inp, info in zip(flat_f_args, input_info)
-            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
-        ]
         # Build the full list of forward graph outputs so the subclass wrapping
         # code knows exactly which graph outputs to wrap back into subclasses.
         # Including intermediate_bases unconditionally is safe: they are only
@@ -835,8 +830,30 @@ from a multi-output view call"
         # inference" path, num_intermediate_bases > 0 is already gated behind
         # `assert not req_subclass_dispatch` (aot_autograd.py), so the subclass
         # wrapping code that consumes subclass_fw_graph_out_meta never sees them.
-        f_fw_graph_outs = [*f_mutated_inputs, *flat_f_outs, *intermediate_bases]
-        fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
+        f_mutated_inputs_for_meta = []
+        for inp, f_inp, info in zip(flat_args, flat_f_args, input_info):
+            if info.mutation_type != MutationType.MUTATED_OUT_GRAPH:
+                continue
+            # Data-only mutations keep input metadata; metadata mutations must
+            # use the functionalized value's updated size/stride layout.
+            f_mutated_inputs_for_meta.append(
+                from_fun(f_inp) if info.mutates_metadata else inp
+            )
+        flat_f_outs_for_meta = []
+        for out, info in zip(flat_f_outs, output_info):
+            if (
+                info.output_type == OutputType.is_input
+                and info.base_idx is not None
+                and not input_info[info.base_idx].mutates_metadata
+            ):
+                flat_f_outs_for_meta.append(flat_args[info.base_idx])
+            else:
+                flat_f_outs_for_meta.append(from_fun(out))
+        fw_graph_outs_for_meta = [
+            *f_mutated_inputs_for_meta,
+            *flat_f_outs_for_meta,
+            *pytree.tree_map(from_fun, intermediate_bases),
+        ]
 
         grad_enabled_mutation = None
         if torch.is_grad_enabled() != prior_grad_enabled:
@@ -853,7 +870,7 @@ from a multi-output view call"
             )
 
         subclass_inp_meta = create_subclass_meta(flat_args)
-        subclass_fw_graph_out_meta = create_subclass_meta(fw_graph_outs)
+        subclass_fw_graph_out_meta = create_subclass_meta(fw_graph_outs_for_meta)
         subclass_tangent_meta = create_subclass_meta(
             traced_tangents, count_symints=False, with_memory_format=True
         )

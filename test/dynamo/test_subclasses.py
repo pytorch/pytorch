@@ -1122,7 +1122,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         inp = torch.ones(4, 4)
         x = inp.as_subclass(TestTensor)
         torch._dynamo.mark_dynamic(x, 0)
-        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         out = compiled_fn(x)
         self.assertEqual(out, torch.ones(4, 4) * 2)
 
@@ -4759,8 +4759,6 @@ class GraphModule(torch.nn.Module):
                     """\
 Eq(s85 - 1, s77)
 Eq(s20, s53)
-Eq(s80 - 1, s78)
-Eq(s72, s71)
 Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_False_leaf_False_False":
@@ -4769,8 +4767,6 @@ Eq(s64, s20)""",
                     """\
 Eq(s85 - 1, s77)
 Eq(s20, s53)
-Eq(s80 - 1, s78)
-Eq(s72, s71)
 Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_False_leaf_False_True":
@@ -4779,8 +4775,6 @@ Eq(s64, s20)""",
                     """\
 Eq(s85 - 1, s77)
 Eq(s20, s53)
-Eq(s80 - 1, s78)
-Eq(s72, s71)
 Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_False_leaf_True_False":
@@ -4789,8 +4783,6 @@ Eq(s64, s20)""",
                     """\
 Eq(s85 - 1, s77)
 Eq(s20, s53)
-Eq(s80 - 1, s78)
-Eq(s72, s71)
 Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_False_leaf_True_True":
@@ -4799,8 +4791,6 @@ Eq(s64, s20)""",
                     """\
 Eq(s85 - 1, s77)
 Eq(s20, s53)
-Eq(s80 - 1, s78)
-Eq(s72, s71)
 Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_False_obscure":
@@ -4809,8 +4799,6 @@ Eq(s64, s20)""",
                     """\
 Eq(s85 - 1, s77)
 Eq(s20, s53)
-Eq(s80 - 1, s78)
-Eq(s72, s71)
 Eq(s64, s20)""",
                 )
             elif nt_view_name == "base_is_nt_True_basic":
@@ -4879,8 +4867,6 @@ Eq(s21, s20)""",
                     """\
 Eq(s85 - 1, s77)
 Eq(s20, s53)
-Eq(s80 - 1, s78)
-Eq(s72, s71)
 Eq(s64, s20)""",
                 )
             elif nt_view_name == "subclass_dense":

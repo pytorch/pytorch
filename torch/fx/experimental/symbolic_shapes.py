@@ -1335,9 +1335,9 @@ def _free_unbacked_symbols_with_path(
         and not is_batchedtensor(a)
         and not is_gradtrackingtensor(a)
     ):
-        from torch._subclasses.fake_tensor import FakeTensor, maybe_get_real_tensor
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_real_tensor
 
-        if not isinstance(a, FakeTensor):
+        if not is_fake_tensor(a):
             raise AssertionError(f"Expected FakeTensor, got {type(a)}")
         match_tensor(a, maybe_get_real_tensor(a))
     elif (
@@ -7964,10 +7964,13 @@ class ShapeEnv:
         # Prefer to simplify out lexicographically higher symbols (i.e. simplify out s4 over s3).
         #   (NB: this unfortunately isn't strictly equivalent to simplifying out newer symbols)
         # Prefer to simplify out symbols with ephemeral sources.
-        def _smart_symbol_sort(x: sympy.Symbol) -> tuple[int, int, str]:
-            has_only_ephemeral_sources = x in self.var_to_sources and all(
+        def _has_only_ephemeral_sources(x: sympy.Symbol) -> bool:
+            return x in self.var_to_sources and all(
                 s.is_ephemeral() for s in self.var_to_sources[x]
             )
+
+        def _smart_symbol_sort(x: sympy.Symbol) -> tuple[int, int, str]:
+            has_only_ephemeral_sources = _has_only_ephemeral_sources(x)
 
             hint = self.backed_var_to_val.get(x)
             if hint is None or isinstance(hint, SingletonInt):
@@ -7985,11 +7988,6 @@ class ShapeEnv:
             # 1 puts ephemeral sourced symbols first when sorting in reverse
             return (1 if has_only_ephemeral_sources else 0, size, name)
 
-        def _has_only_ephemeral_sources(x: sympy.Symbol) -> bool:
-            return x in self.var_to_sources and all(
-                s.is_ephemeral() for s in self.var_to_sources[x]
-            )
-
         def _floor_div_exact_solution(expr: sympy.Expr) -> sympy.Expr | None:
             numerator, denominator = expr.as_numer_denom()
             if not isinstance(denominator, sympy.Integer):
@@ -7999,6 +7997,7 @@ class ShapeEnv:
             if denominator < 0:
                 numerator = -numerator
                 denominator = -denominator
+            # Exact divisibility follows from the ephemeral-source caller gate.
             return FloorDiv(numerator, denominator)
 
         free = sorted(free, key=_smart_symbol_sort, reverse=True)  # type: ignore[attr-defined]

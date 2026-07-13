@@ -11378,7 +11378,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             self.assertIsInstance(
                 result.shape[0],
                 torch.SymInt,
-                f"where output dim 0 should be symbolic but got {result.shape[0]}",
+                lambda msg: f"{msg}\nwhere output dim 0 should be symbolic but got {result.shape[0]}",
             )
 
     def test_nonzero_2(self):
