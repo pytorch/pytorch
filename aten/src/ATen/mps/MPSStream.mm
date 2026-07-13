@@ -63,7 +63,7 @@ id<MTLDevice> MPSStream::device() const {
 
 id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   if (!_commandEncoder) {
-    _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
+    _commandEncoder = [commandBuffer() computeCommandEncoderWithDispatchType:MTLDispatchTypeConcurrent].retain;
   }
 
   return _commandEncoder;
