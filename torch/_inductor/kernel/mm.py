@@ -859,13 +859,13 @@ def _is_blockwise128x128_scaling(
         k_blocks = ceildiv(tensor_sz[1], 128)  # K/128
     sizevars = V.graph.sizevars
     # Case 1: Triton layout [out_blocks, k_blocks] (with possible padding on k_blocks)
-    triton_ok = sizevars.statically_known_equals(
-        sz[0], out_blocks
-    ) and sizevars.statically_known_geq(sz[1], k_blocks)
+    triton_out_ok = sizevars.statically_known_equals(sz[0], out_blocks)
+    triton_k_ok = sizevars.statically_known_geq(sz[1], k_blocks)
+    triton_ok = triton_out_ok and triton_k_ok
     # Case 2: cuBLAS transposed layout [k_blocks_padded, out_blocks]
-    cublas_ok = sizevars.statically_known_equals(
-        sz[1], out_blocks
-    ) and sizevars.statically_known_geq(sz[0], k_blocks)
+    cublas_out_ok = sizevars.statically_known_equals(sz[1], out_blocks)
+    cublas_k_ok = sizevars.statically_known_geq(sz[0], k_blocks)
+    cublas_ok = cublas_out_ok and cublas_k_ok
     return triton_ok or cublas_ok
 
 
