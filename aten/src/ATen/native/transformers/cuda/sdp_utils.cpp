@@ -1087,6 +1087,9 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
+#ifndef USE_ROCM  // ME and FA share the backend on ROCM and thus support training
+        check_requires_grad_and_nested,
+#endif
         check_batch_size_nested,
         check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
