@@ -18,8 +18,6 @@ if errorlevel 1 exit /b 1
 set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUVER%"
 
 if /I "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
-  call "%VS_VCVARSALL%" arm64 -vcvars_ver=14.51
-  if errorlevel 1 exit /b 1
   set "PATH=C:\Tools;%CUDA_PATH%\bin;%CUDA_PATH%\bin\arm64;!PATH!"
   set "MAGMA_ARCH_SUFFIX=_arm64"
   set EXTRA_CMAKE_ARGS=-DCUDA_CUDART_LIBRARY="%CUDA_PATH%\lib\arm64\cudart.lib" -DCUDA_cublas_LIBRARY="%CUDA_PATH%\lib\arm64\cublas.lib" -DCUDA_cusparse_LIBRARY="%CUDA_PATH%\lib\arm64\cusparse.lib"
