@@ -1,23 +1,29 @@
 # Owner(s): ["module: inductor"]
+import json
 import operator
 import os
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
+import types
 import unittest
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from threading import Event
+from unittest.mock import patch
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
     SubprocException,
+    SubprocKind,
     SubprocPool,
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE, IS_LINUX, skipIfWindows
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
 
 
 class TestCompileWorker(TestCase):
@@ -65,6 +71,93 @@ class TestCompileWorker(TestCase):
             pool.shutdown()
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_sidecar_death_fails_pending_futures(self):
+        # If the sidecar (SubprocMain) process dies, its forked compile workers
+        # keep the write pipe open, so the parent never sees EOF and would
+        # otherwise block forever in _recv_msg. The liveness watchdog must
+        # detect the dead sidecar and fail pending futures instead of hanging.
+        pool = self.make_pool(2)
+        try:
+            # Warm the pool so workers are forked and holding the pipe fd.
+            self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+            fut = pool.submit(time.sleep, 600)
+            time.sleep(1.0)
+            pool.process.kill()
+            try:
+                fut.result(timeout=60)
+            except FuturesTimeoutError:
+                self.fail("pending future did not resolve after sidecar death")
+            except Exception:
+                pass  # expected: the watchdog fails the future
+            else:
+                self.fail("expected an exception after sidecar death")
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_sidecar_death_eofs_without_watchdog(self):
+        # With the liveness watchdog disabled, sidecar death must still fail
+        # pending futures via a clean pipe EOF -- which only happens if neither
+        # the parent nor the compile workers keep the result pipe's write end
+        # open. Proves the fd-close fix stands on its own.
+        with patch.object(SubprocPool, "_health_monitor", lambda self: None):
+            pool = self.make_pool(2)
+            try:
+                self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                fut = pool.submit(time.sleep, 600)
+                time.sleep(1.0)
+                pool.process.kill()
+                try:
+                    fut.result(timeout=60)
+                except FuturesTimeoutError:
+                    self.fail("future did not resolve via EOF after sidecar death")
+                except Exception:
+                    pass  # expected: EOF path fails the future
+                else:
+                    self.fail("expected an exception after sidecar death")
+            finally:
+                pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_spawn_pool_basic_jobs(self):
+        # compile_fx_subproc.py runs the pool with kind=SPAWN. The worker
+        # fd-close must be gated to fork; otherwise a spawned worker closes an
+        # unrelated (reused) fd and wedges the pool via a BrokenProcessPool loop.
+        pool = SubprocPool(2, kind=SubprocKind.SPAWN)
+        try:
+            a = pool.submit(operator.add, 100, 1)
+            b = pool.submit(operator.sub, 100, 1)
+            self.assertEqual(a.result(), 101)
+            self.assertEqual(b.result(), 99)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_fails_futures_when_no_eof(self):
+        # Isolate the liveness watchdog from the fd/EOF fix. Disabling _read_thread
+        # kills the result-pipe path entirely, standing in for the "sidecar dies
+        # but EOF never arrives" case: with that path dead, only _health_monitor
+        # -> _on_sidecar_death can resolve pending futures. (The complementary
+        # test_sidecar_death_eofs_without_watchdog covers the EOF path in
+        # isolation by disabling the watchdog instead.)
+        with patch.object(SubprocPool, "_read_thread", lambda self: None):
+            pool = self.make_pool(2)
+            try:
+                fut = pool.submit(time.sleep, 600)
+                time.sleep(1.0)  # let the sidecar fork workers and start the job
+                pool.process.kill()
+                try:
+                    fut.result(timeout=60)
+                except FuturesTimeoutError:
+                    self.fail("watchdog did not fail the future without an EOF")
+                except Exception:
+                    pass  # expected: the watchdog fails the future
+                else:
+                    self.fail("expected an exception after sidecar death")
+            finally:
+                pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_quiesce(self):
         pool = self.make_pool(2)
         try:
@@ -109,24 +202,87 @@ class TestCompileWorker(TestCase):
                 pool.shutdown()
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_shutdown_kills_wedged_worker(self):
+        # A compile worker that ignores SIGTERM must not stall pool teardown:
+        # the sidecar has to escalate to SIGKILL rather than block indefinitely
+        # in pool.shutdown(wait=True) (which the parent only bounds at 300s).
+        code = textwrap.dedent(
+            """
+            import operator
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import (
+                _ignore_sigterm_and_sleep_for_test,
+                SubprocPool,
+            )
+
+            pool = SubprocPool(2)
+            assert pool.submit(operator.add, 1, 2).result() == 3
+            pool.submit(_ignore_sigterm_and_sleep_for_test)
+            time.sleep(1.0)
+
+            start = time.time()
+            pool.shutdown()
+            elapsed = time.time() - start
+            assert elapsed < 120, f"shutdown stalled for {elapsed}s"
+            print(f"shutdown returned in {elapsed:.1f}s")
+            """
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("shutdown returned", result.stdout)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_shutdown_terminates_sidecar_worker_pool(self):
         code = textwrap.dedent(
             """
             import operator
+            import os
             import subprocess
             import time
 
-            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+            from torch._inductor.compile_worker.subproc_pool import (
+                _test_signal_then_sleep,
+                SubprocPool,
+            )
 
+            # Warm the pool so the sidecar and its worker pool are fully up.
             pool = SubprocPool(2)
             assert pool.submit(operator.add, 1, 2).result() == 3
-            pool.submit(time.sleep, 5)
-            time.sleep(0.5)
 
+            # Submit a job that signals (via a sentinel file) once a worker is
+            # actually executing it, then blocks far longer than the shutdown
+            # timeout below.
+            signal_path = os.environ["WORKER_SIGNAL_PATH"]
+            pool.submit(_test_signal_then_sleep, signal_path, 120)
+
+            # Readiness barrier: wait until a worker is provably running the job
+            # before timing the shutdown, so process/worker startup cost stays
+            # out of the shutdown budget.
+            deadline = time.time() + 60
+            while not os.path.exists(signal_path):
+                if time.time() >= deadline:
+                    raise RuntimeError("worker never started the long-running job")
+                time.sleep(0.05)
+
+            # Bound the shutdown well below the running job's sleep so a
+            # regression that waits for the in-flight job (instead of
+            # terminating it) is detected quickly.
             wait = pool.process.wait
 
             def short_wait(timeout=None):
-                return wait(timeout=2)
+                return wait(timeout=30)
 
             pool.process.wait = short_wait
 
@@ -141,17 +297,22 @@ class TestCompileWorker(TestCase):
             """
         )
         with tempfile.TemporaryDirectory() as cwd:
+            signal_path = os.path.join(cwd, "worker_started")
             result = subprocess.run(
                 [sys.executable, "-c", code],
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                timeout=20,
+                env={**os.environ, "WORKER_SIGNAL_PATH": signal_path},
+                # Generous backstop: the child pays multiple heavyweight process
+                # cold-starts (esp. in fbcode). A real regression still fails
+                # fast via the bounded shutdown wait above.
+                timeout=120,
             )
         self.assertEqual(
             result.returncode,
             0,
-            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
         self.assertIn("shutdown returned", result.stdout)
 
@@ -160,6 +321,202 @@ class TestCompileWorker(TestCase):
 class TestCompileWorkerWithTimer(TestCompileWorker):
     def make_pool(self, size):
         return SubprocPool(size, quiesce=True)
+
+
+class TestCompileWorkerWatchdog(TestCase):
+    # The sidecar runs a watchdog that, every interval (shortened to 1s here via
+    # env), reports jobs still running past that interval to the parent, which
+    # turns them into a "compile_worker_status" structured-trace artifact -- so a
+    # stuck/slow worker leaves a breadcrumb in tlparse instead of silently
+    # wedging. See subproc_pool.SubprocMain._watchdog_loop.
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_reports_slow_jobs(self):
+        reports = []
+        got_report = Event()
+
+        def fake_trace_structured(name, *args, **kwargs):
+            if name != "artifact":
+                return
+            metadata = kwargs.get("metadata_fn", dict)()
+            if metadata.get("name") != "compile_worker_status":
+                return
+            reports.append(json.loads(kwargs["payload_fn"]()))
+            got_report.set()
+
+        with patch.dict(
+            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        ):
+            with patch(
+                "torch._inductor.compile_worker.subproc_pool.trace_structured",
+                fake_trace_structured,
+            ):
+                pool = SubprocPool(2)
+                try:
+                    slow = pool.submit(time.sleep, 8)
+                    self.assertTrue(
+                        got_report.wait(30), "watchdog did not report the slow job"
+                    )
+                    slow.result()
+                finally:
+                    pool.shutdown()
+
+        self.assertTrue(reports)
+        self.assertGreaterEqual(reports[-1]["elapsed_s"], 1.0)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_silent_for_fast_jobs(self):
+        reports = []
+
+        def fake_trace_structured(name, *args, **kwargs):
+            if name != "artifact":
+                return
+            metadata = kwargs.get("metadata_fn", dict)()
+            if metadata.get("name") == "compile_worker_status":
+                reports.append(metadata)
+
+        with patch.dict(
+            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        ):
+            pool = SubprocPool(2)
+            try:
+                # Warm the pool before collecting reports. The first job pays cold
+                # pool creation and the worker forks, which can exceed the
+                # (test-shortened) interval and be legitimately reported; that
+                # cost must not be attributed to the "fast" job below. The
+                # callback drops a job from _inflight before its result is sent,
+                # so once this result returns the warm-up job can no longer be
+                # reported.
+                self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                with patch(
+                    "torch._inductor.compile_worker.subproc_pool.trace_structured",
+                    fake_trace_structured,
+                ):
+                    self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                    time.sleep(2.5)  # a couple of watchdog ticks with no slow job
+            finally:
+                pool.shutdown()
+
+        self.assertEqual(reports, [])
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_reports_worker_phase(self):
+        # A worker that reports a heartbeat phase should have that phase surface
+        # in the STATUS report (Phase 2: shared-memory phase heartbeat).
+        from torch._inductor.compile_worker.subproc_pool import (
+            _report_phase_and_sleep_for_test,
+        )
+        from torch._inductor.compile_worker.watchdog import Phase
+
+        reports = []
+        got_phase = Event()
+
+        def fake_trace_structured(name, *args, **kwargs):
+            if name != "artifact":
+                return
+            metadata = kwargs.get("metadata_fn", dict)()
+            if metadata.get("name") != "compile_worker_status":
+                return
+            record = json.loads(kwargs["payload_fn"]())
+            reports.append(record)
+            if record.get("phase") == "querying_cache":
+                got_phase.set()
+
+        with patch.dict(
+            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        ):
+            with patch(
+                "torch._inductor.compile_worker.subproc_pool.trace_structured",
+                fake_trace_structured,
+            ):
+                pool = SubprocPool(2)
+                try:
+                    fut = pool.submit(
+                        _report_phase_and_sleep_for_test, int(Phase.QUERYING_CACHE), 8
+                    )
+                    self.assertTrue(
+                        got_phase.wait(30),
+                        f"watchdog did not report the phase; got {reports}",
+                    )
+                    fut.result()
+                finally:
+                    pool.shutdown()
+
+        phased = [r for r in reports if r.get("phase") == "querying_cache"]
+        self.assertTrue(phased)
+        self.assertIn("phase_elapsed_s", phased[-1])
+        self.assertIn("worker_pid", phased[-1])
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_reports_queued_job(self):
+        # A job submitted while every worker is busy sits in the pool queue with
+        # no heartbeat slot, and must be reported with phase="queued".
+        reports = []
+        got_queued = Event()
+
+        def fake_trace_structured(name, *args, **kwargs):
+            if name != "artifact":
+                return
+            metadata = kwargs.get("metadata_fn", dict)()
+            if metadata.get("name") != "compile_worker_status":
+                return
+            record = json.loads(kwargs["payload_fn"]())
+            reports.append(record)
+            if record.get("phase") == "queued":
+                got_queued.set()
+
+        with patch.dict(
+            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        ):
+            with patch(
+                "torch._inductor.compile_worker.subproc_pool.trace_structured",
+                fake_trace_structured,
+            ):
+                pool = SubprocPool(1)  # single worker so the 2nd job must queue
+                try:
+                    pool.submit(time.sleep, 30)  # occupies the sole worker
+                    pool.submit(time.sleep, 30)  # no free worker -> queued
+                    self.assertTrue(
+                        got_queued.wait(30),
+                        f"no queued-phase report; got {reports}",
+                    )
+                finally:
+                    pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_duration_only_for_spawn_pool(self):
+        # Spawn pools don't get the heartbeat buffer, so the watchdog reports
+        # duration only -- no phase (it can't tell queued from running).
+        reports = []
+        got_report = Event()
+
+        def fake_trace_structured(name, *args, **kwargs):
+            if name != "artifact":
+                return
+            metadata = kwargs.get("metadata_fn", dict)()
+            if metadata.get("name") != "compile_worker_status":
+                return
+            reports.append(json.loads(kwargs["payload_fn"]()))
+            got_report.set()
+
+        with patch.dict(
+            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        ):
+            with patch(
+                "torch._inductor.compile_worker.subproc_pool.trace_structured",
+                fake_trace_structured,
+            ):
+                pool = SubprocPool(2, kind=SubprocKind.SPAWN)
+                try:
+                    pool.submit(time.sleep, 30)
+                    self.assertTrue(
+                        got_report.wait(30), f"no watchdog report; got {reports}"
+                    )
+                finally:
+                    pool.shutdown()
+
+        self.assertTrue(reports)
+        self.assertNotIn("phase", reports[-1])
+        self.assertIn("elapsed_s", reports[-1])
 
 
 class TestTimer(TestCase):
@@ -326,6 +683,70 @@ class TestSetTritonLibdevicePath(TestCase):
         from triton import knobs
 
         self.assertEqual(knobs.nvidia.libdevice_path, expected)
+
+
+class TestTritonCompileWorker(TestCase):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_worker_compile_triton_warm_cache_skips_gpu_driver_setup(self):
+        from torch._inductor.runtime import triton_helpers
+        from torch._inductor.runtime.compile_tasks import _worker_compile_triton
+
+        class RaisingDriver:
+            @staticmethod
+            def is_active():
+                raise RuntimeError("0 active drivers ([]). There should only be one.")
+
+        class FakeKernel:
+            def __init__(self):
+                self.precompile_calls = []
+                self.prepared = False
+
+            def precompile(self, warm_cache_only=False):
+                self.precompile_calls.append(warm_cache_only)
+                triton_helpers.set_driver_to_gpu()
+
+            def prepare_for_pickle(self):
+                self.prepared = True
+
+        kernel = FakeKernel()
+
+        def load_kernel():
+            triton_helpers.set_driver_to_gpu()
+            return kernel
+
+        fake_backends = {"nvidia": types.SimpleNamespace(driver=RaisingDriver)}
+        with patch.object(triton_helpers.triton.backends, "backends", fake_backends):
+            result, _elapsed_us = _worker_compile_triton(load_kernel, {}, {})
+            self.assertIs(result, kernel)
+            self.assertEqual(kernel.precompile_calls, [True])
+            self.assertTrue(kernel.prepared)
+
+            # The skip is scoped to the worker compile call and restored afterward.
+            with self.assertRaisesRegex(RuntimeError, "0 active drivers"):
+                triton_helpers.set_driver_to_gpu()
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_worker_compile_triton_restores_gpu_driver_setup_after_error(self):
+        from torch._inductor.runtime import triton_helpers
+        from torch._inductor.runtime.compile_tasks import _worker_compile_triton
+
+        class RaisingDriver:
+            @staticmethod
+            def is_active():
+                raise RuntimeError("0 active drivers ([]). There should only be one.")
+
+        def load_kernel():
+            triton_helpers.set_driver_to_gpu()
+            raise ValueError("compile failed")
+
+        fake_backends = {"nvidia": types.SimpleNamespace(driver=RaisingDriver)}
+        with patch.object(triton_helpers.triton.backends, "backends", fake_backends):
+            with self.assertRaisesRegex(ValueError, "compile failed"):
+                _worker_compile_triton(load_kernel, {}, {})
+
+            # The skip is restored even if worker compilation raises.
+            with self.assertRaisesRegex(RuntimeError, "0 active drivers"):
+                triton_helpers.set_driver_to_gpu()
 
 
 if __name__ == "__main__":

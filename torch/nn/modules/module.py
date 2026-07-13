@@ -2163,7 +2163,7 @@ class Module:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
         extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
         if (
-            getattr(self.__class__, "get_extra_state", Module.get_extra_state)
+            getattr(type(self), "get_extra_state", Module.get_extra_state)
             is not Module.get_extra_state
         ):
             destination[extra_state_key] = self.get_extra_state()
@@ -2425,7 +2425,7 @@ class Module:
                     continue
 
                 # This is used to avoid copying uninitialized parameters into
-                # non-lazy modules, since they dont have the hook to do the checks
+                # non-lazy modules, since they don't have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
                 is_param_lazy = torch.nn.parameter.is_lazy(param)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
@@ -2506,7 +2506,7 @@ class Module:
 
         extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
         if (
-            getattr(self.__class__, "set_extra_state", Module.set_extra_state)
+            getattr(type(self), "set_extra_state", Module.set_extra_state)
             is not Module.set_extra_state
         ):
             if extra_state_key in state_dict:

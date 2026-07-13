@@ -431,6 +431,43 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
         self.assertEqual(compiled(), fn())
 
+    def test_str_of_id_of_compile_time_object(self):
+        # id() on a sourceless object minted inside the region yields a
+        # FakeIdVariable (int-typed); str()/repr() must mirror int.__repr__
+        # and produce a decimal string with stable compile-time identity.
+        class Obj:
+            pass
+
+        def fn(x):
+            a = Obj()
+            b = Obj()
+            sa = str(id(a))
+            same = sa == str(id(a))
+            distinct = sa != str(id(b))
+            return x + 1, sa.isdigit(), same, distinct
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        _, is_digit, same, distinct = compiled(torch.randn(4))
+        self.assertTrue(is_digit)
+        self.assertTrue(same)
+        self.assertTrue(distinct)
+
+    def test_repr_of_hash_of_compile_time_object(self):
+        # hash() returning id(self) on a sourceless object yields a
+        # FakeIdVariable (HASH kind); repr() must route through its
+        # repr_impl and mirror int.__repr__ (a decimal string).
+        class Obj:
+            def __hash__(self):
+                return id(self)
+
+        def fn(x):
+            s = repr(hash(Obj()))
+            return x + 1, s.isdigit()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        _, is_digit = compiled(torch.randn(4))
+        self.assertTrue(is_digit)
+
 
 if __name__ == "__main__":
     run_tests()

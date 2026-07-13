@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -148,6 +149,72 @@ class AOTInductorModelContainer {
     buffers_[1].map = std::make_shared<ConstantMap>();
     buffers_[1].array =
         std::make_shared<std::vector<ConstantHandle>>(model->num_constants());
+
+    in_spec_ = model->get_in_spec();
+    out_spec_ = model->get_out_spec();
+  }
+
+  // Construct with externally-provided weights (e.g. from CUDA IPC).
+  // Skips load_constants entirely — no GPU allocation for weights.
+  // The caller retains ownership of the provided tensor handles.
+  AOTInductorModelContainer(
+      size_t num_models,
+      const std::string& device_str,
+      const std::unordered_map<std::string, AtenTensorHandle>& constants,
+      const std::optional<std::string>& cubin_dir = std::nullopt) {
+    buffers_[0].map = std::make_shared<ConstantMap>();
+    buffers_[0].array = std::make_shared<std::vector<ConstantHandle>>();
+
+    models_.reserve(num_models);
+    available_models_.reserve(num_models);
+    for (size_t i = 0; i < num_models; ++i) {
+      models_.push_back(AOTInductorModel::Create(
+          buffers_[0].map, buffers_[0].array, device_str, cubin_dir));
+      models_.back()->set_constant_blob_releasable(false);
+      available_models_.push_back(models_.back().get());
+    }
+
+    auto* model = available_models_[0];
+    size_t num_inputs = model->num_inputs();
+    input_names_.reserve(num_inputs);
+    for (size_t i = 0; i < num_inputs; i++) {
+      input_names_.emplace_back(model->input_name(static_cast<int64_t>(i)));
+    }
+
+    size_t num_outputs = model->num_outputs();
+    output_names_.reserve(num_outputs);
+    for (size_t i = 0; i < num_outputs; i++) {
+      output_names_.emplace_back(model->output_name(static_cast<int64_t>(i)));
+    }
+
+    // This path must not call load_constants(): caller-owned tensors below are
+    // the only source of weight storage. release_* is disabled above so common
+    // setup code can call it and get an empty handle.
+    buffers_[0].blob = model->release_constant_blob();
+    buffers_[0].aux_cpu_blob = model->release_aux_cpu_constant_blob();
+    buffers_[0].array->resize(model->num_constants());
+    buffers_[1].map = std::make_shared<ConstantMap>();
+    buffers_[1].array =
+        std::make_shared<std::vector<ConstantHandle>>(model->num_constants());
+    constants_internal_offset_.resize(
+        model->num_constants() - model->num_folded_constants());
+    aux_cpu_constants_internal_offset_.resize(
+        model->num_constants() - model->num_folded_constants());
+    model->compute_constant_blob(
+        blob_size_,
+        constants_internal_offset_,
+        aux_cpu_blob_size_,
+        aux_cpu_constants_internal_offset_);
+
+    for (auto& m : models_) {
+      m->update_constants_map(buffers_[0].map);
+    }
+
+    // Populate the constants map with user-managed handles.
+    update_constant_buffer(constants, false, false, /*user_managed=*/true);
+
+    // Run constant folding and mark as done so run() won't re-fold.
+    run_const_fold(false, nullptr, nullptr);
 
     in_spec_ = model->get_in_spec();
     out_spec_ = model->get_out_spec();
@@ -352,6 +419,13 @@ class AOTInductorModelContainer {
       throw std::runtime_error("No available models in container!");
     }
     return models_[0]->constant_blob_size();
+  }
+
+  bool did_call_load_constants() const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->did_call_load_constants();
   }
 
   void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
@@ -587,6 +661,15 @@ class AOTInductorModelContainer {
     // constant as we walk.
     size_t main_blob_idx = 0;
     size_t aux_cpu_blob_idx = 0;
+#ifdef USE_CUDA
+    // Opt-in pinned async staging pool for the delta-update H2D copies below.
+    // nullptr (default / on allocation failure) keeps the throttled path.
+    auto staging_pool = tryMakeConstantsStagingPool();
+#endif
+    auto _update_start = std::chrono::steady_clock::now();
+    AOTI_LOG_LOADING(
+        "update_constant_buffer: starting copy of " << num_constants
+                                                    << " constants");
     for (size_t idx = 0; idx < num_constants; idx++) {
       if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
@@ -689,11 +772,37 @@ class AOTInductorModelContainer {
         offset = constants_internal_offset_[this_main_idx] /
             aoti_torch_dtype_element_size(dtype);
 #elif USE_CUDA
-        aoti_cuda_memcpy_throttled(
-            internal_constants_ptr,
-            user_constant_ptr,
-            static_cast<size_t>(constant_size),
-            cudaMemcpyDefault);
+        // Pinned-async staging only helps for pageable host sources (which
+        // trigger CUDA/HIP's device-wide implicit sync) and is only safe for
+        // them, since copyH2DViaStage CPU-reads the source. Device / pinned
+        // sources use the synchronous throttled copy, which serializes with
+        // prior device work on the source; the pool's private stream would not.
+        // Detect per constant: a single update may mix pageable-host and
+        // device/pinned sources, so the type cannot be cached across the loop.
+        bool use_staging = false;
+        if (staging_pool != nullptr) {
+          cudaPointerAttributes attrs{};
+          cudaError_t pointer_attrs_result =
+              cudaPointerGetAttributes(&attrs, user_constant_ptr);
+          if (pointer_attrs_result != cudaSuccess) {
+            (void)cudaGetLastError();
+            use_staging = true;
+          } else {
+            use_staging = (attrs.type == cudaMemoryTypeUnregistered);
+          }
+        }
+        if (use_staging) {
+          staging_pool->copyH2DViaStage(
+              internal_constants_ptr,
+              user_constant_ptr,
+              static_cast<size_t>(constant_size));
+        } else {
+          aoti_cuda_memcpy_throttled(
+              internal_constants_ptr,
+              user_constant_ptr,
+              static_cast<size_t>(constant_size),
+              cudaMemcpyDefault);
+        }
 #else
         memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
 #endif
@@ -718,7 +827,32 @@ class AOTInductorModelContainer {
       target.map->insert_or_assign(
           constant_name, RAIIAtenTensorHandle(tensor_handle));
     }
+#ifdef USE_CUDA
+    // Synchronize the staging stream (surfacing any async copy error) and
+    // release the pinned buffers before the updated constants are observed by
+    // callers.
+    if (staging_pool != nullptr) {
+      staging_pool->finish();
+    }
+    staging_pool.reset();
+#endif
+    auto _update_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - _update_start)
+                          .count();
+    AOTI_LOG_LOADING(
+        "update_constant_buffer: copy completed in " << _update_ms << " ms");
     target.update_array(models_[0].get());
+
+#ifdef USE_CUDA
+    // S638065: the GPU constant copies above run on the default stream (raw
+    // cudaMemcpy), while run_const_fold launches the fold on
+    // getCurrentCUDAStream(). On ROCm the default stream is not implicitly
+    // ordered with the fold's stream, so without this the fold could read
+    // not-yet-copied weights and bake stale values into the folded constants.
+    // Wait for the copies to complete before returning, so any subsequent fold
+    // (on any stream) sees the updated weights.
+    AOTI_RUNTIME_CUDA_CHECK(cudaStreamSynchronize(0));
+#endif // USE_CUDA
   }
 
   void swap_constant_buffer() {

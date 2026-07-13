@@ -4,6 +4,7 @@
 import dataclasses
 import functools
 import importlib
+import inspect
 import warnings
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
@@ -15,6 +16,7 @@ from sympy import Expr, Integer
 import torch
 from torch.fx import GraphModule
 
+from ...codegen.cutedsl.aux_scalars import CuteDSLAuxScalarBindings
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
@@ -53,6 +55,18 @@ class FlexFlashConfig:
     mask_mod_packed_intervals: tuple[PackedMaskInterval, ...] | None = None
 
 
+def collect_aux_scalar_symbols(
+    *buffer_groups: Sequence[Any],
+) -> tuple[sympy.Symbol, ...]:
+    symbols: dict[sympy.Symbol, None] = {}
+    for buffers in buffer_groups:
+        for buffer in buffers:
+            if isinstance(buffer, sympy.Expr):
+                for symbol in sorted(buffer.free_symbols, key=lambda s: s.name):
+                    symbols.setdefault(symbol, None)
+    return tuple(symbols)
+
+
 def get_flex_flash_fwd_configs(
     has_score_mod: bool,
     has_aux_tensors: bool,
@@ -63,6 +77,7 @@ def get_flex_flash_fwd_configs(
     has_mask_aux_tensors: bool = False,
     mask_mod_graph_module: GraphModule | None = None,
     mask_mod_other_buffers: Sequence[TensorBox] = (),
+    aux_scalar_symbols: Sequence[sympy.Symbol] = (),
 ) -> list[FlexFlashConfig]:
     cuda_major = None
     if torch.cuda.is_available() and (
@@ -86,22 +101,22 @@ def get_flex_flash_fwd_configs(
     )
     mask_mod_packed_intervals = None
     if has_mask_mod and cuda_major in (10, 11) and mask_mod_graph_module is not None:
-        mask_mod_packed_intervals = select_packed_mask_intervals(mask_mod_graph_module)
+        mask_mod_packed_intervals = select_packed_mask_intervals(
+            mask_mod_graph_module,
+            mask_mod_other_buffers,
+            CuteDSLAuxScalarBindings(tuple(aux_scalar_symbols)).symbol_codes(),
+        )
     if mask_mod_packed_intervals is not None:
-        if any(isinstance(buf, sympy.Expr) for buf in mask_mod_other_buffers):
-            # Packed interval rendering addresses tensor captures through aux_tensors,
-            # but symbolic scalar captures are not aux tensor inputs.
-            mask_mod_packed_intervals = None
-        else:
-            mask_mod_vec_size = DEFAULT_MASK_MOD_VEC_SIZE
+        mask_mod_vec_size = DEFAULT_MASK_MOD_VEC_SIZE
 
     if (
         has_score_mod
         and score_mod_vec_size is None
         and torch._inductor.config.max_autotune
     ):
-        # No captured score_mod tensors means any kernel-supported power-of-two
-        # vector width is legal, so autotune the full CuTe score_mod range.
+        # None means no captured tensor load constrained the score_mod vector width.
+        # Scalar captures are lane-uniform aux_scalars, so any kernel-supported
+        # power-of-two vector width is legal.
         score_mod_vec_sizes = (1, 2, 4, 8, 16, 32, 64, 128)
     else:
         score_mod_vec_sizes = (score_mod_vec_size,)
@@ -126,6 +141,20 @@ def _get_flex_flash_bwd_configs() -> list[FlexFlashConfig]:
 aten = torch.ops.aten
 prims = torch.ops.prims
 
+FLASH_ATTENTION_INSTALL_MESSAGE = (
+    "Install a compatible Flash Attention package, for example "
+    '`pip install --pre flash-attn-4` (`pip install --pre "flash-attn-4[cu13]"` '
+    "for CUDA 13), and see https://pypi.org/project/flash-attn-4/ "
+    "for PyPI packaging details."
+)
+
+
+def _flash_attention_unavailable_message() -> str:
+    return (
+        "CUTE flash attention library is not available. "
+        f"{FLASH_ATTENTION_INSTALL_MESSAGE}"
+    )
+
 
 @functools.lru_cache(maxsize=1)
 def ensure_flash_available() -> bool:
@@ -138,6 +167,19 @@ def ensure_flash_available() -> bool:
         return importlib.util.find_spec("flash_attn.cute") is not None  # type: ignore[attr-defined]
     except ImportError:
         return False
+
+
+@functools.lru_cache(maxsize=1)
+def flash_supports_aux_scalars() -> bool:
+    """Check whether the installed FA4 package supports scalar captures."""
+    try:
+        interface = importlib.import_module("flash_attn.cute.interface")
+    except ImportError:
+        return False
+    return (
+        "aux_scalars" in inspect.signature(interface._flash_attn_fwd).parameters
+        and "aux_scalars" in inspect.signature(interface._flash_attn_bwd).parameters
+    )
 
 
 from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
@@ -183,10 +225,12 @@ def _hierarchical_indexer_cute(
     """Return an indexer that preserves multi-dimensional indices for CuteDSL."""
 
     def indexer(indices: Sequence[Expr]) -> Expr:
-        assert offset == Integer(0), "Offset not supported for hierarchical indexing"
-        assert len(indices) == len(size), (
-            f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
-        )
+        if offset != Integer(0):
+            raise AssertionError("Offset not supported for hierarchical indexing")
+        if len(indices) != len(size):
+            raise AssertionError(
+                f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
+            )
         if not indices:
             return Integer(0)
         if len(indices) == 1:
@@ -262,7 +306,8 @@ def is_trivial_score_graph(graph_module: GraphModule) -> bool:
     nodes = list(graph.nodes)
     placeholders = [n for n in nodes if n.op == "placeholder"]
     output = [n for n in nodes if n.op == "output"]
-    assert len(output) == 1, "Got graph w/ multiple outputs"
+    if len(output) != 1:
+        raise AssertionError("Got graph w/ multiple outputs")
     output_val = output[0].args[0]
     # The identity graph just sends the score straight through
     return output_val == placeholders[0]
@@ -274,40 +319,20 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
     nodes = list(graph.nodes)
     placeholders = [n for n in nodes if n.op == "placeholder"]
     output = [n for n in nodes if n.op == "output"]
-    assert len(output) == 1, "Got graph w/ multiple outputs"
+    if len(output) != 1:
+        raise AssertionError("Got graph w/ multiple outputs")
     output_val = output[0].args[0]
 
     # mask mod graph is empty if we have 4 inputs and full_default output
     return len(placeholders) == 4 and output_val.target is torch.ops.aten.full.default
 
 
-@functools.lru_cache(maxsize=1)
-def _is_symbol_from_tensor_shape(symbol: sympy.Symbol, shape_env: Any) -> bool:
-    from torch._dynamo.source import TensorPropertySource
-
-    sources = shape_env.var_to_sources.get(symbol, [])
-    return any(isinstance(s, TensorPropertySource) for s in sources)
-
-
-def has_unsupported_captured_scalars(
+def has_unsupported_cpu_scalar_tensor_captures(
     score_mod_other_buffers: Sequence[Any],
     mask_mod_other_buffers: Sequence[Any],
 ) -> bool:
-    """Return True when FLASH captures dynamic scalars it cannot inline.
-
-    With dynamic=True, captured Python scalars in score_mod or mask_mod may
-    become sympy symbols from LocalSource (captured ints) or 0-dim CPU tensors
-    (captured floats). Symbols from TensorPropertySource are allowed because
-    tensor size/stride values are resolved at runtime, but LocalSource symbols
-    cannot be inlined into the CuteDSL template.
-    """
-    shape_env = V.graph.sizevars.shape_env
-
+    """Return True for CPU 0-d tensor captures that need scalarization first."""
     for buf in list(score_mod_other_buffers) + list(mask_mod_other_buffers):
-        if isinstance(buf, sympy.Expr):
-            for symbol in buf.free_symbols:
-                if not _is_symbol_from_tensor_shape(symbol, shape_env):
-                    return True
         if isinstance(buf, TensorBox):
             device = buf.get_device()
             size = buf.get_size()
@@ -327,7 +352,7 @@ def _can_use_flex_flash_attention(
         tuple: (can_use, reason) where reason explains why it can't be used if can_use is False
     """
     if not ensure_flash_available():
-        return False, "CUTE flash attention library is not available"
+        return False, _flash_attention_unavailable_message()
 
     if input_buffers_require_grads(subgraph.graph_module, num_score_mod_placeholders):
         return (
@@ -403,14 +428,15 @@ def create_flex_flash_attention_kernel(
             f"and value.dtype: {value.dtype}."
         )
     if not ensure_flash_available():
-        raise RuntimeError("CUTE flash attention not available")
+        raise RuntimeError(_flash_attention_unavailable_message())
 
     # Get dimensions
     batch_size, num_heads, seq_len_q, head_dim = query.get_size()
     v_head_dim = value.get_size()[-1]
     device = query.get_device()
     dtype = query.get_dtype()
-    assert device is not None, "Device must be specified"
+    if device is None:
+        raise AssertionError("Device must be specified")
 
     # Match stride pattern from query tensor
     q_strides = query.get_stride()
@@ -439,49 +465,73 @@ def create_flex_flash_attention_kernel(
         stride=[sympy.sympify(s) for s in output.get_stride()],
     )
 
-    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
-    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
-
     mask_graph_is_trivial = is_trivial_mask_graph(mask_graph.graph_module)
     score_graph_is_trivial = subgraph is None or is_trivial_score_graph(
         subgraph.graph_module
     )
 
-    needs_block_mask = not mask_graph_is_trivial
+    if kv_num_blocks is None or kv_indices is None:
+        raise AssertionError("kv block metadata is required for flex FLASH")
+
     has_score_mod = not score_graph_is_trivial
+    has_mask_mod = not mask_graph_is_trivial
     has_full_blocks = full_kv_num_blocks is not None
+    if has_full_blocks and full_kv_indices is None:
+        raise AssertionError("full_kv_indices must be provided with full_kv_num_blocks")
+    is_noop_block_mask = not has_full_blocks and V.graph.sizevars.statically_known_true(
+        sympy.And(
+            sympy.Eq(sparse_q_block_size, 1 << 30),
+            sympy.Eq(sparse_kv_block_size, 1 << 30),
+        )
+    )
+    needs_block_mask = not (mask_graph_is_trivial and is_noop_block_mask)
+    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
+    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
 
     choices: list[Any] = []
-    assert flash_attention_cutedsl_template is not None
+    if flash_attention_cutedsl_template is None:
+        raise AssertionError("flash_attention_cutedsl_template must not be None")
 
     input_nodes = [query, key, value, lse]
-    if has_full_blocks:
-        input_nodes.extend(
-            [kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices]
-        )
-
-    if needs_block_mask and not has_full_blocks:
-        raise NotImplementedError(
-            "Flash attention with block mask but without full blocks is not supported yet"
-        )
+    if needs_block_mask:
+        input_nodes.extend([kv_num_blocks, kv_indices])
+        if has_full_blocks:
+            input_nodes.extend([full_kv_num_blocks, full_kv_indices])
 
     subgraphs = []
     if has_score_mod:
         subgraphs.append(subgraph_buffer)
-    subgraphs.append(mask_graph_buffer)
+    if has_mask_mod:
+        subgraphs.append(mask_graph_buffer)
+
+    aux_scalar_symbols = collect_aux_scalar_symbols(
+        score_mod_other_buffers, mask_mod_other_buffers
+    )
+    if aux_scalar_symbols and not flash_supports_aux_scalars():
+        raise RuntimeError(
+            "CUTE flash attention scalar captures require flash-attn-4>=4.0.0b17. "
+            f"{FLASH_ATTENTION_INSTALL_MESSAGE}"
+        )
+    has_score_aux_tensors = any(
+        not isinstance(buffer, sympy.Expr) for buffer in score_mod_other_buffers
+    )
+    has_mask_aux_tensors = any(
+        not isinstance(buffer, sympy.Expr) for buffer in mask_mod_other_buffers
+    )
 
     configs = get_flex_flash_fwd_configs(
         has_score_mod=has_score_mod,
-        has_aux_tensors=len(score_mod_other_buffers) > 0,
+        has_aux_tensors=has_score_aux_tensors,
         device=device,
         score_mod_graph_module=(
             subgraph.graph_module if has_score_mod and subgraph is not None else None
         ),
         score_mod_other_buffers=score_mod_other_buffers,
-        has_mask_mod=needs_block_mask,
-        has_mask_aux_tensors=len(mask_mod_other_buffers) > 0,
+        has_mask_mod=has_mask_mod,
+        has_mask_aux_tensors=has_mask_aux_tensors,
         mask_mod_graph_module=mask_graph.graph_module,
         mask_mod_other_buffers=mask_mod_other_buffers,
+        aux_scalar_symbols=aux_scalar_symbols,
     )
     error: NotImplementedError | None = None
     for conf in configs:
@@ -498,7 +548,10 @@ def create_flex_flash_attention_kernel(
                 MASK_MOD_VEC_SIZE=conf.mask_mod_vec_size,
                 MASK_MOD_PACKED_INTERVALS=conf.mask_mod_packed_intervals,
                 MASK_MOD_OTHER_BUFFERS=mask_mod_other_buffers,
+                AUX_SCALAR_SYMBOLS=aux_scalar_symbols,
                 NEEDS_BLOCK_MASK=needs_block_mask,
+                HAS_MASK_MOD=has_mask_mod,
+                HAS_FULL_BLOCKS=has_full_blocks,
                 SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
             )
@@ -512,13 +565,18 @@ def create_flex_flash_attention_kernel(
         raise RuntimeError(f"CuteDSL template failed: {error}")
 
     input_gen_fns: dict[int, Callable] | None = None
-    if has_full_blocks:
+    if needs_block_mask:
         input_gen_fns = {
             4: create_num_blocks_fake_generator(kv_indices),
             5: create_indices_fake,
-            6: create_num_blocks_fake_generator(full_kv_indices),
-            7: create_indices_fake,
         }
+        if has_full_blocks:
+            input_gen_fns.update(
+                {
+                    6: create_num_blocks_fake_generator(full_kv_indices),
+                    7: create_indices_fake,
+                }
+            )
 
     template_output, _ = autotune_select_algorithm(
         "flex_flash_attention",
@@ -540,7 +598,7 @@ def _can_use_flex_flash_attention_backward(
     num_score_mod_placeholders: int = 5,
 ) -> tuple[bool, str]:
     if not ensure_flash_available():
-        return False, "CUTE flash attention is not available"
+        return False, _flash_attention_unavailable_message()
 
     if input_buffers_require_grads(
         fw_subgraph.graph_module, num_score_mod_placeholders
@@ -618,6 +676,7 @@ def create_flex_flash_attention_backward_kernel(
     joint_subgraph_buffer: Any | None = None,
     score_mod_other_buffers: list[TensorBox] | None = None,
     mask_graph_buffer: SubgraphResults | None = None,
+    mask_mod_other_buffers: list[TensorBox] | None = None,
     q_num_blocks: TensorBox | None = None,
     q_indices: TensorBox | None = None,
     full_q_num_blocks: TensorBox | None = None,
@@ -629,13 +688,14 @@ def create_flex_flash_attention_backward_kernel(
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
-        raise RuntimeError("CUTE flash attention not available")
+        raise RuntimeError(_flash_attention_unavailable_message())
 
     batch_size, num_heads, seq_len_q, head_dim = query.get_size()
     _, num_heads_kv, seq_len_kv, v_head_dim = value.get_size()
     device = query.get_device()
     dtype = query.get_dtype()
-    assert device is not None
+    if device is None:
+        raise AssertionError("Device must not be None")
 
     grad_query_strides = infer_dense_strides(
         [batch_size, num_heads, seq_len_q, head_dim], query.get_stride()
@@ -693,9 +753,14 @@ def create_flex_flash_attention_backward_kernel(
 
     has_block_mask = mask_graph_buffer is not None
     if has_block_mask:
-        assert q_indices is not None
-        assert full_q_num_blocks is not None
-        assert full_q_indices is not None
+        if q_indices is None:
+            raise AssertionError("q_indices required when block mask is present")
+        if full_q_num_blocks is None:
+            raise AssertionError(
+                "full_q_num_blocks required when block mask is present"
+            )
+        if full_q_indices is None:
+            raise AssertionError("full_q_indices required when block mask is present")
         input_nodes.extend(
             [
                 cast(TensorBox, q_num_blocks),
@@ -789,6 +854,14 @@ def create_flex_flash_attention_backward_kernel(
     if has_block_mask:
         subgraphs.append(mask_graph_buffer)
 
+    aux_scalar_symbols = collect_aux_scalar_symbols(
+        score_mod_other_buffers or (), mask_mod_other_buffers or ()
+    )
+    if aux_scalar_symbols and not flash_supports_aux_scalars():
+        raise RuntimeError(
+            "CUTE flash attention scalar captures require flash-attn-4>=4.0.0b17. "
+            f"{FLASH_ATTENTION_INSTALL_MESSAGE}"
+        )
     configs = _get_flex_flash_bwd_configs()
 
     error: NotImplementedError | None = None
@@ -808,6 +881,7 @@ def create_flex_flash_attention_backward_kernel(
                 HAS_DQ_WRITE_ORDER_FULL=dq_write_order_full is not None,
                 HAS_DQ_KV_ORDER=has_dq_kv_order,
                 DQ_KV_ORDER_SPT=dq_kv_order_spt_for_flash,
+                AUX_SCALAR_SYMBOLS=aux_scalar_symbols,
                 SUPPORTS_DQ_KV_ORDER=supports_dq_kv_order,
                 SUPPORTS_SPT=supports_spt,
                 DETERMINISTIC_BACKWARD_ENABLED=deterministic_backward_enabled,

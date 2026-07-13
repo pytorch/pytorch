@@ -191,6 +191,31 @@ class TestNbLshift(torch._dynamo.test_case.TestCase):
 
     # --- SymNode lshift ---
 
+    def test_lshift_tensor_and_int(self):
+        def fn(x):
+            return x << 2
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_lshift_int_and_tensor(self):
+        def fn(x):
+            return 2 << x
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_lshift_tensor_and_tensor(self):
+        def fn(x, y):
+            return x << y
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        y = torch.tensor([1, 0, 2], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
     def test_lshift_symnode_and_int(self):
         def fn(x):
             s = x.shape[0]
@@ -401,6 +426,31 @@ class TestNbRshift(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, "B.__rrshift__ called")
 
     # --- SymNode rshift ---
+
+    def test_rshift_tensor_and_int(self):
+        def fn(x):
+            return x >> 1
+
+        x = torch.tensor([16, 8, 4], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_rshift_int_and_tensor(self):
+        def fn(x):
+            return 32 >> x
+
+        x = torch.tensor([1, 2, 3], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_rshift_tensor_and_tensor(self):
+        def fn(x, y):
+            return x >> y
+
+        x = torch.tensor([16, 8, 4], dtype=torch.int64)
+        y = torch.tensor([1, 2, 0], dtype=torch.int64)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
 
     def test_rshift_symnode_and_int(self):
         def fn(x):
