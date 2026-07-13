@@ -1950,9 +1950,15 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             joint, [], [derived_node], num_fwd_outputs=1
         )
         bw_placeholders = list(bw_graph.graph.find_nodes(op="placeholder"))
+        # The backward binds the unreplaced symbol u0 (needed by runtime
+        # assertions, which preserve raw placeholder expressions) *and* the
+        # replacement target s0 (needed by sizevar codegen and FxGraphCache
+        # guards, which use ShapeEnv replacements). Binding only u0 leaves s0
+        # undefined in the backward, surfacing as a KeyError during backward
+        # FxGraphCache guard evaluation.
         self.assertEqual(
             [node.meta["val"].node._expr for node in bw_placeholders],
-            [u0, u0 + 1],
+            [s0, u0, u0 + 1],
         )
 
         graph_inputs = [node.meta["val"] for node in bw_placeholders]
@@ -1964,14 +1970,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self.assertEqual(
             [lowering.graph_inputs[name] for name in lowering.graph_input_names],
-            [u1, u1 + 1],
+            [s0, u1, u1 + 1],
         )
         self.assertEqual(
             [
                 lowering.graph_inputs[name].xreplace({u1: s0})
                 for name in lowering.graph_input_names
             ],
-            [s0, s0 + 1],
+            [s0, s0, s0 + 1],
         )
 
     def test_batched_matmul_inference_mode(self):

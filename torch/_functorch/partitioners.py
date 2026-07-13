@@ -52,6 +52,7 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator, Sy
 from torch.fx.experimental.symbolic_shapes import (
     _get_placeholder_expr,
     find_symbol_binding_fx_nodes,
+    free_symbols,
     is_symbol_binding_fx_node,
     is_symbolic,
     optimization_hint,
@@ -1442,9 +1443,17 @@ def _extract_fwd_bwd_modules(
     for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
         if "val" not in node.meta:
             continue
+        # Bind both the unreplaced symbols (needed by runtime assertions, which
+        # preserve raw placeholder expressions -- see #155468) and the replaced
+        # symbols (needed by sizevar codegen and FxGraphCache guards, which use
+        # ShapeEnv replacements). Binding only one side can leave the other's
+        # symbols undefined in the backward: e.g. an offsets size that is a
+        # symbol replaced to `s + 1` leaves the base symbol `s` unbound, which
+        # surfaces as a KeyError during backward FxGraphCache guard evaluation.
         new_symbols = (
-            _free_symbols_without_replacements(node.meta["val"]) - saved_symbols
-        )
+            _free_symbols_without_replacements(node.meta["val"])
+            | free_symbols(node.meta["val"])
+        ) - saved_symbols
         # NB: Deterministic order please!
         for s in sorted(new_symbols, key=lambda s: s.name):
             # NB: For well formed graphs, the symbol should always be present,
