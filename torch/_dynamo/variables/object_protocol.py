@@ -1930,9 +1930,11 @@ def mro_lookup(py_type: type, name: str) -> object:
     chain.  Returns the raw descriptor/value from the class __dict__,
     or NO_SUCH_SUBOBJ if not found.
     """
-    for base in py_type.__mro__:
-        if name in base.__dict__:
-            return base.__dict__[name]
+    mro = type.__getattribute__(py_type, "__mro__")
+    for base in mro:
+        class_dict = type.__getattribute__(base, "__dict__")
+        if name in class_dict:
+            return class_dict[name]
     return NO_SUCH_SUBOBJ
 
 

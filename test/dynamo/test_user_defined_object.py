@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import dataclasses
 import types
 import unittest
@@ -83,6 +84,758 @@ class Slots:
 
 class SlotsShadowed(SlotsBase):
     x = 42  # class attribute shadows parent's slot descriptor
+
+
+class TestUserDefinedObjectConstruction(TestCase):
+    def test_instantiate_class_with_custom_getattribute(self):
+        class Foo:
+            def __init__(self, a):
+                self.a = a
+
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(t):
+            _ = Foo(3)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_custom_getattribute_and_attr_read(self):
+        class Foo:
+            def __init__(self, a):
+                self.a = a
+
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_avoids_metaclass_getattribute_for_init(self):
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name in {"__new__", "__init__"}:
+                    raise RuntimeError("should use static constructor lookup")
+                return super().__getattribute__(name)
+
+        class Foo(metaclass=Meta):
+            def __init__(self, a):
+                self.a = a
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_class_init_read_honors_metaclass_getattribute_with_polyfill_name(self):
+        class Meta(type):
+            def __getattribute__(cls, name):
+                if name == "__init__":
+                    raise RuntimeError("should use metaclass lookup")
+                return super().__getattribute__(name)
+
+        class Foo(metaclass=Meta):
+            pass
+
+        def instantiate_user_defined_class_object():
+            return Foo.__init__
+
+        opt_fn = torch.compile(
+            instantiate_user_defined_class_object, backend="eager", fullgraph=True
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Observed exception|Custom metaclass with __getattribute__",
+        ):
+            opt_fn()
+
+    def test_instantiate_class_ignores_instance_init_attr(self):
+        class Foo:
+            def __new__(cls, *args):
+                obj = object.__new__(cls)
+
+                def wrong_init(*args, **kwargs):
+                    raise AssertionError("should call class __init__")
+
+                obj.__init__ = wrong_init
+                return obj
+
+            def __init__(self, a):
+                self.a = a
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_class_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            f = Foo()
+            Foo.__init__(f, 1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"object\.__init__\(\) takes exactly one argument",
+        ):
+            opt_fn(x)
+
+    def test_instantiate_class_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            Foo(1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"object\.__init__\(\) takes exactly one argument",
+        ):
+            opt_fn(x)
+
+    def test_instantiate_class_object_init_with_extra_arg_custom_new_noop(self):
+        class Foo:
+            def __new__(cls, *args):
+                return object.__new__(cls)
+
+        def fn(t):
+            Foo(1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_class_object_init_with_extra_arg_custom_new_noop(self):
+        class Foo:
+            def __new__(cls):
+                return object.__new__(cls)
+
+        def fn(t):
+            f = Foo()
+            Foo.__init__(f, 1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_bound_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            f = Foo()
+            f.__init__(1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"object\.__init__\(\) takes exactly one argument",
+        ):
+            opt_fn(x)
+
+    def test_explicit_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            f = Foo()
+            object.__init__(f, 1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"object\.__init__\(\) takes exactly one argument",
+        ):
+            opt_fn(x)
+
+    def test_super_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            def __init__(self):
+                super().__init__(1)
+
+        def fn(t):
+            Foo()
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"object\.__init__\(\) takes exactly one argument",
+        ):
+            opt_fn(x)
+
+    def test_explicit_exception_init_updates_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn(t):
+            e = MyError()
+            MyError.__init__(e, 1)
+            return t.sin() + len(e.args)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_exception_init_updates_escaped_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            e = MyError()
+            MyError.__init__(e, 1)
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn().args, fn().args)
+
+    def test_bound_exception_init_updates_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn(t):
+            e = MyError(1)
+            e.__init__()
+            return t.sin() + len(e.args)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_bound_exception_init_updates_escaped_args(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            e = MyError(1)
+            e.__init__()
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn().args, fn().args)
+
+    def test_exception_new_returned_instance_no_arg_init_graph_breaks(self):
+        class MyError(Exception):
+            saved = None
+
+            def __new__(cls):
+                return cls.saved
+
+        MyError.saved = Exception.__new__(MyError)
+        BaseException.__init__(MyError.saved, "stale")
+
+        def fn():
+            e = MyError()
+            return len(e.args)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "existing exception object"
+        ):
+            opt_fn()
+
+    def test_explicit_exception_init_with_wrong_receiver_not_supported(self):
+        class MyError(Exception):
+            pass
+
+        def fn():
+            values = []
+            MyError.__init__(values, 1)
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_builtin_exception_init_requires_descriptor_owner(self):
+        def fn():
+            e = BaseException("x")
+            Exception.__init__(e)
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_exception_init_requires_descriptor_owner(self):
+        class MyError(OSError):
+            pass
+
+        def fn():
+            e = BaseException()
+            MyError.__init__(e, 1)
+            return e
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_set_init_with_kwargs_not_supported(self):
+        class MySet(set):
+            pass
+
+        def fn():
+            s = MySet()
+            MySet.__init__(s, iterable=[1])
+            return s
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_set_init_with_wrong_receiver_not_supported(self):
+        class MySet(set):
+            pass
+
+        def fn():
+            values = []
+            MySet.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_set_init_with_wrong_receiver_and_kwargs_not_supported(self):
+        class MySet(set):
+            pass
+
+        def fn():
+            values = []
+            MySet.__init__(values, iterable=[1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_dict_init_with_wrong_receiver_not_supported(self):
+        class MyDict(dict):
+            pass
+
+        def fn():
+            values = []
+            MyDict.__init__(values, a=1)
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_list_init_with_wrong_receiver_not_supported(self):
+        class MyList(list):
+            pass
+
+        def fn():
+            values = {}
+            MyList.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_ordered_dict_init_with_wrong_receiver_not_supported(self):
+        def fn():
+            values = {}
+            collections.OrderedDict.__init__(values, a=1)
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_ordered_dict_subclass_init_with_wrong_receiver_not_supported(
+        self,
+    ):
+        class MyOrderedDict(collections.OrderedDict):
+            pass
+
+        def fn():
+            values = {}
+            MyOrderedDict.__init__(values, a=1)
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_ordered_dict_init_ignores_update_override(self):
+        class MyOrderedDict(collections.OrderedDict):
+            def update(self, *args, **kwargs):
+                self["sentinel"] = 1
+                return super().update(*args, **kwargs)
+
+        def fn():
+            values = MyOrderedDict()
+            collections.OrderedDict.__init__(values, {"a": 1})
+            return list(values.items())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+
+    def test_explicit_ordered_dict_init_uses_setitem_override(self):
+        class MyOrderedDict(collections.OrderedDict):
+            def __setitem__(self, key, value):
+                super().__setitem__("sentinel", 1)
+                return super().__setitem__(key, value)
+
+        def fn():
+            values = MyOrderedDict()
+            collections.OrderedDict.__init__(values, {"a": 1})
+            return list(values.items())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+
+    def test_explicit_ordered_dict_init_preserves_duplicate_pair_setitems(self):
+        class MyOrderedDict(collections.OrderedDict):
+            def __init__(self):
+                self.count = 0
+
+            def __setitem__(self, key, value):
+                self.count += 1
+                return super().__setitem__(key, value)
+
+        def fn():
+            values = MyOrderedDict()
+            collections.OrderedDict.__init__(values, [("a", 1), ("a", 2)])
+            return values.count, list(values.items())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+
+    def test_explicit_ordered_dict_init_bad_pair_error_matches_eager(self):
+        def fn(data):
+            values = collections.OrderedDict()
+            try:
+                collections.OrderedDict.__init__(values, data)
+            except ValueError as e:
+                return str(e)
+            return "no error"
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for data in ([()], [("a",)], [("a", 1, 2)]):
+            self.assertEqual(opt_fn(data), fn(data))
+
+    def test_explicit_defaultdict_init_with_wrong_receiver_not_supported(self):
+        def fn():
+            values = {}
+            collections.defaultdict.__init__(values)
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_defaultdict_init_resets_default_factory(self):
+        def fn():
+            values = collections.defaultdict(list)
+            collections.defaultdict.__init__(values)
+            return values.default_factory is None
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+
+    def test_instantiate_deque_subclass_init(self):
+        class MyDeque(collections.deque):
+            pass
+
+        def fn(t):
+            d = MyDeque(range(25))
+            d.__init__(range(200))
+            for i in range(200, 400):
+                d.append(i)
+            for i in reversed(range(-200, 0)):
+                d.appendleft(i)
+            left = [d.popleft() for _ in range(250)]
+            return t.sin(), len(d), list(d), left
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_deque_subclass_init_resets_maxlen(self):
+        class MyDeque(collections.deque):
+            pass
+
+        def fn(t):
+            d = MyDeque([1, 2], maxlen=2)
+            MyDeque.__init__(d, range(4))
+            return t.sin(), d.maxlen, list(d)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_deque_init_with_wrong_receiver_not_supported(self):
+        class MyDeque(collections.deque):
+            pass
+
+        def fn():
+            values = []
+            MyDeque.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_frozenset_init_noop(self):
+        class MyFrozenSet(frozenset):
+            pass
+
+        def fn(t):
+            s = MyFrozenSet([1])
+            MyFrozenSet.__init__(s, [2])
+            return t.sin() + len(s) + (1 if 1 in s else 0)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_frozenset_init_with_kwargs_noop(self):
+        class MyFrozenSet(frozenset):
+            pass
+
+        def fn():
+            s = MyFrozenSet([1])
+            MyFrozenSet.__init__(s, iterable=[1])
+            return len(s)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+
+    def test_explicit_frozenset_init_with_immutable_receiver_noop(self):
+        class MyFrozenSet(frozenset):
+            pass
+
+        def fn(t):
+            receiver = tuple()
+            MyFrozenSet.__init__(receiver, [1])
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_frozenset_init_with_wrong_receiver_not_supported(self):
+        class MyFrozenSet(frozenset):
+            pass
+
+        def fn():
+            values = []
+            MyFrozenSet.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_exact_frozenset_init_with_wrong_receiver_not_supported(self):
+        def fn():
+            values = []
+            frozenset.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_exact_set_init_with_wrong_receiver_not_supported(self):
+        def fn():
+            values = []
+            set.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_explicit_exact_tuple_init_with_wrong_receiver_not_supported(self):
+        def fn():
+            values = []
+            tuple.__init__(values, [1])
+            return values
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Observed exception"
+        ):
+            opt_fn()
+
+    def test_instantiate_class_with_staticmethod_init(self):
+        class Foo:
+            def __new__(cls, *args):
+                return object.__new__(cls)
+
+            def init(a):
+                pass
+
+            __init__ = staticmethod(init)
+
+        def fn(t):
+            Foo(3)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_classmethod_init(self):
+        class Foo:
+            def __new__(cls, *args):
+                return object.__new__(cls)
+
+            def init(cls, a):
+                pass
+
+            __init__ = classmethod(init)
+
+        def fn(t):
+            Foo(3)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_list_subclass_init_replaces_contents(self):
+        class MyList(list):
+            pass
+
+        def fn(t):
+            l = MyList([t])
+            MyList.__init__(l, [t + 1])
+            first = l[0]
+            MyList.__init__(l)
+            return first, len(l)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_custom_getattribute_reads_init_state(self):
+        class Foo:
+            def __init__(self, a):
+                object.__setattr__(self, "ready", True)
+                self.a = a
+
+            def __getattribute__(self, name):
+                if super().__getattribute__("ready"):
+                    return super().__getattribute__(name)
+                raise RuntimeError("not ready")
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_custom_getattribute_normal_setattr(self):
+        class Foo:
+            def __init__(self, a):
+                self.ready = True
+                self.a = a
+
+            def __getattribute__(self, name):
+                try:
+                    ready = super().__getattribute__("ready")
+                except AttributeError:
+                    raise RuntimeError("not ready") from None
+                if ready:
+                    return super().__getattribute__(name)
+                raise RuntimeError("not ready")
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_slotted_class_with_custom_getattribute(self):
+        class Foo:
+            __slots__ = ("ready", "a")
+
+            def __init__(self, a):
+                object.__setattr__(self, "ready", True)
+                self.a = a
+
+            def __getattribute__(self, name):
+                if super().__getattribute__("ready"):
+                    return super().__getattribute__(name)
+                raise RuntimeError("not ready")
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
 
 class SlotsAndProperty:
