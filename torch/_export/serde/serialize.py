@@ -28,7 +28,7 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
-from torch._library.opaque_object import get_opaque_type_name, is_opaque_value
+from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
@@ -1586,7 +1586,7 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(
                 as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn)
             )
-        elif is_opaque_value(arg):
+        elif is_custom_class_obj(arg):
             custom_obj_name = f"_custom_obj_{len(self.custom_objs)}"
             self.custom_objs[custom_obj_name] = arg
             class_fqn = get_opaque_type_name(type(arg))
@@ -1618,7 +1618,7 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state.sym_float_values[name] = serialize_sym_float(meta_val)
         return SymFloatArgument.create(as_name=name)
 
-    def serialize_sym_bool_output(self, name, meta_val) -> SymIntArgument:
+    def serialize_sym_bool_output(self, name, meta_val) -> SymBoolArgument:
         if name in self.graph_state.sym_bool_values:
             raise AssertionError(f"name {name!r} already in sym_bool_values")
         self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)

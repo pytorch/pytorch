@@ -178,15 +178,15 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
             self.assertLessEqual(
                 num_handlers,
                 2,
-                "All pt2 loggers should only have at most two handlers (debug artifacts and messages above debug level).",
+                "All pt2 loggers should only have at most two Torch handlers (debug artifacts and messages above debug level).",
             )
 
-            self.assertGreater(num_handlers, 0, "All pt2 loggers should have more than zero handlers")
+            self.assertGreater(num_handlers, 0, "All pt2 loggers should have more than zero Torch handlers")
 
             for handler in torch_handlers:
                 old_emit = handler.emit
 
-                def new_emit(record):
+                def new_emit(record, old_emit=old_emit):
                     old_emit(record)
                     emit_post_hook(record)
 
