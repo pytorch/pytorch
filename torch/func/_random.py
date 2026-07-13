@@ -65,7 +65,7 @@ class PRNGKey(torch.Tensor):
     def _split(self, num: int) -> "PRNGKey":
         raise NotImplementedError
 
-    def _fold_in(self, data: int) -> "PRNGKey":
+    def _fold_in(self, data: int | torch.Tensor) -> "PRNGKey":
         raise NotImplementedError
 
     def _uniform(
@@ -95,7 +95,11 @@ class Philox4x32_10Key(PRNGKey):
         return Philox4x32_10Key(torch.ops.aten._philox_key_split(self, num))
 
     def _fold_in(self, data):
-        return Philox4x32_10Key(torch.ops.aten._philox_key_fold_in(self, data))
+        if isinstance(data, torch.Tensor):
+            result = torch.ops.aten._philox_key_fold_in.Tensor(self, data)
+        else:
+            result = torch.ops.aten._philox_key_fold_in(self, data)
+        return Philox4x32_10Key(result)
 
     def _uniform(self, out, low, high, portable):
         return torch.ops.aten._philox_uniform_(out, self, low, high, portable)
@@ -108,7 +112,7 @@ _IMPLS: dict[str, type[PRNGKey]] = {"philox4x32-10": Philox4x32_10Key}
 
 
 def key(
-    seed: int, impl: str = "philox4x32-10", device: torch.device | None = None
+    seed: int, *, device: torch.device | None = None, impl: str = "philox4x32-10"
 ) -> torch.Tensor:
     r"""Create a PRNG key from a seed.
 
@@ -119,10 +123,10 @@ def key(
 
     Args:
         seed (int): The seed value for the PRNG.
-        impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
-            supported.
         device (:class:`torch.device`, optional): The desired device for the
             returned key. Default: ``cpu``.
+        impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
+            supported.
 
     Returns:
         A tensor representing the PRNG key.
@@ -300,20 +304,30 @@ def _philox_unbind(
     return torch.stack([seeds, offset], dim=-1).view(torch.uint64)
 
 
-def fold_in(key: torch.Tensor, data: int) -> torch.Tensor:
-    r"""Deterministically derive a new key by folding in an integer.
+def fold_in(key: torch.Tensor, data: int | torch.Tensor) -> torch.Tensor:
+    r"""Deterministically derive a new key by folding in an integer value.
+
+    ``data`` may be a Python ``int`` or a single-item ``uint64`` tensor. Note
+    that passing ``data`` as a tensor prevents it from being baked into a
+    captured CUDA graph, so the graph can be replayed with a different value
+    without recapture.
 
     Equivalent to ``split(key, data + 1)[data]``, but more efficient when
     only a single derived key is needed. Useful for associating a key with
     a loop iteration, layer index, or other integer identifier.
 
-    Supports batched keys: if ``key`` has shape ``(*batch, K)``, each key in
-    the batch is folded independently.
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, ``data`` is
+    folded into each key independently.
 
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
-        data (int): An integer to fold into the key, interpreted as uint64.
+        data (int or Tensor): The value to fold into the key, interpreted as
+            uint64. An ``int`` must be within the inclusive range
+            ``[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]``. Negative inputs
+            are remapped to positive values with the formula
+            ``0x1_0000_0000_0000_0000 + data``. A tensor must have dtype
+            ``uint64`` and contain a single value.
 
     Returns:
         A new key tensor with the same shape as ``key``.
@@ -328,8 +342,19 @@ def fold_in(key: torch.Tensor, data: int) -> torch.Tensor:
         >>> assert torch.equal(k0, keys[0])  # doctest: +SKIP
         >>> assert torch.equal(k1, keys[1])  # doctest: +SKIP
     """
+    if not isinstance(data, torch.Tensor):
+        data = int(data)
+        if not -(1 << 63) <= data <= (1 << 64) - 1:
+            raise ValueError(
+                f"fold_in: int data must be in [-2**63, 2**64 - 1], got {data}"
+            )
+        # Reinterpret as signed int64 due to ATen op schema; kernel will cast back
+        if data >= (1 << 63):
+            data -= 1 << 64
     if isinstance(key, PRNGKey):
         return key._fold_in(data)
+    if isinstance(data, torch.Tensor):
+        return torch.ops.aten._philox_key_fold_in.Tensor(key, data)
     return torch.ops.aten._philox_key_fold_in(key, data)
 
 
