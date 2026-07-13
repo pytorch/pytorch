@@ -15918,12 +15918,15 @@ class TestComplex(TestCase):
         torch.manual_seed(0)
         grad64 = torch.randn(64, dtype=torch.complex64)
         out64 = torch.tanh(torch.randn(64, dtype=torch.complex64))
-        expected = torch.ops.aten.tanh_backward(grad64, out64)
-        # chalf has no CPU reference, so both dtypes compare against the
-        # complex64 CPU result on the same values (chalf at half tolerance).
+        # chalf has no CPU kernel, so reference the complex64 CPU result on the
+        # SAME rounded inputs the MPS kernel sees (upcast back to complex64 for
+        # the CPU compute). Referencing the unrounded complex64 values would
+        # fold input-rounding error into the tolerance and could mask a real
+        # kernel bug at chalf's loose 1e-2 tolerance.
         for dtype, atol in [(torch.complex64, 1e-5), (torch.complex32, 1e-2)]:
-            grad, out = grad64.to(dtype).to("mps"), out64.to(dtype).to("mps")
-            actual = torch.ops.aten.tanh_backward(grad, out)
+            grad, out = grad64.to(dtype), out64.to(dtype)
+            expected = torch.ops.aten.tanh_backward(grad.to(torch.complex64), out.to(torch.complex64))
+            actual = torch.ops.aten.tanh_backward(grad.to("mps"), out.to("mps"))
             self.assertEqual(actual.cpu().to(torch.complex64), expected, atol=atol, rtol=atol)
         # scale keeps draws away from tanh's poles at i*pi/2, where gradients
         # blow up and float noise amplifies past any sane tolerance
