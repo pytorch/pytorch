@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import platform
 import unittest
 
 import torch
@@ -733,9 +734,20 @@ class GraphModule(torch.nn.Module):
         )
 
 
+def _is_x86_cpu():
+    return platform.machine().lower() in ("x86_64", "amd64", "i386", "i686")
+
+
 @xfailIfNoAcceleratorTriton
 class TestDynamoDecompositionsNumerics(TestCase):
     """Numerics tests for dynamo decompositions across devices."""
+
+    def assertAddcmulTensorValueEqual(self, expected, actual, device):
+        # Pin bitwise parity on x86; ARM NEON/SVE can differ by FMA contraction.
+        if device == "cpu" and _is_x86_cpu():
+            self.assertEqual(expected, actual, atol=0, rtol=0)
+        else:
+            self.assertEqual(expected, actual)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
@@ -978,10 +990,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
         expected = fn(x.clone(), t1, t2, value)
         actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)
-        if device == "cpu":
-            self.assertEqual(expected, actual, atol=0, rtol=0)
-        else:
-            self.assertEqual(expected, actual)
+        self.assertAddcmulTensorValueEqual(expected, actual, device)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
@@ -1000,7 +1009,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
         expected = fn(x.clone(), t1, t2, value)
         actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)
-        self.assertEqual(expected, actual, atol=0, rtol=0)
+        self.assertAddcmulTensorValueEqual(expected, actual, device)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
@@ -1029,7 +1038,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
         expected_grads = run(fn)
         actual_grads = run(torch.compile(fn, fullgraph=True))
         for expected, actual in zip(expected_grads, actual_grads):
-            self.assertEqual(expected, actual, atol=0, rtol=0)
+            self.assertAddcmulTensorValueEqual(expected, actual, device)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
@@ -1086,7 +1095,7 @@ class TestDynamoDecompositionsNumerics(TestCase):
         expected_grads = run(fn)
         actual_grads = run(torch.compile(fn, fullgraph=True))
         for expected, actual in zip(expected_grads, actual_grads):
-            self.assertEqual(expected, actual, atol=0, rtol=0)
+            self.assertAddcmulTensorValueEqual(expected, actual, device)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
