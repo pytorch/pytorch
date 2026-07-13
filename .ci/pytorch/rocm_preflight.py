@@ -41,9 +41,36 @@ def _worker(rank: int, world_size: int) -> None:
         dist.destroy_process_group()
 
 
+def _diag() -> None:
+    """Print container-side GPU visibility to disambiguate a device_count()==0
+    failure: a container KFD/topology-passthrough gap (no /dev/dri render nodes,
+    /dev/kfd unreadable, rocminfo sees 0 agents) vs. a torch/HIP-layer problem
+    (devices present to the OS/rocminfo but torch still enumerates 0)."""
+    import glob
+    import subprocess
+
+    try:
+        print(f"[preflight-diag] /dev/dri: {sorted(glob.glob('/dev/dri/*'))}")
+        print(f"[preflight-diag] /dev/kfd readable: {os.access('/dev/kfd', os.R_OK)}")
+        for var in ("HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+            print(f"[preflight-diag] {var}={os.environ.get(var, '<unset>')}")
+        rocminfo = subprocess.run(
+            "rocminfo | grep -c -E 'Name:.*\\sgfx'",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+        print(f"[preflight-diag] rocminfo gfx-agent count: {rocminfo.stdout.strip()!r}")
+        print(f"[preflight-diag] torch.cuda.device_count(): {torch.cuda.device_count()}")
+        print(f"[preflight-diag] torch.version.hip: {torch.version.hip}")
+    except Exception as e:  # noqa: BLE001 - diagnostics must never mask the real error
+        print(f"[preflight-diag] error while collecting diagnostics: {e}")
+
+
 def main() -> int:
     n = torch.cuda.device_count()
     if n < 1:
+        _diag()
         print("::error::ROCm pre-flight: no GPUs visible to the container")
         return 1
     world_size = min(2, n)

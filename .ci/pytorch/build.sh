@@ -140,6 +140,14 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
       export PYTORCH_ROCM_ARCH="gfx906"
   fi
 
+  if [[ "$BUILD_ENVIRONMENT" == *rocm-preview* ]]; then
+    # TheRock preview exposes rocSHMEM, but the linked torch_rocshmem path can
+    # fail HIP fat-binary registration before torch can enumerate GPUs on the
+    # distributed shards. Drop rocSHMEM linkage (USE_NVSHMEM gates torch_rocshmem
+    # for USE_ROCM in caffe2/CMakeLists.txt) until the preview stack is fixed.
+    export USE_NVSHMEM=0
+  fi
+
   # hipify sources
   python tools/amd_build/build_amd.py
 fi
