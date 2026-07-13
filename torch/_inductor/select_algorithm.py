@@ -4979,7 +4979,16 @@ class AlgorithmSelectorCache(PersistentCache):
                         kernel_name=c.bmreq.kernel_name, source_code=source_code
                     ).future
                     log.debug("Submitted triton async compile for choice: %s", c)
-                elif nvgemm_choice and use_nvgemm_subprocess:
+                elif (
+                    nvgemm_choice
+                    and use_nvgemm_subprocess
+                    # Scaled-GEMM enum args now pickle (see _register_enum_pickling
+                    # in nv_universal_gemm_utils), but the scaled precompile worker
+                    # still initializes CUDA and then forks -> "Cannot re-initialize
+                    # CUDA in forked subprocess". Keep scaled in-process until that
+                    # worker is made fork-safe (or the pool forced to spawn).
+                    and c.bmreq.variant.name != "SCALED_GEMM"
+                ):
                     from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
                         CUDAContextMetadata,
                     )
@@ -4988,7 +4997,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         c.bmreq.kernel, c.bmreq.input_tensor_meta[0].device
                     )
                     future = async_compile.nvgemm_precompile(
-                        kernel_name=c.bmreq.kernel.metadata.kernel_name,
+                        kernel_name=c.bmreq.kernel.metadata.operator_name,
                         variant_name=c.bmreq.variant.name,
                         accumulator_type=c.bmreq.accumulator_type,
                         input_tensor_meta=c.bmreq.input_tensor_meta,
@@ -4998,6 +5007,8 @@ class AlgorithmSelectorCache(PersistentCache):
                         scale_type_b=c.bmreq.scale_type_b,
                         swizzle_type_a=c.bmreq.swizzle_type_a,
                         swizzle_type_b=c.bmreq.swizzle_type_b,
+                        has_bias_epilogue=c.bmreq.has_bias_epilogue,
+                        swap_ab=c.bmreq.swap_ab,
                     )
                     log.debug(
                         "Submitted nvgemm subprocess precompile for choice: %s", c
