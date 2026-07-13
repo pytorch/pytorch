@@ -372,11 +372,11 @@ def is_noncontiguous_supported(device):
 
 def handle_noncontiguous_outputs(input_tlist, output):
     device = None
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import FakeTensor, maybe_get_fake_device
 
     for t in input_tlist:
         if isinstance(t, FakeTensor):
-            device = t.fake_device
+            device = maybe_get_fake_device(t)
             break
 
     if not is_noncontiguous_supported(device):
@@ -426,7 +426,7 @@ def _broadcast_shapes(*_shapes):
                     continue
             else:
                 # When backed size oblivious is used, we specialize for broadcasting
-                # if its the only way to compile the example input.
+                # if it's the only way to compile the example input.
                 # i.e: s0:1, s1:1 ==>
                 #           assert s0==s1, no specialization on ==1 or !=1.
                 #            The non-broadcast path is picked
@@ -3178,7 +3178,7 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
             shape_[offset_idx] = x
         else:
             # When backed size oblivious is used, we specialize for broadcasting
-            # if its the only way to compile the example input.
+            # if it's the only way to compile the example input.
             # i.e: x:1, requested_length:1 ==>
             #           assert x==requested_length, no specialization on ==1 or !=1.
             #            The non-broadcast path is picked
@@ -3430,6 +3430,66 @@ def native_group_norm(
     return (out, mean, rstd)
 
 
+_SCALAR_TYPE_NAME_OVERRIDES = {
+    "uint8": "Byte",
+    "int8": "Char",
+    "int16": "Short",
+    "int32": "Int",
+    "int64": "Long",
+    "float16": "Half",
+    "float32": "Float",
+    "float64": "Double",
+    "complex32": "ComplexHalf",
+    "complex64": "ComplexFloat",
+    "complex128": "ComplexDouble",
+    "bool": "Bool",
+    "qint8": "QInt8",
+    "quint8": "QUInt8",
+    "qint32": "QInt32",
+    "bfloat16": "BFloat16",
+    "quint4x2": "QUInt4x2",
+    "quint2x4": "QUInt2x4",
+    "bcomplex32": "BComplex32",
+}
+
+
+def _scalar_type_name(dtype: torch.dtype) -> str:
+    dtype_name = str(dtype).removeprefix("torch.")
+    if dtype_name in _SCALAR_TYPE_NAME_OVERRIDES:
+        return _SCALAR_TYPE_NAME_OVERRIDES[dtype_name]
+    if dtype_name.startswith("uint"):
+        return "UInt" + dtype_name.removeprefix("uint")
+    return dtype_name[:1].upper() + dtype_name[1:]
+
+
+def _check_native_layer_norm_cuda_param_dtype(
+    input: Tensor,
+    normalized_ndim: int,
+    weight: Tensor | None,
+    bias: Tensor | None,
+) -> None:
+    if input.device.type != "cuda":
+        return
+
+    mismatched_dtype = None
+    if weight is not None and weight.dtype != input.dtype:
+        mismatched_dtype = weight.dtype
+    elif bias is not None and bias.dtype != input.dtype:
+        mismatched_dtype = bias.dtype
+
+    if mismatched_dtype is None:
+        return
+
+    axis = input.ndim - normalized_ndim
+    num_rows = math.prod(input.shape[:axis])
+    expected_dtype = _scalar_type_name(input.dtype)
+    found_dtype = _scalar_type_name(mismatched_dtype)
+    torch._check(
+        num_rows == 0,
+        lambda: f"expected scalar type {expected_dtype} but found {found_dtype}",
+    )
+
+
 @register_decomposition(aten.native_layer_norm)
 @out_wrapper("out0", "out1", "out2")
 def native_layer_norm(
@@ -3486,6 +3546,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
+    _check_native_layer_norm_cuda_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
@@ -4671,7 +4732,19 @@ def diagonal_scatter(
 ) -> TensorLikeType:
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
-    out = utils.clone_preserve_strides(input)
+    # Mirror at::native::clone_preserve_strides: when the input has internal
+    # memory overlap (e.g. an expand from a scalar with stride 0), we cannot
+    # preserve its strides because copy_to() below would write through aliased
+    # storage and corrupt non-diagonal positions. This arises in the backward
+    # of diagonal_scatter(x, src).sum(), where grad_output is expanded. Fall
+    # back to a plain clone, which materializes a contiguous buffer.
+    if builtins.any(
+        guard_or_false(sz > 1) and guard_or_false(s == 0)
+        for sz, s in zip(input.size(), input.stride())
+    ):
+        out = input.clone()
+    else:
+        out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
     # Use sym_or + guard_or_false to handle unbacked symbolic dimensions.
     torch._check(
@@ -5413,9 +5486,7 @@ def arange(
         xend = sym_int(end)
         xstep = sym_int(step)
 
-    # For int64 we truncate arguments to int before calculating length, but
-    # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64 or integer_args:
+    if integer_args:
         torch._check_value(xstep != 0, lambda: "step must be nonzero")  # type: ignore[possibly-undefined]
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
@@ -5423,7 +5494,7 @@ def arange(
     else:
         length = math.ceil((end - start) / step)
 
-    if is_integer:
+    if is_integer and integer_args:
         return prims.iota(
             length,
             start=xstart,  # type: ignore[possibly-undefined]
@@ -5432,6 +5503,17 @@ def arange(
             device=device,
             requires_grad=requires_grad,
         )
+
+    if is_integer and not integer_args:
+        index = prims.iota(
+            length,
+            start=0,
+            step=1,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+        return xstart + xstep * index  # type: ignore[possibly-undefined]
 
     index = prims.iota(
         length,
@@ -6527,7 +6609,6 @@ def log_normal(self, mean=1, std=2, generator=None):
     return torch.exp(std * torch.randn_like(self) + mean)
 
 
-# TODO: add support for functionalization aten.normal_functional
 # NOTE: the device and dtype will be ignored when shape is None
 @register_decomposition(aten.normal)
 @out_wrapper()
@@ -6594,6 +6675,22 @@ def normal(
 @register_decomposition(aten.normal_)
 def normal_(self, mean=0, std=1, *, generator=None):
     return normal(mean, std, self.shape, out=self, generator=generator)
+
+
+@register_decomposition(aten.normal_functional)
+def normal_functional(self, mean=0, std=1, *, generator=None):
+    res = normal(
+        mean,
+        std,
+        self.shape,
+        dtype=self.dtype,
+        device=self.device,
+        generator=generator,
+    )
+    if self.stride() == res.stride():
+        return res
+    new_stride = utils.compute_elementwise_output_strides(self)
+    return res.as_strided(self.shape, new_stride)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
