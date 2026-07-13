@@ -1913,6 +1913,23 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             warm_cached = counters["inductor"]["combo_subkernel_autotune_cached"]
             self.assertEqual(warm_cached, cold)
 
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_excludes_indirect_indexing(self):
+        def fn(a, b, c, idx):
+            return a[idx], b * 2.0, c + 1.0
+
+        inps = [
+            torch.randn(1024, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randint(0, 1024, (256,), device=GPU_TYPE),
+        ]
+        out, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out, fn(*inps))
+        src = code[0]
+        # The gather is its own kernel; the combo stitches only the 2 pointwise subkernels.
+        FileCheck().check("triton_poi_fused_index").check("'num_kernels': 2").run(src)
+
 
 @instantiate_parametrized_tests
 class ComboKernelPDLTests(TestCase):
