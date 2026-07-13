@@ -6,6 +6,7 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import io
+import json
 import math
 import tempfile
 import unittest
@@ -38,7 +39,7 @@ import torch.export._trace
 import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
-from torch._export.serde.schema import ArgumentKind
+from torch._export.serde.schema import ArgumentKind, Device, SCHEMA_VERSION
 from torch._export.serde.serialize import (
     _dict_to_dataclass,
     _to_json_bytes,
@@ -47,6 +48,7 @@ from torch._export.serde.serialize import (
     deserialize_torch_artifact,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleDeserializer,
     GraphModuleSerializer,
     serialize,
     SerializeError,
@@ -2388,6 +2390,161 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
         self.assertEqual(m(*inp), loaded_ep.module()(*inp))
 
+    @parametrize(
+        "map_location",
+        (
+            "cpu",
+            torch.device("cpu"),
+            {"cuda:0": "cpu"},
+            lambda storage, _location: storage,
+        ),
+        name_fn=lambda map_location: type(map_location).__name__,
+    )
+    def test_load_map_location(self, map_location) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 4))
+                self.register_buffer("bias", torch.randn(4))
+                self.register_buffer("empty", torch.empty(0))
+                self.constant = torch.randn(4)
+
+            def forward(self, x):
+                out = x @ self.weight + self.bias + self.constant + self.empty.sum()
+                return torch.ops.aten.to.device(
+                    out,
+                    device="cpu",
+                    dtype=torch.float32,
+                )
+
+        def rewrite_cpu_devices_as_cuda(value):
+            if isinstance(value, dict):
+                if value.get("type") == "cpu" and "index" in value:
+                    value["type"] = "cuda"
+                    value["index"] = 0
+                for item in value.values():
+                    rewrite_cpu_devices_as_cuda(item)
+            elif isinstance(value, list):
+                for item in value:
+                    rewrite_cpu_devices_as_cuda(item)
+
+        m = M()
+        inp = (torch.randn(2, 4),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+
+        cuda_buffer = io.BytesIO()
+        with (
+            zipfile.ZipFile(buffer) as source,
+            zipfile.ZipFile(cuda_buffer, "w") as destination,
+        ):
+            for info in source.infolist():
+                data = source.read(info.filename)
+                if info.filename.endswith(".json"):
+                    json_data = json.loads(data)
+                    rewrite_cpu_devices_as_cuda(json_data)
+                    if info.filename.endswith("models/model.json"):
+                        for node in json_data["graph_module"]["graph"]["nodes"]:
+                            if node["target"] == "torch.ops.aten.to.device":
+                                for node_input in node["inputs"]:
+                                    if "as_device" in node_input["arg"]:
+                                        node_input["arg"]["as_device"]["index"] = None
+                    data = json.dumps(json_data).encode()
+                destination.writestr(info, data)
+        cuda_buffer.seek(0)
+
+        loaded_ep = load(cuda_buffer, map_location=map_location)
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+        self.assertTrue(loaded_ep.constants)
+        self.assertEqual(loaded_ep.state_dict["empty"].numel(), 0)
+
+        for tensor in loaded_ep.state_dict.values():
+            self.assertEqual(tensor.device.type, "cpu")
+        for tensor in loaded_ep.constants.values():
+            if isinstance(tensor, torch.Tensor):
+                self.assertEqual(tensor.device.type, "cpu")
+        for node in loaded_ep.graph.nodes:
+            for value in pytree.tree_leaves(node.meta.get("val")):
+                if isinstance(value, torch.Tensor):
+                    self.assertEqual(value.device.type, "cpu")
+            for value in pytree.tree_leaves((node.args, node.kwargs)):
+                if isinstance(value, torch.device):
+                    self.assertEqual(value.type, "cpu")
+
+    @parametrize(
+        "case,map_location,expected",
+        (
+            (
+                "invalid_source",
+                {"not-a-device": "meta", "cuda:0": "cpu"},
+                torch.device("cpu"),
+            ),
+            (
+                "same_destination",
+                {"cuda:0": "cpu", "cuda:1": "cpu"},
+                torch.device("cpu"),
+            ),
+            (
+                "ambiguous_exact_fallback",
+                {"cuda": "meta", "cuda:0": "cpu"},
+                torch.device("meta"),
+            ),
+        ),
+        name_fn=lambda case, map_location, expected: case,
+    )
+    def test_unindexed_device_map_location(
+        self,
+        case,
+        map_location,
+        expected,
+    ) -> None:
+        deserializer = GraphModuleDeserializer(map_location)
+        self.assertEqual(
+            deserializer._deserialize_device(Device(type="cuda")),
+            expected,
+        )
+
+    @parametrize(
+        "legacy",
+        (False, True),
+        name_fn=lambda legacy: "legacy" if legacy else "pt2",
+    )
+    def test_load_map_location_meta(self, legacy) -> None:
+        ep = export(torch.nn.Linear(4, 4), (torch.randn(2, 4),))
+        buffer = io.BytesIO()
+        if legacy:
+            artifact = serialize(ep)
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr("version", ".".join(map(str, SCHEMA_VERSION)))
+                archive.writestr(
+                    "serialized_exported_program.json",
+                    artifact.exported_program,
+                )
+                archive.writestr("serialized_state_dict.pt", artifact.state_dict)
+                archive.writestr("serialized_constants.pt", artifact.constants)
+                archive.writestr(
+                    "serialized_example_inputs.pt",
+                    artifact.example_inputs,
+                )
+        else:
+            save(ep, buffer)
+        buffer.seek(0)
+
+        loaded_ep = load(buffer, map_location="meta")
+        for tensor in loaded_ep.state_dict.values():
+            self.assertEqual(tensor.device.type, "meta")
+        if loaded_ep.example_inputs is None:
+            self.fail("Expected example inputs to be preserved")
+        for value in pytree.tree_leaves(loaded_ep.example_inputs):
+            if isinstance(value, torch.Tensor):
+                self.assertEqual(value.device.type, "meta")
+        for node in loaded_ep.graph.nodes:
+            for value in pytree.tree_leaves(node.meta.get("val")):
+                if isinstance(value, torch.Tensor):
+                    self.assertEqual(value.device.type, "meta")
+
     @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
     def test_save_load_cuda_tensor(self) -> None:
         class M(torch.nn.Module):
@@ -2400,6 +2557,7 @@ class TestSaveLoad(TestCase):
 
         m = M().cuda()
         inp = (torch.randn(1, 64, device="cuda"),)
+        expected = m(*inp).cpu()
         ep = torch.export.export(m, inp)
         buffer = io.BytesIO()
         save(ep, buffer)
@@ -2411,6 +2569,21 @@ class TestSaveLoad(TestCase):
                 param.device.type, "cuda", lambda msg: f"{msg}\n{name} not on cuda"
             )
         self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
+        buffer.seek(0)
+        loaded_cpu_ep = load(buffer, map_location="cpu")
+        for name, param in loaded_cpu_ep.state_dict.items():
+            self.assertEqual(
+                param.device.type, "cpu", lambda msg: f"{msg}\n{name} not on cpu"
+            )
+        example_inputs = loaded_cpu_ep.example_inputs
+        if example_inputs is None:
+            self.fail("Expected example inputs to be preserved")
+        args, kwargs = example_inputs
+        for value in pytree.tree_leaves((args, kwargs)):
+            if isinstance(value, torch.Tensor):
+                self.assertEqual(value.device.type, "cpu")
+        self.assertEqual(expected, loaded_cpu_ep.module()(*args, **kwargs))
 
     def test_from_node_metadata_serialization(self):
         """Test that from_node metadata is properly serialized and deserialized."""
@@ -2464,6 +2637,9 @@ class TestSaveLoad(TestCase):
                         self.assertEqual(
                             node_source_orig.to_dict(), node_source_loaded.to_dict()
                         )
+
+
+instantiate_parametrized_tests(TestSaveLoad)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

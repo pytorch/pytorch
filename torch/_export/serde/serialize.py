@@ -33,6 +33,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.traceback import NodeSource
+from torch.serialization import _get_restore_location, MAP_LOCATION
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
@@ -426,6 +427,7 @@ def serialize_torch_artifact(
 
 def deserialize_torch_artifact(
     serialized: dict[str, Any] | tuple[Any, ...] | bytes,
+    map_location: MAP_LOCATION = None,
 ):
     if isinstance(serialized, (dict, tuple)):
         return serialized
@@ -435,10 +437,18 @@ def deserialize_torch_artifact(
     buffer.seek(0)
     # weights_only=False as we want to load custom objects here (e.g. ScriptObject)
     try:
-        artifact = torch.load(buffer, weights_only=True)
+        artifact = torch.load(
+            buffer,
+            map_location=map_location,
+            weights_only=True,
+        )
     except Exception as e:
         buffer.seek(0)
-        artifact = torch.load(buffer, weights_only=False)
+        artifact = torch.load(
+            buffer,
+            map_location=map_location,
+            weights_only=False,
+        )
         log.warning(
             "Fallback to weights_only=False succeeded. "
             "Loaded object of type %s after initial failure: %s",
@@ -2304,11 +2314,35 @@ class GraphModuleDeserializer(metaclass=Final):
         constants: dict[str, _ConstantAttributeType]
         example_inputs: tuple[tuple[torch.Tensor, ...], dict[str, Any]] | None
 
-    def __init__(self) -> None:
+    def __init__(self, map_location: MAP_LOCATION = None) -> None:
         self.serialized_name_to_node: dict[str, torch.fx.Node] = {}
         self.serialized_name_to_meta: LazyMap = LazyMap()  # str -> MetaType
         self.graph = torch.fx.Graph()
         self.module = torch.nn.Module()
+        self.map_location = map_location
+
+    def _deserialize_device(self, device: Device) -> torch.device:
+        deserialized_device = deserialize_device(device)
+        if self.map_location is None:
+            return deserialized_device
+        if isinstance(self.map_location, dict) and deserialized_device.index is None:
+            # Preserve torch.load's exact-key behavior: ignore invalid source tags
+            # and fall through when indexed tags do not imply one destination.
+            mapped_locations: set[str] = set()
+            for location, mapped_location in self.map_location.items():
+                try:
+                    location_device = torch.device(location)
+                except (RuntimeError, ValueError):
+                    continue
+                if location_device.type == deserialized_device.type:
+                    mapped_locations.add(mapped_location)
+            if len(mapped_locations) == 1:
+                return torch.device(mapped_locations.pop())
+        storage = _get_restore_location(self.map_location)(
+            torch.UntypedStorage(0),
+            str(deserialized_device),
+        )
+        return torch.device(storage.device)
 
     @contextmanager
     def save_graph_module(self) -> Iterator[None]:
@@ -2477,7 +2511,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 torch.empty_strided(
                     tuple(self.deserialize_sym_int(val) for val in tensor_meta.sizes),  # type: ignore[misc]
                     tuple(self.deserialize_sym_int(val) for val in tensor_meta.strides),  # type: ignore[misc]
-                    device=deserialize_device(tensor_meta.device),
+                    device=self._deserialize_device(tensor_meta.device),
                     dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
                     requires_grad=tensor_meta.requires_grad,
                 ),
@@ -2950,7 +2984,11 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
-            self.constants = deserialize_torch_artifact(constants)
+            state_dict = deserialize_torch_artifact(
+                serialized_state_dict,
+                self.map_location,
+            )
+            self.constants = deserialize_torch_artifact(constants, self.map_location)
             self.signature = self.deserialize_signature(
                 serialized_graph_module.signature
             )
@@ -2986,7 +3024,10 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.shape_env.unbacked_symint_counter += 1
 
             if example_inputs is not None and len(example_inputs) > 0:
-                self.example_inputs = deserialize_torch_artifact(example_inputs)
+                self.example_inputs = deserialize_torch_artifact(
+                    example_inputs,
+                    self.map_location,
+                )
             else:
                 self.example_inputs = None
             self.deserialize_graph(serialized_graph_module.graph)
@@ -3012,7 +3053,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 signature=self.signature,
                 module_call_graph=module_call_graph,
                 names_to_symbols=self.symbol_name_to_symbol,
-                state_dict=deserialize_torch_artifact(serialized_state_dict),
+                state_dict=state_dict,
                 constants=self.constants,
                 example_inputs=self.example_inputs,
             )
@@ -3117,7 +3158,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 name=value.name,
             )
         elif typ_ == "as_device":
-            return deserialize_device(inp.as_device)
+            return self._deserialize_device(inp.as_device)
         elif typ_ == "as_int":
             return inp.as_int
         elif typ_ == "as_float":
@@ -3574,6 +3615,7 @@ class ExportedProgramDeserializer(metaclass=Final):
         | bytes
         | None = None,
         *,
+        map_location: MAP_LOCATION = None,
         _unsafe_skip_version_check=False,
     ) -> ep.ExportedProgram:
         if not isinstance(exported_program, ExportedProgram):
@@ -3599,7 +3641,7 @@ class ExportedProgramDeserializer(metaclass=Final):
             )
             for k, v in exported_program.range_constraints.items()
         }
-        res = GraphModuleDeserializer().deserialize(
+        res = GraphModuleDeserializer(map_location).deserialize(
             exported_program.graph_module,
             state_dict,
             constants,
@@ -3776,6 +3818,7 @@ def deserialize(
     artifact: SerializedArtifact,
     expected_opset_version: dict[str, int] | None = None,
     *,
+    map_location: MAP_LOCATION = None,
     _unsafe_skip_version_check=False,
 ) -> ep.ExportedProgram:
     if not isinstance(artifact.exported_program, bytes):
@@ -3790,6 +3833,7 @@ def deserialize(
         artifact.state_dict,
         artifact.constants,
         artifact.example_inputs,
+        map_location=map_location,
         _unsafe_skip_version_check=_unsafe_skip_version_check,
     )
 

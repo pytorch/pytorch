@@ -9,6 +9,7 @@ from typing_extensions import deprecated
 import torch
 import torch.utils._pytree as pytree
 from torch.fx.passes.infra.pass_base import PassResult
+from torch.serialization import MAP_LOCATION
 from torch.types import FileLike
 
 
@@ -338,6 +339,7 @@ def load(
     *,
     extra_files: dict[str, Any] | None = None,
     expected_opset_version: dict[str, int] | None = None,
+    map_location: MAP_LOCATION = None,
 ) -> ExportedProgram:
     """
 
@@ -362,6 +364,9 @@ def load(
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
 
+        map_location: a function, :class:`torch.device`, string or a dict
+         specifying how to remap storage locations.
+
     Returns:
         An :class:`ExportedProgram` object
 
@@ -372,6 +377,9 @@ def load(
 
         # Load ExportedProgram from file
         ep = torch.export.load("exported_program.pt2")
+
+        # Load all tensor state and graph device metadata onto the CPU.
+        ep = torch.export.load("exported_program.pt2", map_location="cpu")
 
         # Load ExportedProgram from io.BytesIO object
         with open("exported_program.pt2", "rb") as f:
@@ -396,6 +404,7 @@ def load(
         pt2_contents = load_pt2(
             f,
             expected_opset_version=expected_opset_version,
+            map_location=map_location,
         )
     except RuntimeError:
         log.warning("Ran into the following error when deserializing", exc_info=True)
@@ -482,7 +491,11 @@ def load(
         )
 
         # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
+        ep = deserialize(
+            artifact,
+            expected_opset_version,
+            map_location=map_location,
+        )
 
         return ep
 

@@ -57,6 +57,7 @@ from torch.export.pt2_archive.constants import (
     WEIGHTS_CONFIG_FILENAME_FORMAT,
     WEIGHTS_DIR,
 )
+from torch.serialization import _get_restore_location, MAP_LOCATION
 from torch.types import FileLike
 
 
@@ -796,11 +797,13 @@ def _build_file_map(
     archive_reader: PT2ArchiveReader,
     config: schema.PayloadConfig,
     base_dir: str,
+    map_location: MAP_LOCATION = None,
 ) -> dict[str, torch.Tensor]:
     """
     Build a map from file path to the payload in flat tensor format.
     """
     file_map: dict[str, torch.Tensor] = {}
+    restore_location = _get_restore_location(map_location)
     for payload_meta in config.config.values():
         # skip pickled objects
         if payload_meta.use_pickle:
@@ -819,10 +822,10 @@ def _build_file_map(
         nbytes = archive_reader.archive_file.get_record_size(record_name)
 
         if nbytes == 0:
+            # Match torch.load: materialize on CPU, then apply map_location below.
+            # Allocating on the saved device here would fail before remapping.
             size = deserialize_size(tensor_meta.sizes)
-            tensor = torch.zeros(size, dtype=dtype, device=device)
-            if tensor_meta.requires_grad:
-                tensor.requires_grad_(True)
+            tensor = torch.zeros(size, dtype=dtype)
         else:
             element_size = torch._utils._element_size(dtype)
             if nbytes % element_size != 0:
@@ -838,10 +841,16 @@ def _build_file_map(
             # so we wrap the storage in a proper CPU tensor via set_().
             tensor = torch.empty(0, dtype=dtype)
             tensor.set_(raw.untyped_storage(), 0, (numel,), (1,))
-            if tensor_meta.requires_grad:
-                tensor.requires_grad_(True)
-            if device != torch.device("cpu"):
-                tensor = tensor.to(device)
+
+        restored_storage = restore_location(tensor.untyped_storage(), str(device))
+        tensor = torch.empty(0, dtype=dtype, device=restored_storage.device).set_(
+            restored_storage,
+            tensor.storage_offset(),
+            tensor.size(),
+            tensor.stride(),
+        )
+        if tensor_meta.requires_grad:
+            tensor.requires_grad_(True)
 
         file_map[payload_meta.path_name] = tensor
 
@@ -864,6 +873,7 @@ def _load_payload_config(
 def _load_state_dict(
     archive_reader: PT2ArchiveReader,
     model_name: str,
+    map_location: MAP_LOCATION = None,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy weight files
     legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
@@ -880,7 +890,10 @@ def _load_state_dict(
         weights_config = _load_payload_config(archive_reader, weights_config_file)
         # construct the mapping from file name (e.g. weight_0) to flat weight payload
         state_dict_file_map = _build_file_map(
-            archive_reader, weights_config, WEIGHTS_DIR
+            archive_reader,
+            weights_config,
+            WEIGHTS_DIR,
+            map_location,
         )
         # chain the mapping weight FQN -> weight file name -> strided weight payload
         # so that the aliasing of weights is preserved
@@ -891,7 +904,9 @@ def _load_state_dict(
                     os.path.join(WEIGHTS_DIR, payload_meta.path_name)
                 )
                 state_dict[weight_fqn] = torch.load(
-                    io.BytesIO(weight_bytes), weights_only=False
+                    io.BytesIO(weight_bytes),
+                    map_location=map_location,
+                    weights_only=False,
                 )
             else:
                 tensor_meta = payload_meta.tensor_meta
@@ -920,6 +935,7 @@ def _load_state_dict(
 def _load_constants(
     archive_reader: PT2ArchiveReader,
     model_name: str,
+    map_location: MAP_LOCATION = None,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy constant files
     legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
@@ -936,7 +952,10 @@ def _load_constants(
         constants_config = _load_payload_config(archive_reader, constants_config_file)
         # construct the mapping from file name (e.g. constant_0) to constant payload
         constant_file_map = _build_file_map(
-            archive_reader, constants_config, CONSTANTS_DIR
+            archive_reader,
+            constants_config,
+            CONSTANTS_DIR,
+            map_location,
         )
         # chain the mapping constant FQN -> constant file name -> strided constant payload
         # so that the aliasing of constants is preserved
@@ -949,7 +968,9 @@ def _load_constants(
                         os.path.join(CONSTANTS_DIR, path_name)
                     )
                     constants[constant_fqn] = torch.load(
-                        io.BytesIO(constant_bytes), weights_only=False
+                        io.BytesIO(constant_bytes),
+                        map_location=map_location,
+                        weights_only=False,
                     )
                 else:
                     tensor_meta = payload_meta.tensor_meta
@@ -989,6 +1010,7 @@ def _load_exported_programs(
     archive_reader: PT2ArchiveReader,
     file_names: list[str],
     expected_opset_version: dict[str, int] | None,
+    map_location: MAP_LOCATION = None,
 ) -> dict[str, ExportedProgram]:
     exported_program_files = [
         file for file in file_names if file.startswith(MODELS_DIR)
@@ -1011,14 +1033,15 @@ def _load_exported_programs(
         serialized_exported_program = _bytes_to_dataclass(
             schema.ExportedProgram, exported_program_bytes
         )
-        state_dict = _load_state_dict(archive_reader, model_name)
-        constants = _load_constants(archive_reader, model_name)
+        state_dict = _load_state_dict(archive_reader, model_name, map_location)
+        constants = _load_constants(archive_reader, model_name, map_location)
 
         ep = ExportedProgramDeserializer(expected_opset_version).deserialize(
             serialized_exported_program,
             state_dict,
             constants,
             serialized_sample_inputs,
+            map_location=map_location,
         )
 
         exported_programs[model_name] = ep
@@ -1083,6 +1106,7 @@ def load_pt2(
     f: FileLike,
     *,
     expected_opset_version: dict[str, int] | None = None,
+    map_location: MAP_LOCATION = None,
     run_single_threaded: bool = False,
     num_runners: int = 1,
     device_index: int = -1,
@@ -1097,6 +1121,9 @@ def load_pt2(
 
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
+
+        map_location: a function, :class:`torch.device`, string or a dict
+         specifying how to remap storage locations.
 
         num_runners (int): Number of runners to load AOTInductor artifacts
 
@@ -1143,7 +1170,10 @@ def load_pt2(
         file_names = archive_reader.get_file_names()
 
         exported_programs = _load_exported_programs(
-            archive_reader, file_names, expected_opset_version
+            archive_reader,
+            file_names,
+            expected_opset_version,
+            map_location,
         )
         extra_files = _load_extra_files(archive_reader, file_names)
 
@@ -1169,7 +1199,10 @@ def load_pt2(
                     len(WEIGHTS_DIR) :
                 ]  # remove data/weights/ prefix
                 weight_bytes = archive_reader.read_bytes(file)
-                loaded_weight = torch.load(io.BytesIO(weight_bytes))
+                loaded_weight = torch.load(
+                    io.BytesIO(weight_bytes),
+                    map_location=map_location,
+                )
                 weights[weight_file_name] = loaded_weight
 
     if isinstance(f, (io.IOBase, IO)):
