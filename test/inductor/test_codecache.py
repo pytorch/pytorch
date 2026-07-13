@@ -99,6 +99,7 @@ from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
     requires_gpu_and_triton,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 try:
@@ -332,7 +333,7 @@ class _CyclicOpaque(torch._custom_class_base.CustomClassBase):
         self.child = None
 
 
-if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
+if not torch._library.opaque_object.is_custom_class(_CyclicOpaque):
     torch._library.opaque_object.register_custom_class(_CyclicOpaque, typ="symbolic")
 
 
@@ -3092,6 +3093,41 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         self.assertIsNot(seen_fake_modes[0], fake_mode)
         self.assertIsInstance(seen_fake_modes[0], FakeTensorMode)
         self.assertIsNotNone(seen_fake_modes[0].shape_env)
+
+    def test_dynamic_shapes_from_graph_tensor_subclass_fake_mode(self):
+        @torch._dynamo.allow_in_graph
+        def to_subclass(x):
+            return TwoTensor(x.clone(), x.clone())
+
+        def f(x):
+            return to_subclass(x).view(-1)
+
+        x = torch.ones(2)
+        torch._dynamo.mark_dynamic(x, 0)
+        with fresh_cache():
+            gm, args, kwargs = self.capture(f, dynamic=True)(x)
+            if kwargs:
+                raise AssertionError
+
+        output_node = next(iter(reversed(gm.graph.nodes)))
+        value_node = output_node.args[0][0]
+        self.assertIsInstance(value_node, torch.fx.Node)
+        output_example_value = value_node.meta["example_value"]
+        self.assertIsInstance(output_example_value, TwoTensor)
+        fake_mode = output_example_value.a.fake_mode
+
+        seen_fake_modes = []
+
+        def fake_compile_fx(gm, example_inputs, **kwargs):
+            seen_fake_modes.append(torch._guards.TracingContext.get().fake_mode)
+            return lambda *args: args
+
+        with mock.patch(
+            "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
+        ):
+            torch._inductor.standalone_compile(gm, args, dynamic_shapes="from_graph")
+
+        self.assertIs(seen_fake_modes[0], fake_mode)
 
     def test_standalone_compile_fake_mode_requires_shape_env(self):
         def f(x):
