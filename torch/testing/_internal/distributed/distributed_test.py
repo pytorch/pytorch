@@ -8902,7 +8902,8 @@ class DistributedTest:
                 # wrapper PG is enabled or not, since with wrapper pg, it will
                 # fail in a collective synchronization check and not actually
                 # call into the nccl pg.
-                if dist.get_debug_level() == dist.DebugLevel.DETAIL:
+                # xccl backend throws 'Timed out waiting' error
+                if dist.get_debug_level() == dist.DebugLevel.DETAIL or BACKEND = "xccl":
                     err_regex = "Timed out waiting"
                 else:
                     err_regex = "caught collective operation timeout"
