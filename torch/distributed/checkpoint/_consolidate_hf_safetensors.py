@@ -62,6 +62,9 @@ class _OutputFileData:
     fqn_data: dict[str, _FqnData] = field(default_factory=dict)
 
 
+torch.serialization.add_safe_globals([_FqnData, _OutputFileData])
+
+
 @dataclass
 class _InputFileData:
     """
@@ -733,6 +736,7 @@ def consolidate_safetensors_files_on_every_rank(
             gathered_output_files_data,
             dst=0,
             group=process_group,
+            weights_only=True,
         )
 
         if rank == 0:

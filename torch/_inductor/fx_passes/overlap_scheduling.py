@@ -845,7 +845,10 @@ class OverlapScheduler:
                     [] for _ in range(world_size)
                 ]
                 dist.all_gather_object(
-                    gathered_runtime_estimations, runtime_estimations, pg
+                    gathered_runtime_estimations,
+                    runtime_estimations,
+                    pg,
+                    weights_only=True,
                 )
                 median_runtime_estimations = torch.median(
                     torch.tensor(gathered_runtime_estimations), dim=0
@@ -1824,7 +1827,7 @@ def align_estimations_across_ranks(
 
     with unset_fake_temporarily():
         gathered: list[list[float]] = [[] for _ in range(world_size)]
-        dist.all_gather_object(gathered, local_values, pg)
+        dist.all_gather_object(gathered, local_values, pg, weights_only=True)
         medians = torch.median(torch.tensor(gathered), dim=0).values.tolist()
 
     return dict(zip(nodes, medians))

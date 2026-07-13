@@ -316,7 +316,9 @@ def check_tensor_meta(
         )
 
     gathered_metadata = [None for _ in range(torch.distributed.get_world_size())]
-    torch.distributed.all_gather_object(gathered_metadata, local_metadata)
+    torch.distributed.all_gather_object(
+        gathered_metadata, local_metadata, weights_only=True
+    )
 
     # Check if metadata is consistent across ranks
     if not all(meta == local_metadata for meta in gathered_metadata):

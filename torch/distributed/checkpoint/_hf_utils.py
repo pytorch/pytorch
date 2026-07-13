@@ -55,6 +55,9 @@ class _HFStorageInfo:
     dtype: torch.dtype
 
 
+torch.serialization.add_safe_globals([_HFStorageInfo])
+
+
 def _gen_file_name(
     index: int, largest_index: int, shard_index: int | None = None
 ) -> str:

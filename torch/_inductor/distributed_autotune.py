@@ -203,7 +203,9 @@ def _sync(autotune_results: list[_SerializedChoice]) -> Sequence[_SerializedChoi
 
     # Perform allgather
     all_states: list[list[_SerializedChoice]] = [None] * autotune_pg.size()  # type: ignore[list-item]
-    torch.distributed.all_gather_object(all_states, autotune_results, group=autotune_pg)
+    torch.distributed.all_gather_object(
+        all_states, autotune_results, group=autotune_pg, weights_only=True
+    )
 
     node_count = sum(len(x) for x in all_states)
     # It's faster to briefly lie about the type than to unzip the results and append.
@@ -318,6 +320,11 @@ class _SerializedChoice:
         for k in parts[1:]:
             obj = getattr(obj, k)
         return obj
+
+
+# Transmitted between ranks via all_gather_object (which deserializes with
+# weights_only=True by default).
+torch.serialization.add_safe_globals([_SerializedChoice])
 
 
 def _autotune_local_nodes(
