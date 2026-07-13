@@ -17809,6 +17809,30 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         result = compiled(torch.randn(1024), 256)
         self.assertEqual(result, 4)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorify_add_sub_alpha_from_item(self):
+        """add/sub with a non-unit `alpha` and a `.item()` scalar operand must
+        preserve `alpha`. The tensorify pass rebuilds the op from node.args
+        only; `alpha` is keyword-only (node.kwargs) and was previously dropped,
+        turning add(a, b, alpha=k) into a + b. Must run on aot_eager/inductor
+        (the pass does not run under backend="eager")."""
+
+        def fn(a, b):
+            s = b.item()
+            return (
+                torch.add(torch.sigmoid(a), s, alpha=-0.9248),
+                torch.sub(torch.sigmoid(a), s, alpha=3.5),
+            )
+
+        a = torch.tensor(0.5)
+        b = torch.tensor(2.0)
+        expected = fn(a, b)
+        for backend in ("aot_eager", "inductor"):
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                got = torch.compile(fn, backend=backend, fullgraph=True)(a, b)
+                self.assertEqual(got, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
