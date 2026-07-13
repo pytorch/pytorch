@@ -292,7 +292,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
   # on a from-source build that test jobs don't have. --dry-run reads the tree
   # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
-  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && [[ "${USE_NINJA}" != "0" ]] && grep -q "csrc/Module.cpp" build/compile_commands.json; then
     debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
     echo "${debinfo_plan}"
     grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
