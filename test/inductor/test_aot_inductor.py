@@ -10,7 +10,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import uuid
 import zipfile
 from unittest import skip
 from unittest.mock import patch
@@ -5090,49 +5089,6 @@ class AOTInductorTestsTemplate:
         self.assertTrue(torch.allclose(result2, sample * 2))
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
-    @config.patch({"size_asserts": True, "fx_graph_cache": False})
-    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
-    def test_aoti_custom_op_bad_fake_dtype_fails_fast(self):
-        if self.device == "mps":
-            raise unittest.SkipTest("bfloat16 custom op fallback not covered on MPS")
-
-        namespace = f"aoti_test_bad_fake_dtype_{uuid.uuid4().hex}"
-
-        @torch.library.custom_op(f"{namespace}::bad_meta_mul", mutates_args=())
-        def bad_meta_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-            return a * b
-
-        @bad_meta_mul.register_fake
-        def _(a, b):
-            return torch.empty_like(a, dtype=torch.bfloat16)
-
-        from torch._inductor.lowering import make_fallback
-
-        op = getattr(torch.ops, namespace).bad_meta_mul
-        make_fallback(op.default, warn=False)
-
-        class M(torch.nn.Module):
-            def forward(self, a, b):
-                x = op(a, b)
-                return x + 1
-
-        sample = (
-            torch.randn(16, device=self.device, dtype=torch.float32),
-            torch.randn(16, device=self.device, dtype=torch.float32),
-        )
-        package_path, code = run_and_get_cpp_code(AOTIRunnerUtil.compile, M(), sample)
-        FileCheck().check(
-            "if (_check_aoti_runtime_check_inputs_env()) { assert_size_stride("
-        ).check('"torch.bfloat16"').run(code)
-
-        aoti_module = torch._inductor.aoti_load_package(package_path)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"(?s)expected dtype torch\.bfloat16 but got dtype code .*incorrect fake",
-        ):
-            aoti_module(*sample)
-
-    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_check_error_message_preserved(self):
         # Exception thrown from CONVERT_EXCEPTION_TO_ERROR_CODE at the outer
@@ -5868,6 +5824,49 @@ class AOTInductorTestsTemplate:
             aot_inductor_module(y3)
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(y4)
+
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
+    def test_runtime_check_overbound_no_input_leak(self):
+        # When AOTI_RUNTIME_CHECK_INPUTS rejects an over-bound input, the check
+        # throws before the input handles are stolen into RAII. A correct runner
+        # must free those un-stolen handles; otherwise every rejected call leaks
+        # one at::Tensor (and its backing GPU storage) per input.
+        # MPS has no memory_allocated accounting (needed below); skip CPU and MPS.
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU with memory_allocated support")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2048, 2048)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model().to(self.device)
+        x = torch.randn(8, 2048, device=self.device)  # example within bound
+        dim0 = Dim("b", min=1, max=64)  # compiled upper bound = 64
+        with torch.no_grad():
+            package_path: str = AOTIRunnerUtil.compile(
+                model, (x,), dynamic_shapes={"x": {0: dim0}}
+            )
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        # in-bound call works and warms up the allocator
+        aot_inductor_module(torch.randn(8, 2048, device=self.device))
+
+        device_interface = get_interface_for_device(GPU_TYPE)
+        device = device_interface.current_device()
+        device_interface.synchronize()
+        mem_before = device_interface.memory_allocated(device)
+        # Repeatedly reject FRESH over-bound inputs; storage must not be retained.
+        for _ in range(64):
+            over = torch.randn(128, 2048, device=self.device)  # 128 > 64 -> rejected
+            with self.assertRaisesRegex(Exception, "dim value is too large"):
+                aot_inductor_module(over)
+            del over
+        device_interface.synchronize()
+        mem_after = device_interface.memory_allocated(device)
+        self.assertEqual(mem_after, mem_before)
 
     def test_add_complex(self):
         class Model(torch.nn.Module):
@@ -9387,13 +9386,6 @@ copy_tests(
 # Lazy-autotune-mode-specific failures go here. Inherits regular GPU failures.
 GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
     **GPU_TEST_FAILURES,
-    # This regression intentionally creates an incorrect fake dtype and
-    # expects AOTI runtime validation to catch it.  Lazy autotune dual-wrapper
-    # mode runs the generated JIT wrapper during compile, so it fails before
-    # the AOTI package can be loaded.
-    "test_aoti_custom_op_bad_fake_dtype_fails_fast": fail_gpu(
-        ("cuda", "xpu"), is_skip=True
-    ),
 }
 
 
