@@ -83,10 +83,6 @@ self-hosted-runner:
     - macos-26-xlarge
     # Organization-wide Intel hosted XPU runners
     - linux.idc.xpu
-    # Organization-wide Google Cloud TPU runners
-    - linux.google.tpuv6e.1
-    - linux.google.tpuv7x.1
-    - linux.google.tpuv7x.4
     # OSDC ARC (multi-tenant) runners
     - mt-l-x86iavx512-2-4
     - mt-l-x86iavx512-48-384
