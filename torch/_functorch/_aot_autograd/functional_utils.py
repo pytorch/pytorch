@@ -16,7 +16,7 @@ from torch import Tensor
 from torch._C import _functionalization
 from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr
@@ -267,7 +267,7 @@ def has_metadata_mutation(
             raise AssertionError(
                 f"expected FunctionalTensor for f_arg, got {type(f_arg)}"
             )
-        if not isinstance(arg, FakeTensor):
+        if not is_fake_tensor(arg):
             raise AssertionError(f"expected FakeTensor for arg, got {type(arg)}")
 
         arg_after = torch._from_functional_tensor(f_arg.elem)

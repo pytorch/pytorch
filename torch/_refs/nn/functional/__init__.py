@@ -756,14 +756,14 @@ def _nll_loss_nd(
     # TODO: This check does not work with FakeTensor inputs; See Issue #85834
     # Explicit cast for class_check to bool; See Issue #78071
     """
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
     num_classes = input.shape[1] if input.ndim > 1 else input.shape[0]
     valid_classes_mask = torch.logical_and(
         (flat_target >= 0), (flat_target < num_classes)
     )
     class_check = torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask))
     torch._check(
-        isinstance(target, FakeTensor) or bool(class_check.item()),
+        is_fake_tensor(target) or bool(class_check.item()),
         lambda: "A target class is out-of-bounds and not the ignore index.",
     )
     """
