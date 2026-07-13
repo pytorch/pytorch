@@ -4770,7 +4770,8 @@ for dtype in (torch.int32, torch.int64):
         fn = torch.vmap(dot_based)
         is_gfx1100 = (
             TEST_WITH_ROCM
-            and torch.cuda.get_device_properties(0).gcnArchName.split(":")[0] == "gfx1100"
+            and torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            == "gfx1100"
         )
         bmm_codegen_call = (
             "aoti_torch_cuda_bmm_out" if config.cpp_wrapper else "extern_kernels.bmm"
