@@ -77,6 +77,7 @@ from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
+    skipIfSM103,
     SM100OrLater,
     SM120OrLater,
     SM80OrLater,
@@ -322,6 +323,18 @@ class TestCutlassBackend(TestCase):
         from torch._inductor.codecache import cutlass_key
 
         self.assertIsNotNone(cutlass_key())
+
+    @skipXPUIf(True, "CUDA-specific CUTLASS arch feature set")
+    def test_sm103_cutlass_ops_skip_int8_umma(self):
+        from torch.utils import _pytree as pytree
+
+        self.assertTrue(try_import_cutlass())
+
+        ops = pytree.tree_flatten(_gen_ops_cached("103", "13.3", "cuda"))[0]
+        cutlass_ops = [op for op in ops if hasattr(op, "configuration_name")]
+        int8_ops = [op for op in cutlass_ops if "s8_s8_s32" in op.configuration_name()]
+        self.assertGreater(len(cutlass_ops), 0)
+        self.assertEqual(int8_ops, [])
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
@@ -633,6 +646,7 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(torch.version.hip is not None, "ROCm not supported")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipXPUIf(not Xe2_Or_Later, "")
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("num_gemms", (1, 2))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1270,6 +1284,7 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(True, "int_mm not supported on xpu cutlass backend")
     # TODO: Enable dynamic test cases when dynamic support is added.
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipIfSM103
     @xfailIfSM120OrLater
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -2225,7 +2240,6 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_filtered_ops_cache(self):
         class TestModel(torch.nn.Module):
             def forward(self, B):
@@ -2238,21 +2252,23 @@ class TestCutlassBackend(TestCase):
         B = torch.randn(M, M).to(GPU_TYPE).half()
         model = TestModel().to(GPU_TYPE)
 
-        start_time = time.time()
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 1,
-            }
+        counters.clear()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cutlass.cutlass_max_profiling_configs": 1,
+                }
+            ),
         ):
             _ = torch.compile(model)(B)
 
-        if GPU_TYPE == "xpu":
-            time_limit = 100
-        else:
-            time_limit = 60
-        self.assertTrue(time.time() - start_time < time_limit)
+        # All 100 matmuls share one input shape/dtype/layout, so they map to a
+        # single filtered-ops cache key: op filtering runs exactly once (one
+        # miss) and the remaining lowerings hit the cache.
+        self.assertEqual(counters["inductor"]["cutlass_filtered_ops_cache_miss"], 1)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
@@ -2415,6 +2431,80 @@ class TestCutlassBackend(TestCase):
 
         result = torch.compile(model)(a, b)
         ref_result = model(a, b)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    def test_evt_silu_fusion(self):
+        """Test that SiLU activation can be fused into GEMM epilogue via EVT."""
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.nn.functional.silu(a @ b)
+
+        M, N = 1024, 512
+        a = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(N, N, device=GPU_TYPE, dtype=torch.float16).t()
+        model = TestModel().to(GPU_TYPE)
+
+        result = torch.compile(model)(a, b)
+        ref_result = model(a, b)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    def test_evt_llama_mlp_pattern(self):
+        """Test the Llama MLP pattern: silu(x @ gate.T) * (x @ up.T)."""
+
+        class LlamaMLP(torch.nn.Module):
+            def forward(self, x, gate_w, up_w):
+                return torch.nn.functional.silu(x @ gate_w.t()) * (x @ up_w.t())
+
+        M, K, N = 256, 256, 256
+        x = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        gate_w = torch.randn(N, K, device=GPU_TYPE, dtype=torch.float16)
+        up_w = torch.randn(N, K, device=GPU_TYPE, dtype=torch.float16)
+        model = LlamaMLP().to(GPU_TYPE)
+
+        ref_result = model(x, gate_w, up_w)
+        result = torch.compile(model)(x, gate_w, up_w)
+
+        self.assertGreaterEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    def test_evt_aux_load_mul(self):
+        """Test that multiplying GEMM output with an external buffer uses AuxLoad."""
+
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, aux):
+                return (a @ b) * aux
+
+        M, N, K = 256, 256, 256
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+        aux = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float16)
+        model = TestModel().to(GPU_TYPE)
+
+        result = torch.compile(model)(a, b, aux)
+        ref_result = model(a, b, aux)
 
         self.assertEqual(
             torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
