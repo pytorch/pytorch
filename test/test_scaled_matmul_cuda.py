@@ -835,7 +835,6 @@ class TestFP8Matmul(TestCase):
                 if format == "mxfp8":
                     wh, wq, w_scale = _convert_to_mxfp8_with_hp_ref(W[i])
                 elif format == "nvfp4":
-                    w_scale, wq = to_mxfp(W[i], format="mxfp8")
                     wh, wq, w_scale, w_global_scale = _convert_to_nvfp4_with_hp_ref(W[i])
                     w_global_scale_list.append(w_global_scale)
                 elif format == "mxfp4":
@@ -1840,6 +1839,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164271")
+    @onlyCUDA
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
