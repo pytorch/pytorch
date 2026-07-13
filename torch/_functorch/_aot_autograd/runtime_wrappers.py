@@ -24,7 +24,6 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.fx as fx
 from torch import Tensor
-from torch._custom_class_base import CustomClassBase
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.graph_bytecode_inputs import index_to_external_object_weakref
@@ -37,7 +36,6 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-from torch._library.opaque_object import is_custom_class
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
@@ -2622,49 +2620,17 @@ class AOTDispatchAutogradCompileSpec:
 @dataclass
 class _AutogradSavedState:
     metadata: ViewAndMutationMeta
-    debug_assert: bool
+    plan: _AOTAutogradSavePlan
 
-    def save_from_forward(
-        self, ctx: Any, fw_outs: Sequence[Any], plan: _AOTAutogradSavePlan
-    ) -> None:
+    def save_from_forward(self, ctx: Any, fw_outs: Sequence[Any]) -> None:
         # C++ owns the actual save/detach/ctx mutation. This wrapper only keeps
-        # the Python-specific debug checks and dynamic-dim attribute stamping.
-        if self.debug_assert:
-            self._debug_assert(fw_outs)
-
+        # the Python-specific dynamic-dim attribute stamping.
         dynamic_saved_tensor_idxs = self.metadata.dynamic_saved_tensors_idxs
-        if not dynamic_saved_tensor_idxs:
-            torch._C._aot_autograd_save_for_backward(ctx, fw_outs, plan)
-            return
-
         saved_tensors = torch._C._aot_autograd_save_for_backward(
-            ctx, fw_outs, plan, True
+            ctx, fw_outs, self.plan, True
         )
         for idx, dims in dynamic_saved_tensor_idxs.items():
             mark_dynamo_propagated_dynamic_indices(saved_tensors[idx], dims)
-
-    def _debug_assert(self, fw_outs: Sequence[Any]) -> None:
-        symint_outs = fw_outs[self.metadata.symints_saved_for_backwards_slice]
-        if not all(
-            isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
-            for x in symint_outs
-        ):
-            raise AssertionError(
-                "expected all symint_outs to be int/float/SymInt/SymFloat, "
-                f"got types: {[type(x) for x in symint_outs]}"
-            )
-
-        opaque_object_outs = fw_outs[
-            self.metadata.opaque_objects_saved_for_backwards_slice
-        ]
-        if not all(
-            is_custom_class(type(obj)) or isinstance(obj, CustomClassBase)
-            for obj in opaque_object_outs
-        ):
-            raise AssertionError(
-                "expected all opaque_object_outs to be opaque types, "
-                f"got types: {[type(obj) for obj in opaque_object_outs]}"
-            )
 
 
 def _slice_to_indices(s: slice, length: int) -> list[int]:
@@ -2677,7 +2643,7 @@ def _slice_to_indices(s: slice, length: int) -> list[int]:
 def _codegen_save_from_forward(
     fw_metadata: ViewAndMutationMeta,
     num_fw_outs_saved_for_bw: int,
-) -> tuple[Callable[..., Any], _AOTAutogradSavePlan]:
+) -> tuple[Callable[..., Any], _AOTAutogradSavePlan | None]:
     total_fw_outs = fw_metadata.num_forward + num_fw_outs_saved_for_bw
     vc_idxs = _slice_to_indices(
         fw_metadata.tensors_saved_for_backwards_with_vc_check_slice,
@@ -2718,7 +2684,7 @@ def _codegen_save_from_forward(
         *is_graph_input,
     )
     save_plan = torch._C._aot_autograd_make_save_plan(plan)
-    if not config.debug_assert and not fw_metadata.dynamic_saved_tensors_idxs:
+    if not fw_metadata.dynamic_saved_tensors_idxs:
         return (
             torch._C._aot_autograd_save_for_backward,
             save_plan,
@@ -2726,9 +2692,9 @@ def _codegen_save_from_forward(
 
     save_from_forward = _AutogradSavedState(
         fw_metadata,
-        debug_assert=config.debug_assert,
+        plan=save_plan,
     )
-    return save_from_forward.save_from_forward, save_plan
+    return save_from_forward.save_from_forward, None
 
 
 @dataclass
@@ -3265,6 +3231,7 @@ def _codegen_compiled_forward(
     backward_state_indices: list[int],
     disable_amp: bool,
     num_rng: int,
+    has_save_plan: bool,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
@@ -3300,7 +3267,10 @@ def _codegen_compiled_forward(
             buf.writeline("fw_outs = _compiled_fw_(list(args))")
             _codegen_normalize_as_list(buf.lines, "fw_outs", indent_level=1)
 
-        buf.writeline("_save_(ctx, fw_outs, _save_plan_)")
+        if has_save_plan:
+            buf.writeline("_save_(ctx, fw_outs, _save_plan_)")
+        else:
+            buf.writeline("_save_(ctx, fw_outs)")
         buf.writeline("return _finalize_(ctx, fw_outs)")
 
     return buf.build()
@@ -3450,6 +3420,7 @@ class _AOTDispatchAutogradFunctionFactory:
             backward_state_indices,
             disable_amp,
             rng_state.num_rng,
+            _codegen_save_plan is not None,
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias

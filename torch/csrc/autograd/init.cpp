@@ -39,6 +39,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_raii.h>
+#include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
 #include <set>
@@ -1807,9 +1808,19 @@ static PyObject* prepare_saved_tensor(
   return item;
 }
 
-static void set_list_attr_from_indices(
+static void check_symint_item(PyObject* item, int64_t idx) {
+  TORCH_CHECK(
+      PyLong_Check(item) || PyFloat_Check(item) ||
+          torch::is_symint(py::handle(item)) ||
+          torch::is_symfloat(py::handle(item)),
+      "expected symint_outs to contain int/float/SymInt/SymFloat at index ",
+      idx,
+      ", got ",
+      Py_TYPE(item)->tp_name);
+}
+
+static void set_symints_attr_from_indices(
     PyObject* ctx,
-    const char* attr,
     PyObject* fw_outs,
     const AOTAutogradSavePlan* plan,
     int64_t start,
@@ -1821,10 +1832,90 @@ static void set_list_attr_from_indices(
   for (const auto i : c10::irange(num_indices)) {
     auto idx = plan->indices[start + i];
     PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
+    check_symint_item(item, idx);
     Py_INCREF(item);
     PyList_SET_ITEM(result.get(), static_cast<Py_ssize_t>(i), item);
   }
-  if (PyObject_SetAttrString(ctx, attr, result.get()) < 0) {
+  if (PyObject_SetAttrString(ctx, "symints", result.get()) < 0) {
+    throw python_error();
+  }
+}
+
+static bool is_opaque_object(
+    PyObject* item,
+    PyObject* is_custom_class,
+    PyObject* custom_class_base) {
+  THPObjectPtr is_custom_class_result(PyObject_CallFunctionObjArgs(
+      is_custom_class, reinterpret_cast<PyObject*>(Py_TYPE(item)), nullptr));
+  if (!is_custom_class_result) {
+    throw python_error();
+  }
+  auto is_custom_class_true = PyObject_IsTrue(is_custom_class_result.get());
+  if (is_custom_class_true < 0) {
+    throw python_error();
+  }
+  if (is_custom_class_true != 0) {
+    return true;
+  }
+
+  auto is_custom_class_base = PyObject_IsInstance(item, custom_class_base);
+  if (is_custom_class_base < 0) {
+    throw python_error();
+  }
+  return is_custom_class_base != 0;
+}
+
+static void set_opaque_objects_attr_from_indices(
+    PyObject* ctx,
+    PyObject* fw_outs,
+    const AOTAutogradSavePlan* plan,
+    int64_t start,
+    int64_t num_indices) {
+  THPObjectPtr result(PyList_New(static_cast<Py_ssize_t>(num_indices)));
+  if (!result) {
+    throw python_error();
+  }
+  if (num_indices == 0) {
+    if (PyObject_SetAttrString(ctx, "opaque_objects", result.get()) < 0) {
+      throw python_error();
+    }
+    return;
+  }
+
+  THPObjectPtr opaque_module(
+      PyImport_ImportModule("torch._library.opaque_object"));
+  if (!opaque_module) {
+    throw python_error();
+  }
+  THPObjectPtr is_custom_class(
+      PyObject_GetAttrString(opaque_module.get(), "is_custom_class"));
+  if (!is_custom_class) {
+    throw python_error();
+  }
+  THPObjectPtr custom_class_base_module(
+      PyImport_ImportModule("torch._custom_class_base"));
+  if (!custom_class_base_module) {
+    throw python_error();
+  }
+  THPObjectPtr custom_class_base(PyObject_GetAttrString(
+      custom_class_base_module.get(), "CustomClassBase"));
+  if (!custom_class_base) {
+    throw python_error();
+  }
+
+  for (const auto i : c10::irange(num_indices)) {
+    auto idx = plan->indices[start + i];
+    PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
+    TORCH_CHECK(
+        is_opaque_object(item, is_custom_class.get(), custom_class_base.get()),
+        "expected opaque_object_outs to contain opaque types at index ",
+        idx,
+        ", got ",
+        Py_TYPE(item)->tp_name);
+    Py_INCREF(item);
+    PyList_SET_ITEM(result.get(), static_cast<Py_ssize_t>(i), item);
+  }
+  if (PyObject_SetAttrString(ctx, "opaque_objects", result.get()) < 0) {
     throw python_error();
   }
 }
@@ -1974,12 +2065,11 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
       0) {
     throw python_error();
   }
-  // SymInts and opaque objects do not need tensor view handling; just preserve
-  // the selected fw_out objects on ctx for the backward prologue.
-  set_list_attr_from_indices(
-      ctx, "symints", fw_outs, plan, symint_start, num_symints);
-  set_list_attr_from_indices(
-      ctx, "opaque_objects", fw_outs, plan, opaque_start, num_opaque);
+  // SymInts and opaque objects do not need tensor view handling; validate and
+  // preserve the selected fw_out objects on ctx for the backward prologue.
+  set_symints_attr_from_indices(ctx, fw_outs, plan, symint_start, num_symints);
+  set_opaque_objects_attr_from_indices(
+      ctx, fw_outs, plan, opaque_start, num_opaque);
 
   if (return_saved_tensors) {
     return saved_tensors.release();
