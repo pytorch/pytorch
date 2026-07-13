@@ -1406,6 +1406,51 @@ class TestSerialization(TestCase, SerializationMixin):
                 with self.assertRaisesRegex(pickle.UnpicklingError, error_msg):
                     torch.load(f, weights_only=True)
 
+    def test_weights_only_blocklist_code_execution_modules(self):
+        import marshal
+        with BytesIOContext() as f:
+            torch.save(marshal.loads, f)
+            f.seek(0)
+            with safe_globals([marshal.loads]):
+                with self.assertRaisesRegex(
+                    pickle.UnpicklingError,
+                    "marshal.loads whose module marshal is blocked",
+                ):
+                    torch.load(f, weights_only=True)
+
+    def test_weights_only_blocklist_builtins_eval(self):
+        with BytesIOContext() as f:
+            torch.save(eval, f)
+            f.seek(0)
+            with safe_globals([eval]):
+                with self.assertRaisesRegex(
+                    pickle.UnpicklingError,
+                    "builtins.eval which is blocked",
+                ):
+                    torch.load(f, weights_only=True)
+
+    def test_weights_only_blocklist_builtins_getattr(self):
+        with BytesIOContext() as f:
+            torch.save(getattr, f)
+            f.seek(0)
+            with safe_globals([getattr]):
+                with self.assertRaisesRegex(
+                    pickle.UnpicklingError,
+                    "builtins.getattr which is blocked",
+                ):
+                    torch.load(f, weights_only=True)
+
+    def test_weights_only_blocklist_pickle_module(self):
+        with BytesIOContext() as f:
+            torch.save(pickle.loads, f)
+            f.seek(0)
+            with safe_globals([pickle.loads]):
+                with self.assertRaisesRegex(
+                    pickle.UnpicklingError,
+                    "pickle.loads whose module pickle is blocked",
+                ):
+                    torch.load(f, weights_only=True)
+
     @parametrize("unsafe_global", [True, False])
     def test_weights_only_error(self, unsafe_global):
         sd = {'t': TwoTensor(torch.randn(2), torch.randn(2))}
