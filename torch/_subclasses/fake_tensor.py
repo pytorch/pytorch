@@ -250,36 +250,10 @@ def get_plain_tensors(
 
 
 def is_fake_tensor(x: object) -> TypeGuard[Tensor]:
-    # True if x is itself a fake tensor: a Python FakeTensor, or a C++ fake -- a
-    # plain torch.Tensor carrying DispatchKey::Fake, not an instance of the
-    # Python FakeTensor subclass.
+    # True if x is itself a fake tensor: a Python FakeTensor, or a C++ fake.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return True
     return isinstance(x, Tensor) and torch._C._is_fake_tensor(x)
-
-
-def maybe_get_fake_device(x: object) -> torch.device | None:
-    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-        return x.fake_device
-    else:
-        # return None for now until C++ functionality is added in a followup
-        return None
-
-
-def maybe_get_fake_constant(x: object) -> Tensor | None:
-    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-        return x.constant
-    else:
-        # return None for now until C++ functionality is added in a followup
-        return None
-
-
-def maybe_get_real_tensor(x: object) -> Tensor | None:
-    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-        return x.real_tensor
-    else:
-        # return None for now until C++ functionality is added in a followup
-        return None
 
 
 def is_fake(x: object) -> TypeGuard[Tensor]:
@@ -349,6 +323,24 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     elif isinstance(t, Tensor) and is_functorch_wrapped_tensor(t):
         unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
+    return None
+
+
+def maybe_get_real_tensor(x: object) -> Tensor | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return x.real_tensor
+    return None
+
+
+def maybe_get_fake_device(x: object) -> torch.device | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return x.fake_device
+    return None
+
+
+def maybe_get_fake_constant(x: object) -> Tensor | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return x.constant
     return None
 
 

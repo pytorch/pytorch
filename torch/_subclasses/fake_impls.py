@@ -2457,16 +2457,16 @@ def fast_detach(
     x: FakeTensor | torch.Tensor,
     include_real: bool = False,
 ) -> torch.Tensor:
-    from torch._subclasses.fake_tensor import FakeTensorMode
-
-    # A non-FakeTensor input (or no fake mode) has no Python FakeTensor to
-    # reconstruct; just detach directly.
-    if not isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-        with no_python_dispatcher():
-            return torch.ops.aten.detach.default(x)
-    if not isinstance(fake_mode, FakeTensorMode):
-        with no_python_dispatcher():
-            return torch.ops.aten.detach.default(x)
+    # The FakeTensor | Tensor and FakeTensorMode | None widening exists for C++
+    # FakeTensor support, which is not enabled yet: today x is always a Python
+    # FakeTensor and fake_mode a FakeTensorMode.
+    if (
+        not isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+        or fake_mode is None
+    ):
+        raise AssertionError(
+            "type widening added for cpp faketensor but this is not used yet"
+        )
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
     dispatch_keys = x.dispatch_keys
