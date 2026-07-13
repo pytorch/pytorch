@@ -2,7 +2,7 @@
 import contextlib
 import io
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -321,6 +321,24 @@ def assume_constant_result(fn):
     import torch._dynamo
 
     return torch._dynamo.assume_constant_result(fn)
+
+
+@overload
+def disable(
+    fn: Callable[_P, _R],
+    recursive: bool = True,
+    *,
+    reason: str | None = None,
+) -> Callable[_P, _R]: ...
+
+
+@overload
+def disable(
+    fn: None = None,
+    recursive: bool = True,
+    *,
+    reason: str | None = None,
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]: ...
 
 
 def disable(fn=None, recursive=True, *, reason=None):
