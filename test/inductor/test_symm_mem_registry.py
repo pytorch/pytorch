@@ -14,7 +14,7 @@ import torch
 from torch._library.simple_registry import singleton, SymmMemArgsHolder
 from torch.library import Library  # noqa: SCOPED_LIBRARY
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 def register_symm_mem_args(op, arg_names):
@@ -238,7 +238,7 @@ class TestFunctionalOpCompile(TestCase):
         torch._dynamo.reset()
         super().tearDown()
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA and Triton")
+    @unittest.skipIf(not HAS_GPU, "Requires GPU and Triton")
     def test_functional_op_compiles_with_symm_mem_args(self):
         """Test that a functional op with registered symm_mem_args compiles and runs."""
         lib = Library("test_func_symm", "DEF")  # noqa: SCOPED_LIBRARY
@@ -249,7 +249,7 @@ class TestFunctionalOpCompile(TestCase):
         def meta_impl(input, group_name):
             return torch.empty_like(input)
 
-        @torch.library.impl(lib, "my_functional_op", "CUDA")
+        @torch.library.impl(lib, "my_functional_op", GPU_TYPE.upper())
         def cuda_impl(input, group_name):
             return input + 1.0
 
@@ -260,7 +260,7 @@ class TestFunctionalOpCompile(TestCase):
         def f_compiled(x):
             return torch.ops.test_func_symm.my_functional_op(x, "test_group")
 
-        x = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=GPU_TYPE)
 
         eager_result = f_eager(x.clone())
         compiled_result = f_compiled(x.clone())
@@ -275,7 +275,7 @@ class TestFunctionalOpCompile(TestCase):
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
         self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA and Triton")
+    @unittest.skipIf(not HAS_GPU, "Requires GPU and Triton")
     def test_functional_op_with_multiple_symm_mem_args(self):
         """Test that multiple symm_mem args are registered and visible during compilation."""
         lib = Library("test_func_multi", "DEF")  # noqa: SCOPED_LIBRARY
@@ -288,7 +288,7 @@ class TestFunctionalOpCompile(TestCase):
         def meta_impl(input, out, group_name):
             return torch.empty_like(input)
 
-        @torch.library.impl(lib, "my_multi_arg_op", "CUDA")
+        @torch.library.impl(lib, "my_multi_arg_op", GPU_TYPE.upper())
         def cuda_impl(input, out, group_name):
             # use both symm_mem args to verify functionality
             return input + out
@@ -300,8 +300,8 @@ class TestFunctionalOpCompile(TestCase):
         def f_compiled(x, y):
             return torch.ops.test_func_multi.my_multi_arg_op(x, y, "test_group")
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
 
         eager_result = f_eager(x.clone(), y.clone())
         compiled_result = f_compiled(x.clone(), y.clone())
