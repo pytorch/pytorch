@@ -4576,6 +4576,35 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.randn(1, 4),))
 
+    def test_nested_reduction_broadcast_outer_product(self):
+        # Regression: for a fused broadcast+reduce whose broadcast
+        # materializes [N, N] from [N] and [N, 1], the codegen used to emit
+        # nested reduction loops that advanced a block_ptr through the entire
+        # inner loop without rewinding it at outer-loop suffix. Any backend
+        # that lowers the loops to iter-arg-threaded control flow (e.g.
+        # `scf.for` on Triton-MTIA) would then load out-of-bounds on outer
+        # iterations >= 1 and silently drop most of the reduction. This test
+        # verifies numerical correctness for the outer-product-broadcast +
+        # sum/mean pattern at a size large enough to exercise multi-tile
+        # reduction paths.
+        def fn(a, b):
+            return (a * b).sum(), torch.mean(a * b)
+
+        # Non-zero mean so a truncated reduction cannot hide behind noise.
+        # rtol is relaxed from the float32 default because summing N^2=1M
+        # elements accumulates float32 rounding (~1e-5 relative), while the
+        # bug this catches causes a >90% error, so the looser bound still
+        # detects any regression.
+        self.common(
+            fn,
+            (
+                torch.randn(1024) + 3.0,
+                (torch.randn(1024) + 3.0).view(-1, 1),
+            ),
+            rtol=2e-4,
+            atol=1e-5,
+        )
+
     def test_squeeze1(self):
         def fn(a):
             return ((a + 1).squeeze() + 2, a.squeeze() + 2)
