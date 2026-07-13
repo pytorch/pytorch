@@ -80,36 +80,57 @@ def _diag() -> None:
             val = p.read_text().strip() if p.exists() else "<absent>"
             print(f"[preflight-diag] {label} ({path}): {val}")
 
-        # Remove torch from the causal chain: query libamdhip64 directly.
-        try:
-            hip = ctypes.CDLL("libamdhip64.so")
-            raw = ctypes.c_int(-1)
-            rc = hip.hipGetDeviceCount(ctypes.byref(raw))
-            print(f"[preflight-diag] raw hipGetDeviceCount rc={rc} count={raw.value}")
-        except Exception as e:  # noqa: BLE001
-            print(f"[preflight-diag] raw hipGetDeviceCount failed: {e}")
+        # Resolve the libamdhip64 torch actually loaded (bare soname is not on
+        # the loader path in the wheel container -- torch finds it via its own
+        # RPATH). Read the real path from /proc/self/maps.
+        import re
 
-        # CLR verbose init log (torch-free): if HIP rejects the devices it names
-        # why here (e.g. KFD version below minimum, ioctl EINVAL, queue-create
-        # failure). Bounded tail so it never floods the job log.
+        hip_path = None
+        try:
+            with open("/proc/self/maps") as maps:
+                for line in maps:
+                    m = re.search(r"(/\S*libamdhip64\.so[.\d]*)", line)
+                    if m:
+                        hip_path = m.group(1)
+                        break
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] could not read /proc/self/maps: {e}")
+        print(f"[preflight-diag] resolved libamdhip64 path: {hip_path}")
+
+        # Remove torch from the causal chain: query libamdhip64 directly.
+        if hip_path:
+            try:
+                hip = ctypes.CDLL(hip_path)
+                raw = ctypes.c_int(-1)
+                rc = hip.hipGetDeviceCount(ctypes.byref(raw))
+                print(f"[preflight-diag] raw hipGetDeviceCount rc={rc} count={raw.value}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[preflight-diag] raw hipGetDeviceCount failed: {e}")
+
+        # CLR verbose init log: on failure HIP names why here (KFD version below
+        # minimum, ioctl EINVAL, queue-create failure, no usable device). The
+        # child imports torch first so libamdhip64 resolves via torch's RPATH,
+        # then re-reads the resolved path and calls hipGetDeviceCount raw.
         try:
             clr = subprocess.run(
                 [
                     sys.executable,
                     "-c",
-                    "import ctypes;h=ctypes.CDLL('libamdhip64.so');"
-                    "n=ctypes.c_int(-1);h.hipGetDeviceCount(ctypes.byref(n));"
-                    "print('rc-count',n.value)",
+                    "import torch, ctypes, re;"
+                    "p=[re.search(r'(/\\S*libamdhip64\\.so[.\\d]*)',l).group(1)"
+                    " for l in open('/proc/self/maps') if 'libamdhip64' in l][0];"
+                    "h=ctypes.CDLL(p); n=ctypes.c_int(-1);"
+                    "rc=h.hipGetDeviceCount(ctypes.byref(n));"
+                    "print('rc-count', rc, n.value)",
                 ],
-                env={**os.environ, "AMD_LOG_LEVEL": "3"},
+                env={**os.environ, "AMD_LOG_LEVEL": "4"},
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=120,
             )
             lines = (clr.stderr or "").strip().splitlines()
-            # On failure the reason (KFD version, ioctl EINVAL, queue-create,
-            # "no ... device") can appear anywhere, drowned by per-device spam.
-            # Surface flagged lines first, then a bounded tail as a fallback.
+            # On failure the reason can appear anywhere, drowned by per-device
+            # spam. Surface flagged lines first, then a bounded tail fallback.
             flagged = [
                 ln
                 for ln in lines
@@ -120,20 +141,27 @@ def _diag() -> None:
                         "fail",
                         "einval",
                         "no device",
+                        "no gpu",
                         "not supported",
+                        "unsupported",
                         "version",
+                        "minimum",
                         "unable",
                         "abort",
                         "kfd",
+                        "ioctl",
+                        "queue",
+                        "hsakmt",
+                        "topology",
                     )
                 )
             ]
             print(f"[preflight-diag] raw child stdout: {clr.stdout.strip()!r}")
-            print("[preflight-diag] --- CLR AMD_LOG_LEVEL=3 flagged lines ---")
-            for line in flagged[-40:]:
+            print("[preflight-diag] --- CLR AMD_LOG_LEVEL=4 flagged lines ---")
+            for line in flagged[-60:]:
                 print(f"[preflight-diag-clr] {line}")
-            print("[preflight-diag] --- CLR AMD_LOG_LEVEL=3 tail (20 lines) ---")
-            for line in lines[-20:]:
+            print("[preflight-diag] --- CLR AMD_LOG_LEVEL=4 tail (25 lines) ---")
+            for line in lines[-25:]:
                 print(f"[preflight-diag-clr] {line}")
         except Exception as e:  # noqa: BLE001
             print(f"[preflight-diag] CLR log capture failed: {e}")
