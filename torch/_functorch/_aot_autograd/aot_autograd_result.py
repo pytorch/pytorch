@@ -544,6 +544,10 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         if needs_autograd:
             if self.compiled_bw is None:
                 raise AssertionError("compiled_bw must not be None when needs_autograd")
+            if self.num_fw_outs_saved_for_bw is None:
+                raise AssertionError(
+                    "num_fw_outs_saved_for_bw must not be None when needs_autograd"
+                )
 
             cached_lazy_backward = None
             if self.serialized_bw_module is not None:
@@ -560,6 +564,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 compiled_bw_func=compiled_bw_func,
                 maybe_subclass_meta=self.maybe_subclass_meta,
                 num_symints_saved_for_bw=self.compiled_bw.num_symints_saved_for_bw_,
+                num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 backward_state_indices=self.compiled_bw.backward_state_indices,
                 disable_amp=disable_amp,
                 indices_of_inps_to_detach=self.indices_of_inps_to_detach,

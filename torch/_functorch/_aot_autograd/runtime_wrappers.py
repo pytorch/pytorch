@@ -12,6 +12,7 @@ import copy
 import functools
 import itertools
 import pprint
+import struct
 import typing
 import warnings
 import weakref
@@ -2600,6 +2601,7 @@ class AOTDispatchAutogradCompileSpec:
     compiled_bw_func: Callable[..., Any] | None
     maybe_subclass_meta: SubclassMeta | None
     num_symints_saved_for_bw: int
+    num_fw_outs_saved_for_bw: int
     backward_state_indices: list[int]
     disable_amp: bool
     indices_of_inps_to_detach: list[int]
@@ -2682,6 +2684,69 @@ class _AutogradSavedState:
                 f"got types: {[type(obj) for obj in opaque_object_outs]}"
             )
         ctx.opaque_objects = opaque_object_outs
+
+
+def _slice_to_indices(s: slice, length: int) -> list[int]:
+    start, stop, step = s.indices(length)
+    if step != 1:
+        raise AssertionError(f"expected slice step 1, got {step}")
+    return list(range(start, stop))
+
+
+def _codegen_save_from_forward(
+    fw_metadata: ViewAndMutationMeta,
+    num_fw_outs_saved_for_bw: int,
+) -> tuple[Callable[..., Any], bytes | None]:
+    total_fw_outs = fw_metadata.num_forward + num_fw_outs_saved_for_bw
+    vc_idxs = _slice_to_indices(
+        fw_metadata.tensors_saved_for_backwards_with_vc_check_slice,
+        total_fw_outs,
+    )
+    no_vc_idxs = _slice_to_indices(
+        fw_metadata.tensors_saved_for_backwards_no_vc_check_slice,
+        total_fw_outs,
+    )
+    symint_idxs = _slice_to_indices(
+        fw_metadata.symints_saved_for_backwards_slice,
+        total_fw_outs,
+    )
+    opaque_idxs = _slice_to_indices(
+        fw_metadata.opaque_objects_saved_for_backwards_slice,
+        total_fw_outs,
+    )
+
+    saved_tensor_idxs = [*vc_idxs, *no_vc_idxs]
+    is_graph_input = fw_metadata.saved_tensor_is_graph_input
+    if len(is_graph_input) != len(saved_tensor_idxs):
+        raise AssertionError(
+            "expected one saved_tensor_is_graph_input entry per saved tensor, "
+            f"got {len(is_graph_input)} != {len(saved_tensor_idxs)}"
+        )
+
+    saved_state = _AutogradSavedState(fw_metadata)
+    if not config.debug_assert and not fw_metadata.dynamic_saved_tensors_idxs:
+        # Use C++ only when it can mirror save_from_forward without extra
+        # debug checks or dynamic-shape marking. The Python method stays as the
+        # fallback for those less common cases.
+        # Keep the fast-path plan intentionally close to the Python fallback:
+        # counts, fw_out indices, then one graph-input flag per saved tensor.
+        plan = (
+            len(vc_idxs),
+            len(no_vc_idxs),
+            len(symint_idxs),
+            len(opaque_idxs),
+            *vc_idxs,
+            *no_vc_idxs,
+            *symint_idxs,
+            *opaque_idxs,
+            *is_graph_input,
+        )
+        return (
+            typing.cast(Any, torch._C)._aot_autograd_save_for_backward,
+            struct.pack(f"{len(plan)}q", *plan),
+        )
+
+    return saved_state.save_from_forward, None
 
 
 @dataclass
@@ -3218,12 +3283,13 @@ def _codegen_compiled_forward(
     backward_state_indices: list[int],
     disable_amp: bool,
     num_rng: int,
+    has_save_plan: bool,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
     buf = PySourceBuilder(
         "_compiled_forward",
-        args="ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_",
+        args="ctx, args, _rng_add_, _save_, _save_plan_, _finalize_, _compiled_fw_",
         artifact_name="compiled_function_forward",
     )
     buf.bind(torch=torch, BackwardState=BackwardState)
@@ -3253,7 +3319,10 @@ def _codegen_compiled_forward(
             buf.writeline("fw_outs = _compiled_fw_(list(args))")
             _codegen_normalize_as_list(buf.lines, "fw_outs", indent_level=1)
 
-        buf.writeline("_save_(ctx, fw_outs)")
+        if has_save_plan:
+            buf.writeline("_save_(ctx, fw_outs, _save_plan_)")
+        else:
+            buf.writeline("_save_(ctx, fw_outs)")
         buf.writeline("return _finalize_(ctx, fw_outs)")
 
     return buf.build()
@@ -3341,7 +3410,6 @@ class _AOTDispatchAutogradFunctionFactory:
         compile_id_str = str(compile_id) if compile_id is not None else None
         self.spec.fw_metadata.compile_id_str = compile_id_str
 
-        saved_state = _AutogradSavedState(self.spec.fw_metadata)
         forward_epilogue = _AutogradForwardEpilogue(self.spec.fw_metadata)
         rng_state = _AutogradRngStateTracker(
             num_rng=self.spec.fw_metadata.num_graphsafe_rng_states,
@@ -3362,6 +3430,7 @@ class _AOTDispatchAutogradFunctionFactory:
         compiled_bw_func = self.spec.compiled_bw_func
         maybe_subclass_meta = self.spec.maybe_subclass_meta
         num_symints_saved_for_bw_ = self.spec.num_symints_saved_for_bw
+        num_fw_outs_saved_for_bw = self.spec.num_fw_outs_saved_for_bw
         backward_state_indices = self.spec.backward_state_indices
         disable_amp = self.spec.disable_amp
         lazy_backward_info = self.spec.lazy_backward_info
@@ -3389,17 +3458,21 @@ class _AOTDispatchAutogradFunctionFactory:
             _codegen_bw_wrap_fn,
         )
 
+        _codegen_bwd = _codegen_compiled_backward(
+            rng_state.num_rng,
+            fw_metadata.num_tensors_saved_with_no_vc_check,
+            any(inp.requires_grad for inp in fw_metadata.input_info),
+        )
+        _codegen_save, _codegen_save_plan = _codegen_save_from_forward(
+            fw_metadata,
+            num_fw_outs_saved_for_bw,
+        )
         _codegen_fwd = _codegen_compiled_forward(
             fw_metadata,
             backward_state_indices,
             disable_amp,
             rng_state.num_rng,
-        )
-
-        _codegen_bwd = _codegen_compiled_backward(
-            rng_state.num_rng,
-            fw_metadata.num_tensors_saved_with_no_vc_check,
-            any(inp.requires_grad for inp in fw_metadata.input_info),
+            _codegen_save_plan is not None,
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3522,7 +3595,8 @@ class _AOTDispatchAutogradFunctionFactory:
                     ctx,
                     deduped_flat_tensor_args,
                     rng_state.add_forward_args,
-                    saved_state.save_from_forward,
+                    _codegen_save,
+                    _codegen_save_plan,
                     forward_epilogue.finalize,
                     CompiledFunction.compiled_fw,
                 )
