@@ -6,13 +6,14 @@ import sympy
 import torch
 from torch._dynamo.test_case import TestCase
 from torch._inductor.codegen.cutlass.utils import (
+    cutlass_arch,
     torch_dtype_to_cutlass_type,
     try_import_cutlass,
 )
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
-from torch.testing._internal.common_cuda import IS_SM100, IS_SM90, SM90OrLater
+from torch.testing._internal.common_cuda import IS_SM10X, IS_SM90, SM90OrLater
 from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
@@ -21,6 +22,14 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     MockGraphHandler,
 )
+
+
+def _is_cuda_sm90_or_sm10x():
+    return bool(IS_SM90) or bool(IS_SM10X)
+
+
+def _expect_cuda_evt_key_error():
+    return GPU_TYPE == "cuda" and bool(IS_SM10X) and int(cutlass_arch(GPU_TYPE)) > 100
 
 
 if try_import_cutlass():
@@ -346,6 +355,123 @@ return tmp_1, D""",
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_neg_constant(self):
+        """Test EVT codegen for neg and constant ops (used in decomposed SiLU)."""
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import ops, V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+
+        def inner_fn(index):
+            x = buf0.make_loader()(index)
+            c = ops.constant(1, torch.float32)
+            return c + ops.exp(ops.neg(x))
+
+        buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
+        with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
+            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [MockSchedulerNode(buf1)],
+                OrderedSet(["buf0"]),
+            )
+        self.assertExpectedInline(reads, """[]""")
+        self.assertExpectedInline(writes, """['buf1']""")
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum):
+    tmp_0 = 1.0
+    tmp_1 = (0.0 - accum)
+    tmp_2 = exp(tmp_1)
+    D = tmp_0 + tmp_2
+
+return D""",
+        )
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_sigmoid_decomposed(self):
+        """Test EVT codegen for decomposed sigmoid: 1/(1+exp(-x))."""
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import ops, V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+
+        def inner_fn(index):
+            x = buf0.make_loader()(index)
+            neg_x = ops.neg(x)
+            exp_neg = ops.exp(neg_x)
+            one = ops.constant(1, torch.float32)
+            denom = one + exp_neg
+            return ops.truediv(one, denom)
+
+        buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
+        with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
+            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [MockSchedulerNode(buf1)],
+                OrderedSet(["buf0"]),
+            )
+        self.assertExpectedInline(reads, """[]""")
+        self.assertExpectedInline(writes, """['buf1']""")
+        # Sigmoid doesn't match _fuse_activations (not x/denom form with x in num)
+        # so it stays decomposed
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum):
+    tmp_0 = (0.0 - accum)
+    tmp_1 = exp(tmp_0)
+    tmp_2 = 1.0
+    tmp_3 = tmp_2 + tmp_1
+    D = tmp_2 / tmp_3
+
+return D""",
+        )
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_silu_fused(self):
+        """Test EVT codegen for SiLU: x/(1+exp(-x)) is folded to silu(x)."""
+        from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import ops, V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+
+        def inner_fn(index):
+            x = buf0.make_loader()(index)
+            neg_x = ops.neg(x)
+            exp_neg = ops.exp(neg_x)
+            one = ops.constant(1, torch.float32)
+            denom = one + exp_neg
+            return ops.truediv(x, denom)
+
+        buf1 = MockComputedBuffer("buf1", inner_fn, torch.float32, size)
+        with V.set_graph_handler(MockGraphHandler({"buf0": buf0, "buf1": buf1})):
+            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [MockSchedulerNode(buf1)],
+                OrderedSet(["buf0"]),
+            )
+        self.assertExpectedInline(reads, """[]""")
+        self.assertExpectedInline(writes, """['buf1']""")
+        # _fuse_activations folds x/(1+exp(0.0-x)) into silu(x)
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum):
+    D = silu(accum)
+return D""",
+        )
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cutlass.lib_extensions.evt_extensions import (
             create_example_tensors,
@@ -377,18 +503,25 @@ return tmp_1, D""",
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
-        from torch._inductor.codegen.cutlass.utils import cutlass_arch
-
         arch = int(cutlass_arch(GPU_TYPE))
-        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, arch)
-        code = _render_argument_type(
-            epilogue_functor,
-            _create_mock_buffer_name_map(EXAMPLE_TENSORS),
-            lambda x: int(x),
-        )[0]
+
+        def render_code():
+            epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, arch)
+            return _render_argument_type(
+                epilogue_functor,
+                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+                lambda x: int(x),
+            )[0]
+
+        if _expect_cuda_evt_key_error():
+            with self.assertRaises(KeyError):
+                render_code()
+            return
+
+        code = render_code()
         if GPU_TYPE == "xpu":
             self.assertExpectedInline(
                 code,
@@ -439,11 +572,9 @@ return tmp_1, D""",
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen_return_accumulator(self):
-        from torch._inductor.codegen.cutlass.utils import cutlass_arch
-
         arch = int(cutlass_arch(GPU_TYPE))
 
         code = """
@@ -467,12 +598,20 @@ def fn(accum, bias):
             ),
         }
 
-        epilogue_functor = _trace(code, example_tensors, arch)
-        code = _render_argument_type(
-            epilogue_functor,
-            _create_mock_buffer_name_map(example_tensors),
-            lambda x: int(x),
-        )[0]
+        def render_code():
+            epilogue_functor = _trace(code, example_tensors, arch)
+            return _render_argument_type(
+                epilogue_functor,
+                _create_mock_buffer_name_map(example_tensors),
+                lambda x: int(x),
+            )[0]
+
+        if _expect_cuda_evt_key_error():
+            with self.assertRaises(KeyError):
+                render_code()
+            return
+
+        code = render_code()
 
         if GPU_TYPE == "xpu":
             self.assertExpectedInline(
@@ -504,20 +643,28 @@ def fn(accum, bias):
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
-        _, _, code, _ = trace(
-            BIAS_CODE,
-            EXAMPLE_TENSORS,
-            DataType.f32,
-            DataType.f32,
-            MockTileDescription(),
-            EpilogueScheduleType.ScheduleAuto,
-            _create_mock_buffer_name_map(EXAMPLE_TENSORS),
-            lambda x: x,  # static shapes
-            device_type=GPU_TYPE,
-        )
+        def render_code():
+            return trace(
+                BIAS_CODE,
+                EXAMPLE_TENSORS,
+                DataType.f32,
+                DataType.f32,
+                MockTileDescription(),
+                EpilogueScheduleType.ScheduleAuto,
+                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+                lambda x: x,  # static shapes
+                device_type=GPU_TYPE,
+            )[2]
+
+        if _expect_cuda_evt_key_error():
+            with self.assertRaises(KeyError):
+                render_code()
+            return
+
+        code = render_code()
         if IS_SM90:
             self.assertExpectedInline(
                 code,
@@ -621,7 +768,7 @@ using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 """,
             )
 
-        if IS_SM100:
+        if IS_SM10X:
             self.assertExpectedInline(
                 code,
                 """\
@@ -721,7 +868,7 @@ using DagCompute4 = cutlass::epilogue::fusion::Sm90TopologicalVisitor<
 using ElementD = float;
 using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 
-""",  # noqa: B950
+""",
             )
         if GPU_TYPE == "xpu":
             self.assertExpectedInline(

@@ -7,7 +7,11 @@ import torch
 import torch._dynamo
 import torch._dynamo.config
 from torch._dynamo import debug_utils
-from torch._dynamo.debug_utils import aot_graph_input_parser, generate_env_vars_string
+from torch._dynamo.debug_utils import (
+    aot_graph_input_parser,
+    generate_env_vars_string,
+    NNModuleToString,
+)
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -43,7 +47,7 @@ def forward(self, x_1):
     full = torch.ops.aten.full.default([32], 2, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     empty = torch.ops.aten.empty.memory_format([32], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     return (convert_element_type, _to_copy, full, empty)
-    """,  # NOQA: B950
+    """,
         )
 
         _, fp64_examples = debug_utils.cast_to_fp64(fx, (x,))
@@ -58,7 +62,7 @@ def forward(self, x_1):
     full = torch.ops.aten.full.default([32], 2, dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
     empty = torch.ops.aten.empty.memory_format([32], dtype = torch.float64, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     return (convert_element_type, _to_copy, full, empty)
-    """,  # NOQA: B950
+    """,
         )
 
     @patch.dict(
@@ -68,6 +72,8 @@ def forward(self, x_1):
             "TEST_ENV": "1",
             "TORCHINDUCTOR_ENV_SINGLE_QUOTES": "inductor_'env'",
             "TORCHINDUCTOR_ENV_DOUBLE_QUOTES": 'inductor_"env"',
+            "TORCHDYNAMO_REPRO_AFTER": "aot",
+            "TORCHDYNAMO_REPRO_LEVEL": "4",
         },
     )
     def test_generate_env_vars_string(self):
@@ -97,6 +103,35 @@ def forward(self, x_1):
 """,
             env_strings,
         )
+        self.assertNotIn("os.environ['TORCHDYNAMO_REPRO_AFTER']", env_strings)
+        self.assertNotIn("os.environ['TORCHDYNAMO_REPRO_LEVEL']", env_strings)
+        self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_AFTER', None)", env_strings)
+        self.assertIn("os.environ.pop('TORCHDYNAMO_REPRO_LEVEL', None)", env_strings)
+
+    def test_cuda_system_info_comment_nvcc_os_errors(self):
+        self.addCleanup(debug_utils._cuda_system_info_comment.cache_clear)
+        errors = (
+            PermissionError(13, "Permission denied", "nvcc"),
+            OSError(5, "Input/output error", "nvcc"),
+        )
+
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                debug_utils._cuda_system_info_comment.cache_clear()
+                with (
+                    patch.object(torch.cuda, "is_available", return_value=True),
+                    patch.object(torch.version, "hip", None),
+                    patch.object(
+                        debug_utils.subprocess,
+                        "check_output",
+                        side_effect=error,
+                    ),
+                    patch.object(torch.cuda, "device_count", return_value=0),
+                ):
+                    result = debug_utils._cuda_system_info_comment()
+
+                self.assertIn("# nvcc not found\n", result)
+                self.assertIn("# GPU Hardware Info: \n", result)
 
 
 class TestDebugUtilsDevice(TestCase):
@@ -190,7 +225,7 @@ class TestDebugUtilsDevice(TestCase):
     def test_sym_aot_graph_parser(self, device):
         def forward(
             self,
-            primals_1: "f32[1001, 6]",  # noqa: F821
+            primals_1: "f32[1001, 6]",
             primals_2: "f32[s0]",  # noqa: F821
             primals_3: "Sym(s0)",  # noqa: F821,
             primals_4: "f32[s1]",  # noqa: F821,
@@ -209,10 +244,43 @@ class TestDebugUtilsDevice(TestCase):
         self.assertEqual(kwargs["primals_5"], 5)
 
 
+class TestNNModuleToStringBufferDevice(TestCase):
+    def test_nn_module_to_string_buffer_device(self, device):
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        gm.register_buffer("test_buf", torch.empty(5, device=device))
+
+        result = NNModuleToString.convert(gm)
+
+        if torch.device(device).type == "cpu":
+            self.assertNotIn(".to(", result)
+        else:
+            expected_device = str(torch.empty(1, device=device).device)
+            self.assertIn(f'.to("{expected_device}")', result)
+            self.assertNotIn(".cuda()", result)
+
+    def test_nn_module_to_string_param_device(self, device):
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        gm.register_parameter(
+            "test_param", torch.nn.Parameter(torch.empty(5, device=device))
+        )
+
+        result = NNModuleToString.convert(gm)
+
+        if torch.device(device).type == "cpu":
+            self.assertNotIn("device=", result)
+        else:
+            expected_device = str(torch.empty(1, device=device).device)
+            self.assertIn(f'device="{expected_device}"', result)
+            self.assertNotIn(', device="cuda")', result)
+
+
+instantiate_device_type_tests(
+    TestNNModuleToStringBufferDevice, globals(), allow_xpu=True
+)
+
 instantiate_device_type_tests(TestDebugUtils, globals())
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(TestDebugUtilsDevice, globals(), only_for=devices)
+instantiate_device_type_tests(TestDebugUtilsDevice, globals(), except_for="mps")
 
 
 class TestBackendOverrideIntegration(TestCase):
@@ -376,7 +444,7 @@ class TestBackendOverrideIntegration(TestCase):
 
 
 instantiate_device_type_tests(
-    TestBackendOverrideIntegration, globals(), only_for=["cpu", "cuda"]
+    TestBackendOverrideIntegration, globals(), except_for="mps"
 )
 
 
@@ -767,7 +835,7 @@ class TestInductorConfigOverrideIntegration(TestCase):
                 self.assertEqual(
                     configs_at_compile[(gid, is_bw)],
                     expected,
-                    f"graph {gid} {phase}: config mismatch",
+                    lambda msg: f"{msg}\ngraph {gid} {phase}: config mismatch",
                 )
 
         self.assertIsNotNone(x.grad)

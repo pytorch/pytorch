@@ -8,7 +8,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import IS_FBCODE
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import (
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
@@ -388,6 +388,22 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             got = opt_fn(model, states, x)
             self.assertEqual(expected, got)
 
+    def test_ordered_dict_no_reconstruct_without_mutation(self):
+        """Sourced OrderedDict should not emit BUILD_MAP when not mutated."""
+
+        def hook(instructions: list[dis.Instruction]):
+            build_map = _filter_instructions(instructions, "BUILD_MAP")
+            self.assertEqual(len(build_map), 0)
+
+        def fn(od, x):
+            return x + od["a"]
+
+        od = collections.OrderedDict(a=1, b=2)
+        with self.register_bytecode_hook(hook):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            got = opt_fn(od, torch.tensor(1.0))
+            self.assertEqual(got, torch.tensor(2.0))
+
     def test_graph_break_in_wrapped_user_function(self):
         def fn(x):
             x = x + 1
@@ -485,7 +501,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3)
         self.assertEqual(gn(inp), inp + 3)
 
-    @requires_triton()
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
         "Test requires triton.tools.experimental_descriptor API",
@@ -510,7 +526,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         res = torch.compile(create_tma, backend="eager")(x)
         self.assertEqual(ref[1].desc, res[1].desc)
 
-    @requires_triton()
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @unittest.skipIf(
         not has_triton_tensor_descriptor_host_tma(),
         "Test requires triton.tools.tensor_descriptor API",
@@ -646,10 +662,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """TSOV.as_python_constant must succeed for reference-type opaque
         objects. Without this, __eq__ between two opaque objects graph breaks.
         """
+        import torch._custom_class_base
         import torch._library.opaque_object
-        import torch._opaque_base
 
-        class Config(torch._opaque_base.OpaqueBase):
+        class Config(torch._custom_class_base.CustomClassBase):
             def __init__(self, v):
                 self.v = v
 
@@ -662,7 +678,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             def __hash__(self):
                 return hash(self.v)
 
-        torch._library.opaque_object.register_opaque_type(Config, typ="reference")
+        torch._library.opaque_object.register_custom_class(Config, typ="symbolic")
 
         cfg = Config(42)
 

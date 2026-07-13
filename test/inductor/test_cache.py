@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import pickle
+import typing
 from concurrent.futures import ThreadPoolExecutor
 from inspect import isclass
 from os import environ
@@ -80,7 +81,7 @@ class TestMixin:
         if len(cache_type.__orig_bases__) != 1:
             raise AssertionError
         generic_base = cache_type.__orig_bases__[0]
-        _key_type, _value_type = generic_base.__args__
+        _key_type, _value_type = typing.get_args(generic_base)
         if ((_key_type != icache.Key) and (_key_type != key_type)) or (
             (_value_type != icache.Value) and (_value_type != value_type)
         ):

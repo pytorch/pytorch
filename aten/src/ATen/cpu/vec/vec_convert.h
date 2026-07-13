@@ -51,9 +51,22 @@ struct VecRoundConvert {
         static_cast<src_t>(std::numeric_limits<dst_t>::max());
     for (int i = 0; i < count; i++) {
       dst_buf[i] = static_cast<dst_t>(
-          std::min(std::max(std::round(src_buf[i]), min_val), max_val));
+          std::clamp(std::round(src_buf[i]), min_val, max_val));
     }
     return VectorizedN<dst_t, dst_n>::loadu(dst_buf, count);
+  }
+};
+
+template <typename dst_t, int dst_n, typename src_t, int src_n>
+struct VecConvert<
+    dst_t,
+    dst_n,
+    src_t,
+    src_n,
+    std::enable_if_t<std::is_same_v<dst_t, src_t> && dst_n == src_n>> {
+  static inline VectorizedN<dst_t, dst_n> apply(
+      const VectorizedN<src_t, src_n>& src) {
+    return src;
   }
 };
 

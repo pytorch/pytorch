@@ -428,7 +428,7 @@ class TestValidateCombination(TestCase):
                 "P(max),R->P(max)",
                 "P(min),R->P(min)",
                 # NOTE: these two rules are NOT valid in general for torch.add since it accepts alpha=a, which if negative
-                # flips the the partial output from max to min or vice versa.
+                # flips the partial output from max to min or vice versa.
                 # However, this test is simpler than the end to end validator and ignores alpha, and the rules have to
                 # be listed as valid since without alpha they DO produce correct results and the test asserts any rule
                 # NOT listed here produces incorrect results.
@@ -732,7 +732,7 @@ class TestCreatePartialInput(TestCase):
                         self.assertNotEqual(
                             vals[idx],
                             vals[idx + 1],
-                            f"Mask should alternate along dim 0 at [{':,'}{j},{k},{l}], "
+                            lambda msg: f"{msg}\nMask should alternate along dim 0 at [{':,'}{j},{k},{l}], "
                             f"got {vals}",
                         )
 
@@ -765,7 +765,7 @@ class TestCreatePartialInput(TestCase):
             self.assertNotEqual(
                 r0.argmin().item(),
                 r1.argmin().item(),
-                f"P({reduce_op}) ranks should disagree on argmin with adaptive offset",
+                lambda msg: f"{msg}\nP({reduce_op}) ranks should disagree on argmin with adaptive offset",
             )
 
 
@@ -1445,7 +1445,7 @@ class TestMainModule(TestCase):
         self.assertEqual(
             result.returncode,
             0,
-            f"Module exited with code {result.returncode}.\n"
+            lambda msg: f"{msg}\nModule exited with code {result.returncode}.\n"
             f"stderr: {result.stderr[-2000:]}",
         )
         return result.stdout

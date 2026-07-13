@@ -46,8 +46,10 @@ nn/qat/ @jerryzh168
 
 # Distributed
 # c10d backend APIs
+/torch/csrc/distributed/c10d @d4l3k @fduwjj @kapilsh
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
+/torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
 # FSDP, DDP
 /torch/distributed/_composable/fsdp/ @weifengpy
 /torch/distributed/_composable/replicate.py @weifengpy
@@ -59,6 +61,9 @@ nn/qat/ @jerryzh168
 /torch/distributed/tensor/placement_types.py @weifengpy
 /torch/distributed/tensor/_ops/_view_ops.py @weifengpy
 /torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
+
+# TVM backend
+/torch/_dynamo/backends/tvm.py @guan404ming
 
 # ONNX Export
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
@@ -72,7 +77,11 @@ nn/qat/ @jerryzh168
 /.ci  @pytorch/pytorch-dev-infra
 
 # Docker
-/.ci/docker/ @jeffdaily
+/.ci/docker/ubuntu-rocm/ @jeffdaily
+/.ci/docker/common/install_roc*.sh @jeffdaily
+/.ci/docker/common/install_miopen.sh @jeffdaily
+/.ci/docker/common/install_amdsmi.sh @jeffdaily
+/.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
@@ -91,11 +100,11 @@ nn/qat/ @jerryzh168
 
 # torch.linalg
 # docs
-/torch/linalg/ @lezcano @IvanYashchuk @nikitaved
+/torch/linalg/ @lezcano @nikitaved
 # code
-/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
+/aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
 # tests
-/test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
+/test/test_linalg.py @lezcano @nikitaved
 
 # OpInfo-related files
 /torch/testing/_internal/common_methods_invocations.py @mruberry
@@ -118,10 +127,11 @@ test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 torch/fx/proxy.py @zou3519
 
 # HOPs
-torch/_higher_order_ops/*.py @zou3519 @aorenste
-torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste
-test/test_hop_infra.py @zou3519 @aorenste
-torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste
+torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
+torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
+docs/source/higher_order_ops/ @bohnstingl
+test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
+torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
 
 # AOTAutograd
 torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
@@ -142,10 +152,10 @@ aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @scotts
-torch/autograd/profiler* @scotts
-torch/csrc/profiler/ @scotts
-torch/profiler/ @scotts
+torch/csrc/autograd/profiler* @scotts @ryanzhang22
+torch/autograd/profiler* @scotts @ryanzhang22
+torch/csrc/profiler/ @scotts @ryanzhang22
+torch/profiler/ @scotts @ryanzhang22
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
@@ -250,3 +260,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 
 # Python/DSL native ops
 /torch/_native/ @slayton58 @drisspg
+
+# Vendored quack library
+/torch/_vendor/quack/ @slayton58 @drisspg

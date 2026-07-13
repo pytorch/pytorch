@@ -74,7 +74,9 @@ static void checkForUnfusedOps(Node* enter_node) {
     for (Node* n : guarding_ifs) {
       ss << *n << '\n';
     }
-    throw(ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str());
+    throw(
+        ErrorReport(enter_node->input()->node()->sourceRange())
+        << std::move(ss).str());
   }
 
   // autodiff/nnc both insert a number of guards, see
@@ -107,7 +109,9 @@ static void checkForUnfusedOps(Node* enter_node) {
       }
       ss << '\n';
     }
-    throw(ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str());
+    throw(
+        ErrorReport(enter_node->input()->node()->sourceRange())
+        << std::move(ss).str());
   }
 }
 

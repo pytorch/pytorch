@@ -2,6 +2,7 @@
 import logging
 import os
 import shutil
+import subprocess
 
 from torch._inductor import config
 from torch._inductor.codegen.xpu.xpu_env import get_xpu_arch
@@ -67,9 +68,9 @@ def _sycl_lib_options() -> list[str]:
 
 
 def _sycl_arch_as_compile_option() -> str:
-    arc_option_map = {"Xe12": "intel_gpu_pvc", "Xe20": "intel_gpu_bmg_g21"}
+    arc_option_map = {"Xe12": "pvc", "Xe20": "bmg-g21,bmg-g31"}
     arch = get_xpu_arch()
-    return arc_option_map.get(arch, "intel_gpu_pvc")
+    return arc_option_map.get(arch, "pvc")
 
 
 def _sycl_compiler_options() -> list[str]:
@@ -82,13 +83,19 @@ def _sycl_compiler_options() -> list[str]:
         "-std=c++20",
         "-fPIC",
         "-fsycl",
-        f"-fsycl-targets={_sycl_arch_as_compile_option()}",
+        "-fsycl-targets=spir64_gen",
         "-Xspirv-translator",
         "-spirv-ext=+SPV_INTEL_split_barrier,+SPV_INTEL_2d_block_io,+SPV_INTEL_subgroup_matrix_multiply_accumulate",
         "-fno-sycl-instrument-device-code",
         "-DMKL_ILP64",
         "-MD",
-        "-MT",
+        "-Xs",
+        (
+            f"-device {_sycl_arch_as_compile_option()} "
+            "-options \"-igc_opts 'VISAOptions=-perfmodel,VectorAliasBBThreshold=100000000000,"
+            "ExtraOCLOptions=-cl-intel-256-GRF-per-thread'\" "
+            "-options -ze-opt-large-register-file"
+        ),
     ]
     if config.cutlass.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
@@ -107,24 +114,24 @@ def xpu_compile_command(
     sycl_lib_options = _sycl_lib_options()
     sycl_compiler_options = _sycl_compiler_options()
 
-    options = (
-        extra_args
+    # Build command as a list to preserve arguments with spaces
+    cmd_parts = (
+        [_sycl_compiler()]
+        + extra_args
         + ["-I" + path for path in include_paths]
         + ["-isystem", "/include"]
         + sycl_compiler_options
         + sycl_lib_options
     )
-    src_file = " ".join(src_files)
-    res = ""
     if dst_file_ext == "o":
-        res = f"{_sycl_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
+        cmd_parts.extend(["-c", "-o", dst_file] + src_files)
     elif dst_file_ext == "so":
-        options.append("-shared")
-        res = f"{_sycl_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+        cmd_parts.extend(["-shared", "-o", dst_file] + src_files)
     elif dst_file_ext == "exe":
-        res = f"{_sycl_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+        cmd_parts.extend(["-o", dst_file] + src_files)
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
 
+    res = subprocess.list2cmdline(cmd_parts)
     log.debug("XPU command: %s", res)
     return res

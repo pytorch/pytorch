@@ -36,10 +36,8 @@ class ChunkShardingSpec(ShardingSpec):
     in the placement specified.
 
     Args:
-        dim (int or str):
-            The dimension to shard on, could be an integer representing the
-            dimension or a string in case of named tensors where dimensions are
-            named. Note that named tensor support is not added yet.
+        dim (int):
+            The dimension to shard on, an integer representing the dimension.
         placement(List[Union[_remote_device, str]]):
             Specifies the placement of each shard of the Tensor. The size of
             the list represents the number of shards to be created. This could

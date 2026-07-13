@@ -112,6 +112,25 @@ class CUTLASSKernel(Kernel):
             ):
                 raise AssertionError("All matching layout args should be identical")
             return first_match
+        attr_values = node.get_size() if attr == "size" else node.get_stride()
+        if dim >= len(attr_values):
+            return None
+        expr = attr_values[dim]
+        fallback_matches = []
+        for arg in itertools.chain.from_iterable(self.layout_args.values()):
+            if arg.attr != attr:
+                continue
+            if arg.node.get_name() != node.get_name():
+                continue
+            arg_values = (
+                arg.node.get_size() if arg.attr == "size" else arg.node.get_stride()
+            )
+            if arg.dim >= len(arg_values):
+                continue
+            if arg_values[arg.dim] == expr:
+                fallback_matches.append(arg)
+        if fallback_matches:
+            return fallback_matches[0]
         return None
 
     def add_layout_arg(
@@ -186,7 +205,8 @@ class CUTLASSKernel(Kernel):
         if V.graph.sizevars.statically_known_equals(strides[-1], 1):
             return _normalize_idx(-2, len(strides))
 
-        assert V.graph.sizevars.statically_known_equals(strides[-2], 1), strides[-2]
+        if not V.graph.sizevars.statically_known_equals(strides[-2], 1):
+            raise AssertionError(strides[-2])
         return _normalize_idx(-1, len(strides))
 
 
@@ -247,6 +267,22 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
     def get_signature(self) -> str:
         return self.signature
 
+    def _collect_unbound_layout_free_symbols(self, node: IRNode) -> OrderedSet[Expr]:
+        free_symbols: OrderedSet[Expr] = OrderedSet()
+        for attr_name, values in (
+            ("size", node.get_size()),
+            ("stride", node.get_stride()),
+        ):
+            attr = attr_name  # help mypy narrow the Literal argument below
+            for dim, expr in enumerate(values):
+                if not isinstance(expr, Expr):
+                    continue
+                if self.find_layout_arg(node, attr, dim) is not None:
+                    continue
+                for symbol in expr.free_symbols:
+                    free_symbols.add(symbol)  # type: ignore[arg-type]
+        return free_symbols
+
     def def_kernel(
         self,
         inputs: list[IRNode],
@@ -276,7 +312,11 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
             )
 
         if input_reorder is not None:
-            assert len(inputs) == len(input_reorder)
+            if len(inputs) != len(input_reorder):
+                raise AssertionError(
+                    f"expected len(inputs) == len(input_reorder), got "
+                    f"{len(inputs)} != {len(input_reorder)}"
+                )
         else:
             input_reorder = list(range(len(inputs)))
 
@@ -287,27 +327,18 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
-        free_symbols: OrderedSet[Expr] = OrderedSet()
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 # NB: named nodes must be populated in the order of names
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-                if name not in (
-                    "X",
-                    "W",
-                    "Bias",
-                    "Y",
-                ):  # we handle these symbolic shapes explicitly
-                    for expr in itertools.chain(node.get_size(), node.get_stride()):
-                        if isinstance(expr, Expr):
-                            for s in expr.free_symbols:
-                                free_symbols.add(s)  # type: ignore[arg-type]
-
         arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
         self.init_layout_args()
+        free_symbols: OrderedSet[Expr] = OrderedSet()
+        for node in self.named_nodes.values():
+            free_symbols |= self._collect_unbound_layout_free_symbols(node)
         size_vars = ["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
         size_vars.extend(str(s) for s in free_symbols)
         self.size_args.extend(free_symbols)
@@ -345,7 +376,10 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
-            assert isinstance(wrapper, CppWrapperCpu)
+            if not isinstance(wrapper, CppWrapperCpu):
+                raise AssertionError(
+                    f"expected wrapper to be CppWrapperCpu, got {type(wrapper)}"
+                )
             wrapper.initialized_kernels[name] = self
             # We always originally initialize name with "KERNEL_NAME". So, we
             # we replace with the real kernel name passed as an arg to this function.
@@ -600,11 +634,13 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         self.info_kwargs = info_kwargs
 
     def precompile(self) -> None:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to not be None")
         self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to not be None")
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)

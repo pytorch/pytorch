@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from functools import lru_cache
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -27,6 +28,10 @@ log = logging.getLogger(__name__)
 # sympy.factor() in optimization_hint process for unbacked.
 # Factoring polynomials with many variables is expensive.
 SYMPY_FACTOR_MAX_FREE_SYMBOLS = 50
+
+# Maximum product of expression free symbols and non-symbol replacement count
+# before optimization_hint skips expensive SymPy subs() canonicalization.
+SYMPY_SUBS_MAX_SYMBOL_REPLACEMENT_PRODUCT = 1024
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -191,7 +196,7 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
         expression becomes the canonical expression.
         """
 
-        def __init__(self, eq_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]]):
+        def __init__(self, eq_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]]) -> None:
             self.eq_graph = eq_graph
             self.expressions = list(eq_graph.keys())
             self.reverse_expressions = {
@@ -201,15 +206,15 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
             self.size = [1] * len(self.expressions)
             self._build_canonical_expr_mapping()
 
-        def _build_canonical_expr_mapping(self):
+        def _build_canonical_expr_mapping(self) -> None:
             for expr, edges in self.eq_graph.items():
                 for adj in edges:
                     self.union_expr(expr, adj)
 
-        def union_expr(self, a: sympy.Expr, b: sympy.Expr):
+        def union_expr(self, a: sympy.Expr, b: sympy.Expr) -> bool:
             return self.union(self.reverse_expressions[a], self.reverse_expressions[b])
 
-        def union(self, a: int, b: int):
+        def union(self, a: int, b: int) -> bool:
             rootA = self.find(a)
             rootB = self.find(b)
             if rootA == rootB:
@@ -219,16 +224,16 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
             self.size[leader] += self.size[other]
             return True
 
-        def find_expr(self, expr: sympy.Expr):
+        def find_expr(self, expr: sympy.Expr) -> sympy.Expr:
             parent = self.find(self.reverse_expressions[expr])
             return self.expressions[parent]
 
-        def find(self, x: int):
+        def find(self, x: int) -> int:
             if self.leader[x] != x:
                 self.leader[x] = self.find(self.leader[x])
             return self.leader[x]
 
-        def choose_leader(self, a: int, b: int):
+        def choose_leader(self, a: int, b: int) -> tuple[int, int]:
             """
             The leader will become the canonical expression.
             Returns a (leader, follower) tuple.
@@ -290,16 +295,40 @@ def _get_unbacked_replacements(shape_env: ShapeEnv) -> dict[sympy.Expr, sympy.Ex
     return shape_env._unbacked_replacements
 
 
+@lru_cache(maxsize=1024)
 def _sub_unbacked_exprs(shape_env: ShapeEnv, expr: sympy.Expr) -> sympy.Expr:
     """Substitute unbacked expressions with canonical equivalents.
-    Used by optimization_hint to maximize consistency when hinting unbacked symbols."""
+    Used by optimization_hint to maximize consistency when hinting unbacked symbols.
+    """
     replacements = _get_unbacked_replacements(shape_env)
+    symbol_replacements = {
+        k: v for k, v in replacements.items() if isinstance(k, sympy.Symbol)
+    }
+    expr_replacements = {
+        k: v for k, v in replacements.items() if not isinstance(k, sympy.Symbol)
+    }
 
     # consider making this threshold configurable
     sub_cnt_limit = 30
     sub_cnt = 0
     while sub_cnt < sub_cnt_limit:
-        new_expr = expr.subs(replacements)
+        if expr_replacements:
+            free_symbol_count = len(expr.free_symbols)
+            if (
+                free_symbol_count * len(expr_replacements)
+                <= SYMPY_SUBS_MAX_SYMBOL_REPLACEMENT_PRODUCT
+            ):
+                new_expr = expr.subs(replacements)
+            else:
+                new_expr = _sympy_subs(expr, symbol_replacements)
+                log.debug(
+                    "Skipping %d expensive unbacked expression substitutions "
+                    "over %d free symbols in optimization_hint",
+                    len(expr_replacements),
+                    free_symbol_count,
+                )
+        else:
+            new_expr = _sympy_subs(expr, symbol_replacements)
         if new_expr == expr:
             break
         if len(new_expr.free_symbols) <= SYMPY_FACTOR_MAX_FREE_SYMBOLS:
@@ -427,10 +456,10 @@ def _optimization_hint_base(
         size_dict[s] = sym_fallback
 
     try:
-        final_result = expr.subs(size_dict)
+        final_result = _sympy_subs(expr, size_dict)
     except ZeroDivisionError:
-        # Expressions like ModularIndexing(x, u1, 4) crash during subs()
-        # when u1 is substituted with 0, because sympy eagerly evaluates
+        # Expressions like ModularIndexing(x, u1, 4) crash during substitution
+        # when u1 is replaced with 0, because sympy eagerly evaluates
         # (x // 0) % 4.  This can happen when an unbacked symbol with
         # var_to_range lower=0 is used as a divisor (e.g. from
         # _dynamic_reshape_indexer) and the fallback also maps to 0.

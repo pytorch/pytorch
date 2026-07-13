@@ -4,8 +4,11 @@
 
 import copy
 import itertools
+import multiprocessing
+import os
 import operator
 import random
+import traceback
 import unittest
 from typing import NamedTuple, TYPE_CHECKING
 
@@ -194,6 +197,180 @@ def _dequantize_fp8e4m3(qt: torch.Tensor, scale: torch.Tensor):
         dqt = dqt * scale_reshape
     return dqt
 
+
+def _test_qlinear_pt2e_fast_path_helper(error_conn=None):
+    try:
+        os.environ["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
+
+        qlinear_op = torch.ops.onednn.qlinear_pointwise
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        x_scale, x_zp = 1.2, 1
+        w_scale, w_zp = 0.8, 0
+        y_scale, y_zp = 4.7, 2
+
+        x = torch.rand(1, 4) * 10
+        w = torch.rand(16, 4) * 10
+        b = torch.rand(16) * 10
+
+        qx = torch.quantize_per_tensor(x, x_scale, x_zp, torch.quint8)
+        qw = torch.quantize_per_tensor(w, w_scale, w_zp, torch.qint8)
+        w_scales = torch.tensor([w_scale])
+        w_zps = torch.tensor([w_zp], dtype=torch.int)
+
+        qx_cpu = qx.int_repr()
+        w_ref = qw.dequantize()
+
+        with override_quantized_engine("onednn"):
+            # Warm up once to initialize the fast-path cache.
+            qw_packed = qlinear_prepack(qw.int_repr(), qx_cpu.shape)
+            qlinear_op(
+                qx_cpu,
+                x_scale,
+                x_zp,
+                qw_packed,
+                w_scales,
+                w_zps,
+                b,
+                y_scale,
+                y_zp,
+                None,
+                "none",
+                (),
+                "none",
+            )
+
+            for qx_cpu_iter in (qx_cpu, qx_cpu.repeat(2, 1)):
+                qy_cpu = qlinear_op(
+                    qx_cpu_iter,
+                    x_scale,
+                    x_zp,
+                    qw_packed,
+                    w_scales,
+                    w_zps,
+                    b,
+                    y_scale,
+                    y_zp,
+                    None,
+                    "none",
+                    (),
+                    "none",
+                )
+
+                x_ref = x_scale * (qx_cpu_iter.float() - x_zp)
+                y_ref = F.linear(x_ref, w_ref, b)
+                qy_ref = torch.quantize_per_tensor(y_ref, y_scale, y_zp, torch.quint8)
+
+                np.testing.assert_equal(
+                    qy_ref.dim(),
+                    qy_cpu.dim(),
+                    err_msg="Quantized qlinear pt2e output dims do not match.",
+                )
+                np.testing.assert_array_almost_equal(
+                    qy_ref.int_repr().cpu().numpy(),
+                    qy_cpu.cpu().numpy(),
+                    decimal=0,
+                )
+        if error_conn is not None:
+            error_conn.send("")
+    except Exception:
+        if error_conn is not None:
+            error_conn.send(traceback.format_exc())
+        raise
+    finally:
+        if error_conn is not None:
+            error_conn.close()
+
+
+def _test_qlinear_fp8_fast_path_helper(error_conn=None):
+    try:
+        os.environ["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
+
+        def _quantize_fp8_for_process(tensor, scale):
+            return (tensor / scale).clamp(-448, 448).half().to(torch.float8_e4m3fn)
+
+        def _dequantize_fp8_for_process(qtensor, scale):
+            return qtensor.float() * scale
+
+        qlinear_op = torch.ops.onednn.qlinear_pointwise
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        y_scale = 0.3
+        x_zp = 0
+
+        x = torch.rand(1, 4) * 10
+        w = torch.rand(16, 4) * 10
+        b = torch.rand(16) * 10
+
+        eps = torch.tensor([torch.finfo(torch.float32).eps])
+        quant_max = torch.finfo(torch.float8_e4m3fn).max
+        x_scale = torch.max(x.abs().max().reshape([1]) / quant_max, eps)
+        w_scales = torch.max(w.abs().max().reshape([1]) / quant_max, eps)
+        qx = _quantize_fp8_for_process(x, x_scale)
+        qw = _quantize_fp8_for_process(w, w_scales)
+        w_zps = torch.zeros_like(w_scales, dtype=torch.int)
+
+        with override_quantized_engine("onednn"):
+            # Warm up once to initialize the fast-path cache.
+            qw_packed = qlinear_prepack(qw, qx.shape)
+            qlinear_op(
+                qx,
+                x_scale,
+                x_zp,
+                qw_packed,
+                w_scales,
+                w_zps,
+                b,
+                y_scale,
+                0,
+                None,
+                "none",
+                (),
+                "none",
+            )
+
+            for qx_iter in (qx, qx.repeat(2, 1)):
+                qy = qlinear_op(
+                    qx_iter,
+                    x_scale,
+                    x_zp,
+                    qw_packed,
+                    w_scales,
+                    w_zps,
+                    b,
+                    y_scale,
+                    0,
+                    None,
+                    "none",
+                    (),
+                    "none",
+                )
+
+                x_ref = _dequantize_fp8_for_process(qx_iter, x_scale)
+                w_ref = _dequantize_fp8_for_process(qw, w_scales)
+                y_ref = F.linear(x_ref, w_ref, b)
+                y_ref = _quantize_fp8_for_process(y_ref, torch.tensor([y_scale]))
+
+                np.testing.assert_equal(
+                    y_ref.dim(),
+                    qy.dim(),
+                    err_msg="Quantized qlinear fp8 output dims do not match.",
+                )
+                np.testing.assert_equal(
+                    y_ref.float().cpu().numpy(),
+                    qy.float().cpu().numpy(),
+                    err_msg="Quantized qlinear fp8 outputs do not match.",
+                )
+                if torch.isnan(qy).any():
+                    raise AssertionError("Output qy contains NaN values")
+        if error_conn is not None:
+            error_conn.send("")
+    except Exception:
+        if error_conn is not None:
+            error_conn.send(traceback.format_exc())
+        raise
+    finally:
+        if error_conn is not None:
+            error_conn.close()
+
 class TestQuantizedOps(TestCase):
 
     """Helper function to test quantized activation functions."""
@@ -288,7 +465,7 @@ class TestQuantizedOps(TestCase):
                     # Finds qY using in-place or non-in-place quantized operators.
                     qY = q_op(qX, **extra_kwargs)
 
-                    self.assertEqual(qY, qY_hat, msg=f'{fn_name} - {q_op} failed: ({qY} vs. {qY_hat})')
+                    self.assertEqual(qY, qY_hat, msg=lambda msg: f'{msg}\n{fn_name} - {q_op} failed: ({qY} vs. {qY_hat})')
 
     """Tests the correctness of the quantized::relu op."""
     @override_qengines
@@ -476,7 +653,7 @@ class TestQuantizedOps(TestCase):
                                            dtype=torch_type)
             qY_hat = op(qX, negative_slope=alpha)
             self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                             msg=f"F.leaky_relu failed ({qY} vs {qY_hat})")
+                             msg=lambda msg: f"{msg}\nF.leaky_relu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::elu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -501,7 +678,7 @@ class TestQuantizedOps(TestCase):
 
         qY = torch.ao.nn.quantized.functional.elu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
-                         msg=f"F.elu failed ({qY} vs {qY_hat})")
+                         msg=lambda msg: f"{msg}\nF.elu failed ({qY} vs {qY_hat})")
 
 
     """Tests the correctness of the quantized::celu op."""
@@ -527,7 +704,7 @@ class TestQuantizedOps(TestCase):
         # test regular
         qY = torch.ops.quantized.celu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
-                         msg=f"F.celu failed ({qY} vs {qY_hat})")
+                         msg=lambda msg: f"{msg}\nF.celu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::gelu op."""
     def test_qgelu(self):
@@ -556,7 +733,7 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
                 qY_hat = op(qX)
                 self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                                 msg=f"F.gelu failed ({qY} vs {qY_hat})")
+                                 msg=lambda msg: f"{msg}\nF.gelu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::prelu op."""
     def test_qprelu(self):
@@ -590,7 +767,7 @@ class TestQuantizedOps(TestCase):
                                            dtype=torch_type)
             qY_hat = qop(qX, qW, scale, zero_point)
             self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                             msg=f"F.prelu failed ({qY} vs {qY_hat})")
+                             msg=lambda msg: f"{msg}\nF.prelu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
@@ -714,7 +891,7 @@ class TestQuantizedOps(TestCase):
                                        dtype=torch_type)
         qY_hat = torch.tanh(qX)
         self.assertEqual(qY, qY_hat,
-                         msg=f"TanH failed: {qY} vs. {qY_hat}")
+                         msg=lambda msg: f"{msg}\nTanH failed: {qY} vs. {qY_hat}")
 
     """Tests the correctness of the quantized::threshold op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -743,7 +920,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qY = op(qX, threshold, value)
-            self.assertEqual(qY, qY_hat, msg=f"{name} qthreshold failed")
+            self.assertEqual(qY, qY_hat, msg=lambda msg: f"{msg}\n{name} qthreshold failed")
 
     """Tests the correctness of the quantized::clamp op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
@@ -768,7 +945,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qY_clamp_hat = op(qX, min=min_val, max=max_val)
-            self.assertEqual(qY_clamp, qY_clamp_hat, msg=f"{name} qclamp failed")
+            self.assertEqual(qY_clamp, qY_clamp_hat, msg=lambda msg: f"{msg}\n{name} qclamp failed")
 
         if torch.backends.quantized.engine == 'fbgemm':
             with override_quantized_engine('fbgemm'):
@@ -783,9 +960,9 @@ class TestQuantizedOps(TestCase):
 
                 for name, op in ops_under_test.items():
                     qY_min_clamp_hat = op(qX, min=min_val)
-                    self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg=f"{name} qclamp failed")
+                    self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg=lambda msg: f"{msg}\n{name} qclamp failed")
                     qY_max_clamp_hat = op(qX, max=max_val)
-                    self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg=f"{name} qclamp failed")
+                    self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg=lambda msg: f"{msg}\n{name} qclamp failed")
 
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM
@@ -815,7 +992,7 @@ class TestQuantizedOps(TestCase):
 
             for name, op in ops_under_test.items():
                 qY_hat = op(qX, min_val, max_val)
-                self.assertEqual(qY, qY_hat, msg=f"{name} hardtanh failed")
+                self.assertEqual(qY, qY_hat, msg=lambda msg: f"{msg}\n{name} hardtanh failed")
 
             ops_under_test_inplace = {
                 'inplace ao.nn.quantized.functional.hardtanh':
@@ -825,7 +1002,7 @@ class TestQuantizedOps(TestCase):
             for name, op_ in ops_under_test_inplace.items():
                 qY_hat = qX.clone()
                 op_(qY_hat, min_val, max_val, inplace=True)
-                self.assertEqual(qY, qY_hat, msg=f"{name} hardtanh failed")
+                self.assertEqual(qY, qY_hat, msg=lambda msg: f"{msg}\n{name} hardtanh failed")
 
     """Tests the correctness of the quantized::hardswish op."""
     @override_qengines
@@ -862,7 +1039,7 @@ class TestQuantizedOps(TestCase):
                     qX, scale=Y_scale, zero_point=Y_zero_point)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg=f"Hardswish failed: {qY} vs {qY_hat}, {torch.backends.quantized.engine}")
+                    msg=lambda msg: f"{msg}\nHardswish failed: {qY} vs {qY_hat}, {torch.backends.quantized.engine}")
 
     """Tests the correctness of the binary op + scalar."""
     def _test_binary_op_scalar_relu(self, A, b, binary_op_name, binary_op, quantized_op, quantized_op_relu):
@@ -888,10 +1065,10 @@ class TestQuantizedOps(TestCase):
             C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 
         self.assertEqual(C_ref.dequantize(), C_hat.dequantize(),
-                         msg=f"{binary_op_name}_scalar results don't match: "
+                         msg=lambda msg: f"{msg}\n{binary_op_name}_scalar results don't match: "
                          f"{C_ref.dequantize()} vs {C_hat.dequantize()}")
         self.assertEqual(C_relu_ref.dequantize(), C_relu_hat.dequantize(),
-                         msg=f"{binary_op_name}_scalar_relu results don't match: "
+                         msg=lambda msg: f"{msg}\n{binary_op_name}_scalar_relu results don't match: "
                          f"{C_relu_ref.dequantize()} vs {C_relu_hat.dequantize()}")
 
     @unittest.skipIf(IS_MACOS, "skipping macos test")
@@ -1425,7 +1602,7 @@ class TestQuantizedOps(TestCase):
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation, ceil_mode=ceil_mode)
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg=f"{name} results are off")
+                             msg=lambda msg: f"{msg}\n{name} results are off")
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool1d(
             qa, kernel_size=_single(kernel),
@@ -1519,7 +1696,7 @@ class TestQuantizedOps(TestCase):
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation, ceil_mode=ceil_mode)
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg=f"{name} results are off")
+                             msg=lambda msg: f"{msg}\n{name} results are off")
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
@@ -1601,7 +1778,7 @@ class TestQuantizedOps(TestCase):
                 a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                            dilation=dilation, ceil_mode=ceil_mode)
                 self.assertEqual(a_ref, a_hat.dequantize(),
-                                 msg=f"{name} results are off")
+                                 msg=lambda msg: f"{msg}\n{name} results are off")
 
     """Tests max pool operation on NHWC quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
@@ -1653,7 +1830,7 @@ class TestQuantizedOps(TestCase):
                        dilation=dilation, ceil_mode=ceil_mode)
             self.assertTrue(a_hat.stride() != sorted(a_hat.stride()))
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg=f"{name} results are off")
+                             msg=lambda msg: f"{msg}\n{name} results are off")
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
@@ -1709,7 +1886,7 @@ class TestQuantizedOps(TestCase):
                 a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                            dilation=dilation, ceil_mode=ceil_mode)
                 self.assertEqual(a_ref, a_hat.dequantize(),
-                                 msg=f"{name} results are off")
+                                 msg=lambda msg: f"{msg}\n{name} results are off")
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
@@ -1753,12 +1930,12 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr())))
             self.assertEqual(scale, qX_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, qX_hat.q_scale())))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                                                      qX_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                      qX_hat.q_zero_point())))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
@@ -1815,12 +1992,12 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr().to(torch.double), X_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_ref.int_repr(), X_hat.int_repr()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name, qX_ref.int_repr(), X_hat.int_repr())))
             self.assertEqual(scale, X_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, X_hat.q_scale())))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                             X_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                             X_hat.q_zero_point())))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
@@ -1867,12 +2044,12 @@ class TestQuantizedOps(TestCase):
             qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
                                                dtype=torch_type)
             self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr())))
             self.assertEqual(scale, qX_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, qX_hat.q_scale())))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                                                      qX_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                      qX_hat.q_zero_point())))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
@@ -1931,12 +2108,12 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr().to(torch.double), X_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_ref.int_repr(), X_hat.int_repr()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name, qX_ref.int_repr(), X_hat.int_repr())))
             self.assertEqual(scale, X_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, X_hat.q_scale())))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                             X_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                             X_hat.q_zero_point())))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool2d_nhwc(self):
@@ -1996,13 +2173,13 @@ class TestQuantizedOps(TestCase):
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
                 self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, X_hat.int_repr())),
                                  exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
-                                 msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, X_hat.q_scale())))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
-                                 msg=error_message.format(name + '.zero_point', scale,
-                                 X_hat.q_zero_point()))
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                 X_hat.q_zero_point())))
 
     @unittest.skip("not currently working and feature isn't used")
     def test_adaptive_avg_pool(self):
@@ -2074,15 +2251,15 @@ class TestQuantizedOps(TestCase):
                         qX_hat = op(qX.to(device=device), output_size=output_size)
                         self.assertEqual(
                             X_ref, qX_hat.int_repr(), atol=1.0,
-                            rtol=0, msg=error_message.format(name, X_ref, qX_hat), exact_dtype=False)
+                            rtol=0, msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, qX_hat)), exact_dtype=False)
                         self.assertEqual(
                             scale, qX_hat.q_scale(),
-                            msg=error_message.format(name + '.scale', scale,
-                                                     qX_hat.q_scale()))
+                            msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale,
+                                                     qX_hat.q_scale())))
                         self.assertEqual(
                             zero_point, qX_hat.q_zero_point(),
-                            msg=error_message.format(name + '.zero_point', scale,
-                                                     qX_hat.q_zero_point()))
+                            msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                     qX_hat.q_zero_point())))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool3d_ndhwc(self):
@@ -2145,13 +2322,13 @@ class TestQuantizedOps(TestCase):
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
                 self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, X_hat.int_repr())),
                                  exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
-                                 msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, X_hat.q_scale())))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
-                                 msg=error_message.format(name + '.zero_point', scale,
-                                 X_hat.q_zero_point()))
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                 X_hat.q_zero_point())))
 
     def test_qtopk(self):
         x_dims = [3, 4]  # Num elements in the shape
@@ -2295,13 +2472,13 @@ class TestQuantizedOps(TestCase):
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
             self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                             msg=f"{name} results are off: qX_hat={qX_hat.int_repr()} X_ref={X_ref}",
+                             msg=lambda msg: f"{msg}\n{name} results are off: qX_hat={qX_hat.int_repr()} X_ref={X_ref}",
                              exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, qX_hat.q_scale())))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                                                      qX_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                      qX_hat.q_zero_point())))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
@@ -2348,12 +2525,12 @@ class TestQuantizedOps(TestCase):
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
             self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                             msg=f"{name} results are off: qX_hat={qX_hat.int_repr()}, X_ref={X_ref}", exact_dtype=False)
+                             msg=lambda msg: f"{msg}\n{name} results are off: qX_hat={qX_hat.int_repr()}, X_ref={X_ref}", exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, qX_hat.q_scale())))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                                                      qX_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                      qX_hat.q_zero_point())))
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
@@ -2771,7 +2948,7 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(
                     qy.int_repr().numpy(),
                     quantize_ref.int_repr().numpy(),
-                    msg=f"{qy} vs {quantize_ref}")
+                    msg=lambda msg: f"{msg}\n{qy} vs {quantize_ref}")
 
     @skipIfNoFBGEMM
     def test_batch_norm(self):
@@ -2816,7 +2993,7 @@ class TestQuantizedOps(TestCase):
                 quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
                 self.assertEqual(
                     qy.int_repr().numpy(), quantize_ref.int_repr().numpy(),
-                    msg=f"{qy} vs {quantize_ref}")
+                    msg=lambda msg: f"{msg}\n{qy} vs {quantize_ref}")
 
     @override_qengines
     def test_empty_batch(self):
@@ -3313,7 +3490,7 @@ class TestQuantizedOps(TestCase):
                     y_ref, y_scale, y_zero_point, 0, 255, torch.uint8
                 )
             y_ref = y_ref.to(out_dtype)
-            self.assertEqual(y, y_ref, msg=f"{y} vs {y_ref}")
+            self.assertEqual(y, y_ref, msg=lambda msg: f"{msg}\n{y} vs {y_ref}")
 
 
 class TestDynamicQuantizedOps(TestCase):
@@ -3672,7 +3849,7 @@ class TestDynamicQuantizedOps(TestCase):
         return Xq, Hq, Cq
 
     def _get_rnn_weights_and_bias(self, input_size, hidden_size, num_directions, per_channel_quant, rnn_type):
-        hidden_mult_map = {'LSTM': 4, 'LSTMCell': 4, 'GRU': 3, 'GRUCell': 3, 'RNNTanh': 2, 'RNNReLU': 2}
+        hidden_mult_map = {'LSTM': 4, 'LSTMCell': 4, 'GRU': 3, 'GRUCell': 3, 'RNNTanh': 1, 'RNNReLU': 1}
         hidden_mult = hidden_mult_map[rnn_type]
         weights1 = torch.randn(hidden_mult * hidden_size, input_size)
         weights2 = torch.randn(hidden_mult * hidden_size, hidden_size)
@@ -4597,8 +4774,6 @@ class TestQuantizedLinear(TestCase):
         unary_post_op_args=(),
         post_op_algorithms=("none",),
     ):
-        import os
-        test_fast_path = os.getenv("ONEDNN_CACHE_CONTEXT_UNSAFE", "0") == "1"
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         linear_op = F.linear
         in_channels_list = [4, 8]
@@ -4650,14 +4825,12 @@ class TestQuantizedLinear(TestCase):
                 qw_cpu = qw.int_repr()
                 qw_packed = qlinear_prepack(qw_cpu, x.shape)
 
-                num_iter = 2 if test_fast_path else 1  # rerun to use cache
                 if post_op in ("none", "relu", "gelu"):
-                    for _ in range(num_iter):
-                        qy_cpu = qlinear_op(
-                            qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            b, used_y_scale, used_y_zp, output_dtype,
-                            post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy_cpu = qlinear_op(
+                        qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        b, used_y_scale, used_y_zp, output_dtype,
+                        post_op, unary_post_op_args, post_op_algo
+                    )
                     if post_op == "relu":
                         y_ref = F.relu(y_ref)
                     elif post_op == "gelu":
@@ -4674,14 +4847,13 @@ class TestQuantizedLinear(TestCase):
                     accum = qx2.int_repr() if output_dtype is None else qx2.dequantize()
                     if bfloat16_out:
                         accum = accum.bfloat16()
-                    for _ in range(num_iter):
-                        # clone accum otherwise it gets accumulated multiple times
-                        qy_cpu = qlinear_op(
-                            qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            accum.clone(), b, used_y_scale, used_y_zp, output_dtype,
-                            x2_scale, x2_zp, "sum", binary_alpha,
-                            unary_post_op, unary_post_op_args, post_op_algo
-                        )
+                    # clone accum otherwise it gets accumulated multiple times
+                    qy_cpu = qlinear_op(
+                        qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        accum.clone(), b, used_y_scale, used_y_zp, output_dtype,
+                        x2_scale, x2_zp, "sum", binary_alpha,
+                        unary_post_op, unary_post_op_args, post_op_algo
+                    )
                     y_ref = y_ref + x2 * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
@@ -4694,13 +4866,12 @@ class TestQuantizedLinear(TestCase):
                     x2 = torch.randn(y_ref.size()) * 10
                     unary_post_op = "relu" if post_op == "add_relu" else "none"
                     binary_alpha = 1.0  # we only support alpha=1.0 now
-                    for _ in range(num_iter):
-                        qy_cpu = qlinear_op(
-                            qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            x2, b, used_y_scale, used_y_zp, output_dtype,
-                            1.0, 0, "add", binary_alpha,
-                            unary_post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy_cpu = qlinear_op(
+                        qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        x2, b, used_y_scale, used_y_zp, output_dtype,
+                        1.0, 0, "add", binary_alpha,
+                        unary_post_op, unary_post_op_args, post_op_algo
+                    )
                     y_ref = y_ref + x2 * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
@@ -4731,6 +4902,18 @@ class TestQuantizedLinear(TestCase):
     def test_qlinear_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         self._test_qlinear_pt2e_helper(qlinear, "none")
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qlinear_prepack_meta(self):
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        N, K = 16, 8
+
+        w = torch.empty(N, K, dtype=torch.int8, device="meta")
+        packed = qlinear_prepack(w, [3, K])
+        self.assertEqual(packed.shape, torch.Size([K, N]))
+        self.assertEqual(packed.dtype, torch.int8)
+        self.assertEqual(packed.device.type, "meta")
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
@@ -4769,6 +4952,29 @@ class TestQuantizedLinear(TestCase):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "add_relu")
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qlinear_fast_path_pt2e(self):
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        process = ctx.Process(
+            target=_test_qlinear_pt2e_fast_path_helper,
+            args=(child_conn,),
+        )
+        process.start()
+        child_conn.close()
+        process.join()
+        error = parent_conn.recv() if parent_conn.poll() else ""
+        parent_conn.close()
+        self.assertEqual(
+            process.exitcode,
+            0,
+            msg=(
+                lambda msg: f"{msg}\nSpawned fast-path validation failed.\n"
+                f"traceback:\n{error}"
+            ),
+        )
+
     def _test_qlinear_fp8_helper(
         self,
         qlinear_op,
@@ -4776,8 +4982,6 @@ class TestQuantizedLinear(TestCase):
         unary_post_op_args=(),
         post_op_algorithms=("none",),
     ):
-        import os
-        test_fast_path = os.getenv("ONEDNN_CACHE_CONTEXT_UNSAFE", "0") == "1"
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         linear_op = F.linear
         in_channels_list = [4, 8]
@@ -4826,14 +5030,12 @@ class TestQuantizedLinear(TestCase):
                 x_zp = 0
                 w_zps = torch.zeros_like(w_scales, dtype=torch.int)
 
-                num_iter = 2 if test_fast_path else 1  # rerun to use cache
                 if post_op in ("none", "relu", "gelu"):
-                    for _ in range(num_iter):
-                        qy = qlinear_op(
-                            qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            b, used_y_scale, used_y_zp, output_dtype,
-                            post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy = qlinear_op(
+                        qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        b, used_y_scale, used_y_zp, output_dtype,
+                        post_op, unary_post_op_args, post_op_algo
+                    )
                     if post_op == "relu":
                         y_ref = F.relu(y_ref)
                     elif post_op == "gelu":
@@ -4852,13 +5054,12 @@ class TestQuantizedLinear(TestCase):
                     if bfloat16_out:
                         accum = accum.bfloat16()
                         accum_ref = accum_ref.bfloat16()
-                    for _ in range(num_iter):
-                        qy = qlinear_op(
-                            qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            accum.clone(), b, used_y_scale, used_y_zp, output_dtype,
-                            x2_scale, x2_zp, "sum", binary_alpha,
-                            unary_post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy = qlinear_op(
+                        qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        accum.clone(), b, used_y_scale, used_y_zp, output_dtype,
+                        x2_scale, x2_zp, "sum", binary_alpha,
+                        unary_post_op, unary_post_op_args, post_op_algo
+                    )
                     y_ref = y_ref + accum_ref * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
@@ -4869,13 +5070,12 @@ class TestQuantizedLinear(TestCase):
                     x2 = torch.rand_like(y_ref)
                     unary_post_op = "relu" if post_op == "add_relu" else "none"
                     binary_alpha = 1.0  # we only support alpha=1.0 now
-                    for _ in range(num_iter):
-                        qy = qlinear_op(
-                            qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            x2, b, used_y_scale, used_y_zp, output_dtype,
-                            1.0, 0, "add", binary_alpha,
-                            unary_post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy = qlinear_op(
+                        qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        x2, b, used_y_scale, used_y_zp, output_dtype,
+                        1.0, 0, "add", binary_alpha,
+                        unary_post_op, unary_post_op_args, post_op_algo
+                    )
                     y_ref = y_ref + x2 * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
@@ -4933,6 +5133,29 @@ class TestQuantizedLinear(TestCase):
     def test_qlinear_add_relu_fp8(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_fp8_helper(qlinear, "add_relu")
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qlinear_fast_path_fp8(self):
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        process = ctx.Process(
+            target=_test_qlinear_fp8_fast_path_helper,
+            args=(child_conn,),
+        )
+        process.start()
+        child_conn.close()
+        process.join()
+        error = parent_conn.recv() if parent_conn.poll() else ""
+        parent_conn.close()
+        self.assertEqual(
+            process.exitcode,
+            0,
+            msg=(
+                lambda msg: f"{msg}\nSpawned fp8 fast-path validation failed.\n"
+                f"traceback:\n{error}"
+            ),
+        )
 
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
@@ -7848,6 +8071,137 @@ class TestQuantizedConv(TestCase):
                 qconv_x2_dtype=qconv_x2_dtype,
             )
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_binary_no_output_aliasing(self):
+        # Verify that qconv2d_pointwise.binary mutates qaccum in-place
+        # but returns a tensor that does not alias it.
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (1, in_ch, 5, 5), dtype=torch.uint8)
+        x = x.to(memory_format=torch.channels_last)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1, 1], [1, 1], [1, 1], groups, x.size(),
+        )
+        dummy_out = torch.ops.onednn.qconv2d_pointwise(
+            x, 1.0, 0, packed_w, w_scale, w_zp, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None, "none", [], None,
+        )
+        for binary_attr, unary_attr in [("sum", "none"), ("sum", "relu")]:
+            qaccum = torch.randint(0, 8, dummy_out.size(), dtype=torch.uint8)
+            qaccum = qaccum.to(memory_format=torch.channels_last)
+            qaccum_data_before = qaccum.clone()
+            result = torch.ops.onednn.qconv2d_pointwise.binary(
+                x, 1.0, 0, packed_w, w_scale, w_zp, qaccum, None,
+                [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None,
+                1.0, 0, binary_attr, None, unary_attr, [], None,
+            )
+            # qaccum was mutated
+            self.assertFalse(torch.equal(qaccum, qaccum_data_before))
+            # result does not alias qaccum
+            self.assertNotEqual(result.data_ptr(), qaccum.data_ptr())
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_binary_tensor_no_output_aliasing(self):
+        # Same as above but for the .binary_tensor overload (tensor scale/zp).
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (1, in_ch, 5, 5), dtype=torch.uint8)
+        x = x.to(memory_format=torch.channels_last)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1, 1], [1, 1], [1, 1], groups, x.size(),
+        )
+        dummy_out = torch.ops.onednn.qconv2d_pointwise(
+            x, 1.0, 0, packed_w, w_scale, w_zp, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None, "none", [], None,
+        )
+        qaccum = torch.randint(0, 8, dummy_out.size(), dtype=torch.uint8)
+        qaccum = qaccum.to(memory_format=torch.channels_last)
+        qaccum_data_before = qaccum.clone()
+        x_scale = torch.tensor([1.0])
+        x_zp = torch.tensor([0])
+        result = torch.ops.onednn.qconv2d_pointwise.binary_tensor(
+            x, x_scale, x_zp, packed_w, w_scale, w_zp, qaccum, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None,
+            1.0, 0, "sum", None, "none", [], None,
+        )
+        self.assertFalse(torch.equal(qaccum, qaccum_data_before))
+        self.assertNotEqual(result.data_ptr(), qaccum.data_ptr())
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_binary_empty_output_no_aliasing(self):
+        # Trigger the early return path when output has 0 elements.
+        # Use batch_size=0 so the convolution output has numel == 0.
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (0, in_ch, 5, 5), dtype=torch.uint8)
+        x = x.to(memory_format=torch.channels_last)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1, 1], [1, 1], [1, 1], groups, x.size(),
+        )
+        qaccum = torch.empty(0, out_ch, 3, 3, dtype=torch.uint8)
+        qaccum = qaccum.to(memory_format=torch.channels_last)
+        result = torch.ops.onednn.qconv2d_pointwise.binary(
+            x, 1.0, 0, packed_w, w_scale, w_zp, qaccum, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None,
+            1.0, 0, "sum", None, "none", [], None,
+        )
+        self.assertEqual(result.numel(), 0)
+        # Empty tensors both have data_ptr()==0; the key invariant is that
+        # the early-return path doesn't crash and returns a valid tensor.
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_empty_output_no_binary(self):
+        # Exercise the early return path with has_accum_postop_sum=false.
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (0, in_ch, 5, 5), dtype=torch.uint8)
+        x = x.to(memory_format=torch.channels_last)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1, 1], [1, 1], [1, 1], groups, x.size(),
+        )
+        result = torch.ops.onednn.qconv2d_pointwise(
+            x, 1.0, 0, packed_w, w_scale, w_zp, None,
+            [1, 1], [1, 1], [1, 1], groups, 1.0, 0, None, "none", [], None,
+        )
+        self.assertEqual(result.numel(), 0)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv1d_sum_exercises_1d_path(self):
+        # Exercise the is_1d squeeze path via a 1d convolution without
+        # binary postop (has_accum_postop_sum is unreachable for 1d since
+        # run_pointwise_binary enforces act.dim()==4).
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (1, in_ch, 8), dtype=torch.uint8)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1], [1], [1], groups, x.size(),
+        )
+        result = torch.ops.onednn.qconv_pointwise(
+            x, 1.0, 0, packed_w, w_scale, w_zp, None,
+            [1], [1], [1], groups, 1.0, 0, None, "none", [], None,
+        )
+        self.assertEqual(result.dim(), 3)
+
     # Test qconv1d with post op relu
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
@@ -8368,10 +8722,10 @@ class TestQNNPackOps(TestCase):
                 qY_hat = torch.tanh(qX)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg=f"QNNPACK TanH failed (FP ref), memory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nQNNPACK TanH failed (FP ref), memory_format {memory_format}")
                 self.assertEqual(
                     qYserver, qY_hat,
-                    msg=f"QNNPACK TanH failed (FBGEMM ref), memory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nQNNPACK TanH failed (FBGEMM ref), memory_format {memory_format}")
 
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @skipIfNoFBGEMM
@@ -8400,10 +8754,10 @@ class TestQNNPackOps(TestCase):
                 qY_hat = torch.sigmoid(qX)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg=f"QNNPACK Sigmoid failed (FP ref), memory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nQNNPACK Sigmoid failed (FP ref), memory_format {memory_format}")
                 self.assertEqual(
                     qYserver, qY_hat,
-                    msg=f"QNNPACK Sigmoid failed (FBGEMM ref), memory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nQNNPACK Sigmoid failed (FBGEMM ref), memory_format {memory_format}")
 
     @skipIfNoFBGEMM
     def test_qnnpack_sigmoid_sweep(self):
@@ -8795,7 +9149,7 @@ class TestQNNPackOps(TestCase):
                 qY_hat = torch.ao.nn.quantized.functional.hardtanh(qX, min_val, max_val)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg=f"hardtanh failed:\nactual {qY_hat}\nexpected {qY}\nmemory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nhardtanh failed:\nactual {qY_hat}\nexpected {qY}\nmemory_format {memory_format}")
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
@@ -8824,12 +9178,12 @@ class TestComparatorOps(TestCase):
             result_ref = getattr(dqA, op)(dqB)
             result = getattr(qA, op)(qB)
             self.assertEqual(result_ref, result,
-                             msg=f"'tensor.{op}(tensor)'' failed")
+                             msg=lambda msg: f"{msg}\n'tensor.{op}(tensor)'' failed")
             # Reversed broadcasting.
             result_ref = getattr(dqB, op)(dqA)
             result = getattr(qB, op)(qA)
             self.assertEqual(result_ref, result,
-                             msg=f"'tensor.{op}(tensor)'' failed")
+                             msg=lambda msg: f"{msg}\n'tensor.{op}(tensor)'' failed")
 
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
@@ -8852,14 +9206,14 @@ class TestComparatorOps(TestCase):
             note(f"result_ref 1: {result_ref}")
             note(f"result 1: {result}")
             self.assertEqual(result_ref, result,
-                             msg=f"'tensor.{op}(scalar)'' failed")
+                             msg=lambda msg: f"{msg}\n'tensor.{op}(scalar)'' failed")
             # Reversed broadcasting.
             result_ref = getattr(b, op)(dqA)
             result = getattr(b, op)(qA)
             note(f"result_ref 2: {result_ref}")
             note(f"result 2: {result}")
             self.assertEqual(result_ref, result,
-                             msg=f"'scalar.{op}(tensor)'' failed")
+                             msg=lambda msg: f"{msg}\n'scalar.{op}(tensor)'' failed")
 
         for op in ops_under_test_nonreversible:
             result_ref = getattr(dqA, op)(b)
@@ -8867,7 +9221,7 @@ class TestComparatorOps(TestCase):
             note(f"result_ref 3: {result_ref}")
             note(f"result 3: {result}")
             self.assertEqual(result_ref, result,
-                             msg=f"'tensor.{op}(scalar)'' failed")
+                             msg=lambda msg: f"{msg}\n'tensor.{op}(scalar)'' failed")
 
 """Tests the correctness of the quantized::embedding_bag_(byte|4bit|2bit)_prepack_with_rowwise_min_max ops."""
 class TestQuantizedWithMinMax(TestCase):

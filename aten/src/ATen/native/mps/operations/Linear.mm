@@ -7,37 +7,49 @@
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
 
+// MTLGPUFamilyApple10 is only defined in the macOS 26+ SDK.
+#if !defined(__MAC_26_0)
+static constexpr auto MTLGPUFamilyApple10 = static_cast<MTLGPUFamily>(1010);
+#endif
+
 namespace at::native {
 
 using namespace mps;
 
+// MPSNDArrayMatrixMultiplication and MPSGraph matrixMultiplication produce
+// non-deterministic results for >2D fp16/bf16 inputs on Apple M5+ (Apple10 GPU family).
+// Flatten to 2D to work around the issue (See https://github.com/pytorch/pytorch/issues/180776 )
+static bool needs_nd_workaround(const Tensor& input) {
+  static const bool is_m5_or_newer = [MPSDevice::getInstance()->device() supportsFamily:MTLGPUFamilyApple10];
+  return input.dim() > 2 && is_m5_or_newer && (input.scalar_type() == kHalf || input.scalar_type() == kBFloat16);
+}
+
 static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const Tensor& bias, Tensor& output) {
   bool is_bias_defined = bias.defined();
 
-  MPSStream* mpsStream = getCurrentMPSStream();
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  auto mpsStream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
 
   const std::string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true, true);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       mpsStream->endKernelCoalescing();
 
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      auto computeEncoder = mpsStream->commandEncoder();
+      auto commandBuffer = mpsStream->commandBuffer();
 
-      MPSDataType mpsDataType = getMPSDataType(weight.scalar_type());
+      const auto mpsDataType = getMPSDataType(weight.scalar_type());
 
       auto inputNDArray = getMPSNDArray(input, input.sizes(), input.strides());
       auto outNDArray = getMPSNDArray(output, output.sizes(), output.strides());
 
-      id<MTLBuffer> weightBuf = getMTLBufferStorage(weight);
-      MPSNDArrayDescriptor* weightDesc = [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType
-                                                                                shape:getMPSShape(weight.sizes())];
+      auto weightBuf = getMTLBufferStorage(weight);
+      auto weightDesc = [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType shape:getMPSShape(weight.sizes())];
       weightDesc.preferPackedRows = YES;
       [weightDesc transposeDimension:0 withDimension:1];
-      MPSNDArray* weightNDArray = [[[MPSNDArray alloc] initWithBuffer:weightBuf
-                                                               offset:weight.storage_offset() * weight.element_size()
-                                                           descriptor:weightDesc] autorelease];
+      auto weightNDArray = [[[MPSNDArray alloc] initWithBuffer:weightBuf
+                                                        offset:weight.storage_offset() * weight.element_size()
+                                                    descriptor:weightDesc] autorelease];
 
       if (is_bias_defined) {
         auto biasNDArray = getMPSNDArray(bias, bias.sizes(), bias.strides());
@@ -113,12 +125,29 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return output;
   }
 
-  // No-graph execution causes nonsense if these are non-contiguous.
-  const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
 
-  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_contiguous && !is_complex) {
-    _mps_linear_nograph(input, weight, bias, output);
+  // No-graph execution causes nonsense if these are non-contiguous.
+  const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
+
+  if (is_macos_at_least(MacOSVersion::MACOS_15_0) && is_contiguous && !is_complex) {
+    // The fused 3-source kernel drops the bias for vector-shaped (M==1) inputs on the M1
+    // (Apple7) family on macOS 26; add it separately there. Fixed in macOS 27.
+    static const bool decompose_bias = is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS) &&
+        !is_apple_family_or_newer(AppleGPUFamily::APPLE_8_PLUS) && is_macos_at_least(MacOSVersion::MACOS_26_0) &&
+        !is_macos_at_least(MacOSVersion::MACOS_27_0);
+    const bool add_bias_after = is_bias_defined && decompose_bias;
+    const Tensor kernel_bias = add_bias_after ? Tensor() : bias;
+    if (needs_nd_workaround(input) && (!kernel_bias.defined() || kernel_bias.dim() <= 1)) {
+      auto input2d = input.flatten(0, -2);
+      auto output2d = output.flatten(0, -2);
+      _mps_linear_nograph(input2d, weight, kernel_bias, output2d);
+    } else {
+      _mps_linear_nograph(input, weight, kernel_bias, output);
+    }
+    if (add_bias_after) {
+      output.add_(bias);
+    }
     // Squeeze last dim of 1D linear
     return weight_arg.dim() != 1 ? output : output.squeeze(-1);
   }
@@ -147,6 +176,10 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
         // workaround to improve the performance with 3D+ inputs
         doReshape =
             input_size.size() > 2 && input_size[0] > 1 && input_size[1] >= 1 && input_size[1] <= 32 && bias.dim() <= 1;
+      }
+      // Non-deterministic results for >2D fp16/bf16 on Apple10+
+      if (!doReshape) {
+        doReshape = needs_nd_workaround(input);
       }
       auto inputFlattened = doReshape ? [mpsGraph flatten2DTensor:inputTensor axis:-1 name:nil] : inputTensor;
       auto outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:inputFlattened
@@ -220,8 +253,10 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
       newCachedGraph->gradOutputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
       // MPS matrixMultiplication crashes for 5D+ tensors on 14.2.1 with `New volume should match old volume`
-      // See https://github.com/pytorch/pytorch/issues/114942 for more details
-      bool needReshape = grad_output.dim() > 4;
+      // (https://github.com/pytorch/pytorch/issues/114942), so flatten >4D to 2D first. macOS 27 handles N-D
+      // matmul directly and instead crashes the MLIR pass manager on the in-graph reshape -> matmul -> reshape
+      // (https://github.com/pytorch/pytorch/issues/187201), so skip the reshape there.
+      bool needReshape = grad_output.dim() > 4 && !is_macos_at_least(MacOSVersion::MACOS_27_0);
       auto gradOutputTensor = needReshape
           ? [mpsGraph flatten2DTensor:newCachedGraph->gradOutputTensor_ axis:-1 name:nil]
           : newCachedGraph->gradOutputTensor_;

@@ -673,7 +673,7 @@ class FunctionModifiers:
     UNUSED = "unused (ignored and replaced with raising of an exception)"
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
-    DEFAULT = "default (compile if called from a exported function / forward)"
+    DEFAULT = "default (compile if called from an exported function / forward)"
     COPY_TO_SCRIPT_WRAPPER = (
         "if this method is not scripted, copy the python method onto the scripted model"
     )
@@ -1044,7 +1044,7 @@ def _check_overload_body(func):
         raise RuntimeError(msg)
 
 
-def _overload(func):
+def _overload(func: Callable[_P, _R]) -> Callable[_P, _R]:
     _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_fns
@@ -1097,7 +1097,7 @@ _overloaded_methods: dict[str, dict[str, list[Callable]]] = {}  # noqa: T484
 _overloaded_method_class_fileno: dict[tuple[str, str], int] = {}
 
 
-def _overload_method(func):
+def _overload_method(func: Callable[_P, _R]) -> Callable[_P, _R]:
     try:
         _check_overload_body(func)
     except IndentationError:

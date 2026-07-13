@@ -161,6 +161,12 @@ for input, target in dataset:
 .. currentmodule:: torch.optim
 ```
 
+## Utilities
+
+```{eval-rst}
+.. autofunction:: swap_in_optimizer_params_and_state
+```
+
 ## Algorithms
 
 ```{eval-rst}
@@ -268,7 +274,7 @@ embeddings and the final LM head, pass ``exclude_name_patterns`` (typically
 helper does not apply this exclusion by default:
 
 ```{eval-rst}
-.. autofunction:: param_groups_for_muon
+.. autofunction:: torch.optim.param_groups_for_muon
 ```
 
 ## How to adjust learning rate
@@ -713,6 +719,9 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 
     swa_utils.AveragedModel
     swa_utils.SWALR
+    swa_utils.get_ema_avg_fn
+    swa_utils.get_swa_avg_fn
+    swa_utils.get_swa_multi_avg_fn
 
 
 .. autofunction:: torch.optim.swa_utils.get_ema_multi_avg_fn

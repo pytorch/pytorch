@@ -59,6 +59,25 @@ def aot_eager_regional_inductor():
     )
 
 
+class SingleCondModel(torch.nn.Module):
+    def __init__(self, d=64):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(d, d)
+        self.fc2 = torch.nn.Linear(d, d)
+
+    def forward(self, x):
+        x = self.fc1(x)
+
+        def true_fn(x):
+            return x * 2.0
+
+        def false_fn(x):
+            return x * 3.0
+
+        x = torch.cond(x.shape[0] < 32, true_fn, false_fn, (x,))
+        return self.fc2(x)
+
+
 class MooType:
     def __init__(self, x):
         self.x = x
@@ -355,7 +374,7 @@ class TestVLLMModel(MultiModalMixin, TextModel):
 def _subprocess_entry(fn, queue):
     try:
         fn()
-    except BaseException as exc:  # noqa: BLE001
+    except BaseException as exc:
         import traceback
 
         queue.put((type(exc).__name__, str(exc), traceback.format_exc()))
@@ -588,6 +607,29 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_autocast_guard_reload(self):
+        def fn(x):
+            return x + 1 * x
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        x = torch.randn(3, 4)
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, backend=backend
+            ).aot_compile(((x,), {}))
+            expected = fn(x)
+            self.assertEqual(expected, compiled_fn(x))
+
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            actual = compiled_fn(x)
+        self.assertEqual(expected, actual)
 
     def test_aot_compile_basic_forward(self):
         mod = SimpleLinearModule()
@@ -959,6 +1001,43 @@ from user code:
             raise AssertionError("Expected compiled_fn to have 'serialize' attribute")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
 
+    def test_aot_cache_predicate_not_pickleable(self):
+        import torch._functorch.config as functorch_config
+        import torch._inductor.config as inductor_config
+
+        model = SingleCondModel().eval()
+
+        old_cacheable = torch.ops.higher_order.cond._cacheable
+        torch.ops.higher_order.cond._cacheable = True
+        try:
+            with (
+                functorch_config.patch(
+                    enable_autograd_cache=True,
+                    force_non_lazy_backward_lowering=True,
+                    strict_autograd_cache=True,
+                ),
+                inductor_config.patch(
+                    fx_graph_cache=True,
+                    fx_graph_remote_cache=False,
+                ),
+            ):
+                compiled = torch.compile(model, backend="inductor", dynamic=True)
+
+                # Test both branches of the cond predicate (x.shape[0] < 32).
+                for batch_size in (16, 64):
+                    inp = torch.randn(batch_size, 64)
+                    expected = model(inp)
+                    actual = compiled(inp)
+                    self.assertEqual(expected, actual)
+
+                # If the SymBool predicate is not pickleable, the FxGraphCache
+                # silently bypasses instead of caching. Assert no bypass occurred.
+                self.assertEqual(
+                    torch._dynamo.utils.counters["inductor"]["fxgraph_cache_bypass"], 0
+                )
+        finally:
+            torch.ops.higher_order.cond._cacheable = old_cacheable
+
     def test_fullgraph_capture_with_pytree_module(self):
         from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
@@ -1036,6 +1115,20 @@ from user code:
             torch.randn(3, 4),
         )
         self.assertEqual(compiled_foo(inputs), foo(inputs))
+
+    def test_fullgraph_capture_schema_self_arg_no_collision(self):
+        """Regression: aten op schemas with `self` at non-first position
+        (e.g. `aten.where.self(Tensor condition, Tensor self, Tensor other)`)
+        must not produce `def forward(self, condition, self, other):` and
+        SyntaxError at `graph_module.recompile()`."""
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        cond = torch.tensor([True, False, True, False])
+        x = torch.tensor(0.0)
+        y = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        op = torch.ops.aten.where.self
+        compiled = dynamo_graph_capture_for_export(op)(cond, x, y)
+        self.assertEqual(compiled(cond, x, y), op(cond, x, y))
 
     def test_aot_compile_with_closure_save_and_load(self):
         tmp = 2
@@ -1686,7 +1779,7 @@ from user code:
                     self.assertEqual(
                         compiled_grads[name],
                         eager_grads[name],
-                        msg=f"Gradients for {name} should be bitwise equivalent",
+                        msg=lambda msg: f"{msg}\nGradients for {name} should be bitwise equivalent",
                     )
         finally:
             c10d.destroy_process_group()

@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa: B950
 
 import functools
 import itertools
@@ -148,13 +147,13 @@ class GraphModule(torch.nn.Module):
         aot1_tangents_1: "f32[2]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
         accumulate_grad = torch__dynamo_compiled_autograd_ops_AccumulateGrad([aot1_tangents_1], getitem_1, None, False);  getitem_1 = None
-        getitem_11: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
+        call_accumulate_grad: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
 
         result: "f32[2]" = aot1_tangents_1 * aot1_tangents_1;  aot1_tangents_1 = None
 
         accumulate_grad_1 = torch__dynamo_compiled_autograd_ops_AccumulateGrad([result], getitem_2, None, False);  result = getitem_2 = None
-        getitem_12: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
-        return (getitem_11, getitem_12)
+        call_accumulate_grad_1: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
+        return (call_accumulate_grad, call_accumulate_grad_1)
 """,
                 )
             elif backend == "inductor":
@@ -179,13 +178,13 @@ class GraphModule(torch.nn.Module):
         aot3_tangents_1: "f32[2]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
         accumulate_grad = torch__dynamo_compiled_autograd_ops_AccumulateGrad([aot3_tangents_1], getitem_1, None, False);  getitem_1 = None
-        getitem_11: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
+        call_accumulate_grad: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
 
         result: "f32[2]" = aot3_tangents_1 * aot3_tangents_1;  aot3_tangents_1 = None
 
         accumulate_grad_1 = torch__dynamo_compiled_autograd_ops_AccumulateGrad([result], getitem_2, None, False);  result = getitem_2 = None
-        getitem_12: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
-        return (getitem_11, getitem_12)
+        call_accumulate_grad_1: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
+        return (call_accumulate_grad, call_accumulate_grad_1)
 """,
                 )
 
@@ -264,15 +263,15 @@ class GraphModule(torch.nn.Module):
         aot0_tangents_1: "f32[2]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
         accumulate_grad = torch__dynamo_compiled_autograd_ops_AccumulateGrad([aot0_tangents_1], getitem_1, None, False);  getitem_1 = None
-        getitem_11: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
+        call_accumulate_grad: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
 
         add: "Sym(s45 + 1)" = l_hooks_1_keywords_fn_keywords_obj_counter + 1;  l_hooks_1_keywords_fn_keywords_obj_counter = None
 
         result: "f32[2]" = aot0_tangents_1 * aot0_tangents_1;  aot0_tangents_1 = None
 
         accumulate_grad_1 = torch__dynamo_compiled_autograd_ops_AccumulateGrad([result], getitem_2, None, False);  result = getitem_2 = None
-        getitem_12: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
-        return (getitem_11, getitem_12, add)
+        call_accumulate_grad_1: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
+        return (call_accumulate_grad, call_accumulate_grad_1, add)
 """,
                 )
 
