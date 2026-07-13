@@ -127,6 +127,12 @@ NCCLAllocMap::iterator find_allocation_covering(
   if (driver_api->cuMemGetAddressRange_(
           &base_ptr, nullptr, reinterpret_cast<CUdeviceptr>(ptr)) ==
       CUDA_SUCCESS) {
+    // buffer_offset here is recomputed from the *current* global pad size. It
+    // matches the allocation's stored buffer_offset only if the pad size has
+    // not changed since alloc(). If set_signal_pad_size() was called in
+    // between, this O(1) key won't match and we fall through to the linear
+    // scan, which uses each allocation's own stored buffer_offset -- so the
+    // fallback is load-bearing for correctness when the pad size changes.
     const size_t buffer_offset =
         at::round_up(get_signal_pad_size(), signal_pad_alignment);
     auto buffer_ptr = reinterpret_cast<void*>(
