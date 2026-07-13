@@ -1721,6 +1721,12 @@ static PyObject* prepare_saved_tensor(
     PyObject* item,
     int64_t idx,
     bool is_graph_input) {
+  TORCH_CHECK(
+      THPVariable_Check(item),
+      "save_for_backward expected tensor at index ",
+      idx,
+      ", got ",
+      Py_TYPE(item)->tp_name);
   // Non-input views are detached before storing them on ctx to avoid keeping an
   // intermediate view and its grad_fn alive. Graph inputs are already held by
   // the autograd invocation, so retaining the original input view is safe and
@@ -1730,12 +1736,6 @@ static PyObject* prepare_saved_tensor(
     return item;
   }
 
-  TORCH_CHECK(
-      THPVariable_Check(item),
-      "save_for_backward expected tensor at index ",
-      idx,
-      ", got ",
-      Py_TYPE(item)->tp_name);
   const auto& tensor = THPVariable_Unpack(item);
   if (tensor.is_view()) {
     return THPVariable_Wrap(tensor.detach());
@@ -1772,10 +1772,20 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
     PyObject* const* args,
     Py_ssize_t nargs) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(nargs == 3, "expected ctx, fw_outs, and plan");
+  TORCH_CHECK(
+      nargs == 3 || nargs == 4,
+      "expected ctx, fw_outs, plan, and optional return_saved_tensors");
   PyObject* ctx = args[0];
   PyObject* fw_outs = args[1];
   PyObject* plan_obj = args[2];
+  bool return_saved_tensors = false;
+  if (nargs == 4) {
+    auto return_saved_tensors_int = PyObject_IsTrue(args[3]);
+    if (return_saved_tensors_int < 0) {
+      throw python_error();
+    }
+    return_saved_tensors = return_saved_tensors_int != 0;
+  }
   TORCH_CHECK(THPFunction_Check(ctx), "ctx must be a torch autograd Function");
   TORCH_CHECK(PyBytes_Check(plan_obj), "plan must be bytes");
   auto* fn = reinterpret_cast<THPFunction*>(ctx);
@@ -1789,7 +1799,13 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
       "invalid AOTAutograd save plan");
   const char* plan_bytes = PyBytes_AS_STRING(plan_obj);
   // Plan layout matches _codegen_save_from_forward:
-  // counts, fw_out indices, then graph-input flags for saved tensors.
+  //
+  //   [counts]
+  //   [fw_out indices for tensors, symints, opaque objects]
+  //   [one graph-input flag per saved tensor]
+  //
+  // This keeps Python responsible for compile-time indexing decisions while
+  // this helper owns the runtime save/detach/ctx mutation work.
   auto num_vc = read_i64(plan_bytes);
   auto num_no_vc = read_i64(plan_bytes + sizeof(int64_t));
   auto num_symints = read_i64(plan_bytes + 2 * sizeof(int64_t));
@@ -1809,9 +1825,23 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
   const auto symint_start = no_vc_start + num_no_vc;
   const auto opaque_start = symint_start + num_symints;
 
+  // Implements ctx.save_for_backward(*tensors_saved_with_vc_check). We write
+  // directly to THPFunction::to_save because saved_tensors is intentionally not
+  // visible from Python during forward.
   THPObjectPtr to_save(PyTuple_New(static_cast<Py_ssize_t>(num_vc)));
   if (!to_save) {
     throw python_error();
+  }
+  THPObjectPtr saved_tensors;
+  if (return_saved_tensors) {
+    // Dynamic saved tensor marking still happens in Python because it sets a
+    // Python attribute. Return the exact saved objects so Python marks the
+    // detached tensors, not the original fw_out views.
+    saved_tensors =
+        THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(num_saved_tensors)));
+    if (!saved_tensors) {
+      throw python_error();
+    }
   }
   for (const auto i : c10::irange(num_vc)) {
     auto idx = read_i64(indices + i * sizeof(int64_t));
@@ -1820,11 +1850,17 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
         read_i64(indices + graph_input_idx * sizeof(int64_t)) != 0;
     PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
     PyObject* saved = prepare_saved_tensor(item, idx, is_graph_input);
+    if (return_saved_tensors) {
+      Py_INCREF(saved);
+      PyList_SET_ITEM(saved_tensors.get(), static_cast<Py_ssize_t>(i), saved);
+    }
     PyTuple_SET_ITEM(to_save.get(), static_cast<Py_ssize_t>(i), saved);
   }
   Py_CLEAR(fn->to_save);
   fn->to_save = to_save.release();
 
+  // Implements ctx._tensors_no_vc_check = tensors_saved_no_vc_check. These
+  // tensors are saved for backward without autograd's version-counter checks.
   THPObjectPtr no_vc_list(PyList_New(static_cast<Py_ssize_t>(num_no_vc)));
   if (!no_vc_list) {
     throw python_error();
@@ -1836,17 +1872,27 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
         read_i64(indices + graph_input_idx * sizeof(int64_t)) != 0;
     PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
     PyObject* saved = prepare_saved_tensor(item, idx, is_graph_input);
+    if (return_saved_tensors) {
+      Py_INCREF(saved);
+      PyList_SET_ITEM(
+          saved_tensors.get(), static_cast<Py_ssize_t>(num_vc + i), saved);
+    }
     PyList_SET_ITEM(no_vc_list.get(), static_cast<Py_ssize_t>(i), saved);
   }
   if (PyObject_SetAttrString(ctx, "_tensors_no_vc_check", no_vc_list.get()) <
       0) {
     throw python_error();
   }
+  // SymInts and opaque objects do not need tensor view handling; just preserve
+  // the selected fw_out objects on ctx for the backward prologue.
   set_list_attr_from_indices(
       ctx, "symints", fw_outs, indices, symint_start, num_symints);
   set_list_attr_from_indices(
       ctx, "opaque_objects", fw_outs, indices, opaque_start, num_opaque);
 
+  if (return_saved_tensors) {
+    return saved_tensors.release();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
