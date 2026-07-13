@@ -177,9 +177,9 @@ class Repro(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, x_19):
-        x_20 = torch.relu(x_19);  x_19 = None
-        return (x_20,)""",
+    def forward(self, sin_19):
+        relu = torch.relu(sin_19);  sin_19 = None
+        return (relu,)""",
         )
 
 

@@ -6623,7 +6623,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "MKLDNN inputs are not supported for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -6639,7 +6639,7 @@ Done""",
             UserWarning, "Input #0 requires gradient and is not a double precision"
         ):
             with self.assertRaisesRegex(
-                ValueError, "MKLDNN inputs are not support for forward AD gradcheck."
+                ValueError, "MKLDNN inputs are not supported for forward AD gradcheck."
             ):
                 gradcheck(
                     lambda x: x.to_dense(),
@@ -14082,6 +14082,113 @@ class TestAutogradDeviceType(TestCase):
         self.assertIsNotNone(model.b.grad)
         self.assertEqual(model.a.grad.device, torch.device("cpu"))
         self.assertEqual(model.b.grad.device, torch.device("cpu"))
+
+    @dtypes(torch.double)
+    def test_cdist_gradgrad(self, device, dtype):
+        # Second-order (double) backward for cdist / _cdist_backward. p < 1 is
+        # excluded here because |diff|^(p-2) makes the second derivative too
+        # singular for a reliable finite-difference gradgradcheck.
+        make = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
+        shape_pairs = [
+            ((4, 3), (5, 3)),  # unbatched
+            ((2, 4, 3), (2, 5, 3)),  # batched
+            ((1, 4, 3), (2, 5, 3)),  # broadcast batch
+        ]
+        for p in [1.0, 1.5, 2.0, 2.5, 3.0, float("inf")]:
+            # p == 2 dispatches to _euclidean_dist (mm) or the fused kernel
+            # depending on compute_mode; exercise both backward paths.
+            modes = (
+                ["use_mm_for_euclid_dist", "donot_use_mm_for_euclid_dist"]
+                if p == 2.0
+                else ["donot_use_mm_for_euclid_dist"]
+            )
+            for s1, s2 in shape_pairs:
+                for mode in modes:
+                    x1, x2 = make(s1), make(s2)
+
+                    def fn(a, b, p=p, mode=mode):
+                        return torch.cdist(a, b, p, compute_mode=mode)
+
+                    with self.subTest(p=p, shapes=(s1, s2), mode=mode):
+                        self.assertTrue(gradcheck(fn, (x1, x2)))
+                        # Compiled autograd cannot reproduce eager's undefined-grad
+                        # accumulation. Check with eager compilation.
+                        self.assertTrue(
+                            gradgradcheck(
+                                fn,
+                                (x1, x2),
+                                check_undefined_grad=not TEST_WITH_TORCHDYNAMO,
+                            )
+                        )
+
+    @dtypes(torch.double)
+    def test_pdist_gradgrad(self, device, dtype):
+        make = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
+        for p in [1.0, 1.5, 2.0, 2.5, 3.0, float("inf")]:
+            for shape in [(4, 3), (5, 2)]:
+                x = make(shape)
+
+                def fn(a, p=p):
+                    return torch.nn.functional.pdist(a, p)
+
+                with self.subTest(p=p, shape=shape):
+                    self.assertTrue(gradcheck(fn, (x,)))
+                    # See test_cdist_gradgrad: undefined-grad mode is eager-only.
+                    self.assertTrue(
+                        gradgradcheck(
+                            fn, (x,), check_undefined_grad=not TEST_WITH_TORCHDYNAMO
+                        )
+                    )
+
+    @dtypes(torch.double)
+    def test_cdist_gradgrad_small_p(self, device, dtype):
+        # p < 1 is too singular for finite-difference gradgradcheck, so compare
+        # the analytic double backward to an autograd reference. Point clouds are
+        # separated so no pairwise difference is near zero.
+        def ref_cdist(a, b, p):
+            return (a.unsqueeze(-2) - b.unsqueeze(-3)).abs().pow(p).sum(-1).pow(1.0 / p)
+
+        def second_order(fn, x1, x2, v, p):
+            d = fn(x1, x2, p)
+            g1 = torch.autograd.grad(d, x1, grad_outputs=v, create_graph=True)[0]
+            return torch.autograd.grad(g1.sum(), (x1, x2, v))
+
+        mk = partial(make_tensor, device=device, dtype=dtype)
+        for p in [0.5, 0.75]:
+            x1 = mk((4, 3), requires_grad=True)
+            x2 = (mk((5, 3)).abs() + 20).detach().requires_grad_()
+            v = mk((4, 5), requires_grad=True)
+            with self.subTest(p=p):
+                self.assertEqual(
+                    second_order(torch.cdist, x1, x2, v, p),
+                    second_order(ref_cdist, x1, x2, v, p),
+                )
+
+    @dtypes(torch.double)
+    def test_pdist_gradgrad_small_p(self, device, dtype):
+        # See test_cdist_gradgrad_small_p; rows separated to avoid near-zero diffs.
+        def ref_pdist(a, p):
+            # Gather only the off-diagonal pairs; including self-distances would
+            # put a |0|^(p-1) singularity in the graph for p < 1.
+            i, j = torch.triu_indices(a.size(0), a.size(0), 1, device=a.device).unbind()
+            return (a[i] - a[j]).abs().pow(p).sum(-1).pow(1.0 / p)
+
+        def second_order(fn, x, v, p):
+            d = fn(x, p)
+            g = torch.autograd.grad(d, x, grad_outputs=v, create_graph=True)[0]
+            return torch.autograd.grad(g.sum(), (x, v))
+
+        mk = partial(make_tensor, device=device, dtype=dtype)
+        for p in [0.5, 0.75]:
+            n, m = 4, 3
+            sep = torch.arange(n, device=device, dtype=dtype).view(n, 1) * 50
+            x = (mk((n, m)) + sep).detach().requires_grad_()
+            v = mk((n * (n - 1) // 2,), requires_grad=True)
+            with self.subTest(p=p):
+                self.assertEqual(
+                    second_order(torch.nn.functional.pdist, x, v, p),
+                    second_order(ref_pdist, x, v, p),
+                )
 
 
 class TestAllowMutationOnSaved(TestCase):
