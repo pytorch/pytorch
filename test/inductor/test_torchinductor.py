@@ -6417,7 +6417,6 @@ for dtype in (torch.int32, torch.int64):
                 check_lowp=False,
             )
 
-    @xfail_if_mps
     @skip_if_gpu_halide  # slow
     def test_adaptive_max_pool2d1(self):
         def fn(x):
