@@ -2798,8 +2798,11 @@ def _abort_process_group(group: ProcessGroup | None = None):
         # semantic for NCCL). This ensures that different communicators'
         # abort calls won't deadlock each other.
         # For details, please see: https://github.com/pytorch/pytorch/issues/119797
+        # getattr instead of a direct attribute access because custom Python
+        # backends are ProcessGroup subclasses, which don't expose the
+        # Backend.supports_coalescing property.
         coalescing_device = (
-            device if backend is not None and backend.supports_coalescing else None
+            device if getattr(backend, "supports_coalescing", False) else None
         )
         # Drop any pending coalesced ops; everything is being aborted anyway
         # and _coalescing_manager requires an empty op list on entry.
