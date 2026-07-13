@@ -1911,13 +1911,13 @@ def is_invalid_cancel(
     )
 
 
-def is_out_of_tree_l3(check: JobCheckState, drci_classifications: Any) -> bool:
-    """Return True if this check is a non-blocking L3 out-of-tree failure.
+def is_crcr_non_blocking(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if this check is a non-blocking CRCR L3 failure.
 
     Dr.CI is the classification authority. A check is L3 non-blocking when
-    Dr.CI returns it under the ``OUT_OF_TREE`` category. CRCR (cross-repo CI
+    Dr.CI returns it under the ``CRCR_NON_BLOCKING`` category. CRCR (cross-repo CI
     relay) L3 check runs are named ``crcr/<repo>/<workflow>`` and will be
-    classified as OUT_OF_TREE by Dr.CI when their downstream_repo_level is L3.
+    classified as CRCR_NON_BLOCKING by Dr.CI when their downstream_repo_level is L3.
     """
     if not check or not drci_classifications:
         return False
@@ -1927,7 +1927,7 @@ def is_out_of_tree_l3(check: JobCheckState, drci_classifications: Any) -> bool:
 
     return any(
         name == oot["name"] or (job_id and job_id == oot["id"])
-        for oot in drci_classifications.get("OUT_OF_TREE", [])
+        for oot in drci_classifications.get("CRCR_NON_BLOCKING", [])
     )
 
 
@@ -2029,12 +2029,12 @@ def get_classifications(
             )
             continue
 
-        elif is_out_of_tree_l3(check, drci_classifications):
+        elif is_crcr_non_blocking(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
                 check.status,
-                "OUT_OF_TREE",
+                "CRCR_NON_BLOCKING",
                 check.job_id,
                 check.title,
                 check.summary,
@@ -2335,7 +2335,7 @@ def categorize_checks(
                     "BROKEN_TRUNK",
                     "FLAKY",
                     "UNSTABLE",
-                    "OUT_OF_TREE",
+                    "CRCR_NON_BLOCKING",
                 )
                 else failed_checks
             )
