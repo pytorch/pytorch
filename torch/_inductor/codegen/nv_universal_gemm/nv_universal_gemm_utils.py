@@ -3,9 +3,41 @@
 Utility functions for NVIDIA Universal GEMM.
 """
 
+import copyreg
 from typing import Any
 
 from torch.nn.functional import ScalingType, SwizzleType
+
+
+def _rebuild_scaling_type(name: str) -> Any:
+    return getattr(ScalingType, name)
+
+
+def _rebuild_swizzle_type(name: str) -> Any:
+    return getattr(SwizzleType, name)
+
+
+def _register_enum_pickling() -> None:
+    """Make torch.nn.functional ScalingType/SwizzleType picklable.
+
+    They are pybind11 C++ enums whose class __qualname__ is `_ScalingType` /
+    `_SwizzleType`, but torch.nn.functional only binds the public names
+    `ScalingType` / `SwizzleType`. Pickle's default reduction reconstructs by
+    the private qualname and fails, which blocks shipping a scaled-GEMM
+    benchmark request to the autotuning subprocess pool. Reduce by `.name`
+    string via the public alias instead (no class object in the pickle).
+    """
+    copyreg.pickle(
+        type(ScalingType.BlockWise1x16),
+        lambda v: (_rebuild_scaling_type, (v.name,)),
+    )
+    copyreg.pickle(
+        type(SwizzleType.NO_SWIZZLE),
+        lambda v: (_rebuild_swizzle_type, (v.name,)),
+    )
+
+
+_register_enum_pickling()
 
 
 def to_cutlass_scale_mode(
