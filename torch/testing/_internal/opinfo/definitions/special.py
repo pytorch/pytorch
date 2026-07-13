@@ -121,6 +121,20 @@ def sample_inputs_erfcx(op_info, device, dtype, requires_grad, **kwargs):
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
 
+# Restricting the x > 0 Bessel ops to domain=(0, None) makes the unary sample
+# generator clamp samples with clamp_min, which has no CPU kernel for the barebones
+# unsigned integer types. Skip the affected forward reference-numerics tests there.
+_domain_uint_skips = tuple(
+    DecorateInfo(
+        unittest.skip("clamp_min unimplemented for unsigned int types"),
+        "TestUnaryUfuncs",
+        test_name,
+        dtypes=_unsigned_int_types,
+    )
+    for test_name in ("test_reference_numerics_small", "test_reference_numerics_large")
+)
+
+
 op_db: list[OpInfo] = [
     UnaryUfuncInfo(
         "special.i0e",
@@ -480,6 +494,7 @@ op_db: list[OpInfo] = [
         ref=scipy.special.y0 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
         domain=(0, None),
+        skips=_domain_uint_skips,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -510,6 +525,7 @@ op_db: list[OpInfo] = [
         ref=scipy.special.y1 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
         domain=(0, None),
+        skips=_domain_uint_skips,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -746,6 +762,7 @@ op_db: list[OpInfo] = [
         ref=scipy.special.k0 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
         domain=(0, None),
+        skips=_domain_uint_skips,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -764,6 +781,7 @@ op_db: list[OpInfo] = [
         ref=scipy.special.k1 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
         domain=(0, None),
+        skips=_domain_uint_skips,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
