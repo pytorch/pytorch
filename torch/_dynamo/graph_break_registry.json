@@ -1537,6 +1537,15 @@
   "GB0107": [
     {
       "Gb_type": "Tensor.random_ op",
+      "Context": "Tensor.random_(args={args}, kwargs={kwargs})",
+      "Explanation": "This is currently not supported.",
+      "Hints": [
+        "Use the out-of-place version of this op",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Tensor.random_ op",
       "Context": "Tensor.{name}(args={args}, kwargs={kwargs})",
       "Explanation": "This is currently not supported.",
       "Hints": [
@@ -1571,6 +1580,15 @@
     }
   ],
   "GB0110": [
+    {
+      "Gb_type": "Tensor.uniform_ op called with `from` keyword",
+      "Context": "Tensor.uniform_(args={args}, kwargs={kwargs})",
+      "Explanation": "This is currently not supported.",
+      "Hints": [
+        "Avoid using the `from` keyword.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Tensor.uniform_ op called with `from` keyword",
       "Context": "Tensor.{name}(args={args}, kwargs={kwargs})",
@@ -5007,6 +5025,26 @@
       "Explanation": "Expected xs to be a list/tuple but got {xs.python_type()}",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB6815": [
+    {
+      "Gb_type": "ContextVar mutation not supported",
+      "Context": "ContextVar('{self.cv_obj.name}').{name}()",
+      "Explanation": "ContextVar.{name}() is not yet supported inside torch.compile. Move the .{name}() call outside the compiled region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6066": [
+    {
+      "Gb_type": "ContextVar.get() with non-constant default",
+      "Context": "ContextVar('{self.cv_obj.name}').get(...)",
+      "Explanation": "ContextVar.get() default argument must be a compile-time constant inside torch.compile.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

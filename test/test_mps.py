@@ -6603,6 +6603,23 @@ class TestMPS(TestCaseMPS):
         helper((4, 2, 3), (1, 2, 3))
         helper((2, 3), (2, 3))
 
+    def test_clamp_tensor_bounds_out_dtype(self):
+        # Regression test: ternary ops with an out= dtype differing from the
+        # (matching) input dtypes must route to the _cast_ kernel. Previously
+        # the dispatcher only compared the inputs against each other and
+        # formatted an unregistered non-cast kernel name, failing at pipeline
+        # creation.
+        cpu_x = torch.randn(4, 5, device="cpu", dtype=torch.float32)
+        cpu_min_t = torch.full((4, 5), -0.5, device="cpu", dtype=torch.float32)
+        cpu_max_t = torch.full((4, 5), 0.5, device="cpu", dtype=torch.float32)
+        cpu_out = torch.empty(4, 5, device="cpu", dtype=torch.float16)
+        mps_x = cpu_x.to("mps")
+        mps_min_t = cpu_min_t.to("mps")
+        mps_max_t = cpu_max_t.to("mps")
+        mps_out = torch.empty(4, 5, device="mps", dtype=torch.float16)
+        torch.clamp(cpu_x, min=cpu_min_t, max=cpu_max_t, out=cpu_out)
+        torch.clamp(mps_x, min=mps_min_t, max=mps_max_t, out=mps_out)
+        self.assertEqual(mps_out.cpu(), cpu_out)
 
     def test_divmode(self):
         def helper(shape, rounding_mode):
@@ -7916,6 +7933,31 @@ class TestMPS(TestCaseMPS):
             cpu_out.backward(gradient=torch.ones_like(cpu_out))
             self.assertFalse(torch.isnan(x.grad).any(), f"NaN in backward for {dtype}")
             self.assertEqual(x.grad, cpu_xg.grad.to('mps'))
+
+    def test_erfc_tail_accuracy(self):
+        # gh-187806: c10::metal::erfc was 1 - erf(x), 100% relative error past
+        # erf's fp32 saturation (~3.9); compare against float64 over the
+        # fp32-normal output range
+        x = torch.arange(-9.0, 9.0, 2**-10)
+        actual = torch.erfc(x.to('mps')).cpu().double()
+        expected = torch.erfc(x.double())
+        self.assertEqual(actual, expected, rtol=1e-6, atol=0)
+        # specials and the clamped tail (t = min(|x|, 10.5) in the kernel);
+        # erfc rounds to exactly 0/2 in fp32 well before the clamp
+        vals = [0.0, float('inf'), float('-inf'), float('nan'), 10.5, -10.5, 1e30, -1e30]
+        expected_sp = torch.tensor([1.0, 0.0, 2.0, float('nan'), 0.0, 2.0, 0.0, 2.0])
+        actual_sp = torch.erfc(torch.tensor(vals, device='mps')).cpu()
+        self.assertEqual(actual_sp, expected_sp, rtol=0, atol=0)
+
+    def test_igammac_tail_accuracy(self):
+        # igamma.h evaluates 0.5 * erfc(...) on its large-a asymptotic path,
+        # so the erfc rewrite fixes the igammac tail too
+        a = torch.full((2048,), 1200.0)
+        x = torch.linspace(1150.0, 1660.0, 2048)
+        actual = torch.special.gammaincc(a.to('mps'), x.to('mps')).cpu().double()
+        expected = torch.special.gammaincc(a.double(), x.double())
+        rel = ((actual - expected) / expected).abs().max()
+        self.assertLess(rel.item(), 5e-4)
 
     # Test hardtanh
     def test_hardtanh(self):
@@ -11441,6 +11483,61 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(mps.residuals.cpu(), cpu.residuals)
         self.assertEqual(mps.rank.cpu(), cpu.rank)
         self.assertEqual(mps.singular_values.cpu(), cpu.singular_values)
+
+    @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16)
+    @parametrize("out", ["none", "zeros", "ones"])
+    @parametrize("m, n, data, noncontig", [
+        (1, 3, (2, 2), False),
+        (2, 6, (256, 256), False),
+        (3, 4, (7, 7, 7), False),
+        (6, 5, (512, 512), False),
+        (5, 3, (128, 128), True),
+    ])
+    def test_compute_linear_combination(self, device, dtype, m, n, data, noncontig, out):
+        torch.manual_seed(0)
+        coeff_dtype = torch.float32 if dtype.is_complex else dtype  # coeffs are real
+        tol = {torch.float16: (2e-2, 2e-2), torch.bfloat16: (5e-2, 5e-2)}.get(dtype, (1e-4, 1e-4))
+        coeffs = torch.rand(m, n, dtype=coeff_dtype)
+        x = torch.randn(n, *data, 2, dtype=dtype)[..., 1] if noncontig else torch.randn(n, *data, dtype=dtype)
+        xm, cm = x.to(device), coeffs.to(device)
+        if out == "none":
+            expected = torch._compute_linear_combination(x, coeffs)
+            actual = torch._compute_linear_combination(xm, cm)
+        else:
+            init = torch.zeros if out == "zeros" else torch.ones
+            expected = init(m, *data, dtype=dtype)
+            actual = init(m, *data, device=device, dtype=dtype)
+            torch._compute_linear_combination(x, coeffs, out=expected)
+            torch._compute_linear_combination(xm, cm, out=actual)
+        self.assertEqual(actual.cpu(), expected, atol=tol[0], rtol=tol[1])
+
+    @unittest.skipIf(MACOS_VERSION < 15.0, "matrix_exp on MPS requires macOS 15+")
+    @dtypes(torch.float32, torch.complex64)
+    def test_matrix_exp_invariants(self, device, dtype):
+        # Reference-free identities catch systematic MPS bias an MPS-vs-CPU compare misses.
+        torch.manual_seed(0)
+        expm = torch.linalg.matrix_exp
+
+        for n, batch in [(8, ()), (16, ()), (32, (4,))]:
+            eye = torch.eye(n, dtype=dtype, device=device).expand(*batch, n, n)
+
+            zero = torch.zeros(*batch, n, n, dtype=dtype, device=device)
+            self.assertEqual(expm(zero), eye, atol=2e-4, rtol=2e-4)
+
+            # exp(skew-Hermitian) is unitary, and the norm sweep hits every branch
+            # plus the squaring path.
+            for scale in (1e-2, 1.0, 5.0):
+                a = torch.randn(*batch, n, n, dtype=dtype, device=device)
+                q = expm((a - a.mH) * scale)
+                self.assertEqual(torch.matmul(q, q.mH), eye, atol=2e-4, rtol=2e-4)
+
+            # det(exp(A)) == exp(tr(A)); a scalar check over the full matmul path.
+            # linalg.det has no complex MPS support, so the identity is evaluated on
+            # CPU over the MPS matrix_exp result.
+            a = torch.randn(*batch, n, n, dtype=dtype, device=device) / n
+            lhs = torch.linalg.det(expm(a).cpu())
+            rhs = torch.exp(torch.diagonal(a.cpu(), dim1=-2, dim2=-1).sum(-1))
+            self.assertEqual(lhs, rhs, atol=1e-3, rtol=1e-3)
 
     def test_matrix_rank(self, device="mps", dtype=torch.float32):
         matrix_rank = torch.linalg.matrix_rank
@@ -15134,7 +15231,6 @@ class TestConsistency(TestCaseMPS):
         'gradient', 'var', 'std', 'std_mean', 'ldexp',
         'linalg.vector_norm', 'lerp',
         'addr', 'var_mean',
-        'var_mean_unbiased',
         'acosh', 'asinh', 'asin',
         'masked.std',
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
@@ -15187,6 +15283,10 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.conv_transpose3d',
         'matmul', '__rmatmul__',
         'linalg.multi_dot',
+        # matrix_exp is Taylor + scale-and-square, i.e. repeated matmuls, so MPS
+        # and CPU diverge by ~1e-5 like the rest of this list; complex64 outputs
+        # of magnitude e^||A|| also need rtol rather than a tight atol.
+        'matrix_exp',
         'addbmm',
         # Accumulates sigmoid + log + weighted sum rounding; CPU and MPS
         # end up within ~3e-5 of fp64 but differ from each other by more
