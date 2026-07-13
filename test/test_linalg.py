@@ -2371,7 +2371,7 @@ class TestLinalg(TestCase):
         # Valid if (vals[0]=λ AND vals[1]=λ*) OR (vals[0]=λ* AND vals[1]=λ)
         self.assertTrue(
             (match_0_pos and match_1_neg) or (match_0_neg and match_1_pos),
-            f"Expected conjugate pair {{λ, λ*}}, got {vals_complex[0]}, {vals_complex[1]}"
+            lambda msg: f"{msg}\nExpected conjugate pair {{λ, λ*}}, got {vals_complex[0]}, {vals_complex[1]}"
         )
 
         # Verify output is complex type
@@ -8045,7 +8045,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             # slogdet implementations when det is near zero due to precision
             # issues.
             if sdet.item() < 0:
-                self.assertTrue(logdet.item() != logdet.item(), f'{desc} (logdet negative case)')
+                self.assertTrue(logdet.item() != logdet.item(), lambda msg: f'{msg}\n{desc} (logdet negative case)')
             else:
                 self.assertEqual(logdet.exp(), target_logabsdet.exp(),
                                  atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (logdet non-negative case)')
