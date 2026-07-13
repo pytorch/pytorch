@@ -3840,11 +3840,11 @@
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
   dispatch:
-    CPU, CUDA, XPU: _compute_linear_combination
+    CPU, CUDA, XPU, MPS: _compute_linear_combination
 
 - func: _compute_linear_combination.out(Tensor input, Tensor coefficients, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: _compute_linear_combination_out
+    CPU, CUDA, XPU, MPS: _compute_linear_combination_out
 
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
@@ -4501,6 +4501,7 @@
 - func: ones(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: ones
+    Meta: ones_meta_symint
 
 - func: ones.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -4530,7 +4531,7 @@
   autogen: _cdist_forward.out
   tags: core
 
-- func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
+- func: _cdist_backward(Tensor grad_output, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
   dispatch:
     CPU, CUDA, MPS, XPU: _cdist_backward
   autogen: _cdist_backward.out
@@ -4543,7 +4544,7 @@
   autogen: _pdist_forward.out
   tags: core
 
-- func: _pdist_backward(Tensor grad, Tensor self, float p, Tensor pdist) -> Tensor
+- func: _pdist_backward(Tensor grad_output, Tensor self, float p, Tensor pdist) -> Tensor
   dispatch:
     CPU, CUDA, XPU: _pdist_backward
   autogen: _pdist_backward.out
@@ -5762,6 +5763,7 @@
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
     CompositeExplicitAutograd: stack
+    Meta: stack_meta
 
 - func: stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -8171,8 +8173,8 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA, XPU: view
-    ZeroTensor: view_symint
+    CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA, XPU: view
+    Meta, ZeroTensor: view_symint
     MkldnnCPU: mkldnn_view
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: view_nested
   tags: core
@@ -9500,11 +9502,6 @@
 - func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA, MPS: cholesky_inverse_out
-
-- func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
-
-- func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
-  variants: method, function
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
@@ -13023,6 +13020,7 @@
     CPU: _upsample_bilinear2d_aa_backward_out_cpu
     CUDA: _upsample_bilinear2d_aa_backward_out_cuda
     XPU: _upsample_bilinear2d_aa_backward_out_xpu
+    MPS: _upsample_bilinear2d_aa_backward_out_mps
 
 - func: _upsample_bilinear2d_aa_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -13074,6 +13072,7 @@
     CPU: _upsample_bicubic2d_aa_backward_out_cpu
     CUDA: _upsample_bicubic2d_aa_backward_out_cuda
     XPU: _upsample_bicubic2d_aa_backward_out_xpu
+    MPS: _upsample_bicubic2d_aa_backward_out_mps
 
 - func: _upsample_bicubic2d_aa_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -14304,7 +14303,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA, XPU: linalg_lu_solve_out
+    CPU, CUDA, XPU, MPS: linalg_lu_solve_out
 
 # linalg.det
 - func: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
@@ -14391,7 +14390,7 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA: linalg_matrix_exp
+    CPU, CUDA, MPS: linalg_matrix_exp
   autogen: linalg_matrix_exp.out
 
 - func: linalg_matrix_sqrth(Tensor self) -> Tensor
