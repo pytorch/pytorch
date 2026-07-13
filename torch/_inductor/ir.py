@@ -6492,6 +6492,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         swizzle_type_a: Any | None = None,
         swizzle_type_b: Any | None = None,
         supports_epilogue_fusion: bool = False,
+        swap_ab: bool = False,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6505,6 +6506,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
+        self.swap_ab = swap_ab
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
@@ -6573,6 +6575,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_reads=epilogue_reads,
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
+            swap_ab=self.swap_ab,
         )
 
         def render():
