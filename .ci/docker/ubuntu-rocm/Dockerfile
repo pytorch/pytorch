@@ -24,15 +24,19 @@ ARG KATEX
 COPY ./common/install_docs_reqs.sh install_docs_reqs.sh
 RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
-# Install conda and other packages (e.g., numpy, pytest)
-ARG ANACONDA_PYTHON_VERSION
+# Install python (via deadsnakes) into a venv and the CI requirements
+ARG PYTHON_VERSION
+ARG PYTHON_FREETHREADED
 ARG BUILD_ENVIRONMENT
-ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
-ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
-COPY requirements-ci.txt /opt/conda/requirements-ci.txt
-COPY ./common/install_conda.sh install_conda.sh
+ENV PYTHON_VERSION=$PYTHON_VERSION
+ENV PYTHON_FREETHREADED=$PYTHON_FREETHREADED
+ENV VENV_PATH=/opt/python-${PYTHON_VERSION}-venv
+ENV VIRTUAL_ENV=${VENV_PATH}
+ENV PATH=${VENV_PATH}/bin:$PATH
+COPY requirements-ci.txt /opt/requirements-ci.txt
+COPY ./common/install_python.sh install_python.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
+RUN bash ./install_python.sh && rm install_python.sh common_utils.sh /opt/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -87,8 +91,6 @@ RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
 
 ARG INDUCTOR_BENCHMARKS
-ARG ANACONDA_PYTHON_VERSION
-ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/huggingface-requirements.txt huggingface-requirements.txt

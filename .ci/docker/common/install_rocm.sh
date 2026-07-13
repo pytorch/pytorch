@@ -26,6 +26,10 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
+    # sqlite3 CLI is used below to fix up MIOpen kdb files. It used to be pulled
+    # in via conda; now that the image is conda-free, install it explicitly.
+    apt-get install -y sqlite3
+
     # When ROCM_VERSION=nightly, install ROCm from TheRock nightly tarballs
     # Mirrors: https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh
     if [[ "${ROCM_VERSION}" == "nightly" ]]; then
@@ -223,7 +227,7 @@ EOF
             HIP_TAG=rocm-6.4.0
             CLR_HASH=600f5b0d2baed94d5121e2174a9de0851b040b0c  # branch release/rocm-rel-6.4-statco-hotfix
         fi
-        # clr build needs CppHeaderParser but can only find it using conda's python
+        # clr build needs CppHeaderParser; install it into the active Python env
         python -m pip install CppHeaderParser
         git clone https://github.com/ROCm/HIP -b $HIP_TAG
         HIP_COMMON_DIR=$(readlink -f HIP)
@@ -233,8 +237,8 @@ EOF
         popd
         mkdir -p clr/build
         pushd clr/build
-        # Need to point CMake to the correct python installation to find CppHeaderParser
-        cmake .. -DPython3_EXECUTABLE=/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/bin/python3 -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
+        # Point CMake at the active Python interpreter so it can find CppHeaderParser
+        cmake .. -DPython3_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')" -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
         make -j
         cp hipamd/lib/libamdhip64.so.6.4.* /opt/rocm/lib/libamdhip64.so.6.4.*
         popd
