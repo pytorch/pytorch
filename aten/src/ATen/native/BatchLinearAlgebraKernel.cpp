@@ -16,6 +16,7 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
 
 #include <algorithm>
 #endif
@@ -596,7 +597,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   Tensor jpvt;
   int* jpvt_data = nullptr;
   if (driver_t::Gelsy == driver_type) {
-    jpvt = at::empty({std::max<int64_t>(1, n)}, A.options().dtype(at::kInt));
+    jpvt = at::zeros({std::max<int64_t>(1, n)}, A.options().dtype(at::kInt));
     jpvt_data = jpvt.mutable_data_ptr<int>();
   }
 
@@ -654,6 +655,12 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
       rank_working_ptr = rank_working_ptr ? &rank_data[A_linear_batch_idx] : nullptr;
       s_working_ptr = s_working_ptr ? &s_data[A_linear_batch_idx * s_stride] : nullptr;
       int* infos_working_ptr = &infos_data[A_linear_batch_idx];
+
+      // JPVT is an input/output argument for *gelsy. Non-zero values on
+      // input mark fixed columns, so reset it before each call.
+      if (jpvt_data != nullptr) {
+        jpvt.zero_();
+      }
 
       lapack_func(trans, m, n, nrhs,
         A_working_ptr, lda,

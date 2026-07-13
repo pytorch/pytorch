@@ -304,7 +304,7 @@ class SignalHandlingTest(TestCase):
                 self.assertEqual(
                     handler,
                     _terminate_process_handler,
-                    f"Signal {sig} should use _terminate_process_handler",
+                    lambda msg: f"{msg}\nSignal {sig} should use _terminate_process_handler",
                 )
 
         # Verify that info messages were logged for successful registration

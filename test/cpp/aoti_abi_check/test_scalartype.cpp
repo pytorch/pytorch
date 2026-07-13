@@ -42,7 +42,7 @@ TEST(TestScalarType, CppTypeToScalarType) {
 
 TEST_FORALL(AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ, 14)
 TEST_FORALL(AT_FORALL_SCALAR_TYPES_WITH_COMPLEX, 18)
-TEST_FORALL(AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS, 46)
+TEST_FORALL(AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS, 47)
 TEST_FORALL(AT_FORALL_INT_TYPES, 5)
 TEST_FORALL(AT_FORALL_SCALAR_TYPES, 7)
 TEST_FORALL(AT_FORALL_SCALAR_TYPES_AND, 8, Bool, )
@@ -76,11 +76,11 @@ TEST(TestScalarType, toString) {
 TEST(TestScalarType, operator_left_shift) {
   using torch::headeronly::ScalarType;
 
-#define DEFINE_CHECK(_, name)   \
-  {                             \
-    std::stringstream ss;       \
-    ss << ScalarType::name;     \
-    EXPECT_EQ(ss.str(), #name); \
+#define DEFINE_CHECK(_, name)              \
+  {                                        \
+    std::stringstream ss;                  \
+    ss << ScalarType::name;                \
+    EXPECT_EQ(std::move(ss).str(), #name); \
   }
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CHECK);
 #undef DEFINE_CHECK

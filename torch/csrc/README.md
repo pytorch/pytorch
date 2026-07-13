@@ -24,7 +24,7 @@ important gotchas:
 Historically, Torch supported nullptr storage, as a minor optimization to
 avoid having to allocate a storage object when it would be empty.
 However, this is actually a confusing special case to deal with, so
-by-in-large, PyTorch assumes that, in fact, storage is never nullptr.
+by and large, PyTorch assumes that, in fact, storage is never nullptr.
 
 One important case where this assumption is important is when tracking
 the CUDA device a tensor is stored in: this information is stored

@@ -99,6 +99,7 @@
      change_current_allocator
      empty_cache
      get_per_process_memory_fraction
+     list_gpu_processes
      max_memory_allocated
      max_memory_reserved
      mem_get_info
