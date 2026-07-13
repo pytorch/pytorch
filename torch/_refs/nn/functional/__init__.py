@@ -186,10 +186,18 @@ def celu(
 
     rhs: TensorLikeType
     if alpha is not None:
+        torch._check(
+            alpha != 0,
+            lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
+        )
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
+        torch._check(
+            alpha != 0,
+            lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
+        )
         rhs = alpha * torch.expm1(torch.true_divide(a, alpha))  # type: ignore[arg-type]
     else:
         rhs = torch.expm1(a)
@@ -539,6 +547,8 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
         0 <= lambd <= torch.finfo(a.dtype).max,
         lambda: f"lambda must be in range [0, {torch.finfo(a.dtype).max}] for input dtype {a.dtype}, but found {lambd}",
     )
+    if a.dtype in (torch.bfloat16, torch.float16):
+        lambd = torch.scalar_tensor(lambd, dtype=a.dtype, device=a.device)  # type: ignore[arg-type]
     # We implement this in one torch.where to generate better code in the backward
     # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
     # We multiply by 0 for dealing with nans

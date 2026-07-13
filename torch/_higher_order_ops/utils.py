@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, overload, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -13,9 +14,9 @@ from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor, maybe_get_fake_mode
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -317,7 +318,7 @@ def _set_compilation_env():
     # but it exposes some bugs in existing tests so we have to have a temporary flag to control
     # the behavior, which allows dynamo to store an empty graph for a frame without falling back to eager
     try:
-        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
+        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dynamo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
         # pyrefly: ignore [bad-assignment]
@@ -331,23 +332,13 @@ def _set_compilation_env():
 
 
 # The invariant here is that we always trace the branch with fake tensor
-def _detect_fake_mode_from_inputs(inputs: list[Any]):
+def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode_det = None
     for inp in pytree.tree_leaves(inputs):
-        fake_mode = maybe_get_fake_mode(inp)
-        if fake_mode is None:
-            continue
-        if fake_mode_det is None:
-            fake_mode_det = fake_mode
-        elif fake_mode_det is not fake_mode:
-            raise AssertionError(
-                f"Expected all fake inputs to use the same fake mode, got {fake_mode_det} and {fake_mode}"
-            )
-    return fake_mode_det
+        if isinstance(inp, FakeTensor):
+            fake_mode_det = inp.fake_mode
+            break
 
-
-def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode_det = _detect_fake_mode_from_inputs(inputs)
     fake_mode: AbstractContextManager = nullcontext()
     tracing_mode = "fake"
     if fake_mode_det is not None:
@@ -358,20 +349,12 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
     # as fake tensor.
     with fake_mode, disable_proxy_modes_tracing():
-        from torch.fx.experimental.symbolic_shapes import (
-            _ignore_fresh_unbacked_symbols_tls_context,
-        )
-
-        # This graph is used only to answer alias/mutation questions. Fresh
-        # unbacked symbols created during the trace are therefore discarded with
-        # the graph and should not require bindings in the surrounding graph.
-        with _ignore_fresh_unbacked_symbols_tls_context():
-            gm = make_fx(
-                fn,
-                tracing_mode=tracing_mode,
-                pre_dispatch=pre_dispatch,
-                _error_on_data_dependent_ops=False,
-            )(*inputs)
+        gm = make_fx(
+            fn,
+            tracing_mode=tracing_mode,
+            pre_dispatch=pre_dispatch,
+            _error_on_data_dependent_ops=False,
+        )(*inputs)
         if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:  # type: ignore[attr-defined]
             insert_deferred_runtime_asserts(
                 gm,
@@ -813,7 +796,7 @@ def _stack_pytree(pytrees):
 def save_values_for_backward(ctx, args):
     if not all(
         isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None), FakeScriptObject))
-        or is_opaque_type(type(arg))
+        or is_custom_class(type(arg))
         for arg in args
     ):
         raise AssertionError(f"Invalid arg types in {args}")
@@ -1157,6 +1140,7 @@ hops_that_skip_faketensor_cache: set[torch._ops.OpOverload] = set()
 
 
 F = TypeVar("F", bound=Callable)
+_P = ParamSpec("_P")
 
 
 @overload
@@ -1442,3 +1426,37 @@ def filter_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
 def fill_none_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]
+
+
+def create_fn_remove_none(
+    fn: Callable[_P, Any],
+) -> tuple[Callable[_P, list[torch.Tensor]], list[bool]]:
+    """Wrap ``fn`` so its non-Tensor output leaves are dropped, and expose the
+    mask of which leaves survived.
+
+    Returns ``(wrapped, mask)``:
+      - ``wrapped(*args)`` calls ``fn(*args)``, flattens the pytree result and
+        returns only its Tensor leaves as a list.
+      - ``mask`` is a list populated whenever ``wrapped`` runs -- one bool per
+        leaf, ``True`` where the leaf is a Tensor. Callers should read it
+        AFTER invoking ``wrapped`` (typically indirectly via
+        ``materialize_as_graph``), then pass it to ``fill_none_with_masks``
+        to reconstruct the full output with ``None`` at the dropped slots.
+
+    Used in HOP autograd impls in two places:
+      - Around a forward branch that may return non-Tensor leaves (None,
+        int/SymInt), so ``create_bw_fn``'s joint sees a tensor-only signature.
+      - Around the resulting backward joint whose grad list contains ``None``
+        at non-differentiable input slots, so the materialized ``GraphModule``
+        returns a uniform Tensor list.
+    """
+    mask: list[bool] = []
+
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        leaves = pytree.tree_leaves(fn(*args, **kwargs))
+        mask.clear()
+        mask.extend(isinstance(o, torch.Tensor) for o in leaves)
+        return filter_with_masks(leaves, mask)
+
+    return wrapped, mask

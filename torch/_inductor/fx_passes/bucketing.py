@@ -76,14 +76,16 @@ def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str]:
 def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:  # type: ignore[name-defined]
     _, reduce_op, group_size, group_name = node.args
     dtype = node.meta["val"].dtype
-    assert isinstance(reduce_op, str)
+    if not isinstance(reduce_op, str):
+        raise AssertionError(f"expected reduce_op to be str, got {type(reduce_op)}")
     return (_resolve_group_name(group_name), reduce_op, dtype)
 
 
 def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
     _, reduce_op, group_name = node.args
     dtype = node.meta["val"].dtype
-    assert isinstance(reduce_op, str)
+    if not isinstance(reduce_op, str):
+        raise AssertionError(f"expected reduce_op to be str, got {type(reduce_op)}")
     return (_resolve_group_name(group_name), reduce_op, dtype)
 
 
@@ -191,11 +193,15 @@ def _get_collective_node_from_wait(node: torch.fx.Node) -> torch.fx.Node | None:
     if not is_wait_tensor(node):
         return None
     arg = node.args[0]
-    assert isinstance(arg, torch.fx.Node)
+    if not isinstance(arg, torch.fx.Node):
+        raise AssertionError(f"expected arg to be a Node, got {type(arg)}")
     if arg.op != "call_function":
         return None
     if arg.target is operator.getitem:
-        assert isinstance(arg.args[0], torch.fx.Node)
+        if not isinstance(arg.args[0], torch.fx.Node):
+            raise AssertionError(
+                f"expected arg.args[0] to be a Node, got {type(arg.args[0])}"
+            )
         arg = arg.args[0]
         if arg.op != "call_function":
             return None
@@ -367,7 +373,8 @@ def bucket_key(node: torch.fx.Node, mode: BucketMode | None = None) -> object | 
 
 
 def pick_bucket_dtype(dtypes: list[torch.dtype]) -> torch.dtype:  # type: ignore[name-defined]
-    assert len(dtypes) > 0
+    if len(dtypes) == 0:
+        raise AssertionError("expected at least one dtype, got empty list")
     return min(dtypes, key=operator.attrgetter("itemsize"))
 
 
@@ -635,7 +642,8 @@ def greedy_bucket_collective_by_mb(
             if node in cur_bucket_descendents:
                 # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
                 continue
-            assert "val" in node.meta
+            if "val" not in node.meta:
+                raise AssertionError(f"expected 'val' in node.meta for {node}")
             n_val = node.meta["val"]
             out_size_bytes = _size_bytes_hint_or_raise(
                 n_val, context="collective bucket output size"
@@ -722,9 +730,8 @@ def bucket_reduce_scatter_by_mb(
     """
     mode = mode or _default_bucket_mode()
 
-    assert mode is None or "multidtype" not in mode, (
-        "reduce scatter bucketing does not support multidtype"
-    )
+    if mode is not None and "multidtype" in mode:
+        raise AssertionError("reduce scatter bucketing does not support multidtype")
 
     return greedy_bucket_collective_by_mb(
         gm,
@@ -1125,7 +1132,8 @@ def all_gather_merge_fn_to_trace_functional(
 def _trace(fn, inps) -> torch.fx.GraphModule:  # type: ignore[no-untyped-def]
     with dynamo_timed("fx.bucketing._trace", log_pt2_compile_event=True):
         fake_mode = detect_fake_mode(inps)
-        assert fake_mode is not None
+        if fake_mode is None:
+            raise AssertionError("expected a fake mode to be detected, got None")
         shape_env = fake_mode.shape_env
         pending_unbacked = None
         ignorable_unbacked = None
@@ -1139,8 +1147,10 @@ def _trace(fn, inps) -> torch.fx.GraphModule:  # type: ignore[no-untyped-def]
                 out = make_fx(fn)(*inps)
         finally:
             if shape_env is not None:
-                assert pending_unbacked is not None
-                assert ignorable_unbacked is not None
+                if pending_unbacked is None:
+                    raise AssertionError("expected pending_unbacked to be set")
+                if ignorable_unbacked is None:
+                    raise AssertionError("expected ignorable_unbacked to be set")
                 shape_env.pending_fresh_unbacked_symbols[:] = pending_unbacked
                 shape_env.ignorable_fresh_unbacked_symbols[:] = ignorable_unbacked
         for node in out.graph.find_nodes(
@@ -1315,7 +1325,8 @@ def process_collective_bucket(
     ag_node_to_pre_nodes: dict[torch.fx.Node, list[torch.fx.Node]] = defaultdict(list)
 
     for n in bucket_nodes:
-        assert len(n.users) == 1, f"Expected single user for {n}, got {n.users}"
+        if len(n.users) != 1:
+            raise AssertionError(f"Expected single user for {n}, got {n.users}")
         wait_n = next(iter(n.users))
 
         # Handle convert_element_type operations (for all_gather)
@@ -1326,7 +1337,8 @@ def process_collective_bucket(
             # pyrefly: ignore [missing-attribute]
             node_in = node_in.args[0]
 
-        assert isinstance(node_in, torch.fx.Node)  # Ensure node_in is a Node
+        if not isinstance(node_in, torch.fx.Node):  # Ensure node_in is a Node
+            raise AssertionError(f"expected node_in to be a Node, got {type(node_in)}")
         bucket_ins.append(node_in)
         bucket_waits.append(wait_n)
 
@@ -1404,13 +1416,16 @@ def merge_reduce_scatter_bucket(
 
     for n in rs_nodes:
         rs_val = n.meta["val"]
-        assert (
+        if not (
             n.args[1] == reduce_op
             and n.args[2] == group_size
             and _resolve_group_name(n.args[3]) == group_name_str
             and rs_val.device == device
             and rs_val.dtype == reduce_dtype
-        )
+        ):
+            raise AssertionError(
+                f"reduce_scatter node {n} does not match bucket parameters"
+            )
 
     # Choose merge function based on mode
     rs_merge_fn = reduce_scatter_merge_fn_to_trace
@@ -1462,12 +1477,15 @@ def merge_all_reduce_bucket(
 
     for n in ar_nodes:
         ar_val = n.meta["val"]
-        assert (
+        if not (
             n.args[1] == reduce_op
             and _resolve_group_name(n.args[2]) == group_name_str
             and ar_val.device == device
             and ar_val.dtype == reduce_dtype
-        )
+        ):
+            raise AssertionError(
+                f"all_reduce node {n} does not match bucket parameters"
+            )
 
     ar_merge_fn = all_reduce_merge_fn_to_trace
 
@@ -1513,9 +1531,12 @@ def merge_all_gather_bucket(
     _ag_dtypes: list[torch.dtype] = []  # type: ignore[name-defined]
 
     for n in ag_nodes:
-        assert (
+        if not (
             n.args[1] == group_size and _resolve_group_name(n.args[2]) == group_name_str
-        )
+        ):
+            raise AssertionError(
+                f"all_gather node {n} does not match bucket parameters"
+            )
         _ag_dtypes.append(n.meta["val"].dtype)
 
     bucket_dtype = pick_bucket_dtype(_ag_dtypes)

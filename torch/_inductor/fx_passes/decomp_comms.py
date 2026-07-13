@@ -54,7 +54,8 @@ def _retrace_node_meta(node: fx.Node) -> None:
     if not valid:
         return
     target = node.target
-    assert callable(target)
+    if not callable(target):
+        raise AssertionError(f"node target is not callable: {target}")
     with _get_fake_mode(node):
         node.meta["val"] = target(*args, **kwargs)
 
@@ -97,7 +98,8 @@ def gram_source(gram_node: fx.Node) -> fx.Node:
     """Return the base tensor X (non-transposed arg) from a Gram mm."""
     a = gram_node.args[0]
     b = gram_node.args[1]
-    assert isinstance(a, fx.Node) and isinstance(b, fx.Node)
+    if not (isinstance(a, fx.Node) and isinstance(b, fx.Node)):
+        raise AssertionError("gram mm args must both be fx.Node")
     return b if _is_2d_transpose(a) else a
 
 
@@ -533,7 +535,8 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
 
         # Result is already shard-sized, bypass split+getitem
         pre_split = split_node.args[0]
-        assert isinstance(pre_split, fx.Node)
+        if not isinstance(pre_split, fx.Node):
+            raise AssertionError(f"split input must be fx.Node, got {pre_split}")
         getitem_node.replace_all_uses_with(pre_split)
 
         # Retrace meta["val"] for nodes whose shapes changed

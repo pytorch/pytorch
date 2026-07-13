@@ -25,30 +25,30 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
     case 26:
       switch (minor) {
         case 0:
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+          return is_macos_at_least(MacOSVersion::MACOS_26_0);
         default:
           TORCH_WARN("Can't check whether running on 26.", minor, "+ returning one for 26.0+");
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
+          return is_macos_at_least(MacOSVersion::MACOS_26_0);
       }
     case 15:
       switch (minor) {
         case 0:
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+          return is_macos_at_least(MacOSVersion::MACOS_15_0);
         case 1:
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS);
+          return is_macos_at_least(MacOSVersion::MACOS_15_1);
         default:
           TORCH_WARN("Can't check whether running on 15.", minor, "+ returning one for 15.1+");
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS);
+          return is_macos_at_least(MacOSVersion::MACOS_15_1);
       }
     case 14:
       switch (minor) {
         case 0:
           return true;
         case 4:
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+          return is_macos_at_least(MacOSVersion::MACOS_14_4);
         default:
           TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.4+");
-          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
+          return is_macos_at_least(MacOSVersion::MACOS_14_4);
       }
     case 13:
       return true;
@@ -159,7 +159,7 @@ bool MPSHooks::isPinnedPtr(const void* data) const {
 }
 
 Allocator* MPSHooks::getPinnedMemoryAllocator() const {
-  return at::mps::getIMPSAllocator();
+  return at::mps::getMPSPinnedAllocator();
 }
 
 using at::MPSHooksRegistry;
