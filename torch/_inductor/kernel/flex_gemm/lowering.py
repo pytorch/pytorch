@@ -183,7 +183,7 @@ def flex_gemm_config_keys_for_local_reduce(
     tuned: bool,
 ) -> tuple[tuple[Any, ...], ...]:
     """Select QuACK config keys after applying local-reduce layout constraints."""
-    from torch._inductor.template_heuristics.flex_gemm import (
+    from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
         gemm_config_key,
