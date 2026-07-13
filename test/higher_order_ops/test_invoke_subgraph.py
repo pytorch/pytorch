@@ -39,7 +39,11 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu,
+    requires_gpu_and_triton,
+)
 
 
 nested_compile_region = torch.compiler.nested_compile_region
@@ -1787,14 +1791,14 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_return_none(self):
         from torch.nn import functional as F
 
         weight = torch.ones(
-            1000, device="cuda:0", dtype=torch.float32, requires_grad=True
+            1000, device=GPU_TYPE, dtype=torch.float32, requires_grad=True
         )
-        ones = torch.ones(1000, device="cuda:0", dtype=torch.float32)
+        ones = torch.ones(1000, device=GPU_TYPE, dtype=torch.float32)
 
         @nested_compile_region
         def fn(x, train):
