@@ -62,7 +62,9 @@ def _epilogue_args_signature(epilogue_args: Any) -> tuple:
     return tuple(sig)
 
 
-_cache_lock = threading.Lock()
+# Reentrant: get_efc_kernel_with_epilogue holds this lock and may call
+# get_kernel_by_name -> _ensure_caches, which re-acquires it on the same thread.
+_cache_lock = threading.RLock()
 
 # Full kernel manifest: kernel_name -> kernel object. Built lazily (~14s, ~290K
 # operators) only as a LAST-RESORT fallback -- the common paths (choice
