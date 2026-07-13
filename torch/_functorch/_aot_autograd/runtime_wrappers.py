@@ -12,6 +12,7 @@ import copy
 import functools
 import itertools
 import pprint
+import struct
 import typing
 import warnings
 import weakref
@@ -2600,6 +2601,7 @@ class AOTDispatchAutogradCompileSpec:
     compiled_bw_func: Callable[..., Any] | None
     maybe_subclass_meta: SubclassMeta | None
     num_symints_saved_for_bw: int
+    num_fw_outs_saved_for_bw: int
     backward_state_indices: list[int]
     disable_amp: bool
     indices_of_inps_to_detach: list[int]
@@ -2682,6 +2684,175 @@ class _AutogradSavedState:
                 f"got types: {[type(obj) for obj in opaque_object_outs]}"
             )
         ctx.opaque_objects = opaque_object_outs
+
+
+def _slice_to_indices(s: slice, length: int) -> list[int]:
+    start, stop, step = s.indices(length)
+    if step != 1:
+        raise AssertionError(f"expected slice step 1, got {step}")
+    return list(range(start, stop))
+
+
+def _codegen_save_from_forward(
+    fw_metadata: ViewAndMutationMeta,
+    num_fw_outs_saved_for_bw: int,
+) -> tuple[Callable[..., Any], bytes | None]:
+    from .subclass_codegen import _compile_and_exec_source
+
+    total_fw_outs = fw_metadata.num_forward + num_fw_outs_saved_for_bw
+    vc_idxs = _slice_to_indices(
+        fw_metadata.tensors_saved_for_backwards_with_vc_check_slice,
+        total_fw_outs,
+    )
+    no_vc_idxs = _slice_to_indices(
+        fw_metadata.tensors_saved_for_backwards_no_vc_check_slice,
+        total_fw_outs,
+    )
+    symint_idxs = _slice_to_indices(
+        fw_metadata.symints_saved_for_backwards_slice,
+        total_fw_outs,
+    )
+    opaque_idxs = _slice_to_indices(
+        fw_metadata.opaque_objects_saved_for_backwards_slice,
+        total_fw_outs,
+    )
+
+    saved_tensor_idxs = [*vc_idxs, *no_vc_idxs]
+    is_graph_input = fw_metadata.saved_tensor_is_graph_input
+    if len(is_graph_input) != len(saved_tensor_idxs):
+        raise AssertionError(
+            "expected one saved_tensor_is_graph_input entry per saved tensor, "
+            f"got {len(is_graph_input)} != {len(saved_tensor_idxs)}"
+        )
+
+    if not config.debug_assert and not fw_metadata.dynamic_saved_tensors_idxs:
+        plan = (
+            len(vc_idxs),
+            len(no_vc_idxs),
+            len(symint_idxs),
+            len(opaque_idxs),
+            *vc_idxs,
+            *no_vc_idxs,
+            *symint_idxs,
+            *opaque_idxs,
+            *is_graph_input,
+        )
+        return (
+            typing.cast(Any, torch._C)._aot_autograd_save_for_backward,
+            struct.pack(f"{len(plan)}q", *plan),
+        )
+
+    lines = ["def _save_from_forward(ctx, fw_outs):"]
+    code_globals: dict[str, object] = {
+        "torch": torch,
+        "CustomClassBase": CustomClassBase,
+        "is_custom_class": is_custom_class,
+    }
+
+    saved_names: list[str] = []
+    vc_names: list[str] = []
+    no_vc_names: list[str] = []
+
+    def emit_saved_tensor(name: str, idx: int, is_input: bool) -> None:
+        lines.append(f"    {name} = fw_outs[{idx}]")
+        if config.debug_assert:
+            lines.append(f"    if not isinstance({name}, torch.Tensor):")
+            lines.append(
+                "        raise AssertionError("
+                f"'expected saved tensor at index {idx}, got ' + str(type({name})))"
+            )
+        if not is_input:
+            lines.append(f"    if {name}._is_view():")
+            lines.append(f"        {name} = {name}.detach()")
+        saved_names.append(name)
+
+    for i, (idx, is_input) in enumerate(zip(vc_idxs, is_graph_input)):
+        name = f"_vc_{i}"
+        emit_saved_tensor(name, idx, is_input)
+        vc_names.append(name)
+
+    for i, (idx, is_input) in enumerate(
+        zip(no_vc_idxs, is_graph_input[len(vc_idxs) :])
+    ):
+        name = f"_no_vc_{i}"
+        emit_saved_tensor(name, idx, is_input)
+        no_vc_names.append(name)
+
+    for saved_idx, dims in fw_metadata.dynamic_saved_tensors_idxs.items():
+        if saved_idx >= len(saved_names):
+            raise AssertionError(
+                f"dynamic saved tensor index {saved_idx} out of range for {len(saved_names)} saved tensors"
+            )
+        dims_name = f"_dynamic_saved_dims_{saved_idx}"
+        code_globals[dims_name] = dims
+        code_globals["_mark_dynamic_"] = mark_dynamo_propagated_dynamic_indices
+        lines.append(f"    _mark_dynamic_({saved_names[saved_idx]}, {dims_name})")
+
+    lines.append(f"    ctx.save_for_backward({', '.join(vc_names)})")
+    if no_vc_names:
+        lines.append(f"    ctx._tensors_no_vc_check = [{', '.join(no_vc_names)}]")
+    else:
+        lines.append("    ctx._tensors_no_vc_check = []")
+
+    if symint_idxs:
+        if config.debug_assert:
+            for i, idx in enumerate(symint_idxs):
+                name = f"_symint_{i}"
+                lines.append(f"    {name} = fw_outs[{idx}]")
+                lines.append(
+                    f"    if not isinstance({name}, (int, float, torch.SymInt, torch.SymFloat)):"
+                )
+                lines.append(
+                    "        raise AssertionError("
+                    f"'expected saved symint at index {idx}, got ' + str(type({name})))"
+                )
+            lines.append(
+                "    ctx.symints = ["
+                + ", ".join(f"_symint_{i}" for i in range(len(symint_idxs)))
+                + "]"
+            )
+        else:
+            lines.append(
+                "    ctx.symints = ["
+                + ", ".join(f"fw_outs[{idx}]" for idx in symint_idxs)
+                + "]"
+            )
+    else:
+        lines.append("    ctx.symints = []")
+
+    if opaque_idxs:
+        if config.debug_assert:
+            for i, idx in enumerate(opaque_idxs):
+                name = f"_opaque_{i}"
+                lines.append(f"    {name} = fw_outs[{idx}]")
+                lines.append(
+                    f"    if not (is_custom_class(type({name})) or isinstance({name}, CustomClassBase)):"
+                )
+                lines.append(
+                    "        raise AssertionError("
+                    f"'expected saved opaque object at index {idx}, got ' + str(type({name})))"
+                )
+            lines.append(
+                "    ctx.opaque_objects = ["
+                + ", ".join(f"_opaque_{i}" for i in range(len(opaque_idxs)))
+                + "]"
+            )
+        else:
+            lines.append(
+                "    ctx.opaque_objects = ["
+                + ", ".join(f"fw_outs[{idx}]" for idx in opaque_idxs)
+                + "]"
+            )
+    else:
+        lines.append("    ctx.opaque_objects = []")
+
+    source = "\n".join(lines)
+    return (
+        _compile_and_exec_source(
+            source, code_globals, "_save_from_forward", "compiled_function_save"
+        ),
+        None,
+    )
 
 
 @dataclass
@@ -3218,12 +3389,13 @@ def _codegen_compiled_forward(
     backward_state_indices: list[int],
     disable_amp: bool,
     num_rng: int,
+    has_save_plan: bool,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
     buf = PySourceBuilder(
         "_compiled_forward",
-        args="ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_",
+        args="ctx, args, _rng_add_, _save_, _save_plan_, _finalize_, _compiled_fw_",
         artifact_name="compiled_function_forward",
     )
     buf.bind(torch=torch, BackwardState=BackwardState)
@@ -3253,7 +3425,10 @@ def _codegen_compiled_forward(
             buf.writeline("fw_outs = _compiled_fw_(list(args))")
             _codegen_normalize_as_list(buf.lines, "fw_outs", indent_level=1)
 
-        buf.writeline("_save_(ctx, fw_outs)")
+        if has_save_plan:
+            buf.writeline("_save_(ctx, fw_outs, _save_plan_)")
+        else:
+            buf.writeline("_save_(ctx, fw_outs)")
         buf.writeline("return _finalize_(ctx, fw_outs)")
 
     return buf.build()
@@ -3262,6 +3437,8 @@ def _codegen_compiled_forward(
 def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
+    num_symints_saved_for_bw: int,
+    num_opaque_objects_saved_for_bw: int | None,
     inputs_require_grad: bool,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
@@ -3296,9 +3473,21 @@ def _codegen_compiled_backward(
         else:
             buf.writeline("_saved = _ctx_.saved_tensors")
 
+        if num_symints_saved_for_bw > 0:
+            buf.writeline("_symints = _ctx_.symints")
+        else:
+            buf.writeline("_symints = ()")
+
+        if (
+            num_opaque_objects_saved_for_bw is not None
+            and num_opaque_objects_saved_for_bw > 0
+        ):
+            buf.writeline("_opaque_objects = _ctx_.opaque_objects")
+        else:
+            buf.writeline("_opaque_objects = ()")
+
         buf.writeline(
-            "all_args = _prologue_(_saved, _ctx_.symints,"
-            " _ctx_.opaque_objects, grad_args)"
+            "all_args = _prologue_(_saved, _symints, _opaque_objects, grad_args)"
         )
         buf.writeline("del _saved")
 
@@ -3341,7 +3530,6 @@ class _AOTDispatchAutogradFunctionFactory:
         compile_id_str = str(compile_id) if compile_id is not None else None
         self.spec.fw_metadata.compile_id_str = compile_id_str
 
-        saved_state = _AutogradSavedState(self.spec.fw_metadata)
         forward_epilogue = _AutogradForwardEpilogue(self.spec.fw_metadata)
         rng_state = _AutogradRngStateTracker(
             num_rng=self.spec.fw_metadata.num_graphsafe_rng_states,
@@ -3362,6 +3550,7 @@ class _AOTDispatchAutogradFunctionFactory:
         compiled_bw_func = self.spec.compiled_bw_func
         maybe_subclass_meta = self.spec.maybe_subclass_meta
         num_symints_saved_for_bw_ = self.spec.num_symints_saved_for_bw
+        num_fw_outs_saved_for_bw = self.spec.num_fw_outs_saved_for_bw
         backward_state_indices = self.spec.backward_state_indices
         disable_amp = self.spec.disable_amp
         lazy_backward_info = self.spec.lazy_backward_info
@@ -3389,17 +3578,23 @@ class _AOTDispatchAutogradFunctionFactory:
             _codegen_bw_wrap_fn,
         )
 
+        _codegen_bwd = _codegen_compiled_backward(
+            rng_state.num_rng,
+            fw_metadata.num_tensors_saved_with_no_vc_check,
+            num_symints_saved_for_bw_,
+            fw_metadata.num_opaque_objects_saved_for_bw,
+            any(inp.requires_grad for inp in fw_metadata.input_info),
+        )
+        _codegen_save, _codegen_save_plan = _codegen_save_from_forward(
+            fw_metadata,
+            num_fw_outs_saved_for_bw,
+        )
         _codegen_fwd = _codegen_compiled_forward(
             fw_metadata,
             backward_state_indices,
             disable_amp,
             rng_state.num_rng,
-        )
-
-        _codegen_bwd = _codegen_compiled_backward(
-            rng_state.num_rng,
-            fw_metadata.num_tensors_saved_with_no_vc_check,
-            any(inp.requires_grad for inp in fw_metadata.input_info),
+            _codegen_save_plan is not None,
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3522,7 +3717,8 @@ class _AOTDispatchAutogradFunctionFactory:
                     ctx,
                     deduped_flat_tensor_args,
                     rng_state.add_forward_args,
-                    saved_state.save_from_forward,
+                    _codegen_save,
+                    _codegen_save_plan,
                     forward_epilogue.finalize,
                     CompiledFunction.compiled_fw,
                 )

@@ -41,6 +41,7 @@
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
+#include <cstring>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -1696,6 +1697,161 @@ static PyObject* THPModule_increment_version(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* get_sequence_item(PyObject* obj, Py_ssize_t idx) {
+  if (PyList_CheckExact(obj)) {
+    auto size = PyList_GET_SIZE(obj);
+    TORCH_CHECK(idx >= 0 && idx < size, "fw_outs index out of range");
+    return PyList_GET_ITEM(obj, idx);
+  }
+  if (PyTuple_CheckExact(obj)) {
+    auto size = PyTuple_GET_SIZE(obj);
+    TORCH_CHECK(idx >= 0 && idx < size, "fw_outs index out of range");
+    return PyTuple_GET_ITEM(obj, idx);
+  }
+  TORCH_CHECK(false, "fw_outs must be a list or tuple");
+}
+
+static int64_t read_i64(const char* ptr) {
+  int64_t result;
+  std::memcpy(&result, ptr, sizeof(result));
+  return result;
+}
+
+static PyObject* prepare_saved_tensor(
+    PyObject* item,
+    int64_t idx,
+    bool is_graph_input) {
+  if (is_graph_input) {
+    Py_INCREF(item);
+    return item;
+  }
+
+  TORCH_CHECK(
+      THPVariable_Check(item),
+      "save_for_backward expected tensor at index ",
+      idx,
+      ", got ",
+      Py_TYPE(item)->tp_name);
+  const auto& tensor = THPVariable_Unpack(item);
+  if (tensor.is_view()) {
+    return THPVariable_Wrap(tensor.detach());
+  }
+
+  Py_INCREF(item);
+  return item;
+}
+
+static void set_list_attr_from_indices(
+    PyObject* ctx,
+    const char* attr,
+    PyObject* fw_outs,
+    const char* indices,
+    int64_t start,
+    int64_t num_indices) {
+  THPObjectPtr result(PyList_New(static_cast<Py_ssize_t>(num_indices)));
+  if (!result) {
+    throw python_error();
+  }
+  for (const auto i : c10::irange(num_indices)) {
+    auto idx = read_i64(indices + (start + i) * sizeof(int64_t));
+    PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
+    Py_INCREF(item);
+    PyList_SET_ITEM(result.get(), static_cast<Py_ssize_t>(i), item);
+  }
+  if (PyObject_SetAttrString(ctx, attr, result.get()) < 0) {
+    throw python_error();
+  }
+}
+
+static PyObject* THPModule_aot_autograd_save_for_backward(
+    PyObject* _unused,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(nargs == 3, "expected ctx, fw_outs, and plan");
+  PyObject* ctx = args[0];
+  PyObject* fw_outs = args[1];
+  PyObject* plan_obj = args[2];
+  TORCH_CHECK(THPFunction_Check(ctx), "ctx must be a torch autograd Function");
+  TORCH_CHECK(PyBytes_Check(plan_obj), "plan must be bytes");
+  auto* fn = reinterpret_cast<THPFunction*>(ctx);
+
+  const auto plan_size = PyBytes_GET_SIZE(plan_obj);
+  TORCH_CHECK(
+      plan_size >= static_cast<Py_ssize_t>(4 * sizeof(int64_t)),
+      "invalid AOTAutograd save plan");
+  TORCH_CHECK(
+      plan_size % static_cast<Py_ssize_t>(sizeof(int64_t)) == 0,
+      "invalid AOTAutograd save plan");
+  const char* plan_bytes = PyBytes_AS_STRING(plan_obj);
+  auto num_vc = read_i64(plan_bytes);
+  auto num_no_vc = read_i64(plan_bytes + sizeof(int64_t));
+  auto num_symints = read_i64(plan_bytes + 2 * sizeof(int64_t));
+  auto num_opaque = read_i64(plan_bytes + 3 * sizeof(int64_t));
+  TORCH_CHECK(
+      num_vc >= 0 && num_no_vc >= 0 && num_symints >= 0 && num_opaque >= 0,
+      "invalid AOTAutograd save plan counts");
+  const auto num_saved_tensors = num_vc + num_no_vc;
+  const auto num_indices = num_saved_tensors + num_symints + num_opaque;
+  auto expected_size =
+      static_cast<Py_ssize_t>(4 + num_indices + num_saved_tensors) *
+      static_cast<Py_ssize_t>(sizeof(int64_t));
+  TORCH_CHECK(plan_size == expected_size, "invalid AOTAutograd save plan size");
+  const auto* indices = plan_bytes + 4 * sizeof(int64_t);
+  const auto graph_input_start = num_indices;
+  const auto no_vc_start = num_vc;
+  const auto symint_start = no_vc_start + num_no_vc;
+  const auto opaque_start = symint_start + num_symints;
+
+  THPObjectPtr to_save(PyTuple_New(static_cast<Py_ssize_t>(num_vc)));
+  if (!to_save) {
+    throw python_error();
+  }
+  for (const auto i : c10::irange(num_vc)) {
+    auto idx = read_i64(indices + i * sizeof(int64_t));
+    auto is_graph_input =
+        read_i64(indices + (graph_input_start + i) * sizeof(int64_t)) != 0;
+    PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
+    PyObject* saved = prepare_saved_tensor(item, idx, is_graph_input);
+    PyTuple_SET_ITEM(to_save.get(), static_cast<Py_ssize_t>(i), saved);
+  }
+  Py_CLEAR(fn->to_save);
+  fn->to_save = to_save.release();
+
+  if (num_no_vc > 0) {
+    THPObjectPtr no_vc_list(PyList_New(static_cast<Py_ssize_t>(num_no_vc)));
+    if (!no_vc_list) {
+      throw python_error();
+    }
+    for (const auto i : c10::irange(num_no_vc)) {
+      auto idx = read_i64(indices + (no_vc_start + i) * sizeof(int64_t));
+      auto is_graph_input =
+          read_i64(
+              indices +
+              (graph_input_start + no_vc_start + i) * sizeof(int64_t)) != 0;
+      PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
+      PyObject* saved = prepare_saved_tensor(item, idx, is_graph_input);
+      PyList_SET_ITEM(no_vc_list.get(), static_cast<Py_ssize_t>(i), saved);
+    }
+    if (PyObject_SetAttrString(ctx, "_tensors_no_vc_check", no_vc_list.get()) <
+        0) {
+      throw python_error();
+    }
+  }
+
+  if (num_symints > 0) {
+    set_list_attr_from_indices(
+        ctx, "symints", fw_outs, indices, symint_start, num_symints);
+  }
+  if (num_opaque > 0) {
+    set_list_attr_from_indices(
+        ctx, "opaque_objects", fw_outs, indices, opaque_start, num_opaque);
+  }
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef methods[] = {
@@ -1768,6 +1924,11 @@ static PyMethodDef methods[] = {
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
     {"_increment_version", THPModule_increment_version, METH_O, nullptr},
+    {"_aot_autograd_save_for_backward",
+     reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)()>(
+         THPModule_aot_autograd_save_for_backward)),
+     METH_FASTCALL,
+     nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,
