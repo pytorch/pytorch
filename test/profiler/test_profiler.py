@@ -1886,7 +1886,9 @@ class TestProfiler(TestCase):
         with profile(record_shapes=True) as prof:
             CustomRecordShapes.apply(x, 2.0, y[:3])
 
-        events = [event for event in prof.events() if event.name == "CustomRecordShapes"]
+        events = [
+            event for event in prof.events() if event.name == "CustomRecordShapes"
+        ]
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].input_shapes, [[2, 3], [], [3]])
 
