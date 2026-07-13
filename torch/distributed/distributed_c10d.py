@@ -292,16 +292,6 @@ except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
-    # In-tree NCCL backend built on the torchcomms engine (selected via the
-    # "nccl2" backend / entry point). Available whenever NCCL is built.
-    from torch._C._distributed_c10d import ProcessGroupNCCL2
-
-    ProcessGroupNCCL2.__module__ = "torch.distributed.distributed_c10d"
-    __all__ += ["ProcessGroupNCCL2"]
-except ImportError:
-    pass
-
-try:
     from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
 
     ProcessGroupGloo.__module__ = "torch.distributed.distributed_c10d"
@@ -332,7 +322,6 @@ if TYPE_CHECKING:
         ProcessGroupGloo,
         ProcessGroupMPI,
         ProcessGroupNCCL,
-        ProcessGroupNCCL2,
         ProcessGroupUCC,
         ProcessGroupXCCL,
     )
@@ -613,28 +602,6 @@ def _create_nccl_process_group(
     return backend_class
 
 
-def _create_nccl2_process_group(
-    opts: _DistributedBackendOptions, backend_options: Any | None
-) -> C10DBackend:
-    if not is_nccl_available():
-        raise RuntimeError("Distributed package doesn't have NCCL built in")
-    # Accept a ProcessGroupNCCL2.Options if given; otherwise (None, or a
-    # ProcessGroupNCCL.Options passed through the generic path) build a fresh one.
-    if backend_options is not None and isinstance(
-        backend_options, ProcessGroupNCCL2.Options
-    ):
-        pg_options = backend_options
-    else:
-        pg_options = ProcessGroupNCCL2.Options()
-    # pyrefly: ignore [bad-argument-type]
-    pg_options._timeout = opts.timeout
-    pg_options.global_ranks_in_group = opts.global_ranks_in_group
-    pg_options.group_name = opts.group_id
-    if opts.enable_reconfigure:
-        pg_options.enable_reconfigure = True
-    return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
-
-
 def _create_ucc_process_group(
     opts: _DistributedBackendOptions, backend_options: Any | None
 ) -> C10DBackend:
@@ -695,19 +662,6 @@ def _register_builtin_nccl_backend() -> None:
         extended_api=True,
         devices=Backend.backend_capability[Backend.NCCL],
         _backend_type=ProcessGroup.BackendType.NCCL,
-    )
-
-
-def _register_builtin_nccl2_backend() -> None:
-    # In-tree torchcomms NCCL backend. CUSTOM backend type; registering with
-    # devices=["cuda"] sets capability without claiming the cuda default (which
-    # stays "nccl"), so this only takes effect when explicitly requested.
-    Backend.register_backend(
-        "nccl2",
-        _create_nccl2_process_group,
-        extended_api=True,
-        devices=["cuda"],
-        _backend_type=ProcessGroup.BackendType.CUSTOM,
     )
 
 
@@ -5959,6 +5913,9 @@ def split_group(
             in the parent pg. For example, if the parent group has 4 ranks, and split_ranks can be
             [[0, 1], [2, 3]]. Note [[0,1]] is also a valid split, in which case ranks 2, 3 would
             return a non-group member.
+            The order of ranks within each split is preserved: position in the
+            list determines the group rank in the new group. All ranks must pass
+            the same ordering.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
         pg_options (ProcessGroupOptions, optional): Additional options need to be passed in during
             the construction of specific process groups. i.e.``is_high_priority_stream``
@@ -6101,7 +6058,6 @@ def split_group(
             )
         if len(split_group) != len(set(split_group)):
             raise ValueError("the split group cannot have duplicate ranks")
-        split_group = sorted(split_group)
         if parent_group_rank in split_group:
             my_group = split_group
             break
@@ -6250,8 +6206,8 @@ def new_group(
     :func:`split_group` so subgroup creation goes through the TorchComms path.
     The delegation raises ``NotImplementedError`` for arguments that
     :func:`split_group` cannot honor (e.g. ``use_local_synchronization=True``,
-    ``sort_ranks=False``, or an explicit ``device_id`` that diverges from the
-    default group's bound device).
+    or an explicit ``device_id`` that diverges from the default group's bound
+    device).
     """
     if _use_torchcomms_enabled():
         # split_group can only split the parent's existing communicator, so it
@@ -6316,12 +6272,6 @@ def _new_group_via_split_group(
             "use_local_synchronization=True; split_group requires all ranks "
             "in the parent group to participate."
         )
-    if not sort_ranks:
-        raise NotImplementedError(
-            "new_group cannot delegate to split_group with sort_ranks=False; "
-            "split_group always sorts the ranks of each subgroup."
-        )
-
     default_pg = _get_default_group()
     if device_id is not None:
         bound = default_pg.bound_device_id
@@ -6335,8 +6285,10 @@ def _new_group_via_split_group(
     global_world_size = default_pg.size()
     if ranks is None:
         group_ranks = list(range(global_world_size))
-    else:
+    elif sort_ranks:
         group_ranks = sorted(ranks)
+    else:
+        group_ranks = list(ranks)
 
     # Auto-qualify the requested backend so it always names just the parent's
     # default device backend (the one matching ``bound_device_id``) plus any
