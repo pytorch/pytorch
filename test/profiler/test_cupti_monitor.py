@@ -171,8 +171,8 @@ class TestCuptiRecords(TestCase):
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_snapshots_config(self):
-        # CuptiMonitor() is the process-wide singleton: every accessor returns the one
-        # instance, built once from the configure() settings.
+        # CuptiMonitor() is the process-wide singleton: it returns the one instance,
+        # built once from the configure() settings.
         from torch.profiler._cupti import monitor as cupti_monitor
         from torch.profiler._cupti.monitor import CuptiMonitor
 
@@ -186,8 +186,6 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(m.background_flush_period_s, 0.5)
         self.assertEqual(m.background_drain_period_s, 2.0)
         self.assertIs(CuptiMonitor(), m)
-        self.assertIs(cupti_monitor.instance(), m)
-        self.assertIs(cupti_monitor.get_monitor(), m)
 
         # Unconfigured, both cadences default off (caller-driven).
         cupti_monitor._reset_for_test()
@@ -630,6 +628,116 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertTrue(any(len(n) > 0 for c in columns for n in c[int(Kernel.NAME)]))
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_worker_loop_self_flush_delivers_without_caller_flush(self):
+        # worker_loop() with a flush period set (self_flush): the native decode thread
+        # drives cuptiActivityFlushAll on its cadence and decodes the completed buffers
+        # itself, so records surface with NO caller flush(). Background drain is off, so
+        # the only Python work is an explicit drain -- flush() is never called.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        kind = ActivityKind.CONCURRENT_KERNEL
+        lock = threading.Lock()
+        columns: list = []
+        # A real (spread-out) cadence, not a tight spin: the decode thread's first flush is
+        # backdated to fire at worker start -- before these kernels exist -- so the kernels'
+        # buffers are only delivered by the NEXT cadence flush ~period later. Records showing
+        # up therefore proves the periodic self-flush actually fires on schedule.
+        flush_period_s = 5.0
+        cupti_monitor.configure(
+            background_flush_period_s=flush_period_s, background_drain_period_s=-1
+        )
+        monitor = CuptiMonitor()
+
+        def on_columns(cols):
+            if kind in cols:
+                with lock:
+                    columns.append(cols[kind])
+
+        try:
+            obs = monitor.register({kind: {Kernel.START, Kernel.END}}, on_columns)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.addCleanup(monitor.unregister, obs)
+
+        x = torch.randn(128, 128, device="cuda")
+        for _ in range(4):
+            x = torch.relu(x @ x)
+        x.sum().item()
+        torch.cuda.synchronize()
+
+        # Poll past one cadence: the decode thread self-flushes+decodes on its period
+        # (buffers_completed grows with no flush()); drain pulls the decoded columns to the
+        # observer. Deadline comfortably exceeds the period so the cadence flush lands.
+        deadline = time.time() + flush_period_s * 3 + 5.0
+        total = 0
+        while time.time() < deadline:
+            monitor._drain_and_dispatch()
+            with lock:
+                total = sum(len(c[int(Kernel.START)]) for c in columns)
+            if total > 0:
+                break
+            time.sleep(0.1)
+        self.assertGreater(monitor.stats()["buffers_completed"], 0)
+        self.assertGreater(total, 0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_worker_loop_no_self_flush_waits_for_caller_flush(self):
+        # worker_loop() with no flush period (self_flush off): the decode thread blocks on
+        # get_completed() and never self-flushes, so with a normal buffer nothing is
+        # delivered until the caller drives flush(). Both cadences off (caller-driven).
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        kind = ActivityKind.CONCURRENT_KERNEL
+        lock = threading.Lock()
+        columns: list = []
+        cupti_monitor.configure(
+            background_flush_period_s=-1, background_drain_period_s=-1
+        )
+        monitor = CuptiMonitor()
+
+        def on_columns(cols):
+            if kind in cols:
+                with lock:
+                    columns.append(cols[kind])
+
+        try:
+            obs = monitor.register({kind: {Kernel.START, Kernel.END}}, on_columns)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.addCleanup(monitor.unregister, obs)
+
+        x = torch.randn(128, 128, device="cuda")
+        for _ in range(4):
+            x = torch.relu(x @ x)
+        x.sum().item()
+        torch.cuda.synchronize()
+
+        # No self-flush and no caller flush: the idle decode thread decodes nothing.
+        time.sleep(0.2)
+        monitor._drain_and_dispatch()
+        with lock:
+            before = sum(len(c[int(Kernel.START)]) for c in columns)
+        self.assertEqual(monitor.stats()["buffers_completed"], 0)
+        self.assertEqual(before, 0)
+
+        # The caller-driven flush is what delivers the records.
+        monitor.flush(sync=True)
+        with lock:
+            after = sum(len(c[int(Kernel.START)]) for c in columns)
+        self.assertGreater(monitor.stats()["buffers_completed"], 0)
+        self.assertGreater(after, 0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_approx_timestamp_callback_engages_under_udr(self):
         # use_approx_timestamps hands CUPTI a per-subscriber timestamp callback
         # (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK) so records ride the profiler's approx
@@ -724,10 +832,9 @@ class TestCuptiMonitorCUDA(TestCase):
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_flush_accessible(self):
-        # A user can reach the process-wide monitor singleton through the public
-        # accessors and flush it: instance() constructs/returns it, get_monitor()
-        # hands back that same object, and flush(sync=True) on the singleton
-        # delivers everything collected up to the call.
+        # A user can reach the process-wide monitor singleton through CuptiMonitor()
+        # and flush it: CuptiMonitor() constructs/returns the one instance, and
+        # flush(sync=True) on it delivers everything collected up to the call.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
         from torch.profiler._cupti import monitor as cupti_monitor
@@ -743,9 +850,9 @@ class TestCuptiMonitorCUDA(TestCase):
                 with lock:
                     columns.append(cols[kernel])
 
-        mon = cupti_monitor.instance()
-        self.assertIs(cupti_monitor.get_monitor(), mon)
-        # Drop the singleton after the observer is torn down so the next instance()
+        mon = cupti_monitor.CuptiMonitor()
+        self.assertIs(cupti_monitor.CuptiMonitor(), mon)
+        # Drop the singleton after the observer is torn down so the next CuptiMonitor()
         # caller gets a fresh monitor (cleanups run LIFO: unregister first).
         self.addCleanup(setattr, cupti_monitor, "_instance", None)
         try:
@@ -762,7 +869,7 @@ class TestCuptiMonitorCUDA(TestCase):
 
         # Flush via the singleton fetched from the public accessor, not the local
         # handle, to exercise the user-visible path.
-        cupti_monitor.get_monitor().flush(sync=True)
+        cupti_monitor.CuptiMonitor().flush(sync=True)
 
         total = sum(len(c[int(Kernel.START)]) for c in columns)
         self.assertGreater(total, 0)
@@ -1058,7 +1165,7 @@ _cupti_monitor.enable_hes_early()
         y.sum().item()
         torch.cuda.synchronize()
 
-        monitor = _cupti_monitor.instance()
+        monitor = _cupti_monitor.CuptiMonitor()
         monitor.flush(sync=True)
         stats = monitor.stats()
         _gnode, start, _end, _stream = obs.drain()
@@ -1091,7 +1198,7 @@ _cupti_monitor.enable_hes_early()
             y.sum().item()
             torch.cuda.synchronize()
 
-            monitor = _cupti_monitor.instance()
+            monitor = _cupti_monitor.CuptiMonitor()
             monitor.flush(sync=True)
             _gnode, start, _end, _stream = obs.drain()
             obs.close()

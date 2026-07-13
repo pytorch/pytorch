@@ -251,7 +251,7 @@ class CuptiMonitor:
     """Process-wide CUPTI monitor / multiplexer singleton. Like PmSampler, ``CuptiMonitor()``
     returns the one instance (constructed on first call); its settings are snapshotted from
     the class config -- set via ``cupti_monitor.configure()`` before first use -- not from
-    constructor args. ``instance()`` is an alias for ``CuptiMonitor()``."""
+    constructor args."""
 
     _instance: CuptiMonitor | None = None
     _instance_lock = threading.Lock()
@@ -1290,7 +1290,7 @@ def configure(
     use_approx_timestamps: bool | None = None,
 ) -> None:
     """Set the process-wide CUPTI monitor settings the singleton snapshots when first
-    constructed (via instance()/CuptiMonitor()). First-come-first-serve (like
+    constructed (via CuptiMonitor()). First-come-first-serve (like
     PmSampler.configure): locked once this lands OR the singleton is built, so a later call
     is ignored with a warning -- pass all settings in one call, before first use. An unset
     (None) arg keeps its current value. The two cadences default to -1 (caller-driven; a
@@ -1299,7 +1299,7 @@ def configure(
         if CuptiMonitor._configured:
             logger.warning(
                 "cupti_monitor.configure() ignored: already configured "
-                "(first-come-first-serve). Call it once before the first instance()."
+                "(first-come-first-serve). Call it once before the first CuptiMonitor()."
             )
             return
         if buffer_size is not None:
@@ -1336,15 +1336,3 @@ def _reset_for_test() -> None:
         CuptiMonitor._background_drain_period_s = -1.0
         CuptiMonitor._use_approx_timestamps = False
         CuptiMonitor._configured = False
-
-
-def get_monitor() -> CuptiMonitor | None:
-    """The process-wide monitor singleton if it has been constructed, else None."""
-    return CuptiMonitor._instance
-
-
-def instance() -> CuptiMonitor:
-    """The process-wide CUPTI monitor / multiplexer singleton, constructed on first use with
-    the cupti_monitor.configure() settings -- an alias for CuptiMonitor(). It uses CUPTI's v2
-    user-defined-record API (requires libcupti >= 13.2). Observers register via register()."""
-    return CuptiMonitor()
