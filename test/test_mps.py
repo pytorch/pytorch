@@ -8807,6 +8807,21 @@ class TestMPS(TestCaseMPS):
         outputMPS = torch.nan_to_num(inputMPS, nan=2.0, posinf=1.0, neginf=-1.0)
         self.assertEqual(outputMPS, outputCPU)
 
+    def test_nan_to_num_complex(self):
+        # Complex nan_to_num is new on MPS (the MPSGraph path raised); the
+        # replacement applies per component like CPU/CUDA. complex32 exceeds
+        # CPU/CUDA support, so it compares against the complex64 CPU result
+        # with half-extrema (65504) defaults per its value type.
+        x = torch.tensor([complex(float('nan'), 1.0),
+                          complex(float('inf'), float('-inf')),
+                          complex(2.0, float('nan')), 1 + 2j])
+        self.assertEqual(torch.nan_to_num(x.to('mps')).cpu(), torch.nan_to_num(x))
+        self.assertEqual(torch.nan_to_num(x.to('mps'), nan=1.0, posinf=3.0, neginf=-3.0).cpu(),
+                         torch.nan_to_num(x, nan=1.0, posinf=3.0, neginf=-3.0))
+        actual = torch.nan_to_num(x.to(torch.complex32).to('mps')).cpu().to(torch.complex64)
+        expected = torch.nan_to_num(x, posinf=65504.0, neginf=-65504.0)
+        self.assertEqual(actual, expected)
+
     # Test where
     def test_where(self):
         def helper(shape, x_shape, y_shape, cond_dtype=torch.bool, x_dtype=torch.float):
