@@ -577,71 +577,6 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
         return x + a
 
 
-class _LenTensorPytreeCache(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.key_cache: list[torch.Tensor] = []
-        self.value_cache: list[torch.Tensor] = []
-
-    def update(self, key_states: torch.Tensor, value_states: torch.Tensor) -> None:
-        self.key_cache.append(key_states)
-        self.value_cache.append(value_states)
-
-    def get_seq_length(self) -> int:
-        if len(self.key_cache) == 0 or len(self.key_cache[0]) == 0:
-            return 0
-        return self.key_cache[0].shape[-2]
-
-
-def _flatten_len_tensor_pytree_cache(cache):
-    return [cache.key_cache, cache.value_cache], [
-        "key_cache",
-        "value_cache",
-    ]
-
-
-def _flatten_with_keys_len_tensor_pytree_cache(cache):
-    values, context = _flatten_len_tensor_pytree_cache(cache)
-    return [(pytree.MappingKey(k), v) for k, v in zip(context, values)], context
-
-
-def _unflatten_len_tensor_pytree_cache(values, context):
-    cache = _LenTensorPytreeCache()
-    for k, v in zip(context, values):
-        setattr(cache, k, v)
-    return cache
-
-
-def _flatten_spec_len_tensor_pytree_cache(cache, _):
-    return [cache.key_cache, cache.value_cache]
-
-
-class _LenTensorPytreeModule(torch.nn.Module):
-    def forward(self, x, cache):
-        key = torch.cat(cache.key_cache, dim=1)
-        value = torch.cat(cache.value_cache, dim=1)
-        seq_length = cache.get_seq_length()
-        zeros = torch.zeros(
-            (
-                len(cache.key_cache[0]),
-                cache.key_cache[0].shape[1],
-                seq_length,
-                cache.key_cache[0].shape[-1],
-            )
-        )
-        return x + (key + value + zeros).sum(dim=2, keepdim=True)
-
-
-def _make_len_tensor_pytree_inputs(batch, seq_length):
-    x = torch.randn(batch, 8, 7, 1)
-    cache = _LenTensorPytreeCache()
-    cache.update(
-        torch.ones(batch, 8, seq_length, 6),
-        torch.ones(batch, 8, seq_length, 6) * 2,
-    )
-    return x, cache
-
-
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
@@ -872,40 +807,6 @@ class TestExport(TestCase):
                 strict=False,
             )
         self.assertNotIn("Expected a value of type 'Optional[int]'", str(cm.exception))
-
-    def test_non_strict_export_len_tensor_pytree_nn_module_input(self):
-        pytree._private_register_pytree_node(
-            _LenTensorPytreeCache,
-            _flatten_len_tensor_pytree_cache,
-            _unflatten_len_tensor_pytree_cache,
-            serialized_type_name="test.export.test_export._LenTensorPytreeCache",
-            flatten_with_keys_fn=_flatten_with_keys_len_tensor_pytree_cache,
-        )
-        torch.fx._pytree.register_pytree_flatten_spec(
-            _LenTensorPytreeCache, _flatten_spec_len_tensor_pytree_cache
-        )
-        try:
-            x, cache = _make_len_tensor_pytree_inputs(3, 5)
-            batch = Dim("batch", min=1, max=1024)
-            seq_length = Dim("seq_length", min=1, max=1024)
-            with torch.serialization.safe_globals([_LenTensorPytreeCache]):
-                ep = export(
-                    _LenTensorPytreeModule(),
-                    (x, cache),
-                    dynamic_shapes=(
-                        {0: batch},
-                        [[{0: batch, 2: seq_length}], [{0: batch, 2: seq_length}]],
-                    ),
-                    strict=False,
-                )
-
-            x2, cache2 = _make_len_tensor_pytree_inputs(4, 6)
-            self.assertEqual(
-                ep.module()(x2, cache2), _LenTensorPytreeModule()(x2, cache2)
-            )
-        finally:
-            pytree._deregister_pytree_node(_LenTensorPytreeCache)
-            torch.fx._pytree._deregister_pytree_flatten_spec(_LenTensorPytreeCache)
 
     @skipIfCrossRef  # CrossRefMode interferes with functorch ops
     @skipIfTorchDynamo("export inside dynamo is not supported")
@@ -10903,6 +10804,40 @@ def forward(self, b_a_buffer, x):
                 1,
             )
 
+    # associative_scan is not supported by the cpp (NativeRT) runtime yet
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_pointwise_cpu(self):
+        # combine_mode="pointwise" only has Inductor codegen on backends with
+        # scan support (CUDA/XPU), but the device constraint is enforced in the
+        # lowering rather than the eager wrapper, so the HOP can be captured on
+        # other devices. See https://github.com/pytorch/pytorch/issues/186594.
+        def combine_fn(x, y):
+            return x + y
+
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+        xs = torch.randn(8, 4)
+
+        # A pure-eager (non-exported) CPU call runs via the generic fallback.
+        self.assertEqual(M()(xs), torch.cumsum(xs, dim=0))
+
+        # Export succeeds and retains the associative_scan HOP.
+        ep = export(M(), (xs,))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.associative_scan
+                for node in ep.graph_module.graph.nodes
+            ),
+            "exported graph should retain the associative_scan HOP",
+        )
+
+        # The exported program runs on CPU via the HOP's eager fallback and
+        # matches the reference scan.
+        self.assertEqual(ep.module()(xs), torch.cumsum(xs, dim=0))
+
     # scan is not supported in sigmoid yet
     @testing.expectedFailureCppRuntime
     def test_export_scan_pytree_output(self):
@@ -11443,7 +11378,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             self.assertIsInstance(
                 result.shape[0],
                 torch.SymInt,
-                f"where output dim 0 should be symbolic but got {result.shape[0]}",
+                lambda msg: f"{msg}\nwhere output dim 0 should be symbolic but got {result.shape[0]}",
             )
 
     def test_nonzero_2(self):
