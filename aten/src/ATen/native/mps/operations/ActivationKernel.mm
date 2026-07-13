@@ -8,6 +8,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_prelu_kernel_backward_native.h>
+#include <ATen/ops/_prelu_kernel_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
@@ -53,6 +55,37 @@ Tensor& relu_mps_(Tensor& self) {
   auto iter = at::TensorIteratorConfig().add_output(self).add_input(self).set_check_mem_overlap(false).build();
   lib.exec_unary_kernel(iter, "relu");
   return self;
+}
+
+// _prelu_kernel: weight arrives already reshaped to [1, C, 1, ...] by the
+// composite prelu, so it broadcasts over self and its {0, C, 0, ...} stride is
+// the layout binary_inner_strided serves. empty_like(suggest_memory_format)
+// keeps channels_last through the elementwise kernel.
+Tensor prelu_mps(const Tensor& self, const Tensor& weight) {
+  auto result = at::empty_like(self, self.suggest_memory_format());
+  if (result.numel() == 0)
+    return result;
+  auto iter = at::TensorIteratorConfig().add_output(result).add_input(self).add_input(weight).build();
+  lib.exec_binary_kernel(iter, "prelu");
+  return result;
+}
+
+std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const Tensor& self, const Tensor& weight) {
+  auto grad_input = at::empty_like(self, self.suggest_memory_format());
+  // Per-element weight grad; the framework reduces it to the weight shape.
+  auto weight_grad = at::empty_like(self, at::MemoryFormat::Contiguous);
+  if (self.numel() == 0)
+    return std::tuple<Tensor, Tensor>{grad_input, weight_grad};
+  auto input_iter = at::TensorIteratorConfig()
+                        .add_output(grad_input)
+                        .add_input(grad_output)
+                        .add_input(self)
+                        .add_input(weight)
+                        .build();
+  lib.exec_ternary_kernel(input_iter, "prelu_backward");
+  auto weight_iter = at::TensorIteratorConfig().add_output(weight_grad).add_input(grad_output).add_input(self).build();
+  lib.exec_binary_kernel(weight_iter, "prelu_weight_backward");
+  return std::tuple<Tensor, Tensor>{grad_input, weight_grad};
 }
 
 static void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {

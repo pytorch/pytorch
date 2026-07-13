@@ -7613,6 +7613,29 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(rc_h, rc_f)
 
     # Test selu, elu, celu
+    def test_prelu_channels_last_per_channel_weight(self):
+        # PReLU with an NCHW input in channels_last and a per-channel weight is
+        # the flagged flavor for this migration: the weight reshapes to
+        # [1, C, 1, 1] ({0, C, 0, 0} strides, the binary_inner_strided layout),
+        # and channels_last must survive fwd and bwd. Checks both grads too.
+        for memory_format in (torch.contiguous_format, torch.channels_last):
+            for dtype in (torch.float32, torch.float16):
+                with self.subTest(memory_format=memory_format, dtype=dtype):
+                    cpu_x = torch.randn(4, 6, 8, 8, dtype=dtype).to(memory_format=memory_format).requires_grad_()
+                    cpu_w = torch.randn(6, dtype=dtype).requires_grad_()
+                    x = cpu_x.detach().clone().to('mps').requires_grad_()
+                    w = cpu_w.detach().clone().to('mps').requires_grad_()
+                    cpu_out = torch.nn.functional.prelu(cpu_x, cpu_w)
+                    out = torch.nn.functional.prelu(x, w)
+                    self.assertEqual(out.cpu(), cpu_out)
+                    if memory_format == torch.channels_last:
+                        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+                    g = torch.randn_like(cpu_out)
+                    cpu_out.backward(g)
+                    out.backward(g.to('mps'))
+                    self.assertEqual(x.grad.cpu(), cpu_x.grad)
+                    self.assertEqual(w.grad.cpu(), cpu_w.grad)
+
     def test_elu(self):
         def helper(shape, alpha=1.0, memory_format=torch.contiguous_format):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
