@@ -933,9 +933,7 @@ class Module:
                 module._apply(fn)
 
         # _apply is traced by dynamo at the bytecode level, and torch._subclasses
-        # is in dynamo's MOD_SKIPLIST, so we cannot call is_fake_tensor here (it
-        # would raise "marked as skipped"). Use an isinstance FakeTensor check
-        # instead; revisit later.
+        # is in dynamo's MOD_SKIPLIST, revisit later for c++
         from torch._subclasses.fake_tensor import FakeTensor
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
