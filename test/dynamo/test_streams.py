@@ -218,7 +218,7 @@ class <lambda>(torch.nn.Module):
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2), torch.Stream(device="cuda"))
         expected = fn(*inp)
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         actual = fn_opt(*inp)
         self.assertEqual(expected, actual)
 
@@ -231,7 +231,7 @@ class <lambda>(torch.nn.Module):
             return y, s
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         _, s0 = fn_opt(*inp)
         _, s1 = fn_opt(*inp)
         # Streams will be different values for each invocation
@@ -249,7 +249,7 @@ class <lambda>(torch.nn.Module):
 
         s_inp = torch.Stream(device="cuda")
         inp = (torch.ones(2, 2) + 1, s_inp)
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         _, s0 = fn_opt(*inp)
         _, s1 = fn_opt(*inp)
         self.assertEqual(s_inp, s0)
@@ -1666,7 +1666,7 @@ class GraphModule(torch.nn.Module):
     def test_inductor_lowering(self):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 e = torch.Event()
                 x += x + 1
@@ -1973,7 +1973,7 @@ class <lambda>(torch.nn.Module):
     def test_event_synchronize_inductor_lowering(self):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
-            @torch.compile()
+            @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 e = torch.Event()
                 x = x + 1
@@ -2197,7 +2197,7 @@ class <lambda>(torch.nn.Module):
 
         inp = torch.ones(2, 2, device="cuda")
         eager_result = f(inp)
-        compiled_result = torch.compile(f)(inp)
+        compiled_result = torch.compile(f)(inp)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(eager_result, compiled_result)
 
     @requires_cuda
@@ -2217,7 +2217,7 @@ class <lambda>(torch.nn.Module):
 
             return torch.cat(a_cpu_list)
 
-        f_compiled = torch.compile(f)
+        f_compiled = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
         inputs = [
             torch.rand(100, dtype=torch.float16, device="cuda") for _ in range(10)
         ]
@@ -2235,7 +2235,7 @@ class <lambda>(torch.nn.Module):
             e.wait()
             return y + 1
 
-        f_compiled = torch.compile(f)
+        f_compiled = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
         x = torch.randn(10, device="cuda")
         eager_result = f(x)
         compiled_result = f_compiled(x)
