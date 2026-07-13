@@ -54,7 +54,7 @@ from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value
+from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_obj
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -957,6 +957,9 @@ class Operation:
         if self.operation_name is None:
             raise AssertionError("Expected self.operation_name is not None")
         return self.operation_name
+
+    def get_buffer_name(self) -> str | None:
+        return None
 
     def get_config_patches(self) -> dict[str, Any]:
         """Get config patches for this operation (e.g., coordinate_descent_tuning)."""
@@ -5104,6 +5107,7 @@ class Buffer(IRNode, CodegenSymbol):
     # a meaningful name
     name: str | None
     layout: OutputSpec
+    ordering_only: ClassVar[bool] = False
 
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
@@ -5118,6 +5122,9 @@ class Buffer(IRNode, CodegenSymbol):
     def get_name(self) -> str:
         if not self.name:
             raise AssertionError(self)
+        return self.name
+
+    def get_buffer_name(self) -> str | None:
         return self.name
 
     def get_example(self) -> torch.Tensor | torch.SymInt:
@@ -9405,7 +9412,7 @@ class FallbackKernel(ExternKernelAlloc):
             return example_output.device
         if isinstance(
             example_output, (torch._C.ScriptObject, FakeScriptObject)
-        ) or is_opaque_value(example_output):
+        ) or is_custom_class_obj(example_output):
             return torch.device("cpu")
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
@@ -9895,7 +9902,7 @@ class FallbackKernel(ExternKernelAlloc):
                 return output.node.expr
             elif isinstance(
                 output, (torch._C.ScriptObject, FakeScriptObject)
-            ) or is_opaque_value(output):
+            ) or is_custom_class_obj(output):
                 return OpaqueMultiOutput(
                     NoneLayout(device=device),
                     packed,
@@ -11362,7 +11369,7 @@ class TorchBindObject(NonTensorObj):
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
 
-        if is_opaque_value(real_script_obj):
+        if is_custom_class_obj(real_script_obj):
             return 0
 
         if not hasattr(real_script_obj, "__obj_flatten__"):
