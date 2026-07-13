@@ -26,7 +26,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf
+      check_experiments: lf
 
   pytorch-linux-noble-riscv64-py3_12-gcc14-cross-build:
     if: github.repository_owner == 'pytorch'
@@ -36,10 +36,9 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-noble-riscv64-py3.12-gcc14
-      docker-image-name: ci-image:pytorch-linux-noble-riscv64-py3.12-gcc14
+      docker-image-name: ci-image:pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       runner: linux.c7i.2xlarge
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.12"
       compiler: gcc14
       cuda-version: cpu
