@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import ast
 import copy
 import dataclasses
@@ -9,7 +8,7 @@ import math
 import operator
 import re
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
 from typing import Any, TYPE_CHECKING
@@ -27,9 +26,12 @@ if TYPE_CHECKING:
     import sympy
 
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
+    from torch._functorch._aot_autograd.schemas import GraphSignature
     from torch._ops import OperatorBase
     from torch.export import ExportedProgram
     from torch.export.graph_signature import ExportGraphSignature
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+    from torch.utils._pytree import TreeSpec
 
 from torch.export.graph_signature import CustomObjArgument, InputKind, OutputKind
 from torch.fx._pytree import (
@@ -66,7 +68,9 @@ _DISABLE_ATEN_TO_ASSERTION_PASS = False
 
 
 def _collect_and_set_constant_attrs(
-    graph_signature, constants, mod
+    graph_signature: "ExportGraphSignature",
+    constants: dict[str, Any],
+    mod: torch.nn.Module,
 ) -> "ConstantAttrMap":
     # the exported module will store constants & non-persistent buffers such that
     # retracing treats them as persistent buffers, so we inform the constants lifting pass
@@ -96,8 +100,10 @@ def _collect_and_set_constant_attrs(
 
 
 def _register_constants_as_buffers(
-    mod: torch.fx.GraphModule, state_dict, non_persistent_buffers
-):
+    mod: torch.fx.GraphModule,
+    state_dict: dict[str, Any],
+    non_persistent_buffers: Collection[str],
+) -> set[str]:
     # TODO some annoying circular dependency issue
     from torch.export.unflatten import _assign_attr, _AttrKind
 
@@ -122,8 +128,8 @@ def _register_constants_as_buffers(
 
 
 def _override_graph_signature_for_temp_registered_constants(
-    sig: "ExportGraphSignature", temp_registered_constants
-):
+    sig: "ExportGraphSignature", temp_registered_constants: set[str]
+) -> "ExportGraphSignature":
     for spec in sig.input_specs:
         if spec.target in temp_registered_constants:
             spec.kind = InputKind.CONSTANT_TENSOR
@@ -143,7 +149,7 @@ def _override_graph_signature_for_temp_registered_constants(
 
 def _overwrite_signature_for_non_persistent_buffers(
     old_sig: "ExportGraphSignature", new_sig: "ExportGraphSignature"
-):
+) -> "ExportGraphSignature":
     # overwrite signature for non-persistent buffers
     non_persistent_buffers = {
         spec.target
@@ -166,7 +172,7 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
     """
     params_buffers_to_node_meta = {}
 
-    def _getattr(model: torch.fx.GraphModule, attr_name: str):
+    def _getattr(model: torch.fx.GraphModule, attr_name: str) -> Any:
         *prefix, field = attr_name.split(".")
         t = model
         for item in prefix:
@@ -215,7 +221,9 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
     return params_buffers_to_node_meta
 
 
-def _maybe_find_pre_dispatch_tf_mode_for_export():
+def _maybe_find_pre_dispatch_tf_mode_for_export() -> (
+    PreDispatchTorchFunctionMode | None
+):
     if not torch.compiler.is_exporting():
         return None
 
@@ -272,7 +280,7 @@ def _populate_param_buffer_metadata_to_new_gm(
                         node.meta[k] = v
 
 
-def _get_shape_env_from_gm(gm: torch.fx.GraphModule):
+def _get_shape_env_from_gm(gm: torch.fx.GraphModule) -> "ShapeEnv | None":
     vals = [
         node.meta["val"]
         for node in gm.graph.nodes
@@ -294,7 +302,7 @@ def _rename_without_collisions(
     orig_name: str,
     name: str,
     is_placeholder: bool = False,
-):
+) -> str:
     """
     Renames nodes to avoid name collisions, with suffixing.
     name_map: map from original name to new name
@@ -354,8 +362,8 @@ def get_keystr(key_path: KeyPath) -> str:
 def _check_symint(
     symint: int | torch.SymInt,
     arg: int,
-    range_constraints,
-    unification_map,
+    range_constraints: dict["sympy.Expr", Any],
+    unification_map: dict["sympy.Symbol", Any],
     keypath: KeyPath,
     i: int | None = None,
 ) -> None:
@@ -446,7 +454,9 @@ def _check_symint(
 
 
 def _check_input_constraints_for_graph(
-    input_placeholders: list[torch.fx.Node], flat_args_with_path, range_constraints
+    input_placeholders: list[torch.fx.Node],
+    flat_args_with_path: Sequence[tuple[tuple[Any, ...], Any]],
+    range_constraints: dict["sympy.Expr", Any],
 ) -> None:
     if len(flat_args_with_path) != len(input_placeholders):
         raise RuntimeError(
@@ -672,13 +682,15 @@ def sequential_split(
     return new_gm
 
 
-def nodes_filter(nodes: list[torch.fx.Node], node_call_back) -> list[torch.fx.Node]:
+def nodes_filter(
+    nodes: list[torch.fx.Node], node_call_back: Callable[[torch.fx.Node], object]
+) -> list[torch.fx.Node]:
     """Returns the nodes that match the node_call_back as a list."""
     return [node for node in nodes if node_call_back(node)]
 
 
 @contextmanager
-def _disable_aten_to_metadata_assertions():
+def _disable_aten_to_metadata_assertions() -> Generator[None, None, None]:
     global _DISABLE_ATEN_TO_ASSERTION_PASS
     orig_val = _DISABLE_ATEN_TO_ASSERTION_PASS
     _DISABLE_ATEN_TO_ASSERTION_PASS = True
@@ -736,7 +748,9 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
                     )
 
 
-def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
+def apply_runtime_assertion_pass(
+    gm: torch.fx.GraphModule, graph_signature: "GraphSignature"
+) -> tuple[torch.fx.GraphModule, "GraphSignature"]:
     from torch._export.passes._node_metadata_hook import (
         _node_metadata_hook,
         _set_node_metadata_hook,
@@ -773,7 +787,8 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
 
 
 def nodes_first(
-    nodes: list[torch.fx.Node], node_call_back=None
+    nodes: list[torch.fx.Node],
+    node_call_back: Callable[[torch.fx.Node], object] | None = None,
 ) -> torch.fx.Node | None:
     """
     Returns the first node that matches the node_call_back. If no node matches, returns None.
@@ -785,12 +800,16 @@ def nodes_first(
     return None
 
 
-def nodes_count(nodes: list[torch.fx.Node], node_call_back) -> int:
+def nodes_count(
+    nodes: list[torch.fx.Node], node_call_back: Callable[[torch.fx.Node], object]
+) -> int:
     """Returns the number of nodes that match the node_call_back."""
     return len(nodes_filter(nodes, node_call_back))
 
 
-def nodes_map(nodes: list[torch.fx.Node], node_call_back) -> list[torch.fx.Node]:
+def nodes_map(
+    nodes: list[torch.fx.Node], node_call_back: Callable[[torch.fx.Node], object]
+) -> list[torch.fx.Node]:
     """
     Sequentially visit the nodes list and invoke node_call_back on each element.
     Returns the nodes list after the node_call_back is invoked on each element.
@@ -898,6 +917,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                     get_item_users,
                     lambda get_item_node: node_replace_(
                         get_item_node,
+                        # pyrefly: ignore[bad-index]  # TODO getitem idx is an int FX arg
                         new_output[get_item_node.args[1]],
                     ),
                 )
@@ -939,7 +959,9 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module) -> inspect.Sign
     return inspect.Signature(parameters=param_list)
 
 
-def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
+def _bind_signature_to_inputs(
+    mod: torch.nn.Module, fake_args: tuple[Any, ...], fake_kwargs: dict[str, Any]
+) -> dict[str, Any]:
     if isinstance(mod, (torch.jit.ScriptModule, torch.jit.TracedModule)):
         sig = _get_torch_jit_trace_forward_signature(mod)
 
@@ -959,7 +981,9 @@ def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
     return {**sig.bind_partial(*fake_args).arguments, **fake_kwargs}
 
 
-def _build_cache(name, find_available, used_names):
+def _build_cache(
+    name: str, find_available: dict[str, int], used_names: set[str]
+) -> None:
     used_names.add(name)
     match = re.match(r"(.*)_(\d+)", name)
     if match:
@@ -1031,7 +1055,8 @@ def _assign_new_node_names(
             node.name = node.target = name_map[node.name]
             if node.name in custom_meta:
                 if node.meta.get("custom") is None:
-                    node.meta["custom"] = {}
+                    empty_custom: dict[str, Any] = {}
+                    node.meta["custom"] = empty_custom
                 else:
                     # Assert if any existing key has different value
                     for k, v in node.meta["custom"].items():
@@ -1056,9 +1081,9 @@ def placeholder_naming_pass(
     gm: torch.fx.GraphModule,
     export_graph_signature: "ExportGraphSignature",
     mod: torch.nn.Module,
-    fake_args,
-    fake_kwargs,
-    fake_params_buffers,
+    fake_args: tuple[Any, ...],
+    fake_kwargs: dict[str, Any],
+    fake_params_buffers: dict[str, torch.Tensor | torch.nn.Parameter],
     constants: dict[str, Any],
 ) -> None:
     """
@@ -1085,7 +1110,7 @@ def placeholder_naming_pass(
             if "custom" in node.meta:
                 custom_meta[node.name] = node.meta["custom"]
 
-    def _strip_name(x):
+    def _strip_name(x: str) -> str:
         if x.startswith("L__self___"):
             x = x[len("L__self___") :]
         elif x.startswith("self_"):
@@ -1093,7 +1118,7 @@ def placeholder_naming_pass(
         x = re.sub(r"[^a-zA-Z0-9]", "_", x)
         return x
 
-    def _extract_pytree_key(x):
+    def _extract_pytree_key(x: object) -> str:
         if isinstance(x, MappingKey):
             x = re.sub(r"[^a-zA-Z0-9]", "_", str(x.key))
             return x
@@ -1139,6 +1164,7 @@ def placeholder_naming_pass(
         if spec.kind == InputKind.TOKEN:
             base_name = ""
         else:
+            # pyrefly: ignore[bad-argument-type]  # TODO non-token specs always have a str target
             base_name = _strip_name(spec.target).lower()
         base_name = re.sub(r"[^a-zA-Z0-9]", "_", base_name)
 
@@ -1211,7 +1237,9 @@ def placeholder_naming_pass(
                 del constants[name]
 
 
-def remove_proxy_from_state_dict(state_dict: dict, in_place: bool) -> dict:
+def remove_proxy_from_state_dict(
+    state_dict: dict[str, Any], in_place: bool
+) -> dict[str, Any]:
     """
     If `in_place` is false, return a new copy of `state_dict` with "proxy" removed from `v.__dict__`.
     `v` is the values in the dictionary.
@@ -1263,9 +1291,13 @@ def _detect_fake_mode_from_gm(
 
 
 @contextmanager
-def _disable_load_state_dict_hooks(mod: torch.nn.Module):
-    state_dict_hooks: dict[int, Callable] = dict(mod._state_dict_hooks)
-    state_dict_pre_hooks: dict[int, Callable] = dict(mod._state_dict_pre_hooks)
+def _disable_load_state_dict_hooks(
+    mod: torch.nn.Module,
+) -> Generator[None, None, None]:
+    state_dict_hooks: dict[int, Callable[..., object]] = dict(mod._state_dict_hooks)
+    state_dict_pre_hooks: dict[int, Callable[..., object]] = dict(
+        mod._state_dict_pre_hooks
+    )
     mod._state_dict_hooks.clear()
     mod._state_dict_pre_hooks.clear()
     try:
@@ -1322,7 +1354,7 @@ def _materialize_cpp_cia_ops() -> None:
         _ = getattr(getattr(getattr(torch.ops, namespace), op_name), op_overload_name)
 
 
-def _special_op_to_preserve_cia(*args, **kwargs):
+def _special_op_to_preserve_cia(*args: Any, **kwargs: Any) -> Any:
     """
     This is a special marker that tells our infra that we shouldn't decompose this op.
     """
@@ -1333,7 +1365,7 @@ def _special_op_to_preserve_cia(*args, **kwargs):
 # 1. The op should be known statically that it is functional
 # 2. If it is maybe aliasing, we decompose because we must know if an op
 #    is mutating or aliasing.
-def _check_valid_to_preserve(op_overload: "OperatorBase"):
+def _check_valid_to_preserve(op_overload: "OperatorBase") -> bool:
     from torch._decomp import _should_decompose_because_unsafe_op
 
     if _should_decompose_because_unsafe_op(op_overload):
@@ -1411,7 +1443,7 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
     return cia_ops
 
 
-def _get_decomp_for_cia(op: "OperatorBase"):
+def _get_decomp_for_cia(op: "OperatorBase") -> Callable[..., object]:
     # [NOTE] Separating out func.decompose
     # Ideally we should be able to just register func.decompose but
     # we can't as this decomp is gonna be registered to the py_impl.
@@ -1422,7 +1454,7 @@ def _get_decomp_for_cia(op: "OperatorBase"):
     if dk in op.py_kernels and not isinstance(op.py_kernels[dk], torch._C.DispatchKey):
         return op.py_kernels[dk]
 
-    def _special_op_to_decompose_cia(*args, **kwargs):
+    def _special_op_to_decompose_cia(*args: Any, **kwargs: Any) -> Any:
         kernel = kwargs["kernel"]
         del kwargs["kernel"]
         # Can't call kernel.decompose due to infinite recursion as
@@ -1441,7 +1473,7 @@ def _get_decomp_for_cia(op: "OperatorBase"):
 
 
 @contextmanager
-def _compiling_state_context():
+def _compiling_state_context() -> Generator[None, None, None]:
     old_compiling_flag = torch.compiler._is_compiling_flag
     old_exporting_flag = torch.compiler._is_exporting_flag
     try:
@@ -1515,8 +1547,8 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
     import weakref
 
-    class PrototypeModule(weakref.ref):
-        def __init__(self, m, *args, **kwargs):
+    class PrototypeModule(weakref.ref[torch.nn.Module]):
+        def __init__(self, m: torch.nn.Module, *args: Any, **kwargs: Any) -> None:
             super().__init__(m, *args, **kwargs)  # type: ignore[call-arg]
             if not isinstance(m, torch.nn.Module):
                 raise AssertionError(f"expected nn.Module, got {type(m).__name__}")
@@ -1524,10 +1556,11 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
                 raise AssertionError("_proto_cls should not be set")
             self._proto_cls = cls
 
-        def __eq__(self, other):
-            return self._proto_cls == other._proto_cls
+        def __eq__(self, other: object) -> bool:
+            return self._proto_cls == other._proto_cls  # type: ignore[attr-defined]
 
-        def __deepcopy__(self, memo):
+        def __deepcopy__(self, memo: dict[Any, Any]) -> "PrototypeModule":
+            # pyrefly: ignore[bad-argument-type]  # TODO referent is alive during deepcopy
             return PrototypeModule(self())
 
     def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
@@ -1552,7 +1585,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         #       structure to be used together with _reparameterize_module. This will
         #       create a clone of the module with the new parameters and buffers without
         #       affecting the original module.
-        def copy_module(mod: torch.nn.Module):
+        def copy_module(mod: torch.nn.Module) -> torch.nn.Module:
             ret = copy.copy(mod)
             ret.__dict__ = {copy.copy(k): copy.copy(v) for k, v in mod.__dict__.items()}
             for name, child in ret.named_children():
@@ -1580,11 +1613,11 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
     serialized_type_name = cls.__module__ + "." + cls.__qualname__
 
-    def to_dumpable_context(context):
+    def to_dumpable_context(context: Context) -> str:
         keys, *_ = context
         return json.dumps([keys, *([None] * len(_))])
 
-    def from_dumpable_context(dumpable):
+    def from_dumpable_context(dumpable: str) -> Any:
         s = json.loads(dumpable)
         s[1] = PrototypeModule(torch.nn.Module())
         return s
@@ -1599,7 +1632,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         from_dumpable_context=from_dumpable_context,
     )
 
-    def default_flatten_fn_spec(obj, spec) -> list[Any]:
+    def default_flatten_fn_spec(obj: Any, spec: "TreeSpec") -> list[Any]:
         flats, context = flatten_fn(obj)
         if context != spec.context:
             raise AssertionError(f"context mismatch: {context} != {spec.context}")
@@ -1616,7 +1649,7 @@ def deregister_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
     _deregister_pytree_flatten_spec(cls)
 
 
-def _sync_state(src, dst):
+def _sync_state(src: torch.nn.Module, dst: torch.nn.Module) -> None:
     if not isinstance(src, torch.nn.Module):
         raise AssertionError(f"Expected {src} to be a nn.Module")
     if not isinstance(dst, torch.nn.Module):
@@ -1629,7 +1662,7 @@ def _sync_state(src, dst):
     dst._buffers = src._buffers
 
 
-def sync_state(*wrapped_method_modules):
+def sync_state(*wrapped_method_modules: torch.nn.Module) -> None:
     """
     Sync state between exported modules corresponding to wrapped methods.
     This might be necessary after serializing/deserializing due to copying.
@@ -1641,15 +1674,15 @@ def sync_state(*wrapped_method_modules):
 
 
 class _WrappedMethod(torch.nn.Module):
-    def __init__(self, method):
+    def __init__(self, method: Callable[..., object]) -> None:
         super().__init__()
         # share state of method's self module
-        _sync_state(method.__self__, self)
+        _sync_state(method.__self__, self)  # type: ignore[attr-defined]
         # redirect forward to method
         self.forward = method
 
 
-def wrap_method(method):
+def wrap_method(method: Callable[..., object]) -> _WrappedMethod:
     """
     Wrap a method as a module so that it can be exported.
     The wrapped module's forward points to the method, and
