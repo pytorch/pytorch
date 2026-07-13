@@ -5659,20 +5659,24 @@ def sample_inputs__unsafe_masked_index_put_accumulate(op_info, device, dtype, re
 
 
 def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
-    args = (
-        ((S, S, S), (),),
-        ((S, S, S), (1, ),),
-        ((S, S, S), (1, True, ),),
-        ((), (),),
-        ((), (0,),),
-        ((), (0, True,),),
-        # Non-fused mode kernel on CUDA
-        ((3000,), ()),
-    )
     make_arg = partial(make_tensor, dtype=dtype, device=device,
                        requires_grad=requires_grad, low=None, high=None)
-    return (SampleInput(make_arg(input_tensor), *args)
-            for input_tensor, args in args)
+    # `dim` / `keepdim` are passed via kwargs so that test_ops.test_reduction_ops_reduce
+    # (which gates on `"dim" in sample.kwargs`) actually exercises the op instead
+    # of skipping every sample and trivially passing.
+    cases = (
+        # (input_shape, kwargs)
+        ((S, S, S), {}),
+        ((S, S, S), {'dim': 1}),
+        ((S, S, S), {'dim': 1, 'keepdim': True}),
+        ((), {}),
+        ((), {'dim': 0}),
+        ((), {'dim': 0, 'keepdim': True}),
+        # Non-fused mode kernel on CUDA
+        ((3000,), {}),
+    )
+    for input_shape, kw in cases:
+        yield SampleInput(make_arg(input_shape), **kw)
 
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
