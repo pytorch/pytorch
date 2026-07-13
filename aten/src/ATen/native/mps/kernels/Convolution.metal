@@ -425,172 +425,330 @@ kernel void conv3d_mpp(
   }
 }
 
-#define INSTANTIATE_CONV3D_MPP(                                                \
-    DT,                                                                        \
-    DNAME,                                                                     \
-    RELAXED,                                                                   \
-    BO,                                                                        \
-    BW,                                                                        \
-    BH,                                                                        \
-    NSG,                                                                       \
-    KD,                                                                        \
-    KH,                                                                        \
-    KW,                                                                        \
-    SZ,                                                                        \
-    SY,                                                                        \
-    SX,                                                                        \
-    DZ,                                                                        \
-    DY,                                                                        \
-    DX,                                                                        \
-    CNAME,                                                                     \
-    SRCC,                                                                      \
-    BNAME,                                                                     \
-    HAS_BIAS,                                                                  \
-    LNAME,                                                                     \
-    OUT_NCDHW,                                                                 \
-    GNAME,                                                                     \
-    GROUPED)                                                                   \
-  template                                                                     \
-      [[host_name("conv3d_mpp_" #DNAME "_b" #BO "_w" #BW "_h" #BH "_s" \
-                  #NSG "_k" #KD #KH #KW "_s" #SZ #SY #SX "_d" #DZ #DY #DX \
-                  "_c" #CNAME "_" #BNAME "_" #LNAME "_" #GNAME)]]          \
-      kernel void                                                             \
-      conv3d_mpp<                                                              \
-          DT,                                                                  \
-          BO,                                                                  \
-          BW,                                                                  \
-          BH,                                                                  \
-          NSG,                                                                 \
-          KD,                                                                  \
-          KH,                                                                  \
-          KW,                                                                  \
-          SZ,                                                                  \
-          SY,                                                                  \
-          SX,                                                                  \
-          DZ,                                                                  \
-          DY,                                                                  \
-          DX,                                                                  \
-          SRCC,                                                                \
-          16384,                                                               \
-          16384,                                                               \
-          RELAXED,                                                             \
-          HAS_BIAS,                                                            \
-          OUT_NCDHW,                                                           \
-          GROUPED>(                                                            \
-          device DT*,                                                          \
-          device DT*,                                                          \
-          device DT*,                                                          \
-          constant Conv3dDims&,                                                \
-          device const DT*,                                                    \
+#define INSTANTIATE_CONV3D_MPP(                                             \
+    DT,                                                                     \
+    DNAME,                                                                  \
+    RELAXED,                                                                \
+    BO,                                                                     \
+    BW,                                                                     \
+    BH,                                                                     \
+    NSG,                                                                    \
+    KD,                                                                     \
+    KH,                                                                     \
+    KW,                                                                     \
+    SZ,                                                                     \
+    SY,                                                                     \
+    SX,                                                                     \
+    DZ,                                                                     \
+    DY,                                                                     \
+    DX,                                                                     \
+    CNAME,                                                                  \
+    SRCC,                                                                   \
+    BNAME,                                                                  \
+    HAS_BIAS,                                                               \
+    LNAME,                                                                  \
+    OUT_NCDHW,                                                              \
+    GNAME,                                                                  \
+    GROUPED)                                                                \
+  template                                                                  \
+      [[host_name("conv3d_mpp_" #DNAME "_b" #BO "_w" #BW "_h" #BH "_s" #NSG \
+                  "_k" #KD #KH #KW "_s" #SZ #SY #SX "_d" #DZ #DY #DX        \
+                  "_c" #CNAME "_" #BNAME "_" #LNAME "_" #GNAME)]]           \
+      kernel void conv3d_mpp<                                               \
+          DT,                                                               \
+          BO,                                                               \
+          BW,                                                               \
+          BH,                                                               \
+          NSG,                                                              \
+          KD,                                                               \
+          KH,                                                               \
+          KW,                                                               \
+          SZ,                                                               \
+          SY,                                                               \
+          SX,                                                               \
+          DZ,                                                               \
+          DY,                                                               \
+          DX,                                                               \
+          SRCC,                                                             \
+          16384,                                                            \
+          16384,                                                            \
+          RELAXED,                                                          \
+          HAS_BIAS,                                                         \
+          OUT_NCDHW,                                                        \
+          GROUPED>(                                                         \
+          device DT*,                                                       \
+          device DT*,                                                       \
+          device DT*,                                                       \
+          constant Conv3dDims&,                                             \
+          device const DT*,                                                 \
           uint3);
 
-#define INSTANTIATE_CONV3D_MPP_DTYPES(                                        \
-    BO, BW, BH, NSG, KD, KH, KW, SZ, SY, SX, DZ, DY, DX, CNAME, SRCC, BNAME, \
-    HAS_BIAS, LNAME, OUT_NCDHW, GNAME, GROUPED)                               \
-  INSTANTIATE_CONV3D_MPP(                                                     \
-      float,                                                                  \
-      float,                                                                  \
-      false,                                                                  \
-      BO,                                                                     \
-      BW,                                                                     \
-      BH,                                                                     \
-      NSG,                                                                    \
-      KD,                                                                     \
-      KH,                                                                     \
-      KW,                                                                     \
-      SZ,                                                                     \
-      SY,                                                                     \
-      SX,                                                                     \
-      DZ,                                                                     \
-      DY,                                                                     \
-      DX,                                                                     \
-      CNAME,                                                                  \
-      SRCC,                                                                   \
-      BNAME,                                                                  \
-      HAS_BIAS,                                                               \
-      LNAME,                                                                  \
-      OUT_NCDHW,                                                              \
-      GNAME,                                                                  \
-      GROUPED)                                                                \
-  INSTANTIATE_CONV3D_MPP(                                                     \
-      half,                                                                   \
-      half,                                                                   \
-      true,                                                                   \
-      BO,                                                                     \
-      BW,                                                                     \
-      BH,                                                                     \
-      NSG,                                                                    \
-      KD,                                                                     \
-      KH,                                                                     \
-      KW,                                                                     \
-      SZ,                                                                     \
-      SY,                                                                     \
-      SX,                                                                     \
-      DZ,                                                                     \
-      DY,                                                                     \
-      DX,                                                                     \
-      CNAME,                                                                  \
-      SRCC,                                                                   \
-      BNAME,                                                                  \
-      HAS_BIAS,                                                               \
-      LNAME,                                                                  \
-      OUT_NCDHW,                                                              \
-      GNAME,                                                                  \
-      GROUPED)                                                                \
-  INSTANTIATE_CONV3D_MPP(                                                     \
-      bfloat,                                                                 \
-      bfloat,                                                                 \
-      true,                                                                   \
-      BO,                                                                     \
-      BW,                                                                     \
-      BH,                                                                     \
-      NSG,                                                                    \
-      KD,                                                                     \
-      KH,                                                                     \
-      KW,                                                                     \
-      SZ,                                                                     \
-      SY,                                                                     \
-      SX,                                                                     \
-      DZ,                                                                     \
-      DY,                                                                     \
-      DX,                                                                     \
-      CNAME,                                                                  \
-      SRCC,                                                                   \
-      BNAME,                                                                  \
-      HAS_BIAS,                                                               \
-      LNAME,                                                                  \
-      OUT_NCDHW,                                                              \
-      GNAME,                                                                  \
+#define INSTANTIATE_CONV3D_MPP_DTYPES( \
+    BO,                                \
+    BW,                                \
+    BH,                                \
+    NSG,                               \
+    KD,                                \
+    KH,                                \
+    KW,                                \
+    SZ,                                \
+    SY,                                \
+    SX,                                \
+    DZ,                                \
+    DY,                                \
+    DX,                                \
+    CNAME,                             \
+    SRCC,                              \
+    BNAME,                             \
+    HAS_BIAS,                          \
+    LNAME,                             \
+    OUT_NCDHW,                         \
+    GNAME,                             \
+    GROUPED)                           \
+  INSTANTIATE_CONV3D_MPP(              \
+      float,                           \
+      float,                           \
+      false,                           \
+      BO,                              \
+      BW,                              \
+      BH,                              \
+      NSG,                             \
+      KD,                              \
+      KH,                              \
+      KW,                              \
+      SZ,                              \
+      SY,                              \
+      SX,                              \
+      DZ,                              \
+      DY,                              \
+      DX,                              \
+      CNAME,                           \
+      SRCC,                            \
+      BNAME,                           \
+      HAS_BIAS,                        \
+      LNAME,                           \
+      OUT_NCDHW,                       \
+      GNAME,                           \
+      GROUPED)                         \
+  INSTANTIATE_CONV3D_MPP(              \
+      half,                            \
+      half,                            \
+      true,                            \
+      BO,                              \
+      BW,                              \
+      BH,                              \
+      NSG,                             \
+      KD,                              \
+      KH,                              \
+      KW,                              \
+      SZ,                              \
+      SY,                              \
+      SX,                              \
+      DZ,                              \
+      DY,                              \
+      DX,                              \
+      CNAME,                           \
+      SRCC,                            \
+      BNAME,                           \
+      HAS_BIAS,                        \
+      LNAME,                           \
+      OUT_NCDHW,                       \
+      GNAME,                           \
+      GROUPED)                         \
+  INSTANTIATE_CONV3D_MPP(              \
+      bfloat,                          \
+      bfloat,                          \
+      true,                            \
+      BO,                              \
+      BW,                              \
+      BH,                              \
+      NSG,                             \
+      KD,                              \
+      KH,                              \
+      KW,                              \
+      SZ,                              \
+      SY,                              \
+      SX,                              \
+      DZ,                              \
+      DY,                              \
+      DX,                              \
+      CNAME,                           \
+      SRCC,                            \
+      BNAME,                           \
+      HAS_BIAS,                        \
+      LNAME,                           \
+      OUT_NCDHW,                       \
+      GNAME,                           \
       GROUPED)
 
-#define INSTANTIATE_CONV3D_MPP_TILES(                                         \
-    KD, KH, KW, SZ, SY, SX, DZ, DY, DX, CNAME, SRCC, BNAME, HAS_BIAS, LNAME, \
-    OUT_NCDHW, GNAME, GROUPED)                                                \
-  INSTANTIATE_CONV3D_MPP_DTYPES(                                              \
-      32, 8, 8, 2, KD, KH, KW, SZ, SY, SX, DZ, DY, DX, CNAME, SRCC, BNAME,   \
-      HAS_BIAS, LNAME, OUT_NCDHW, GNAME, GROUPED)                             \
-  INSTANTIATE_CONV3D_MPP_DTYPES(                                              \
-      32, 16, 8, 4, KD, KH, KW, SZ, SY, SX, DZ, DY, DX, CNAME, SRCC, BNAME,  \
-      HAS_BIAS, LNAME, OUT_NCDHW, GNAME, GROUPED)                             \
-  INSTANTIATE_CONV3D_MPP_DTYPES(                                              \
-      64, 8, 8, 2, KD, KH, KW, SZ, SY, SX, DZ, DY, DX, CNAME, SRCC, BNAME,   \
-      HAS_BIAS, LNAME, OUT_NCDHW, GNAME, GROUPED)                             \
-  INSTANTIATE_CONV3D_MPP_DTYPES(                                              \
-      64, 16, 8, 4, KD, KH, KW, SZ, SY, SX, DZ, DY, DX, CNAME, SRCC, BNAME,  \
-      HAS_BIAS, LNAME, OUT_NCDHW, GNAME, GROUPED)                             \
-  INSTANTIATE_CONV3D_MPP_DTYPES(                                              \
-      128, 8, 8, 4, KD, KH, KW, SZ, SY, SX, DZ, DY, DX, CNAME, SRCC, BNAME,  \
-      HAS_BIAS, LNAME, OUT_NCDHW, GNAME, GROUPED)
+#define INSTANTIATE_CONV3D_MPP_TILES( \
+    KD,                               \
+    KH,                               \
+    KW,                               \
+    SZ,                               \
+    SY,                               \
+    SX,                               \
+    DZ,                               \
+    DY,                               \
+    DX,                               \
+    CNAME,                            \
+    SRCC,                             \
+    BNAME,                            \
+    HAS_BIAS,                         \
+    LNAME,                            \
+    OUT_NCDHW,                        \
+    GNAME,                            \
+    GROUPED)                          \
+  INSTANTIATE_CONV3D_MPP_DTYPES(      \
+      32,                             \
+      8,                              \
+      8,                              \
+      2,                              \
+      KD,                             \
+      KH,                             \
+      KW,                             \
+      SZ,                             \
+      SY,                             \
+      SX,                             \
+      DZ,                             \
+      DY,                             \
+      DX,                             \
+      CNAME,                          \
+      SRCC,                           \
+      BNAME,                          \
+      HAS_BIAS,                       \
+      LNAME,                          \
+      OUT_NCDHW,                      \
+      GNAME,                          \
+      GROUPED)                        \
+  INSTANTIATE_CONV3D_MPP_DTYPES(      \
+      32,                             \
+      16,                             \
+      8,                              \
+      4,                              \
+      KD,                             \
+      KH,                             \
+      KW,                             \
+      SZ,                             \
+      SY,                             \
+      SX,                             \
+      DZ,                             \
+      DY,                             \
+      DX,                             \
+      CNAME,                          \
+      SRCC,                           \
+      BNAME,                          \
+      HAS_BIAS,                       \
+      LNAME,                          \
+      OUT_NCDHW,                      \
+      GNAME,                          \
+      GROUPED)                        \
+  INSTANTIATE_CONV3D_MPP_DTYPES(      \
+      64,                             \
+      8,                              \
+      8,                              \
+      2,                              \
+      KD,                             \
+      KH,                             \
+      KW,                             \
+      SZ,                             \
+      SY,                             \
+      SX,                             \
+      DZ,                             \
+      DY,                             \
+      DX,                             \
+      CNAME,                          \
+      SRCC,                           \
+      BNAME,                          \
+      HAS_BIAS,                       \
+      LNAME,                          \
+      OUT_NCDHW,                      \
+      GNAME,                          \
+      GROUPED)                        \
+  INSTANTIATE_CONV3D_MPP_DTYPES(      \
+      64,                             \
+      16,                             \
+      8,                              \
+      4,                              \
+      KD,                             \
+      KH,                             \
+      KW,                             \
+      SZ,                             \
+      SY,                             \
+      SX,                             \
+      DZ,                             \
+      DY,                             \
+      DX,                             \
+      CNAME,                          \
+      SRCC,                           \
+      BNAME,                          \
+      HAS_BIAS,                       \
+      LNAME,                          \
+      OUT_NCDHW,                      \
+      GNAME,                          \
+      GROUPED)                        \
+  INSTANTIATE_CONV3D_MPP_DTYPES(      \
+      128,                            \
+      8,                              \
+      8,                              \
+      4,                              \
+      KD,                             \
+      KH,                             \
+      KW,                             \
+      SZ,                             \
+      SY,                             \
+      SX,                             \
+      DZ,                             \
+      DY,                             \
+      DX,                             \
+      CNAME,                          \
+      SRCC,                           \
+      BNAME,                          \
+      HAS_BIAS,                       \
+      LNAME,                          \
+      OUT_NCDHW,                      \
+      GNAME,                          \
+      GROUPED)
 
 #define INSTANTIATE_CONV3D_MPP_STANDARD(KD, KH, KW, SZ, SY, SX, CNAME, SRCC) \
-  INSTANTIATE_CONV3D_MPP_TILES(                                             \
-      KD, KH, KW, SZ, SY, SX, 1, 1, 1, CNAME, SRCC, bias, true, ncdhw, true, \
-      ungrouped, false)
+  INSTANTIATE_CONV3D_MPP_TILES(                                              \
+      KD,                                                                    \
+      KH,                                                                    \
+      KW,                                                                    \
+      SZ,                                                                    \
+      SY,                                                                    \
+      SX,                                                                    \
+      1,                                                                     \
+      1,                                                                     \
+      1,                                                                     \
+      CNAME,                                                                 \
+      SRCC,                                                                  \
+      bias,                                                                  \
+      true,                                                                  \
+      ncdhw,                                                                 \
+      true,                                                                  \
+      ungrouped,                                                             \
+      false)
 
-#define INSTANTIATE_CONV3D_MPP_GROUPED(KD, KH, KW, SZ, SY, SX)             \
-  INSTANTIATE_CONV3D_MPP_TILES(                                            \
-      KD, KH, KW, SZ, SY, SX, 1, 1, 1, 1, 1, nobias, false, ncdhw, true,   \
-      grouped, true)
+#define INSTANTIATE_CONV3D_MPP_GROUPED(KD, KH, KW, SZ, SY, SX) \
+  INSTANTIATE_CONV3D_MPP_TILES(                                \
+      KD,                                                      \
+      KH,                                                      \
+      KW,                                                      \
+      SZ,                                                      \
+      SY,                                                      \
+      SX,                                                      \
+      1,                                                       \
+      1,                                                       \
+      1,                                                       \
+      1,                                                       \
+      1,                                                       \
+      nobias,                                                  \
+      false,                                                   \
+      ncdhw,                                                   \
+      true,                                                    \
+      grouped,                                                 \
+      true)
 
 // Deduplicated direct Conv3d specs from the surveyed model shapes.
 INSTANTIATE_CONV3D_MPP_GROUPED(1, 1, 2, 1, 1, 2)
