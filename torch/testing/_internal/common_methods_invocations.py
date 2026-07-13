@@ -17816,7 +17816,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
                # torch-xpu-ops/issues/4108
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
-                            device_type='xpu', dtype=torch.float32),
+                            device_type='xpu', dtypes=(torch.float32,)),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
