@@ -930,6 +930,7 @@ WRITE_OPS: dict[str, ReadWriteIndexes] = {
     "tt.store": lambda op: [0],
     "tt.atomic_cas": lambda op: [0],
     "tt.atomic_rmw": lambda op: [0],
+    "tt.experimental_tensormap_create": lambda op: [0],
     **TMA_STORE_OPS,  # TMA stores are write ops
 }
 

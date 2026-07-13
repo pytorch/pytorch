@@ -4506,6 +4506,39 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(get_tma_stores(functions, "main"), {Param(idx=0)})
 
+    def test_tensormap_create_marks_descriptor_write(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        functions = {
+            "main": {
+                Intermediate(idx=-1): [
+                    Op(
+                        "tt.experimental_tensormap_create",
+                        None,
+                        [Param(idx=0), Param(idx=1)],
+                        Intermediate(idx=-1),
+                    )
+                ],
+            },
+        }
+
+        analyze_kernel_access.reset()
+        tensor_accesses = analyze_kernel_access(
+            functions,
+            "main",
+            2,
+            ("workspace", "global_ptr"),
+            frozenset({0, 1}),
+        )
+
+        write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+        self.assertListEqual(write_names, ["workspace"])
+
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
         "requires experimental TMA descriptor API",
