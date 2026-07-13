@@ -890,6 +890,36 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """2000""")
 
+    def test_matmul_flop_formula_extra_positional_out(self):
+        from torch.utils.flop_counter import flop_registry
+
+        a, b = (8, 128, 64), (8, 64, 32)
+        out = (8, 128, 32)
+        expected_bmm = 8 * 128 * 32 * 2 * 64
+        self.assertEqual(
+            flop_registry[torch.ops.aten.bmm](a, b, out, out_val=out), expected_bmm
+        )
+        self.assertEqual(
+            flop_registry[torch.ops.aten.baddbmm](out, a, b, out, out_val=out),
+            expected_bmm,
+        )
+
+        a2, b2 = (128, 64), (64, 32)
+        out2 = (128, 32)
+        self.assertEqual(
+            flop_registry[torch.ops.aten.addmm](out2, a2, b2, out2, out_val=out2),
+            128 * 32 * 2 * 64,
+        )
+
+        self.assertEqual(torch.utils.flop_counter.bmm_flop(a, b, out), expected_bmm)
+        self.assertEqual(
+            torch.utils.flop_counter.baddbmm_flop(out, a, b, out), expected_bmm
+        )
+        self.assertEqual(
+            torch.utils.flop_counter.addmm_flop(out2, a2, b2, out2),
+            128 * 32 * 2 * 64,
+        )
+
     def test_hook_registration(self):
         model = torch.nn.Linear(100, 100)
         x = torch.randn(3, 100)
