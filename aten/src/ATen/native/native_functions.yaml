@@ -14729,7 +14729,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_polar_out
+    CPU, CUDA, MPS: linalg_polar_out
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg
