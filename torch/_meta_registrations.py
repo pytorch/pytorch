@@ -5263,6 +5263,11 @@ def max_pool3d_backward_shape_check(
     check_dim_size(indices, ndim, ndim - 2, oheight)
     check_dim_size(indices, ndim, ndim - 1, owidth)
 
+    if ndim == 5:
+        batch_size = input.size(0)
+        check_dim_size(grad_output, ndim, 0, batch_size)
+        check_dim_size(indices, ndim, 0, batch_size)
+
 
 def avg_pool3d_backward_shape_check(
     input: Tensor,

@@ -1618,6 +1618,23 @@ torch.cuda.synchronize()
                 indices,
             )
 
+    @onlyNativeDeviceTypes
+    def test_max_pool3d_with_indices_backward_batch_mismatch(self, device):
+        grad_output = torch.randn(1, 2, 1, 3, 2, device=device)
+        input = torch.randn(1, 2, 3, 6, 5, device=device)
+        indices = torch.zeros(0, 2, 1, 3, 2, dtype=torch.long, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected a tensor of dimension"):
+            torch.ops.aten.max_pool3d_with_indices_backward(
+                grad_output,
+                input,
+                [3, 3, 3],
+                [2, 2, 2],
+                [0, 0, 0],
+                [1, 1, 1],
+                True,
+                indices,
+            )
+
     @onlyCPU
     @dtypes(torch.half, torch.bfloat16)
     def test_avg_pool2d_reduced_floating(self, device, dtype):
