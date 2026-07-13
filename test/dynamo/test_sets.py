@@ -117,6 +117,56 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, x.sin())
         self.assertEqual(results, [3, 2, 2, 1, 1, 0, 0])
 
+    def test_id_arithmetic_in_custom_hash_fullgraph(self):
+        # id() of an object created inside the compiled region is a fake,
+        # compile-time-only int. Bitwise/arithmetic ops on it (a common way to
+        # derive a __hash__, e.g. CPython test_set.test_subclass_with_custom_hash)
+        # must not graph break and must stay compile-time. Covers set,
+        # frozenset, and subclass bases whose __hash__ masks id(self).
+        class HSet(set):
+            def __hash__(self):
+                return int((id(self) & 0x7FFFFFFF) ^ 3)
+
+        class HFrozen(frozenset):
+            def __hash__(self):
+                return int((id(self) & 0x7FFFFFFF) ^ 3)
+
+        class HSubclass(SetSubclass):
+            def __hash__(self):
+                return int((id(self) & 0x7FFFFFFF) ^ 3)
+
+        for cls in (HSet, HFrozen, HSubclass):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                s = cls()
+                f = set()
+                f.add(s)
+                present = s in f
+                f.discard(s)
+                return x + 1, present
+
+            res, present = fn(torch.zeros(1))
+            self.assertEqual(res, torch.ones(1))
+            self.assertTrue(present)
+
+    def test_id_arithmetic_ops_stay_compile_time(self):
+        # A spread of int arithmetic/bitwise/unary ops on a fake id() value
+        # all stay compile-time-only and can serve as a hash without breaking.
+        class H(set):
+            def __hash__(self):
+                i = id(self)
+                return int((i & 0xFFFF) | (i >> 4) ^ (~i) + (i * 2) - (i // 3))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            f = {H()}
+            return x + 1, len(f)
+
+        res, n = fn(torch.zeros(1))
+        self.assertEqual(res, torch.ones(1))
+        self.assertEqual(n, 1)
+
     def test_do_not_rehash_dict_keys(self):
         # Building a set/frozenset (or subclass) from a dict must reuse the
         # dict's stored hashes instead of re-invoking __hash__, mirroring

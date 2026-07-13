@@ -4332,6 +4332,40 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
+        @skipIfRocm
+        def test_graph_partition_max_autotune_skips_linalg_eigh(self):
+            from torch._inductor.utils import is_cudagraph_unsafe_fx_node
+
+            def f(x):
+                affinity = torch.matmul(x, x.transpose(-2, -1))
+                return torch.linalg.eigh(affinity)
+
+            gen = torch.Generator(device="cuda").manual_seed(0)
+            x = torch.randn(2, 6, 4, device="cuda", generator=gen)
+            affinity = torch.matmul(x, x.transpose(-2, -1))
+            gm = make_fx(lambda a: torch.ops.aten._linalg_eigh.default(a))(affinity)
+            eigh_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.aten._linalg_eigh.default
+            )
+            self.assertTrue(is_cudagraph_unsafe_fx_node(eigh_node))
+
+            expected = f(x)
+            compiled_f = torch.compile(f, mode="max-autotune")
+
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                for _ in range(3):
+                    actual = compiled_f(x)
+
+            self.assertEqual(actual[0], expected[0], atol=1e-4, rtol=1e-4)
+            self.assertEqual(actual[1].shape, expected[1].shape)
+            FileCheck().check(
+                "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable"
+            ).run(log_stream.getvalue())
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_log_message(self):
             def foo(x, y):
                 return (x + 1, y + 2)
