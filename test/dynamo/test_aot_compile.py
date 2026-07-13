@@ -608,6 +608,29 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_autocast_guard_reload(self):
+        def fn(x):
+            return x + 1 * x
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        x = torch.randn(3, 4)
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, backend=backend
+            ).aot_compile(((x,), {}))
+            expected = fn(x)
+            self.assertEqual(expected, compiled_fn(x))
+
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            actual = compiled_fn(x)
+        self.assertEqual(expected, actual)
+
     def test_aot_compile_basic_forward(self):
         mod = SimpleLinearModule()
 
@@ -1756,7 +1779,7 @@ from user code:
                     self.assertEqual(
                         compiled_grads[name],
                         eager_grads[name],
-                        msg=f"Gradients for {name} should be bitwise equivalent",
+                        msg=lambda msg: f"{msg}\nGradients for {name} should be bitwise equivalent",
                     )
         finally:
             c10d.destroy_process_group()

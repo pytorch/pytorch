@@ -1138,6 +1138,8 @@ def lp_pool3d(
         )
     kd, kw, kh = _triple(kernel_size)
     if isinstance(norm_type, (int, float)):
+        if norm_type == 0:
+            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
         if norm_type == float("inf"):
             return max_pool3d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
         if norm_type == -float("inf"):
@@ -1185,6 +1187,8 @@ def lp_pool2d(
         )
     kw, kh = _pair(kernel_size)
     if isinstance(norm_type, (int, float)):
+        if norm_type == 0:
+            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
         if norm_type == float("inf"):
             return max_pool2d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
         if norm_type == -float("inf"):
@@ -1228,6 +1232,8 @@ def lp_pool1d(
             ceil_mode=ceil_mode,
         )
     if isinstance(norm_type, (int, float)):
+        if norm_type == 0:
+            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
         if norm_type == float("inf"):
             return max_pool1d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
         if norm_type == -float("inf"):
@@ -3727,7 +3733,14 @@ def linear_cross_entropy(
     Args:
         input (Tensor) : input samples.
         linear_weight (Tensor) : linear weight.
-        target (Tensor) : Ground truth class indices or class probabilities;
+        target (Tensor) : Ground truth class indices or class probabilities.
+            With ``options != None``, class probabilities use the chunked
+            path for ``reduction`` ``'mean'`` / ``'sum'`` when the target
+            dtype matches the ``input`` dtype and the target does not
+            require grad; other probability-target configurations fall
+            back to the reference implementation with a warning
+            (gradients w.r.t. the target are only available on the
+            reference path).
         linear_bias (Tensor, optional): bias added to the linear
             projection (shape ``(C,)`` or ``(C, d_1, ..., d_K)`` for
             K-dimensional loss, matching :attr:`linear_weight`).
@@ -3877,22 +3890,34 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
+    # Probability targets chunk on the scalar reductions only; the chunked
+    # op has no gradient slot for the target, so a target requiring grad
+    # falls back to the reference path.
+    chunkable_prob_target = (
+        target_contains_probabilities
+        and reduction in {"mean", "sum"}
+        and target.dtype == input.dtype
+        and not (target.requires_grad and torch.is_grad_enabled())
+    )
     # K-dim loss falls back: the chunked op softmaxes over the full
     # linear_weight.shape[0], not per-position over num_classes.
     if options is not None and (
         out_features
         or reduction not in {"mean", "sum", "none"}
         or label_smoothing != 0.0
-        or target.dtype != torch.int64
+        or (target.dtype != torch.int64 and not chunkable_prob_target)
         or torch.jit.is_tracing()
     ):
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
             "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
-            " == int64, out_features == (). Got "
+            " == int64 (or a probability target with reduction in {'mean','sum'},"
+            " dtype matching input, and requires_grad == False), out_features"
+            " == (). Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
             f", tracing={torch.jit.is_tracing()}"
+            f", target.requires_grad={target.requires_grad}"
             f", linear_bias.shape="
             f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
             stacklevel=2,
@@ -3902,7 +3927,7 @@ def linear_cross_entropy(
         options is not None
         and reduction in {"mean", "sum", "none"}
         and label_smoothing == 0.0
-        and target.dtype == torch.int64
+        and (target.dtype == torch.int64 or chunkable_prob_target)
         and not out_features
         and not torch.jit.is_tracing()
     ):
@@ -3921,6 +3946,7 @@ def linear_cross_entropy(
             num_classes=num_classes,
             dtype=input.dtype,
             device=input.device,
+            prob_target=target.dtype.is_floating_point,
         )
 
         # Local import avoids a circular init via torch.library.custom_op.
@@ -5362,7 +5388,7 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
 
     Args:
         input (Tensor): input
-        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial
             size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
 

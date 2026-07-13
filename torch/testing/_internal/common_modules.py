@@ -1819,22 +1819,24 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
             )
 
     def sizes_and_options():
+        # APPEND-ONLY: never reorder/insert/remove entries -- each consumes
+        # fixed RNG draws, so a mid-stream change shifts later samples and
+        # moves the cancellation-sensitive index-target ULP caps in test_nn.py.
         for sizes in [(8, 5, 4), (None, 8, 4)]:
             yield sizes, None
             num_batches, in_features, num_classes = sizes
             if acc_dtype is not None:
                 yield sizes, dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
                 continue
-            # unspecified chunk sizes default maximal chunk sizes for
-            # best processing performance:
+            # unspecified options use the auto resolution (aspect_ratio
+            # factor 1, capped to stay at or below the reference peak):
             yield sizes, dict()
 
             if num_batches is not None:
                 # fixed chunk size reduces memory usage but may reduce
                 # processing performance:
                 yield sizes, dict(batch_chunk_size=2)
-                # alternatively to fixing chunk sizes, chunk sizes can be
-                # determined by a chunking method:
+                # alternatively, chunk sizes via an explicit chunking method:
                 yield sizes, dict(chunking_method="aspect_ratio:2")
                 yield sizes, dict(chunking_method="aspect_ratio:4")
 
@@ -1877,7 +1879,9 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                             # ignore_index is not supported for floating point target
                             continue
                         if options is not None:
-                            # chunking is not supported for floating point target
+                            # chunked probability-target samples are
+                            # appended after the main loop (so the RNG
+                            # draw order of these samples is unchanged)
                             continue
                     else:
                         target_shape = (*batch_dims, *of)
@@ -1970,6 +1974,40 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     input = make_input(batch_dims, in_features)
                     target = make_target(num_classes, (*batch_dims, *of), torch.int64)
                     yield module_args, module_kwargs, (input, target)
+
+        # Chunked probability-target coverage (mean/sum; reduction='none'
+        # with a probability target falls back to the reference).
+        # Appended after all other samples so the RNG draw order -- and
+        # therefore the data the calibrated index-target ULP caps were
+        # measured on -- is unchanged.
+        for sizes in [(8, 5, 4), (None, 8, 4)]:
+            num_batches, in_features, num_classes = sizes
+            batch_dims = () if num_batches is None else (num_batches,)
+            weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
+            for reduction, w in product(["mean", "sum"], weights):
+                if acc_dtype is not None:
+                    options = dict(acc_dtype=acc_dtype, chunking_method="aspect_ratio")
+                elif num_batches is not None:
+                    # batch_chunk_size=2 forces >=2 chunks on every device.
+                    options = dict(batch_chunk_size=2)
+                else:
+                    options = dict()
+                module_args = (in_features, num_classes)
+                module_kwargs = dict(
+                    out_features=(),
+                    device=device,
+                    dtype=dtype,
+                    reduction=reduction,
+                    weight=w,
+                    ignore_index=None,
+                    label_smoothing=0.0,
+                    options=torch.nn.LinearCrossEntropyOptions(
+                        allow_retain_graph=allow_retain_graph, **options
+                    ),
+                )
+                input = make_input(batch_dims, in_features)
+                target = make_target(num_classes, (*batch_dims, num_classes), dtype)
+                yield module_args, module_kwargs, (input, target)
 
     module_inputs = []
     for module_args, module_kwargs, (input, target) in samples():
@@ -4147,17 +4185,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.AvgPool2d,
                module_inputs_func=module_inputs_torch_nn_AvgPool2d,
-               skips=(
-                   # The difference between channels last backward and
-                   # channels first backward of AvgPool2d on CUDA is too large
-                   # See https://github.com/pytorch/pytorch/issues/107201
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='cuda',),
-               ),),
+               ),
     ModuleInfo(torch.nn.AvgPool3d,
                module_inputs_func=module_inputs_torch_nn_AvgPool3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -4191,8 +4219,6 @@ module_db: list[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
                module_error_inputs_func=module_error_inputs_torch_nn_BatchNorm1d_2d_3d,
                skips=(
-                   # See https://github.com/pytorch/pytorch/issues/134580
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format', active_if=operator.itemgetter('training')),
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
                    DecorateInfo(
