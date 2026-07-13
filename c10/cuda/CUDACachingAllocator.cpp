@@ -1367,7 +1367,7 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     }
     ss << " has " << format_size(proc.usedGpuMemory) << " memory in use. ";
   }
-  return ss.str();
+  return std::move(ss).str();
 #else
   return "";
 #endif
@@ -2475,7 +2475,7 @@ class DeviceCachingAllocator {
           SegmentRange(block->ptr, block->size), ss);
       offset = static_cast<const char*>(block->ptr) - full_range.ptr;
     }
-    return ShareableHandle{.offset = offset, .handle = ss.str()};
+    return ShareableHandle{.offset = offset, .handle = std::move(ss).str()};
   }
 
   void recordStream(Block* block, cuda::CUDAStream stream) {
