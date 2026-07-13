@@ -1319,6 +1319,69 @@ def forward(self, x_1):
                 gm = fx.GraphModule(tracer.root, tracer.graph)
                 self.assertEqual(gm(2, 3, 4), expected)
 
+    def test_build_proxy_for_pow(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles sympy.Pow.
+
+        sympy canonicalizes x * x into Pow(x, 2), so a reduction numel over a
+        tensor whose two dims duck-share a symbol becomes a nonlinear product
+        like s0 * s1**2. _build_proxy_for_sym_expr must rebuild it; without a
+        Pow handler the Pow factor has no proxy and get_proxy_slot raises
+        "is not tracked with proxy".
+        """
+        import sympy
+
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        # Cover more than just the square: the exponent is passed straight to
+        # the handler, so any natural power must rebuild (s1**2, s1**3, ...).
+        for exp in (2, 3):
+            with self.subTest(exp=exp):
+                shape_env = ShapeEnv()
+                # Unbacked symints keep the expression symbolic (backed symints
+                # would specialize the power away).
+                u0 = shape_env.create_unbacked_symint()
+                u1 = shape_env.create_unbacked_symint()
+
+                prod = u0 * u1**exp
+                self.assertTrue(prod.node.expr.has(sympy.Pow))
+
+                # Case 1: out=None must rebuild the Pow expr, not return None.
+                tracer_none = PythonKeyTracer()
+                for sym in [u0, u1]:
+                    tracer_none.sympy_expr_tracker[sym.node.expr] = (
+                        _SympyExprTrackerValue(proxy=sym, value=sym)
+                    )
+                result = _build_proxy_for_sym_expr(tracer_none, prod.node.expr)
+                self.assertEqual(result.node.expr, prod.node.expr)
+
+                # Case 2: out=prod (the typical get_proxy_slot path). The rebuilt
+                # node must execute correctly: u0 * u1**exp with u0=2, u1=3.
+                tracer = PythonKeyTracer()
+                tracer.root = torch.nn.Module()
+                tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+                for sym, name in [(u0, "u0"), (u1, "u1")]:
+                    node = tracer.graph.placeholder(name)
+                    proxy = fx.Proxy(node, tracer)
+                    set_meta(proxy, sym)
+                    tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                        proxy=proxy, value=sym
+                    )
+                    tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+                _build_proxy_for_sym_expr(tracer, prod.node.expr, out=prod)
+                out_proxy = tracer.symnode_tracker[prod].force()
+                tracer.graph.output(out_proxy.node)
+                gm = fx.GraphModule(tracer.root, tracer.graph)
+                self.assertEqual(gm(2, 3), 2 * 3**exp)
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
@@ -3642,7 +3705,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             cnt.frame_count,
             1,
-            f"Expected 1 compilation, got {cnt.frame_count}. "
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
             f"Size comparison should not cause recompilation.",
         )
 
@@ -3679,7 +3742,7 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             cnt.frame_count,
             1,
-            f"Expected 1 compilation, got {cnt.frame_count}. "
+            lambda msg: f"{msg}\nExpected 1 compilation, got {cnt.frame_count}. "
             f"PythonMod padding should not cause recompilation.",
         )
 

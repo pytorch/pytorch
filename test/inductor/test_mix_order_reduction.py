@@ -1161,6 +1161,11 @@ class OverFusionTest(TestBase):
     regression. See #179423.
     """
 
+    @skipIfXpu(
+        msg="XPU selects Flash Attention for SDPA backward; the current SYCL TLA"
+        "implementation does not guarantee precision on PVC. Re-enable once oneDNN"
+        "adds SDPA backward support. See https://github.com/intel/torch-xpu-ops/issues/4094"
+    )
     @inductor_config.patch(
         {
             "triton.mix_order_reduction": True,

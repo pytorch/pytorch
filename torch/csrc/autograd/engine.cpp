@@ -1054,7 +1054,7 @@ static variable_list call_function(
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
     std::ostringstream ss;
     ss << "Function " << fn.name() << " returned an " << msg;
-    return ss.str();
+    return std::move(ss).str();
   });
 
   // NOLINTNEXTLINE(bugprone-use-after-move)
