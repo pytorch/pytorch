@@ -28,7 +28,7 @@ class _TestHighwaySelfGating(torch.nn.Module):
         self,
         d_model: int,
         size: int,
-        device="cuda",
+        device=GPU_TYPE,
     ) -> None:
         super().__init__()
         self.size = size
@@ -55,7 +55,7 @@ class _TestHighwaySelfGating(torch.nn.Module):
 
 
 class MyModule(torch.nn.Module):
-    def __init__(self, z: int, has_bias: bool, device="cuda") -> None:
+    def __init__(self, z: int, has_bias: bool, device=GPU_TYPE) -> None:
         super().__init__()
         self.z = z
         self.device = device
