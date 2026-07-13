@@ -747,7 +747,7 @@ class AsyncCompile:
                 real CuTe DSL compilation in the subprocess worker.
 
         Note:
-            NVIDIA Universal GEMM kernels are Python code that calls the cutlass_api library.
+            NVIDIA Universal GEMM kernels are Python code that calls the cutlass.operators library.
             We use the PyCodeCache to write the source code to a file and load it.
         """
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
@@ -818,6 +818,9 @@ class AsyncCompile:
         scale_type_b=None,
         swizzle_type_a=None,
         swizzle_type_b=None,
+        has_bias_epilogue=False,
+        swap_ab=False,
+        metadata=None,
     ):
         """Submit NVGEMM kernel precompilation to the subprocess pool.
 
@@ -846,6 +849,9 @@ class AsyncCompile:
             scale_type_b,
             swizzle_type_a,
             swizzle_type_b,
+            has_bias_epilogue,
+            swap_ab,
+            metadata,
         )
 
     def metal(self, kernel_name: str, source: str, headers: list[str]) -> None:
