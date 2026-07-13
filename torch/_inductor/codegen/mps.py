@@ -481,7 +481,6 @@ class MetalOverrides(OpOverrides):
         # Unary special ops
         for name in [
             "erf",
-            "erfc",
             "erfinv",
             "i0",
             "i0e",
