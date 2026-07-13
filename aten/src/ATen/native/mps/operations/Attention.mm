@@ -35,8 +35,8 @@ static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
   if (x.dim() == 3) {
     return {x.unsqueeze(0), true};
   } else if (x.dim() > 4) {
-    auto batchSize = c10::multiply_integers(x.sizes().begin(), x.sizes().end() - 3);
-    return {x.reshape({batchSize, x.size(-3), x.size(-2), x.size(-1)}), true};
+    auto batchSize = c10::multiply_integers(x.sym_sizes().begin(), x.sym_sizes().end() - 3);
+    return {x.reshape_symint({batchSize, x.sym_size(-3), x.sym_size(-2), x.sym_size(-1)}), true};
   } else {
     return {x, false};
   }
@@ -479,7 +479,7 @@ static std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q_,
   });
 
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  return {std::move(final_out), std::move(final_out)};
+  return {final_out, final_out};
 }
 
 // Flash-attention prefill (kernels in Attention.metal). Picks block sizes
@@ -681,7 +681,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   });
 
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  return {std::move(final_out), std::move(final_out)};
+  return {final_out, final_out};
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
@@ -719,43 +719,39 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   }
 
   const auto outer_dims = enable_gqa ? 3 : 2;
-  auto outer_shape = at::infer_size_dimvector(query.sizes().slice(0, query.dim() - outer_dims),
-                                              key_.sizes().slice(0, key_.dim() - outer_dims));
-  outer_shape = at::infer_size_dimvector(outer_shape, value_.sizes().slice(0, value_.dim() - outer_dims));
+  auto outer_shape = at::infer_size_symdimvector(query.sym_sizes().slice(0, query.dim() - outer_dims),
+                                                 key_.sym_sizes().slice(0, key_.dim() - outer_dims));
+  outer_shape = at::infer_size_symdimvector(outer_shape, value_.sym_sizes().slice(0, value_.dim() - outer_dims));
 
   auto broadcast = [&](const Tensor& t) {
     auto shape = outer_shape;
     if (enable_gqa) {
-      shape.push_back(t.size(-3) == 1 ? query.size(-3) : t.size(-3));
+      shape.push_back(t.size(-3) == 1 ? query.sym_size(-3) : t.sym_size(-3));
     }
-    shape.append({t.size(-2), t.size(-1)});
-    return t.expand(shape);
+    shape.append({t.sym_size(-2), t.sym_size(-1)});
+    return t.expand_symint(shape);
   };
 
   Tensor query_expanded = broadcast(query);
-  auto query_tuple = ensure_4d(query_expanded);
-  Tensor q_ = std::get<0>(query_tuple);
-  bool unsqueezed = std::get<1>(query_tuple);
+  auto [q_, unsqueezed] = ensure_4d(query_expanded);
 
-  auto key_tuple = ensure_4d(broadcast(key_));
-  Tensor k_ = std::get<0>(key_tuple);
+  Tensor k_ = std::get<0>(ensure_4d(broadcast(key_)));
 
-  auto value_tuple = ensure_4d(broadcast(value_));
-  Tensor v_ = std::get<0>(value_tuple);
+  Tensor v_ = std::get<0>(ensure_4d(broadcast(value_)));
 
   if (q_.size(0) == 0 || q_.size(1) == 0 || q_.size(2) == 0 || k_.size(2) == 0 || v_.size(3) == 0) {
-    auto out_shape = query_expanded.sizes().vec();
-    out_shape.back() = v_.size(3);
-    auto attn_shape = query_expanded.sizes().vec();
-    attn_shape.back() = k_.size(2);
-    return {at::zeros(out_shape, query.options()), at::zeros(attn_shape, query.options())};
+    auto out_shape = query_expanded.sym_sizes().vec();
+    out_shape.back() = v_.sym_size(3);
+    auto attn_shape = query_expanded.sym_sizes().vec();
+    attn_shape.back() = k_.sym_size(2);
+    return {at::zeros_symint(out_shape, query.options()), at::zeros_symint(attn_shape, query.options())};
   }
 
   std::optional<Tensor> mask_;
   if (attn_mask) {
-    auto mask_shape = query_expanded.sizes().vec();
-    mask_shape.back() = k_.size(2);
-    mask_ = std::get<0>(ensure_4d(attn_mask->expand(mask_shape)));
+    auto mask_shape = query_expanded.sym_sizes().vec();
+    mask_shape.back() = k_.sym_size(2);
+    mask_ = std::get<0>(ensure_4d(attn_mask->expand_symint(mask_shape)));
   }
 
   int query_head_dim = q_.size(3);
