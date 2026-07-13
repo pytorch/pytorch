@@ -1930,6 +1930,79 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         # The gather is its own kernel; the combo stitches only the 2 pointwise subkernels.
         FileCheck().check("triton_poi_fused_index").check("'num_kernels': 2").run(src)
 
+    @requires_gpu_and_triton
+    def test_register_pressure_guard_occupancy(self):
+        # Classification uses the actual gemma-3 q/k RMSNorm+rope reduction register
+        # signature we measured: 216 registers at num_warps=1 -> ~14% register-limited
+        # occupancy, which the guard flags as register-bound. A combo's winning launch
+        # config (32 registers at num_warps=4) reaches full occupancy and is not flagged.
+        from types import SimpleNamespace
+
+        from torch._inductor.codegen.simd import _register_limited_occupancy
+
+        # GB200-class register file; the math is device-portable via these props.
+        props = SimpleNamespace(
+            regs_per_multiprocessor=65536,
+            warp_size=32,
+            max_threads_per_multi_processor=2048,
+        )
+        gemma_occ = _register_limited_occupancy(216, 1, props)
+        winner_occ = _register_limited_occupancy(32, 4, props)
+        self.assertAlmostEqual(gemma_occ, 9 * 32 / 2048, places=5)  # ~0.14
+        self.assertEqual(winner_occ, 1.0)
+        self.assertLess(gemma_occ, 0.2)  # below the default ratio -> register-bound
+        self.assertGreaterEqual(winner_occ, 0.2)  # not register-bound
+        # Missing device props -> None so the caller treats it as not register-bound.
+        self.assertIsNone(
+            _register_limited_occupancy(
+                216,
+                1,
+                SimpleNamespace(
+                    regs_per_multiprocessor=None,
+                    warp_size=32,
+                    max_threads_per_multi_processor=2048,
+                ),
+            )
+        )
+
+    @requires_gpu_and_triton
+    def test_register_pressure_guard_carves_register_bound_reduction(self):
+        # Two reductions of different shapes are combo-fused by default. When a
+        # sub-kernel's register-limited occupancy is below the guard ratio it is carved
+        # out to run standalone (its faster non-combo form); numerics are unchanged.
+        def fn(a, b):
+            return a.sum(-1), b.sum(-1)
+
+        inps = [
+            torch.randn(1024, 512, device=GPU_TYPE),
+            torch.randn(1024, 768, device=GPU_TYPE),
+        ]
+
+        def run(ratio):
+            torch._dynamo.reset()
+            counters.clear()
+            with (
+                fresh_cache(),
+                torch._inductor.config.patch(
+                    combo_kernel_register_pressure_ratio=ratio
+                ),
+            ):
+                out, code = run_and_get_code(torch.compile(fn), *inps)
+            self.assertEqual(out, fn(*inps))  # numerics preserved
+            return " ".join(code), counters["inductor"]["combo_register_bound_carveout"]
+
+        # guard off: the two reductions are combo-fused, nothing carved out.
+        code_off, carve_off = run(0.0)
+        FileCheck().check("'num_kernels': 2").run(code_off)
+        self.assertEqual(carve_off, 0)
+
+        # guard on with an occupancy floor above these light reductions: both are
+        # flagged register-bound, so fewer than two remain fusable and the whole group
+        # is emitted standalone -- no combo kernel.
+        code_on, carve_on = run(0.99)
+        self.assertEqual(carve_on, 2)
+        self.assertNotIn("num_kernels", code_on)
+
 
 @instantiate_parametrized_tests
 class ComboKernelPDLTests(TestCase):
