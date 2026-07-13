@@ -190,7 +190,7 @@ def flex_gemm_config_keys_for_local_reduce(
     fragment and non-divisible tiles split groups across fragments, so either
     would silently regroup the wrong elements.
     """
-    from torch._inductor.template_heuristics.flex_gemm import (
+    from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
         gemm_config_key,
