@@ -779,7 +779,12 @@ def _ensure_cutlass_mm_registered():
         FunctionalTensorMode,
     )
 
-    def _cutlass_mm_decomp(mode, op, types, args, kwargs):
+    # Unlike triton custom ops (which guard with custom_triton_ops_decomposition_disabled
+    # to keep the opaque op in exported programs), we decompose unconditionally here.
+    # The decomposition targets (aten._sparse_semi_structured_mm, pad, narrow) are real
+    # ATen ops with proper meta registrations and are fully serializable, so export
+    # consumers benefit from seeing the underlying ops rather than an opaque custom op.
+    def _cutlass_mm_decomp(mode, _op, types, args, kwargs):
         if _has_unrecognized_tensor_types(types):
             return NotImplemented
         with mode:
