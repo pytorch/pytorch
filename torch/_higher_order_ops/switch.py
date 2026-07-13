@@ -13,12 +13,18 @@ from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
+    create_bw_fn,
+    create_fn_remove_none,
+    fill_none_with_masks,
+    materialize_as_graph,
     reenter_make_fx,
+    save_values_for_backward,
+    saved_values,
     unique_graph_id,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -58,13 +64,18 @@ class SwitchOp(HigherOrderOperator):
             mutated_inputs |= set(branch_mutated_inputs)
 
         # Merge outputs to detect int -> SymInt change
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         fake_mode = detect_fake_mode(operands)
         if fake_mode is None or fake_mode.shape_env is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        # pyrefly: ignore [missing-attribute]
-        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+        # disable_proxy_modes_tracing prevents SymInt arithmetic in _merge_output
+        with (
+            fake_mode,
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols(),  # pyrefly: ignore [missing-attribute]
+            disable_proxy_modes_tracing(),
+        ):
             merged_outputs = [
                 _merge_output(branch_outs, fake_mode)
                 for branch_outs in zip(*all_branch_outputs)
@@ -126,10 +137,6 @@ def switch(
           are also permitted in branch outputs and are merged across branches (an
           unbacked SymInt is introduced when ``int`` leaves differ between branches).
         - Branches cannot have in-place mutations on inputs or global variables.
-        - Autograd is not supported in this prototype: the autograd dispatch
-          key is a no-op that redispatches below autograd, so gradients will
-          not flow through ``torch.switch``. Full autograd support is planned
-          for a future release.
     """
 
     # Flatten operands so the HOP only sees a flat list of tensors.
@@ -261,10 +268,80 @@ def switch_op_dense(index, branches, operands):
     return branches[clamped_idx](*operands)
 
 
+class SwitchAutogradOp(torch.autograd.Function):
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def forward(
+        ctx,
+        index,
+        branches,
+        *operands,
+    ):
+        ctx._index = index
+        # Build one bw fn per branch.
+        ctx._branch_bw_fns = [
+            create_bw_fn(create_fn_remove_none(branch)[0], operands)
+            for branch in branches
+        ]
+
+        # We snapshot the dispatch keys in forward for materializing the
+        # bw_graph in backward.
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+        save_values_for_backward(ctx, operands)
+
+        with torch._C._AutoDispatchBelowAutograd():
+            outs = switch_op(index, branches, operands)
+
+        # Record which output slots are Tensors. Non-Tensor slots (None,
+        # int/SymInt) carry no tangent in backward and the joint is built
+        # to omit them.
+        ctx._fw_output_is_tensor = [
+            isinstance(o, torch.Tensor) for o in pytree.tree_leaves(outs)
+        ]
+        return outs
+
+    @staticmethod
+    def backward(ctx, *flat_grads):
+        operands = saved_values(ctx)
+        tensor_grads = tuple(
+            g for g, keep in zip(flat_grads, ctx._fw_output_is_tensor) if keep
+        )
+        args = operands + tensor_grads
+        # TODO: we need to materialize the bw graphs because dynamo is unable to
+        # trace through the joint function when torch.compile torch.autograd.grad.
+
+        branches_bw_gm: list[torch.fx.GraphModule] = []
+        grads_tensor_masks: list[bool] = []
+        # All branches share the same input signature (see _validate_input)
+        for bw_fn in ctx._branch_bw_fns:
+            wrapped_bw, mask = create_fn_remove_none(bw_fn)
+            bw_gm = materialize_as_graph(
+                wrapped_bw,
+                args,
+                ctx._fw_include_key_set,
+                ctx._fw_exclude_key_set,
+                force_enable_grad=True,
+            )
+            branches_bw_gm.append(bw_gm)
+            if not grads_tensor_masks:
+                grads_tensor_masks = mask
+
+        grads = switch_op(
+            ctx._index,
+            branches_bw_gm,
+            args,
+        )
+        return None, None, *fill_none_with_masks(grads, grads_tensor_masks)
+
+
 @switch_op.py_autograd_impl
 def switch_autograd(index, branches, operands):
-    with torch._C._AutoDispatchBelowAutograd():
-        return switch_op(index, branches, operands)
+    return SwitchAutogradOp.apply(
+        index,
+        branches,
+        *operands,
+    )
 
 
 @switch_op.py_impl(ProxyTorchDispatchMode)
@@ -322,6 +399,12 @@ def _merge_output(xs: tuple[torch.Tensor | int | None, ...], mode: FakeTensorMod
         )
         return merged_out
 
+    # cond_merge_output requires FakeTensors to merge divergent metadata into
+    # unbacked symints. xs[0] is correct here because the branches are assumed to agree on tensor
+    # metadata (dtype/device/dim).
+    if any(isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor) for x in xs):
+        return xs[0]
+
     return functools.reduce(lambda a, b: cond_merge_output(a, b, mode), xs)
 
 
@@ -333,15 +416,14 @@ def switch_func(ctx, index, branches, inputs):
     )
     from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
 
-    if hasattr(ctx, "mode"):
-        hop_instance = HopInstance.create(switch_op, index, branches, inputs)
-        if can_auto_functionalize(hop_instance):
-            return do_auto_functionalize_v2(
-                ctx.mode,
-                hop_instance,
-                tuple(pytree.tree_flatten((index, branches, inputs))[0]),
-                {},
-            )
+    hop_instance = HopInstance.create(switch_op, index, branches, inputs)
+    if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        return do_auto_functionalize_v2(
+            ctx.mode,
+            hop_instance,
+            tuple(pytree.tree_flatten((index, branches, inputs))[0]),
+            {},
+        )
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_index = ctx.unwrap_tensors(index)
