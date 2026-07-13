@@ -835,6 +835,7 @@ exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
     'c10/cuda/CUDACachingAllocator.cpp',
+    'c10/cuda/CUDAMallocAsyncAllocator.cpp',
     '**/fb/**',
 ]
 command = [
@@ -1936,4 +1937,16 @@ command = [
     'tools/linter/adapters/generated_shims_version_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'UNSPECIFIED_BACKEND'
+include_patterns = [
+    'test/dynamo/**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/unspecified_backend_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]
