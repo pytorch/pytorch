@@ -35,6 +35,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM90OrLater,
     TEST_MULTIGPU,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -532,6 +533,7 @@ class CudaReproTests(TestCase):
 
         self._test_split_reduction_impl(x)
 
+    @tf32_on_and_off(0.001)
     def test_split_with_sizes_reshape_cat_cantsplit_regression(self):
         class Repro(nn.Module):
             def __init__(self):
@@ -572,7 +574,7 @@ class CudaReproTests(TestCase):
             eager_out = model(x, indices)
             compiled_out = torch.compile(model)(x, indices)
 
-        torch.testing.assert_close(compiled_out, eager_out)
+        self.assertEqual(compiled_out, eager_out)
 
     @config.patch({"emulate_precision_casts": True})
     def test_bool_emulate_low_precision(self):
@@ -1735,6 +1737,22 @@ class CudaReproTests(TestCase):
         expected = fn(x)
         actual = opt_fn(x)
         self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_promoted_lowp_cuda(self):
+        def fn(x):
+            y = x.to(torch.float16)
+            return y + x
+
+        x = torch.tensor([70000.0], device=device_type)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        expected = fn(x)
+        actual, (code,) = run_and_get_code(opt_fn, x)
+
+        self.assertEqual(expected, actual)
+        self.assertIn(".to(tl.float16)", code)
 
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_norm_rounding(self):

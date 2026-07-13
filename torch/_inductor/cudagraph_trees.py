@@ -55,6 +55,7 @@ from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import torch.fx
 from torch import Tensor
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
@@ -89,8 +90,7 @@ from torch._inductor.cudagraph_utils import (
     PlaceholderInfo,
     WrappedFunction,
 )
-from torch._library.opaque_object import is_opaque_value
-from torch._opaque_base import OpaqueBase
+from torch._library.opaque_object import is_custom_class_obj
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -1014,7 +1014,7 @@ class CUDAGraphNode:
         # That is why tensor_static_input_idxs and
         # non_managed_static_input_idxs filter them out below.
         opaque_input_idxs = OrderedSet(
-            i for i, inp in enumerate(inputs) if is_opaque_value(inp)
+            i for i, inp in enumerate(inputs) if is_custom_class_obj(inp)
         )
         static_input_idxs = OrderedSet(wrapped_function.static_input_idxs)
         cudagraph_managed_idxs = OrderedSet(self.cudagraph_managed_idxs)
@@ -1913,9 +1913,9 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    if not isinstance(inp, (int, torch.Generator, OpaqueBase)):
+                    if not isinstance(inp, (int, torch.Generator, CustomClassBase)):
                         raise AssertionError(
-                            f"expected int, Generator, or OpaqueBase, got {type(inp)}"
+                            f"expected int, Generator, or CustomClassBase, got {type(inp)}"
                         )
 
                     recording_inputs.append(inp)
