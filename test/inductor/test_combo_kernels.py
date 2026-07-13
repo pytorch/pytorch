@@ -2545,6 +2545,9 @@ class ComboKernelTestsMaxAutotune(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+        # Compile-time autotune passes per-subkernel blocks as args, so runtime
+        # coordinate descent still refines the suffixed XBLOCK_i fields (same as
+        # the runtime per-subkernel path).
         baseline_log = next(
             msg for msg in cm.output if "Baseline Config" in msg and "XBLOCK_" in msg
         )
