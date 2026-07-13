@@ -5825,6 +5825,49 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(y4)
 
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
+    def test_runtime_check_overbound_no_input_leak(self):
+        # When AOTI_RUNTIME_CHECK_INPUTS rejects an over-bound input, the check
+        # throws before the input handles are stolen into RAII. A correct runner
+        # must free those un-stolen handles; otherwise every rejected call leaks
+        # one at::Tensor (and its backing GPU storage) per input.
+        # MPS has no memory_allocated accounting (needed below); skip CPU and MPS.
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU with memory_allocated support")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2048, 2048)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model().to(self.device)
+        x = torch.randn(8, 2048, device=self.device)  # example within bound
+        dim0 = Dim("b", min=1, max=64)  # compiled upper bound = 64
+        with torch.no_grad():
+            package_path: str = AOTIRunnerUtil.compile(
+                model, (x,), dynamic_shapes={"x": {0: dim0}}
+            )
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        # in-bound call works and warms up the allocator
+        aot_inductor_module(torch.randn(8, 2048, device=self.device))
+
+        device_interface = get_interface_for_device(GPU_TYPE)
+        device = device_interface.current_device()
+        device_interface.synchronize()
+        mem_before = device_interface.memory_allocated(device)
+        # Repeatedly reject FRESH over-bound inputs; storage must not be retained.
+        for _ in range(64):
+            over = torch.randn(128, 2048, device=self.device)  # 128 > 64 -> rejected
+            with self.assertRaisesRegex(Exception, "dim value is too large"):
+                aot_inductor_module(over)
+            del over
+        device_interface.synchronize()
+        mem_after = device_interface.memory_allocated(device)
+        self.assertEqual(mem_after, mem_before)
+
     def test_add_complex(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
