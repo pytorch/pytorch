@@ -6603,6 +6603,23 @@ class TestMPS(TestCaseMPS):
         helper((4, 2, 3), (1, 2, 3))
         helper((2, 3), (2, 3))
 
+    def test_clamp_tensor_bounds_out_dtype(self):
+        # Regression test: ternary ops with an out= dtype differing from the
+        # (matching) input dtypes must route to the _cast_ kernel. Previously
+        # the dispatcher only compared the inputs against each other and
+        # formatted an unregistered non-cast kernel name, failing at pipeline
+        # creation.
+        cpu_x = torch.randn(4, 5, device="cpu", dtype=torch.float32)
+        cpu_min_t = torch.full((4, 5), -0.5, device="cpu", dtype=torch.float32)
+        cpu_max_t = torch.full((4, 5), 0.5, device="cpu", dtype=torch.float32)
+        cpu_out = torch.empty(4, 5, device="cpu", dtype=torch.float16)
+        mps_x = cpu_x.to("mps")
+        mps_min_t = cpu_min_t.to("mps")
+        mps_max_t = cpu_max_t.to("mps")
+        mps_out = torch.empty(4, 5, device="mps", dtype=torch.float16)
+        torch.clamp(cpu_x, min=cpu_min_t, max=cpu_max_t, out=cpu_out)
+        torch.clamp(mps_x, min=mps_min_t, max=mps_max_t, out=mps_out)
+        self.assertEqual(mps_out.cpu(), cpu_out)
 
     def test_divmode(self):
         def helper(shape, rounding_mode):
@@ -7916,6 +7933,31 @@ class TestMPS(TestCaseMPS):
             cpu_out.backward(gradient=torch.ones_like(cpu_out))
             self.assertFalse(torch.isnan(x.grad).any(), f"NaN in backward for {dtype}")
             self.assertEqual(x.grad, cpu_xg.grad.to('mps'))
+
+    def test_erfc_tail_accuracy(self):
+        # gh-187806: c10::metal::erfc was 1 - erf(x), 100% relative error past
+        # erf's fp32 saturation (~3.9); compare against float64 over the
+        # fp32-normal output range
+        x = torch.arange(-9.0, 9.0, 2**-10)
+        actual = torch.erfc(x.to('mps')).cpu().double()
+        expected = torch.erfc(x.double())
+        self.assertEqual(actual, expected, rtol=1e-6, atol=0)
+        # specials and the clamped tail (t = min(|x|, 10.5) in the kernel);
+        # erfc rounds to exactly 0/2 in fp32 well before the clamp
+        vals = [0.0, float('inf'), float('-inf'), float('nan'), 10.5, -10.5, 1e30, -1e30]
+        expected_sp = torch.tensor([1.0, 0.0, 2.0, float('nan'), 0.0, 2.0, 0.0, 2.0])
+        actual_sp = torch.erfc(torch.tensor(vals, device='mps')).cpu()
+        self.assertEqual(actual_sp, expected_sp, rtol=0, atol=0)
+
+    def test_igammac_tail_accuracy(self):
+        # igamma.h evaluates 0.5 * erfc(...) on its large-a asymptotic path,
+        # so the erfc rewrite fixes the igammac tail too
+        a = torch.full((2048,), 1200.0)
+        x = torch.linspace(1150.0, 1660.0, 2048)
+        actual = torch.special.gammaincc(a.to('mps'), x.to('mps')).cpu().double()
+        expected = torch.special.gammaincc(a.double(), x.double())
+        rel = ((actual - expected) / expected).abs().max()
+        self.assertLess(rel.item(), 5e-4)
 
     # Test hardtanh
     def test_hardtanh(self):
