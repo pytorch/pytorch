@@ -1273,6 +1273,17 @@ class OverridesData:
     mps: Callable[..., str] | None = None
 
 
+def _triton_bessel(order: int, kind: str, x: str) -> str:
+    # PyTorch eager returns NaN for +/-inf, while libdevice returns
+    # the mathematical limit. x - x yields NaN in x's dtype
+    # (avoids fp32 literal promotion under tl.where for float64 inputs)
+    return (
+        f"tl.where(tl_math.abs({x}) == float('inf'), "
+        f"{x} - {x}, "
+        f"libdevice.{kind}{order}({x}))"
+    )
+
+
 def _triton_cyl_bessel_i(order: int, x: str) -> str:
     # PyTorch's Cephes-derived kernels return NaN for infinities; libdevice
     # returns signed infinities, so synthesize a same-dtype NaN with x - x.
@@ -1294,25 +1305,25 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_j0_forward({x})",
-        triton=lambda x: f"libdevice.j0({x})",
+        triton=lambda x: _triton_bessel(0, "j", x),
         name="special_bessel_j0",
     ),
     bessel_j1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_j1_forward({x})",
-        triton=lambda x: f"libdevice.j1({x})",
+        triton=lambda x: _triton_bessel(1, "j", x),
         name="special_bessel_j1",
     ),
     bessel_y0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_y0_forward({x})",
-        triton=lambda x: f"libdevice.y0({x})",
+        triton=lambda x: _triton_bessel(0, "y", x),
         name="special_bessel_y0",
     ),
     bessel_y1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_y1_forward({x})",
-        triton=lambda x: f"libdevice.y1({x})",
+        triton=lambda x: _triton_bessel(1, "y", x),
         name="special_bessel_y1",
     ),
     digamma=OverridesData(
