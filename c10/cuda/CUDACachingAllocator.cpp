@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <c10/core/RingBuffer.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
@@ -1314,61 +1315,7 @@ cudaError_t cudaMallocMaybeCapturing(void** ptr, size_t size, AllocParams& p) {
   }
 }
 
-template <class T>
-class RingBuffer {
- public:
-  RingBuffer()
-      // alloc_trace is a pointer because we need to intentionally
-      // leak this on deallocation it can hold references to Python
-      // state which will already be destroyed when we are in exit handlers
-      : alloc_trace(new std::vector<T>()) {}
-
-  void setMaxEntries(size_t size) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    alloc_trace_max_entries_ = std::max(static_cast<size_t>(1), size);
-  }
-
-  void insertEntries(const T& entry) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    if (alloc_trace->size() < alloc_trace_max_entries_) {
-      alloc_trace->emplace_back(entry);
-    } else {
-      (*alloc_trace)[alloc_trace_next++] = entry;
-      if (alloc_trace_next == alloc_trace_max_entries_) {
-        alloc_trace_next = 0;
-      }
-    }
-  }
-
-  void getEntries(std::vector<T>& result) const {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    result.reserve(result.size() + alloc_trace->size());
-    std::rotate_copy(
-        alloc_trace->begin(),
-        std::next(alloc_trace->begin(), alloc_trace_next),
-        alloc_trace->end(),
-        std::back_inserter(result));
-  }
-
-  void clear() {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    alloc_trace_next = 0;
-    alloc_trace->clear();
-    alloc_trace->shrink_to_fit();
-  }
-
- private:
-  size_t alloc_trace_max_entries_ = 1;
-
-  // Both alloc_trace and alloc_trace_next needs to be used
-  // under alloc_trace_lock.
-  mutable std::mutex alloc_trace_lock;
-  size_t alloc_trace_next = 0;
-  std::vector<T>*
-      alloc_trace; // pointer because we need to intentionally leak this on
-                   // deallocation it can hold references to Python state which
-                   // will already be destroyed when we are in exit handlers
-};
+using c10::RingBuffer;
 } // anonymous namespace
 } // namespace Native
 
@@ -1420,7 +1367,7 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     }
     ss << " has " << format_size(proc.usedGpuMemory) << " memory in use. ";
   }
-  return ss.str();
+  return std::move(ss).str();
 #else
   return "";
 #endif
@@ -1548,7 +1495,11 @@ class DeviceCachingAllocator {
   // thread local compile context for each device
   static thread_local std::stack<std::string> compile_context;
 
-  // thread local user metadata for annotating allocations
+  // Thread local user metadata recorded on memory history trace entries.
+  // Note: being a static member, this is per-thread process-wide state, NOT
+  // per-device state; setUserMetadata on any DeviceCachingAllocator instance
+  // affects trace entries for all devices used by the calling thread. This is
+  // intentional: metadata labels a region of source code, not a device.
   static thread_local std::string user_metadata;
 
  public:
@@ -2524,7 +2475,7 @@ class DeviceCachingAllocator {
           SegmentRange(block->ptr, block->size), ss);
       offset = static_cast<const char*>(block->ptr) - full_range.ptr;
     }
-    return ShareableHandle{.offset = offset, .handle = ss.str()};
+    return ShareableHandle{.offset = offset, .handle = std::move(ss).str()};
   }
 
   void recordStream(Block* block, cuda::CUDAStream stream) {

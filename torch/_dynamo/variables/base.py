@@ -87,7 +87,7 @@ class SourceLocation:
 # calls (e.g., as_python_constant on a list that contains itself). Maps
 # (id(instance), id(original_method)) tuples to track which calls are in progress.
 # We use id(original_method) rather than the method name string so that super()
-# delegation within a class hierarchy (e.g. TorchScriptObjectVariable.as_python_constant
+# delegation within a class hierarchy (e.g. CustomClassObjectVariable.as_python_constant
 # calling UserDefinedObjectVariable.as_python_constant) is not a false positive.
 _vt_active_calls: ContextVar[set[tuple[int, int]] | None] = ContextVar(
     "_vt_active_calls", default=None
@@ -347,7 +347,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "mutation_type",
         "parents_tracker",
         "user_code_variable_name",
+        "dict_vt",
     }
+
+    # Lazily-created view of the instance __dict__, backed by the side effects table
+    dict_vt: variables.DunderDictVariable | None = None
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         """Shallow copy with some (optional) changes"""
@@ -649,6 +653,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # Skip guards on const getattr objects like __code__.co_argcount
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
+
+    def get_dict_vt(
+        self, tx: InstructionTranslatorBase
+    ) -> variables.DunderDictVariable:
+        # Callers gate this on the object actually having an instance __dict__
+        # (e.g. the per-VT `__dict__` attribute branches). If a VT without a
+        # real instance dict reaches here, DunderDictVariable's example-value
+        # lookup graph-breaks rather than fabricating a bogus dict.
+        if self.dict_vt is None:
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
+        return self.dict_vt
 
     def is_proxy(self) -> bool:
         try:
@@ -1908,11 +1923,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Source | None = None,
         mutation_type: MutationType | None = None,
         source_location: SourceLocation | None = None,
+        dict_vt: variables.DunderDictVariable | None = None,
     ) -> None:
         super().__init__()
         self.source = source
         self.source_location = source_location
         self.mutation_type = mutation_type
+        # Carried so clone() round-trips the cached __dict__ view.
+        self.dict_vt = dict_vt
 
         # NOTE sometimes mutation_type is set afterwards for implementation
         # convenience, we don't validate those cases at the moment.

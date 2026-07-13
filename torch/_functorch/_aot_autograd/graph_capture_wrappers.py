@@ -1498,7 +1498,6 @@ def create_functional_call(
     strict_out_tuple: bool = True,
 ) -> Callable[..., Any]:
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
-    # https://github.com/pytorch/pytorch/issues/103569
 
     @simple_wraps(mod)
     def functional_call(*args: Any, **kwargs: Any) -> Any:

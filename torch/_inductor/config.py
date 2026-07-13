@@ -415,6 +415,13 @@ mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
 
+# Decompose DTensor Shard(dim) -> Shard(other_dim) all-to-all into explicit
+# layout ops plus _c10d_functional.all_to_all_single/wait_tensor. This is
+# experimental and intentionally opt-in.
+decompose_shard_dim_alltoall = (
+    os.environ.get("TORCHINDUCTOR_DECOMPOSE_SHARD_DIM_ALLTOALL", "0") == "1"
+)
+
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
@@ -1173,7 +1180,7 @@ _fuse_ddp_communication = False
 _fuse_ddp_bucket_size = 25
 
 # Flag to control which fusion passes to apply. Functions in the list will
-# be applied in order. There are two different different fusion passes
+# be applied in order. There are two different fusion passes
 # --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalesced_op". The default
 # one is "fuse_ddp_with_concat_op". Users can also change this to a customized
 # fusion function.
@@ -1842,10 +1849,28 @@ class cpp:
     use_two_step_variance_threshold = 1024
 
 
+def tlx_mode_from_env() -> Literal["allow", "force"] | None:
+    # Only the explicit values "allow"/"force" enable torchTLX. Any other
+    # value -- unset, empty, a typo, or a legacy "default" -- maps to None so
+    # TLX stays off. See the "Knob" section of the torchTLX README under
+    # third-party/triton/.../tlx/language/tlx/inductor/README.md.
+    mode = os.environ.get("TORCHINDUCTOR_TLX_MODE")
+    if mode in ("allow", "force"):
+        return cast("Literal['allow', 'force']", mode)
+    return None
+
+
 class triton:
     """
     Config specific to codegen/triton.py
     """
+
+    # torchTLX enablement. None (the default) means TLX is never considered
+    # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
+    # "force" uses only TLX templates plus forced epilogue fusion. Also a
+    # no-op unless the active Triton is the fbtriton fork (the integration
+    # import in template_heuristics/tlx.py fails cleanly otherwise).
+    tlx_mode: Literal["allow", "force"] | None = tlx_mode_from_env()
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
@@ -2139,6 +2164,12 @@ class triton:
     enable_tma_load_for_template_epilogue = (
         os.environ.get("ENABLE_TMA_LOAD_FOR_TEMPLATE_EPILOGUE", "0") == "1"
     )
+    # Host-side TMA: build TensorDescriptors on the host and pass them as kernel
+    # args instead of creating them device-side inside the kernel. Selects the
+    # descriptor flavor only; requires use_tensor_descriptor and
+    # assume_aligned_inputs to also be enabled (no effect otherwise).
+    enable_host_side_tma = os.environ.get("ENABLE_HOST_SIDE_TMA", "0") == "1"
+
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
