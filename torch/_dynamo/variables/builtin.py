@@ -1749,19 +1749,69 @@ class BuiltinVariable(BaseBuiltinVariable):
                         args=list(e.args),
                     )
 
-        if self.fn is object and name == "__init__":
-            # object.__init__ is a no-op
-            return variables.ConstantVariable.create(None)
+        if self.fn is object and name == "__init__" and args:
+            receiver_type = args[0].python_type()
+            if (len(args) == 1 and not kwargs) or (
+                inspect.getattr_static(receiver_type, "__init__", None)
+                is object.__init__
+                and inspect.getattr_static(receiver_type, "__new__", None)
+                is not object.__new__
+            ):
+                return variables.ConstantVariable.create(None)
+            raise_type_error(
+                tx,
+                "object.__init__() takes exactly one argument (the instance to initialize)",
+            )
+
+        if self.fn in (BaseException, Exception) and name == "__init__" and args:
+            receiver = args[0]
+            if not issubclass(receiver.python_type(), self.fn):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__init__' requires a '{self.fn.__name__}' object but received a '{receiver.python_type_name()}'",
+                )
+            if isinstance(receiver, variables.UserDefinedExceptionObjectVariable):
+                result = receiver.exc_vt.call_method(tx, "__init__", args[1:], kwargs)
+                receiver.init_args = args[1:]
+                return result
+            if isinstance(receiver, variables.ExceptionVariable):
+                return receiver.call_method(tx, "__init__", args[1:], kwargs)
+            unimplemented(
+                gb_type="Unsupported exception __init__ mutation",
+                context=f"{self.fn.__name__}.__init__ on {receiver}",
+                explanation="Dynamo cannot safely trace BaseException.__init__ mutating an existing exception object.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if self.fn in (frozenset, tuple) and name == "__init__" and args:
+            receiver_type = args[0].python_type()
+            if (len(args) == 1 and not kwargs) or (
+                inspect.getattr_static(receiver_type, "__init__", None)
+                is object.__init__
+                and inspect.getattr_static(receiver_type, "__new__", None)
+                is not object.__new__
+            ):
+                return variables.ConstantVariable.create(None)
+            raise_type_error(
+                tx,
+                "object.__init__() takes exactly one argument (the instance to initialize)",
+            )
 
         if self.fn in (set, frozenset, list, tuple):
-            if isinstance(args[0], variables.UserDefinedObjectVariable):
-                if args[0]._base_vt is None:
+            receiver = args[0]
+            if not issubclass(receiver.python_type(), self.fn):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__init__' requires a '{self.fn.__name__}' object but received a '{receiver.python_type_name()}'",
+                )
+            if isinstance(receiver, variables.UserDefinedObjectVariable):
+                if receiver._base_vt is None:
                     raise AssertionError(
                         "UserDefinedObjectVariable._base_vt must not be None"
                     )
-                return args[0]._base_vt.call_method(tx, name, args[1:], kwargs)
+                return receiver._base_vt.call_method(tx, name, args[1:], kwargs)
             else:
-                return args[0].call_method(tx, name, args[1:], kwargs)
+                return receiver.call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name, None)

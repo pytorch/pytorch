@@ -1618,6 +1618,16 @@
       ]
     }
   ],
+  "GB0888": [
+    {
+      "Gb_type": "Unsupported exception __init__ mutation",
+      "Context": "{self.fn.__name__}.__init__ on {receiver}",
+      "Explanation": "Dynamo cannot safely trace BaseException.__init__ mutating an existing exception object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0115": [
     {
       "Gb_type": "Unexpected failure during itertools.groupby() iteration",
@@ -5169,6 +5179,16 @@
       "Explanation": "torch.func.functional_call capture is disabled",
       "Hints": [
         "Set `torch._dynamo.config.inline_inbuilt_nn_modules=True` to enable."
+      ]
+    }
+  ],
+  "GB9694": [
+    {
+      "Gb_type": "Keyword args passed to exception __init__",
+      "Context": "{self} with kwargs {kwargs}",
+      "Explanation": "Dynamo does not know how to handle keyword args passed to exception __init__",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
