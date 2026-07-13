@@ -145,7 +145,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
     #          could recursively run passes on them. Also the epilogue graph is inlined at the end.
     #       b. we call auto_functionalized_v2 and pass in an additional schema in order to properly invoke
     #          the hop with normalized kwargs.
-    #   3. In inductor, we decompose the auto_functionalized hop by callilng into the dense implementation, which
+    #   3. In inductor, we decompose the auto_functionalized hop by calling into the dense implementation, which
     #      copies the mutated inputs to the hop if necessary and call the hop.
     # After these steps, the rest of the inductor stack knows how to fuse the copy_ in subgraph with other ops.
     def _call_Functionalize(self, ctx, subgraph, *operands, **kwargs):

@@ -3,6 +3,7 @@ import abc
 import copy
 import logging
 import operator
+import re
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -15,7 +16,7 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
@@ -100,19 +101,17 @@ def _assign_attr(
         for to_module in to_modules:
             if not hasattr(to_module, item):
                 setattr(to_module, item, torch.nn.Module())
-            if item in to_module._modules:
-                module = to_module._modules[item]
-                if module is not None:
-                    ts.add(module)
-            i = 1
-            while True:
-                variant = f"{item}@{i}"
-                if variant not in to_module._modules:
-                    break
-                module = to_module._modules[variant]
-                if module is not None:
-                    ts.add(module)
-                i += 1
+            # Collect `item` and every call-name variant `item@N` present in
+            # _modules, regardless of contiguity. Export passes (e.g.
+            # replace_set_grad_with_hop_pass) can relocate intermediate calls
+            # into HOP subgraphs, leaving non-contiguous indices (e.g. base + @3
+            # with @1/@2 absent); scanning contiguously from @1 would stop at the
+            # gap and never populate the surviving higher-index copies.
+            ts.update(
+                t_call  # type: ignore[misc]
+                for k, t_call in to_module._modules.items()
+                if _is_call_name(k, item)
+            )
         to_modules = ts
 
     for to_module in to_modules:
@@ -139,7 +138,7 @@ def _assign_attr(
                     torch.Tensor,
                     torch.ScriptObject,
                 ),
-            ) and not is_opaque_value(from_obj):
+            ) and not is_custom_class_obj(from_obj):
                 raise AssertionError(
                     f"expected torch.Tensor, torch.ScriptObject, or opaque type for CONSTANT attr_kind, got {type(from_obj)}"
                 )
@@ -1095,6 +1094,11 @@ def _call_name(base: str, n: int) -> str:
     # Given n >= 0, generate call names to a submodule `base` of the form
     # `base`, `base@1`, `base@2`, etc.
     return base if n == 1 else f"{base}@{n - 1}"
+
+
+def _is_call_name(call_name: str, base: str) -> bool:
+    # Recognize when call_name = _call_name(base, n) for some n >= 0.
+    return re.match(re.escape(base) + r"(@\d+)?$", call_name) is not None
 
 
 class _ModuleFrame:

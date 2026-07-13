@@ -725,6 +725,7 @@ Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
     bool adjoint);
+Tensor linalg_matrix_sqrth_differential(const Tensor& self, const Tensor& grad);
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor& input,
     const std::optional<Tensor>& gamma,
@@ -764,6 +765,21 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& x1,
     const Tensor& x2,
     const Tensor& res);
+std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
+    const Tensor& grad,
+    const Tensor& grad_output,
+    const Tensor& x1,
+    const Tensor& x2,
+    double p,
+    const Tensor& cdist,
+    std::array<bool, 4> output_mask);
+std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
+    const Tensor& grad,
+    const Tensor& grad_output,
+    const Tensor& self,
+    double p,
+    const Tensor& pdist,
+    std::array<bool, 3> output_mask);
 Tensor fft_backward(
     const Tensor& self,
     const Tensor& grad,
