@@ -2089,6 +2089,14 @@ class triton:
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
     force_cooperative_reductions = False
 
+    # On HIP/ROCm (Triton > 3.2) the reduction loop is software-pipelined with
+    # `tl.range(..., num_stages=2)`. This can crash the AMD backend `make_ttgir`
+    # PassManager for reduction loops containing indirect (index_select) loads.
+    # Set False to disable the pipelining (no num_stages on the reduction loop).
+    hip_reduction_loop_pipelining = (
+        os.environ.get("TORCHINDUCTOR_HIP_REDUCTION_LOOP_PIPELINING", "1") == "1"
+    )
+
     # Lower/upper bounds between two-step variance and Welford variance for
     # non-split CUDA Triton half/bfloat16 reductions. Mid-sized reductions use
     # two-step for throughput; smaller reductions keep the old heuristic because

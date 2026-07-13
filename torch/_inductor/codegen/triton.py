@@ -3236,6 +3236,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
+        # Set when this kernel emits an indirect-indexed (e.g. index_select)
+        # load. Used to skip HIP reduction-loop software pipelining, whose AMD
+        # make_ttgir pass crashes on pipelined loops with indirect loads.
+        self._has_indirect_load: bool = False
         # Cache of values that can be reused for the prologue.
         self.prologue_cache: dict[str, str] = {}
         self.prologue: IndentedBuffer = IndentedBuffer()
@@ -4551,6 +4555,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         load_counts[name] += 1
         make_line: Callable[[str], str | DelayReplaceLine] = identity
         indirect_indexing = self.is_indirect_indexing(index)
+        if indirect_indexing:
+            self._has_indirect_load = True
         original_index = index
         dtype = V.graph.get_dtype(name)
         uses_uint8_storage = use_uint8_triton_storage_for_cuda_float8_e4m3fn(dtype, var)
@@ -6367,8 +6373,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
                     # Conditionalize pipelining on HIP for Triton due to
-                    # reports of numerical inaccuracies on older Triton
-                    if torch.version.hip and get_triton_version() > (3, 2):
+                    # reports of numerical inaccuracies on older Triton. Skip it
+                    # only for kernels with an indirect (index_select) load: the
+                    # AMD make_ttgir pipeliner crashes on pipelined reduction
+                    # loops containing indirect loads. Other reductions keep
+                    # num_stages=2. The config is a master override.
+                    if (
+                        torch.version.hip
+                        and get_triton_version() > (3, 2)
+                        and config.triton.hip_reduction_loop_pipelining
+                        and not self._has_indirect_load
+                    ):
                         num_stages = ", num_stages = 2"
                     else:
                         num_stages = ""
