@@ -1850,7 +1850,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 x, x, x, None, True, dropout_p=0.0
             )[0]
 
-        @torch.compile(mode="reduce-overhead")
+        @torch.compile(mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
         def attn(x):
             return eager_attn(x)
 
@@ -3732,7 +3732,7 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.fx.traceback import preserve_node_meta
 
-        compiled_f = torch.compile(lambda x: x.sin().cos(), fullgraph=True)
+        compiled_f = torch.compile(lambda x: x.sin().cos(), fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
 
         @contextlib.contextmanager
         def skip_nested_compile():
