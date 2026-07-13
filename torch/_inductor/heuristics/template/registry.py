@@ -1,7 +1,7 @@
 """Backward-compatible re-exports from the shared heuristics registry."""
 
 from torch._inductor.heuristics.registry import (  # noqa: F401
-    _HEURISTIC_CACHE,  # noqa: F401
+    _HEURISTIC_CACHE,
     _TEMPLATE_HEURISTIC_REGISTRY,
     clear_registry,
     get_registered_heuristic_class,
