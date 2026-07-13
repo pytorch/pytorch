@@ -428,6 +428,102 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         with self.assertRaises(TypeError):
             d.copy(1)
 
+    # --- deque iterator mutation detection ---
+
+    @make_dynamo_test
+    def test_deque_iter_mutated_pop_raises(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.pop()
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_iter_mutated_append_raises(self):
+        d = collections.deque()
+        it = iter(d)
+        d.append(10)
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_reversed_iter_mutated_raises(self):
+        d = collections.deque("abc")
+        it = reversed(d)
+        d.appendleft("z")
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_iter_unmutated_ok(self):
+        d = collections.deque("abc")
+        self.assertEqual(list(iter(d)), ["a", "b", "c"])
+        self.assertEqual(list(reversed(d)), ["c", "b", "a"])
+
+    @make_dynamo_test
+    def test_deque_reverse_iterator_type(self):
+        klass = type(reversed(collections.deque()))
+        self.assertEqual(list(klass(collections.deque("abcd"))), list(reversed("abcd")))
+
+    @make_dynamo_test
+    def test_deque_forward_iterator_type(self):
+        klass = type(iter(collections.deque()))
+        self.assertEqual(list(klass(collections.deque("abcd"))), list("abcd"))
+
+    @make_dynamo_test
+    def test_deque_reverse_iterator_bad_arg(self):
+        klass = type(reversed(collections.deque()))
+        with self.assertRaises(TypeError):
+            klass([1, 2, 3])
+
+    # Eager parity: only mutations that bump CPython's deque->state invalidate
+    # an active iterator. reverse() and setitem do NOT bump; delitem and a
+    # non-empty extend do.
+
+    @make_dynamo_test
+    def test_deque_iter_reverse_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.reverse()
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_setitem_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d[0] = "Z"
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_delitem_raises(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        del d[0]
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_iter_extend_empty_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.extend([])
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_extendleft_empty_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.extendleft([])
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_extend_nonempty_raises(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.extend([1])
+        with self.assertRaises(RuntimeError):
+            next(it)
+
     # --- torch.Size concatenation ---
 
     @make_dynamo_test
