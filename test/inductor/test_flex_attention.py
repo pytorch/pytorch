@@ -2053,7 +2053,6 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_xpu
     @expected_not_implemented_on_mps
     def test_bf16_score_mod_captured_grad_dtype(self, device):
         """
@@ -5405,6 +5404,59 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return inv_dist * score
 
         self.run_test(euclidean_dist_pos_embed, torch.bfloat16, device=device)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # exercises the Triton default-config tile clamping path
+    def test_narrow_kv_block_size_uses_clamped_default_config(self, device):
+        """The single default config must clamp its tiles to fit a narrower KV
+        sparse block size instead of erroring, in both forward and backward."""
+        q, k, v = (
+            torch.randn(
+                2, 8, 2048, 128, device=device, dtype=torch.bfloat16, requires_grad=True
+            )
+            for _ in range(3)
+        )
+        block_mask = create_block_mask(
+            _causal_mask, None, None, 2048, 2048, BLOCK_SIZE=(128, 64), device=device
+        )
+        out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+        ref = flex_attention(q, k, v, block_mask=block_mask)
+        torch.testing.assert_close(out, ref, atol=2e-2, rtol=2e-2)
+
+        grad_out = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (q, k, v), grad_out, retain_graph=True)
+        ref_grads = torch.autograd.grad(ref, (q, k, v), grad_out, retain_graph=True)
+        for g, rg in zip(grads, ref_grads):
+            torch.testing.assert_close(g, rg, atol=2e-2, rtol=2e-2)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # exercises the Triton IS_DIVISIBLE sparse-block guard
+    def test_sparse_block_not_dividing_seqlen(self, device):
+        """Sparse blocks that overhang a 128-divisible seq len must not be
+        walked unmasked past KV_LEN (silent OOB corruption)."""
+
+        def tail_only(b, h, m, n):
+            return n >= 256
+
+        S = 384
+        q, k, v = (
+            torch.randn(2, 4, S, 64, device=device, requires_grad=True)
+            for _ in range(3)
+        )
+        block_mask = create_block_mask(
+            tail_only, None, None, S, S, BLOCK_SIZE=256, device=device
+        )
+        out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+        ref = flex_attention(q, k, v, block_mask=block_mask)
+        torch.testing.assert_close(out, ref, atol=2e-2, rtol=2e-2)
+
+        grad_out = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (q, k, v), grad_out, retain_graph=True)
+        ref_grads = torch.autograd.grad(ref, (q, k, v), grad_out, retain_graph=True)
+        for g, rg in zip(grads, ref_grads):
+            torch.testing.assert_close(g, rg, atol=2e-2, rtol=2e-2)
 
     @supported_platform
     @skip_on_cpu
