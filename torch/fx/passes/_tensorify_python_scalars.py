@@ -367,7 +367,10 @@ def _tensorify_impl(
                         args.append(a)
 
                 if transform:
-                    replacement_proxy = replacement_op(*args)
+                    # Preserve keyword-only args (e.g. add/sub `alpha`) which
+                    # live in node.kwargs; the loop above only rebuilds
+                    # positional args, so without this they are dropped.
+                    replacement_proxy = replacement_op(*args, **node.kwargs)
 
                     if (
                         compute_dtype != node.meta["val"].dtype
