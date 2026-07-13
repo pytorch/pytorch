@@ -2456,7 +2456,9 @@ def meta__pdist_forward(self: Tensor, p: float = 2) -> Tensor:
 
 @register_meta(aten._pdist_backward)
 @out_wrapper()
-def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) -> Tensor:
+def meta__pdist_backward(
+    grad_output: Tensor, self: Tensor, p: float, pdist: Tensor
+) -> Tensor:
     torch._check(
         self.is_contiguous(), lambda: "_pdist_backward requires self to be contiguous"
     )
@@ -4442,7 +4444,7 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
 
 @register_meta(aten._cdist_backward)
 @out_wrapper()
-def meta_cdist_backward(grad, x1, x2, p, cdist):
+def meta_cdist_backward(grad_output, x1, x2, p, cdist):
     c1 = x1.shape[-1]
     r1 = x1.shape[-2]
     r2 = x2.shape[-2]
@@ -9023,6 +9025,7 @@ def activate_meta():
                 "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
                 "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
+                "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
             }
         ):
             pass
