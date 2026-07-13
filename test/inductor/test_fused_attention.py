@@ -1839,7 +1839,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
             test_sdpa_rewriter_16_fp32_mask_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16_fp32_mask
             )
-        elif GPU_TYPE == "cuda":
+        elif GPU_TYPE in ("cuda", "xpu"):
             test_sdpa_rewriter_16_inference_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16,
                 check_train=False,
