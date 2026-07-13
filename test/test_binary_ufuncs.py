@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
@@ -3606,9 +3607,9 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(torch.ldexp(mantissas, exponents), expected)
 
     @deviceCountAtLeast(2)
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     def test_ldexp_off_current_device(self, devices):
-        # ldexp has no codegen device guard; verify it targets the operand device, not the current one.
+        # verify ldexp targets the operand device, not the current one.
         mantissas = torch.randn(2048)
         exponents = torch.randint(0, 5, (2048,), dtype=torch.int32)
         ref = torch.ldexp(mantissas, exponents)

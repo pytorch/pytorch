@@ -5,7 +5,6 @@
 #include <utility>
 
 #include <ATen/core/Tensor.h>
-#include <ATen/DeviceGuard.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
@@ -1573,8 +1572,6 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
 // This function is used to dispatch to kernels that use std::ldexp on CPU and the global namespaces ::ldexp on CUDA
 // Both of these require floating types for 'self' and integer types for 'other'.
 static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
-  // ldexp is CompositeExplicitAutograd (no codegen guard), but this launches a device kernel.
-  const OptionalDeviceGuard device_guard(device_of(self));
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(result)
@@ -1591,8 +1588,7 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
               "ldexp can't be cast to the desired output type ", result.scalar_type());
 
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
-      isFloatingType(self.scalar_type()) &&
-      ldexp_stub.is_device_supported(self.device().type())) {
+      isFloatingType(self.scalar_type())) {
     return _ldexp_int_exponent(self, other, result);
   }
 
@@ -1601,12 +1597,22 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
-      isFloatingType(self.scalar_type()) &&
-      ldexp_stub.is_device_supported(self.device().type())) {
+      isFloatingType(self.scalar_type())) {
     Tensor result = at::empty_like(self);
     return _ldexp_int_exponent(self, other, result);
   }
 
+  return at::mul(self, _pow2(self, other));
+}
+
+Tensor& ldexp_out_default(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
+              "ldexp can't be cast to the desired output type ", result.scalar_type());
+
+  return at::mul_out(result, self, _pow2(self, other));
+}
+
+Tensor ldexp_default(const Tensor& self, const Tensor& other) {
   return at::mul(self, _pow2(self, other));
 }
 

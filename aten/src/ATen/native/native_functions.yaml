@@ -3444,10 +3444,12 @@
 - func: fbgemm_pack_quantized_matrix.KN(Tensor input, int K, int N) -> Tensor
 
 - func: ldexp.Tensor(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
   variants: function, method
   tags: pointwise
   dispatch:
-    CompositeExplicitAutograd: ldexp
+    CPU, CUDA: ldexp
+    CompositeExplicitAutograd: ldexp_default
 
 - func: ldexp_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: function, method
@@ -3456,9 +3458,11 @@
     CompositeExplicitAutograd: ldexp_
 
 - func: ldexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
   tags: pointwise
   dispatch:
-    CompositeExplicitAutograd: ldexp_out
+    CPU, CUDA: ldexp_out
+    CompositeExplicitAutograd: ldexp_out_default
 
 - func: linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
