@@ -11,8 +11,8 @@ import threading
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
-from typing_extensions import Never
+from typing import Any, Literal, Optional, Protocol, TYPE_CHECKING, Union
+from typing_extensions import assert_never, Never
 
 import sympy
 
@@ -900,7 +900,7 @@ class TensorAccesses:
 
 
 class IgnoreUnknownOp(Protocol):
-    """If return True: skip the op, otherwise raise an error."""
+    """Returns True if the op should be skipped; otherwise the caller raises."""
 
     def __call__(self, op: Op) -> bool: ...
 
@@ -942,6 +942,46 @@ READ_OPS: dict[str, ReadWriteIndexes] = {
 UNKNOWN_OPS: dict[str, IgnoreUnknownOp] = {
     "tt.elementwise_inline_asm": lambda op: op.is_pure
 }
+
+
+KernelAccessKind = Literal["read", "write", "tma_store"]
+
+
+def _read_write_indexes(indexes: Sequence[int] | ReadWriteIndexes) -> ReadWriteIndexes:
+    if callable(indexes):
+        return indexes
+    index_tuple = tuple(indexes)
+    return lambda op: list(index_tuple)
+
+
+def _reset_kernel_access_analysis_caches() -> None:
+    get_tma_stores.reset()
+    analyze_kernel_access.reset()
+
+
+def register_kernel_access_op(
+    name: str,
+    indexes: Sequence[int] | ReadWriteIndexes,
+    *,
+    kind: KernelAccessKind,
+) -> None:
+    """
+    Register a Triton op for kernel read/write analysis.
+
+    Registration invalidates the memoized TTIR access analysis so callers can
+    register custom backend ops after earlier analyses have run.
+    """
+    index_fn = _read_write_indexes(indexes)
+    if kind == "read":
+        READ_OPS[name] = index_fn
+    elif kind == "write":
+        WRITE_OPS[name] = index_fn
+    elif kind == "tma_store":
+        TMA_STORE_OPS[name] = index_fn
+        WRITE_OPS[name] = index_fn
+    else:
+        assert_never(kind)
+    _reset_kernel_access_analysis_caches()
 
 
 @MemoizeWithCycleCheck

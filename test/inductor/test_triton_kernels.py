@@ -4539,6 +4539,51 @@ class MutationTests(torch._inductor.test_case.TestCase):
         write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
         self.assertListEqual(write_names, ["workspace"])
 
+    def test_register_kernel_access_op_invalidates_analysis_cache(self):
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        custom_store = "custom_tma.cache_test_store"
+        functions = {
+            "main": {
+                Intermediate(idx=-1): [
+                    Op(custom_store, None, [Param(idx=0)], Intermediate(idx=-1))
+                ],
+            },
+        }
+
+        old_write_ops = tkw.WRITE_OPS.copy()
+        try:
+            analyze_kernel_access.reset()
+            tensor_accesses = analyze_kernel_access(
+                functions,
+                "main",
+                1,
+                ("out_ptr",),
+                frozenset({0}),
+            )
+            self.assertEqual(len(tensor_accesses.read_writes.writes), 0)
+
+            tkw.register_kernel_access_op(custom_store, [0], kind="write")
+            tensor_accesses = analyze_kernel_access(
+                functions,
+                "main",
+                1,
+                ("out_ptr",),
+                frozenset({0}),
+            )
+            write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+            self.assertListEqual(write_names, ["out_ptr"])
+        finally:
+            tkw.WRITE_OPS.clear()
+            tkw.WRITE_OPS.update(old_write_ops)
+            tkw.analyze_kernel_access.reset()
+
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
         "requires experimental TMA descriptor API",
@@ -4715,9 +4760,10 @@ class MutationTests(torch._inductor.test_case.TestCase):
         old_write_ops = tkw.WRITE_OPS.copy()
         old_read_ops = tkw.READ_OPS.copy()
         try:
-            tkw.TMA_STORE_OPS[custom_store] = tkw._safe_at_least_one_arg
-            tkw.WRITE_OPS[custom_store] = tkw._safe_at_least_one_arg
-            tkw.READ_OPS[custom_load] = lambda op: [0]
+            tkw.register_kernel_access_op(
+                custom_store, tkw._safe_at_least_one_arg, kind="tma_store"
+            )
+            tkw.register_kernel_access_op(custom_load, [0], kind="read")
             with (
                 mock.patch.object(
                     tkw,
