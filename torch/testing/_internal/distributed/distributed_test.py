@@ -9068,6 +9068,9 @@ class DistributedTest:
 
         def _test_monitored_barrier_allreduce_hang(self, wait_all_ranks):
             # tests expected behavior when nonzero rank hangs.
+            # This test requires DETAIL debug flag to match error regex on xccl
+             if TEST_XPU:
+                dist.set_debug_level(dist.DebugLevel.DETAIL)
             backend_pg = dist.new_group(
                 ranks=list(range(int(self.world_size))),
                 # provide sufficient timeout so communicators
