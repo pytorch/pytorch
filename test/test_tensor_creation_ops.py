@@ -1094,6 +1094,11 @@ class TestTensorCreation(TestCase):
         elif dtype == torch.int16:
             # CPU min and max float -> int16 conversion is divergent.
             vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
+        elif dtype == torch.int8:
+            # CPU min and max float -> int8 conversion is divergent under clang-21
+            # (out-of-range float->int is UB; codegen differs from numpy's
+            # reference). Drop the out-of-range extremes, mirroring int16 above.
+            vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
 
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
@@ -3751,7 +3756,7 @@ class TestRandomTensorCreation(TestCase):
         expected_bin = shuffled_interval.shape[0] / 10
         expected_error = math.sqrt(expected_bin) / expected_bin * 3
         error = (hist - expected_bin).abs().max() / expected_bin
-        self.assertTrue(error < expected_error, f"error {error} > {expected_error}")
+        self.assertTrue(error < expected_error, lambda msg: f"{msg}\nerror {error} > {expected_error}")
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA
