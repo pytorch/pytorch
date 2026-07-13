@@ -883,6 +883,38 @@ def gemm_act(
     beta: float | Tensor = 1.0,
     device_capacity_override: tuple[int, int] | None = None,
 ) -> None:
+    """Run GEMM with an optional generated tensor epilogue and local reduction.
+
+    Local reductions group the logical GEMM output ``[L, M, N]``. Axis 0 groups
+    M and writes ``local_reduce_out`` with shape ``[L, M / group, N]``; axis 1
+    groups N and writes ``[L, M, N / group]``. ``local_reduce_group`` must be
+    positive, divide the selected dimension, and fit the selected GEMM tile.
+    ``local_reduce_out`` is always 3-D at this QuACK boundary.
+
+    When ``tensor_epilogue_returns_local_reduce`` is true, the generated tensor
+    epilogue's final return value, after the main result and any same-shape aux
+    results, supplies the grouped reduction. The flag and ``local_reduce_out``
+    must be provided together, and a tensor epilogue function or registry key is
+    required.
+
+    ``local_reduce_feeds_main`` instead reduces the accumulator, broadcasts the
+    finalized group value to its member rows, and appends it as the final input
+    to the tensor epilogue. It does not request an output store by itself. This
+    mode requires a tensor epilogue and both callback keys, and currently accepts
+    only axis-0 groups that fit within one warp. The callback omission described
+    below applies only to store-only reductions.
+
+    ``local_reduce_combine_key`` and ``local_reduce_finalize_key`` identify
+    CuTeDSL callbacks registered with ``register_local_reduce_fns``. The binary
+    combine callback merges two physical partial values using the reduction
+    operation. The unary finalize callback transforms the fully combined value
+    before conversion and storage. Both keys are required whenever the grouped
+    reduction needs physical lane, warp, or fragment combining; they may be
+    omitted when the tensor epilogue returns an already-complete TensorSSA group.
+
+    Returns:
+        None. Results are written to the supplied output tensors.
+    """
     if tensor_epilogue_fn is not None:
         assert activation is None, "tensor_epilogue_fn and activation are mutually exclusive"
         tensor_epilogue_key = (
