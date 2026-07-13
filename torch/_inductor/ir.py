@@ -7170,12 +7170,16 @@ class ExternKernel(InputsKernel):
                     args_flat_is_tensor.append(False)
                     non_tensor_args.append(arg)
                     device_index = arg.device.index
-                    if not (arg.device.type in ["cuda", "xpu"] and device_index is not None):
+                    if not (
+                        arg.device.type in ["cuda", "xpu"] and device_index is not None
+                    ):
                         raise AssertionError(
                             'Expected arg.device.type in ["cuda", "xpu"] and device_index is not None'
                         )
                     real_non_tensor_args.append(
-                        torch._C._accelerator_getDefaultGenerator(device_index).clone_state()
+                        torch._C._accelerator_getDefaultGenerator(
+                            device_index
+                        ).clone_state()
                     )
 
                 case OpaqueObjectState():
@@ -7245,7 +7249,9 @@ class ExternKernel(InputsKernel):
                         'Expected x.device.type in ["cuda", "xpu"] and device_index is not None'
                     )
                 example_args.append(
-                    torch._C._accelerator_getDefaultGenerator(device_index).clone_state()
+                    torch._C._accelerator_getDefaultGenerator(
+                        device_index
+                    ).clone_state()
                 )
             else:
                 example_args.append(ir_node_to_tensor(x))
