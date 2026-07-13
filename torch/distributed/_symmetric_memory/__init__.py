@@ -1914,12 +1914,31 @@ def _should_use_implicit_mempool() -> bool:
 
     By default, use implicit memory pool for `symm_mem.empty`.  Users can
     disable this by setting the environment variable `TORCH_SYMMMEM_IMPLICIT_POOL` to `0`.
+
+    The implicit MemPool is also disabled when the CUDA caching allocator's
+    ``expandable_segments`` option is on. The two are incompatible: the pool's
+    backing allocator is the symmetric-memory allocator, which under
+    ``expandable_segments`` allocates via the caching allocator (``raw_alloc``)
+    and would recurse back into the pool. In that case ``empty`` falls back to
+    direct (non-pooled) allocation.
     """
     global _use_implicit_mempool
     if _use_implicit_mempool is None:
         _use_implicit_mempool = os.getenv("TORCH_SYMMMEM_IMPLICIT_POOL", "1") == "1"
 
-    return _use_implicit_mempool
+    if not _use_implicit_mempool:
+        return False
+
+    if not torch.cuda.is_available():
+        return True
+    get_settings = getattr(torch._C, "_accelerator_getAllocatorSettings", None)
+    if get_settings is None:
+        return True
+    for token in get_settings().split(","):
+        key, _, value = token.partition(":")
+        if key.strip() == "expandable_segments":
+            return value.strip().lower() not in ("true", "1")
+    return True
 
 
 @overload
@@ -1983,6 +2002,8 @@ def empty(  # type: ignore[misc]
         with torch.cuda.use_mem_pool(mempool):
             return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
     else:
+        # `_should_use_implicit_mempool` is False (e.g. expandable_segments is
+        # enabled); allocate from the default pool instead.
         return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
 
 
