@@ -81,6 +81,8 @@ struct SnapshotInfo {
   std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
   std::vector<CachingDeviceAllocator::AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
+  std::vector<CachingDeviceAllocator::HostSegmentInfo> host_segments;
+  std::vector<CachingDeviceAllocator::TraceEntry> host_traces;
 };
 
 // returns the pointers freed in the pool
@@ -232,7 +234,20 @@ class CUDAAllocator : public DeviceAllocator {
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
   virtual void popCompileContext() {}
-  virtual void setUserMetadata(const std::string& metadata) {}
+  // Whether this backend records the string set via setUserMetadata onto
+  // memory-history trace entries. When false, setUserMetadata is a no-op and
+  // getUserMetadata always returns "".
+  virtual bool supportsUserMetadata() {
+    return false;
+  }
+  virtual void setUserMetadata(const std::string& /*metadata*/) {
+    TORCH_WARN_ONCE(
+        name(),
+        " does not support user metadata; the value set via "
+        "torch.cuda.memory._set_memory_metadata is ignored and will not "
+        "appear in memory snapshots. Query "
+        "torch._C._cuda_memoryMetadataSupported() to check support.");
+  }
   virtual std::string getUserMetadata() {
     return "";
   }
@@ -276,6 +291,13 @@ class CUDAAllocator : public DeviceAllocator {
   virtual CheckpointDelta setCheckpointPoolState(
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
+  virtual DataPtr allocateWithAddress(size_t size, void* addr) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support allocateWithAddress. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual std::string name() = 0;
   std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override {
     c10::DeviceGuard device_guard({at::kCUDA, device});
@@ -380,6 +402,10 @@ inline CheckpointDelta setCheckpointPoolState(
     c10::DeviceIndex device,
     std::shared_ptr<AllocatorState> pps) {
   return get()->setCheckpointPoolState(device, std::move(pps));
+}
+
+inline DataPtr allocateWithAddress(size_t size, void* addr) {
+  return get()->allocateWithAddress(size, addr);
 }
 
 // CUDAGraph interactions
@@ -510,6 +536,10 @@ inline void enablePeerAccess(
     c10::DeviceIndex dev,
     c10::DeviceIndex dev_to_access) {
   get()->enablePeerAccess(dev, dev_to_access);
+}
+
+inline bool supportsUserMetadata() {
+  return get()->supportsUserMetadata();
 }
 
 inline void setUserMetadata(const std::string& metadata) {

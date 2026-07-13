@@ -22,6 +22,7 @@
 #include <c10/core/InferenceMode.h>
 
 #include <iostream>
+#include <utility>
 
 // This file contains functorch's Python bindings.
 
@@ -83,7 +84,7 @@ static void _propagate_functional_input_mutation(
   if (unwrapped.unsafeGetTensorImpl() != wrapped_inner.unsafeGetTensorImpl()) {
     if (unwrapped.sym_nbytes() != wrapped_inner.sym_nbytes()) {
       // Functions might resize zero-sized inputs, which we need to reflect
-      // ehre.
+      // here.
       unwrapped.resize__symint(wrapped_inner.sym_sizes());
     }
     // If the input tensor's metadata was mutated, then use as_strided_()
@@ -156,8 +157,10 @@ static Tensor _remove_batch_dim(
   if (!has_level(self, level)) {
     auto self_sizes = self.sym_sizes();
     VmapSymDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
-    expanded_sizes.insert(expanded_sizes.begin() + out_dim, batch_size);
-    auto result = self.expand_symint(expanded_sizes);
+    int64_t ndim = expanded_sizes.size();
+    int64_t wrapped_out_dim = at::maybe_wrap_dim(out_dim, ndim + 1);
+    expanded_sizes.insert(expanded_sizes.begin() + wrapped_out_dim, batch_size);
+    auto result = self.unsqueeze(wrapped_out_dim).expand_symint(expanded_sizes);
     return result;
   }
 
@@ -256,7 +259,7 @@ static int64_t _grad_increment_nesting() {
   if (prev_inference_mode) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(false);
-    c10::AutogradState::set_tls_state(state);
+    c10::AutogradState::set_tls_state(std::move(state));
   }
   return initAndPushDynamicLayer(
       TransformType::Grad,
@@ -275,7 +278,7 @@ static int64_t _grad_decrement_nesting() {
   if (meta.prevInferenceMode_) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(true);
-    c10::AutogradState::set_tls_state(state);
+    c10::AutogradState::set_tls_state(std::move(state));
   }
   return layer.layerId();
 }
@@ -288,7 +291,7 @@ static int64_t _jvp_increment_nesting() {
   if (prev_inference_mode) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(false);
-    c10::AutogradState::set_tls_state(state);
+    c10::AutogradState::set_tls_state(std::move(state));
   }
   return initAndPushDynamicLayer(
       TransformType::Jvp,
@@ -307,7 +310,7 @@ static int64_t _jvp_decrement_nesting() {
   if (meta.prevInferenceMode_) {
     auto state = c10::AutogradState::get_tls_state();
     state.set_inference_mode(true);
-    c10::AutogradState::set_tls_state(state);
+    c10::AutogradState::set_tls_state(std::move(state));
   }
   return layer.layerId();
 }

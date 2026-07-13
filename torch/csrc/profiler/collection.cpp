@@ -344,12 +344,14 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
+  bool pushed_correlation_id = false;
   if (!config_.experimental_config.disable_external_correlation) {
     if (fn.scope() == at::RecordScope::USER_SCOPE) {
       torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
     } else {
       torch::profiler::impl::kineto::pushCorrelationId(corr_id);
     }
+    pushed_correlation_id = true;
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
@@ -370,6 +372,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   auto out = std::make_unique<KinetoObserverContext>(event);
+  out->pushed_correlation_id_ = pushed_correlation_id;
   if (fn.isNcclMeta()) {
     // Record NCCL metadata for specific CPU ops, switch off output
     // introspection in this begin_op callback, we will do that in exit callback
@@ -479,14 +482,12 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto input_shape_getter = inputs_outputs_.getInputShapeGenerator();
   auto concrete_input_getter = inputs_outputs_.getConcreteInputGenerator();
 
-  // TODO: CTAD will take care of template args when we move to C++17
-  auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
-  auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
-  auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
-  auto extra_meta = StealOrDefault<decltype(extra_meta_)>(extra_meta_);
-  auto kwinputs = StealOrDefault<decltype(kwinputs_)>(kwinputs_);
-  auto gpu_fallback =
-      StealOrDefault<decltype(device_fallback_)>(device_fallback_);
+  auto jit_stack = StealOrDefault(jit_stack_);
+  auto jit_module = StealOrDefault(jit_modules_);
+  auto extra_args = StealOrDefault(extra_args_);
+  auto extra_meta = StealOrDefault(extra_meta_);
+  auto kwinputs = StealOrDefault(kwinputs_);
+  auto gpu_fallback = StealOrDefault(device_fallback_);
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
     ExtraFields<EventType::TorchOp> e{
@@ -879,6 +880,12 @@ void generateForwardBackwardLinks(
 
 static constexpr const char* indexKey = "Ev Idx";
 
+static std::string sanitizeNameForKinetoJSON(std::string name) {
+  // Kineto's Chrome trace writer quotes names itself but does not escape '"'.
+  std::replace(name.begin(), name.end(), '"', '\'');
+  return name;
+}
+
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_ns,
@@ -900,6 +907,7 @@ void passEventsToKineto(
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());
     }
+    name = sanitizeNameForKinetoJSON(std::move(name));
     auto* activity = cpu_trace.addCPUActivity(
         name,
         e->kinetoType(),
@@ -912,13 +920,11 @@ void passEventsToKineto(
     if (activity) {
       addMetadata(activity, indexKey, std::to_string(i));
 
-      // There is a longstanding regression for initializing
-      // on-demand Kineto activity handling. Enabling this path
-      // for Profiler API could cause side effects as much has changed since.
-      // Make a surgical fix here until we holistically assess the on-demand
-      // vs API path fragmentation, which has been snowballing in complexity
-      // and thus flakiness.
-      if (config.global()) {
+      // In the normal (synchronous) path, kineto_activity_ is set later
+      // by TransferEvents::reassociate(). For global (async) profiling
+      // and trace_only mode the reassociation path diverges, so we also
+      // set it here while the raw pointer from addCPUActivity is valid.
+      if (config.global() || config.experimental_config.trace_only) {
         e->kineto_activity_ = activity;
       }
     }
@@ -1109,7 +1115,7 @@ class TransferEvents {
                   /*start=*/activity->flowStart()};
             },
             [](auto&) {}));
-        if (config_.experimental_config.expose_kineto_event_metadata) {
+        if (config_.get().experimental_config.expose_kineto_event_metadata) {
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
                 i.metadata_json_ = activity->metadataJson();
@@ -1171,20 +1177,30 @@ class TransferEvents {
   void setParents() {
     // First pass: Collect start events and set parent to linked event.
     ska::flat_hash_map<uint32_t, std::shared_ptr<Result>> flow_map;
+    uint64_t dropped_flow_count = 0;
     for (auto& e : results_.get()) {
       TORCH_INTERNAL_ASSERT(e != nullptr);
       e->visit(c10::overloaded(
           [&](const ExtraFields<EventType::Kineto>& i) {
             if (i.flow.type == libkineto::kLinkAsyncCpuGpu && i.flow.start) {
               auto inserted = flow_map.insert({i.flow.id, e});
-#ifdef USE_ROCM
-              if (inserted.second) {
+              if (!inserted.second) {
+                // Two flow start events arrived with the same ID, so the
+                // active backend produced a non-unique correlation ID.
+                // Nothing in the colliding pair tells us which start (if
+                // either) is the true owner of this ID, so attaching the
+                // matching flow end to the first inserter would risk
+                // linking it to an unrelated CPU op. Poison the slot so
+                // the colliding flow end skips the flow lookup and falls
+                // back to its linked_activity_ parent set in the first
+                // pass: an approximate runtime-correlation link, but never
+                // a wrong one. Any legitimate flow-based link for either
+                // start is forfeited as a result.
                 TORCH_WARN_ONCE(
-                    "ROCTracer produced duplicate flow start: ", i.flow.id);
+                    "Profiler produced duplicate flow start: ", i.flow.id);
+                ++dropped_flow_count;
+                inserted.first->second.reset();
               }
-#else // USE_ROCM
-              TORCH_INTERNAL_ASSERT(inserted.second);
-#endif // USE_ROCM
             }
             TORCH_INTERNAL_ASSERT(e->parent_.expired());
             e->parent_ = i.linked_activity_;
@@ -1196,9 +1212,10 @@ class TransferEvents {
     for (auto& e : results_.get()) {
       e->visit(c10::overloaded(
           [&](const ExtraFields<EventType::Kineto>& i) {
-            // Flow takes priority over linked event.
+            // Flow takes priority over linked event. Skip poisoned slots
+            // (set to null when a duplicate flow start ID was detected).
             const auto it = flow_map.find(i.flow.id);
-            if (it != flow_map.end() &&
+            if (it != flow_map.end() && it->second &&
                 i.flow.type == libkineto::kLinkAsyncCpuGpu && !i.flow.start) {
               e->parent_ = it->second;
             }
@@ -1213,6 +1230,15 @@ class TransferEvents {
           [](const auto&) {}));
     }
 
+    if (dropped_flow_count > 0) {
+      TORCH_WARN(
+          "Profiler observed ",
+          dropped_flow_count,
+          " duplicate flow start ID(s); affected events were linked via "
+          "runtime correlation instead. This indicates a flow ID collision "
+          "in the active backend's profiler.");
+    }
+
     // Set TIDs now that we have established lineage.
     for (auto& e : results_.get()) {
       if (e->parent_.expired()) {
@@ -1224,7 +1250,7 @@ class TransferEvents {
   static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
-  const ProfilerConfig& config_;
+  std::reference_wrapper<const ProfilerConfig> config_;
   std::vector<const itrace_t*> trace_activities_;
   ska::flat_hash_map<const itrace_t*, std::shared_ptr<Result>> kineto_events_;
 };
@@ -1251,7 +1277,9 @@ trace_ptr_t addKinetoEvents(
 
   auto trace = std::make_unique<ActivityTraceWrapper>(stopTrace());
   TORCH_INTERNAL_ASSERT(trace || !kKinetoAvailable);
-  TransferEvents transfer{results, trace, config};
+  if (!config.experimental_config.trace_only) {
+    TransferEvents transfer{results, trace, config};
+  }
   return trace;
 }
 
@@ -1347,7 +1375,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     stacks.erase(start_tid);
     auto new_frame = event->parent_.lock();
     if (new_frame != nullptr) {
-      stacks[start_tid] = new_frame;
+      stacks[start_tid] = std::move(new_frame);
     }
   };
 
@@ -1648,7 +1676,7 @@ RecordQueue::getRecords(
   }
 
   build_tree(out);
-  return {out, std::move(trace)};
+  return {std::move(out), std::move(trace)};
 }
 
 namespace {

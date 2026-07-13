@@ -254,7 +254,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 
     def __setitem__(self, k, v):
         # Cases where sub-module can be re-assigned after ScriptModule construction
-        # 1. If the attr is an module interface type, it's guaranteed that the module is
+        # 1. If the attr is a module interface type, it's guaranteed that the module is
         #    not inlined in the graph, so it's safe to swap a new ScriptModule in.
         # 2. if the new value if a ScriptModule with the same JIT type, IR won't change
         #    and it's legit to swap a new module in.
@@ -1077,7 +1077,10 @@ def call_prepare_scriptable_func_impl(obj, memo):
     for name, sub_module in obj.__dict__.items():
         if name == "_modules":
             for k, v in sub_module.items():
-                sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
+                # Mirror the elif below: skip already-scripted children (re-assigning
+                # a jit-ignored grandchild back into a ScriptModule would raise).
+                if isinstance(v, torch.nn.Module) and not isinstance(v, ScriptModule):
+                    sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
             new_obj_dict[name] = sub_module
         elif isinstance(sub_module, torch.nn.Module) and not isinstance(
             sub_module, ScriptModule

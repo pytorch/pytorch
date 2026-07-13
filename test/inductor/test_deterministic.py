@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -163,6 +164,7 @@ class DeterministicTest(TestCase):
 
             torch.testing.assert_close(eager, compiled_out)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180681")
     @unittest.skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])

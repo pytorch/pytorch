@@ -6,18 +6,30 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import NamedTuple
+from types import SimpleNamespace
+from typing import Any, NamedTuple
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.common import TritonScratchWorkspace
-from torch._inductor.codegen.cpp_wrapper_gpu import DeferredTritonCallWrapper
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.codegen.cpp_wrapper_gpu import (
+    CppWrapperGpu,
+    DeferredTritonCallWrapper,
+)
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
+    find_library_location,
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
     parametrize,
+    skipIfXpu,
     slowTest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
@@ -55,8 +67,63 @@ class GpuWrapperTemplate:
     pass
 
 
+def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
+    def impl(xs, dtype, device_arg, layout, memory_format):
+        if dtype != torch.float32:
+            raise AssertionError(f"Unexpected dtype: {dtype}")
+        if torch.device(device_arg).type != device:
+            raise AssertionError(f"Unexpected device: {device_arg}")
+        if layout != torch.strided:
+            raise AssertionError(f"Unexpected layout: {layout}")
+        if memory_format != torch.contiguous_format:
+            raise AssertionError(f"Unexpected memory_format: {memory_format}")
+        return (
+            xs[0]
+            .to(device=device_arg, dtype=dtype)
+            .contiguous(memory_format=memory_format)
+        )
+
+    def meta(xs, dtype, _device_arg, layout, memory_format):
+        return torch.empty_like(
+            xs[0],
+            dtype=dtype,
+            layout=layout,
+            memory_format=memory_format,
+        )
+
+    m.define(
+        "arg_helpers("
+        "Tensor[] xs, ScalarType dtype, Device device, "
+        "Layout layout, MemoryFormat memory_format"
+        ") -> Tensor"
+    )
+    m.impl("arg_helpers", impl, GPU_TYPE.upper())
+    m.impl("arg_helpers", meta, "Meta")
+
+
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
+
+    def test_cpp_wrapper_compile_timing_recorded(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        from torch._dynamo.utils import compilation_time_metrics
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x, y):
+            return (x @ y).relu()
+
+        x = torch.randn(64, 64, device=self.device)
+        y = torch.randn(64, 64, device=self.device)
+        compilation_time_metrics.pop("cpp_wrapper_compile", None)
+        with fresh_cache():
+            compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+            result = compiled(x, y)
+        self.assertEqual(result, fn(x, y))
+        self.assertIn("cpp_wrapper_compile", compilation_time_metrics)
+        durations = compilation_time_metrics["cpp_wrapper_compile"]
+        self.assertTrue(any(t > 0 for t in durations))
 
     def test_aoti_debug_printer_works_on_constants(self):
         batch_size = 32
@@ -79,6 +146,70 @@ class TestGpuWrapper(InductorTestCase):
         )(test_fn)
         comp()
 
+    def test_cpp_wrapper_gpu_debug_sync_codegen(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+
+        debug_sync = IndentedBuffer()
+        wrapper.generate_debug_sync(debug_sync)
+        code = debug_sync.getvalue()
+        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+        self.assertIn("DeviceSynchronize", code)
+        self.assertNotIn("torch.cuda.synchronize()", code)
+
+        wrapper.prefix = IndentedBuffer()
+        wrapper._lazy_kernel_names = []
+        graph = SimpleNamespace(is_dual_wrapper_mode=False)
+        with (
+            config.patch({"triton.debug_sync_graph": True}),
+            V.set_graph_handler(graph),
+        ):
+            wrapper._codegen_entry_impl_prologue()
+        code = wrapper.prefix.getvalue()
+        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+        self.assertIn("DeviceSynchronize", code)
+        self.assertNotIn("torch.cuda.synchronize()", code)
+
+        wrapper.device = "xpu"
+        with self.assertRaisesRegex(
+            NotImplementedError, "triton debug sync is not supported"
+        ):
+            wrapper.generate_debug_sync(IndentedBuffer())
+
+    def test_debug_sync_graph(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE != "cuda":
+            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
+
+        def test_fn(x):
+            return x * 2
+
+        compiled = torch.compile(
+            options={"cpp_wrapper": True, "triton.debug_sync_graph": True}
+        )(test_fn)
+        x = torch.randn(8, device=self.device)
+        with torch.utils._device.DeviceContext(self.device):
+            result = compiled(x)
+        self.assertEqual(result, x * 2)
+
+    def test_debug_sync_kernel(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE != "cuda":
+            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
+
+        def test_fn(x):
+            return x * 2
+
+        compiled = torch.compile(
+            options={"cpp_wrapper": True, "triton.debug_sync_kernel": True}
+        )(test_fn)
+        x = torch.randn(8, device=self.device)
+        with torch.utils._device.DeviceContext(self.device):
+            result = compiled(x)
+        self.assertEqual(result, x * 2)
+
     def test_non_tensor_args_wrapped_on_cpu(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
@@ -92,10 +223,103 @@ class TestGpuWrapper(InductorTestCase):
             _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
         self.assertIn("torch.tensor(arg, device='cpu')", code)
 
-    def test_cpp_scratch_scales_with_grid_size_for_tma(self):
-        if GPU_TYPE != "cuda" or torch.version.hip:
-            self.skipTest("CUDA-only codegen test")
+    @config.patch(implicit_fallbacks=True)
+    def test_fbcode_custom_op_fallback_python_arg_helpers(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if not config.is_fbcode():
+            self.skipTest("fbcode-only cpp_wrapper symbol visibility test")
 
+        device = self.device
+        with torch.library._scoped_library(
+            "fbcode_cpp_wrapper_arg_helpers", "FRAGMENT"
+        ) as m:
+            _register_fbcode_cpp_wrapper_arg_helper_op(m, device)
+
+            def fn(x):
+                y = x.sin()
+                return torch.ops.fbcode_cpp_wrapper_arg_helpers.arg_helpers(
+                    [y],
+                    torch.float32,
+                    torch.device(device),
+                    torch.strided,
+                    torch.contiguous_format,
+                ).cos()
+
+            x = torch.randn(4, 4, device=device)
+            expected = fn(x)
+            actual = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)(x)
+            self.assertEqual(actual, expected)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_fallback_symint_dispatch(self):
+        # A custom op with a SymInt argument (e.g.
+        # fbgemm::permute_2D_sparse_data_input1D) must not be routed to the
+        # StableIValue path.  SymInt is reported as IntType by JitType.type, so
+        # such ops used to pass _compatible_with_stableivalue and then fail at
+        # runtime with 'aoti_torch_call_dispatcher(...) API call failed'.  They
+        # must use the boxed dispatch path, which handles c10::SymInt correctly.
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        device = self.device
+        with torch.library._scoped_library("mylib_symint", "FRAGMENT") as m:
+            m.define("add_symint(Tensor x, SymInt n) -> Tensor")
+            m.impl("add_symint", lambda x, n: x + n, GPU_TYPE.upper())
+            m.impl("add_symint", lambda x, n: torch.empty_like(x), "Meta")
+
+            op = torch.ops.mylib_symint.add_symint.default
+            self.assertFalse(CppWrapperCpu._compatible_with_stableivalue(op))
+            self.assertTrue(CppWrapperCpu._compatible_with_cpp_boxed_dispatch(op))
+
+            def fn(x):
+                # x.shape[0] is symbolic once dim 0 is dynamic, so n is a SymInt.
+                return torch.ops.mylib_symint.add_symint(x, x.shape[0])
+
+            x = torch.randn(8, 4, device=device)
+            torch._dynamo.mark_dynamic(x, 0)
+            expected = fn(x)
+            compiled = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)
+            actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+            self.assertEqual(actual, expected)
+            self.assertNotIn(
+                'aoti_torch_call_dispatcher("mylib_symint::add_symint"', code
+            )
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_fallback_boxes_none_as_undefined_tensor(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if IS_FBCODE or IS_SANDCASTLE:
+            torch.ops.load_library("//caffe2/test/inductor:custom_ops")
+        elif IS_MACOS:
+            self.skipTest("non-portable load_library call used in test")
+        else:
+            lib_path = find_library_location("libaoti_custom_ops.so")
+            if IS_WINDOWS:
+                lib_path = find_library_location("aoti_custom_ops.dll")
+            if not os.path.exists(lib_path):
+                self.skipTest("libaoti_custom_ops not built")
+            torch.ops.load_library(str(lib_path))
+
+        device = self.device
+
+        def fn(x):
+            return torch.ops.aoti_custom_ops.maybe_weighted(x, None, x.shape[0])
+
+        x = torch.randn(8, 4, device=device)
+        torch._dynamo.mark_dynamic(x, 0)
+        expected = fn(x)
+        compiled = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+        self.assertEqual(actual, expected)
+        # The composite must decompose to the inner op, which is boxed-dispatched
+        # with its undefined weight materialized as an undefined tensor, not None.
+        self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
+        self.assertIn("c10::IValue(at::Tensor())", code)
+
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
+    def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
             0,
             TritonScratchWorkspace(
@@ -108,10 +332,8 @@ class TestGpuWrapper(InductorTestCase):
             "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
         )
 
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_triton_wrapper_scales_scratch_with_num_ctas(self):
-        if GPU_TYPE != "cuda" or torch.version.hip:
-            self.skipTest("CUDA-only codegen test")
-
         class FakeWrapper:
             device = "cuda"
 
@@ -202,7 +424,7 @@ class TestGpuWrapper(InductorTestCase):
                 self.assertEqual(
                     xblocks,
                     [DEFAULT_COMBO_BLOCK_SIZE_1D],
-                    f"{name} got xblocks={xblocks}, "
+                    lambda msg: f"{msg}\n{name} got xblocks={xblocks}, "
                     f"expected [{DEFAULT_COMBO_BLOCK_SIZE_1D}]",
                 )
 
@@ -277,6 +499,109 @@ class TestGpuWrapper(InductorTestCase):
         result = opt_fn(x, output_grad)
         self.assertEqual(result.shape, x.shape)
 
+    def test_cuda_cpp_wrapper_skips_vec_isa_for_device_only_code(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            return (x.sin() + 1).cos()
+
+        x = torch.randn(128, device=self.device)
+        expected = fn(x)
+        compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("needs_vec_isa=False", code)
+
+    def test_cuda_cpp_wrapper_keeps_vec_isa_for_host_vectorized_code(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=self.device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            return x
+
+        x = torch.randn(2, 2, 10)
+        expected = fn(x)
+        compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("at::vec::", code)
+        self.assertIn("needs_vec_isa=True", code)
+
+    def test_cuda_cpp_wrapper_build_separate_splits_vec_isa_requirements(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=self.device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            return x
+
+        x = torch.randn(2, 2, 10)
+        expected = fn(x)
+        with config.patch({"cpp_wrapper_build_separate": True}):
+            compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+            actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("kernel_src = (", code)
+        self.assertIn("needs_vec_isa=False", code)
+        self.assertIn("kernel_needs_vec_isa=True", code)
+
+    def test_map_fullgraph_cpp_wrapper(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def body_fn(x):
+            return torch.nn.functional.gelu(x)
+
+        def fn(xs):
+            return torch._higher_order_ops.map(body_fn, xs).sum()
+
+        xs = torch.randn(8, 64, device=self.device)
+        expected = fn(xs)
+        opt_fn = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})
+        self.assertEqual(opt_fn(xs), expected)
+
+    def test_any_fallback_cpp_wrapper(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        with torch.library._scoped_library("mylib_fallback", "FRAGMENT") as m:
+            m.define("any_fallback(Tensor x, Any y) -> Tensor")
+
+            def any_fallback(x: torch.Tensor, y: Any) -> torch.Tensor:
+                torch._check(y is not None)
+                return x.clone()
+
+            m.impl("any_fallback", any_fallback, GPU_TYPE.upper())
+            m.impl("any_fallback", any_fallback, "Meta")
+
+            @torch.compile(fullgraph=True, options={"cpp_wrapper": True})
+            def test_fn(x: torch.Tensor, y: Any) -> torch.Tensor:
+                return torch.ops.mylib_fallback.any_fallback(x, y)
+
+            test_fn(
+                torch.randn(4, device=self.device), torch.randn(4, device=self.device)
+            )
+            test_fn(torch.randn(4, device=self.device), "string")
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
 
@@ -346,7 +671,11 @@ class TestLazyCompileKernelCollision(InductorTestCase):
                 text=True,
                 env=env,
             )
-            self.assertEqual(r1.returncode, 0, f"Cold run failed:\n{r1.stderr[-2000:]}")
+            self.assertEqual(
+                r1.returncode,
+                0,
+                lambda msg: f"{msg}\nCold run failed:\n{r1.stderr[-2000:]}",
+            )
             # Second run: warm caches trigger the collision without the fix.
             r2 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
@@ -355,7 +684,11 @@ class TestLazyCompileKernelCollision(InductorTestCase):
                 text=True,
                 env=env,
             )
-            self.assertEqual(r2.returncode, 0, f"Warm run failed:\n{r2.stderr[-2000:]}")
+            self.assertEqual(
+                r2.returncode,
+                0,
+                lambda msg: f"{msg}\nWarm run failed:\n{r2.stderr[-2000:]}",
+            )
 
 
 # Helper script for test_static_init_dlopen_does_not_deadlock
@@ -383,6 +716,7 @@ compiled(x)
 class TestCppWrapperStaticInitDeadlock(InductorTestCase):
     device = GPU_TYPE
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
     def test_static_init_dlopen_does_not_deadlock(self):
         """The cpp_wrapper-generated .so must not trigger Triton kernel
         compilation from a static initializer (dlopen-time): doing so
@@ -415,7 +749,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
         self.assertEqual(
             r.returncode,
             0,
-            f"Subprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
+            lambda msg: f"{msg}\nSubprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
         )
 
 
@@ -555,7 +889,7 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
         self.assertEqual(
             result.returncode,
             0,
-            "lazy TMA scratch regression subprocess failed:\n"
+            lambda msg: f"{msg}\nlazy TMA scratch regression subprocess failed:\n"
             f"returncode: {result.returncode}\n"
             f"stderr tail:\n{stderr_tail}",
         )

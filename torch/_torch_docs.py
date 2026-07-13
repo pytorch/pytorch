@@ -607,8 +607,10 @@ Args:
     mat1 (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1422,8 +1424,10 @@ Args:
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1603,8 +1607,10 @@ Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword Args:
     {out}
@@ -1936,25 +1942,32 @@ along dimension :attr:`dim` according to the indices or number of sections speci
 by :attr:`indices_or_sections`. This function is based on NumPy's
 :func:`numpy.array_split`.
 
+.. function:: tensor_split(input, sections, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` into :attr:`sections` sections along dimension :attr:`dim`.
+   If :attr:`input` is divisible by :attr:`sections` along dimension :attr:`dim`, each
+   section will be of equal size, :code:`input.size(dim) / sections`. If :attr:`input`
+   is not divisible by :attr:`sections`, the sizes of the first
+   :code:`int(input.size(dim) % sections)` sections will have size
+   :code:`int(input.size(dim) / sections) + 1`, and the rest will have size
+   :code:`int(input.size(dim) / sections)`.
+
+   :attr:`sections` can also be a zero-dimensional long tensor.
+
+.. function:: tensor_split(input, indices, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` along dimension :attr:`dim` at each of the indices in
+   :attr:`indices`. For instance, :code:`indices=[2, 3]` and :code:`dim=0`
+   would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and
+   :code:`input[3:]`.
+
+   :attr:`indices` can be a list or tuple of ints, or a one-dimensional long
+   tensor on the CPU.
+
 Args:
     input (Tensor): the tensor to split
-    indices_or_sections (Tensor, int or list or tuple of ints):
-        If :attr:`indices_or_sections` is an integer ``n`` or a zero dimensional long tensor
-        with value ``n``, :attr:`input` is split into ``n`` sections along dimension :attr:`dim`.
-        If :attr:`input` is divisible by ``n`` along dimension :attr:`dim`, each
-        section will be of equal size, :code:`input.size(dim) / n`. If :attr:`input`
-        is not divisible by ``n``, the sizes of the first :code:`int(input.size(dim) % n)`
-        sections will have size :code:`int(input.size(dim) / n) + 1`, and the rest will
-        have size :code:`int(input.size(dim) / n)`.
-
-        If :attr:`indices_or_sections` is a list or tuple of ints, or a one-dimensional long
-        tensor, then :attr:`input` is split along dimension :attr:`dim` at each of the indices
-        in the list, tuple or tensor. For instance, :code:`indices_or_sections=[2, 3]` and :code:`dim=0`
-        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
-
-        If :attr:`indices_or_sections` is a tensor, it must be a zero-dimensional or one-dimensional
-        long tensor on the CPU.
-
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
 Example::
@@ -2611,88 +2624,6 @@ Example::
 )
 
 add_docstr(
-    torch.cholesky,
-    r"""
-cholesky(input, upper=False, *, out=None) -> Tensor
-
-Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`A` or for batches of symmetric positive-definite matrices.
-
-If :attr:`upper` is ``True``, the returned matrix ``U`` is upper-triangular, and
-the decomposition has the form:
-
-.. math::
-
-  A = U^TU
-
-If :attr:`upper` is ``False``, the returned matrix ``L`` is lower-triangular, and
-the decomposition has the form:
-
-.. math::
-
-    A = LL^T
-
-If :attr:`upper` is ``True``, and :math:`A` is a batch of symmetric positive-definite
-matrices, then the returned tensor will be composed of upper-triangular Cholesky factors
-of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, the returned
-tensor will be composed of lower-triangular Cholesky factors of each of the individual
-matrices.
-
-.. warning::
-
-    :func:`torch.cholesky` is deprecated in favor of :func:`torch.linalg.cholesky`
-    and will be removed in a future PyTorch release.
-
-    ``L = torch.cholesky(A)`` should be replaced with
-
-    .. code:: python
-
-        L = torch.linalg.cholesky(A)
-
-    ``U = torch.cholesky(A, upper=True)`` should be replaced with
-
-    .. code:: python
-
-        U = torch.linalg.cholesky(A).mH
-
-    This transform will produce equivalent results for all valid (symmetric positive definite) inputs.
-
-Args:
-    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
-                batch dimensions consisting of symmetric positive-definite matrices.
-    upper (bool, optional): flag that indicates whether to return a
-                            upper or lower triangular matrix. Default: ``False``
-
-Keyword args:
-    out (Tensor, optional): the output matrix
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = a @ a.mT + 1e-3 # make symmetric positive-definite
-    >>> l = torch.cholesky(a)
-    >>> a
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> l
-    tensor([[ 1.5528,  0.0000,  0.0000],
-            [-0.4821,  1.0592,  0.0000],
-            [ 0.9371,  0.5487,  0.7023]])
-    >>> l @ l.mT
-    tensor([[ 2.4112, -0.7486,  1.4551],
-            [-0.7486,  1.3544,  0.1294],
-            [ 1.4551,  0.1294,  1.6724]])
-    >>> a = torch.randn(3, 2, 2) # Example for batched input
-    >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
-    >>> l = torch.cholesky(a)
-    >>> z = l @ l.mT
-    >>> torch.dist(z, a)
-    tensor(2.3842e-07)
-""",
-)
-
-add_docstr(
     torch.cholesky_solve,
     r"""
 cholesky_solve(B, L, upper=False, *, out=None) -> Tensor
@@ -3226,10 +3157,6 @@ Example::
     >>> torch.cosh(a)
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
 
-.. note::
-   When :attr:`input` is on the CPU, the implementation of torch.cosh may use
-   the Sleef library, which rounds very large results to infinity or negative
-   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args),
 )
 
@@ -5673,7 +5600,7 @@ allocated during inference mode. A view tensor is an inference
 tensor if and only if the tensor it is a view of is an inference tensor.
 
 For details on inference mode please see
-`Inference Mode <https://pytorch.org/cppdocs/notes/inference_mode.html>`_.
+`Inference Mode <https://docs.pytorch.org/docs/2.9/notes/autograd.html#inference-mode>`_.
 
 Args:
     {input}
@@ -7598,8 +7525,10 @@ Args:
     input (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
     out_dtype (dtype): the dtype of the output tensor.
-        Supported only on CUDA and for torch.float32 given
-        torch.float16/torch.bfloat16 input dtypes.
+        On CUDA and XPU, only ``torch.float32`` is supported given
+        ``torch.float16``/``torch.bfloat16`` input dtypes. Other backends
+        (including out-of-tree accelerators) may support additional
+        input/output dtype combinations.
 
 Keyword args:
     {out}
@@ -8352,6 +8281,58 @@ Example::
 )
 
 add_docstr(
+    torch.nonzero_static,
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> Tensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
+
+Args:
+    {input}
+
+Keyword args:
+    size (int): the size of non-zero elements expected to be included in the out
+        tensor. Pad the out tensor with `fill_value` if the `size` is larger
+        than total number of non-zero elements, truncate out tensor if `size`
+        is smaller. The size must be a non-negative integer.
+    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
+        than the total number of non-zero elements. Default is `-1` to represent
+        invalid index.
+
+Example::
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0],
+            [  1,   1],
+            [  -1, -1]], dtype=torch.int64)
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0]], dtype=torch.int64)
+
+    # Example 3: 0 size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: 0 rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
+""".format(**common_args),
+)
+
+add_docstr(
     torch.normal,
     r"""
 normal(mean, std, *, generator=None, out=None) -> Tensor
@@ -8424,7 +8405,8 @@ Example::
     >>> torch.normal(mean=torch.arange(1., 6.))
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
 
-.. function:: normal(mean, std, size, *, out=None) -> Tensor
+.. function:: normal(mean, std, size, *, generator=None, out=None, dtype=None, \
+    layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
    :noindex:
 
 Similar to the function above, but the means and standard deviations are shared
@@ -8436,13 +8418,19 @@ Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
 
 Keyword args:
+    {generator}
     {out}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+    {pin_memory}
 
 Example::
 
     >>> torch.normal(2, 3, size=(1, 4))
     tensor([[-1.3987, -1.9544,  3.6048,  0.7909]])
-""".format(**common_args),
+""".format(**factory_common_args),
 )
 
 add_docstr(
@@ -8854,90 +8842,6 @@ Example::
     torch.float32
     >>> torch.promote_types(torch.uint8, torch.long)
     torch.long
-""",
-)
-
-add_docstr(
-    torch.qr,
-    r"""
-qr(input: Tensor, some: bool = True, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor], None]) -> (Tensor, Tensor)
-
-Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
-and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
-with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
-:math:`R` being an upper triangular matrix or batch of upper triangular matrices.
-
-If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
-Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
-
-.. warning::
-
-    :func:`torch.qr` is deprecated in favor of :func:`torch.linalg.qr`
-    and will be removed in a future PyTorch release. The boolean parameter :attr:`some` has been
-    replaced with a string parameter :attr:`mode`.
-
-    ``Q, R = torch.qr(A)`` should be replaced with
-
-    .. code:: python
-
-        Q, R = torch.linalg.qr(A)
-
-    ``Q, R = torch.qr(A, some=False)`` should be replaced with
-
-    .. code:: python
-
-        Q, R = torch.linalg.qr(A, mode="complete")
-
-.. warning::
-          If you plan to backpropagate through QR, note that the current backward implementation
-          is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
-          columns of :attr:`input` are linearly independent.
-          This behavior will probably change once QR supports pivoting.
-
-.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
-          and may produce different (valid) decompositions on different device types
-          or different platforms.
-
-Args:
-    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
-                batch dimensions consisting of matrices of dimension :math:`m \times n`.
-    some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
-                complete QR decomposition. If `k = min(m, n)` then:
-
-                  * ``some=True`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
-
-                  * ``'some=False'``: returns `(Q, R)` with dimensions (m, m), (m, n)
-
-Keyword args:
-    out (tuple, optional): tuple of `Q` and `R` tensors.
-                The dimensions of `Q` and `R` are detailed in the description of :attr:`some` above.
-
-Example::
-
-    >>> a = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
-    >>> q, r = torch.qr(a)
-    >>> q
-    tensor([[-0.8571,  0.3943,  0.3314],
-            [-0.4286, -0.9029, -0.0343],
-            [ 0.2857, -0.1714,  0.9429]])
-    >>> r
-    tensor([[ -14.0000,  -21.0000,   14.0000],
-            [   0.0000, -175.0000,   70.0000],
-            [   0.0000,    0.0000,  -35.0000]])
-    >>> torch.mm(q, r).round()
-    tensor([[  12.,  -51.,    4.],
-            [   6.,  167.,  -68.],
-            [  -4.,   24.,  -41.]])
-    >>> torch.mm(q.t(), q).round()
-    tensor([[ 1.,  0.,  0.],
-            [ 0.,  1., -0.],
-            [ 0., -0.,  1.]])
-    >>> a = torch.randn(3, 4, 5)
-    >>> q, r = torch.qr(a, some=False)
-    >>> torch.allclose(torch.matmul(q, r), a)
-    True
-    >>> torch.allclose(torch.matmul(q.mT, q), torch.eye(5))
-    True
 """,
 )
 
@@ -9407,7 +9311,7 @@ Args:
 Keyword args:
     {out}
     {dtype} If `dtype` is not given, infer the data type from the other input
-        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        arguments. If any of `start`, `end`, or `step` are floating-point, the
         `dtype` is inferred to be the default dtype, see
         :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
         be `torch.int64`.
@@ -9636,11 +9540,11 @@ Example::
     tensor([ 5.,  -2.,  9., -8.])
 
     >>> # Values equidistant from two integers are rounded towards the
-    >>> #   the nearest even value (zero is treated as even)
+    >>> #   nearest even value (zero is treated as even)
     >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
     tensor([-0., 0., 2., 2.])
 
-    >>> # A positive decimals argument rounds to the to that decimal place
+    >>> # A positive decimals argument rounds to that decimal place
     >>> torch.round(torch.tensor([0.1234567]), decimals=3)
     tensor([0.1230])
 
@@ -10059,10 +9963,6 @@ Example::
     >>> torch.sinh(a)
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
 
-.. note::
-   When :attr:`input` is on the CPU, the implementation of torch.sinh may use
-   the Sleef library, which rounds very large results to infinity or negative
-   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args),
 )
 
@@ -14123,7 +14023,8 @@ the returned index satisfies the following rules:
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
                               dimension unless :attr:`sorter` is provided, in which case the sequence does not
-                              need to be sorted
+                              need to be sorted. PyTorch does not validate this condition when :attr:`sorter` is
+                              not provided, and the behavior is undefined if the sequence is not sorted.
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
 
 Keyword args:

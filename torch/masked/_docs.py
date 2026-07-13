@@ -285,7 +285,7 @@ along :attr:`dim` while the :attr:`input` elements are masked out
 according to the boolean tensor :attr:`mask`.
 
 Let ``x`` be a sequence of unmasked elements of one-dimensional slice
-of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
+of the :attr:`input` tensor. Cumprod of i-th element in ``x`` is
 defined as ``prod(x[:i])``.
 
 The boolean tensor :attr:`mask` defines the "validity" of
