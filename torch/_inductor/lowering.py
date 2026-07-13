@@ -5929,6 +5929,11 @@ fallback_max_pool2d_with_indices_backward = fallback_handler(
 def max_pool2d_with_indices_backward(
     grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
 ):
+    if x.get_device().type == "xpu":
+        return fallback_max_pool2d_with_indices_backward(
+            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+        )
+
     if padding == 0:
         padding = [0, 0]
     if dilation == 1:
