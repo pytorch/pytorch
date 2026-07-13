@@ -134,7 +134,14 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
 
     // The signal pad shares the allocation with the data buffer: each peer's
     // allocation base is its signal pad base, and its data buffer follows at
-    // buffer_offset. The signal pad is zeroed once in alloc().
+    // buffer_offset. The signal pad is zeroed once in alloc(). This is one pad
+    // per allocation, shared across every process group that rendezvouses on
+    // it -- the same model as the CUDA backend (previously each group did its
+    // own nvshmem_malloc for an isolated pad). barrier()/put_signal()/
+    // wait_signal() are not yet implemented for NVSHMEM (see below), so nothing
+    // consumes the pad today; a future implementation must index signal slots
+    // by (rank, world_size, channel) as the CUDA backend does, so that groups
+    // with overlapping ranks on the same allocation do not clobber each other.
     world_within_cuda_p2p_ = true;
     for (int r = 0; r < world_size_; ++r) {
       auto peer_base = nvshmem_ptr(base_ptr_, rank_to_global_rank[r]);
