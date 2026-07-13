@@ -74,6 +74,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
     is_fake,
+    is_fake_tensor,
     maybe_get_fake_mode,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
@@ -3646,7 +3647,7 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
-            isinstance(value, FakeTensor)
+            is_fake_tensor(value)
             or (
                 # Is functional tensor fakeified by this instance of Dynamo
                 torch._is_functional_tensor(value)
@@ -4220,8 +4221,8 @@ def get_specialized_props(
     specialized_props = target_cls.specialize(example_value)
     # TODO: not sure about this fake mode test
     if (
-        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-        and example_value.fake_mode is tx.fake_mode
+        is_fake_tensor(example_value)
+        and maybe_get_fake_mode(example_value) is tx.fake_mode
     ):
         if subclass_type:
             tensor_type = subclass_type
@@ -4886,7 +4887,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             _wire_tensor_spec_dims(tensor_spec, fake_e)
         if (
             source is not None
-            and isinstance(fake_e, FakeTensor)
+            and isinstance(fake_e, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             and (sym_val := fake_e.item_memo) is not None
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that

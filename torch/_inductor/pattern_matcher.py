@@ -63,6 +63,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import (
+    is_fake_tensor,
     maybe_get_fake_constant,
     unset_fake_temporarily,
 )
@@ -376,7 +377,7 @@ class Match:
                 if fake_mode is not None:
 
                     def _convert_to_fake_mode(it):
-                        if isinstance(it, FakeTensor) and fake_mode is not None:
+                        if is_fake_tensor(it) and fake_mode is not None:
                             return fake_mode.from_tensor(it)
                         return it
 
@@ -543,8 +544,8 @@ class Ignored(PatternExpr):
 
 
 def _get_fake_tensor_constant(value: torch.Tensor) -> torch.Tensor | None:
-    if isinstance(value, FakeTensor):
-        return value.constant
+    if is_fake_tensor(value):
+        return maybe_get_fake_constant(value)
     return value
 
 
@@ -616,8 +617,8 @@ def _tensor_constant_repr(value: torch.Tensor) -> str:
         )
     dtype = value.dtype
     device = value.device
-    if isinstance(value, FakeTensor):
-        constant = value.constant
+    if is_fake_tensor(value):
+        constant = maybe_get_fake_constant(value)
         if constant is None:
             raise NotImplementedError("NYI: serializing fake get_attr tensor")
         data_value = constant
@@ -2181,11 +2182,12 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if isinstance(arg, FakeTensor) and maybe_get_fake_constant(arg) is not None:
+        if isinstance(arg, FakeTensor) and maybe_get_fake_constant(arg) is not None:  # noqa: ISINSTANCE_FAKE_TENSOR
             # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
             # hold onto their original constant value - and by stashing it here
             # will cause a memory leak if the constant value is on GPU.
             # Since this is just an optimization we can clear it out.
+            # for c++ need to add a setter
             arg.constant = None
 
     _known_precompiled_patterns.append(
