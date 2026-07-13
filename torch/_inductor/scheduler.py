@@ -6524,6 +6524,12 @@ class Scheduler:
                 memory_sim_time,
             )
         self.prune_redundant_deps(self.nodes)
+        if not config.reorder_for_peak_memory:
+            from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+            assign_memory_planning_info_for_scheduler_buffers(
+                self.nodes, self.name_to_buf
+            )
 
     def _init_peak_memory_context(self) -> ComboKernelMemoryContext:
         """Build the immutable baseline state the gate compares against:
