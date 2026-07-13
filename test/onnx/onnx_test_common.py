@@ -53,6 +53,9 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
         options.check_shape = test_suite.check_shape
     if hasattr(test_suite, "check_dtype"):
         options.check_dtype = test_suite.check_dtype
+    ort_backend = getattr(test_suite, "ort_backend", None)
+    if ort_backend is not None:
+        options.backend = ort_backend
 
     names = {f.name for f in dataclasses.fields(options)}
     keywords_to_pop = []
@@ -82,6 +85,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
     is_script = False
     check_shape = True
     check_dtype = True
+    # OnnxBackend override; None keeps the VerificationOptions default (ORT CPU).
+    ort_backend: verification.OnnxBackend | None = None
 
     def setUp(self):
         super().setUp()
