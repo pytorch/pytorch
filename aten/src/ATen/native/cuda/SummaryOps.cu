@@ -39,7 +39,7 @@ __device__ static IndexType getBin(
     at::acc_type<input_t, /*is_cuda=*/true> minvalue,
     at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
     int64_t nbins) {
-  IndexType bin = (int)(((bVal - minvalue)) * nbins / (maxvalue - minvalue));
+  IndexType bin = (IndexType)(((bVal - minvalue)) * nbins / (maxvalue - minvalue));
   // (only applicable for histc)
   // while each bin is inclusive at the lower end and exclusive at the higher,
   // i.e. [start, end) the last bin is inclusive at both, i.e. [start, end], in
