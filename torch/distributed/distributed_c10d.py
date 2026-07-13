@@ -2799,7 +2799,7 @@ def _abort_process_group(group: ProcessGroup | None = None):
         # abort calls won't deadlock each other.
         # For details, please see: https://github.com/pytorch/pytorch/issues/119797
         coalescing_device = (
-            device if getattr(backend, "supports_coalescing", False) else None
+            device if backend is not None and backend.supports_coalescing else None
         )
         # Drop any pending coalesced ops; everything is being aborted anyway
         # and _coalescing_manager requires an empty op list on entry.
