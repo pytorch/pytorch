@@ -8,10 +8,10 @@ precompile captures your computation with ``make_fx`` (the default tracer; a
 Dynamo-based tracer is planned), which is a NON-STRICT trace: it records the ATen ops
 that actually run when ``fn`` executes once on the example inputs. It does not analyze
 your Python. There is therefore a small, explicit contract -- the programming model --
-that the caller must follow. Stay
-inside it and the artifact faithfully reproduces ``fn``; step outside it and the
-trace silently bakes assumptions, and you get a fast artifact that computes the
-wrong thing. This is by design: a precise contract instead of best-effort magic.
+that the caller must follow. Stay inside it and the artifact faithfully reproduces
+``fn``; step outside it and the trace silently bakes assumptions, and you get a fast
+artifact that computes the wrong thing. This is by design: a precise contract instead
+of best-effort magic.
 
 The captured graph is lowered through the AOT backend contract
 (``torch._functorch.aot_autograd.compile_to_python``, which drives AOTAutograd +
@@ -151,19 +151,18 @@ graph under foreign metadata.
 #    backend also specializes on input layout. The static-shape restriction is temporary:
 #    dynamic-shape support (symbolic sizes that need not be retraced per shape) is planned
 #    in a follow-up later in this stack (see invariant 3). Each dense user-input leaf's
-#    dtype and device are
-#    recorded at capture and checked at runtime (both backends): a dtype- or
-#    device-mismatched input is rejected with a PrecompileError rather than crashing deep
-#    in a kernel or reading a wrong value. The graph is specialized to the example input
-#    shapes (invariant 3); tensor-
-#    subclass outputs in particular are rebuilt with constant outer sizes/strides, so
-#    a different runtime shape is undefined. The inductor backend ADDITIONALLY bakes
-#    each read input's stride / memory format (it emits assert_size_stride) -- and this
-#    applies to model PARAMETERS/BUFFERS too, not only user inputs, since they are graph
-#    inputs the kernels read. So a same-shape runtime input OR a same-shape/same-dtype
-#    checkpoint WEIGHT with a DIFFERENT layout (e.g. a contiguous tensor when the example
-#    was transposed or channels_last, or a non-contiguous view of a weight) is rejected
-#    with a clear PrecompileError; match the example layout or use backend='eager'.
+#    dtype and device are recorded at capture and checked at runtime (both backends): a
+#    dtype- or device-mismatched input is rejected with a PrecompileError rather than
+#    crashing deep in a kernel or reading a wrong value. The graph is specialized to the
+#    example input shapes (invariant 3); tensor-subclass outputs in particular are
+#    rebuilt with constant outer sizes/strides, so a different runtime shape is undefined.
+#    The inductor backend ADDITIONALLY bakes each read input's stride / memory format
+#    (it emits assert_size_stride) -- and this applies to model PARAMETERS/BUFFERS too,
+#    not only user inputs, since they are graph inputs the kernels read. So a same-shape
+#    runtime input OR a same-shape/same-dtype checkpoint WEIGHT with a DIFFERENT layout
+#    (e.g. a contiguous tensor when the example was transposed or channels_last, or a
+#    non-contiguous view of a weight) is rejected with a clear PrecompileError; match the
+#    example layout or use backend='eager'.
 #    This guard is deliberately CONSERVATIVE: a layout-agnostic kernel (e.g. matmul) may
 #    well have computed the right answer on the new layout, but precompile cannot
 #    recompile to specialize it the way torch.compile does, so it rejects to stay safe
