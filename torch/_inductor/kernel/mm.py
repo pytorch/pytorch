@@ -840,9 +840,7 @@ def _is_blockwise1xTILESIZE_scaling(
         out_dim, k_dim = tensor_sz[0], tensor_sz[1]
     return V.graph.sizevars.statically_known_equals(
         sz[0], out_dim
-    ) and V.graph.sizevars.statically_known_equals(
-        sz[1], ceildiv(k_dim, tile_size)
-    )
+    ) and V.graph.sizevars.statically_known_equals(sz[1], ceildiv(k_dim, tile_size))
 
 
 def _is_blockwise128x128_scaling(
