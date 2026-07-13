@@ -4698,11 +4698,10 @@ class OrderedDictVariable(UserDefinedDictVariable):
         **kwargs: Any,
     ) -> None:
         if dict_vt is None:
-            from .dicts import ConstDictVariable
+            from .dicts import OrderedItemsDictVariable
 
-            dict_vt = ConstDictVariable(
+            dict_vt = OrderedItemsDictVariable(
                 {},
-                user_cls=collections.OrderedDict,
                 mutation_type=ValueMutationNew(),
             )
         super().__init__(value, dict_vt=dict_vt, **kwargs)

@@ -3270,7 +3270,7 @@
   "GB0217": [
     {
       "Gb_type": "unsupported hasattr operation",
-      "Context": "Class {self.user_cls}",
+      "Context": "Class {cls}",
       "Explanation": "msg",
       "Hints": [
         "Consider using a regular dictionary instead",
