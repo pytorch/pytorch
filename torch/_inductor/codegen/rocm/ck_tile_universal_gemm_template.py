@@ -723,9 +723,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             rendered_pipeline_problem = ""
             rendered_universal_gemm_problem = ""
             rendered_pipeline = render_pipeline_v2(op.pipeline)
-            rendered_kernel = (
-                "using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;"
-            )
+            rendered_kernel = "using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;"
         else:
             rendered_pipeline_problem = r"""
         using Traits  =
