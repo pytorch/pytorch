@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
+import threading
 import unittest
 from unittest import mock
 from unittest.mock import MagicMock, patch
@@ -136,6 +137,61 @@ class TestNVUniversalGemm(TestCase):
             result = compiled_fn(a, b)
 
         torch.testing.assert_close(result, expected)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_matmul_swap_ab(self, dtype):
+        """swap_ab computes (B^T @ A^T)^T so the large N lands on the M-axis,
+        improving tile utilization for small-M shapes. Verify a small-M matmul
+        stays numerically correct with swap_ab enabled (the swapped operands and
+        transposed output view must round-trip to the original result).
+        """
+        m, n, k = 16, 512, 512
+
+        def matmul(a, b):
+            return a @ b
+
+        a = _create_tensor_with_layout("contiguous", m, k, dtype)
+        b = _create_tensor_with_layout("contiguous", k, n, dtype)
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_swap_ab=True)):
+            compiled_fn = torch.compile(matmul)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_efc_epilogue_lookup_no_deadlock(self):
+        """get_efc_kernel_with_epilogue holds _cache_lock and, when the base EFC
+        kernel is not pre-resolved and misses the args cache, calls
+        get_kernel_by_name -> _ensure_caches, which re-acquires _cache_lock on the
+        same thread. With a plain (non-reentrant) lock this self-deadlocks; the
+        lock is an RLock. Run the reentrant path in a worker thread and assert it
+        completes (a plain Lock would hang here).
+        """
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        # Force the manifest-fallback re-entry: no cached manifest, empty args
+        # cache, unknown name, no pre-resolved base_kernel.
+        kernel_cache.clear_cache()
+        result = []
+
+        def worker():
+            result.append(
+                kernel_cache.get_efc_kernel_with_epilogue(
+                    "__nonexistent_kernel__", None, base_kernel=None
+                )
+            )
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=120)
+        self.assertFalse(
+            t.is_alive(),
+            "get_efc_kernel_with_epilogue deadlocked (reentrant _cache_lock)",
+        )
+        self.assertIsNone(result[0])
 
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
