@@ -1068,7 +1068,7 @@ compute_all_bounds = False
 
 # enable the combo kernel that combines data-independent kernels (additional
 # to foreach kernels) into a single one (Experimental)
-combo_kernels = False
+combo_kernels = True
 # benchmark combo kernels and only allow ones with perf gains
 benchmark_combo_kernel = False
 # combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
@@ -1095,7 +1095,7 @@ combo_kernel_per_subkernel_blocks: bool = Config(
 # winning per-subkernel blocks are stitched into the combo kernel and passed as args (the combo
 # then autotunes num_warps/num_stages over the winners). Requires
 # combo_kernel_per_subkernel_blocks.
-combo_kernel_compile_time_autotune = False
+combo_kernel_compile_time_autotune = True
 # Register-pressure guard for compile-time-autotuned combo kernels. A sub-kernel is
 # excluded from the combo (emitted standalone instead) when its own register-limited
 # occupancy -- computed from its autotuned n_regs and num_warps against the device
