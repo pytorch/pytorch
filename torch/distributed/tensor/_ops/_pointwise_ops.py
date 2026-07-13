@@ -590,3 +590,4 @@ def register_inductor_prims() -> None:
     # strategies (e.g. mul_rn, div_rn). Those are more complicated and not
     # necessarily pointwise.
     _register_single_dim_pointwise(prims.fma.default)
+    _register_single_dim_pointwise(prims.inductor_addcmul.default)

@@ -45,6 +45,65 @@ def make_prim(
     )
 
 
+def _addcmul_aten_impl(self: Tensor, tensor1: Tensor, tensor2: Tensor, value):
+    return self + value * tensor1 * tensor2
+
+
+def _addcmul_setup_context(ctx, inputs, output) -> None:
+    self, tensor1, tensor2, value = inputs
+    ctx.self_shape = self.shape
+    ctx.self_dtype = self.dtype
+    ctx.tensor1_shape = tensor1.shape
+    ctx.tensor1_dtype = tensor1.dtype
+    ctx.tensor2_shape = tensor2.shape
+    ctx.tensor2_dtype = tensor2.dtype
+    ctx.value_shape = value.shape
+    ctx.value_dtype = value.dtype
+    ctx.save_for_backward(tensor1, tensor2, value)
+
+
+def _handle_r_to_c(dtype: torch.dtype, grad: Tensor) -> Tensor:
+    if not dtype.is_complex and grad.is_complex():
+        return torch.real(grad)
+    return grad
+
+
+def _addcmul_backward(ctx, grad):
+    tensor1, tensor2, value = ctx.saved_tensors
+    value_conj = value.conj()
+
+    grad_self = (
+        _handle_r_to_c(ctx.self_dtype, grad.sum_to_size(ctx.self_shape))
+        if ctx.needs_input_grad[0]
+        else None
+    )
+    grad_tensor1 = (
+        _handle_r_to_c(
+            ctx.tensor1_dtype,
+            (grad * value_conj * tensor2.conj()).sum_to_size(ctx.tensor1_shape),
+        )
+        if ctx.needs_input_grad[1]
+        else None
+    )
+    grad_tensor2 = (
+        _handle_r_to_c(
+            ctx.tensor2_dtype,
+            (grad * value_conj * tensor1.conj()).sum_to_size(ctx.tensor2_shape),
+        )
+        if ctx.needs_input_grad[2]
+        else None
+    )
+    grad_value = (
+        _handle_r_to_c(
+            ctx.value_dtype,
+            (grad * tensor1.conj() * tensor2.conj()).sum_to_size(ctx.value_shape),
+        )
+        if ctx.needs_input_grad[3]
+        else None
+    )
+    return grad_self, grad_tensor1, grad_tensor2, grad_value
+
+
 def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     if input_tensor.stride() == stride:
         return input_tensor
@@ -209,6 +268,19 @@ fma = make_prim(
     lambda a, b, c: (a * b) + c,
     doc="Fused multiply add: fma(a, b, c) -> (a * b) + c without rounding after the multiplication",
     tags=(torch.Tag.pointwise,),
+)
+addcmul = make_prim(
+    "inductor_addcmul("
+    "Tensor self, Tensor tensor1, Tensor tensor2, Tensor value"
+    ") -> Tensor",
+    _addcmul_aten_impl,
+    doc="addcmul with tensor value support for Dynamo decompositions",
+    tags=(torch.Tag.pointwise,),
+)
+torch.library.register_autograd(
+    addcmul,
+    _addcmul_backward,
+    setup_context=_addcmul_setup_context,
 )
 
 
