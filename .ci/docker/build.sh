@@ -287,8 +287,8 @@ case "$tag" in
       platform_flag="--platform linux/riscv64" # we are building using QEMU
     fi
     # Use a custom PyPI index to get pre-built wheels for RISC-V
-    # See https://riseproject.gitlab.io/python/wheel_builder/
-    PIP_EXTRA_INDEX_URL=https://gitlab.com/api/v4/projects/riseproject%2Fpython%2Fwheel_builder/packages/pypi/simple
+    # See https://riseproject-dev.github.io/python-wheels/
+    PIP_EXTRA_INDEX_URL=https://pypi.riseproject.dev/simple
     PIP_PREFER_BINARY=1
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
