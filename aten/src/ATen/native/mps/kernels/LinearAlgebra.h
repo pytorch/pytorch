@@ -50,6 +50,11 @@ struct EighParams {
   float tol;
 };
 
+struct EigParams {
+  uint32_t n;
+  uint32_t compute_v;
+};
+
 // for LU streaming-panel kernels
 C10_METAL_CONSTEXPR unsigned kLUStreamNT = 256;
 C10_METAL_CONSTEXPR unsigned kLUStreamWarpsPerTG =

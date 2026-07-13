@@ -11362,6 +11362,56 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
 
 
 class TestLinalgMPS(TestCaseMPS):
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("shape", [(2, 2), (52, 52), (129, 129), (3, 5, 33, 33)])
+    def test_linalg_eig(self, device, dtype, shape):
+        torch.manual_seed(0)
+        a = torch.randn(shape, dtype=dtype)
+        w_cpu, v_cpu = torch.linalg.eig(a)
+        w, v = torch.linalg.eig(a.to(device))
+        self.assertEqual(w.cpu(), w_cpu, atol=0, rtol=0)
+        self.assertEqual(v.cpu(), v_cpu, atol=0, rtol=0)
+        self.assertEqual(torch.linalg.eigvals(a.to(device)).cpu(), w_cpu, atol=0, rtol=0)
+        av, vw = a.to(device).to(w.dtype) @ v, v * w.unsqueeze(-2)
+        self.assertEqual(av, vw, atol=2e-3, rtol=1e-4)
+
+    @parametrize("n", [7, 24, 60])
+    def test_linalg_eig_metal_batched(self, device, n):
+        torch.manual_seed(0)
+        batch = max(8, -(-1024 // n))  # batch*n >= 1024 hits the Metal geev kernel
+        a = torch.randn(batch, n, n) * 2
+        w, v = torch.linalg.eig(a.to(device))
+        w, v = w.cpu(), v.cpu()
+        w_cpu = torch.linalg.eig(a)[0]
+        dmat = (w.unsqueeze(-1) - w_cpu.unsqueeze(-2)).abs()
+        chamfer = torch.maximum(dmat.amin(-1).amax(-1), dmat.amin(-2).amax(-1))
+        self.assertEqual(chamfer, torch.zeros_like(chamfer), atol=5e-4, rtol=0)
+        rec = (a.to(w.dtype) @ v - v * w.unsqueeze(-2)).abs().amax(dim=(-2, -1))
+        self.assertEqual(rec, torch.zeros_like(rec), atol=2e-3, rtol=0)
+        self.assertEqual(torch.linalg.vector_norm(v, dim=-2), torch.ones(batch, n), atol=1e-5, rtol=0)
+        # deterministic across runs
+        w2, v2 = torch.linalg.eig(a.to(device))
+        self.assertEqual(w2.cpu(), w, atol=0, rtol=0)
+        self.assertEqual(v2.cpu(), v, atol=0, rtol=0)
+
+    @parametrize("shape", [(512, 512), (700, 700), (2, 520, 520)])
+    def test_linalg_eig_hybrid_large(self, device, shape):
+        torch.manual_seed(0)
+        a = torch.randn(shape) * 2
+        w, v = torch.linalg.eig(a.to(device))
+        w, v = w.cpu(), v.cpu()
+        w_cpu = torch.linalg.eig(a)[0]
+        dmat = (w.unsqueeze(-1) - w_cpu.unsqueeze(-2)).abs()
+        chamfer = torch.maximum(dmat.amin(-1).amax(-1), dmat.amin(-2).amax(-1))
+        self.assertEqual(chamfer, torch.zeros_like(chamfer), atol=5e-4, rtol=0)
+        rec = (a.to(w.dtype) @ v - v * w.unsqueeze(-2)).abs().amax(dim=(-2, -1))
+        self.assertEqual(rec, torch.zeros_like(rec), atol=2e-3, rtol=0)
+        norms = torch.linalg.vector_norm(v, dim=-2)
+        self.assertEqual(norms, torch.ones(shape[:-1]), atol=1e-5, rtol=0)
+        w2, v2 = torch.linalg.eig(a.to(device))
+        self.assertEqual(w2.cpu(), w, atol=0, rtol=0)
+        self.assertEqual(v2.cpu(), v, atol=0, rtol=0)
+
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
         numpy_dtype = dtype

@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     all_types_and_complex,
     all_types_and_complex_and,
+    empty_types,
     floating_and_complex_types,
     floating_and_complex_types_and,
     floating_types,
@@ -1372,6 +1373,8 @@ op_db: list[OpInfo] = [
         aten_name="linalg_eig",
         op=torch.linalg.eig,
         dtypes=floating_and_complex_types(),
+        # eig backward needs linalg_solve on complex; MPS lu_factor is float-only
+        backward_dtypesIfMPS=empty_types(),
         sample_inputs_func=sample_inputs_linalg_eig,
         check_batched_forward_grad=False,
         check_batched_grad=False,
@@ -1404,8 +1407,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
     ),
@@ -1414,6 +1415,8 @@ op_db: list[OpInfo] = [
         aten_name="linalg_eigvals",
         op=torch.linalg.eigvals,
         dtypes=floating_and_complex_types(),
+        # eig backward needs linalg_solve on complex; MPS lu_factor is float-only
+        backward_dtypesIfMPS=empty_types(),
         sample_inputs_func=sample_inputs_linalg_invertible,
         check_batched_forward_grad=False,
         check_batched_grad=False,
@@ -1443,8 +1446,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(

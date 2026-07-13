@@ -3319,3 +3319,1734 @@ kernel void eigh_jacobi(
 
 REGISTER_EIGH_JACOBI(float);
 REGISTER_EIGH_JACOBI(float2);
+
+// Batched small-matrix LAPACK sgeev port.
+constant float kEigSafmin = 1.17549435e-38f; // 'S'
+constant float kEigEps = 5.9604645e-08f; // 'E' (rounded eps, 2^-24)
+constant float kEigUlp = 1.1920929e-07f; // 'P' (eps * base, 2^-23)
+constant float kEigSafmn2 = 4.44089210e-16f; // 2^-51 (slanv2)
+constant float kEigSafmx2 = 2.25179981e+15f; // 2^51
+constant float kEigOvfl = 3.40282347e+38f;
+constant float kEigLarfgSafmin = 1.9721523e-31f; // 'S' / 'E' (slarfg)
+constant float kEigRtmin = 1.08420217e-19f; // sqrt(2^-126) (slartg)
+constant float kEigRtmax = 6.51872567e+18f; // sqrt(2^126 / 2)
+
+// Fortran SIGN(a, b): |a| if b >= 0 else -|a| (not copysign: SIGN(x,-0)=+x)
+static inline float eig_sign(float a, float b) {
+  return b >= 0.0f ? fabs(a) : -fabs(a);
+}
+
+static inline float eig_lapy2(float x, float y) {
+  float xa = fabs(x), ya = fabs(y);
+  float w = max(xa, ya), z = min(xa, ya);
+  return z == 0.0f ? w : w * sqrt(1.0f + (z / w) * (z / w));
+}
+
+// scaled two-pass 2-norm over a threadgroup-memory vector, stride 1
+static inline float eig_nrm2_tg(threadgroup const float* x, uint len) {
+  float amax = 0.0f;
+  for (uint i = 0; i < len; ++i) {
+    amax = max(amax, fabs(x[i]));
+  }
+  if (amax == 0.0f) {
+    return 0.0f;
+  }
+  float s = 0.0f;
+  for (uint i = 0; i < len; ++i) {
+    float t = x[i] / amax;
+    s += t * t;
+  }
+  return amax * sqrt(s);
+}
+
+// SLADIV (Baudin-Smith robust complex division): (p, q) = (a + bi) / (c + di)
+static inline float eig_sladiv2(
+    float a,
+    float b,
+    float c,
+    float d,
+    float r,
+    float t) {
+  if (r != 0.0f) {
+    float br = b * r;
+    if (br != 0.0f) {
+      return (a + br) * t;
+    }
+    return a * t + (b * t) * r;
+  }
+  return (a + d * (b / c)) * t;
+}
+
+static inline void eig_sladiv1(
+    float a,
+    float b,
+    float c,
+    float d,
+    thread float& p,
+    thread float& q) {
+  float r = d / c;
+  float t = 1.0f / (c + d * r);
+  p = eig_sladiv2(a, b, c, d, r, t);
+  q = eig_sladiv2(b, -a, c, d, r, t);
+}
+
+static inline void eig_sladiv(
+    float a,
+    float b,
+    float c,
+    float d,
+    thread float& p,
+    thread float& q) {
+  float aa = a, bb = b, cc = c, dd = d;
+  float ab = max(fabs(a), fabs(b));
+  float cd = max(fabs(c), fabs(d));
+  float s = 1.0f;
+  const float be = 2.0f / (kEigEps * kEigEps);
+  if (ab >= 0.5f * kEigOvfl) {
+    aa *= 0.5f;
+    bb *= 0.5f;
+    s *= 2.0f;
+  }
+  if (cd >= 0.5f * kEigOvfl) {
+    cc *= 0.5f;
+    dd *= 0.5f;
+    s *= 0.5f;
+  }
+  if (ab <= kEigSafmin * 2.0f / kEigEps) {
+    aa *= be;
+    bb *= be;
+    s /= be;
+  }
+  if (cd <= kEigSafmin * 2.0f / kEigEps) {
+    cc *= be;
+    dd *= be;
+    s *= be;
+  }
+  if (fabs(d) <= fabs(c)) {
+    eig_sladiv1(aa, bb, cc, dd, p, q);
+  } else {
+    eig_sladiv1(bb, aa, dd, cc, p, q);
+    q = -q;
+  }
+  p *= s;
+  q *= s;
+}
+
+// SLARTG (LAPACK 3.10 scaled version)
+static inline void eig_slartg(
+    float f,
+    float g,
+    thread float& c,
+    thread float& s,
+    thread float& r) {
+  float f1 = fabs(f), g1 = fabs(g);
+  if (g == 0.0f) {
+    c = 1.0f;
+    s = 0.0f;
+    r = f;
+  } else if (f == 0.0f) {
+    c = 0.0f;
+    s = eig_sign(1.0f, g);
+    r = g1;
+  } else if (
+      f1 > kEigRtmin && f1 < kEigRtmax && g1 > kEigRtmin && g1 < kEigRtmax) {
+    float d = sqrt(f * f + g * g);
+    c = f1 / d;
+    r = eig_sign(d, f);
+    s = g / r;
+  } else {
+    float u = min(1.0f / kEigSafmin, max(kEigSafmin, max(f1, g1)));
+    float fs = f / u, gs = g / u;
+    float d = sqrt(fs * fs + gs * gs);
+    c = fabs(fs) / d;
+    r = eig_sign(d, f);
+    s = gs / r;
+    r = r * u;
+  }
+}
+
+// SLARFG on registers, nr in {2, 3}: v[0]=alpha in, v[0]=beta out, returns tau
+static inline float eig_slarfg_reg(uint nr, thread float* v) {
+  float xnorm = nr == 3 ? eig_lapy2(v[1], v[2]) : fabs(v[1]);
+  if (xnorm == 0.0f) {
+    return 0.0f;
+  }
+  float alpha = v[0];
+  float beta = -eig_sign(eig_lapy2(alpha, xnorm), alpha);
+  uint knt = 0;
+  if (fabs(beta) < kEigLarfgSafmin) {
+    const float rsafmn = 1.0f / kEigLarfgSafmin;
+    do {
+      knt++;
+      v[1] *= rsafmn;
+      if (nr == 3) {
+        v[2] *= rsafmn;
+      }
+      beta *= rsafmn;
+      alpha *= rsafmn;
+    } while (fabs(beta) < kEigLarfgSafmin && knt < 20);
+    xnorm = nr == 3 ? eig_lapy2(v[1], v[2]) : fabs(v[1]);
+    beta = -eig_sign(eig_lapy2(alpha, xnorm), alpha);
+  }
+  float tau = (beta - alpha) / beta;
+  float scal = 1.0f / (alpha - beta);
+  v[1] *= scal;
+  if (nr == 3) {
+    v[2] *= scal;
+  }
+  for (uint j = 0; j < knt; ++j) {
+    beta *= kEigLarfgSafmin;
+  }
+  v[0] = beta;
+  return tau;
+}
+
+// Standardize a real 2x2 matrix to Schur form.
+static inline void eig_slanv2(
+    thread float& a,
+    thread float& b,
+    thread float& c,
+    thread float& d,
+    thread float& rt1r,
+    thread float& rt1i,
+    thread float& rt2r,
+    thread float& rt2i,
+    thread float& cs,
+    thread float& sn) {
+  if (c == 0.0f) {
+    cs = 1.0f;
+    sn = 0.0f;
+  } else if (b == 0.0f) {
+    // swap rows and columns
+    cs = 0.0f;
+    sn = 1.0f;
+    float temp = d;
+    d = a;
+    a = temp;
+    b = -c;
+    c = 0.0f;
+  } else if ((a - d) == 0.0f && eig_sign(1.0f, b) != eig_sign(1.0f, c)) {
+    cs = 1.0f;
+    sn = 0.0f;
+  } else {
+    float temp = a - d;
+    float p = 0.5f * temp;
+    float bcmax = max(fabs(b), fabs(c));
+    float bcmis = min(fabs(b), fabs(c)) * eig_sign(1.0f, b) * eig_sign(1.0f, c);
+    float scale = max(fabs(p), bcmax);
+    float z = (p / scale) * p + (bcmax / scale) * bcmis;
+    if (z >= 4.0f * kEigEps) {
+      // real eigenvalues; compute a and d
+      z = p + eig_sign(sqrt(scale) * sqrt(z), p);
+      a = d + z;
+      d = d - (bcmax / z) * bcmis;
+      float tau = eig_lapy2(c, z);
+      cs = z / tau;
+      sn = c / tau;
+      b = b - c;
+      c = 0.0f;
+    } else {
+      // complex or nearly-equal real eigenvalues: make diagonal equal
+      uint count = 0;
+      float sigma = b + c;
+      do {
+        count++;
+        scale = max(fabs(temp), fabs(sigma));
+        if (scale >= kEigSafmx2) {
+          sigma *= kEigSafmn2;
+          temp *= kEigSafmn2;
+        } else if (scale <= kEigSafmn2) {
+          sigma *= kEigSafmx2;
+          temp *= kEigSafmx2;
+        } else {
+          break;
+        }
+      } while (count <= 20);
+      p = 0.5f * temp;
+      float tau = eig_lapy2(sigma, temp);
+      cs = sqrt(0.5f * (1.0f + fabs(sigma) / tau));
+      sn = -(p / (tau * cs)) * eig_sign(1.0f, sigma);
+      float aa = a * cs + b * sn;
+      float bb = -a * sn + b * cs;
+      float cc = c * cs + d * sn;
+      float dd = -c * sn + d * cs;
+      // parentheses defeat FMA contraction (LAPACK issue #1031)
+      a = aa * cs + cc * sn;
+      b = (bb * cs) + (dd * sn);
+      c = -(aa * sn) + (cc * cs);
+      d = -bb * sn + dd * cs;
+      temp = 0.5f * (a + d);
+      a = temp;
+      d = temp;
+      if (c != 0.0f) {
+        if (b != 0.0f) {
+          if (eig_sign(1.0f, b) == eig_sign(1.0f, c)) {
+            // real eigenvalues: reduce to upper triangular form
+            float sab = sqrt(fabs(b));
+            float sac = sqrt(fabs(c));
+            p = eig_sign(sab * sac, c);
+            tau = 1.0f / sqrt(fabs(b + c));
+            a = temp + p;
+            d = temp - p;
+            b = b - c;
+            c = 0.0f;
+            float cs1 = sab * tau;
+            float sn1 = sac * tau;
+            temp = cs * cs1 - sn * sn1;
+            sn = cs * sn1 + sn * cs1;
+            cs = temp;
+          }
+        } else {
+          b = -c;
+          c = 0.0f;
+          temp = cs;
+          cs = -sn;
+          sn = temp;
+        }
+      }
+    }
+  }
+  rt1r = a;
+  rt2r = d;
+  if (c == 0.0f) {
+    rt1i = 0.0f;
+    rt2i = 0.0f;
+  } else {
+    rt1i = sqrt(fabs(b)) * sqrt(fabs(c));
+    rt2i = -rt1i;
+  }
+}
+
+// Solve the SLALN2 cases used by the eigenvector backsolve.
+static inline void eig_slaln2(
+    uint na,
+    uint nw,
+    float smin,
+    float a11,
+    float a12,
+    float a21,
+    float a22,
+    float b1r,
+    float b1i,
+    float b2r,
+    float b2i,
+    float wr,
+    float wi,
+    thread float* x,
+    thread float& scale,
+    thread float& xnorm) {
+  const float smlnum = 2.0f * kEigSafmin;
+  const float bignum = 1.0f / smlnum;
+  const float smini = max(smin, smlnum);
+  scale = 1.0f;
+  if (na == 1) {
+    if (nw == 1) {
+      float csr = a11 - wr;
+      float cnorm = fabs(csr);
+      if (cnorm < smini) {
+        csr = smini;
+        cnorm = smini;
+      }
+      float bnorm = fabs(b1r);
+      if (cnorm < 1.0f && bnorm > 1.0f && bnorm > bignum * cnorm) {
+        scale = 1.0f / bnorm;
+      }
+      x[0] = (b1r * scale) / csr;
+      xnorm = fabs(x[0]);
+    } else {
+      float csr = a11 - wr;
+      float csi = -wi;
+      float cnorm = fabs(csr) + fabs(csi);
+      if (cnorm < smini) {
+        csr = smini;
+        csi = 0.0f;
+        cnorm = smini;
+      }
+      float bnorm = fabs(b1r) + fabs(b1i);
+      if (cnorm < 1.0f && bnorm > 1.0f && bnorm > bignum * cnorm) {
+        scale = 1.0f / bnorm;
+      }
+      eig_sladiv(scale * b1r, scale * b1i, csr, csi, x[0], x[2]);
+      xnorm = fabs(x[0]) + fabs(x[2]);
+    }
+    return;
+  }
+  // 2x2 system; crv holds C column-major: {c11, c21, c12, c22}
+  float crv[4];
+  crv[0] = a11 - wr;
+  crv[3] = a22 - wr;
+  crv[1] = a21;
+  crv[2] = a12;
+  const bool cswap[4] = {false, false, true, true};
+  const bool rswap[4] = {false, true, false, true};
+  const uint ipivot[4][4] = {
+      {1, 2, 3, 4}, {2, 1, 4, 3}, {3, 4, 1, 2}, {4, 3, 2, 1}};
+  if (nw == 1) {
+    float cmax = 0.0f;
+    uint icmax = 0;
+    for (uint j = 0; j < 4; ++j) {
+      if (fabs(crv[j]) > cmax) {
+        cmax = fabs(crv[j]);
+        icmax = j + 1;
+      }
+    }
+    if (cmax < smini) {
+      float bnorm = max(fabs(b1r), fabs(b2r));
+      if (smini < 1.0f && bnorm > 1.0f && bnorm > bignum * smini) {
+        scale = 1.0f / bnorm;
+      }
+      float temp = scale / smini;
+      x[0] = temp * b1r;
+      x[1] = temp * b2r;
+      xnorm = temp * bnorm;
+      return;
+    }
+    // Gaussian elimination with complete pivoting
+    float ur11 = crv[icmax - 1];
+    float cr21 = crv[ipivot[icmax - 1][1] - 1];
+    float ur12 = crv[ipivot[icmax - 1][2] - 1];
+    float cr22 = crv[ipivot[icmax - 1][3] - 1];
+    float ur11r = 1.0f / ur11;
+    float lr21 = ur11r * cr21;
+    float ur22 = cr22 - ur12 * lr21;
+    if (fabs(ur22) < smini) {
+      ur22 = smini;
+    }
+    float br1 = rswap[icmax - 1] ? b2r : b1r;
+    float br2 = rswap[icmax - 1] ? b1r : b2r;
+    br2 = br2 - lr21 * br1;
+    float bbnd = max(fabs(br1 * (ur22 * ur11r)), fabs(br2));
+    if (bbnd > 1.0f && fabs(ur22) < 1.0f && bbnd >= bignum * fabs(ur22)) {
+      scale = 1.0f / bbnd;
+    }
+    float xr2 = (br2 * scale) / ur22;
+    float xr1 = (scale * br1) * ur11r - xr2 * (ur11r * ur12);
+    x[0] = cswap[icmax - 1] ? xr2 : xr1;
+    x[1] = cswap[icmax - 1] ? xr1 : xr2;
+    xnorm = max(fabs(xr1), fabs(xr2));
+    if (xnorm > 1.0f && cmax > 1.0f && xnorm > bignum / cmax) {
+      float temp = cmax / bignum;
+      x[0] *= temp;
+      x[1] *= temp;
+      xnorm *= temp;
+      scale *= temp;
+    }
+    return;
+  }
+  // complex 2x2
+  float civ[4];
+  civ[0] = -wi;
+  civ[1] = 0.0f;
+  civ[2] = 0.0f;
+  civ[3] = -wi;
+  float cmax = 0.0f;
+  uint icmax = 0;
+  for (uint j = 0; j < 4; ++j) {
+    if (fabs(crv[j]) + fabs(civ[j]) > cmax) {
+      cmax = fabs(crv[j]) + fabs(civ[j]);
+      icmax = j + 1;
+    }
+  }
+  if (cmax < smini) {
+    float bnorm = max(fabs(b1r) + fabs(b1i), fabs(b2r) + fabs(b2i));
+    if (smini < 1.0f && bnorm > 1.0f && bnorm > bignum * smini) {
+      scale = 1.0f / bnorm;
+    }
+    float temp = scale / smini;
+    x[0] = temp * b1r;
+    x[1] = temp * b2r;
+    x[2] = temp * b1i;
+    x[3] = temp * b2i;
+    xnorm = temp * bnorm;
+    return;
+  }
+  float ur11 = crv[icmax - 1];
+  float ui11 = civ[icmax - 1];
+  float cr21 = crv[ipivot[icmax - 1][1] - 1];
+  float ci21 = civ[ipivot[icmax - 1][1] - 1];
+  float ur12 = crv[ipivot[icmax - 1][2] - 1];
+  float ui12 = civ[ipivot[icmax - 1][2] - 1];
+  float cr22 = crv[ipivot[icmax - 1][3] - 1];
+  float ci22 = civ[ipivot[icmax - 1][3] - 1];
+  float ur11r, ui11r, lr21, li21, ur12s, ui12s, ur22, ui22;
+  if (icmax == 1 || icmax == 4) {
+    // off-diagonals of the pivoted C are real
+    if (fabs(ur11) > fabs(ui11)) {
+      float temp = ui11 / ur11;
+      ur11r = 1.0f / (ur11 * (1.0f + temp * temp));
+      ui11r = -temp * ur11r;
+    } else {
+      float temp = ur11 / ui11;
+      ui11r = -1.0f / (ui11 * (1.0f + temp * temp));
+      ur11r = -temp * ui11r;
+    }
+    lr21 = cr21 * ur11r;
+    li21 = cr21 * ui11r;
+    ur12s = ur12 * ur11r;
+    ui12s = ur12 * ui11r;
+    ur22 = cr22 - ur12 * lr21;
+    ui22 = ci22 - ur12 * li21;
+  } else {
+    // diagonals of the pivoted C are real
+    ur11r = 1.0f / ur11;
+    ui11r = 0.0f;
+    lr21 = cr21 * ur11r;
+    li21 = ci21 * ur11r;
+    ur12s = ur12 * ur11r;
+    ui12s = ui12 * ur11r;
+    ur22 = cr22 - ur12 * lr21 + ui12 * li21;
+    ui22 = -ur12 * li21 - ui12 * lr21;
+  }
+  float u22abs = fabs(ur22) + fabs(ui22);
+  if (u22abs < smini) {
+    ur22 = smini;
+    ui22 = 0.0f;
+  }
+  float br1, br2, bi1, bi2;
+  if (rswap[icmax - 1]) {
+    br2 = b1r;
+    br1 = b2r;
+    bi2 = b1i;
+    bi1 = b2i;
+  } else {
+    br1 = b1r;
+    br2 = b2r;
+    bi1 = b1i;
+    bi2 = b2i;
+  }
+  br2 = br2 - lr21 * br1 + li21 * bi1;
+  bi2 = bi2 - li21 * br1 - lr21 * bi1;
+  float bbnd =
+      max((fabs(br1) + fabs(bi1)) * (u22abs * (fabs(ur11r) + fabs(ui11r))),
+          fabs(br2) + fabs(bi2));
+  if (bbnd > 1.0f && u22abs < 1.0f && bbnd >= bignum * u22abs) {
+    scale = 1.0f / bbnd;
+    br1 *= scale;
+    bi1 *= scale;
+    br2 *= scale;
+    bi2 *= scale;
+  }
+  float xr2, xi2;
+  eig_sladiv(br2, bi2, ur22, ui22, xr2, xi2);
+  float xr1 = ur11r * br1 - ui11r * bi1 - ur12s * xr2 + ui12s * xi2;
+  float xi1 = ui11r * br1 + ur11r * bi1 - ui12s * xr2 - ur12s * xi2;
+  if (cswap[icmax - 1]) {
+    x[0] = xr2;
+    x[1] = xr1;
+    x[2] = xi2;
+    x[3] = xi1;
+  } else {
+    x[0] = xr1;
+    x[1] = xr2;
+    x[2] = xi1;
+    x[3] = xi2;
+  }
+  xnorm = max(fabs(xr1) + fabs(xi1), fabs(xr2) + fabs(xi2));
+  if (xnorm > 1.0f && cmax > 1.0f && xnorm > bignum / cmax) {
+    float temp = cmax / bignum;
+    x[0] *= temp;
+    x[1] *= temp;
+    x[2] *= temp;
+    x[3] *= temp;
+    xnorm *= temp;
+    scale *= temp;
+  }
+}
+
+kernel void eig_qr_float(
+    device const float* A [[buffer(0)]],
+    device float* values [[buffer(1)]],
+    device float* vectors [[buffer(2)]],
+    device int* infos [[buffer(3)]],
+    constant EigParams& params [[buffer(4)]],
+    threadgroup float* Htg [[threadgroup(0)]],
+    threadgroup float* Qtg [[threadgroup(1)]],
+    threadgroup float* scr [[threadgroup(2)]],
+    uint3 thread_pos [[thread_position_in_threadgroup]],
+    uint3 tpg [[threads_per_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+  const uint tid = thread_pos.x;
+  const uint nt = tpg.x;
+  const uint n = params.n;
+  const bool wantv = params.compute_v != 0u;
+  const uint b = tg_pos.x;
+  device const float* A_b = A + b * n * n; // column-major, ld = n
+  device float* val_b = values + b * 2 * n; // wr | wi
+  device float* vec_b = vectors + b * n * n; // column-major, ld = n
+
+// 1-based accessors matching the Fortran sources
+#define HH(i, j) Htg[((i) - 1) + ((j) - 1) * n]
+#define QQ(i, j) Qtg[((i) - 1) + ((j) - 1) * n]
+  threadgroup float* wr_s = scr; // n
+  threadgroup float* wi_s = scr + n; // n
+  threadgroup float* cn_s = scr + 2 * n; // n: strict-upper column 1-norms
+  threadgroup float* xre_s = scr + 3 * n; // n
+  threadgroup float* xim_s = scr + 4 * n; // n
+  threadgroup float* outre_s = scr + 5 * n; // n
+  threadgroup float* outim_s = scr + 6 * n; // n
+#define WR1(i) wr_s[(i) - 1]
+#define WI1(i) wi_s[(i) - 1]
+#define CN1(i) cn_s[(i) - 1]
+#define XRE(i) xre_s[(i) - 1]
+#define XIM(i) xim_s[(i) - 1]
+#define OUTRE(i) outre_s[(i) - 1]
+#define OUTIM(i) outim_s[(i) - 1]
+
+  // load A into H; init Q = I
+  for (uint idx = tid; idx < n * n; idx += nt) {
+    Htg[idx] = A_b[idx];
+    if (wantv) {
+      Qtg[idx] = (idx % n) == (idx / n) ? 1.0f : 0.0f;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (n == 1) {
+    if (tid == 0) {
+      val_b[0] = Htg[0];
+      val_b[1] = 0.0f;
+      if (wantv) {
+        vec_b[0] = 1.0f;
+      }
+      infos[b] = 0;
+    }
+    return;
+  }
+
+  // ==== sgehd2: unblocked Hessenberg reduction, Q accumulated forward ====
+  for (uint j = 1; j + 2 <= n; ++j) {
+    const uint m = n - j; // reflector length (>= 2)
+    threadgroup float* col = &HH(j + 1, j); // col[0]=alpha, col[1..m-1]=x
+    // slarfg(m, col) executed redundantly; thread 0 commits column writes
+    float xnorm = eig_nrm2_tg(col + 1, m - 1);
+    float tau = 0.0f;
+    if (xnorm != 0.0f) {
+      float alpha = col[0];
+      float beta = -eig_sign(eig_lapy2(alpha, xnorm), alpha);
+      uint knt = 0;
+      if (fabs(beta) < kEigLarfgSafmin) {
+        const float rsafmn = 1.0f / kEigLarfgSafmin;
+        do {
+          knt++;
+          if (tid == 0) {
+            for (uint i = 1; i < m; ++i) {
+              col[i] *= rsafmn;
+            }
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+          beta *= rsafmn;
+          alpha *= rsafmn;
+        } while (fabs(beta) < kEigLarfgSafmin && knt < 20);
+        xnorm = eig_nrm2_tg(col + 1, m - 1);
+        beta = -eig_sign(eig_lapy2(alpha, xnorm), alpha);
+      }
+      tau = (beta - alpha) / beta;
+      if (tid == 0) {
+        float scal = 1.0f / (alpha - beta);
+        for (uint i = 1; i < m; ++i) {
+          col[i] *= scal;
+        }
+        float bout = beta;
+        for (uint kk = 0; kk < knt; ++kk) {
+          bout *= kEigLarfgSafmin;
+        }
+        col[0] = bout;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (tau != 0.0f) {
+      // left: rows j+1..n, cols j+1..n  (v(1)=1 implicit, tail in col[1..])
+      for (uint c = j + 1 + tid; c <= n; c += nt) {
+        float sum = HH(j + 1, c);
+        for (uint i = 1; i < m; ++i) {
+          sum += col[i] * HH(j + 1 + i, c);
+        }
+        sum *= tau;
+        HH(j + 1, c) -= sum;
+        for (uint i = 1; i < m; ++i) {
+          HH(j + 1 + i, c) -= sum * col[i];
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      // right: rows 1..n, cols j+1..n; Q accumulates the same reflector
+      for (uint r = 1 + tid; r <= n; r += nt) {
+        float sum = HH(r, j + 1);
+        for (uint i = 1; i < m; ++i) {
+          sum += HH(r, j + 1 + i) * col[i];
+        }
+        sum *= tau;
+        HH(r, j + 1) -= sum;
+        for (uint i = 1; i < m; ++i) {
+          HH(r, j + 1 + i) -= sum * col[i];
+        }
+        if (wantv) {
+          float qsum = QQ(r, j + 1);
+          for (uint i = 1; i < m; ++i) {
+            qsum += QQ(r, j + 1 + i) * col[i];
+          }
+          qsum *= tau;
+          QQ(r, j + 1) -= qsum;
+          for (uint i = 1; i < m; ++i) {
+            QQ(r, j + 1 + i) -= qsum * col[i];
+          }
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  }
+  // zero the sub-Hessenberg reflector storage
+  for (uint idx = tid; idx < n * n; idx += nt) {
+    uint ri = idx % n + 1, cj = idx / n + 1;
+    if (ri > cj + 1) {
+      Htg[idx] = 0.0f;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // ==== slahqr: double-shift QR iteration (ilo=1, ihi=n) ====
+  const float smlnum = kEigSafmin * (float(n) / kEigUlp);
+  uint i1 = 1, i2 = n;
+  const uint itmax = 30 * max(10u, n);
+  uint kdefl = 0;
+  int info = 0;
+  uint i = n;
+  while (i >= 1) {
+    uint l = 1;
+    bool deflated = false;
+    for (uint its = 0; its <= itmax; ++its) {
+      // look for a single small subdiagonal element
+      uint k = l; // value if the scan falls through
+      for (uint kk = i; kk >= l + 1; --kk) {
+        if (fabs(HH(kk, kk - 1)) <= smlnum) {
+          k = kk;
+          break;
+        }
+        float tst = fabs(HH(kk - 1, kk - 1)) + fabs(HH(kk, kk));
+        if (tst == 0.0f) {
+          if (kk >= 3) {
+            tst += fabs(HH(kk - 1, kk - 2));
+          }
+          if (kk + 1 <= n) {
+            tst += fabs(HH(kk + 1, kk));
+          }
+        }
+        if (fabs(HH(kk, kk - 1)) <= kEigUlp * tst) {
+          // Ahues & Tisseur conservative deflation criterion
+          float ab = max(fabs(HH(kk, kk - 1)), fabs(HH(kk - 1, kk)));
+          float ba = min(fabs(HH(kk, kk - 1)), fabs(HH(kk - 1, kk)));
+          float aa =
+              max(fabs(HH(kk, kk)), fabs(HH(kk - 1, kk - 1) - HH(kk, kk)));
+          float bb =
+              min(fabs(HH(kk, kk)), fabs(HH(kk - 1, kk - 1) - HH(kk, kk)));
+          float s = aa + ab;
+          if (ba * (ab / s) <= max(smlnum, kEigUlp * (bb * (aa / s)))) {
+            k = kk;
+            break;
+          }
+        }
+      }
+      l = k;
+      if (l > 1) {
+        if (tid == 0) {
+          HH(l, l - 1) = 0.0f;
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      }
+      if (l + 1 >= i) {
+        deflated = true;
+        break;
+      }
+      kdefl++;
+      if (!wantv) {
+        i1 = l;
+        i2 = i;
+      }
+      float h11, h12, h21, h22;
+      if (kdefl % 20 == 0) {
+        float s = fabs(HH(i, i - 1)) + fabs(HH(i - 1, i - 2));
+        h11 = 0.75f * s + HH(i, i);
+        h12 = -0.4375f * s;
+        h21 = s;
+        h22 = h11;
+      } else if (kdefl % 10 == 0) {
+        float s = fabs(HH(l + 1, l)) + fabs(HH(l + 2, l + 1));
+        h11 = 0.75f * s + HH(l, l);
+        h12 = -0.4375f * s;
+        h21 = s;
+        h22 = h11;
+      } else {
+        h11 = HH(i - 1, i - 1);
+        h21 = HH(i, i - 1);
+        h12 = HH(i - 1, i);
+        h22 = HH(i, i);
+      }
+      float rt1r, rt1i, rt2r, rt2i;
+      float s = fabs(h11) + fabs(h12) + fabs(h21) + fabs(h22);
+      if (s == 0.0f) {
+        rt1r = rt1i = rt2r = rt2i = 0.0f;
+      } else {
+        h11 /= s;
+        h21 /= s;
+        h12 /= s;
+        h22 /= s;
+        float tr = (h11 + h22) / 2.0f;
+        float det = (h11 - tr) * (h22 - tr) - h12 * h21;
+        float rtdisc = sqrt(fabs(det));
+        if (det >= 0.0f) {
+          rt1r = tr * s;
+          rt2r = rt1r;
+          rt1i = rtdisc * s;
+          rt2i = -rt1i;
+        } else {
+          rt1r = tr + rtdisc;
+          rt2r = tr - rtdisc;
+          if (fabs(rt1r - h22) <= fabs(rt2r - h22)) {
+            rt1r = rt1r * s;
+            rt2r = rt1r;
+          } else {
+            rt2r = rt2r * s;
+            rt1r = rt2r;
+          }
+          rt1i = 0.0f;
+          rt2i = 0.0f;
+        }
+      }
+      // look for two consecutive small subdiagonal elements
+      float v[3];
+      uint mm = l;
+      for (uint m2 = i - 2; m2 >= l; --m2) {
+        float h21s = HH(m2 + 1, m2);
+        float ss = fabs(HH(m2, m2) - rt2r) + fabs(rt2i) + fabs(h21s);
+        h21s = HH(m2 + 1, m2) / ss;
+        v[0] = h21s * HH(m2, m2 + 1) +
+            (HH(m2, m2) - rt1r) * ((HH(m2, m2) - rt2r) / ss) -
+            rt1i * (rt2i / ss);
+        v[1] = h21s * (HH(m2, m2) + HH(m2 + 1, m2 + 1) - rt1r - rt2r);
+        v[2] = h21s * HH(m2 + 2, m2 + 1);
+        ss = fabs(v[0]) + fabs(v[1]) + fabs(v[2]);
+        v[0] /= ss;
+        v[1] /= ss;
+        v[2] /= ss;
+        mm = m2;
+        if (m2 == l) {
+          break;
+        }
+        if (fabs(HH(m2, m2 - 1)) * (fabs(v[1]) + fabs(v[2])) <= kEigUlp *
+                fabs(v[0]) *
+                (fabs(HH(m2 - 1, m2 - 1)) + fabs(HH(m2, m2)) +
+                 fabs(HH(m2 + 1, m2 + 1)))) {
+          break;
+        }
+      }
+      // double-shift QR sweep: chase the bulge from mm to i-1
+      for (uint kb = mm; kb + 1 <= i; ++kb) {
+        const uint nr = min(3u, i - kb + 1);
+        if (kb > mm) {
+          v[0] = HH(kb, kb - 1);
+          v[1] = HH(kb + 1, kb - 1);
+          v[2] = nr == 3 ? HH(kb + 2, kb - 1) : 0.0f;
+        }
+        float t1 = eig_slarfg_reg(nr, v);
+        if (tid == 0) {
+          if (kb > mm) {
+            HH(kb, kb - 1) = v[0];
+            HH(kb + 1, kb - 1) = 0.0f;
+            if (kb < i - 1) {
+              HH(kb + 2, kb - 1) = 0.0f;
+            }
+          } else if (mm > l) {
+            // written this way (not plain negation) to survive v(2)/v(3)
+            // underflow, as in slahqr
+            HH(kb, kb - 1) = HH(kb, kb - 1) * (1.0f - t1);
+          }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        const float v2 = v[1];
+        const float t2 = t1 * v2;
+        if (nr == 3) {
+          const float v3 = v[2];
+          const float t3 = t1 * v3;
+          for (uint jj = kb + tid; jj <= i2; jj += nt) {
+            float sum = HH(kb, jj) + v2 * HH(kb + 1, jj) + v3 * HH(kb + 2, jj);
+            HH(kb, jj) -= sum * t1;
+            HH(kb + 1, jj) -= sum * t2;
+            HH(kb + 2, jj) -= sum * t3;
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+          const uint rhi = min(kb + 3, i);
+          for (uint jj = i1 + tid; jj <= rhi; jj += nt) {
+            float sum = HH(jj, kb) + v2 * HH(jj, kb + 1) + v3 * HH(jj, kb + 2);
+            HH(jj, kb) -= sum * t1;
+            HH(jj, kb + 1) -= sum * t2;
+            HH(jj, kb + 2) -= sum * t3;
+          }
+          if (wantv) {
+            for (uint jj = 1 + tid; jj <= n; jj += nt) {
+              float sum =
+                  QQ(jj, kb) + v2 * QQ(jj, kb + 1) + v3 * QQ(jj, kb + 2);
+              QQ(jj, kb) -= sum * t1;
+              QQ(jj, kb + 1) -= sum * t2;
+              QQ(jj, kb + 2) -= sum * t3;
+            }
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        } else {
+          for (uint jj = kb + tid; jj <= i2; jj += nt) {
+            float sum = HH(kb, jj) + v2 * HH(kb + 1, jj);
+            HH(kb, jj) -= sum * t1;
+            HH(kb + 1, jj) -= sum * t2;
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+          for (uint jj = i1 + tid; jj <= i; jj += nt) {
+            float sum = HH(jj, kb) + v2 * HH(jj, kb + 1);
+            HH(jj, kb) -= sum * t1;
+            HH(jj, kb + 1) -= sum * t2;
+          }
+          if (wantv) {
+            for (uint jj = 1 + tid; jj <= n; jj += nt) {
+              float sum = QQ(jj, kb) + v2 * QQ(jj, kb + 1);
+              QQ(jj, kb) -= sum * t1;
+              QQ(jj, kb + 1) -= sum * t2;
+            }
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+      }
+    }
+    if (!deflated) {
+      info = int(i); // eigenvalues info+1..n (1-based) did converge
+      break;
+    }
+    if (l == i) {
+      if (tid == 0) {
+        WR1(i) = HH(i, i);
+        WI1(i) = 0.0f;
+      }
+    } else { // l == i-1: standardize the 2x2 block
+      float a = HH(i - 1, i - 1), bq = HH(i - 1, i), c = HH(i, i - 1),
+            d = HH(i, i);
+      float rt1r, rt1i, rt2r, rt2i, cs, sn;
+      eig_slanv2(a, bq, c, d, rt1r, rt1i, rt2r, rt2i, cs, sn);
+      if (tid == 0) {
+        HH(i - 1, i - 1) = a;
+        HH(i - 1, i) = bq;
+        HH(i, i - 1) = c;
+        HH(i, i) = d;
+        WR1(i - 1) = rt1r;
+        WI1(i - 1) = rt1i;
+        WR1(i) = rt2r;
+        WI1(i) = rt2i;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (wantv) {
+        // srot on trailing rows, leading columns, and Q
+        for (uint jj = i + 1 + tid; jj <= i2; jj += nt) {
+          float x = HH(i - 1, jj), y = HH(i, jj);
+          HH(i - 1, jj) = cs * x + sn * y;
+          HH(i, jj) = cs * y - sn * x;
+        }
+        for (uint jj = i1 + tid; jj + 2 <= i; jj += nt) {
+          float x = HH(jj, i - 1), y = HH(jj, i);
+          HH(jj, i - 1) = cs * x + sn * y;
+          HH(jj, i) = cs * y - sn * x;
+        }
+        for (uint jj = 1 + tid; jj <= n; jj += nt) {
+          float x = QQ(jj, i - 1), y = QQ(jj, i);
+          QQ(jj, i - 1) = cs * x + sn * y;
+          QQ(jj, i) = cs * y - sn * x;
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    kdefl = 0;
+    if (l == 1) {
+      break;
+    }
+    i = l - 1;
+  }
+
+  // write eigenvalues (geev layout: wr | wi); on info > 0 the leading entries
+  // are unconverged garbage, matching LAPACK (the host raises on info anyway)
+  for (uint idx = 1 + tid; idx <= n; idx += nt) {
+    val_b[idx - 1] = WR1(idx);
+    val_b[n + idx - 1] = WI1(idx);
+  }
+  if (tid == 0) {
+    infos[b] = info;
+  }
+  if (!wantv || info != 0) {
+    return;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // ==== strevc (side='R', howmny='B') + sgeev normalization epilogue ====
+  const float smlnum_tv = kEigSafmin * (float(n) / kEigUlp);
+  const float bignum_tv = (1.0f - kEigUlp) / smlnum_tv;
+  // strict-upper column 1-norms of T for overflow control
+  for (uint j = 1 + tid; j <= n; j += nt) {
+    float ssum = 0.0f;
+    for (uint r = 1; r + 1 <= j; ++r) {
+      ssum += fabs(HH(r, j));
+    }
+    CN1(j) = ssum;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  int ip = 0;
+  for (uint ki = n; ki >= 1; --ki) {
+    if (ip == 1) {
+      ip = 0;
+      continue;
+    }
+    if (ki > 1 && HH(ki, ki - 1) != 0.0f) {
+      ip = -1;
+    }
+    const float wr = HH(ki, ki);
+    const float wi = ip != 0
+        ? sqrt(fabs(HH(ki, ki - 1))) * sqrt(fabs(HH(ki - 1, ki)))
+        : 0.0f;
+    const float smin = max(kEigUlp * (fabs(wr) + fabs(wi)), smlnum_tv);
+
+    if (ip == 0) {
+      // ---- real right eigenvector ----
+      if (tid == 0) {
+        XRE(ki) = 1.0f;
+        for (uint kk = 1; kk + 1 <= ki; ++kk) {
+          XRE(kk) = -HH(kk, ki);
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      int jnxt = int(ki) - 1;
+      for (int j = int(ki) - 1; j >= 1; --j) {
+        if (j > jnxt) {
+          continue;
+        }
+        const uint ju = uint(j);
+        uint j1 = ju;
+        jnxt = j - 1;
+        if (j > 1 && HH(ju, ju - 1) != 0.0f) {
+          j1 = ju - 1;
+          jnxt = j - 2;
+        }
+        float x[4];
+        float scale, xnorm;
+        if (j1 == ju) {
+          eig_slaln2(
+              1,
+              1,
+              smin,
+              HH(ju, ju),
+              0.0f,
+              0.0f,
+              0.0f,
+              XRE(ju),
+              0.0f,
+              0.0f,
+              0.0f,
+              wr,
+              0.0f,
+              x,
+              scale,
+              xnorm);
+          if (xnorm > 1.0f && CN1(ju) > bignum_tv / xnorm) {
+            x[0] /= xnorm;
+            scale /= xnorm;
+          }
+          if (scale != 1.0f) {
+            for (uint kk = 1 + tid; kk <= ki; kk += nt) {
+              XRE(kk) *= scale;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+          }
+          if (tid == 0) {
+            XRE(ju) = x[0];
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+          for (uint kk = 1 + tid; kk + 1 <= ju; kk += nt) {
+            XRE(kk) -= x[0] * HH(kk, ju);
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        } else {
+          eig_slaln2(
+              2,
+              1,
+              smin,
+              HH(ju - 1, ju - 1),
+              HH(ju - 1, ju),
+              HH(ju, ju - 1),
+              HH(ju, ju),
+              XRE(ju - 1),
+              0.0f,
+              XRE(ju),
+              0.0f,
+              wr,
+              0.0f,
+              x,
+              scale,
+              xnorm);
+          if (xnorm > 1.0f) {
+            float beta = max(CN1(ju - 1), CN1(ju));
+            if (beta > bignum_tv / xnorm) {
+              x[0] /= xnorm;
+              x[1] /= xnorm;
+              scale /= xnorm;
+            }
+          }
+          if (scale != 1.0f) {
+            for (uint kk = 1 + tid; kk <= ki; kk += nt) {
+              XRE(kk) *= scale;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+          }
+          if (tid == 0) {
+            XRE(ju - 1) = x[0];
+            XRE(ju) = x[1];
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+          for (uint kk = 1 + tid; kk + 2 <= ju; kk += nt) {
+            XRE(kk) -= x[0] * HH(kk, ju - 1) + x[1] * HH(kk, ju);
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+      }
+      // back-transform: out_re = Q(:,1:ki) * x(1:ki)
+      for (uint r = 1 + tid; r <= n; r += nt) {
+        float ssum = 0.0f;
+        for (uint c = 1; c <= ki; ++c) {
+          ssum += QQ(r, c) * XRE(c);
+        }
+        OUTRE(r) = ssum;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      // strevc max-abs normalization fused with the sgeev unit-2-norm scaling
+      float emax = 0.0f;
+      for (uint r = 1; r <= n; ++r) {
+        emax = max(emax, fabs(OUTRE(r)));
+      }
+      const float remax = 1.0f / emax;
+      float nrm = 0.0f;
+      for (uint r = 1; r <= n; ++r) {
+        float t = OUTRE(r) * remax;
+        nrm += t * t;
+      }
+      const float scl = remax / sqrt(nrm);
+      for (uint r = 1 + tid; r <= n; r += nt) {
+        vec_b[(r - 1) + (ki - 1) * n] = OUTRE(r) * scl;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    } else {
+      // ---- complex right eigenvector (pair in columns ki-1, ki) ----
+      if (tid == 0) {
+        if (fabs(HH(ki - 1, ki)) >= fabs(HH(ki, ki - 1))) {
+          XRE(ki - 1) = 1.0f;
+          XIM(ki) = wi / HH(ki - 1, ki);
+        } else {
+          XRE(ki - 1) = -wi / HH(ki, ki - 1);
+          XIM(ki) = 1.0f;
+        }
+        XRE(ki) = 0.0f;
+        XIM(ki - 1) = 0.0f;
+        for (uint kk = 1; kk + 2 <= ki; ++kk) {
+          XRE(kk) = -XRE(ki - 1) * HH(kk, ki - 1);
+          XIM(kk) = -XIM(ki) * HH(kk, ki);
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      int jnxt = int(ki) - 2;
+      for (int j = int(ki) - 2; j >= 1; --j) {
+        if (j > jnxt) {
+          continue;
+        }
+        const uint ju = uint(j);
+        uint j1 = ju;
+        jnxt = j - 1;
+        if (j > 1 && HH(ju, ju - 1) != 0.0f) {
+          j1 = ju - 1;
+          jnxt = j - 2;
+        }
+        float x[4];
+        float scale, xnorm;
+        if (j1 == ju) {
+          eig_slaln2(
+              1,
+              2,
+              smin,
+              HH(ju, ju),
+              0.0f,
+              0.0f,
+              0.0f,
+              XRE(ju),
+              XIM(ju),
+              0.0f,
+              0.0f,
+              wr,
+              wi,
+              x,
+              scale,
+              xnorm);
+          if (xnorm > 1.0f && CN1(ju) > bignum_tv / xnorm) {
+            x[0] /= xnorm;
+            x[2] /= xnorm;
+            scale /= xnorm;
+          }
+          if (scale != 1.0f) {
+            for (uint kk = 1 + tid; kk <= ki; kk += nt) {
+              XRE(kk) *= scale;
+              XIM(kk) *= scale;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+          }
+          if (tid == 0) {
+            XRE(ju) = x[0];
+            XIM(ju) = x[2];
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+          for (uint kk = 1 + tid; kk + 1 <= ju; kk += nt) {
+            XRE(kk) -= x[0] * HH(kk, ju);
+            XIM(kk) -= x[2] * HH(kk, ju);
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        } else {
+          eig_slaln2(
+              2,
+              2,
+              smin,
+              HH(ju - 1, ju - 1),
+              HH(ju - 1, ju),
+              HH(ju, ju - 1),
+              HH(ju, ju),
+              XRE(ju - 1),
+              XIM(ju - 1),
+              XRE(ju),
+              XIM(ju),
+              wr,
+              wi,
+              x,
+              scale,
+              xnorm);
+          if (xnorm > 1.0f) {
+            float beta = max(CN1(ju - 1), CN1(ju));
+            if (beta > bignum_tv / xnorm) {
+              float rec = 1.0f / xnorm;
+              x[0] *= rec;
+              x[1] *= rec;
+              x[2] *= rec;
+              x[3] *= rec;
+              scale *= rec;
+            }
+          }
+          if (scale != 1.0f) {
+            for (uint kk = 1 + tid; kk <= ki; kk += nt) {
+              XRE(kk) *= scale;
+              XIM(kk) *= scale;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+          }
+          if (tid == 0) {
+            XRE(ju - 1) = x[0];
+            XRE(ju) = x[1];
+            XIM(ju - 1) = x[2];
+            XIM(ju) = x[3];
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+          for (uint kk = 1 + tid; kk + 2 <= ju; kk += nt) {
+            XRE(kk) -= x[0] * HH(kk, ju - 1) + x[1] * HH(kk, ju);
+            XIM(kk) -= x[2] * HH(kk, ju - 1) + x[3] * HH(kk, ju);
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+      }
+      // back-transform both columns (xre(ki) = 0 and xim(ki-1) = 0 make the
+      // full 1..ki sums equal LAPACK's gemv + beta form)
+      for (uint r = 1 + tid; r <= n; r += nt) {
+        float sre = 0.0f, sim = 0.0f;
+        for (uint c = 1; c <= ki; ++c) {
+          sre += QQ(r, c) * XRE(c);
+          sim += QQ(r, c) * XIM(c);
+        }
+        OUTRE(r) = sre;
+        OUTIM(r) = sim;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      float emax = 0.0f;
+      for (uint r = 1; r <= n; ++r) {
+        emax = max(emax, fabs(OUTRE(r)) + fabs(OUTIM(r)));
+      }
+      const float remax = 1.0f / emax;
+      // sgeev epilogue: joint unit 2-norm, then rotate the largest component
+      // (first max of re^2+im^2, isamax semantics) onto the real axis
+      float nre = 0.0f, nim = 0.0f;
+      for (uint r = 1; r <= n; ++r) {
+        float sre = OUTRE(r) * remax, sim = OUTIM(r) * remax;
+        nre += sre * sre;
+        nim += sim * sim;
+      }
+      const float scl = remax / eig_lapy2(sqrt(nre), sqrt(nim));
+      float kmax = -1.0f;
+      uint karg = 1;
+      for (uint r = 1; r <= n; ++r) {
+        float t = OUTRE(r) * scl, u = OUTIM(r) * scl;
+        float mag = t * t + u * u;
+        if (mag > kmax) {
+          kmax = mag;
+          karg = r;
+        }
+      }
+      float cs, sn, rr;
+      eig_slartg(OUTRE(karg) * scl, OUTIM(karg) * scl, cs, sn, rr);
+      for (uint r = 1 + tid; r <= n; r += nt) {
+        float t = OUTRE(r) * scl, u = OUTIM(r) * scl;
+        vec_b[(r - 1) + (ki - 2) * n] = cs * t + sn * u;
+        vec_b[(r - 1) + (ki - 1) * n] = r == karg ? 0.0f : cs * u - sn * t;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      ip = 1;
+    }
+    if (ki == 1) {
+      break;
+    }
+  }
+#undef HH
+#undef QQ
+#undef WR1
+#undef WI1
+#undef CN1
+#undef XRE
+#undef XIM
+#undef OUTRE
+#undef OUTIM
+}
+
+// Decode LAPACK GEEV's packed real eigenvector format into complex vectors.
+// One thread per output element; all tensors batched column-major.
+kernel void eig_make_complex_float(
+    device float2* out [[buffer(0)]],
+    device const float2* values [[buffer(1)]],
+    device const float* vr [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  const uint bidx = tid / (n * n);
+  const uint off = tid % (n * n);
+  const uint j = off / n;
+  const float wi = values[bidx * n + j].y;
+  if (wi == 0.0f) {
+    out[tid] = float2(vr[tid], 0.0f);
+  } else if (wi > 0.0f) {
+    out[tid] = float2(vr[tid], vr[tid + n]);
+  } else {
+    out[tid] = float2(vr[tid - n], -vr[tid]);
+  }
+}
+
+// Right-eigenvector backsolve for the hybrid large-matrix path.
+kernel void eig_trevc_col_float(
+    device const float* T [[buffer(0)]],
+    device const float* cnorm [[buffer(1)]],
+    device float* X [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    threadgroup float* xtg [[threadgroup(0)]],
+    uint3 thread_pos [[thread_position_in_threadgroup]],
+    uint3 tpg [[threads_per_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+  const uint tid = thread_pos.x;
+  const uint nt = tpg.x;
+  const uint ki = tg_pos.x + 1; // 1-based eigenvector column
+  device const float* T_b = T + ulong(tg_pos.y) * n * n; // column-major, ld = n
+  device const float* cn_b = cnorm + ulong(tg_pos.y) * n;
+  device float* X_b = X + ulong(tg_pos.y) * n * n; // column-major, ld = n
+#define TT(i, j) T_b[((i) - 1) + ((j) - 1) * n]
+#define CN1(j) cn_b[(j) - 1]
+#define XRE(i) xtg[(i) - 1]
+#define XIM(i) xtg[n + (i) - 1]
+  if (ki < n && TT(ki + 1, ki) != 0.0f) {
+    return; // left column of a 2x2 block: written by the ki+1 threadgroup
+  }
+  const float smlnum_tv = kEigSafmin * (float(n) / kEigUlp);
+  const float bignum_tv = (1.0f - kEigUlp) / smlnum_tv;
+  const bool pair = ki > 1 && TT(ki, ki - 1) != 0.0f;
+  const float wr = TT(ki, ki);
+  const float wi =
+      pair ? sqrt(fabs(TT(ki, ki - 1))) * sqrt(fabs(TT(ki - 1, ki))) : 0.0f;
+  const float smin = max(kEigUlp * (fabs(wr) + fabs(wi)), smlnum_tv);
+
+  if (!pair) {
+    // ---- real right eigenvector ----
+    if (tid == 0) {
+      XRE(ki) = 1.0f;
+    }
+    for (uint kk = 1 + tid; kk + 1 <= ki; kk += nt) {
+      XRE(kk) = -TT(kk, ki);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    int jnxt = int(ki) - 1;
+    for (int j = int(ki) - 1; j >= 1; --j) {
+      if (j > jnxt) {
+        continue;
+      }
+      const uint ju = uint(j);
+      uint j1 = ju;
+      jnxt = j - 1;
+      if (j > 1 && TT(ju, ju - 1) != 0.0f) {
+        j1 = ju - 1;
+        jnxt = j - 2;
+      }
+      float x[4];
+      float scale, xnorm;
+      if (j1 == ju) {
+        // read shared x state into registers before any thread commits writes:
+        // device-memory latency can desync the simdgroups by more than the
+        // whole solve, so a read after tid 0's commit would see the new value
+        const float b1 = XRE(ju);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        eig_slaln2(
+            1,
+            1,
+            smin,
+            TT(ju, ju),
+            0.0f,
+            0.0f,
+            0.0f,
+            b1,
+            0.0f,
+            0.0f,
+            0.0f,
+            wr,
+            0.0f,
+            x,
+            scale,
+            xnorm);
+        if (xnorm > 1.0f && CN1(ju) > bignum_tv / xnorm) {
+          x[0] /= xnorm;
+          scale /= xnorm;
+        }
+        if (scale != 1.0f) {
+          for (uint kk = 1 + tid; kk <= ki; kk += nt) {
+            XRE(kk) *= scale;
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+        if (tid == 0) {
+          XRE(ju) = x[0];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (uint kk = 1 + tid; kk + 1 <= ju; kk += nt) {
+          XRE(kk) -= x[0] * TT(kk, ju);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      } else {
+        const float b1 = XRE(ju - 1);
+        const float b2 = XRE(ju);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        eig_slaln2(
+            2,
+            1,
+            smin,
+            TT(ju - 1, ju - 1),
+            TT(ju - 1, ju),
+            TT(ju, ju - 1),
+            TT(ju, ju),
+            b1,
+            0.0f,
+            b2,
+            0.0f,
+            wr,
+            0.0f,
+            x,
+            scale,
+            xnorm);
+        if (xnorm > 1.0f) {
+          float beta = max(CN1(ju - 1), CN1(ju));
+          if (beta > bignum_tv / xnorm) {
+            x[0] /= xnorm;
+            x[1] /= xnorm;
+            scale /= xnorm;
+          }
+        }
+        if (scale != 1.0f) {
+          for (uint kk = 1 + tid; kk <= ki; kk += nt) {
+            XRE(kk) *= scale;
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+        if (tid == 0) {
+          XRE(ju - 1) = x[0];
+          XRE(ju) = x[1];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (uint kk = 1 + tid; kk + 2 <= ju; kk += nt) {
+          XRE(kk) -= x[0] * TT(kk, ju - 1) + x[1] * TT(kk, ju);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      }
+    }
+    for (uint r = 1 + tid; r <= n; r += nt) {
+      X_b[(r - 1) + (ki - 1) * n] = r <= ki ? XRE(r) : 0.0f;
+    }
+  } else {
+    // ---- complex right eigenvector (pair in columns ki-1, ki) ----
+    float x0re, x0im; // seeds for XRE(ki-1), XIM(ki)
+    if (fabs(TT(ki - 1, ki)) >= fabs(TT(ki, ki - 1))) {
+      x0re = 1.0f;
+      x0im = wi / TT(ki - 1, ki);
+    } else {
+      x0re = -wi / TT(ki, ki - 1);
+      x0im = 1.0f;
+    }
+    if (tid == 0) {
+      XRE(ki - 1) = x0re;
+      XIM(ki) = x0im;
+      XRE(ki) = 0.0f;
+      XIM(ki - 1) = 0.0f;
+    }
+    for (uint kk = 1 + tid; kk + 2 <= ki; kk += nt) {
+      XRE(kk) = -x0re * TT(kk, ki - 1);
+      XIM(kk) = -x0im * TT(kk, ki);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    int jnxt = int(ki) - 2;
+    for (int j = int(ki) - 2; j >= 1; --j) {
+      if (j > jnxt) {
+        continue;
+      }
+      const uint ju = uint(j);
+      uint j1 = ju;
+      jnxt = j - 1;
+      if (j > 1 && TT(ju, ju - 1) != 0.0f) {
+        j1 = ju - 1;
+        jnxt = j - 2;
+      }
+      float x[4];
+      float scale, xnorm;
+      if (j1 == ju) {
+        const float b1r = XRE(ju);
+        const float b1i = XIM(ju);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        eig_slaln2(
+            1,
+            2,
+            smin,
+            TT(ju, ju),
+            0.0f,
+            0.0f,
+            0.0f,
+            b1r,
+            b1i,
+            0.0f,
+            0.0f,
+            wr,
+            wi,
+            x,
+            scale,
+            xnorm);
+        if (xnorm > 1.0f && CN1(ju) > bignum_tv / xnorm) {
+          x[0] /= xnorm;
+          x[2] /= xnorm;
+          scale /= xnorm;
+        }
+        if (scale != 1.0f) {
+          for (uint kk = 1 + tid; kk <= ki; kk += nt) {
+            XRE(kk) *= scale;
+            XIM(kk) *= scale;
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+        if (tid == 0) {
+          XRE(ju) = x[0];
+          XIM(ju) = x[2];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (uint kk = 1 + tid; kk + 1 <= ju; kk += nt) {
+          XRE(kk) -= x[0] * TT(kk, ju);
+          XIM(kk) -= x[2] * TT(kk, ju);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      } else {
+        const float b1r = XRE(ju - 1);
+        const float b1i = XIM(ju - 1);
+        const float b2r = XRE(ju);
+        const float b2i = XIM(ju);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        eig_slaln2(
+            2,
+            2,
+            smin,
+            TT(ju - 1, ju - 1),
+            TT(ju - 1, ju),
+            TT(ju, ju - 1),
+            TT(ju, ju),
+            b1r,
+            b1i,
+            b2r,
+            b2i,
+            wr,
+            wi,
+            x,
+            scale,
+            xnorm);
+        if (xnorm > 1.0f) {
+          float beta = max(CN1(ju - 1), CN1(ju));
+          if (beta > bignum_tv / xnorm) {
+            float rec = 1.0f / xnorm;
+            x[0] *= rec;
+            x[1] *= rec;
+            x[2] *= rec;
+            x[3] *= rec;
+            scale *= rec;
+          }
+        }
+        if (scale != 1.0f) {
+          for (uint kk = 1 + tid; kk <= ki; kk += nt) {
+            XRE(kk) *= scale;
+            XIM(kk) *= scale;
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+        if (tid == 0) {
+          XRE(ju - 1) = x[0];
+          XRE(ju) = x[1];
+          XIM(ju - 1) = x[2];
+          XIM(ju) = x[3];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (uint kk = 1 + tid; kk + 2 <= ju; kk += nt) {
+          XRE(kk) -= x[0] * TT(kk, ju - 1) + x[1] * TT(kk, ju);
+          XIM(kk) -= x[2] * TT(kk, ju - 1) + x[3] * TT(kk, ju);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      }
+    }
+    for (uint r = 1 + tid; r <= n; r += nt) {
+      X_b[(r - 1) + (ki - 2) * n] = r <= ki ? XRE(r) : 0.0f;
+      X_b[(r - 1) + (ki - 1) * n] = r <= ki ? XIM(r) : 0.0f;
+    }
+  }
+#undef TT
+#undef CN1
+#undef XRE
+#undef XIM
+}
+
+// Normalize the hybrid path's eigenvectors in place.
+kernel void eig_normalize_float(
+    device float* V [[buffer(0)]],
+    device const float* values [[buffer(1)]],
+    constant uint& n [[buffer(2)]],
+    threadgroup float* scr [[threadgroup(0)]],
+    threadgroup uint* scri [[threadgroup(1)]],
+    uint3 thread_pos [[thread_position_in_threadgroup]],
+    uint3 tpg [[threads_per_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+  const uint tid = thread_pos.x;
+  const uint nt = tpg.x;
+  const uint ki = tg_pos.x + 1; // 1-based column
+  device float* V_b = V + ulong(tg_pos.y) * n * n; // column-major, ld = n
+  device const float* val_b = values + ulong(tg_pos.y) * 2 * n; // wr | wi
+  const float wi = val_b[n + ki - 1];
+  if (wi < 0.0f) {
+    return; // second column of a pair: rotated by the ki-1 threadgroup
+  }
+  device float* vre = V_b + (ki - 1) * n;
+  if (wi == 0.0f) {
+    // scl = 1 / snrm2(v); max-abs pre-scale keeps the squares finite
+    float lmax = 0.0f;
+    for (uint r = tid; r < n; r += nt) {
+      lmax = max(lmax, fabs(vre[r]));
+    }
+    scr[tid] = lmax;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float emax = 0.0f;
+    for (uint t = 0; t < nt; ++t) {
+      emax = max(emax, scr[t]);
+    }
+    if (emax == 0.0f) {
+      return;
+    }
+    const float remax = 1.0f / emax;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float lsum = 0.0f;
+    for (uint r = tid; r < n; r += nt) {
+      const float t = vre[r] * remax;
+      lsum += t * t;
+    }
+    scr[tid] = lsum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float nrm = 0.0f;
+    for (uint t = 0; t < nt; ++t) {
+      nrm += scr[t];
+    }
+    const float scl = remax / sqrt(nrm);
+    for (uint r = tid; r < n; r += nt) {
+      vre[r] *= scl;
+    }
+  } else {
+    device float* vim = V_b + ki * n; // column ki+1 holds the imaginary part
+    float lmax = 0.0f;
+    for (uint r = tid; r < n; r += nt) {
+      lmax = max(lmax, fabs(vre[r]) + fabs(vim[r]));
+    }
+    scr[tid] = lmax;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float emax = 0.0f;
+    for (uint t = 0; t < nt; ++t) {
+      emax = max(emax, scr[t]);
+    }
+    if (emax == 0.0f) {
+      return;
+    }
+    const float remax = 1.0f / emax;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float lre = 0.0f;
+    float lim = 0.0f;
+    for (uint r = tid; r < n; r += nt) {
+      const float t = vre[r] * remax;
+      const float u = vim[r] * remax;
+      lre += t * t;
+      lim += u * u;
+    }
+    scr[tid] = lre;
+    scr[nt + tid] = lim;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float nre = 0.0f;
+    float nim = 0.0f;
+    for (uint t = 0; t < nt; ++t) {
+      nre += scr[t];
+      nim += scr[nt + t];
+    }
+    const float scl = remax / eig_lapy2(sqrt(nre), sqrt(nim));
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    // isamax semantics: first strict maximum of re^2 + im^2
+    float lbest = -1.0f;
+    uint lidx = 0;
+    for (uint r = tid; r < n; r += nt) {
+      const float t = vre[r] * scl;
+      const float u = vim[r] * scl;
+      const float mag = t * t + u * u;
+      if (mag > lbest) {
+        lbest = mag;
+        lidx = r;
+      }
+    }
+    scr[tid] = lbest;
+    scri[tid] = lidx;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float kmax = -1.0f;
+    uint karg = 0;
+    for (uint t = 0; t < nt; ++t) {
+      const bool better = scr[t] > kmax || (scr[t] == kmax && scri[t] < karg);
+      if (better) {
+        kmax = scr[t];
+        karg = scri[t];
+      }
+    }
+    float cs, sn, rr;
+    eig_slartg(vre[karg] * scl, vim[karg] * scl, cs, sn, rr);
+    // every thread has read row karg; rendezvous before overwriting it
+    threadgroup_barrier(mem_flags::mem_device);
+    for (uint r = tid; r < n; r += nt) {
+      const float t = vre[r] * scl;
+      const float u = vim[r] * scl;
+      vre[r] = cs * t + sn * u;
+      vim[r] = r == karg ? 0.0f : cs * u - sn * t;
+    }
+  }
+}
