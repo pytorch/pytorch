@@ -13,7 +13,7 @@ from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import _is_tensorify_enabled, get_metrics_context
 from torch._prims_common import get_computation_dtype
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -287,7 +287,7 @@ def _tensorify_impl(
             # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32
 
             val = node.meta.get("val")
-            if is_fake_tensor(val):
+            if isinstance(val, FakeTensor):
                 for dim in val.shape:
                     if isinstance(dim, torch.SymInt):
                         for s in dim.node.expr.free_symbols:

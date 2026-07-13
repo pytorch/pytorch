@@ -12,12 +12,7 @@ from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._higher_order_ops.map import _unstack_pytree
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
-from torch._subclasses.fake_tensor import (
-    FakeTensorMode,
-    is_fake_tensor,
-    maybe_get_fake_constant,
-    maybe_get_fake_mode,
-)
+from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_constant
 from torch.fx import traceback as fx_traceback
 from torch.fx.experimental.proxy_tensor import PythonKeyTracer
 from torch.fx.experimental.symbolic_shapes import (
@@ -86,7 +81,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     name_submodule = f"submodule_{len(self.submodules)}"
                     self.root.add_module(name_submodule, a)
                     self.submodules[a] = name_submodule
-            elif is_fake_tensor(a):
+            elif isinstance(a, FakeTensor):
                 if maybe_get_fake_constant(a) is None:
                     raise ExportPassBaseError(f"Cannot add {a} to graph.")
                 a = maybe_get_fake_constant(a)
@@ -119,7 +114,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 | str
                 | None
             ):
-                if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                if isinstance(x, FakeTensor):
                     return x
                 elif isinstance(x, torch.Tensor):
                     if x.is_quantized:
@@ -166,7 +161,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
             # Set the tensor_metadata for values that do not have a corresponding FakeTensor
             def make_tensor_meta(x: Argument) -> TensorMetadata | None:
-                if not is_fake_tensor(x) and isinstance(x, torch.Tensor):
+                if not isinstance(x, FakeTensor) and isinstance(x, torch.Tensor):
                     if x.is_quantized:
                         # TODO (tmanlaibaatar) properly support Quantized FakeTensor
                         x = torch.dequantize(x)
@@ -482,13 +477,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         fake_tensor_mode = None
         for i in inputs:
-            if is_fake_tensor(i):
-                if (
-                    fake_tensor_mode is not None
-                    and fake_tensor_mode is not maybe_get_fake_mode(i)
-                ):
+            if isinstance(i, FakeTensor):
+                if fake_tensor_mode is not None and fake_tensor_mode is not i.fake_mode:
                     raise AssertionError("Multiple fake tensor mode detected.")
-                fake_tensor_mode = maybe_get_fake_mode(i)
+                fake_tensor_mode = i.fake_mode
         if fake_tensor_mode is None:
             self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]
