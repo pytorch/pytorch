@@ -286,6 +286,18 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
+/**
+ * The beginning of all shims added in 2.14.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
+// Returns whether the tensor has an associated storage (false for e.g. sparse
+// tensors). Calling this on an undefined tensor is invalid.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
