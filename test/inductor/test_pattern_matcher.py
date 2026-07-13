@@ -2603,7 +2603,7 @@ class TestPatternMatcher(TestCase):
         self.assertGreaterEqual(
             view_count_skip_noop,
             view_count_default,
-            f"Expected view count with remove_noop disabled ({view_count_skip_noop}) "
+            lambda msg: f"{msg}\nExpected view count with remove_noop disabled ({view_count_skip_noop}) "
             f"to be >= view count with remove_noop enabled ({view_count_default})",
         )
 
@@ -3420,7 +3420,9 @@ class TestPatternMatcherLogging(LoggingTestCase):
             tol = 0.1
             ratio = actual / expected
 
-            self.assertTrue(abs(ratio - 1) < tol, f"{expected} v.s. {actual}")
+            self.assertTrue(
+                abs(ratio - 1) < tol, lambda msg: f"{msg}\n{expected} v.s. {actual}"
+            )
 
         self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
 
