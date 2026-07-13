@@ -5128,20 +5128,22 @@ class CppScheduling(BaseScheduling):
     def reset_kernel_group(self):
         self.kernel_group = KernelGroup()
 
-    def _get_indexing_ranges_exprs(self, node):
+    def _get_indexing_ranges_exprs(self, node) -> ir.ExtraIndexingConstraints:
         if isinstance(node, FusedSchedulerNode):
             if len(node.snodes) <= 0:
                 raise AssertionError(node.snodes)
             var_ranges = None
             indexing_exprs = OrderedSet[Any]()
             for snode in node.snodes:
-                v, exprs = self._get_indexing_ranges_exprs(snode)
+                constraints = self._get_indexing_ranges_exprs(snode)
                 if var_ranges is None:
-                    var_ranges = v
-                if var_ranges != v:
-                    raise AssertionError((var_ranges, v, node.snodes))
-                indexing_exprs.update(exprs)
-            return var_ranges, list(indexing_exprs)
+                    var_ranges = constraints.ranges
+                if var_ranges != constraints.ranges:
+                    raise AssertionError((var_ranges, constraints.ranges, node.snodes))
+                indexing_exprs.update(constraints.exprs)
+            if var_ranges is None:
+                raise AssertionError("expected at least one snode to set var_ranges")
+            return ir.ExtraIndexingConstraints(var_ranges, list(indexing_exprs))
 
         if not isinstance(node, SchedulerNode):
             raise AssertionError("expected isinstance(node, SchedulerNode)")
@@ -5149,7 +5151,9 @@ class CppScheduling(BaseScheduling):
         if not isinstance(comp_buffer, ir.ComputedBuffer):
             raise AssertionError("expected isinstance(comp_buffer, ir.ComputedBuffer)")
         _, body, _ = comp_buffer.get_default_sizes_body()
-        return body.var_ranges, list(body.indexing_exprs.values())
+        return ir.ExtraIndexingConstraints(
+            body.var_ranges, list(body.indexing_exprs.values())
+        )
 
     def _snapshot_node_loop_states(self, node):
         if isinstance(node, SchedulerNode):
@@ -5598,7 +5602,7 @@ class CppScheduling(BaseScheduling):
 
         if extra_indexing_ranges is None:
             raise AssertionError("extra_indexing_ranges is None")
-        extra_indexing_constraints = (
+        extra_indexing_constraints = ir.ExtraIndexingConstraints(
             extra_indexing_ranges,
             list(extra_indexing_exprs),
         )
