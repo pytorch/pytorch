@@ -1914,11 +1914,6 @@ op_db: list[OpInfo] = [
             # kernel, hence the skip is scoped to CUDA only).
             DecorateInfo(skipIfNoNvmath, device_type="cuda"),
         ],
-        skips=(
-            # The operator 'aten::linalg_polar.out' is not implemented for MPS;
-            # only CPU and CUDA dispatch keys are registered.
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-        ),
     ),
     OpInfo(
         "linalg.slogdet",
