@@ -12,14 +12,7 @@ from numpy import inf
 
 import torch
 from torch.testing import make_tensor
-
-
-_ROCM_VERSION = (
-    tuple(int(v) for v in torch.version.hip.split(".")[:2])
-    if torch.version.hip
-    else (0, 0)
-)
-from torch.testing._internal.common_cuda import _get_magma_version, with_tf32_off
+from torch.testing._internal.common_cuda import _get_magma_version, ROCM_VERSION, with_tf32_off
 from torch.testing._internal.common_device_type import (
     has_cusolver,
     skipCPUIfNoLapack,
@@ -1422,7 +1415,7 @@ op_db: list[OpInfo] = [
             # hipSOLVER xgeev requires ROCm >= 7.14; older ROCm without MAGMA has no geev support
             DecorateInfo(
                 unittest.skip("hipSOLVER xgeev requires ROCm >= 7.14"),
-                active_if=TEST_WITH_ROCM and _ROCM_VERSION < (7, 14),
+                active_if=TEST_WITH_ROCM and ROCM_VERSION < (7, 14),
             ),
         ),
         decorators=[
@@ -1470,7 +1463,7 @@ op_db: list[OpInfo] = [
             # hipSOLVER xgeev requires ROCm >= 7.14; older ROCm without MAGMA has no geev support
             DecorateInfo(
                 unittest.skip("hipSOLVER xgeev requires ROCm >= 7.14"),
-                active_if=TEST_WITH_ROCM and _ROCM_VERSION < (7, 14),
+                active_if=TEST_WITH_ROCM and ROCM_VERSION < (7, 14),
             ),
         ),
     ),
