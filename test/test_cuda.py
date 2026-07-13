@@ -2626,12 +2626,13 @@ raise RuntimeError("device assert did not fire")
         self.assertEqual(torch.sum(counted), 10)
 
     @largeTensorTest("18GB", "cuda")
+    @serialTest()
     def test_bincount_int32_overflow(self):
         # https://github.com/pytorch/pytorch/issues/189666
         # A value above INT_MAX must not overflow the bin index inside
         # kernelHistogram1D, which produced a negative bin offset and an
         # illegal memory access.
-        val = 2147484647  # INT_MAX + 1000
+        val = torch.iinfo(torch.int32).max + 1000  # INT_MAX + 1000
         t = torch.tensor([val, val], dtype=torch.long, device="cuda")
         counted = t.bincount()
         self.assertEqual(counted.numel(), val + 1)
