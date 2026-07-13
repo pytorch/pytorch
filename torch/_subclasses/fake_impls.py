@@ -41,6 +41,7 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
     FakeTensor,
     in_kernel_invocation_manager,
+    is_fake_tensor,
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
@@ -378,7 +379,7 @@ def workaround_stride_incorrect_op(
     # This is a workaround for meta implementations with incorrect strides
 
     def is_symbolic(x: object) -> bool:
-        if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        if is_fake_tensor(x):
             return x._has_symbolic_sizes_strides
         if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             return True
@@ -425,7 +426,7 @@ def _spdiags_static_offsets(offsets: FakeTensorLike) -> list[int] | None:
     constant = getattr(offsets, "constant", None)
     if constant is None:
         constant = getattr(offsets, "real_tensor", None)
-    if isinstance(constant, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+    if is_fake_tensor(constant):
         return None
     if constant is None or constant.device.type != "cpu":
         return None
@@ -1640,6 +1641,8 @@ def maybe_to_dense_mkldnn(
     dtype: torch.dtype | None = None,
     masked_grad: bool | None = None,
 ) -> object:
+    # this function invokes in_kernel_invocation_manager and creates python
+    # FakeTensor, revisit later for C++ behaviour
     if (
         not isinstance(a, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
         or not a.is_mkldnn
@@ -2457,9 +2460,6 @@ def fast_detach(
     x: FakeTensor | torch.Tensor,
     include_real: bool = False,
 ) -> torch.Tensor:
-    # The FakeTensor | Tensor and FakeTensorMode | None widening exists for C++
-    # FakeTensor support, which is not enabled yet: today x is always a Python
-    # FakeTensor and fake_mode a FakeTensorMode.
     if (
         not isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
         or fake_mode is None
