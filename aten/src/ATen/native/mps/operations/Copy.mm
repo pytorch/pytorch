@@ -61,6 +61,32 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
   lib.exec_unary_kernel(iter, std::string(name), std::nullopt, std::nullopt, /*ilp_threshold=*/131072u);
 }
 
+// Byte-erased compute copy, not a blit: faster at small sizes and avoids the encoder switch.
+// One dispatch per <=2GB chunk keeps chunk_bytes in uint. Callers must pass contiguous src and
+// dst with equal nbytes (both are treated as flat byte runs).
+static void contiguous_copy_kernel_mps(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
+  uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+      getMTLBufferStorage(src), getMTLBufferStorage(dst), src, dst, src.nbytes(), non_blocking, /*usesBlitter=*/false);
+  auto* kernel = lib.getCachedKernelFunctionPtr("contiguous_byte_copy");
+  constexpr size_t max_chunk = 0x80000000; // 2GB
+  const size_t total = src.nbytes();
+  kernel->runCommandBlock([&] {
+    kernel->startEncoding();
+    kernel->setArg(0, dst);
+    kernel->setArg(1, src);
+    for (size_t base = 0; base < total;) {
+      const uint32_t chunk = static_cast<uint32_t>(std::min(max_chunk, total - base));
+      kernel->setArg(2, chunk);
+      kernel->setArg(3, static_cast<uint64_t>(base));
+      kernel->dispatch((chunk + 15) / 16);
+      base += chunk;
+    }
+  });
+  if (profile_id) {
+    getMPSProfiler().endProfileCopy(profile_id, SyncType::NONE);
+  }
+}
+
 static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
   uintptr_t address = (uintptr_t)ptr;
   uintptr_t alignedAddress = address & ~(PAGE_SIZE - 1);
@@ -242,11 +268,10 @@ void copy_blit_mps(void* dst, const void* src, size_t size) {
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
-  auto src_byte_offset = src_.storage_offset() * src_.itemsize();
   auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
 
   // If dst is contiguous and there is no byte offset, we can save directly the result of
-  // gather into dst. This reduces the overhead of doing an additional blit for most cases.
+  // gather into dst. This reduces the overhead of doing an additional copy for most cases.
   bool returnGatherOutput = dst_.is_contiguous();
   Tensor src;
   auto sameMemFormat =
@@ -264,21 +289,15 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
       if (returnGatherOutput) {
         return dst_;
       }
-
-      src_byte_offset = 0;
     } else {
       src = src_.expand_as(dst_).contiguous();
-      src_byte_offset = src.storage_offset() * src.itemsize();
     }
   } else {
     src = src_;
   }
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
-  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
 
-  // Scatter to `dst` if the memory is not contiguous
-  // If the memory is not contiguous, it means that the tensor has strides and we would not be
-  // able to do the copy using a single blit
+  // Strided dst can't be written as one contiguous run: route it through the scatter kernel.
   if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     return scatterViewTensor(src, dst_);
   }
@@ -287,9 +306,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
 
   MPSStream* stream = getCurrentMPSStream();
   if (sameDataType) {
-    uint64_t profile_id = getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst_, src.nbytes(), true);
-    // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
-    stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset, profile_id);
+    contiguous_copy_kernel_mps(dst_, src, non_blocking);
   } else {
     if (dst_byte_offset) {
       auto maybeCastedSource =
