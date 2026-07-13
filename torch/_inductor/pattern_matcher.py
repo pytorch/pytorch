@@ -78,7 +78,7 @@ from torch.utils._ordered_set import OrderedSet
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
-from .._subclasses import FakeTensorMode
+from .._subclasses import FakeTensor, FakeTensorMode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
@@ -2182,12 +2182,12 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if is_fake_tensor(arg) and maybe_get_fake_constant(arg) is not None:
+        if isinstance(arg, FakeTensor) and maybe_get_fake_constant(arg) is not None:  # noqa: ISINSTANCE_FAKE_TENSOR
             # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
             # hold onto their original constant value - and by stashing it here
             # will cause a memory leak if the constant value is on GPU.
             # Since this is just an optimization we can clear it out.
-            # pyrefly: ignore[missing-attribute]
+            # for c++ need to add a setter
             arg.constant = None
 
     _known_precompiled_patterns.append(
