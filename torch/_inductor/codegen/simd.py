@@ -49,7 +49,7 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties
+from ..runtime.hints import DeviceProperties, InductorMeta
 from ..runtime.runtime_utils import (
     green_text,
     last_power_of_2,
@@ -3579,10 +3579,13 @@ class SIMDScheduling(BaseScheduling):
             for prefix, numel in kernel.numels.items()
             if not prefix_is_reduction(prefix) or kernel.inside_reduction
         }
-        inductor_meta = {
-            **kernel.inductor_meta_common(),
-            **kernel.inductor_meta_per_kernel(),
-        }
+        inductor_meta = cast(
+            "InductorMeta",
+            {
+                **kernel.inductor_meta_common(),
+                **kernel.inductor_meta_per_kernel(),
+            },
+        )
         if kernel.persistent_reduction:
             configs = persistent_reduction(
                 size_hints,
