@@ -53,7 +53,8 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
         func = copyreg.__newobj__  # pyrefly: ignore[missing-attribute]
         newargs = (cls, *args)
 
-    if cls.__getstate__ is not object.__getstate__:
+    default_getstate = getattr(object, "__getstate__", None)
+    if getattr(cls, "__getstate__", None) is not default_getstate:
         state = obj.__getstate__()
     else:
         try:
