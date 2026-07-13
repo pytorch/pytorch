@@ -61,8 +61,6 @@ from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_
 from torch.types import _TensorOrTensors
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
-
 if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
@@ -2452,7 +2450,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
         loss = F.mse_loss(inputs, targets, weight=weight, reduction='mean')
         expected_loss = torch.tensor(0.25)
-        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+        self.assertTrue(torch.isclose(loss, expected_loss), lambda msg: f"{msg}\nExpected {expected_loss}, but got {loss}")
 
     def test_weighted_l1_loss_with_weights(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -2460,7 +2458,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
         loss = F.l1_loss(inputs, targets, weight=weight, reduction='mean')
         expected_loss = torch.tensor(0.5)
-        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+        self.assertTrue(torch.isclose(loss, expected_loss), lambda msg: f"{msg}\nExpected {expected_loss}, but got {loss}")
 
     def test_weighted_huber_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -12215,7 +12213,7 @@ class TestNNDeviceType(NNTestCase):
         # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
         grad_fn_str = str(loss_cudnn.grad_fn)
         self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
-                        f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
+                        lambda msg: f"{msg}\nExpected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
@@ -12245,7 +12243,7 @@ class TestNNDeviceType(NNTestCase):
         # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
         grad_fn_str = str(loss_cudnn.grad_fn)
         self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
-                        f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
+                        lambda msg: f"{msg}\nExpected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
@@ -12698,7 +12696,7 @@ if __name__ == '__main__':
                           or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
                           or 'illegal memory access' in stderr)
         self.assertTrue(has_cuda_assert or has_hip_assert,
-                        f"Expected device assert error in stderr, got: {stderr}")
+                        lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
 
 
 
@@ -14490,19 +14488,19 @@ if __name__ == '__main__':
                     worst_linear_bias_grad_err_kwargs = dict(module_kwargs)
 
         self.assertLessEqual(maximal_input_grad_err, feps,
-                             msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_err, feps,
-                             msg=f"worst linear_weight-grad err {maximal_linear_weight_grad_err} from kwargs={worst_linear_weight_grad_err_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst linear_weight-grad err {maximal_linear_weight_grad_err} from kwargs={worst_linear_weight_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_bias_grad_err, feps,
-                             msg=f"worst linear_bias-grad err {maximal_linear_bias_grad_err} from kwargs={worst_linear_bias_grad_err_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst linear_bias-grad err {maximal_linear_bias_grad_err} from kwargs={worst_linear_bias_grad_err_kwargs}")
         self.assertLessEqual(maximal_output_max_ulp_diff, expected_max_ulp_diff,
-                             msg=f"worst output ULP {maximal_output_max_ulp_diff} from kwargs={worst_output_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst output ULP {maximal_output_max_ulp_diff} from kwargs={worst_output_kwargs}")
         self.assertLessEqual(maximal_input_grad_max_ulp_diff, expected_input_grad_max_ulp_diff,
-                             msg=f"worst input-grad ULP {maximal_input_grad_max_ulp_diff} from kwargs={worst_input_grad_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst input-grad ULP {maximal_input_grad_max_ulp_diff} from kwargs={worst_input_grad_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_max_ulp_diff, expected_weight_grad_max_ulp_diff,
-                             msg=f"worst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
         self.assertLessEqual(maximal_linear_bias_grad_max_ulp_diff, expected_linear_bias_grad_max_ulp_diff,
-                             msg=f"worst linear_bias-grad ULP {maximal_linear_bias_grad_max_ulp_diff} from kwargs={worst_linear_bias_grad_kwargs}")
+                             msg=lambda msg: f"{msg}\nworst linear_bias-grad ULP {maximal_linear_bias_grad_max_ulp_diff} from kwargs={worst_linear_bias_grad_kwargs}")
 
     @parametrize_test("bias", [False, True])
     @dtypes(torch.float32)
