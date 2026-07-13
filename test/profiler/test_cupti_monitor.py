@@ -138,7 +138,7 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(fields[kernel], frozenset({0, int(Kernel.START)}))
         self.assertEqual(fields[memcpy], all_memcpy)
 
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires the cupti python bindings")
     def test_configure_and_get_config(self):
         # configure() sets the process-wide config get_config() reports; it is first-come-
         # first-serve. Pure config -- no session, only the cupti python bindings (not
