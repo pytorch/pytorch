@@ -46,7 +46,9 @@ def _diag() -> None:
     failure: a container KFD/topology-passthrough gap (no /dev/dri render nodes,
     /dev/kfd unreadable, rocminfo sees 0 agents) vs. a torch/HIP-layer problem
     (devices present to the OS/rocminfo but torch still enumerates 0)."""
+    import ctypes
     import glob
+    import pathlib
     import subprocess
 
     try:
@@ -63,6 +65,78 @@ def _diag() -> None:
         print(f"[preflight-diag] rocminfo gfx-agent count: {rocminfo.stdout.strip()!r}")
         print(f"[preflight-diag] torch.cuda.device_count(): {torch.cuda.device_count()}")
         print(f"[preflight-diag] torch.version.hip: {torch.version.hip}")
+
+        # Driver-truth: the LOADED kernel driver, not image-baked dpkg metadata
+        # (which is identical on every pod). This is the load-bearing fact for a
+        # KMD/UMD-skew diagnosis.
+        uname = subprocess.run(["uname", "-r"], capture_output=True, text=True)
+        print(f"[preflight-diag] uname -r: {uname.stdout.strip()}")
+        for label, path in (
+            ("amdgpu KMD version", "/sys/module/amdgpu/version"),
+            ("kfd interface version", "/sys/devices/virtual/kfd/kfd/version"),
+            ("kfd topology generation", "/sys/class/kfd/kfd/topology/generation_id"),
+        ):
+            p = pathlib.Path(path)
+            val = p.read_text().strip() if p.exists() else "<absent>"
+            print(f"[preflight-diag] {label} ({path}): {val}")
+
+        # Remove torch from the causal chain: query libamdhip64 directly.
+        try:
+            hip = ctypes.CDLL("libamdhip64.so")
+            raw = ctypes.c_int(-1)
+            rc = hip.hipGetDeviceCount(ctypes.byref(raw))
+            print(f"[preflight-diag] raw hipGetDeviceCount rc={rc} count={raw.value}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] raw hipGetDeviceCount failed: {e}")
+
+        # CLR verbose init log (torch-free): if HIP rejects the devices it names
+        # why here (e.g. KFD version below minimum, ioctl EINVAL, queue-create
+        # failure). Bounded tail so it never floods the job log.
+        try:
+            clr = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import ctypes;h=ctypes.CDLL('libamdhip64.so');"
+                    "n=ctypes.c_int(-1);h.hipGetDeviceCount(ctypes.byref(n));"
+                    "print('rc-count',n.value)",
+                ],
+                env={**os.environ, "AMD_LOG_LEVEL": "3"},
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            lines = (clr.stderr or "").strip().splitlines()
+            # On failure the reason (KFD version, ioctl EINVAL, queue-create,
+            # "no ... device") can appear anywhere, drowned by per-device spam.
+            # Surface flagged lines first, then a bounded tail as a fallback.
+            flagged = [
+                ln
+                for ln in lines
+                if any(
+                    k in ln.lower()
+                    for k in (
+                        "error",
+                        "fail",
+                        "einval",
+                        "no device",
+                        "not supported",
+                        "version",
+                        "unable",
+                        "abort",
+                        "kfd",
+                    )
+                )
+            ]
+            print(f"[preflight-diag] raw child stdout: {clr.stdout.strip()!r}")
+            print("[preflight-diag] --- CLR AMD_LOG_LEVEL=3 flagged lines ---")
+            for line in flagged[-40:]:
+                print(f"[preflight-diag-clr] {line}")
+            print("[preflight-diag] --- CLR AMD_LOG_LEVEL=3 tail (20 lines) ---")
+            for line in lines[-20:]:
+                print(f"[preflight-diag-clr] {line}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] CLR log capture failed: {e}")
     except Exception as e:  # noqa: BLE001 - diagnostics must never mask the real error
         print(f"[preflight-diag] error while collecting diagnostics: {e}")
 
