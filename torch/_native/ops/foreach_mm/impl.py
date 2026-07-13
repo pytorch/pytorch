@@ -40,7 +40,7 @@ from typing import Literal
 
 import torch
 
-from ... import registry
+from ... import nvmath_utils, registry
 from ...common_utils import _unavailable_reason
 
 
@@ -50,10 +50,13 @@ _NVMATH_DEPS = [
     ("nvmath-python", "nvmath.bindings"),
 ]
 
+# Minimum cuBLASLt version that exposes grouped-GEMM layout APIs
+# (cublasLtGroupedMatrixLayoutCreate). CUDA 13.2 ships cuBLASLt 13.2.
+_MIN_CUBLASLT_VERSION = 13200
 
-@cache
+
 def _check_nvmath_cublaslt() -> bool:
-    return _unavailable_reason(_NVMATH_DEPS) is None
+    return nvmath_utils.check_cublaslt_version(_MIN_CUBLASLT_VERSION)
 
 
 def _k_n_16_byte_aligned(a: torch.Tensor, b: torch.Tensor, elem_size: int) -> bool:

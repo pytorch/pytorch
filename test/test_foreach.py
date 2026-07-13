@@ -11,6 +11,8 @@ from contextlib import nullcontext
 from numbers import Number
 
 import torch
+from torch._native import nvmath_utils
+from torch._native.ops.foreach_mm.impl import _check_nvmath_cublaslt, _MIN_CUBLASLT_VERSION
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
@@ -2162,6 +2164,35 @@ class TestForeachMM(TestCase):
     )
     def test_foreach_mm_nvmath(self, label, shapes):
         self._check(shapes, torch.bfloat16, "cuda")
+
+    def test_check_nvmath_cublaslt_version_gate(self):
+        nvmath_utils.check_cublaslt_version.cache_clear()
+        nvmath_utils.cublaslt_version.cache_clear()
+        try:
+            # nvmath not installed: should return False
+            with unittest.mock.patch.object(nvmath_utils, "nvmath_unavailable_reason", return_value="not installed"), \
+                 unittest.mock.patch.object(nvmath_utils, "cublaslt_version", return_value=None):
+                self.assertFalse(_check_nvmath_cublaslt())
+                nvmath_utils.check_cublaslt_version.cache_clear()
+                nvmath_utils.cublaslt_version.cache_clear()
+
+            # nvmath installed, cuBLASLt version too old (< 13.2): should return False
+            with unittest.mock.patch.object(nvmath_utils, "nvmath_unavailable_reason", return_value=None), \
+                 unittest.mock.patch.object(nvmath_utils, "cublaslt_version", return_value=_MIN_CUBLASLT_VERSION - 1):
+                self.assertFalse(_check_nvmath_cublaslt())
+                nvmath_utils.check_cublaslt_version.cache_clear()
+                nvmath_utils.cublaslt_version.cache_clear()
+
+            # nvmath installed, cuBLASLt version >= 13.2: should return True
+            with unittest.mock.patch.object(nvmath_utils, "nvmath_unavailable_reason", return_value=None), \
+                 unittest.mock.patch.object(nvmath_utils, "cublaslt_version", return_value=_MIN_CUBLASLT_VERSION):
+                self.assertTrue(_check_nvmath_cublaslt())
+                nvmath_utils.check_cublaslt_version.cache_clear()
+                nvmath_utils.cublaslt_version.cache_clear()
+        finally:
+            nvmath_utils.check_cublaslt_version.cache_clear()
+            nvmath_utils.cublaslt_version.cache_clear()
+
 
 
 instantiate_parametrized_tests(TestForeachMM)

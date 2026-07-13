@@ -9,6 +9,8 @@ inside the function bodies, lazily, on first use) so importing this module does
 not pull in the nvmath/cuda runtime or initialize CUDA.
 """
 
+from functools import cache
+
 import torch
 
 from .common_utils import _unavailable_reason
@@ -28,6 +30,7 @@ def nvmath_unavailable_reason() -> str | None:
     return _unavailable_reason(_NVMATH_DEPS)
 
 
+@cache
 def cusolver_version() -> int | None:
     """cuSOLVER runtime version as major*1000 + minor*100 + patch, or None.
 
@@ -43,6 +46,32 @@ def cusolver_version() -> int | None:
         return cusolver.get_version()
     except Exception:
         return None
+
+
+@cache
+def cublaslt_version() -> int | None:
+    """cuBLASLt runtime version as major*1000 + minor*100 + patch, or None.
+
+    Queries cublasLtGetVersion through nvmath, against the exact cuBLASLt
+    library nvmath dlopens. Used to gate features that require a minimum
+    cuBLASLt release (e.g. grouped-GEMM APIs added in CUDA 13.2 / cuBLASLt
+    13.2).
+    """
+    try:
+        from nvmath.bindings import cublasLt  # pyrefly: ignore[missing-import]
+
+        return cublasLt.get_version()
+    except Exception:
+        return None
+
+
+@cache
+def check_cublaslt_version(min_version: int) -> bool:
+    """Return True if nvmath is available and cuBLASLt version is >= min_version."""
+    if nvmath_unavailable_reason() is not None:
+        return False
+    version = cublaslt_version()
+    return version is not None and version >= min_version
 
 
 # One cuSOLVER handle per device, reused for the process lifetime. Handles are
