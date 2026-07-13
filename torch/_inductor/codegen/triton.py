@@ -4301,17 +4301,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.block_ptr_to_buffer[block_descriptor] = name
 
                     # Generate block pointer advancements, for later use.
+                    # We record the entry for every level, even when the
+                    # per-level offset is zero. The outer-loop suffix computes
+                    # a rewind as `outer_step - inner_step * inner_num_iter`;
+                    # if a pointer's outer entry is absent, no rewind is
+                    # emitted and its SSA value (in scf.for-based backends
+                    # such as Triton-MTIA) retains the accumulated inner
+                    # advances across outer iterations, silently loading
+                    # out-of-bounds. The emit site below drops pure no-op
+                    # advances so this does not add codegen noise for
+                    # pointers that are truly constant across all levels.
                     for symt in TritonSymbols.reduction_types:
                         advance_offsets = indexing.advance_roffset(symt)
-
-                        # Ignore identity advancements.
-                        if all(
-                            V.graph.sizevars.statically_known_equals(
-                                offset, sympy.Integer(0)
-                            )
-                            for offset in advance_offsets
-                        ):
-                            continue
 
                         advancements = self.pointer_advancements[symt]
                         if block_descriptor in advancements:
@@ -6399,8 +6400,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                             prev_advancements = self.pointer_advancements[
                                 prev_tree.symt
                             ]
-                            # block_ptr may not exist in the inner loop's advancements
-                            # if its advancement was identity (zero) and was skipped
                             if block_ptr in prev_advancements:
                                 prev_advancement = prev_advancements[block_ptr]
                                 prev_block = TritonSymbols.get_block_size(prev_tree)
@@ -6409,6 +6408,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                                     cur - prev * prev_num_iter
                                     for cur, prev in zip(advancement, prev_advancement)
                                 ]
+
+                        # Drop pure no-op advances to avoid emitting
+                        # `tl.advance(ptr, [0, 0, ...])` for pointers that
+                        # are constant across every level.
+                        if all(
+                            V.graph.sizevars.statically_known_equals(
+                                offset, sympy.Integer(0)
+                            )
+                            for offset in advancement
+                        ):
+                            continue
 
                         self.body.writeline(
                             DeferredLine(
