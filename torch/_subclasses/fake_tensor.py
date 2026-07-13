@@ -3282,15 +3282,13 @@ class FakeTensorMode(TorchDispatchMode):
                     else fake_tensor_tls.allow_non_fake_inputs_override
                 )
                 if not allow_non_fake_inputs:
-                    if (
-                        isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-                            x, FakeTensor
-                        )
-                        and x.fake_mode is not self
-                    ):
-                        raise AssertionError(
-                            f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
-                        )
+                    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                        # pyrefly: ignore [missing-attribute]
+                        x_fake_mode = x.fake_mode
+                        if x_fake_mode is not self:
+                            raise AssertionError(
+                                f"Mixing fake modes NYI x.fake_mode={x_fake_mode} vs self={self}"
+                            )
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise AssertionError(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "

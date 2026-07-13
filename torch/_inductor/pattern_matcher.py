@@ -2182,7 +2182,9 @@ def gen_register_replacement(
         pat = getattr(m, unique_name)
 
     for arg in pytree.tree_iter(example_inputs):
-        if is_fake_tensor(arg) and maybe_get_fake_constant(arg) is not None:
+        if not isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+            continue
+        if maybe_get_fake_constant(arg) is not None:
             # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
             # hold onto their original constant value - and by stashing it here
             # will cause a memory leak if the constant value is on GPU.

@@ -119,7 +119,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 | str
                 | None
             ):
-                if is_fake_tensor(x):
+                if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                     return x
                 elif isinstance(x, torch.Tensor):
                     if x.is_quantized:

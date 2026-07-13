@@ -2588,8 +2588,9 @@ def _compute_reduction_shape(self, dims, keepdim):
 # exists so meta kernels which have diverge per device will be more
 # accurate when run with FakeTensors
 def device_hint(tensor) -> "str":
-    if torch._subclasses.fake_tensor.is_fake_tensor(tensor):
-        return torch._subclasses.fake_tensor.maybe_get_fake_device(tensor).type
+    fake_device = torch._subclasses.fake_tensor.maybe_get_fake_device(tensor)
+    if fake_device is not None:
+        return fake_device.type
     elif (
         hasattr(tensor, "device")
         and hasattr(tensor.device, "type")
@@ -2735,14 +2736,11 @@ def calc_conv_nd_return_shape(
     # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
     # CUDA (cuDNN) and HIP handle zero-sized conv_transpose outputs by short-circuiting,
     # but other backends fail: CPU rejects it and MPS asserts "Placeholder tensor is empty".
-    from torch._subclasses.fake_tensor import is_fake_tensor
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
     from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
-    device = (
-        input_tensor.fake_device
-        if is_fake_tensor(input_tensor)
-        else input_tensor.device
-    )
+    fake_device = maybe_get_fake_device(input_tensor)
+    device = fake_device if fake_device is not None else input_tensor.device
 
     # ROCm reports device.type as "cuda"; keep the existing NVIDIA CUDA behavior
     # unchanged and only apply the new check to HIP.

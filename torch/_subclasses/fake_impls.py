@@ -2453,8 +2453,20 @@ def make_fast_binary_impl(
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
 def fast_detach(
-    fake_mode: FakeTensorMode, x: FakeTensor, include_real: bool = False
-) -> FakeTensor:
+    fake_mode: FakeTensorMode | None,
+    x: FakeTensor | torch.Tensor,
+    include_real: bool = False,
+) -> torch.Tensor:
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    # A non-FakeTensor input (or no fake mode) has no Python FakeTensor to
+    # reconstruct; just detach directly.
+    if not isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        with no_python_dispatcher():
+            return torch.ops.aten.detach.default(x)
+    if not isinstance(fake_mode, FakeTensorMode):
+        with no_python_dispatcher():
+            return torch.ops.aten.detach.default(x)
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
     dispatch_keys = x.dispatch_keys
