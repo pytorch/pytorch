@@ -140,9 +140,6 @@
 - .github/workflows/inductor-pallas.yml
 - .ci/docker/ci_commit_pins/jax.txt
 - .ci/docker/common/install_jax.sh
-- .ci/docker/common/install_torch_tpu.sh
-- .ci/docker/common/requirements_tpu.txt
-- .github/ci_commit_pins/torch_tpu.txt
 
 "ciflow/b200":
 - test/test_matmul_cuda.py
