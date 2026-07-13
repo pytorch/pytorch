@@ -344,12 +344,14 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
+  bool pushed_correlation_id = false;
   if (!config_.experimental_config.disable_external_correlation) {
     if (fn.scope() == at::RecordScope::USER_SCOPE) {
       torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
     } else {
       torch::profiler::impl::kineto::pushCorrelationId(corr_id);
     }
+    pushed_correlation_id = true;
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
@@ -370,6 +372,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   auto out = std::make_unique<KinetoObserverContext>(event);
+  out->pushed_correlation_id_ = pushed_correlation_id;
   if (fn.isNcclMeta()) {
     // Record NCCL metadata for specific CPU ops, switch off output
     // introspection in this begin_op callback, we will do that in exit callback
@@ -1112,7 +1115,7 @@ class TransferEvents {
                   /*start=*/activity->flowStart()};
             },
             [](auto&) {}));
-        if (config_.experimental_config.expose_kineto_event_metadata) {
+        if (config_.get().experimental_config.expose_kineto_event_metadata) {
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
                 i.metadata_json_ = activity->metadataJson();
@@ -1247,7 +1250,7 @@ class TransferEvents {
   static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
-  const ProfilerConfig& config_;
+  std::reference_wrapper<const ProfilerConfig> config_;
   std::vector<const itrace_t*> trace_activities_;
   ska::flat_hash_map<const itrace_t*, std::shared_ptr<Result>> kineto_events_;
 };
@@ -1372,7 +1375,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     stacks.erase(start_tid);
     auto new_frame = event->parent_.lock();
     if (new_frame != nullptr) {
-      stacks[start_tid] = new_frame;
+      stacks[start_tid] = std::move(new_frame);
     }
   };
 

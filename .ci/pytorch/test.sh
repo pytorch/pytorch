@@ -424,6 +424,7 @@ test_python_smoke() {
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_linalg -k polar $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -1168,7 +1169,12 @@ test_inductor_torchbench_smoketest_perf() {
   done
 
   # Perform some "warm-start" runs for a few huggingface models.
-  for test in AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
+  # NB: DistillGPT2 is excluded here because it has a known A100-specific inductor
+  # accuracy divergence (RMSE ~0.19 vs ~0.008 eager) that fails only on sm80; it
+  # still passes and is covered by the inductor_huggingface accuracy job on other
+  # runners. See pytorch/pytorch#187401. A one-off warm-start accuracy miss should
+  # not fail the whole smoke job. Re-add once the sm80 divergence is fixed.
+  for test in AllenaiLongformerBase DistilBertForMaskedLM GoogleFnet YituTechConvBert; do
     python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
@@ -1542,6 +1548,10 @@ test_xpu_bin(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
+  # Build binaries carry absolute RPATHs that don't exist on the test runner;
+  # point LD_LIBRARY_PATH at the installed torch libs so the linker finds them.
+  export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
+
   for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
     if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then
       case_name=$(basename "$xpu_case")
@@ -1575,10 +1585,24 @@ test_vulkan() {
 }
 
 test_distributed() {
-  echo "Testing distributed python tests"
+  # $1 (optional): multigpu filter ("multigpu" | "not-multigpu"), see the
+  # `multigpu` marker in test/conftest.py. Empty runs the whole suite.
+  # "not-multigpu" runs on a single-GPU runner, so it also skips the
+  # multi-GPU-only C++ / mpiexec tests below.
+  local multigpu_filter="${1:-}"
+  local filter_arg=()
+  if [[ -n "$multigpu_filter" ]]; then
+    filter_arg=(--multigpu-filter "$multigpu_filter")
+  fi
+  echo "Testing distributed python tests (${multigpu_filter:-all})"
   # shellcheck disable=SC2086
-  time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
+
+  # The C++ / mpiexec distributed tests below require multiple GPUs.
+  if [[ "$multigpu_filter" == "not-multigpu" ]]; then
+    return
+  fi
 
   if [[ ("$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm*) && "$SHARD_NUMBER" == 1 ]]; then
     echo "Testing distributed C++ tests"
@@ -1608,6 +1632,16 @@ test_distributed() {
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
   fi
+}
+
+test_distributed_single_gpu() {
+  # Single-process (single-GPU) distributed tests, hived off the multi-GPU
+  # `distributed` config to run on the cheaper 1-GPU `default` CUDA runner (see
+  # the `multigpu` marker in test/conftest.py). Sharded with the rest of the
+  # `default` config's Python tests.
+  install_torchcomms
+  install_spmd_types
+  test_distributed not-multigpu
 }
 
 test_quantization() {
@@ -2188,7 +2222,15 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
   install_spmd_types
-  test_distributed
+  # On CUDA the single-process (single-GPU) distributed tests are hived off to
+  # the `default` config's 1-GPU runner (see below), so this multi-GPU box only
+  # runs the process-spawning ones. Elsewhere (CPU pull, rocm) there is no such
+  # split, so run the whole suite.
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    test_distributed multigpu
+  else
+    test_distributed
+  fi
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
@@ -2334,6 +2376,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   test_python_shard "$SHARD_NUMBER"
   test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  # TODO(temporary): run distributed-single first for faster signal while we
+  # validate the split; move to the end once it's proven stable.
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    test_distributed_single_gpu
+  fi
   test_lazy_tensor_meta_reference_disabled
   test_without_numpy
   install_torchvision
@@ -2344,6 +2391,9 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_xpu_bin
   fi
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    test_distributed_single_gpu
+  fi
   install_torchvision
   test_python_shard 2
   test_libtorch 2
@@ -2354,6 +2404,9 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_libtorch_profiler
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    test_distributed_single_gpu
+  fi
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then

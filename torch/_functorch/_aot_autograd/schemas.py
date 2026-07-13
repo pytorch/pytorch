@@ -16,7 +16,7 @@ from typing_extensions import ParamSpec
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
@@ -142,6 +142,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
+    mutation_is_shallow_copy_data: bool
     requires_grad: bool
     keep_input_mutations: bool
 
@@ -232,6 +233,16 @@ class MemoryFormatMeta:
 class PlainTensorMeta:
     unwrapped_idx: int
     memory_format: MemoryFormatMeta | None = None
+    size_symbol_placeholders: tuple[bool, ...] = ()
+    stride_symbol_placeholders: tuple[bool, ...] = ()
+
+    @property
+    def arg_count(self) -> int:
+        return (
+            1
+            + sum(self.size_symbol_placeholders)
+            + sum(self.stride_symbol_placeholders)
+        )
 
 
 @dataclass
@@ -288,7 +299,7 @@ class SubclassCreationMeta:
 
     def compute_outer_size_and_stride(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
+        all_args: Sequence[torch.Tensor | IntLikeType | CustomClassBase],
         *,
         curr_start_idx: int,
     ) -> tuple[
@@ -319,18 +330,20 @@ class SubclassCreationMeta:
 
     def creation_fn(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
+        all_args: Sequence[torch.Tensor | IntLikeType | CustomClassBase],
         *,
         is_runtime: bool,
     ) -> torch.Tensor:
-        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
+        inner_tensors: dict[str, torch.Tensor | CustomClassBase] = {}
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
             if isinstance(creation_meta, OpaqueMeta):
                 opaque = all_args[curr_start_idx]
-                if not isinstance(opaque, OpaqueBase):
-                    raise AssertionError(f"OpaqueBase expected, got {type(opaque)}")
+                if not isinstance(opaque, CustomClassBase):
+                    raise AssertionError(
+                        f"CustomClassBase expected, got {type(opaque)}"
+                    )
                 inner_tensors[attr] = opaque
                 curr_start_idx += 1
                 continue
@@ -338,7 +351,7 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 if not isinstance(subclass, Tensor):
                     raise AssertionError("Tensor expected")
-                curr_start_idx += 1
+                curr_start_idx += creation_meta.arg_count
             else:
                 subclass = creation_meta.creation_fn(
                     all_args,
@@ -1281,7 +1294,7 @@ class AOTState:
     fake_mode: FakeTensorMode
 
 
-FxValue = Tensor | int | SymInt | BackwardState | OpaqueBase
+FxValue = Tensor | int | SymInt | BackwardState | CustomClassBase
 
 
 class CompilerWrapper:

@@ -22,7 +22,11 @@ from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
-from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch._inductor.cudagraph_trees import (
+    AliasesPriorGraphOutput,
+    cudagraphify_impl as tree_cudagraphify_impl,
+    ExecutionState,
+)
 from torch._inductor.cudagraph_utils import PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -67,15 +71,15 @@ requires_multigpu = functools.partial(
 )
 from io import StringIO
 
-from torch._library.opaque_object import OpaqueBase, register_opaque_type
+from torch._library.opaque_object import CustomClassBase, register_custom_class
 
 
-class _CudagraphTestScaleFactor(OpaqueBase):
+class _CudagraphTestScaleFactor(CustomClassBase):
     def __init__(self, factor):
         self.factor = factor
 
 
-register_opaque_type(_CudagraphTestScaleFactor, typ="reference")
+register_custom_class(_CudagraphTestScaleFactor, typ="symbolic")
 
 
 def get_compile_fn(backend):
@@ -227,6 +231,33 @@ if HAS_CUDA_AND_TRITON:
         def run_twc(fn, *args, **kwargs):
             fn(*args, **kwargs)
             return fn(*args, **kwargs)
+
+        @staticmethod
+        def run_next_generation(fn, *args, **kwargs):
+            torch.compiler.cudagraph_mark_step_begin()
+            return fn(*args, **kwargs)
+
+        def replay_next_generation(self, fn, *args, **kwargs):
+            out = self.run_next_generation(fn, *args, **kwargs)
+            self.assertEqual(self.get_manager().path_state, ExecutionState.EXECUTION)
+            return out
+
+        def _iter_tensor_outputs(self, outputs):
+            if isinstance(outputs, torch.Tensor):
+                yield outputs
+                return
+            if isinstance(outputs, (list, tuple)):
+                for out in outputs:
+                    yield from self._iter_tensor_outputs(out)
+                return
+            if outputs is not None:
+                raise AssertionError(f"expected tensor output, got {type(outputs)}")
+
+        def save_live_outputs(self, live_outputs, *outputs):
+            for out in self._iter_tensor_outputs(outputs):
+                live_outputs.append((out, out.detach().clone()))
+            for out, expected in live_outputs:
+                self.assertEqual(out, expected)
 
         def num_checkpoints(self):
             return self.get_manager().debug_checkpointing_counter
@@ -2100,7 +2131,7 @@ if HAS_CUDA_AND_TRITON:
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         def test_workspace_allocation_error(self):
-            torch.cuda._clear_cublas_workspaces()
+            torch._C._cuda_clearCublasWorkspaces()
 
             prev = torch._inductor.cudagraph_trees.clear_cublas_manager
 
@@ -2140,7 +2171,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertTrue(thrown)
 
             finally:
-                torch.cuda._clear_cublas_workspaces()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch._inductor.cudagraph_trees.clear_cublas_manager = prev
                 torch._inductor.cudagraph_trees.get_container(
                     self.device_idx
@@ -2451,16 +2482,499 @@ if HAS_CUDA_AND_TRITON:
             with self.assertRaises(Exception) as exc:
                 out + out
 
-            FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
+            FileCheck().check("overwritten").check("x * x * x").check(
+                "cudagraph_mark_step_begin"
+            ).check("manually clone").check("cudagraph_trees_generation_cloning").check(
+                "clone all user-visible tensors that persist"
+            ).run(repr(exc.exception))
 
             foo(inp)
 
             with self.assertRaises(Exception) as exc:
                 out2 + out2
 
-            FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
+            FileCheck().check("overwritten").check("x * x * x").check(
+                "cudagraph_mark_step_begin"
+            ).check("manually clone").check("cudagraph_trees_generation_cloning").check(
+                "clone all user-visible tensors that persist"
+            ).run(repr(exc.exception))
 
-        def test_grad_accumulation_dealloc_error_message(self):
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        @parametrize(
+            "variant", ("default", "no_graph_partition", "no_keep_output_stride")
+        )
+        def test_clone_live_output_on_new_generation(self, variant):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            patches = {
+                "no_graph_partition": {"graph_partition": False},
+                "no_keep_output_stride": {"keep_output_stride": False},
+            }.get(variant, {})
+            with config.patch(patches):
+                inputs = [
+                    torch.randn(4, device="cuda", dtype=torch.float32) + i
+                    for i in range(4)
+                ]
+                live_outputs = []
+                free_calls = 0
+                orig_free = torch._C._free_And_Remove_DeleterFn
+
+                def spy_free(storage_ptr):
+                    nonlocal free_calls
+                    self.assertTrue(torch._C._has_Standard_Deleter(storage_ptr))
+                    free_calls += 1
+                    return orig_free(storage_ptr)
+
+                with unittest.mock.patch.object(
+                    torch._C, "_free_And_Remove_DeleterFn", spy_free
+                ):
+                    out = self.run_next_generation(foo, inputs[0])
+                    expected = out.detach().clone()
+                    old_data_ptr = out.untyped_storage().data_ptr()
+                    self.save_live_outputs(live_outputs, out)
+
+                    record_out = self.run_next_generation(foo, inputs[1])
+                    record_expected = record_out.detach().clone()
+                    record_old_data_ptr = record_out.untyped_storage().data_ptr()
+                    self.save_live_outputs(live_outputs, record_out)
+                    self.assertEqual(free_calls, 1)
+                    self.assertTrue(torch._C._has_Standard_Deleter(cdata(out)))
+
+                    replay_out = self.replay_next_generation(foo, inputs[2])
+                    node = self.curr_node()
+                    self.assertEqual(free_calls, 2)
+                    self.assertTrue(torch._C._has_Standard_Deleter(cdata(record_out)))
+                    self.assertIs(replay_out, node.cached_tensor_outputs[0])
+                    self.assertTrue(torch._C._is_cached_tensor(replay_out))
+                    replay_old_data_ptr = replay_out.untyped_storage().data_ptr()
+                    self.save_live_outputs(live_outputs, replay_out)
+                    # Exercise a second replay after cloning live outputs.
+                    next_out = self.replay_next_generation(foo, inputs[3])
+                    self.save_live_outputs(live_outputs, next_out)
+                    self.assertEqual(free_calls, 2)
+                    self.assertTrue(torch._C._has_Standard_Deleter(cdata(replay_out)))
+
+            self.assertEqual(out, expected)
+            self.assertEqual(out + out, expected + expected)
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(record_out, record_expected)
+            self.assertNotEqual(
+                record_out.untyped_storage().data_ptr(), record_old_data_ptr
+            )
+            self.assertNotEqual(
+                replay_out.untyped_storage().data_ptr(), replay_old_data_ptr
+            )
+            self.assertEqual(replay_out, inputs[2] * inputs[2] * inputs[2])
+            self.assertEqual(next_out, inputs[3] * inputs[3] * inputs[3])
+            self.assertIsNone(node.cached_tensor_outputs[0])
+            self.assertFalse(torch._C._is_cached_tensor(replay_out))
+            self.assertIsNot(out, replay_out)
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_output_keeps_cache_when_output_dead(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            inputs = [
+                torch.randn(4, device="cuda", dtype=torch.float32) + i for i in range(4)
+            ]
+            out = self.run_next_generation(foo, inputs[0])
+            del out
+
+            self.run_next_generation(foo, inputs[1])
+            replay_out = self.replay_next_generation(foo, inputs[2])
+            node = self.curr_node()
+            self.assertIs(replay_out, node.cached_tensor_outputs[0])
+            self.assertTrue(torch._C._is_cached_tensor(replay_out))
+            cached_id = id(replay_out)
+            cached_data_ptr = replay_out.untyped_storage().data_ptr()
+            del replay_out
+
+            next_out = self.replay_next_generation(foo, inputs[3])
+            self.assertIs(next_out, node.cached_tensor_outputs[0])
+            self.assertEqual(id(next_out), cached_id)
+            self.assertEqual(next_out.untyped_storage().data_ptr(), cached_data_ptr)
+            self.assertTrue(torch._C._is_cached_tensor(next_out))
+            self.assertEqual(next_out, inputs[3] * inputs[3] * inputs[3])
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_aliased_output_storage_on_new_generation(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                y = x * x
+                return y, y[1:]
+
+            inputs = [
+                torch.randn(4, 4, device="cuda", dtype=torch.float32) + i
+                for i in range(4)
+            ]
+            live_outputs = []
+            out, out_view = self.run_next_generation(foo, inputs[0])
+            expected = out.detach().clone()
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out.untyped_storage().data_ptr()
+            view_size = out_view.size()
+            view_stride = out_view.stride()
+            view_storage_offset = out_view.storage_offset()
+            self.assertEqual(cdata(out), cdata(out_view))
+            self.save_live_outputs(live_outputs, out, out_view)
+
+            record_out, record_view = self.run_next_generation(foo, inputs[1])
+            self.save_live_outputs(live_outputs, record_out, record_view)
+            replay_out, replay_view = self.replay_next_generation(foo, inputs[2])
+            self.save_live_outputs(live_outputs, replay_out, replay_view)
+            next_out, next_view = self.replay_next_generation(foo, inputs[3])
+            self.save_live_outputs(live_outputs, next_out, next_view)
+
+            self.assertEqual(out, expected)
+            self.assertEqual(out_view, expected_view)
+            self.assertEqual(cdata(out), cdata(out_view))
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(out_view.size(), view_size)
+            self.assertEqual(out_view.stride(), view_stride)
+            self.assertEqual(out_view.storage_offset(), view_storage_offset)
+            self.assertEqual(replay_out, inputs[2] * inputs[2])
+            self.assertEqual(replay_view, (inputs[2] * inputs[2])[1:])
+            self.assertEqual(next_out, inputs[3] * inputs[3])
+            self.assertEqual(next_view, (inputs[3] * inputs[3])[1:])
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_clone_live_retargets_non_user_visible_output_alias(self):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                y = x * x
+                return y, y[1:]
+
+            inputs = [
+                torch.randn(4, 4, device="cuda", dtype=torch.float32) + i
+                for i in range(4)
+            ]
+            live_outputs = []
+            foo_cg = self.cudagraphify_impl(
+                foo,
+                [inputs[0]],
+                (),
+                stack_traces=[None, None],
+                user_visible_output_idxs=(0,),
+            )
+            out, out_view = self.run_next_generation(foo_cg, [inputs[0]])
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out_view.untyped_storage().data_ptr()
+            self.save_live_outputs(live_outputs, out, out_view)
+
+            replay_out, replay_view = self.replay_next_generation(foo_cg, [inputs[1]])
+            replay_expected_view = replay_view.detach().clone()
+            replay_old_data_ptr = replay_view.untyped_storage().data_ptr()
+            self.save_live_outputs(live_outputs, replay_out, replay_view)
+            next_out, next_view = self.replay_next_generation(foo_cg, [inputs[2]])
+            self.save_live_outputs(live_outputs, next_out, next_view)
+            steady_out, steady_view = self.replay_next_generation(foo_cg, [inputs[3]])
+            self.save_live_outputs(live_outputs, steady_out, steady_view)
+
+            self.assertEqual(cdata(out), cdata(out_view))
+            self.assertEqual(out_view, expected_view)
+            self.assertNotEqual(out_view.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(cdata(replay_out), cdata(replay_view))
+            self.assertEqual(replay_view, replay_expected_view)
+            self.assertNotEqual(
+                replay_view.untyped_storage().data_ptr(), replay_old_data_ptr
+            )
+            self.assertEqual(cdata(next_out), cdata(next_view))
+            self.assertEqual(cdata(steady_out), cdata(steady_view))
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_clone_live_prior_graph_output_alias(self):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return (x * x,)
+
+            def foo2(args):
+                x = args[0]
+                args.clear()
+                return (x[1:],)
+
+            inputs = [
+                torch.randn(4, 4, device="cuda", dtype=torch.float32) + i
+                for i in range(4)
+            ]
+            live_outputs = []
+            foo_cg = self.cudagraphify_impl(foo, [inputs[0]], (), stack_traces=[None])
+            foo2_cg = self.cudagraphify_impl(
+                foo2,
+                [inputs[0]],
+                (),
+                stack_traces=[None],
+                user_visible_output_idxs=(0,),
+            )
+
+            def run_pair(x):
+                torch.compiler.cudagraph_mark_step_begin()
+                base = foo_cg([x])[0]
+                view = foo2_cg([base])[0]
+                return base, view
+
+            out, out_view = run_pair(inputs[0])
+            self.assertIsInstance(
+                self.curr_node().output_storage_alias[0], AliasesPriorGraphOutput
+            )
+
+            expected = out.detach().clone()
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out.untyped_storage().data_ptr()
+            self.save_live_outputs(live_outputs, out, out_view)
+
+            record_out, record_view = run_pair(inputs[1])
+            self.save_live_outputs(live_outputs, record_out, record_view)
+            replay_out, replay_view = run_pair(inputs[2])
+            self.save_live_outputs(live_outputs, replay_out, replay_view)
+            next_out, next_view = run_pair(inputs[3])
+            self.save_live_outputs(live_outputs, next_out, next_view)
+
+            self.assertEqual(out, expected)
+            self.assertEqual(out_view, expected_view)
+            self.assertEqual(cdata(out), cdata(out_view))
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(replay_view, replay_out[1:])
+            self.assertEqual(next_view, next_out[1:])
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_output_storage_with_only_user_view_live(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x
+
+            inputs = [
+                torch.randn(4, 4, device="cuda", dtype=torch.float32) + i
+                for i in range(4)
+            ]
+            live_outputs = []
+            out = self.run_next_generation(foo, inputs[0])
+            out_view = out[1:]
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out_view.untyped_storage().data_ptr()
+            del out
+            self.save_live_outputs(live_outputs, out_view)
+
+            record_out = self.run_next_generation(foo, inputs[1])
+            self.save_live_outputs(live_outputs, record_out)
+            replay_out = self.replay_next_generation(foo, inputs[2])
+            self.save_live_outputs(live_outputs, replay_out)
+            next_out = self.replay_next_generation(foo, inputs[3])
+            self.save_live_outputs(live_outputs, next_out)
+
+            self.assertEqual(out_view, expected_view)
+            self.assertNotEqual(out_view.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(replay_out, inputs[2] * inputs[2])
+            self.assertEqual(next_out, inputs[3] * inputs[3])
+
+        def test_clone_live_output_used_as_next_generation_input(self):
+            @torch.compile(mode="reduce-overhead")
+            def step(x, bias):
+                return x * 0.99 + bias
+
+            @torch.compile(mode="reduce-overhead")
+            def producer(x):
+                return x * x + 1
+
+            @torch.compile(mode="reduce-overhead")
+            def consumer(x):
+                return x * 2 - 3
+
+            with config.patch(
+                "triton.cudagraph_trees_generation_cloning", "user_visible"
+            ):
+                live_outputs = []
+                inp = torch.randn(4, device="cuda", dtype=torch.float32)
+                biases = [
+                    torch.randn(4, device="cuda", dtype=torch.float32) * 0.01 + i
+                    for i in range(5)
+                ]
+                x = inp
+                expected = inp
+                old_data_ptr = None
+                for i in range(3):
+                    x = self.run_next_generation(step, x, biases[i])
+                    expected = expected * 0.99 + biases[i]
+                    old_data_ptr = x.untyped_storage().data_ptr()
+                    self.save_live_outputs(live_outputs, x)
+
+                out = self.replay_next_generation(step, x, biases[3])
+                expected_out = expected * 0.99 + biases[3]
+                out_data_ptr = out.untyped_storage().data_ptr()
+                self.save_live_outputs(live_outputs, out)
+                next_out = self.replay_next_generation(step, out, biases[4])
+                self.save_live_outputs(live_outputs, next_out)
+
+                self.assertEqual(x, expected)
+                self.assertNotEqual(x.untyped_storage().data_ptr(), old_data_ptr)
+                self.assertEqual(out, expected_out)
+                self.assertNotEqual(out.untyped_storage().data_ptr(), out_data_ptr)
+                self.assertEqual(next_out, expected_out * 0.99 + biases[4])
+
+                producer_inputs = [
+                    torch.randn(8, device="cuda", dtype=torch.float32) + i
+                    for i in range(5)
+                ]
+                for i in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    producer_out = producer(producer_inputs[i])
+                    producer_out_data_ptr = producer_out.untyped_storage().data_ptr()
+                    consumer_out = consumer(producer_out)
+                    self.assertEqual(
+                        producer_out.untyped_storage().data_ptr(),
+                        producer_out_data_ptr,
+                    )
+                    self.save_live_outputs(live_outputs, producer_out, consumer_out)
+
+                torch.compiler.cudagraph_mark_step_begin()
+                producer_out = producer(producer_inputs[3])
+                producer_out_data_ptr = producer_out.untyped_storage().data_ptr()
+                self.save_live_outputs(live_outputs, producer_out)
+
+                torch.compiler.cudagraph_mark_step_begin()
+                consumer_out = consumer(producer_out)
+                self.save_live_outputs(live_outputs, consumer_out)
+                self.assertNotEqual(
+                    producer_out.untyped_storage().data_ptr(), producer_out_data_ptr
+                )
+
+                torch.compiler.cudagraph_mark_step_begin()
+                self.save_live_outputs(live_outputs, producer(producer_inputs[4]))
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        @parametrize("graph_partition", (True, False))
+        def test_clone_live_output_saved_for_backward_on_mark_step(
+            self, graph_partition
+        ):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return torch.sigmoid(x)
+
+            with config.patch("graph_partition", graph_partition):
+                live_outputs = []
+                inp = torch.randn(
+                    4, device="cuda", dtype=torch.float32
+                ).requires_grad_()
+                out = self.run_next_generation(foo, inp)
+                expected = out.detach().clone()
+                expected_grad = expected * (1 - expected)
+                old_data_ptr = out.untyped_storage().data_ptr()
+                self.save_live_outputs(live_outputs, out)
+
+                inp2 = (
+                    torch.randn(4, device="cuda", dtype=torch.float32) + 1
+                ).requires_grad_()
+                out2 = self.run_next_generation(foo, inp2)
+                self.save_live_outputs(live_outputs, out2)
+                inp3 = (
+                    torch.randn(4, device="cuda", dtype=torch.float32) + 2
+                ).requires_grad_()
+                out3 = self.replay_next_generation(foo, inp3)
+                self.save_live_outputs(live_outputs, out3)
+                inp4 = (
+                    torch.randn(4, device="cuda", dtype=torch.float32) + 3
+                ).requires_grad_()
+                out4 = self.replay_next_generation(foo, inp4)
+                self.save_live_outputs(live_outputs, out4)
+
+            self.assertEqual(out, expected)
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+            out.sum().backward()
+            self.assertEqual(inp.grad, expected_grad)
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_output_saved_for_backward_with_only_user_view_live(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return torch.sigmoid(x)
+
+            live_outputs = []
+            inp = torch.randn(4, device="cuda", dtype=torch.float32).requires_grad_()
+            out = self.run_next_generation(foo, inp)
+            out_view = out[1:]
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out_view.untyped_storage().data_ptr()
+            del out
+            self.save_live_outputs(live_outputs, out_view)
+
+            inp2 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 1
+            ).requires_grad_()
+            out2 = self.run_next_generation(foo, inp2)
+            self.save_live_outputs(live_outputs, out2)
+            inp3 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 2
+            ).requires_grad_()
+            out3 = self.replay_next_generation(foo, inp3)
+            self.save_live_outputs(live_outputs, out3)
+            inp4 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 3
+            ).requires_grad_()
+            out4 = self.replay_next_generation(foo, inp4)
+            self.save_live_outputs(live_outputs, out4)
+
+            self.assertEqual(out_view, expected_view)
+            self.assertNotEqual(out_view.untyped_storage().data_ptr(), old_data_ptr)
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_view_output_saved_for_backward_on_mark_step(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return torch.sigmoid(x)[1:]
+
+            live_outputs = []
+            inp = torch.randn(4, device="cuda", dtype=torch.float32).requires_grad_()
+            out = self.run_next_generation(foo, inp)
+            expected = out.detach().clone()
+            old_data_ptr = out.untyped_storage().data_ptr()
+            self.save_live_outputs(live_outputs, out)
+
+            inp2 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 1
+            ).requires_grad_()
+            out2 = self.run_next_generation(foo, inp2)
+            self.save_live_outputs(live_outputs, out2)
+            inp3 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 2
+            ).requires_grad_()
+            out3 = self.replay_next_generation(foo, inp3)
+            self.save_live_outputs(live_outputs, out3)
+            inp4 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 3
+            ).requires_grad_()
+            out4 = self.replay_next_generation(foo, inp4)
+            self.save_live_outputs(live_outputs, out4)
+
+            self.assertEqual(out, expected)
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+
+        @parametrize("generation_cloning", (None, "user_visible"))
+        def test_grad_accumulation_dealloc_error_message(self, generation_cloning):
             model = torch.nn.Linear(10, 1, device="cuda")
             compiled_model = torch.compile(
                 model, fullgraph=True, mode="reduce-overhead"
@@ -2474,10 +2988,15 @@ if HAS_CUDA_AND_TRITON:
                 loss = compiled_model(x).clone().sum().clone()
                 loss.backward()
 
-            run_iter()
-
-            with self.assertRaises(RuntimeError) as exc:
+            with config.patch(
+                {
+                    "triton.cudagraph_trees_generation_cloning": generation_cloning,
+                }
+            ):
                 run_iter()
+
+                with self.assertRaises(RuntimeError) as exc:
+                    run_iter()
 
             FileCheck().check("gradient tensor output of CUDAGraphs").check(
                 "gradient accumulation"
@@ -3442,6 +3961,110 @@ if HAS_CUDA_AND_TRITON:
             # g2 and g3 use cudagraphs (2 graphs recorded)
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_nested_callee_graph_break(self):
+            """Context manager enables cudagraphs across a graph break that
+            occurs inside a nested callee, even though the `with` block lives
+            in the caller's frame and the callee is compiled as a separate
+            frame (it cannot be inlined because it contains a graph break)."""
+
+            def callee(x):
+                y = x + 1  # segment 1 (inside override) -> cudagraphs
+                torch._dynamo.graph_break()
+                return y * 2  # segment 2 (inside override) -> cudagraphs
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=True, bwd=True):
+                    return callee(x)
+
+            compiled = torch.compile(model)
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            self.assertIsNotNone(self.get_manager())
+            # both callee segments use cudagraphs (2 graphs recorded)
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_module_forward_graph_break(self):
+            """Decorator on a module's forward enables cudagraphs for every
+            segment even when the forward contains a graph break (the forward
+            is compiled as a separate frame from its caller)."""
+
+            class MyModule(torch.nn.Module):
+                @torch._dynamo.override_cudagraphs(fwd=True, bwd=True)
+                def forward(self, x):
+                    y = x + 1  # segment 1 -> cudagraphs
+                    torch._dynamo.graph_break()
+                    return y * 2  # segment 2 -> cudagraphs
+
+            mod = MyModule().cuda()
+
+            def model(x):
+                return mod(x)
+
+            compiled = torch.compile(model)
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        def test_cudagraph_annotation_disable_nested_callee_graph_break(self):
+            """Context manager disables cudagraphs across a graph break inside a
+            nested callee compiled as a separate frame, even though the default
+            (reduce-overhead) config would otherwise record cudagraphs."""
+
+            def callee(x):
+                y = x + 1  # segment 1 (inside override) -> no cudagraphs
+                torch._dynamo.graph_break()
+                return y * 2  # segment 2 (inside override) -> no cudagraphs
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=False, bwd=False):
+                    return callee(x)
+
+            inp = torch.randn(4, 4, device="cuda")
+            compiled = torch.compile(model, mode="reduce-overhead")
+            out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            # No callee segment is recorded despite reduce-overhead default.
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_annotation_disable_bwd_nested_callee_graph_break(self):
+            """Asymmetric override (fwd=True, bwd=False) propagates across a
+            graph break in a separately-compiled callee: both forward segments
+            record cudagraphs while the backward is disabled."""
+
+            def callee(x):
+                y = (x * x).sin()  # forward segment 1
+                torch._dynamo.graph_break()
+                return y + 1  # forward segment 2
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=True, bwd=False):
+                    return callee(x)
+
+            compiled = torch.compile(model, mode="reduce-overhead")
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+                out.sum().backward()
+
+            self.assertEqual(out, (inp.detach().pow(2).sin()) + 1)
+            self.assertIsNotNone(self.get_manager())
+            # Two forward segments record; backward is disabled (no bwd graphs),
+            # matching the forward-only count of the enable variant above.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
         def test_cudagraph_min_partition_size_skip_small(self):
             """Partitions with fewer kernels than the threshold are skipped."""
 
@@ -3707,6 +4330,40 @@ if HAS_CUDA_AND_TRITON:
                 eager_out = f(x)
                 compiled_out = compiled_f(x)
                 self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @skipIfRocm
+        def test_graph_partition_max_autotune_skips_linalg_eigh(self):
+            from torch._inductor.utils import is_cudagraph_unsafe_fx_node
+
+            def f(x):
+                affinity = torch.matmul(x, x.transpose(-2, -1))
+                return torch.linalg.eigh(affinity)
+
+            gen = torch.Generator(device="cuda").manual_seed(0)
+            x = torch.randn(2, 6, 4, device="cuda", generator=gen)
+            affinity = torch.matmul(x, x.transpose(-2, -1))
+            gm = make_fx(lambda a: torch.ops.aten._linalg_eigh.default(a))(affinity)
+            eigh_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.aten._linalg_eigh.default
+            )
+            self.assertTrue(is_cudagraph_unsafe_fx_node(eigh_node))
+
+            expected = f(x)
+            compiled_f = torch.compile(f, mode="max-autotune")
+
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                for _ in range(3):
+                    actual = compiled_f(x)
+
+            self.assertEqual(actual[0], expected[0], atol=1e-4, rtol=1e-4)
+            self.assertEqual(actual[1].shape, expected[1].shape)
+            FileCheck().check(
+                "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable"
+            ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_log_message(self):
@@ -4659,11 +5316,11 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_reorder_cpu_and_gpu_interleave(self):
-            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+            def f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu):
                 # partition 1 on cuda, no dependency
                 x_cuda0 = x_cuda + 1
                 x_cuda1 = x_cuda0 @ weight_cuda
-                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+                x_cuda2 = 2 * (x_cuda1 + bias_cuda)
 
                 # partition 2 on cpu w/ dependency on partition 1
                 y_cpu0 = y_cpu + 1
@@ -4673,7 +5330,7 @@ if HAS_CUDA_AND_TRITON:
                 # partition 3 on cuda w/o dependency
                 z_cuda0 = z_cuda + 1
                 z_cuda1 = z_cuda0 @ weight_cuda
-                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+                z_cuda2 = 2 * (z_cuda1 + bias_cuda)
 
                 # partition 4 on cpu w/o dependency
                 y_cpu2 = y_cpu + 5
@@ -4682,22 +5339,25 @@ if HAS_CUDA_AND_TRITON:
                 # partition 5 on cuda w/o dependency
                 u_cuda0 = z_cuda + 3
                 u_cuda1 = u_cuda0 @ weight_cuda
-                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+                u_cuda2 = 2 * (u_cuda1 + bias_cuda)
 
                 return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
 
             x_cuda = torch.randn(3, 3, device="cuda")
             y_cpu = torch.randn(3, 3, device="cpu")
             z_cuda = torch.randn(3, 3, device="cuda")
+            # Keep the CUDA adds pointwise so this test continues to exercise
+            # graph partition reordering instead of addmm fusion.
+            bias_cuda = torch.randn(1, 3, device="cuda")
             weight_cuda = torch.randn(3, 3, device="cuda")
             weight_cpu = torch.randn(3, 3, device="cpu")
 
-            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+            eager_out = f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu)
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
             for _ in range(3):
                 compiled_out = compiled_f(
-                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                    x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu
                 )
                 self.assertEqual(eager_out, compiled_out)
 
