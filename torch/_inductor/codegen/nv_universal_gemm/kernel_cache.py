@@ -64,20 +64,11 @@ def _epilogue_args_signature(epilogue_args: Any) -> tuple:
 
 _cache_lock = threading.Lock()
 
-# Global cache: kernel_name -> kernel object
+# Full kernel manifest: kernel_name -> kernel object. Built lazily (~14s, ~290K
+# operators) only as a LAST-RESORT fallback -- the common paths (choice
+# generation and subprocess precompile) resolve operators via cheap
+# args-filtered queries and cache them in _ops_by_name.
 _kernel_by_name_cache: dict[str, Any] | None = None
-
-# Global index: (A dtype, B dtype) -> {"efc": [...], "non_efc": [...]}. The full
-# cache has ~294K kernels spanning all dtypes; a given GEMM only ever matches
-# kernels of its own operand dtypes, and an addmm (bias) needs an epilogue-fusion
-# (EFC) kernel. This lets partition_compatible_kernels scan only the relevant
-# few thousand kernels instead of calling the expensive supports() on all 294K.
-# Built lazily alongside the name cache.
-_kernel_by_dtype_cache: dict[tuple[str, str], dict[str, list[Any]]] | None = None
-
-
-def _is_efc_kernel(kernel: Any) -> bool:
-    return "EFC" in kernel.metadata.operator_class.__name__
 
 
 def _operand_dtype_str(operand: Any) -> str | None:
@@ -89,10 +80,8 @@ def _operand_dtype_str(operand: Any) -> str | None:
     return None if dtype is None else str(dtype)
 
 
-def _build_kernel_cache() -> tuple[
-    dict[str, Any], dict[tuple[str, str], dict[str, list[Any]]]
-]:
-    """Build the kernel name -> kernel cache and the (A,B) dtype/EFC index."""
+def _build_kernel_cache() -> dict[str, Any]:
+    """Build the full kernel name -> kernel manifest (fallback path only)."""
     import cutlass.operators
 
     log.debug("Building NVGEMM kernel cache (this may take a few seconds)...")
@@ -106,39 +95,20 @@ def _build_kernel_cache() -> tuple[
 
     all_kernels = cutlass.operators.get_operators()
     cache = {k.metadata.operator_name: k for k in all_kernels}
-
-    by_dtype: dict[tuple[str, str], dict[str, list[Any]]] = {}
-    for k in all_kernels:
-        operands = k.metadata.operands
-        key = (
-            _operand_dtype_str(getattr(operands, "A", None)),
-            _operand_dtype_str(getattr(operands, "B", None)),
-        )
-        if key[0] is None or key[1] is None:
-            continue
-        sub = by_dtype.setdefault(key, {"efc": [], "non_efc": []})  # type: ignore[arg-type]
-        sub["efc" if _is_efc_kernel(k) else "non_efc"].append(k)
-
-    log.debug(
-        "NVGEMM kernel cache built: %d kernels, %d dtype buckets",
-        len(cache),
-        len(by_dtype),
-    )
-    return cache, by_dtype
+    log.debug("NVGEMM kernel manifest built: %d kernels", len(cache))
+    return cache
 
 
 def _ensure_caches() -> None:
-    global _kernel_by_name_cache, _kernel_by_dtype_cache
+    global _kernel_by_name_cache
     if _kernel_by_name_cache is None:
         with _cache_lock:
             if _kernel_by_name_cache is None:
-                cache, by_dtype = _build_kernel_cache()
-                _kernel_by_dtype_cache = by_dtype
-                _kernel_by_name_cache = cache
+                _kernel_by_name_cache = _build_kernel_cache()
 
 
 def _get_kernel_cache() -> dict[str, Any]:
-    """Return the kernel cache, initializing lazily if needed.
+    """Return the fallback manifest, building it lazily if needed.
 
     Snapshot to local frame: a concurrent clear_cache() rebinding the global to
     None cannot turn the caller's subsequent read into AttributeError.
@@ -147,27 +117,6 @@ def _get_kernel_cache() -> dict[str, Any]:
     cache = _kernel_by_name_cache
     assert cache is not None  # noqa: S101
     return cache
-
-
-def _kernels_for_args(args: Any, efc_only: bool = False) -> list[Any] | None:
-    """Return the dtype-matched kernel subset for `args`, or None to full-scan.
-
-    Uses the (A dtype, B dtype) index so we don't call supports() on the ~250K
-    kernels that can't possibly match a bf16 GEMM. When `efc_only` is set (the
-    addmm/bias path, which requires an epilogue), returns only EFC kernels.
-    """
-    _ensure_caches()
-    by_dtype = _kernel_by_dtype_cache
-    if by_dtype is None:
-        return None
-    dtype_a = _operand_dtype_str(getattr(args, "A", None))
-    dtype_b = _operand_dtype_str(getattr(args, "B", None))
-    if dtype_a is None or dtype_b is None:
-        return None
-    sub = by_dtype.get((dtype_a, dtype_b))
-    if sub is None:
-        return None
-    return sub["efc"] if efc_only else sub["efc"] + sub["non_efc"]
 
 
 def _operand_sig(operand: Any) -> tuple | None:
@@ -196,12 +145,140 @@ def _partition_sig(args: Any) -> tuple | None:
     return (a, b, o)
 
 
+# Per-process cache of instantiated operators, keyed by operator_name. Populated
+# incrementally by the args-filtered queries below (choice generation and the
+# subprocess precompile fast path). One args query returns the whole set of
+# operators compatible with a shape (hundreds); we index all of them, so any
+# later lookup -- another config of that shape, another shape sharing those
+# templates (common across FLUX shapes), or get_kernel_by_name for a chosen
+# kernel -- resolves in O(1) without rebuilding the ~14s manifest. Operator
+# names embed the arch (e.g. "..._sm100_..."), so the name alone is unambiguous
+# within a process. Reusing an operator across different args is safe for the
+# same reason the manifest always has been: an operator is a config template
+# (its args-specific state lives in the artifact returned by compile(args)), and
+# every (name, args) pairing routed here was validated by supports(args).
+_ops_by_name: dict[str, Any] = {}
+
 # Memoizes partition results. `partition_compatible_kernels` is called once per
 # GEMM node during choice generation, but FLUX has hundreds of nodes sharing a
-# handful of shapes (e.g. 114 nodes are all 4608x3072x3072). Re-scanning the
-# dtype-matched kernel subset per node dominated FLUX compile time (~169s over
-# 618 calls); memoizing collapses that to one scan per unique shape.
+# handful of shapes (e.g. 114 nodes are all 4608x3072x3072); memoizing collapses
+# that to one args query per unique shape.
 _partition_cache: dict[tuple, list[list[Any]]] = {}
+
+
+def _args_query_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
+    """Compatible operators via an args-filtered get_operators query (~0.05s).
+
+    cutlass prunes by supports(args) and the device target internally. Only
+    valid for the dense GEMM path: for that path this returns the identical set
+    as the full-manifest scan (verified), avoiding the ~14s manifest build.
+    """
+    import cutlass.operators
+
+    metadata_filter = (
+        (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
+    )
+    return cutlass.operators.get_operators(
+        args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+    )
+
+
+def _filter_supported(kernels: Any, args: Any, cc: int) -> list[Any]:
+    """Keep the kernels that support `args` on this device.
+
+    Prunes by (A, B) operand dtype first (a cheap string compare) so the
+    expensive supports() runs only on the ~hundreds that could possibly match --
+    the ~290K manifest spans all dtypes, and a GEMM only matches its own.
+    """
+    device_target = _device_target(cc)
+    dtype_a = _operand_dtype_str(getattr(args, "A", None))
+    dtype_b = _operand_dtype_str(getattr(args, "B", None))
+    out = []
+    for kernel in kernels:
+        if kernel.designed_for_min_cc > cc:
+            continue
+        operands = kernel.metadata.operands
+        if (
+            _operand_dtype_str(getattr(operands, "A", None)) != dtype_a
+            or _operand_dtype_str(getattr(operands, "B", None)) != dtype_b
+        ):
+            continue
+        if not device_target.supports_operators_from(kernel.metadata.supported_targets):
+            continue
+        if kernel.supports(args).error is not None:
+            continue
+        out.append(kernel)
+    return out
+
+
+def _manifest_candidates(args: Any, cc: int) -> list[Any]:
+    """Compatible operators via a full-manifest scan (last-resort fallback)."""
+    return _filter_supported(_get_kernel_cache().values(), args, cc)
+
+
+def _blockscaled_provider_classes() -> list[Any]:
+    """The operator classes that produce block-scaled (fp4/fp8) kernels.
+
+    Both the cutlass built-in and the vendored provider matter: for NVFP4 the
+    vendored kernels supply most of the working configs (60 of 96), so missing
+    either under-generates and breaks scaled autotuning.
+    """
+    classes: list[Any] = []
+    try:
+        from cutlass.operators.providers.cutedsl.gemm.sm100_dense_blockscaled_static_persistent import (
+            PersistentDenseBlockScaledGemmOperator,
+        )
+
+        classes.append(PersistentDenseBlockScaledGemmOperator)
+    except ImportError:
+        pass
+    try:
+        from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
+            VendoredDenseBlockScaledGemmKernel,
+        )
+
+        classes.append(VendoredDenseBlockScaledGemmKernel)
+    except ImportError:
+        pass
+    return classes
+
+
+@functools.cache
+def _blockscaled_operators(cc: int) -> tuple:
+    """All block-scaled operators for this arch (~0.3s), cached per process.
+
+    These sub-providers are the only sources of scale-bearing operators, so
+    enumerating them directly gives the complete scaled design space while
+    avoiding the ~14s full-manifest build (dominated by the dense providers the
+    scaled path never uses). Returns () if no provider is available so the caller
+    can fall back to the manifest.
+
+    No concrete target_sm -- matches how the full manifest is built
+    (get_operators() passes none). A concrete arch narrows generation to that
+    arch's variants and drops valid scale-mode configs (36 vs 96 for fp4); the
+    per-kernel arch check is applied later in _filter_supported instead.
+    """
+    ops: list[Any] = []
+    for cls in _blockscaled_provider_classes():
+        ops.extend(cls.generate_operators(lambda md: True, args=None))
+    return tuple(ops)
+
+
+def _scaled_candidates(args: Any, cc: int) -> list[Any]:
+    """Compatible operators for a scaled GEMM via direct block-scaled enumeration.
+
+    get_operators(args=...) derives operand configs from the args and
+    under-generates for scaled (e.g. ~36 of 96 valid fp4 kernels), so we scan the
+    block-scaled sub-provider's full design space instead -- complete, and ~50x
+    cheaper than the manifest. Falls back to the manifest if the provider is
+    unavailable or nothing matches (e.g. a future non-block-scaled scaled dtype).
+    """
+    ops = _blockscaled_operators(cc)
+    if ops:
+        out = _filter_supported(ops, args, cc)
+        if out:
+            return out
+    return _manifest_candidates(args, cc)
 
 
 def partition_compatible_kernels(
@@ -210,45 +287,49 @@ def partition_compatible_kernels(
     classifier: Callable[[Any], int],
     num_buckets: int,
     efc_only: bool = False,
+    candidate_source: str = "args",
 ) -> list[list[Any]]:
-    """Partition compatible kernels into N buckets in a single pass.
+    """Partition the operators compatible with `args` into N buckets.
 
-    `classifier(metadata)` returns a bucket index in [0, num_buckets-1] or
-    -1 to drop the kernel. Scans only the kernels whose operand dtypes match
-    `args` (via the dtype index), avoiding the expensive `supports()` call on
-    the ~294K-entry full cache for every shape. `efc_only` further restricts
-    the scan to epilogue-fusion-capable kernels (the addmm/bias path). Results
-    are memoized per (shape, cc, efc_only) -- the single call site uses a pure
-    metadata-only classifier, so identical shapes reuse the scan.
+    `classifier(metadata)` returns a bucket index in [0, num_buckets-1] or -1 to
+    drop the kernel. `candidate_source` selects how the compatible set is found,
+    all of which avoid the ~14s full manifest except "manifest":
+      - "args"     dense GEMM: cheap args-filtered get_operators query
+      - "scaled"   scaled GEMM: direct block-scaled sub-provider enumeration
+      - "manifest" fallback (e.g. grouped GEMM): full-manifest scan
+    `efc_only` restricts to epilogue-fusion-capable kernels (the addmm/bias
+    path). Results are memoized per (shape, cc, num_buckets, efc_only, source).
     """
     sig = _partition_sig(args)
-    cache_key = (sig, cc, num_buckets, efc_only) if sig is not None else None
+    cache_key = (
+        (sig, cc, num_buckets, efc_only, candidate_source) if sig is not None else None
+    )
     if cache_key is not None:
         cached = _partition_cache.get(cache_key)
         if cached is not None:
             return [list(b) for b in cached]
 
-    candidates = _kernels_for_args(args, efc_only=efc_only)
-    if candidates is None:
-        candidates = list(_get_kernel_cache().values())
-    device_target = _device_target(cc)
+    if candidate_source == "args":
+        candidates = _args_query_candidates(args, cc, efc_only)
+    elif candidate_source == "scaled":
+        candidates = _scaled_candidates(args, cc)
+    else:
+        candidates = _manifest_candidates(args, cc)
+
     buckets: list[list[Any]] = [[] for _ in range(num_buckets)]
     for kernel in candidates:
-        if kernel.designed_for_min_cc > cc:
-            continue
-        if not device_target.supports_operators_from(kernel.metadata.supported_targets):
-            continue
+        # Share every compatible operator so a later get_kernel_by_name (e.g. the
+        # scheduling max_active_clusters lookup for the chosen kernel) hits
+        # without building the manifest.
+        _ops_by_name.setdefault(kernel.metadata.operator_name, kernel)
         bucket = classifier(kernel.metadata)
         if bucket < 0:
             continue
-        status = kernel.supports(args)
-        if status.error is not None:
-            continue
         buckets[bucket].append(kernel)
     log.debug(
-        "Partitioned %s compatible kernels from %d dtype-matched candidates",
-        [len(b) for b in buckets],
+        "Partitioned %d compatible operators into buckets %s",
         len(candidates),
+        [len(b) for b in buckets],
     )
     if cache_key is not None:
         _partition_cache[cache_key] = [list(b) for b in buckets]
@@ -256,8 +337,46 @@ def partition_compatible_kernels(
 
 
 def get_kernel_by_name(kernel_name: str) -> Any:
-    """Get a cutlass.operators kernel by name using the global cache."""
+    """Get a kernel by name.
+
+    Checks the incrementally-populated operator cache first (filled by the
+    args-filtered queries during choice generation / precompile), falling back
+    to the full manifest only if the name was never resolved via args.
+    """
+    kernel = _ops_by_name.get(kernel_name)
+    if kernel is not None:
+        return kernel
     return _get_kernel_cache().get(kernel_name)
+
+
+def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
+    """Fast single-kernel lookup via an args-filtered get_operators query.
+
+    Passing concrete `args` (a cutlass RuntimeArguments) plus the device target
+    prunes the operator space to the ~hundreds compatible with this exact GEMM
+    in ~0.05s, versus ~14s to enumerate/construct the full ~294K-kernel manifest
+    (`get_kernel_by_name`). Used by subprocess precompile workers, which need
+    only the single named kernel and would otherwise each rebuild the whole
+    manifest.
+
+    A miss runs one args query and indexes every operator it returns into
+    _ops_by_name, so the ~50ms cost is paid once per distinct operator (not once
+    per lookup) and is amortized across all configs and shapes a persistent
+    worker handles. Returns None if no operator matches the name (caller then
+    falls back to the full manifest).
+    """
+    import cutlass.operators
+
+    cached = _ops_by_name.get(kernel_name)
+    if cached is not None:
+        return cached
+
+    ops = cutlass.operators.get_operators(args=args, target_sm=f"{cc}a")
+    for op in ops:
+        # setdefault: keep an already-cached (possibly already-compiled) object
+        # rather than replacing it with a fresh instance from this query.
+        _ops_by_name.setdefault(op.metadata.operator_name, op)
+    return _ops_by_name.get(kernel_name)
 
 
 def ensure_cache_initialized() -> None:
@@ -270,12 +389,13 @@ _efc_epilogue_cache: dict[tuple[str, str, tuple], Any] = {}
 
 def clear_cache() -> None:
     """Clear all kernel caches."""
-    global _kernel_by_name_cache, _kernel_by_dtype_cache, _efc_epilogue_cache
+    global _kernel_by_name_cache, _efc_epilogue_cache
     with _cache_lock:
         _kernel_by_name_cache = None
-        _kernel_by_dtype_cache = None
         _efc_epilogue_cache = {}
         _partition_cache.clear()
+        _ops_by_name.clear()
+        _blockscaled_operators.cache_clear()
 
 
 class _NVGEMMCacheWrapper:
@@ -293,11 +413,15 @@ def get_efc_kernel_with_epilogue(
     efc_kernel_name: str,
     epilogue_args: Any,
     epilogue_source: str = "",
+    base_kernel: Any | None = None,
 ) -> Any:
     """Get (or create and cache) an EFC kernel bound to a specific epilogue.
 
     epilogue_source is preferred over inspect.getsource — generated functions
     produce unstable source strings that can't be hashed reliably.
+
+    base_kernel: pre-resolved base EFC kernel (e.g. from the args-filtered fast
+    lookup in a subprocess worker). When None, falls back to the full manifest.
     """
     if not epilogue_source:
         epilogue_source = str(epilogue_args) if epilogue_args is not None else ""
@@ -308,14 +432,16 @@ def get_efc_kernel_with_epilogue(
         _epilogue_args_signature(epilogue_args),
     )
 
-    base_cache = _get_kernel_cache()
-
     with _cache_lock:
         if cache_key in _efc_epilogue_cache:
             log.debug("EFC kernel with epilogue found in cache: %s", efc_kernel_name)
             return _efc_epilogue_cache[cache_key]
 
-        base_kernel = base_cache.get(efc_kernel_name)
+        if base_kernel is None:
+            # Prefer the args-resolved operator cache (populated by choice
+            # generation); only build the full manifest if the name was never
+            # seen via args.
+            base_kernel = get_kernel_by_name(efc_kernel_name)
         if base_kernel is None:
             log.debug("Base EFC kernel not found: %s", efc_kernel_name)
             return None

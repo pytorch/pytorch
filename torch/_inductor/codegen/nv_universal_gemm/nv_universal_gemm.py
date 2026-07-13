@@ -306,6 +306,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             epilogue_args=epilogue_args,
             epilogue_source="nvgemm_addmm_bias_v1",
             fallback_fn=disk_fallback,
+            base_kernel=self.kernel,
         )
 
         if was_compiled:
@@ -754,8 +755,20 @@ def _add_nv_gemm_choices_impl(
 
     # A baked bias-add requires an epilogue-fusion-capable (EFC) kernel, so
     # scan only EFC kernels -- skips supports() on the far larger non-EFC set.
+    # The args-filtered fast query is complete only for dense GEMM; scaled uses
+    # direct block-scaled sub-provider enumeration (get_operators under-generates
+    # operands from scaled args); anything else falls back to the full manifest.
+    candidate_source = {
+        GemmVariant.GEMM: "args",
+        GemmVariant.SCALED_GEMM: "scaled",
+    }.get(variant, "manifest")
     non_efc_kernels, efc_kernels = partition_compatible_kernels(
-        args, cc_int, _classify, num_buckets=2, efc_only=bias_node is not None
+        args,
+        cc_int,
+        _classify,
+        num_buckets=2,
+        efc_only=bias_node is not None,
+        candidate_source=candidate_source,
     )
     if not config.epilogue_fusion or swap_ab:
         efc_kernels = []

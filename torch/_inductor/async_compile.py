@@ -820,6 +820,7 @@ class AsyncCompile:
         swizzle_type_b=None,
         has_bias_epilogue=False,
         swap_ab=False,
+        metadata=None,
     ):
         """Submit NVGEMM kernel precompilation to the subprocess pool.
 
@@ -850,6 +851,7 @@ class AsyncCompile:
             swizzle_type_b,
             has_bias_epilogue,
             swap_ab,
+            metadata,
         )
 
     def metal(self, kernel_name: str, source: str, headers: list[str]) -> None:

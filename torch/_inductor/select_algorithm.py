@@ -5009,6 +5009,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         swizzle_type_b=c.bmreq.swizzle_type_b,
                         has_bias_epilogue=c.bmreq.has_bias_epilogue,
                         swap_ab=c.bmreq.swap_ab,
+                        metadata=c.bmreq.kernel.metadata,
                     )
                     log.debug(
                         "Submitted nvgemm subprocess precompile for choice: %s", c
