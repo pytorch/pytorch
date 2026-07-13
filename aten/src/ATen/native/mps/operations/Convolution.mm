@@ -168,39 +168,15 @@ static Conv3dTile conv3d_mpp_tile(const Conv3dDims& d, int64_t groups) {
     const unsigned c = at::mps::MPSDevice::getInstance()->getCoreCount();
     return c > 0 ? static_cast<int64_t>(c) : 16;
   }();
-  const int BOp = static_cast<int>(std::min<int64_t>(64, std::max<int64_t>(32, d.OG)));
-  Conv3dTile cands[11];
-  int nc = 0;
-  // Degenerate planes add tiles the square candidates lack (a 1-wide plane can't use
-  // an 8-wide tile); the argmin still chooses among them.
-  if (d.WO == 1) {
-    for (const auto& t :
-         {Conv3dTile{BOp, 1, 32, 2}, {BOp, 1, 32, 4}, {BOp, 1, 64, 2}, {BOp, 1, 64, 4}, {BOp, 1, 128, 4}}) {
-      cands[nc++] = t;
-    }
-  } else {
-    for (const auto& t : {Conv3dTile{32, 8, 8, 2},
-                          {32, 16, 8, 4},
-                          {64, 8, 8, 2},
-                          {64, 16, 8, 4},
-                          {128, 8, 8, 4}}) {
-      cands[nc++] = t;
-    }
-    if (d.HO <= 4) {
-      cands[nc++] = {BOp, d.WO >= 32 ? 32 : 16, 4, 4};
-      cands[nc++] = {BOp, 16, 4, 4};
-    } else if (d.WO <= 8) {
-      cands[nc++] = {BOp, 8, 8, 4};
-      cands[nc++] = {BOp, 8, 8, 2};
-    }
-  }
+  // Keep in sync with INSTANTIATE_CONV3D_MPP_TILES in Convolution.metal.
+  const Conv3dTile cands[] = {{32, 8, 8, 2}, {32, 16, 8, 4}, {64, 8, 8, 2}, {64, 16, 8, 4}, {128, 8, 8, 4}};
   auto best = cands[0];
-  auto best_cost = conv3d_tile_cost(best, d, groups, cores);
-  for (int i = 1; i < nc; ++i) {
-    const auto cost = conv3d_tile_cost(cands[i], d, groups, cores);
+  auto best_cost = std::numeric_limits<float>::max();
+  for (const auto& t : cands) {
+    const auto cost = conv3d_tile_cost(t, d, groups, cores);
     if (cost < best_cost) {
       best_cost = cost;
-      best = cands[i];
+      best = t;
     }
   }
   return best;
@@ -224,26 +200,34 @@ static id<MTLComputePipelineState> conv3d_mpp_pso(const Conv3dSpec& s, Conv3dTil
   if (s.SRCW != 16384 || s.SRCH != 16384) {
     return nil;
   }
-  const auto src_channels = s.SRCC < 0 ? std::string("dyn") : std::to_string(s.SRCC);
-  const auto name = fmt::format("conv3d_mpp_{}_b{}_w{}_h{}_s{}_k{}{}{}_s{}{}{}_d{}{}{}_c{}_{}_{}_{}",
-                                s.dtype,
-                                t.BO,
-                                t.BW,
-                                t.BH,
-                                t.NSG,
-                                s.KD,
-                                s.KH,
-                                s.KW,
-                                s.SZ,
-                                s.SY,
-                                s.SX,
-                                s.DZ,
-                                s.DY,
-                                s.DX,
-                                src_channels,
-                                s.has_bias ? "bias" : "nobias",
-                                s.out_ncdhw ? "ncdhw" : "ndhwc",
-                                s.grouped ? "grouped" : "ungrouped");
+  auto build_name = [&](const std::string& src_channels) {
+    return fmt::format("conv3d_mpp_{}_b{}_w{}_h{}_s{}_k{}{}{}_s{}{}{}_d{}{}{}_c{}_{}_{}_{}",
+                       s.dtype,
+                       t.BO,
+                       t.BW,
+                       t.BH,
+                       t.NSG,
+                       s.KD,
+                       s.KH,
+                       s.KW,
+                       s.SZ,
+                       s.SY,
+                       s.SX,
+                       s.DZ,
+                       s.DY,
+                       s.DX,
+                       src_channels,
+                       s.has_bias ? "bias" : "nobias",
+                       s.out_ncdhw ? "ncdhw" : "ndhwc",
+                       s.grouped ? "grouped" : "ungrouped");
+  };
+  if (s.SRCC >= 0) {
+    const auto name = build_name(std::to_string(s.SRCC));
+    if (lib.hasFunction(name)) {
+      return lib.getPipelineStateForFunc(name);
+    }
+  }
+  const auto name = build_name("dyn");
   return lib.hasFunction(name) ? lib.getPipelineStateForFunc(name) : nil;
 }
 
