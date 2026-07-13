@@ -265,7 +265,7 @@ def generate_ttir(
     triton_version = get_triton_attrs_descriptor_version()
 
     import torch._inductor.ir
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import is_fake_tensor
 
     if isinstance(kernel, Autotuner):
         if len(kernel.configs) > 0:
@@ -320,7 +320,7 @@ def generate_ttir(
                 )
 
             ordered_args[name] = TensorDescriptor.from_tensor(base_tensor, block_shape)
-        elif isinstance(a, (FakeTensor, torch._inductor.ir.TensorBox)):
+        elif is_fake_tensor(a) or isinstance(a, torch._inductor.ir.TensorBox):
             with torch._C._DisableTorchDispatch():
                 ordered_args[name] = torch.empty(2, dtype=a.dtype)
         else:
