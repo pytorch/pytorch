@@ -61,6 +61,7 @@ trap cleanup EXIT
 PYTORCH_ONLY_FILES=(
     cute_dsl_elf_fix.py
     cute_dsl_mlir_threading.py
+    grouped_gemm.py
 )
 
 FLEX_GEMM_CREATED_FILES=()

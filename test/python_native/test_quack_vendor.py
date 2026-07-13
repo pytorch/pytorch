@@ -24,6 +24,7 @@ class TestQuackVendor(TestCase):
         import torch._vendor.quack as quack
         from torch._vendor.quack.gemm_act import gemm_act
         from torch._vendor.quack.gemm_config import GemmConfig
+        from torch._vendor.quack.grouped_gemm import grouped_mm_sm120_varlen_m
         from torch._vendor.quack.trace import TraceContext
 
         vendor_root = Path(quack.__file__).resolve().parent
@@ -34,6 +35,7 @@ class TestQuackVendor(TestCase):
                 for obj in (
                     gemm_act,
                     GemmConfig,
+                    grouped_mm_sm120_varlen_m,
                 )
             )
         )

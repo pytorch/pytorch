@@ -232,3 +232,23 @@ def compile_gemm_kernel(
         trace_ptr,
         options="--enable-tvm-ffi",
     )
+
+
+def plan_scheduler_args(plan, tile_count_semaphore, batch_idx_permute=None):
+    """Per-call TileSchedulerOptions for a cached plan."""
+    if plan.scheduler_static is not None:
+        return plan.scheduler_static
+    return make_scheduler_args(
+        plan.max_active_clusters,
+        plan.max_swizzle_size,
+        tile_count_semaphore if plan.scheduler_uses_semaphore else None,
+        batch_idx_permute,
+    )
+
+
+def launch_gemm(plan, A, B, D, C, epi_args, scheduler_args, varlen_args, SFA=None, SFB=None):
+    """Invoke the compiled kernel; SM100/110 signatures take trailing (SFA, SFB)."""
+    if plan.is_sm100_family:
+        plan.compiled_fn(A, B, D, C, epi_args, scheduler_args, varlen_args, SFA, SFB, None)
+    else:
+        plan.compiled_fn(A, B, D, C, epi_args, scheduler_args, varlen_args, None)
