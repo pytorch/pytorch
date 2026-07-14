@@ -3525,7 +3525,7 @@ class TestSDPAGpuOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
             actual = F.scaled_dot_product_attention(query, key, value, actual_mask)
         actual.sum().backward()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         expected_mask = mask.detach().clone().requires_grad_()
         with sdpa_kernel(backends=[SDPBackend.MATH]):
@@ -3855,6 +3855,8 @@ class TestSDPAGpuOnly(NNTestCase):
         # Cast up and compare
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=1e-5, rtol=1e-5)
 
+
+    @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
