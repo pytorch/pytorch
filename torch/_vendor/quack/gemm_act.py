@@ -4,7 +4,7 @@ import math
 from typing import NamedTuple, Tuple, Optional, Callable, Type
 
 from torch import Tensor
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 
 import cutlass
 import cutlass.cute as cute
@@ -86,7 +86,7 @@ def tensor_stride_divisibility(
             divisibility = min(
                 divisibility, power_of_2_divisibility(stride, max_divisibility)
             )
-    if isinstance(tensor, FakeTensor) or tensor.is_meta:
+    if is_fake_tensor(tensor) or tensor.is_meta:
         # AOT inputs have no real pointer; reuse this contract only when the
         # runtime tensor has the allocator-backed base alignment assumed here.
         return divisibility
