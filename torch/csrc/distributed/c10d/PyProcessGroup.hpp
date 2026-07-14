@@ -53,7 +53,7 @@ class PyProcessGroup : public ProcessGroup {
       if (o.is_none()) {                                                \
         return c10::intrusive_ptr<Work>();                              \
       }                                                                 \
-      return c10::make_intrusive<PyWorkHolder>(std::move(o));           \
+      return c10::make_intrusive<PyProcessGroup::PyWorkHolder>(std::move(o)); \
     }                                                                   \
     return cname::name(__VA_ARGS__);                                    \
   } while (false)
