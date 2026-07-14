@@ -516,7 +516,7 @@ class PadMMTest(TestCase):
         {
             "triton.unique_kernel_names": "original_aten",
             "max_autotune_gemm_backends": "TRITON",
-            "shape_padding": True,
+            "force_shape_pad": True,  # Force pad so that the padding is applied regardless of the heuristic checks on devices.
         }
     )
     def test_original_aten_preserved_pad_mm(self):

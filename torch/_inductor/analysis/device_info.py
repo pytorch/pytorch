@@ -319,11 +319,26 @@ def datasheet_tops(
     return tops / device_info.tops_sparsity_factor
 
 
-def datasheet_dram_bw_gbs(device_name: str) -> float | None:
+def datasheet_dram_bw_gbs(device_name: str | None = None) -> float | None:
     """
     Get the theoretical DRAM bandwidth (GB/s) of the named device from the
     datasheet, or None if the device is not present.
+
+    If ``device_name`` is None, the current device is queried.
     """
+    if device_name is None:
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name()
+        elif torch.xpu.is_available():
+            device_name = torch.xpu.get_device_name()
+        else:
+            log.info("No supported device available, skipping datasheet lookup")
+            return None
+
+    if device_name is None:
+        log.info("No device found, returning None")
+        return None
+
     device_info = lookup_device_info(device_name)
     if device_info is None:
         log.info("Device %s not in datasheet, returning None", device_name)

@@ -34,7 +34,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
