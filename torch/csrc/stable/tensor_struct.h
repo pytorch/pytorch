@@ -389,10 +389,10 @@ class Tensor {
   /**
    * @brief Checks whether the tensor has an associated storage.
    *
-   * Returns false for tensors that do not own a contiguous storage (e.g.
-   * sparse tensors). Calling this on an undefined tensor is invalid.
+   * Returns false for undefined tensors and for tensors that do not own a
+   * contiguous storage (e.g. sparse tensors).
    *
-   * @return true if the tensor has a storage, false otherwise.
+   * @return true if the tensor has a contiguous storage, false otherwise.
    *
    * Minimum compatible version: PyTorch 2.14.
    */

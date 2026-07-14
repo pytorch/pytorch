@@ -291,8 +291,8 @@ AOTI_TORCH_EXPORT AOTITorchError torch_generator_get_device(
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
 
-// Returns whether the tensor has an associated storage (false for e.g. sparse
-// tensors). Calling this on an undefined tensor is invalid.
+// Returns whether the tensor has an associated storage. Returns false for
+// undefined tensors and for tensors without storage (e.g. sparse tensors).
 AOTI_TORCH_EXPORT AOTITorchError
 torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage);
 
