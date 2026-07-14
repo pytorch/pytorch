@@ -178,6 +178,10 @@ class TestTraceValidatorRules(TestCase):
         self.assertEqual(len(v), 1)
 
 
+# Class-level skip so setUpClass (which profiles a ResNet50 on GPU) is bypassed
+# while all E2E tests are disabled. Re-enable alongside the per-test skips once
+# kineto's CPU/GPU timestamp clock-skew issue is fixed.
+@unittest.skip("E2E tests disabled pending kineto clock-skew fix; see per-test skips")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 @instantiate_parametrized_tests
