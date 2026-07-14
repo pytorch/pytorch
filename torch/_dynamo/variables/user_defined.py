@@ -4335,16 +4335,21 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             return self._base_vt.call_method(tx, name, args, kwargs)  # type: ignore[missing-attribute]
         return super().call_method(tx, name, args, kwargs)
 
-    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
-        if name in (
-            "args",
-            "__cause__",
-            "__context__",
-            "__suppress_context__",
-            "__traceback__",
-        ):
-            return self._base_vt.getattro_impl(tx, name)  # type: ignore[missing-attribute]
-        return super().getattro_impl(tx, name)
+    # BaseException args/__cause__/__context__/__suppress_context__/__traceback__
+    # are members/getsets; delegate each to the wrapped base exception VT.
+    tp_members = {
+        "args": Member(lambda s, tx: s._base_vt.getattro_impl(tx, "args")),
+        "__cause__": Member(lambda s, tx: s._base_vt.getattro_impl(tx, "__cause__")),
+        "__context__": Member(
+            lambda s, tx: s._base_vt.getattro_impl(tx, "__context__")
+        ),
+        "__suppress_context__": Member(
+            lambda s, tx: s._base_vt.getattro_impl(tx, "__suppress_context__")
+        ),
+        "__traceback__": Member(
+            lambda s, tx: s._base_vt.getattro_impl(tx, "__traceback__")
+        ),
+    }
 
     @property
     def __context__(self) -> "ConstantVariable":
@@ -4716,11 +4721,10 @@ class OrderedDictVariable(UserDefinedDictVariable):
         **kwargs: Any,
     ) -> None:
         if dict_vt is None:
-            from .dicts import ConstDictVariable
+            from .dicts import OrderedItemsDictVariable
 
-            dict_vt = ConstDictVariable(
+            dict_vt = OrderedItemsDictVariable(
                 {},
-                user_cls=collections.OrderedDict,
                 mutation_type=ValueMutationNew(),
             )
         super().__init__(value, dict_vt=dict_vt, **kwargs)
