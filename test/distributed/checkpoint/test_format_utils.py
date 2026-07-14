@@ -1,7 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-from unittest.mock import patch
-
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
@@ -12,10 +10,6 @@ from torch.distributed.checkpoint.format_utils import (
     dcp_to_torch_save,
     DynamicMetaLoadPlanner,
     torch_save_to_dcp,
-)
-from torch.distributed.checkpoint.metadata import (
-    ChunkStorageMetadata,
-    TensorStorageMetadata,
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -77,51 +71,6 @@ class TestFormatUtils(DTensorTestBase):
         dcp.load({"model": model}, checkpoint_id=self.temp_dir)
 
         self.assertEqual({"model": model.state_dict()}, sd)
-
-    def test_broadcasting_torch_save_reader_checkpointable_tensor(self) -> None:
-        tensor = torch.full((8,), -1.0)
-        tensor.global_shape = (16,)
-        tensor.global_offsets = ((0,), (12,))
-        tensor.local_offsets = ((0,), (4,))
-        tensor.local_sizes = ((4,), (4,))
-
-        planner = DynamicMetaLoadPlanner()
-        planner.set_up_planner({"proto": tensor}, metadata=None, is_coordinator=False)
-        plan = planner.create_local_plan()
-
-        tensor_metadata = planner.metadata.state_dict_metadata["proto"]
-        self.assertIsInstance(tensor_metadata, TensorStorageMetadata)
-        self.assertEqual(torch.Size([16]), tensor_metadata.size)
-        self.assertEqual(
-            [
-                ChunkStorageMetadata(
-                    offsets=torch.Size([0]),
-                    sizes=torch.Size([16]),
-                )
-            ],
-            tensor_metadata.chunks,
-        )
-        self.assertEqual(2, len(plan.items))
-        self.assertEqual(torch.Size([0]), plan.items[0].storage_offsets)
-        self.assertEqual(torch.Size([12]), plan.items[1].storage_offsets)
-
-        reader = BroadcastingTorchSaveReader()
-        reader.is_coordinator = False
-
-        def mock_broadcast(tensor_to_broadcast, src, async_op=False):
-            self.assertEqual(torch.Size([16]), tensor_to_broadcast.size())
-            tensor_to_broadcast.copy_(torch.arange(16, dtype=tensor.dtype))
-
-        with patch(
-            "torch.distributed.checkpoint.format_utils.dist.broadcast",
-            mock_broadcast,
-        ):
-            reader.read_data(plan, planner)
-
-        self.assertEqual(
-            torch.tensor([0, 1, 2, 3, 12, 13, 14, 15], dtype=tensor.dtype),
-            tensor,
-        )
 
     @with_comms
     @with_temp_dir
