@@ -473,7 +473,7 @@ if HAS_CUDA_AND_TRITON:
             # Region opts in, enclosing graph off, graph_partition globally off:
             # the region becomes its own cudagraph partition, the add stays inline.
             nested_config = get_invoke_subgraph_compile_options(
-                inductor_config_patches={"triton.cudagraphs": True}
+                fw_inductor_config_patches={"triton.cudagraphs": True}
             )
 
             @torch.compiler.nested_compile_region(options=nested_config)
@@ -509,7 +509,7 @@ if HAS_CUDA_AND_TRITON:
             # Region opts out, enclosing graph on, graph_partition globally off:
             # the region is excluded from the cudagraph, the rest is captured.
             nested_config = get_invoke_subgraph_compile_options(
-                inductor_config_patches={"triton.cudagraphs": False}
+                fw_inductor_config_patches={"triton.cudagraphs": False}
             )
 
             @torch.compiler.nested_compile_region(options=nested_config)
@@ -545,7 +545,7 @@ if HAS_CUDA_AND_TRITON:
             # Region opts in but its body has a non-cudagraphable op (a host
             # round-trip), so cudagraphs are skipped for it; result still correct.
             nested_config = get_invoke_subgraph_compile_options(
-                inductor_config_patches={"triton.cudagraphs": True}
+                fw_inductor_config_patches={"triton.cudagraphs": True}
             )
 
             @torch.compiler.nested_compile_region(options=nested_config)

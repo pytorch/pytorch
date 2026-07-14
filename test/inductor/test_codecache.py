@@ -3586,7 +3586,7 @@ class TestFxGraphCacheHashing(TestCase):
 
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
         gm.meta["nested_region_config"] = get_invoke_subgraph_compile_options(
-            inductor_config_patches=patches
+            fw_inductor_config_patches=patches
         )
         return gm
 
