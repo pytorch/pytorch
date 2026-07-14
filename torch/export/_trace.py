@@ -708,10 +708,25 @@ def _canonicalize_export_graph(
                 else:
                     return _computation_node_key(node, canonical_idx)
 
+            # Unflatten expects nodes from the same nn_module_stack scope to
+            # be contiguous.  Treat module-boundary transitions as barriers
+            # so canonicalization never reorders across them.
+            prev_stack: list[tuple[str, ...] | None] = [None]
+
+            def _safe(node: torch.fx.Node, _prev: list = prev_stack) -> bool:
+                if not _is_safe_to_reorder(node):
+                    _prev[0] = tuple(node.meta.get("nn_module_stack", {}).keys())
+                    return False
+                stack = tuple(node.meta.get("nn_module_stack", {}).keys())
+                if stack != _prev[0]:
+                    _prev[0] = stack
+                    return False
+                return True
+
             renamed = canonicalize_graph(
                 mod.graph,
                 _key,
-                _is_safe_to_reorder,
+                _safe,
                 skip_rename_ops=frozenset({"placeholder"}),
             )
             if mod is gm and renamed:
