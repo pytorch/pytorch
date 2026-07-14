@@ -147,23 +147,24 @@ struct Conv3dTile {
   int BO, BW, BH, NSG;
 };
 
-static float conv3d_tile_cost(Conv3dTile t, const Conv3dDims& d, int64_t groups, int64_t cores) {
+static float conv3d_tile_cost(Conv3dTile t, const Conv3DParams& d, int64_t groups, int64_t cores) {
   constexpr float kFill = 300.0f, kS = 8.0f, kBO = 90.0f, kW = 0.15f, kSt = 0.4f;
-  const auto OGT = (d.OG + t.BO - 1) / t.BO;
-  const auto WT = (d.WO + t.BW - 1) / t.BW, HT = (d.HO + t.BH - 1) / t.BH;
-  const auto n_tg = int64_t(OGT) * groups * WT * HT * d.NB * d.DO; // 64-bit: guards int32 overflow
-  const auto K = d.KD * d.KH * d.KW;
+  const auto& p = d.conv2d;
+  const auto OGT = (p.C_out_per_group + t.BO - 1) / t.BO;
+  const auto WT = (p.outW + t.BW - 1) / t.BW, HT = (p.outH + t.BH - 1) / t.BH;
+  const auto n_tg = int64_t(OGT) * groups * WT * HT * p.N * d.outD; // 64-bit: guards int32 overflow
+  const auto K = d.kD * p.kH * p.kW;
   const auto padded_out = float(n_tg) * t.BO * t.BW * t.BH;
   const auto S = float(t.BW * t.BH) / t.NSG;
-  const auto in_w = int64_t(t.BW - 1) * d.SX + (d.KW - 1) * d.DX + 1;
-  const auto in_h = int64_t(t.BH - 1) * d.SY + (d.KH - 1) * d.DY + 1;
+  const auto in_w = int64_t(t.BW - 1) * p.sW + (p.kW - 1) * p.dW + 1;
+  const auto in_h = int64_t(t.BH - 1) * p.sH + (p.kH - 1) * p.dH + 1;
   const auto stage = float(t.BW * t.BH) / (float(in_w * in_h) + kW * t.BO * K);
   const auto eff = S / (S + kS) * (t.BO / (t.BO + kBO)) * (stage / (stage + kSt));
   const auto util = float(n_tg) / (n_tg + cores * kFill);
   return padded_out / (eff * util);
 }
 
-static Conv3dTile conv3d_mpp_tile(const Conv3dDims& d, int64_t groups) {
+static Conv3dTile conv3d_mpp_tile(const Conv3DParams& d, int64_t groups) {
   static const int64_t cores = []() {
     const unsigned c = at::mps::MPSDevice::getInstance()->getCoreCount();
     return c > 0 ? static_cast<int64_t>(c) : 16;
@@ -236,34 +237,34 @@ static id<MTLComputePipelineState> conv3d_simd_pso(const std::string& dtype, Con
   return lib.getPipelineStateForFunc(fmt::format("{}_{}_{}_{}_{}_{}", pfx, dtype, t.BO, t.BW, t.BH, t.NSG));
 }
 
-// Encode-only launch for either kernel family. OGT depends on the tile, so
-// it is derived here rather than by callers.
+// Encode-only launch for either kernel family.
 static void conv3d_metal_launch(id<MTLComputePipelineState> pso,
                                 bool simd,
                                 const Tensor& act,
                                 const Tensor& wts,
                                 const std::optional<Tensor>& bias,
                                 const Tensor& out,
-                                Conv3dDims dims,
+                                Conv3DParams dims,
                                 Conv3dTile t,
                                 int64_t groups) {
   using namespace mps;
+  const auto& p = dims.conv2d;
   auto stream = getCurrentMPSStream();
   MTLSize tgs, tptg;
   if (simd) {
-    const auto n_tiles = (dims.OG + t.BW - 1) / t.BW;
-    const auto m_tiles = (dims.HO * dims.WO + t.BO - 1) / t.BO;
+    const auto n_tiles = (p.C_out_per_group + t.BW - 1) / t.BW;
+    const auto m_tiles = (p.outH * p.outW + t.BO - 1) / t.BO;
     tgs = MTLSizeMake(static_cast<NSUInteger>(n_tiles * groups),
                       static_cast<NSUInteger>(m_tiles),
-                      static_cast<NSUInteger>(dims.NB) * dims.DO);
+                      static_cast<NSUInteger>(p.N) * dims.outD);
     tptg = MTLSizeMake(static_cast<NSUInteger>(t.BH) * t.NSG * 32, 1, 1);
   } else {
-    dims.OGT = (dims.OG + t.BO - 1) / t.BO;
-    const auto w_tiles = (dims.WO + t.BW - 1) / t.BW;
-    const auto h_tiles = (dims.HO + t.BH - 1) / t.BH;
-    tgs = MTLSizeMake(static_cast<NSUInteger>(dims.OGT * groups),
+    const auto o_tiles = (p.C_out_per_group + t.BO - 1) / t.BO;
+    const auto w_tiles = (p.outW + t.BW - 1) / t.BW;
+    const auto h_tiles = (p.outH + t.BH - 1) / t.BH;
+    tgs = MTLSizeMake(static_cast<NSUInteger>(o_tiles * groups),
                       static_cast<NSUInteger>(w_tiles),
-                      static_cast<NSUInteger>(h_tiles) * dims.NB * dims.DO);
+                      static_cast<NSUInteger>(h_tiles) * p.N * dims.outD);
     tptg = MTLSizeMake(t.NSG * 32, 1, 1);
   }
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -322,46 +323,45 @@ static void conv3d_metal_forward(const Tensor& input_t,
   }
 
   const int64_t CG = C / groups, OG = O / groups;
-  Conv3dDims dims;
-  dims.C = static_cast<int>(C);
-  dims.H = static_cast<int>(H);
-  dims.W = static_cast<int>(W);
-  dims.O = static_cast<int>(O);
-  dims.HO = static_cast<int>(HO);
-  dims.WO = static_cast<int>(WO);
-  dims.NB = static_cast<int>(input_t.size(0));
-  dims.PADX = static_cast<int>(padding[2]);
-  dims.PADY = static_cast<int>(padding[1]);
-  dims.CG = static_cast<int>(CG);
-  dims.OG = static_cast<int>(OG);
-  dims.OGT = 0; // per-tile, set by conv3d_metal_launch
-  dims.D = static_cast<int>(D);
-  dims.DO = static_cast<int>(DO);
-  dims.PADZ = static_cast<int>(padding[0]);
-  dims.KD = static_cast<int>(weight_t.size(2));
-  dims.KH = static_cast<int>(weight_t.size(3));
-  dims.KW = static_cast<int>(weight_t.size(4));
-  dims.SZ = static_cast<int>(stride[0]);
-  dims.SY = static_cast<int>(stride[1]);
-  dims.SX = static_cast<int>(stride[2]);
-  dims.DZ = static_cast<int>(dilation[0]);
-  dims.DY = static_cast<int>(dilation[1]);
-  dims.DX = static_cast<int>(dilation[2]);
-  dims.HAS_BIAS = bias_defined ? 1 : 0;
-  dims.OUT_NCDHW = out_ncdhw ? 1 : 0;
+  Conv3DParams dims;
+  dims.conv2d.N = static_cast<int32_t>(input_t.size(0));
+  dims.conv2d.C_in = static_cast<int32_t>(C);
+  dims.conv2d.C_out = static_cast<int32_t>(O);
+  dims.conv2d.H = static_cast<int32_t>(H);
+  dims.conv2d.W = static_cast<int32_t>(W);
+  dims.conv2d.outH = static_cast<int32_t>(HO);
+  dims.conv2d.outW = static_cast<int32_t>(WO);
+  dims.conv2d.kH = static_cast<int32_t>(weight_t.size(3));
+  dims.conv2d.kW = static_cast<int32_t>(weight_t.size(4));
+  dims.conv2d.sH = static_cast<int32_t>(stride[1]);
+  dims.conv2d.sW = static_cast<int32_t>(stride[2]);
+  dims.conv2d.padH = static_cast<int32_t>(padding[1]);
+  dims.conv2d.padW = static_cast<int32_t>(padding[2]);
+  dims.conv2d.dH = static_cast<int32_t>(dilation[1]);
+  dims.conv2d.dW = static_cast<int32_t>(dilation[2]);
+  dims.conv2d.C_in_per_group = static_cast<int32_t>(CG);
+  dims.conv2d.C_out_per_group = static_cast<int32_t>(OG);
+  dims.conv2d.has_bias = bias_defined;
+  dims.D = static_cast<int32_t>(D);
+  dims.outD = static_cast<int32_t>(DO);
+  dims.kD = static_cast<int32_t>(weight_t.size(2));
+  dims.sD = static_cast<int32_t>(stride[0]);
+  dims.padD = static_cast<int32_t>(padding[0]);
+  dims.dD = static_cast<int32_t>(dilation[0]);
+  dims.out_ncdhw = out_ncdhw;
 
   const auto dtype_str = scalarToMetalTypeString(input_t);
   Conv3dSpec spec;
   spec.dtype = dtype_str;
-  spec.KD = dims.KD;
-  spec.KH = dims.KH;
-  spec.KW = dims.KW;
-  spec.SZ = dims.SZ;
-  spec.SY = dims.SY;
-  spec.SX = dims.SX;
-  spec.DZ = dims.DZ;
-  spec.DY = dims.DY;
-  spec.DX = dims.DX;
+  spec.KD = dims.kD;
+  spec.KH = dims.conv2d.kH;
+  spec.KW = dims.conv2d.kW;
+  spec.SZ = dims.sD;
+  spec.SY = dims.conv2d.sH;
+  spec.SX = dims.conv2d.sW;
+  spec.DZ = dims.dD;
+  spec.DY = dims.conv2d.dH;
+  spec.DX = dims.conv2d.dW;
   spec.SRCC = CG <= 64 ? static_cast<int>(CG) : -1;
   spec.SRCW = static_cast<int>(std::max<int64_t>(W, 16384));
   spec.SRCH = static_cast<int>(std::max<int64_t>(H, 16384));

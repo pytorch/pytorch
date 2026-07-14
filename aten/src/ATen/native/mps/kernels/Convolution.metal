@@ -23,7 +23,7 @@ kernel void nchw_to_nhwc(
   device const T* s = src + (int64_t)tgid.z * C * X;
   device T* d = dst + (int64_t)tgid.z * C * X;
 
-  if (VECR) {
+  if IF_CONSTEXPR (VECR) {
     for (int i = tid; i < TC * (TX / 2); i += NTH) {
       const int x = (i % (TX / 2)) * 2, c = i / (TX / 2);
       const int gc = c0 + c, gx = x0 + x;
@@ -49,7 +49,7 @@ kernel void nchw_to_nhwc(
     }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  if (VECW) {
+  if IF_CONSTEXPR (VECW) {
     for (int i = tid; i < (TC / 2) * TX; i += NTH) {
       const int c = (i % (TC / 2)) * 2, x = i / (TC / 2);
       const int gc = c0 + c, gx = x0 + x;
@@ -82,11 +82,12 @@ kernel void conv3d_simd(
     device T* act [[buffer(0)]],
     device T* wts [[buffer(1)]],
     device T* dst [[buffer(2)]],
-    constant Conv3dDims& gP [[buffer(3)]],
+    constant Conv3DParams& gP [[buffer(3)]],
     device const T* bias [[buffer(4)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint sgid [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
+  constant Conv2DParams& p = gP.conv2d;
   constexpr int TGP = WM * WN * 32;
   constexpr int WT_M = BM / WM, WT_N = BN / WN;
   constexpr int TM = WT_M / 8, TN = WT_N / 8;
@@ -98,18 +99,18 @@ kernel void conv3d_simd(
   threadgroup T Bs[BK * LDB];
 
   const int tid = int(sgid) * 32 + int(lane);
-  const int n_tiles = (gP.OG + BN - 1) / BN;
+  const int n_tiles = (p.C_out_per_group + BN - 1) / BN;
   const int g = int(tgid.x) / n_tiles;
   const int n_block = (int(tgid.x) % n_tiles) * BN;
   const IDX m_block = IDX(tgid.y) * BM;
-  const int dd = int(tgid.z) % gP.DO;
-  const int nb = int(tgid.z) / gP.DO;
-  const int c0 = g * gP.CG;
-  const int o0 = g * gP.OG;
+  const int dd = int(tgid.z) % gP.outD;
+  const int nb = int(tgid.z) / gP.outD;
+  const int c0 = g * p.C_in_per_group;
+  const int o0 = g * p.C_out_per_group;
 
-  const IDX M = IDX(gP.HO) * gP.WO;
-  const int K = gP.KD * gP.KH * gP.KW * gP.CG;
-  const int64_t act_nb = (int64_t)nb * gP.D * gP.H * gP.W * gP.C;
+  const IDX M = IDX(p.outH) * p.outW;
+  const int K = gP.kD * p.kH * p.kW * p.C_in_per_group;
+  const int64_t act_nb = (int64_t)nb * gP.D * p.H * p.W * p.C_in;
 
   simdgroup_matrix<float, 8, 8> Cfrag[TM][TN];
   for (int i = 0; i < TM; ++i) {
@@ -133,26 +134,26 @@ kernel void conv3d_simd(
     int di = 0, dh = 0, dw = 0, cc = 0;
     bool k_ok = k < K;
     if (k_ok) {
-      cc = k % gP.CG;
-      int r = k / gP.CG;
-      const int kw = r % gP.KW;
-      r /= gP.KW;
-      const int kh = r % gP.KH;
-      const int kd = r / gP.KH;
-      di = dd * gP.SZ - gP.PADZ + kd * gP.DZ;
-      dh = kh * gP.DY - gP.PADY;
-      dw = kw * gP.DX - gP.PADX;
+      cc = k % p.C_in_per_group;
+      int r = k / p.C_in_per_group;
+      const int kw = r % p.kW;
+      r /= p.kW;
+      const int kh = r % p.kH;
+      const int kd = r / p.kH;
+      di = dd * gP.sD - gP.padD + kd * gP.dD;
+      dh = kh * p.dH - p.padH;
+      dw = kw * p.dW - p.padW;
       k_ok = di >= 0 && di < gP.D;
     }
     for (int rl = a_r0; rl < BM; rl += TGP / BK) {
       const IDX m = m_block + rl;
       T v = T(0);
       if (k_ok && m < M) {
-        const int hi = int(m / gP.WO) * gP.SY + dh;
-        const int wi = int(m % gP.WO) * gP.SX + dw;
-        if (hi >= 0 && hi < gP.H && wi >= 0 && wi < gP.W) {
+        const int hi = int(m / p.outW) * p.sH + dh;
+        const int wi = int(m % p.outW) * p.sW + dw;
+        if (hi >= 0 && hi < p.H && wi >= 0 && wi < p.W) {
           v =
-              act[act_nb + (((int64_t)di * gP.H + hi) * gP.W + wi) * gP.C + c0 +
+              act[act_nb + (((int64_t)di * p.H + hi) * p.W + wi) * p.C_in + c0 +
                   cc];
         }
       }
@@ -161,8 +162,9 @@ kernel void conv3d_simd(
     for (int rl = b_r0; rl < BK; rl += TGP / BN) {
       const int kb = k0 + rl;
       const int n = n_block + b_n;
-      Bs[rl * LDB + b_n] =
-          (kb < K && n < gP.OG) ? wts[(int64_t)kb * gP.O + o0 + n] : T(0);
+      Bs[rl * LDB + b_n] = (kb < K && n < p.C_out_per_group)
+          ? wts[(int64_t)kb * p.C_out + o0 + n]
+          : T(0);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -196,24 +198,25 @@ kernel void conv3d_simd(
       if (m >= M) {
         continue;
       }
-      const int ho = int(m / gP.WO), wo = int(m % gP.WO);
+      const int ho = int(m / p.outW), wo = int(m % p.outW);
       for (int e = 0; e < 2; ++e) {
         const int n = n_block + warp_n + j * 8 + fn + e;
-        if (n >= gP.OG) {
+        if (n >= p.C_out_per_group) {
           continue;
         }
         float v = Cfrag[i][j].thread_elements()[e];
         const int o = o0 + n;
-        if (gP.HAS_BIAS != 0) {
+        if (p.has_bias) {
           v += (float)bias[o];
         }
         int64_t idx;
-        if (gP.OUT_NCDHW != 0) {
-          idx = ((((int64_t)nb * gP.O + o) * gP.DO + dd) * gP.HO + ho) * gP.WO +
+        if (gP.out_ncdhw) {
+          idx = ((((int64_t)nb * p.C_out + o) * gP.outD + dd) * p.outH + ho) *
+                  p.outW +
               wo;
         } else {
-          idx =
-              ((((int64_t)nb * gP.DO + dd) * gP.HO + ho) * gP.WO + wo) * gP.O +
+          idx = ((((int64_t)nb * gP.outD + dd) * p.outH + ho) * p.outW + wo) *
+                  p.C_out +
               o;
         }
         dst[idx] = (T)v;
@@ -229,7 +232,7 @@ kernel void conv3d_simd(
           device DT*,                                                        \
           device DT*,                                                        \
           device DT*,                                                        \
-          constant Conv3dDims&,                                              \
+          constant Conv3DParams&,                                            \
           device const DT*,                                                  \
           uint3,                                                             \
           uint,                                                              \
@@ -273,26 +276,23 @@ INSTANTIATE_NCHW_TO_NHWC_ALL(bfloat)
 
 using namespace mpp::tensor_ops;
 
+template <int X, int Y, int Z>
+struct StaticInt3 {
+  static constexpr int x = X;
+  static constexpr int y = Y;
+  static constexpr int z = Z;
+};
+
 // One 2D convolution per (batch, output-depth) slice; the KD loop accumulates
 // kernel-depth taps into one cooperative tensor, skipping depth padding.
 template <
     typename T,
-    int BO,
-    int BW,
-    int BH,
+    typename Block,
     int NSG,
-    int KD,
-    int KH,
-    int KW,
-    int SZ,
-    int SY,
-    int SX,
-    int DZ,
-    int DY,
-    int DX,
-    int SRCC,
-    int SRCW,
-    int SRCH,
+    typename Kernel,
+    typename Stride,
+    typename Dilation,
+    typename Source,
     bool RELAXED,
     bool HAS_BIAS,
     bool OUT_NCDHW,
@@ -301,32 +301,39 @@ kernel void conv3d_mpp(
     device T* act [[buffer(0)]],
     device T* wts [[buffer(1)]],
     device T* dst [[buffer(2)]],
-    constant Conv3dDims& gP [[buffer(3)]],
+    constant Conv3DParams& gP [[buffer(3)]],
     device const T* bias [[buffer(4)]],
     uint3 tgid [[threadgroup_position_in_grid]]) {
-  const int h_tiles = (gP.HO + BH - 1) / BH;
+  constant Conv2DParams& p = gP.conv2d;
+  constexpr int BO = Block::x, BW = Block::y, BH = Block::z;
+  constexpr int KW = Kernel::x, KH = Kernel::y, KD = Kernel::z;
+  constexpr int SX = Stride::x, SY = Stride::y, SZ = Stride::z;
+  constexpr int DX = Dilation::x, DY = Dilation::y, DZ = Dilation::z;
+  constexpr int SRCC = Source::x, SRCW = Source::y, SRCH = Source::z;
+  const int h_tiles = (p.outH + BH - 1) / BH;
   int o_off, o_end, c0;
   if constexpr (GROUPED) {
-    const int g = int(tgid.x) / gP.OGT;
-    o_off = (int(tgid.x) % gP.OGT) * BO + g * gP.OG;
-    o_end = g * gP.OG + gP.OG;
-    c0 = g * gP.CG;
+    const int o_tiles = (p.C_out_per_group + BO - 1) / BO;
+    const int g = int(tgid.x) / o_tiles;
+    o_off = (int(tgid.x) % o_tiles) * BO + g * p.C_out_per_group;
+    o_end = g * p.C_out_per_group + p.C_out_per_group;
+    c0 = g * p.C_in_per_group;
   } else {
     o_off = int(tgid.x) * BO;
-    o_end = gP.O;
+    o_end = p.C_out;
     c0 = 0;
   }
   const int wo_off = int(tgid.y) * BW;
   int zi = int(tgid.z);
   const int ho_off = (zi % h_tiles) * BH;
   zi /= h_tiles;
-  const int dd = zi % gP.DO;
-  const int nb = zi / gP.DO;
+  const int dd = zi % gP.outD;
+  const int nb = zi / gP.outD;
 
   // DHWIO weights viewed innermost-first; kernel-depth slice kd starts at
   // row kd * KH of the flattened (KH * KD) height axis.
   tensor<device T, dextents<int32_t, 4>, tensor_inline> tWt(
-      wts, dextents<int32_t, 4>(gP.O, gP.CG, KW, KH * KD));
+      wts, dextents<int32_t, 4>(p.C_out, p.C_in_per_group, KW, KH * KD));
 
   constexpr auto desc = convolution2d_descriptor(
       int4(BO, BW, BH, 1),
@@ -343,20 +350,20 @@ kernel void conv3d_mpp(
   // MPP anchors the window at ceil((K - 1) * dilation / 2) (measured; for
   // even kernels with dilation > 1 this is NOT (K / 2) * dilation).
   op.set_offsets(int2(
-      wo_off * SX - gP.PADX + ((KW - 1) * DX + 1) / 2,
-      ho_off * SY - gP.PADY + ((KH - 1) * DY + 1) / 2));
+      wo_off * SX - p.padW + ((KW - 1) * DX + 1) / 2,
+      ho_off * SY - p.padH + ((KH - 1) * DY + 1) / 2));
 
-  const int64_t plane = (int64_t)gP.H * gP.W * gP.C;
+  const int64_t plane = (int64_t)p.H * p.W * p.C_in;
   device T* actn = act + (int64_t)nb * gP.D * plane;
-  auto act_view = [&](device T* p) {
+  auto act_view = [&](device T* ptr) {
     if constexpr (GROUPED) {
       return tensor<device T, dextents<int32_t, 4>, tensor_inline>(
-          p,
-          dextents<int32_t, 4>(c0 + gP.CG, gP.W, gP.H, 1),
-          array<int32_t, 4>{1, gP.C, gP.C * gP.W, gP.C * gP.W * gP.H});
+          ptr,
+          dextents<int32_t, 4>(c0 + p.C_in_per_group, p.W, p.H, 1),
+          array<int32_t, 4>{1, p.C_in, p.C_in * p.W, p.C_in * p.W * p.H});
     } else {
       return tensor<device T, dextents<int32_t, 4>, tensor_inline>(
-          p, dextents<int32_t, 4>(gP.C, gP.W, gP.H, 1));
+          ptr, dextents<int32_t, 4>(p.C_in, p.W, p.H, 1));
     }
   };
   auto tA0 = act_view(actn);
@@ -372,7 +379,7 @@ kernel void conv3d_mpp(
   }
 
   for (int kd = 0; kd < KD; ++kd) {
-    const int di = dd * SZ - gP.PADZ + kd * DZ;
+    const int di = dd * SZ - gP.padD + kd * DZ;
     if (di < 0 || di >= gP.D) {
       continue;
     }
@@ -388,7 +395,7 @@ kernel void conv3d_mpp(
       const int o = o_off + (int)idx[0];
       const int x = wo_off + (int)idx[1];
       const int y = ho_off + (int)idx[2];
-      if (o >= o_end || x >= gP.WO || y >= gP.HO) {
+      if (o >= o_end || x >= p.outW || y >= p.outH) {
         continue;
       }
       float v = cT[i];
@@ -397,16 +404,21 @@ kernel void conv3d_mpp(
       }
       int64_t di;
       if constexpr (OUT_NCDHW) {
-        di = ((((int64_t)nb * gP.O + o) * gP.DO + dd) * gP.HO + y) * gP.WO + x;
+        di = ((((int64_t)nb * p.C_out + o) * gP.outD + dd) * p.outH + y) *
+                p.outW +
+            x;
       } else {
-        di = ((((int64_t)nb * gP.DO + dd) * gP.HO + y) * gP.WO + x) * gP.O + o;
+        di = ((((int64_t)nb * gP.outD + dd) * p.outH + y) * p.outW + x) *
+                p.C_out +
+            o;
       }
       dst[di] = (T)v;
     }
   } else {
-    device T* dstn = dst + ((int64_t)nb * gP.DO + dd) * gP.HO * gP.WO * gP.O;
+    device T* dstn =
+        dst + ((int64_t)nb * gP.outD + dd) * p.outH * p.outW * p.C_out;
     tensor<device T, dextents<int32_t, 4>, tensor_inline> tD(
-        dstn, dextents<int32_t, 4>(gP.O, gP.WO, gP.HO, 1));
+        dstn, dextents<int32_t, 4>(p.C_out, p.outW, p.outH, 1));
     auto mD = tD.slice(o_off, wo_off, ho_off, 0);
     auto cO = op.template get_destination_cooperative_tensor<
         decltype(mA0),
@@ -417,7 +429,7 @@ kernel void conv3d_mpp(
       if constexpr (HAS_BIAS) {
         // clamp: lanes past O are masked by the bounds-aware store below
         const int o = o_off + (int)cT.get_multidimensional_index(i)[0];
-        v += (float)bias[min(o, gP.O - 1)];
+        v += (float)bias[min(o, p.C_out - 1)];
       }
       cO[i] = (T)v;
     }
@@ -456,22 +468,12 @@ kernel void conv3d_mpp(
                   "_c" #CNAME "_" #BNAME "_" #LNAME "_" #GNAME)]]           \
       kernel void conv3d_mpp<                                               \
           DT,                                                               \
-          BO,                                                               \
-          BW,                                                               \
-          BH,                                                               \
+          StaticInt3<BO, BW, BH>,                                           \
           NSG,                                                              \
-          KD,                                                               \
-          KH,                                                               \
-          KW,                                                               \
-          SZ,                                                               \
-          SY,                                                               \
-          SX,                                                               \
-          DZ,                                                               \
-          DY,                                                               \
-          DX,                                                               \
-          SRCC,                                                             \
-          16384,                                                            \
-          16384,                                                            \
+          StaticInt3<KW, KH, KD>,                                           \
+          StaticInt3<SX, SY, SZ>,                                           \
+          StaticInt3<DX, DY, DZ>,                                           \
+          StaticInt3<SRCC, 16384, 16384>,                                   \
           RELAXED,                                                          \
           HAS_BIAS,                                                         \
           OUT_NCDHW,                                                        \
@@ -479,7 +481,7 @@ kernel void conv3d_mpp(
           device DT*,                                                       \
           device DT*,                                                       \
           device DT*,                                                       \
-          constant Conv3dDims&,                                             \
+          constant Conv3DParams&,                                           \
           device const DT*,                                                 \
           uint3);
 

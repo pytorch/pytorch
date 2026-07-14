@@ -1,20 +1,6 @@
 #pragma once
 #include <c10/metal/common.h>
 
-// Shared between Convolution.metal and operations/Convolution.mm. conv3d_mpp
-// bakes K*/S*/D* into template args; conv3d_simd reads them from here.
-struct Conv3dDims {
-  int C, H, W, O;
-  int HO, WO, NB;
-  int PADX, PADY;
-  int CG, OG, OGT;
-  int D, DO, PADZ;
-  int KD, KH, KW;
-  int SZ, SY, SX;
-  int DZ, DY, DX;
-  int HAS_BIAS, OUT_NCDHW;
-};
-
 struct Conv2DParams {
   int32_t N;
   int32_t C_in;
@@ -34,4 +20,18 @@ struct Conv2DParams {
   int32_t C_in_per_group;
   int32_t C_out_per_group;
   bool has_bias;
+};
+
+// Shared between Convolution.metal and operations/Convolution.mm. conv3d_mpp
+// bakes kernel, stride, and dilation into template args; conv3d_simd reads
+// them from here.
+struct Conv3DParams {
+  Conv2DParams conv2d;
+  int32_t D;
+  int32_t outD;
+  int32_t kD;
+  int32_t sD;
+  int32_t padD;
+  int32_t dD;
+  bool out_ncdhw;
 };

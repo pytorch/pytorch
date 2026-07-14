@@ -42,7 +42,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, largeTensorTest, OpDTypes
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
 import numpy as np
@@ -10255,11 +10255,10 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    @largeTensorTest("16GB", device="mps")
     @serialTest()
     @parametrize("C,O", [(65536, 8), (8, 65536)])  # input-plane / output-plane overflow
     def test_conv3d_int32_overflow(self, C, O):
-        if torch.mps.recommended_max_memory() < 16_000_000_000:
-            raise unittest.SkipTest("Needs at least 16Gb of RAM")
         x = torch.randn(1, C, 1, 182, 181, dtype=torch.float16, device='mps')
         w = torch.randn(O, C, 1, 1, 1, dtype=torch.float16, device='mps') * 0.01
         y = F.conv3d(x, w)
