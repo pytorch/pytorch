@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
 )
 
 
@@ -139,8 +140,7 @@ def _loss_fn(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 def _requires_multi_gpu(func):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        torch.accelerator.device_count() < 4,
-        f"{backend} test requires 4+ GPUs",
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ GPUs"
     )
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
