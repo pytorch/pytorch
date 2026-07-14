@@ -2161,6 +2161,13 @@ class TestForeachMM(TestCase):
         name_fn=lambda label, shapes: label,
     )
     def test_foreach_mm_nvmath(self, label, shapes):
+        from torch._native.ops.foreach_mm.impl import _check_nvmath_cublaslt
+
+        if not _check_nvmath_cublaslt():
+            self.skipTest(
+                "cuBLASLt grouped GEMM unavailable (nvmath present but "
+                "cublasLtGroupedMatrixLayoutCreate missing)"
+            )
         self._check(shapes, torch.bfloat16, "cuda")
 
 
