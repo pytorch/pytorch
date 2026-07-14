@@ -290,23 +290,23 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   return true;
 }
 
-// `fb` must be out of available_buffers, with its bytes still counted in
+// `free_block` must be out of available_buffers, with its bytes still counted in
 // available_size/free_bytes, and its stale buffer (if any) releasable.
-BufferBlock* MPSHeapAllocatorImpl::cut_block(AllocParams& params, BufferBlock* fb) {
+BufferBlock* MPSHeapAllocatorImpl::cut_block(AllocParams& params, BufferBlock* free_block) {
   BufferPool& pool = *params.pool;
-  HeapBlock* heap = fb->heap;
-  const size_t total = fb->size;
+  HeapBlock* heap = free_block->heap;
+  const size_t total = free_block->size;
   TORCH_INTERNAL_ASSERT(total >= params.size());
   // Placement heaps don't track aliasing, so a bookkeeping slip would silently
   // overlap neighbors; this in-bounds check plus page-aligned sizes keep every
   // block's byte range disjoint.
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(fb->offset + total <= heap->size.total);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(free_block->offset + total <= heap->size.total);
   pool.available_size -= total;
   heap->free_bytes -= total;
-  if (fb->buffer != nil) {
-    m_allocated_buffers.erase(fb->cpu_ptr);
-    heap->releaseMTLBuffer(fb->buffer);
-    fb->cpu_ptr = nullptr;
+  if (free_block->buffer != nil) {
+    m_allocated_buffers.erase(free_block->cpu_ptr);
+    heap->releaseMTLBuffer(free_block->buffer);
+    free_block->cpu_ptr = nullptr;
   }
 
   size_t alloc_size = params.size();
@@ -314,14 +314,14 @@ BufferBlock* MPSHeapAllocatorImpl::cut_block(AllocParams& params, BufferBlock* f
   // split off the remainder only if it is worth its own block (CUDA should_split)
   if (remainder >= kMaxSmallAlloc) {
     BufferBlock* rem = new BufferBlock(remainder, 0, nil, heap);
-    rem->offset = fb->offset + alloc_size;
+    rem->offset = free_block->offset + alloc_size;
     rem->in_use = false;
-    rem->prev = fb;
-    rem->next = fb->next;
-    if (fb->next) {
-      fb->next->prev = rem;
+    rem->prev = free_block;
+    rem->next = free_block->next;
+    if (free_block->next) {
+      free_block->next->prev = rem;
     }
-    fb->next = rem;
+    free_block->next = rem;
     pool.available_buffers.insert(rem);
     pool.available_size += remainder;
     heap->free_bytes += remainder;
@@ -329,16 +329,16 @@ BufferBlock* MPSHeapAllocatorImpl::cut_block(AllocParams& params, BufferBlock* f
     alloc_size = total;
   }
 
-  fb->size = alloc_size;
-  fb->buffer = heap->newMTLBufferPlaced(alloc_size, pool.usage, fb->offset);
-  TORCH_INTERNAL_ASSERT(fb->buffer);
-  fb->buf_id = ++BufferBlock::buffer_counter;
-  fb->requested_size = params.requested_size;
-  fb->gc_count = 0;
-  fb->cpu_ptr = [fb->buffer contents];
-  TORCH_INTERNAL_ASSERT(fb->cpu_ptr);
-  m_allocated_buffers[fb->cpu_ptr] = fb;
-  return fb;
+  free_block->size = alloc_size;
+  free_block->buffer = heap->newMTLBufferPlaced(alloc_size, pool.usage, free_block->offset);
+  TORCH_INTERNAL_ASSERT(free_block->buffer);
+  free_block->buf_id = ++BufferBlock::buffer_counter;
+  free_block->requested_size = params.requested_size;
+  free_block->gc_count = 0;
+  free_block->cpu_ptr = [free_block->buffer contents];
+  TORCH_INTERNAL_ASSERT(free_block->cpu_ptr);
+  m_allocated_buffers[free_block->cpu_ptr] = free_block;
+  return free_block;
 }
 
 // Coalesce the free run [first..last] into `first`. Byte totals stay counted in
