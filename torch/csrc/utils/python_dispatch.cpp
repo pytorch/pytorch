@@ -435,6 +435,7 @@ template <typename Func>
 static PyObject* pyobject_dispatch_with_keyset(
     Func* self,
     c10::DispatchKeySet key_set,
+    bool skip_torch_function,
     PyObject* const* args,
     Py_ssize_t nargs,
     PyObject* kwnames,
@@ -469,12 +470,21 @@ static PyObject* pyobject_dispatch_with_keyset(
   // Otherwise, just directly invoke the Python kernel.
   auto* kernel = holder->func(self->interpreter);
   TORCH_INTERNAL_ASSERT(kernel != nullptr);
-  if (C10_UNLIKELY(holder->with_keyset())) {
-    return pyobject_dispatch_call_python_with_keyset(
-        kernel, key_set, args, nargs, nkwargs, kwnames, op_args_start);
+  if (C10_UNLIKELY(skip_torch_function)) {
+    torch::consume_should_skip_torch_function();
   }
-  return pyobject_dispatch_call_python(
-      kernel, args, nargs, kwnames, op_args_start);
+  PyObject* result = nullptr;
+  if (C10_UNLIKELY(holder->with_keyset())) {
+    result = pyobject_dispatch_call_python_with_keyset(
+        kernel, key_set, args, nargs, nkwargs, kwnames, op_args_start);
+  } else {
+    result = pyobject_dispatch_call_python(
+        kernel, args, nargs, kwnames, op_args_start);
+  }
+  if (result == nullptr) {
+    return nullptr;
+  }
+  return result;
 }
 
 static PyObject* pyobject_dispatch_vectorcall(
@@ -492,9 +502,6 @@ static PyObject* pyobject_dispatch_vectorcall(
           pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))) {
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
-  }
-  if (C10_UNLIKELY(skip_torch_function)) {
-    torch::consume_should_skip_torch_function();
   }
   c10::SmallVector<PyObject*, 64> normalized_args;
   std::vector<py::object> owned_args;
@@ -516,7 +523,7 @@ static PyObject* pyobject_dispatch_vectorcall(
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
   return pyobject_dispatch_with_keyset(
-      self, key_set, op_args, nargs, kwnames, 0);
+      self, key_set, skip_torch_function, op_args, nargs, kwnames, 0);
   END_HANDLE_TH_ERRORS
 }
 
@@ -535,9 +542,6 @@ static PyObject* pyobject_redispatch_vectorcall(
           pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
     return PyObject_Vectorcall(
         self->cpp_redispatch_fn, args, static_cast<size_t>(nargs), kwnames);
-  }
-  if (C10_UNLIKELY(skip_torch_function)) {
-    torch::consume_should_skip_torch_function();
   }
   if (nargs == 0) {
     PyErr_SetString(
@@ -559,7 +563,8 @@ static PyObject* pyobject_redispatch_vectorcall(
   if (C10_UNLIKELY(skip_torch_function)) {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
-  return pyobject_dispatch_with_keyset(self, key_set, args, nargs, kwnames, 1);
+  return pyobject_dispatch_with_keyset(
+      self, key_set, skip_torch_function, args, nargs, kwnames, 1);
   END_HANDLE_TH_ERRORS
 }
 
