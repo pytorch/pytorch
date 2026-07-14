@@ -3333,8 +3333,7 @@
 
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, MTIA, XPU: nan_to_num_out
-    MPS: nan_to_num_out_mps
+    CPU, CUDA, MTIA, XPU, MPS: nan_to_num_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: nan_to_num_sparse_out
   tags: pointwise
 
@@ -4531,7 +4530,7 @@
   autogen: _cdist_forward.out
   tags: core
 
-- func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
+- func: _cdist_backward(Tensor grad_output, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
   dispatch:
     CPU, CUDA, MPS, XPU: _cdist_backward
   autogen: _cdist_backward.out
@@ -4544,7 +4543,7 @@
   autogen: _pdist_forward.out
   tags: core
 
-- func: _pdist_backward(Tensor grad, Tensor self, float p, Tensor pdist) -> Tensor
+- func: _pdist_backward(Tensor grad_output, Tensor self, float p, Tensor pdist) -> Tensor
   dispatch:
     CPU, CUDA, XPU: _pdist_backward
   autogen: _pdist_backward.out
@@ -14716,7 +14715,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_polar_out
+    CPU, CUDA, MPS: linalg_polar_out
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg

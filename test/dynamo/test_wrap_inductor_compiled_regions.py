@@ -1164,7 +1164,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
                 # This should now work - the inductor_compiled_code HOP will
                 # use the stored FX graph to propagate fake tensors
-                result = torch.compile(model)(inp)
+                result = torch.compile(model)(inp)  # noqa: UNSPECIFIED_BACKEND
                 # Verify the result has the expected shape
                 self.assertEqual(result.shape, (4, 4))
 
@@ -1413,11 +1413,11 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         try:
             mesh = init_device_mesh("cpu", mesh_shape=(1,), mesh_dim_names=("dp",))
 
-            @torch.compile(dynamic=False, fullgraph=True)
+            @torch.compile(dynamic=False, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def compute_int_stuff(n):
                 return torch.arange(n, dtype=torch.int32)
 
-            @torch.compile(dynamic=False, fullgraph=True)
+            @torch.compile(dynamic=False, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def compute_float(q, cached_ints):
                 ql = q.to_local()
                 out = ql * cached_ints.float().sum()
