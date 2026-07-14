@@ -19,7 +19,11 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
-from torch.distributed.checkpoint.staging import _ReplicationStager
+from torch.distributed.checkpoint.staging import (
+    _ReplicationStager,
+    DefaultStager,
+    StagingOptions,
+)
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
 from torch.testing._internal.common_distributed import (
@@ -230,10 +234,11 @@ class TestStateDictStager(TestCase):
                         "type": TestStruct(tensor1=tensor3.narrow(0, 0, 2)),
                     },
                 }
-                assert (
+                if (
                     state_dict["tensor1"].storage().data_ptr()
-                    == state_dict["tensor2"].storage().data_ptr()
-                )
+                    != state_dict["tensor2"].storage().data_ptr()
+                ):
+                    raise AssertionError("tensor1 and tensor2 should share storage")
 
                 stager = StateDictStager(
                     pin_memory=pin_memory, share_memory=share_memory
@@ -250,9 +255,10 @@ class TestStateDictStager(TestCase):
 
                 # Validate tensor count and bytes
                 expected_storage_cnt = 2
-                assert num_storages == expected_storage_cnt, (
-                    f"Expected {expected_storage_cnt} storages, got {num_storages}"
-                )
+                if num_storages != expected_storage_cnt:
+                    raise AssertionError(
+                        f"Expected {expected_storage_cnt} storages, got {num_storages}"
+                    )
 
                 # Calculate expected bytes
                 # Note: Only unique storages are counted in the byte count
@@ -261,28 +267,46 @@ class TestStateDictStager(TestCase):
                     + tensor3.numel()  # tensor1 and tensor2 share storage
                     * tensor3.element_size()  # tensor3 and its narrow view share storage
                 )
-                assert num_bytes == expected_bytes, (
-                    f"Expected {expected_bytes} bytes, got {num_bytes}"
-                )
+                if num_bytes != expected_bytes:
+                    raise AssertionError(
+                        f"Expected {expected_bytes} bytes, got {num_bytes}"
+                    )
                 # Verify that the CPU state dict is equivalent to the original GPU state dict
                 result, error = compare_state_dicts(state_dict, cpu_state_dict)
-                assert result, f"State dicts are not equivalent: {error}"
+                if not result:
+                    raise AssertionError(f"State dicts are not equivalent: {error}")
 
                 # Additional checks for storage sharing
-                assert cpu_state_dict["tensor1"].device == torch.device("cpu")
-                assert cpu_state_dict["tensor2"].device == torch.device("cpu")
-                assert (
+                if cpu_state_dict["tensor1"].device != torch.device("cpu"):
+                    raise AssertionError(
+                        f"Expected tensor1 on cpu, got {cpu_state_dict['tensor1'].device}"
+                    )
+                if cpu_state_dict["tensor2"].device != torch.device("cpu"):
+                    raise AssertionError(
+                        f"Expected tensor2 on cpu, got {cpu_state_dict['tensor2'].device}"
+                    )
+                if (
                     cpu_state_dict["tensor1"].storage().data_ptr()
-                    == cpu_state_dict["tensor2"].storage().data_ptr()
-                )
+                    != cpu_state_dict["tensor2"].storage().data_ptr()
+                ):
+                    raise AssertionError("cpu tensor1 and tensor2 should share storage")
 
                 recursive = cpu_state_dict["recursive"]
-                assert recursive["tensor3"].device == torch.device("cpu")
-                assert recursive["type"].tensor1.device == torch.device("cpu")
-                assert (
+                if recursive["tensor3"].device != torch.device("cpu"):
+                    raise AssertionError(
+                        f"Expected tensor3 on cpu, got {recursive['tensor3'].device}"
+                    )
+                if recursive["type"].tensor1.device != torch.device("cpu"):
+                    raise AssertionError(
+                        f"Expected type.tensor1 on cpu, got {recursive['type'].tensor1.device}"
+                    )
+                if (
                     recursive["tensor3"].storage().data_ptr()
-                    == recursive["type"].tensor1.storage().data_ptr()
-                )
+                    != recursive["type"].tensor1.storage().data_ptr()
+                ):
+                    raise AssertionError(
+                        "tensor3 and type.tensor1 should share storage"
+                    )
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_caching(self):
@@ -323,9 +347,10 @@ class TestStateDictStager(TestCase):
 
                 # Verify the first result is correct
                 result, error = compare_state_dicts(state_dict, cpu_state_dict1)
-                assert result, (
-                    f"First state dict is not equivalent to original: {error}"
-                )
+                if not result:
+                    raise AssertionError(
+                        f"First state dict is not equivalent to original: {error}"
+                    )
 
                 # Modify the original tensors
                 tensor1.fill_(0)
@@ -339,28 +364,33 @@ class TestStateDictStager(TestCase):
 
                 # Verify that the second CPU state dict is equivalent to the modified original state dict
                 result, error = compare_state_dicts(state_dict, cpu_state_dict2)
-                assert result, (
-                    f"Second state dict is not equivalent to modified original: {error}"
-                )
+                if not result:
+                    raise AssertionError(
+                        f"Second state dict is not equivalent to modified original: {error}"
+                    )
 
                 # Verify that the number of cached storages hasn't changed
-                assert num_storages1 == num_storages2, (
-                    f"Storage count changed: {num_storages1} vs {num_storages2}"
-                )
+                if num_storages1 != num_storages2:
+                    raise AssertionError(
+                        f"Storage count changed: {num_storages1} vs {num_storages2}"
+                    )
 
                 # Verify that the tensors in the second state dict have the same storage pointers as the first
-                assert (
+                if (
                     cpu_state_dict1["tensor1"].storage().data_ptr()
-                    == cpu_state_dict2["tensor1"].storage().data_ptr()
-                ), "Storage pointers should match for tensor1"
-                assert (
+                    != cpu_state_dict2["tensor1"].storage().data_ptr()
+                ):
+                    raise AssertionError("Storage pointers should match for tensor1")
+                if (
                     cpu_state_dict1["tensor2"].storage().data_ptr()
-                    == cpu_state_dict2["tensor2"].storage().data_ptr()
-                ), "Storage pointers should match for tensor2"
-                assert (
+                    != cpu_state_dict2["tensor2"].storage().data_ptr()
+                ):
+                    raise AssertionError("Storage pointers should match for tensor2")
+                if (
                     cpu_state_dict1["recursive"]["tensor3"].storage().data_ptr()
-                    == cpu_state_dict2["recursive"]["tensor3"].storage().data_ptr()
-                ), "Storage pointers should match for tensor3"
+                    != cpu_state_dict2["recursive"]["tensor3"].storage().data_ptr()
+                ):
+                    raise AssertionError("Storage pointers should match for tensor3")
 
                 # Modify the original tensors again with different values
                 tensor1.fill_(42.0)
@@ -369,12 +399,14 @@ class TestStateDictStager(TestCase):
                 cpu_state_dict3 = stager.stage(state_dict)
 
                 # Verify that the third CPU state dict reflects the updated values
-                assert torch.all(cpu_state_dict3["tensor1"] == 42.0), (
-                    "Updated values should be reflected in the cached state dict"
-                )
-                assert torch.all(cpu_state_dict3["tensor2"] == 42.0), (
-                    "Updated values should be reflected in the cached state dict"
-                )
+                if not torch.all(cpu_state_dict3["tensor1"] == 42.0):
+                    raise AssertionError(
+                        "Updated values should be reflected in the cached state dict for tensor1"
+                    )
+                if not torch.all(cpu_state_dict3["tensor2"] == 42.0):
+                    raise AssertionError(
+                        "Updated values should be reflected in the cached state dict for tensor2"
+                    )
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_tensor_attrs(self):
@@ -403,24 +435,24 @@ class TestStateDictStager(TestCase):
         cpu_state_dict = stager.stage(state_dict)
 
         # Verify that tensor attributes are preserved
-        assert hasattr(cpu_state_dict["tensor1"], "a"), (
-            "Tensor attribute 'a' was not preserved"
-        )
-        assert cpu_state_dict["tensor1"].a == 42, (
-            "Tensor attribute 'a' has incorrect value"
-        )
-        assert hasattr(cpu_state_dict["tensor1"], "b"), (
-            "Tensor attribute 'b' was not preserved"
-        )
-        assert cpu_state_dict["tensor1"].b == 43, (
-            "Tensor attribute 'b' has incorrect value"
-        )
-        assert hasattr(cpu_state_dict["recursive"]["tensor3"], "c"), (
-            "Tensor attribute 'c' was not preserved"
-        )
-        assert cpu_state_dict["recursive"]["tensor3"].c == 44, (
-            "Tensor attribute 'c' has incorrect value"
-        )
+        if not hasattr(cpu_state_dict["tensor1"], "a"):
+            raise AssertionError("Tensor attribute 'a' was not preserved")
+        if cpu_state_dict["tensor1"].a != 42:
+            raise AssertionError(
+                f"Tensor attribute 'a' has incorrect value: {cpu_state_dict['tensor1'].a}"
+            )
+        if not hasattr(cpu_state_dict["tensor1"], "b"):
+            raise AssertionError("Tensor attribute 'b' was not preserved")
+        if cpu_state_dict["tensor1"].b != 43:
+            raise AssertionError(
+                f"Tensor attribute 'b' has incorrect value: {cpu_state_dict['tensor1'].b}"
+            )
+        if not hasattr(cpu_state_dict["recursive"]["tensor3"], "c"):
+            raise AssertionError("Tensor attribute 'c' was not preserved")
+        if cpu_state_dict["recursive"]["tensor3"].c != 44:
+            raise AssertionError(
+                f"Tensor attribute 'c' has incorrect value: {cpu_state_dict['recursive']['tensor3'].c}"
+            )
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_different_dtypes(self):
@@ -450,16 +482,18 @@ class TestStateDictStager(TestCase):
         for dtype_name, original_tensor in tensors.items():
             cpu_tensor = cpu_state_dict[dtype_name]
             self.assertEqual(
-                cpu_tensor.device.type, "cpu", f"Tensor {dtype_name} should be on CPU"
+                cpu_tensor.device.type,
+                "cpu",
+                lambda msg: f"{msg}\nTensor {dtype_name} should be on CPU",
             )
             self.assertEqual(
                 cpu_tensor.dtype,
                 original_tensor.dtype,
-                f"Tensor {dtype_name} has incorrect dtype",
+                lambda msg: f"{msg}\nTensor {dtype_name} has incorrect dtype",
             )
             self.assertTrue(
                 torch.allclose(cpu_tensor, original_tensor.cpu()),
-                f"Tensor {dtype_name} has incorrect values",
+                lambda msg: f"{msg}\nTensor {dtype_name} has incorrect values",
             )
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
@@ -504,17 +538,17 @@ class TestStateDictStager(TestCase):
                     self.assertEqual(
                         cpu_tensor.device.type,
                         "cpu",
-                        f"Tensor {tensor_name} should be on CPU",
+                        lambda msg: f"{msg}\nTensor {tensor_name} should be on CPU",
                     )
                     self.assertEqual(
                         cpu_tensor.shape,
                         original_tensor.shape,
-                        f"Tensor {tensor_name} has incorrect shape",
+                        lambda msg: f"{msg}\nTensor {tensor_name} has incorrect shape",
                     )
                     self.assertEqual(
                         cpu_tensor.dtype,
                         original_tensor.dtype,
-                        f"Tensor {tensor_name} has incorrect dtype",
+                        lambda msg: f"{msg}\nTensor {tensor_name} has incorrect dtype",
                     )
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
@@ -545,7 +579,9 @@ class TestStateDictStager(TestCase):
 
         # Verify that all tensors have been correctly copied to CPU
         result, error = compare_state_dicts(state_dict, cpu_state_dict)
-        self.assertTrue(result, f"State dicts are not equivalent: {error}")
+        self.assertTrue(
+            result, lambda msg: f"{msg}\nState dicts are not equivalent: {error}"
+        )
 
         # Verify storage sharing is preserved
         # All these tensors should share the same storage
@@ -769,24 +805,24 @@ class TestStateDictStager(TestCase):
                 self.assertEqual(
                     cpu_tensor1.is_pinned(),
                     pin_memory,
-                    f"Tensor pinned status should be {pin_memory}",
+                    lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
                 )
                 self.assertEqual(
                     cpu_tensor2.is_pinned(),
                     pin_memory,
-                    f"Tensor pinned status should be {pin_memory}",
+                    lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
                 )
 
                 # Verify shared memory status
                 self.assertEqual(
                     cpu_tensor1.is_shared(),
                     share_memory,
-                    f"Tensor shared status should be {share_memory}",
+                    lambda msg: f"{msg}\nTensor shared status should be {share_memory}",
                 )
                 self.assertEqual(
                     cpu_tensor2.is_shared(),
                     share_memory,
-                    f"Tensor shared status should be {share_memory}",
+                    lambda msg: f"{msg}\nTensor shared status should be {share_memory}",
                 )
 
                 # Verify storage sharing is consistent with tensor sharing
@@ -810,6 +846,33 @@ class TestStateDictStager(TestCase):
                         cpu_tensor2.storage().is_shared(),
                         "When share_memory=False, tensor storage should not be shared",
                     )
+
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_async_save_can_reuse_default_stager(self):
+        state_dict = {
+            "weight": torch.randn(4, 4, device=device_type),
+            "step": 42,
+        }
+        stager = DefaultStager(
+            StagingOptions(
+                use_pinned_memory=False,
+                use_shared_memory=False,
+                use_async_staging=False,
+                use_non_blocking_copy=False,
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for step in range(2):
+                metadata = async_save(
+                    state_dict,
+                    checkpoint_id=os.path.join(temp_dir, f"step_{step}"),
+                    async_stager=stager,
+                    no_dist=True,
+                ).result()
+                self.assertIsNotNone(metadata)
+
+        stager.close()
 
 
 class TestDTensorStateDictStager(DTensorTestBase):
@@ -882,7 +945,7 @@ class TestDTensorStateDictStager(DTensorTestBase):
             self.assertLess(
                 growth,
                 max_allowed,
-                f"Memory grew {growth:.0f}MB over {num_saves} saves (baseline={baseline:.0f}MB). "
+                lambda msg: f"{msg}\nMemory grew {growth:.0f}MB over {num_saves} saves (baseline={baseline:.0f}MB). "
                 f"This indicates a memory leak. Max allowed: {max_allowed:.0f}MB",
             )
 
@@ -939,7 +1002,9 @@ class TestReplicationStager(DTensorTestBase):
         def compare_tensors(actual, expected, path=""):
             if isinstance(actual, dict) and isinstance(expected, dict):
                 self.assertEqual(
-                    actual.keys(), expected.keys(), f"Keys mismatch at {path}"
+                    actual.keys(),
+                    expected.keys(),
+                    lambda msg: f"{msg}\nKeys mismatch at {path}",
                 )
                 for key in actual:
                     compare_tensors(
@@ -949,19 +1014,28 @@ class TestReplicationStager(DTensorTestBase):
                 expected, torch.Tensor
             ):
                 self.assertEqual(
-                    actual.device.type, "cpu", f"Tensor at {path} should be on CPU"
+                    actual.device.type,
+                    "cpu",
+                    lambda msg: f"{msg}\nTensor at {path} should be on CPU",
                 )
                 self.assertEqual(
-                    actual.shape, expected.shape, f"Shape mismatch at {path}"
+                    actual.shape,
+                    expected.shape,
+                    lambda msg: f"{msg}\nShape mismatch at {path}",
                 )
                 self.assertEqual(
-                    actual.dtype, expected.dtype, f"Dtype mismatch at {path}"
+                    actual.dtype,
+                    expected.dtype,
+                    lambda msg: f"{msg}\nDtype mismatch at {path}",
                 )
                 self.assertTrue(
-                    torch.equal(actual, expected), f"Values mismatch at {path}"
+                    torch.equal(actual, expected),
+                    lambda msg: f"{msg}\nValues mismatch at {path}",
                 )
             else:
-                self.assertEqual(actual, expected, f"Value mismatch at {path}")
+                self.assertEqual(
+                    actual, expected, lambda msg: f"{msg}\nValue mismatch at {path}"
+                )
 
         compare_tensors(replicated_dict, expected_dict)
 
@@ -1077,7 +1151,7 @@ class TestReplicationStager(DTensorTestBase):
             self.assertEqual(
                 replicated_dict["rank_scalar"].item(),
                 float(partner_rank),
-                f"Rank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
+                lambda msg: f"{msg}\nRank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
             )
 
     def _create_sharded_tensor_state_dict(self, rank: int, world_size: int) -> dict:
@@ -1188,7 +1262,7 @@ class TestReplicationStager(DTensorTestBase):
             self.assertEqual(
                 replicated_dict["rank_scalar"].item(),
                 float(partner_rank),
-                f"Rank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
+                lambda msg: f"{msg}\nRank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
             )
 
     @with_comms
@@ -1336,7 +1410,7 @@ class TestReplicationStager(DTensorTestBase):
 
             self.assertTrue(
                 os.path.exists(expected_path),
-                f"Persisted file should exist at {expected_path}",
+                lambda msg: f"{msg}\nPersisted file should exist at {expected_path}",
             )
 
             # Verify the storage directory was created
@@ -1392,7 +1466,7 @@ class TestReplicationStager(DTensorTestBase):
 
             self.assertTrue(
                 os.path.exists(expected_path),
-                f"Persisted file should exist in custom directory at {expected_path}",
+                lambda msg: f"{msg}\nPersisted file should exist in custom directory at {expected_path}",
             )
 
             # Load and verify the persisted state_dict

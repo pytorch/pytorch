@@ -8,12 +8,12 @@ import unittest
 from unittest.mock import patch
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 from torch._dynamo.testing import rand_strided
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache, run_and_get_kernels
+from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_kernels
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
@@ -84,10 +84,11 @@ class TestKernelBenchmark(TestCase):
             raise e
 
         # make sure we have the bandwidth information in the output
+        # -kc flag benchmarks all autotuning configs,
+        # so we check for at least GB_count occurrences rather than exactly.
         FileCheck().check_count(
             "GB/s",
             GB_count,
-            exactly=1,
         ).run(bench_out)
 
     def verify_remove_inductor_deps(self, compiled_module):
@@ -374,12 +375,12 @@ class TestKernelBenchmark(TestCase):
         out = f(*inputs)
 
         compiled_module = self.get_compiled_module()
-        # torch.mm becomes an extern kernel, so we measure the nbytes
-        # for the pointwise add kernel:
-        # num_gb = x0 + 2 * size_slice_c + size_out
-        # num_gb = (1000 * 1000 + 2 * 1000 * 1000 + 1000 * 1000) * 2/ 1e9
-        #        = 0.008
-        num_gb = "0.008"
+        # torch.mm + x1 becomes an extern addmm kernel, so we measure the nbytes
+        # for the pointwise kernel adding that result to x2:
+        # num_gb = addmm_out + size_slice_c + size_out
+        # num_gb = (1000 * 1000 + 1000 * 1000 + 1000 * 1000) * 2 / 1e9
+        #        = 0.006
+        num_gb = "0.006"
         self.check_bandwidth(compiled_module, num_gb)
 
     def test_mm_slice_add_bandwidth_computation_2(self):
@@ -531,6 +532,20 @@ class TestKernelBenchmark(TestCase):
         f(a, b)
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
+
+    def test_benchmark_compiled_module_device_arg(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/181954."""
+
+        @torch.compile
+        def f(x):
+            return x + 1
+
+        x = torch.randn(1024, device=GPU_TYPE)
+        _, (src,) = run_and_get_code(f, x)
+
+        FileCheck().check(
+            f"print_performance(fn, times=times, repeat=repeat, device='{GPU_TYPE}')"
+        ).run(src)
 
 
 if __name__ == "__main__":

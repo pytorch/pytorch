@@ -21,7 +21,7 @@ The backend can be used with torch.compile():
 """
 
 import functools
-import importlib
+import importlib.util
 import logging
 import os
 import sys
@@ -29,7 +29,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import fx
@@ -47,11 +47,52 @@ def tvm(
     gm: fx.GraphModule,
     example_inputs: list[torch.Tensor],
     *,
-    options: Optional[MappingProxyType[str, Any]] = None,
+    options: MappingProxyType[str, Any] | None = None,
 ) -> Callable[..., Any]:
     if options is None:
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
-    assert options is not None
+    try:
+        import tvm  # type: ignore[import]  # noqa: F401
+    except ImportError as e:
+        raise ImportError(
+            "Please install apache-tvm to use the tvm backend. "
+            "See https://tvm.apache.org/docs/install/index.html for instructions."
+        ) from e
+
+    # relay was removed in TVM 0.20; newer pip wheels only ship the relax
+    # frontend, so dispatch on whichever API the installed TVM provides.
+    if importlib.util.find_spec("tvm.relay") is not None:
+        return _tvm_relay_compile(gm, example_inputs, options)
+    if importlib.util.find_spec("tvm.relax.frontend.torch") is not None:
+        return _tvm_relax_compile(gm, example_inputs, options)
+    raise ImportError(
+        "The installed apache-tvm provides neither the legacy relay frontend nor "
+        "the relax torch frontend, so the tvm backend cannot compile this graph."
+    )
+
+
+def _tvm_relax_compile(
+    gm: fx.GraphModule,
+    example_inputs: list[torch.Tensor],
+    options: MappingProxyType[str, Any],
+) -> Callable[..., Any]:
+    from tvm.relax.frontend.torch import relax_dynamo  # type: ignore[import]
+
+    scheduler = options.get("scheduler", None) or os.environ.get("TVM_SCHEDULER", None)
+    if scheduler in ("auto_scheduler", "meta_schedule"):
+        log.warning(
+            "scheduler=%s has no equivalent in the relax TVM backend; "
+            "falling back to the default relax pipeline.",
+            scheduler,
+        )
+    return relax_dynamo()(gm, example_inputs)
+
+
+def _tvm_relay_compile(
+    gm: fx.GraphModule,
+    example_inputs: list[torch.Tensor],
+    options: MappingProxyType[str, Any],
+) -> Callable[..., Any]:
     import tvm  # type: ignore[import]
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
@@ -79,7 +120,7 @@ def tvm(
     opt_level = options.get("opt_level", 3)
 
     if scheduler == "auto_scheduler":
-        # pyrefly: ignore [import-error, missing-import]
+        # pyrefly: ignore [missing-import]
         from tvm import auto_scheduler
 
         with (
@@ -91,7 +132,7 @@ def tvm(
         ):
             lib = relay.build(mod, target=target, params=params)
     elif scheduler == "meta_schedule":
-        # pyrefly: ignore [import-error, missing-import]
+        # pyrefly: ignore [missing-import]
         from tvm import meta_schedule as ms
 
         with tempfile.TemporaryDirectory() as work_dir:
@@ -103,7 +144,8 @@ def tvm(
                 )
             # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
             # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
-            assert trials > 0
+            if trials <= 0:
+                raise AssertionError(f"trials must be positive, got {trials}")
             database = ms.relay_integration.tune_relay(
                 mod=mod,
                 target=target,
@@ -149,10 +191,12 @@ def tvm(
             return tvm.nd.array(torch_tensor.cpu().numpy())
         return tvm.nd.from_dlpack(torch_tensor)
 
+    # input info is fixed at compile time, so query it once instead of per call
+    shape_info, _ = m.get_input_info()
+    active_inputs = set(shape_info.keys())
+
     def exec_tvm(*i_args: torch.Tensor) -> list[torch.Tensor]:
         args = [a.contiguous() for a in i_args]
-        shape_info, _ = m.get_input_info()
-        active_inputs = {name for name, _ in shape_info.items()}
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
                 if arg.requires_grad:
@@ -174,16 +218,17 @@ def tvm(
     return exec_tvm
 
 
-tvm_meta_schedule = functools.partial(tvm, scheduler="meta_schedule")
-tvm_auto_scheduler = functools.partial(tvm, scheduler="auto_scheduler")
+tvm_meta_schedule = functools.partial(
+    tvm, options=MappingProxyType({"scheduler": "meta_schedule"})
+)
+tvm_auto_scheduler = functools.partial(
+    tvm, options=MappingProxyType({"scheduler": "auto_scheduler"})
+)
 
 
 def has_tvm() -> bool:
-    try:
-        importlib.import_module("tvm")
-        return True
-    except ImportError:
-        return False
+    # avoid the heavy tvm import just to check availability
+    return importlib.util.find_spec("tvm") is not None
 
 
 @functools.cache

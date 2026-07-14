@@ -178,7 +178,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 self.assertIn(
                     param_name,
                     sd_param_names,
-                    f"Parameter name '{param_name}' not found in state_dict.",
+                    lambda msg: f"{msg}\nParameter name '{param_name}' not found in state_dict.",
                 )
 
         _dcp_test(self)
@@ -615,7 +615,10 @@ class ComposabilityTest(MultiProcContinuousTest):
             pipeline_model_parameter_dict, ref_model_parameter_dict
         ):
             for parameter in pipeline_model_parameter_dict:
-                assert parameter in ref_model_parameter_dict
+                if parameter not in ref_model_parameter_dict:
+                    raise AssertionError(
+                        f"Parameter {parameter} not found in ref_model_parameter_dict"
+                    )
 
                 pipeline_parameter = pipeline_model_parameter_dict[parameter]
                 if pipeline_parameter.grad is not None:
@@ -629,7 +632,10 @@ class ComposabilityTest(MultiProcContinuousTest):
                             atol=1e-5,
                         )
                     else:
-                        assert pipeline_parameter.grad is None
+                        if pipeline_parameter.grad is not None:
+                            raise AssertionError(
+                                f"Expected pipeline_parameter.grad to be None for {parameter}"
+                            )
 
         pipeline_model_parameter_dict = {}
 

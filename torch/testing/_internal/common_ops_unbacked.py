@@ -7,13 +7,7 @@ These lists are used by both test_ops_unbacked.py (base tensor tests)
 and test_dtensor_ops.py (DTensor tests with unbacked dimensions).
 """
 
-
-def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, True)
-
-
-def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, False)
+from torch.testing._internal.common_device_type import skip, xfail
 
 
 # Ops that have data-dependent errors with unbacked dimensions.
@@ -24,7 +18,6 @@ ops_dde_xfail = {
     xfail("_upsample_bilinear2d_aa"),
     xfail("addmv"),
     xfail("allclose"),
-    xfail("as_strided_scatter"),
     xfail("baddbmm"),
     xfail("bernoulli"),
     xfail("cauchy"),
@@ -38,9 +31,7 @@ ops_dde_xfail = {
     xfail("cummax"),
     xfail("cummin"),
     xfail("cumulative_trapezoid"),
-    xfail("diagonal_scatter"),
     xfail("diff"),
-    xfail("dist"),
     xfail("dsplit"),
     xfail("equal"),
     xfail("exponential"),
@@ -93,21 +84,16 @@ ops_dde_xfail = {
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
     xfail("linalg.pinv", "singular"),
-    xfail("linalg.qr"),
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),
-    xfail("linalg.svd"),
-    xfail("linalg.svdvals"),
     xfail("linalg.tensorinv"),
     xfail("linalg.tensorsolve"),
     xfail("linalg.vander"),
-    xfail("linalg.vector_norm"),
     xfail("log_normal"),
     xfail("logdet"),
     xfail("logsumexp"),
     xfail("lu_solve"),
-    xfail("lu_unpack"),
     xfail("masked.amax"),
     xfail("masked.amin"),
     xfail("masked.argmax"),
@@ -128,7 +114,6 @@ ops_dde_xfail = {
     xfail("masked.var"),
     xfail("max_pool2d_with_indices_backward"),
     xfail("multinomial"),
-    xfail("nanquantile"),
     xfail("nn.functional.adaptive_avg_pool1d"),
     xfail("nn.functional.adaptive_avg_pool2d"),
     xfail("nn.functional.adaptive_avg_pool3d"),
@@ -144,12 +129,6 @@ ops_dde_xfail = {
     xfail("nn.functional.binary_cross_entropy"),
     xfail("nn.functional.binary_cross_entropy_with_logits"),
     xfail("nn.functional.channel_shuffle"),
-    xfail("nn.functional.conv1d"),
-    xfail("nn.functional.conv2d"),
-    xfail("nn.functional.conv3d"),
-    xfail("nn.functional.conv_transpose1d"),
-    xfail("nn.functional.conv_transpose2d"),
-    xfail("nn.functional.conv_transpose3d"),
     xfail("nn.functional.cosine_similarity"),
     xfail("nn.functional.cross_entropy"),
     xfail("nn.functional.ctc_loss"),
@@ -163,7 +142,6 @@ ops_dde_xfail = {
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("nn.functional.glu"),
     xfail("nn.functional.grid_sample"),
     xfail("nn.functional.group_norm"),
     xfail("nn.functional.huber_loss"),
@@ -174,6 +152,9 @@ ops_dde_xfail = {
     xfail("nn.functional.interpolate", "linear"),
     xfail("nn.functional.interpolate", "trilinear"),
     xfail("nn.functional.l1_loss"),
+    xfail("nn.functional.linear_cross_entropy"),
+    xfail("nn.functional.linear_cross_entropy", "chunked"),
+    xfail("nn.functional.linear_cross_entropy", "chunked_none"),
     xfail("nn.functional.local_response_norm"),
     xfail("nn.functional.max_pool1d"),
     xfail("nn.functional.max_pool2d"),
@@ -189,28 +170,20 @@ ops_dde_xfail = {
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.nll_loss"),
     xfail("nn.functional.pad", "circular"),
-    xfail("nn.functional.pad", "reflect"),
     xfail("nn.functional.pad", "replicate"),
     xfail("nn.functional.pad", "replicate_negative"),
-    xfail("nn.functional.pdist"),
-    xfail("nn.functional.pixel_shuffle"),
     xfail("nn.functional.prelu"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.scaled_dot_product_attention"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.unfold"),
     xfail("nn.functional.upsample_bilinear"),
-    xfail("norm"),
-    xfail("norm", "fro"),
-    xfail("norm", "nuc"),
     xfail("normal"),
     xfail("normal", "in_place"),
     xfail("normal", "number_mean"),
     xfail("ormqr"),
     xfail("pca_lowrank"),
     xfail("pinverse"),
-    xfail("quantile"),
-    xfail("qr"),
     xfail("rand_like"),
     xfail("randint_like"),
     xfail("randn_like"),
@@ -218,18 +191,10 @@ ops_dde_xfail = {
     xfail("resize_"),
     xfail("resize_as_"),
     xfail("roll"),
-    xfail("scatter"),
-    xfail("scatter_add"),
-    xfail("scatter_reduce", "amax"),
-    xfail("scatter_reduce", "amin"),
-    xfail("scatter_reduce", "mean"),
-    xfail("scatter_reduce", "prod"),
-    xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
     xfail("sparse.mm", "reduce"),
     xfail("split"),
     xfail("stft"),
-    xfail("svd"),
     xfail("svd_lowrank"),
     xfail("sum_to_size"),
     xfail("take"),
@@ -244,7 +209,6 @@ ops_dde_xfail = {
     xfail("uniform"),
     xfail("unsafe_chunk"),
     xfail("unsafe_split"),
-    xfail("view_as_complex"),
     xfail("vsplit"),
 }
 
@@ -280,4 +244,6 @@ ops_unbacked_skip = {
     skip("zeros"),
     # Sparse ops that can't be deepcopied
     skip("sparse.sampled_addmm"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/179881
+    skip("norm", "nuc"),
 }

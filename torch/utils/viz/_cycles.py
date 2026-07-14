@@ -316,7 +316,7 @@ def is_cuda_tensor(obj):
     return (
         isinstance(obj, torch.Tensor) and
         obj.device.type == "cuda" and
-        not isinstance(obj, torch._subclasses.FakeTensor)
+        not torch._subclasses.fake_tensor.is_fake_tensor(obj)
     )
 
 def cuda_allocation_context():
@@ -467,7 +467,6 @@ def to_html(nodes):
         if n.context is None:
             continue
         s = _listener_template.format(id=str(i + 1), stack=escape(f'{n.label}:\n{n.context}'))
-        # pyrefly: ignore [bad-argument-type]
         listeners.append(s)
     dot = to_dot(nodes)
     return _template.replace('$DOT', repr(dot)).replace('$LISTENERS', '\n'.join(listeners))

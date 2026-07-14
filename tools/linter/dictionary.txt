@@ -9,6 +9,7 @@ bLoads
 bStore
 bStores
 BU
+canonicalizations
 contiguities
 contiguity
 coo

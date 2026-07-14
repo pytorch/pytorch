@@ -1,6 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import os
+import tempfile
+
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
 import torch
@@ -11,7 +14,7 @@ from torch.distributed.pipelining import (
     PipelineStage,
     ScheduleGPipe,
 )
-from torch.distributed.pipelining._utils import PipeliningShapeError
+from torch.distributed.pipelining._utils import PipeliningMetadataError
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
@@ -22,6 +25,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_MULTIACCELERATOR,
+    TestCase,
 )
 from torch.utils._pytree import tree_map_only
 
@@ -34,6 +38,69 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 backend = dist.get_default_backend_for_device(device_type)
 
 torch.manual_seed(0)
+
+
+class PipelineStageMetadataInferenceTest(TestCase):
+    def test_dynamic_metadata_inference_restores_module_buffers(self):
+        class BufferMutatingModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.register_buffer("counter", torch.zeros(4))
+                self.register_buffer("scale", torch.ones(4))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.counter.add_(1)
+                out = self.linear(x) * self.scale
+                if out.requires_grad:
+                    out.register_hook(self._backward_hook)
+                return out
+
+            def _backward_hook(self, grad):
+                with torch.no_grad():
+                    self.counter.add_(10)
+                return grad
+
+        device = torch.device("cpu")
+        init_pg = not dist.is_initialized()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            if init_pg:
+                dist.init_process_group(
+                    "gloo",
+                    init_method=f"file://{os.path.join(tmpdir, 'pg')}",
+                    rank=0,
+                    world_size=1,
+                )
+            try:
+                mod = BufferMutatingModule().to(device)
+                stage = PipelineStage(
+                    mod,
+                    stage_index=0,
+                    num_stages=1,
+                    device=device,
+                )
+                schedule = ScheduleGPipe(
+                    stage,
+                    n_microbatches=1,
+                    loss_fn=lambda out, target: out.sum() + target.sum() * 0,
+                )
+
+                initial_counter = mod.counter.clone()
+                initial_scale = mod.scale.clone()
+                x = torch.randn(2, 4, device=device, requires_grad=True)
+                target = torch.zeros((), device=device)
+
+                # This exercises the full metadata-inference lifecycle. The
+                # scale buffer is saved by autograd, so restoring buffers before
+                # backward metadata inference would bump its version counter.
+                schedule._initialize_stage((x,), {}, target=target)
+
+                self.assertEqual(mod.counter, initial_counter)
+                self.assertEqual(mod.scale, initial_scale)
+            finally:
+                if init_pg:
+                    dist.destroy_process_group()
 
 
 def get_dtype_change_hook(new_dtype):
@@ -118,7 +185,10 @@ class StageTest(MultiProcContinuousTest):
         submod_keys = stage.submod.state_dict().keys()
         # Confirm keys are consistent with original model
         old_keys = mod.state_dict().keys()
-        assert all(k in old_keys for k in submod_keys)
+        if not all(k in old_keys for k in submod_keys):
+            raise AssertionError(
+                f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
+            )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -169,7 +239,10 @@ class StageTest(MultiProcContinuousTest):
         submod_keys = stage.submod.state_dict().keys()
         # Confirm keys are consistent with original model
         old_keys = mod.state_dict().keys()
-        assert all(k in old_keys for k in submod_keys)
+        if not all(k in old_keys for k in submod_keys):
+            raise AssertionError(
+                f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
+            )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -316,7 +389,7 @@ class StageTest(MultiProcContinuousTest):
             self.assertEqual(
                 len(stage.output_chunks),
                 0,
-                f"Non-last stage (rank {self.rank}) should not store output chunks",
+                lambda msg: f"{msg}\nNon-last stage (rank {self.rank}) should not store output chunks",
             )
 
         # Clear the schedule and stage caches
@@ -362,6 +435,7 @@ class StageNegativeTest(MultiProcContinuousTest):
             self.world_size,
             self.device,
         )
+        stage._runtime_validate = True
 
         # Attach to a schedule
         schedule = ScheduleGPipe(stage, chunks)
@@ -376,20 +450,20 @@ class StageNegativeTest(MultiProcContinuousTest):
         _run_step(x)
 
         if self.rank == 0:
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+            with self.assertRaisesRegex(PipeliningMetadataError, "shape mismatch"):
                 _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
 
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+            with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
                 _run_step(x.to(torch.int32))
 
             # output of stage's mlp layer will be flattened by this hook, the stage should err
             handle = stage_mod.register_forward_hook(get_flatten_hook())
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+            with self.assertRaisesRegex(PipeliningMetadataError, "shape mismatch"):
                 _run_step(x)
             handle.remove()
 
             stage_mod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
+            with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
                 _run_step(x)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])

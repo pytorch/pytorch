@@ -3,115 +3,260 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
+#include <functional>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
 
 namespace c10d::symmetric_memory {
 
-// Manage all the NCCL device communicator business. Singleton.
-class NCCLDevCommManager {
+// Manages NCCL device communicators for symmetric memory operations.
+// This is a singleton class that maintains a registry of device communicators
+// organized by process group name and an optional key (typically the caller
+// function name). This allows different functions within the same process group
+// to use different device communicators, which is useful for concurrent
+// collective operations.
+//
+// The registry uses a two-level map structure:
+// - First level: keyed by process group name
+// - Second level: keyed by an optional key (defaults to caller function name)
+//
+// Device communicators are stored by value in the registry, but methods return
+// references wrapped in std::optional for safe access.
+class TORCH_API NCCLDevCommManager {
  public:
   // Constructor
+  // @param device The CUDA device this manager is associated with
   explicit NCCLDevCommManager(const c10::Device device) : device_(device) {}
 
-  // Get single, global manager.
+  // Per-device singleton: lazily creates one manager per CUDA device so
+  // callers on different devices don't share state.
   static NCCLDevCommManager& get(const c10::Device device) {
-    static NCCLDevCommManager manager(device);
-    TORCH_CHECK_VALUE(
-        manager.device_ == device,
-        "Detected use of NCCLDevCommManager on multiple devices. This is not supported.");
-    return manager;
-  }
-
-  // Get an NCCL device communicator for a group.
-  ncclDevComm& get_devcomm(const std::string& group_name) {
-    auto it = group_to_comms_.find(group_name);
-    if (it == group_to_comms_.end()) {
-      TORCH_CHECK(
-          false,
-          "NCCL device communicator for group ",
-          group_name,
-          " not found. Have you rendezvoused any tensor with this group?");
+    static std::mutex mu;
+    static std::
+        unordered_map<c10::DeviceIndex, std::unique_ptr<NCCLDevCommManager>>
+            managers;
+    std::lock_guard<std::mutex> lock(mu);
+    auto& slot = managers[device.index()];
+    if (!slot) {
+      slot =
+          std::unique_ptr<NCCLDevCommManager>(new NCCLDevCommManager(device));
+      LOG(INFO) << "[NCCLDevCommManager] created manager for device=" << device;
     }
-    return it->second.second;
+    return *slot;
   }
 
-  // Get a host-side communicator for a group.
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  // Get an NCCL device communicator for a group, for the caller function.  By
+  // default, we search for the device communicator using the caller function
+  // name as the key.  If you previously registered a device communicator with a
+  // different key, you should provide that key instead.
+  // Returns std::nullopt if the device communicator is not found.
+  // Example:
+  // void foo(const std::string& group_name) {
+  //   // Try to get first.
+  //   auto devcomm_opt = get_devcomm(group_name);
+  //   if (!devcomm_opt) {
+  //     // Not found, create then register.
+  //     ncclDevComm devcomm = ncclDevCommCreate(...);
+  //     devcomm_opt = register_devcomm(group_name, devcomm);
+  //   }
+  //   ncclDevComm& devcomm_ref = *devcomm_opt;
+  //   // Use devcomm_ref
+  // }
+  std::optional<std::reference_wrapper<ncclDevComm>> get_devcomm(
+      const std::string& group_name,
+      const std::string& key = __builtin_FUNCTION()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // First, look up the group in the registry
+    auto group_it = devcomm_registry_.find(group_name);
+    if (group_it == devcomm_registry_.end()) {
+      return std::nullopt;
+    }
+    // Then, look up the key within that group's map
+    auto key_it = group_it->second.find(key);
+    if (key_it == group_it->second.end()) {
+      return std::nullopt;
+    }
+    // Return a reference wrapper to the device communicator
+    // Using reference_wrapper because std::optional cannot hold references
+    // directly
+    return std::make_optional(std::ref(key_it->second));
+  }
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+
+  // Get a host-side NCCL communicator for a group.
+  // This is the regular host-side communicator, not the device communicator.
+  // @param group_name The process group name
+  // @return The host-side NCCL communicator
+  // @throws TORCH_CHECK if the communicator is not found
   ncclComm_t get_comm(const std::string& group_name) {
-    auto it = group_to_comms_.find(group_name);
-    if (it == group_to_comms_.end()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = group_to_comm_.find(group_name);
+    if (it == group_to_comm_.end()) {
       TORCH_CHECK(
           false,
           "NCCL host communicator for group ",
           group_name,
           " not found. Have you rendezvoused any tensor with this group?");
     }
-    return it->second.first;
+    return it->second;
   }
 
-  // Create device communicator if it doesn't exist. Skip if it already exists.
-  void try_emplace_devcomm(
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  // Register a device communicator for a group. If `key` is not
+  // specified, we use the caller function name as the default `key`, to
+  // distinguish between different collective functions within the same group.
+  // You can provide your own `key` if your function uses two different
+  // device communicators on the same group at the same time, for example,
+  // when concurrent collective operations are used.
+  // Returns a reference to the newly registered device communicator.
+  // @throws TORCH_CHECK if the device communicator is already registered for
+  //         the given group and key combination.
+  // Example:
+  // void foo(const std::string& group_name) {
+  //   // Try to get first.
+  //   auto devcomm_opt = get_devcomm(group_name);
+  //   if (!devcomm_opt) {
+  //     // Not found, create then register.
+  //     ncclDevComm devcomm = ncclDevCommCreate(...);
+  //     devcomm_opt = register_devcomm(group_name, devcomm);
+  //   }
+  //   ncclDevComm& devcomm_ref = *devcomm_opt;
+  //   // Use devcomm_ref
+  // }
+  // void bar(const std::string& group_name) {
+  //   ncclDevComm devcomm0 = ncclDevCommCreate(...);
+  //   ncclDevComm devcomm1 = ncclDevCommCreate(...);
+  //   // You can provide your own `key` if you want to, for example, to
+  //   // distinguish between concurrent collective operations.
+  //   register_devcomm(group_name, devcomm0, "bar0");
+  //   register_devcomm(group_name, devcomm1, "bar1");
+  // }
+  std::optional<std::reference_wrapper<ncclDevComm>> register_devcomm(
       const std::string& group_name,
-      ncclComm_t comm,
-      int lsa_barrier_count,
-      int gin_barrier_count) {
-    auto it = group_to_comms_.find(group_name);
-    if (it != group_to_comms_.end()) {
-      return;
+      ncclDevComm devcomm,
+      const std::string& key = __builtin_FUNCTION()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Ensure the group exists in the registry, creating an empty map if needed
+    auto [group_it, inserted] = devcomm_registry_.try_emplace(
+        group_name, std::unordered_map<std::string, ncclDevComm>());
+    auto& group_map = group_it->second;
+    // Try to insert the device communicator with the given key
+    // Use std::move to avoid copying the device communicator
+    auto [key_it, key_inserted] =
+        group_map.try_emplace(key, std::move(devcomm));
+    if (!key_inserted) {
+      // Already registered - this is a programming error, so throw
+      TORCH_CHECK(
+          false,
+          "NCCL device communicator for group ",
+          group_name,
+          " with key ",
+          key,
+          " already registered.");
     }
-    c10::cuda::CUDAGuard guard(device_);
-    ncclDevComm devComm;
+    // Return a reference to the newly registered device communicator
+    return std::make_optional(std::ref(key_it->second));
+  }
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
-    // Initializer available from NCCL 2.29
-#ifdef NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER
-    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-#else
-    // In 2.28, we can set it to zero
-    ncclDevCommRequirements reqs;
-    memset(&reqs, 0, sizeof(ncclDevCommRequirements));
-#endif
-
-    // Specifies the number of barriers to allocate, LSA for NVLink domain, GIN
-    // for network.
-    reqs.lsaBarrierCount = lsa_barrier_count;
-    reqs.railGinBarrierCount = gin_barrier_count;
-
-    C10D_NCCL_CHECK(
-        ncclDevCommCreate(comm, &reqs, &devComm), "ncclDevCommCreate failed");
-    // Cache the device communicator for future reuse
-    // TODO (kwen2501):
-    // Cache devComm not just based on group name, but also on requirements.
-    group_to_comms_.emplace(group_name, std::make_pair(comm, devComm));
+  // Register the host-side NCCL communicator for `group_name` on this
+  // manager's device. Last-write-wins so a successor PG can replace the
+  // entry before the prior PG's destructor runs (e.g. restart-after-error).
+  // Producers must call `unregister_comm` from their destructor.
+  void register_comm(const std::string& group_name, ncclComm_t comm) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    group_to_comm_[group_name] = comm;
   }
 
+  // Unregister `group_name` on this manager's device. Safe to call when
+  // nothing is registered. Does not destroy the host comm; lifetime stays
+  // with the producer.
+  //
+  // Producers are expected to skip already-aborted comms in their
+  // destructor (e.g. ProcessGroupNCCL guards on isAborted()). Without that
+  // discipline, a stale destructor could race with a successor PG that
+  // re-registered under the same `group_name` (e.g. restart-after-error)
+  // and silently drop the successor's entry.
+  void unregister_comm(const std::string& group_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    group_to_comm_.erase(group_name);
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    devcomm_registry_.erase(group_name);
+#endif
+  }
+
+  // Destructor: Clean up all registered device communicators.
+  // This is a best-effort cleanup. If the CUDA context has already been
+  // destroyed, the cleanup will be skipped. All errors are caught and ignored
+  // to prevent exceptions from propagating during destruction.
   ~NCCLDevCommManager() noexcept {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Best effort to destroy the device communicators. Skip if CUDA context has
     // exited.
     try {
       c10::cuda::CUDAGuard guard(device_);
       // Make sure all kernels have completed before destroying the device
-      // communicator.
+      // communicator. This is important to ensure no kernels are still using
+      // the device communicator when we destroy it.
       C10_CUDA_CHECK(cudaDeviceSynchronize());
-      for (auto& [_, comm_pair] : group_to_comms_) {
-        auto& [comm, devcomm] = comm_pair;
-        ncclDevCommDestroy(comm, &devcomm);
+      // Iterate through all groups and their device communicators
+      for (auto& [group_name, group_map] : devcomm_registry_) {
+        // Find the host communicator for the group.
+        // Device communicators need the host communicator for destruction.
+        auto comm_it = group_to_comm_.find(group_name);
+        if (comm_it != group_to_comm_.end()) {
+          // Destroy each device communicator in this group
+          for (auto& [_, devcomm] : group_map) {
+            // Destroy the device communicator using the host communicator
+            ncclDevCommDestroy(comm_it->second, &devcomm);
+          }
+        }
       }
     } catch (...) {
-      // Ignore the error
-      std::cerr << "Failed to destroy the NCCL device communicator, skipping\n";
+      // Ignore the error - we're in a destructor and can't throw
+      // Log a warning for debugging purposes
+      LOG(WARNING)
+          << "Failed to destroy the NCCL device communicator, skipping";
     }
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   }
 
  private:
-  // Device where the NCCL device communicator manager is created
+  // Device where the NCCL device communicator manager is created.
+  // The manager is device-specific and cannot be used across multiple devices.
   const c10::Device device_;
-  // A map from group name to NCCL device communicator for that group.
-  std::unordered_map<std::string, std::pair<ncclComm_t, ncclDevComm>>
-      group_to_comms_;
+
+  // Mutex to protect the registry maps.
+  std::mutex mutex_;
+
+  // A map from process group name to the host-side NCCL communicator.
+  // The host communicator is required for creating and destroying device
+  // communicators. It should be registered before any device communicators
+  // for the same group.
+  std::unordered_map<std::string, ncclComm_t> group_to_comm_;
+
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  // A two-level map for device communicators:
+  // - First level: keyed by process group name
+  // - Second level: keyed by an optional key (defaults to caller function name
+  //   via __builtin_FUNCTION())
+  //
+  // This structure allows multiple device communicators per process group,
+  // which is useful when different functions need separate device communicators
+  // for concurrent operations. The key defaults to the caller's function name,
+  // but can be customized for cases where a single function needs multiple
+  // device communicators.
+  std::unordered_map<std::string, std::unordered_map<std::string, ncclDevComm>>
+      devcomm_registry_;
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 };
 
 } // namespace c10d::symmetric_memory
-#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#endif // NCCL_HAS_SYMMEM_SUPPORT

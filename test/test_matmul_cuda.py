@@ -1,8 +1,9 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
+import json
+import math
 import os
-import time
 import unittest
 from itertools import product
 from functools import partial
@@ -19,11 +20,15 @@ from torch.quantization._quantized_conversions import (
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
+    _get_torch_rocm_version,
+    _get_torch_cuda_version,
+    blas_library_context,
+    IS_SM90,
     PLATFORM_SUPPORTS_BF16,
-    PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
+    SM120OrLater,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -47,9 +52,11 @@ from torch.testing._internal.common_utils import (
     runOnRocmArch,
     serialTest,
     skipIfRocm,
+    skipIfRocmArch,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
+    TemporaryFileName,
     decorateIf,
 )
 
@@ -62,7 +69,8 @@ if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 # Protects against includes accidentally setting the default dtype
-assert torch.get_default_dtype() is torch.float32
+if torch.get_default_dtype() is not torch.float32:
+    raise AssertionError("default dtype should be float32")
 
 def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
     """
@@ -75,15 +83,6 @@ def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
         lambda params: computeCapabilityCheck and condition_fn(params)
     )
 
-
-@contextlib.contextmanager
-def blas_library_context(backend):
-    prev_backend = torch.backends.cuda.preferred_blas_library()
-    torch.backends.cuda.preferred_blas_library(backend)
-    try:
-        yield
-    finally:
-        torch.backends.cuda.preferred_blas_library(prev_backend)
 
 @contextlib.contextmanager
 def rocm_group_gemm_ck_env(value):
@@ -101,6 +100,26 @@ def rocm_group_gemm_ck_env(value):
         else:
             os.environ[var] = old
 
+
+@contextlib.contextmanager
+def prefer_cublaslt_grouped_gemm():
+    old = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+    try:
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = True
+        yield
+    finally:
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = old
+
+
+@contextlib.contextmanager
+def sm_carveout(value: int | None):
+    torch._C._set_sm_carveout_experimental(value)
+    try:
+        yield
+    finally:
+        torch._C._set_sm_carveout_experimental(None)
+
+
 class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -109,6 +128,84 @@ class TestMatmulCuda(InductorTestCase):
     def tearDown(self):
         torch.backends.cuda.matmul.allow_tf32 = True
         super().tearDown()
+
+    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    def test_legacy_cublas_honors_sm_carveout(self, device):
+        if torch.version.cuda is None or not IS_SM90:
+            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")
+
+        torch._C._set_sm_carveout_experimental(None)
+        dtype = torch.float16
+        sm_count = torch.cuda.get_device_properties().multi_processor_count
+        carveout = max(1, sm_count // 2)
+        a = torch.empty(8192, 8192, device=device, dtype=dtype)
+        b = torch.empty(8192, 8192, device=device, dtype=dtype)
+
+        def mm_grid_size(carveout_value: int | None) -> int:
+            with sm_carveout(carveout_value), TemporaryFileName(mode="w+") as fname:
+                with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                    torch.mm(a, b)
+                prof.export_chrome_trace(fname)
+                with open(fname) as trace_file:
+                    total_grid_size = 0
+                    kernel_count = 0
+                    for evt in json.load(trace_file)["traceEvents"]:
+                        grid = evt.get("args", {}).get("grid")
+                        if evt.get("cat", "") == "kernel" and grid:
+                            total_grid_size += math.prod(grid)
+                            kernel_count += 1
+
+            self.assertNotEqual(0, kernel_count)
+            return total_grid_size
+
+        with blas_library_context("cublas"):
+            torch.mm(a, b)
+            torch.cuda.synchronize()
+
+            no_carveout = mm_grid_size(None)
+            carveout_0 = mm_grid_size(0)
+            carved_out = mm_grid_size(carveout)
+            no_carveout_again = mm_grid_size(None)
+
+        self.assertEqual(no_carveout, carveout_0)
+        self.assertNotEqual(no_carveout, carved_out)
+        self.assertEqual(no_carveout, no_carveout_again)
+
+    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    def test_sm_carveout_invalid_value_throws(self, device):
+        if torch.version.cuda is None or not IS_SM90:
+            raise unittest.SkipTest("cublasSetSmCountTarget requires CUDA and sm90")
+        sm_count = torch.cuda.get_device_properties().multi_processor_count
+        a = torch.empty(64, 64, device=device, dtype=torch.float16)
+        b = torch.empty(64, 64, device=device, dtype=torch.float16)
+
+        with blas_library_context("cublas"):
+            with sm_carveout(sm_count):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    r"SM carveout must be between 0 and \d+",
+                    torch.mm,
+                    a,
+                    b,
+                )
+
+            with sm_carveout(sm_count + 1):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    r"SM carveout must be between 0 and \d+",
+                    torch.mm,
+                    a,
+                    b,
+                )
+
+            with sm_carveout(-1):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    r"SM carveout must be between 0 and \d+",
+                    torch.mm,
+                    a,
+                    b,
+                )
 
     def cublas_addmm(
         self,
@@ -182,6 +279,28 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
+    @dtypes(torch.cfloat, torch.cdouble)
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_mm_with_mH_args(self, dtype, backend):
+        # Testing mm with mH-transformed arguments.
+        # The root cause of:
+        # https://github.com/pytorch/pytorch/issues/174382
+        val = 3 + 4j
+        x = torch.zeros(2, 3, dtype=dtype, device="cuda")
+        x.diagonal().fill_(val)
+
+        ref_corrcoef = torch.empty(2, 2, dtype=dtype, device="cuda")
+        ref_corrcoef.fill_(-0.5)
+        ref_corrcoef.diagonal().fill_(1.0)
+
+        with blas_library_context(backend):
+            for a in (x, x.mH):
+                norm_squared = (a @ a.mH).sum().item()
+                self.assertEqual(norm_squared, 50 + 0j)
+
+            self.assertEqual(torch.corrcoef(x), ref_corrcoef)
+
+    @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
                         torch.bfloat16: xtol(atol=1e-4, rtol=1e-4),
@@ -227,6 +346,8 @@ class TestMatmulCuda(InductorTestCase):
 
 
     @onlyCUDA
+    # Fails with triton 3.7
+    @skipIfRocmArch(NAVI_ARCH)
     @dtypes(torch.float16)
     # m == 4 chooses OUTPUT_TYPE reduction on H200
     # m == 8 chooses OUTPUT_TYPE reduction on A100
@@ -245,6 +366,40 @@ class TestMatmulCuda(InductorTestCase):
             out = torch.addmm(b, m1, m2, beta=1.0)
             self.assertEqual(out.sum().item(), 0.0)
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI200_ARCH)
+    @parametrize("batched", [False, True])
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_fp16_backward_preserves_subnormals_rocm(self, backend, batched):
+        # Regression test for issue #182952. On ROCm, the hipBLASLt path for
+        # at::Half had no equivalent of rocBLAS's fp16_alt_impl, so backward
+        # fp16 GEMMs silently flushed subnormals to zero. The dispatcher now
+        # routes fp16 backward GEMMs to rocBLAS on gfx90a regardless of the
+        # user's preferred backend.
+        dtype = torch.float16
+        M = K = N = 64
+        sub_val = torch.finfo(dtype).tiny / 2
+        ref = M * sub_val
+        with blas_library_context(backend):
+            if batched:
+                B = 3
+                x = torch.ones(B, M, K, dtype=dtype, device="cuda")
+                w = torch.nn.Parameter(
+                    torch.ones(B, K, N, dtype=dtype, device="cuda")
+                )
+                d = torch.full((B, M, N), sub_val, dtype=dtype, device="cuda")
+            else:
+                x = torch.ones(M, K, dtype=dtype, device="cuda")
+                w = torch.nn.Parameter(
+                    torch.ones(K, N, dtype=dtype, device="cuda")
+                )
+                d = torch.full((M, N), sub_val, dtype=dtype, device="cuda")
+            (x @ w).backward(d)
+            torch.cuda.synchronize()
+            grad = w.grad.flatten()[0].item()
+            self.assertEqual(grad, ref)
 
     @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
@@ -356,7 +511,6 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(out1_gpu, out2_gpu[0])
 
     @onlyCUDA
-    @skipIfRocm
     @parametrize("shape", [2**i for i in range(5, 14)])
     @dtypes(torch.float, torch.half, torch.bfloat16)
     def test_cublas_deterministic(self, device, shape, dtype):
@@ -379,9 +533,10 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16)
+    @parametrize("batched", [False, True])
     @unittest.skipIf(not SM100OrLater, "cuBLAS integration for batch invariance is only on Blackwell")
     @serialTest()
-    def test_cublas_batch_invariance_blackwell(self, device, dtype):
+    def test_cublas_batch_invariance_blackwell(self, device, dtype, batched):
         orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
         orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)
@@ -390,12 +545,21 @@ class TestMatmulCuda(InductorTestCase):
             N = 2048
             K = 6144
             M_max = 32
-            x = torch.randn(M_max, K, device="cuda", dtype=torch.bfloat16)
-            w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16).t()
-            full = x @ w
-            xx = x[:1]
-            out = xx @ w
-            self.assertEqual(full[:1], out, atol=0., rtol=0.)
+            if batched:
+                B = 8
+                x = torch.randn(B, M_max, K, device=device, dtype=dtype)
+                w = torch.randn(B, N, K, device=device, dtype=dtype).transpose(-2, -1)
+                full = x @ w
+                xx = x[:, :1]
+                out = xx @ w
+                self.assertEqual(full[:, :1], out, atol=0.0, rtol=0.0)
+            else:
+                x = torch.randn(M_max, K, device=device, dtype=dtype)
+                w = torch.randn(N, K, device=device, dtype=dtype).t()
+                full = x @ w
+                xx = x[:1]
+                out = xx @ w
+                self.assertEqual(full[:1], out, atol=0.0, rtol=0.0)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 
@@ -575,7 +739,6 @@ class TestMatmulCuda(InductorTestCase):
                 start = offs_cpu[i]
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
@@ -688,6 +851,12 @@ class TestMatmulCuda(InductorTestCase):
             raise AssertionError(f"Invalid op: {op}")
 
         C_ref = f_ref(A, B.transpose(-2, -1), offs=offs)
+        if TEST_WITH_ROCM:
+            # Inductor's ROCm extern layout for grouped_mm must match ATen,
+            # which returns contiguous outputs on ROCm rather than CUDA's
+            # TMA-aligned padded strides.
+            contiguous_stride = torch.empty_like(C_ref).stride()
+            self.assertEqual(C_ref.stride(), contiguous_stride)
         if not IS_BIG_GPU and max_autotune:
             with self.assertRaisesRegex(torch._inductor.exc.InductorError, "NoValidChoicesError"):
                 C = f(A, B.transpose(-2, -1), offs=offs)
@@ -695,44 +864,339 @@ class TestMatmulCuda(InductorTestCase):
             C = f(A, B.transpose(-2, -1), offs=offs)
             self.assertEqual(C, C_ref)
 
+    def grouped_gemm_cublaslt_common(self, op, jagged_size, a_row_major, b_row_major, dtype):
+        device = "cuda"
+        element_size = dtype.itemsize
+        align = 16 // element_size  # 8 for bf16
+
+        if op == "2d/2d":
+            # Jagged K with non-multiple-of-8 total, but all offsets
+            # are multiples of 8 so per-group pointers stay aligned.
+            m, n = 3, 7
+            m_align = (m + align - 1) // align * align
+            n_align = (n + align - 1) // align * align
+            offs = torch.tensor([0, 8, 16, 16, jagged_size], device=device, dtype=torch.int32)
+            k = jagged_size
+            k_align = (k + align - 1) // align * align
+
+            if a_row_major:
+                A = torch.randn(m, k_align, device=device, dtype=dtype)[:, :k]
+            else:
+                A = torch.randn(k, m_align, device=device, dtype=dtype).t()[:m, :]
+            if b_row_major:
+                B = torch.randn(n, k_align, device=device, dtype=dtype)[:, :k]
+            else:
+                B = torch.randn(k, n_align, device=device, dtype=dtype).t()[:n, :]
+
+            aligned = (jagged_size % align == 0) or (not a_row_major and not b_row_major)
+
+        elif op == "2d/3d":
+            # Jagged M with aligned offsets.
+            n, k = 7, 32
+            n_align = (n + align - 1) // align * align
+            k_align = (k + align - 1) // align * align
+            offs = torch.tensor([0, 8, 16, 16, jagged_size], device=device, dtype=torch.int32)
+            m = jagged_size
+            m_align = (m + align - 1) // align * align
+            ngroups = offs.shape[0]
+
+            if a_row_major:
+                A = torch.randn(m, k_align, device=device, dtype=dtype)[:, :k]
+            else:
+                A = torch.randn(k, m_align, device=device, dtype=dtype).t()[:m, :]
+            if b_row_major:
+                B = torch.randn(ngroups, n, k_align, device=device, dtype=dtype)[:, :, :k]
+            else:
+                B = torch.randn(ngroups, k, n_align, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )[:, :n, :]
+
+            aligned = (jagged_size % align == 0) or not (not a_row_major and b_row_major)
+
+        elif op == "3d/2d":
+            # Jagged N with aligned offsets.
+            m, k = 3, 32
+            m_align = (m + align - 1) // align * align
+            k_align = (k + align - 1) // align * align
+            offs = torch.tensor([0, 8, 16, 16, jagged_size], device=device, dtype=torch.int32)
+            n = jagged_size
+            n_align = (n + align - 1) // align * align
+            ngroups = offs.shape[0]
+
+            if a_row_major:
+                A = torch.randn(ngroups, m, k_align, device=device, dtype=dtype)[:, :, :k]
+            else:
+                A = torch.randn(ngroups, k, m_align, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )[:, :m, :]
+            if b_row_major:
+                B = torch.randn(n, k_align, device=device, dtype=dtype)[:, :k]
+            else:
+                B = torch.randn(k, n_align, device=device, dtype=dtype).t()[:n, :]
+
+            aligned = (jagged_size % align == 0) or not (a_row_major and not b_row_major)
+
+        elif op == "3d/3d":
+            # No jagged dimension, all dims fixed. Use non-multiple-of-8
+            # dimensions with padded strides.
+            ngroups = 5
+            m, n, k = 3, 7, jagged_size
+            m_align = (m + align - 1) // align * align
+            n_align = (n + align - 1) // align * align
+            k_align = (k + align - 1) // align * align
+            offs = None
+
+            if a_row_major:
+                A = torch.randn(ngroups, m, k_align, device=device, dtype=dtype)[:, :, :k]
+            else:
+                A = torch.randn(ngroups, k, m_align, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )[:, :m, :]
+            if b_row_major:
+                B = torch.randn(ngroups, n, k_align, device=device, dtype=dtype)[:, :, :k]
+            else:
+                B = torch.randn(ngroups, k, n_align, device=device, dtype=dtype).transpose(
+                    -2, -1
+                )[:, :n, :]
+
+            aligned = (jagged_size % align == 0) or (not a_row_major and not b_row_major)
+
+        return A, B.transpose(-2, -1), offs, aligned
+
+    def grouped_gemm_reference(self, A, B, offs):
+        if A.dim() == 2 and B.dim() == 2:
+            offs_cpu = offs.cpu()
+            outputs = []
+            start = 0
+            for end in offs_cpu:
+                end = int(end)
+                outputs.append(torch.mm(A[:, start:end], B[start:end]))
+                start = end
+            return torch.stack(outputs)
+        if A.dim() == 2:
+            offs_cpu = offs.cpu()
+            outputs = []
+            start = 0
+            for i, end in enumerate(offs_cpu):
+                end = int(end)
+                outputs.append(torch.mm(A[start:end], B[i]))
+                start = end
+            return torch.cat(outputs)
+        if B.dim() == 2:
+            offs_cpu = offs.cpu()
+            outputs = []
+            start = 0
+            for i, end in enumerate(offs_cpu):
+                end = int(end)
+                outputs.append(torch.mm(A[i], B[:, start:end]))
+                start = end
+            return torch.cat(outputs, dim=1)
+        return torch.stack([torch.mm(a, b) for a, b in zip(A, B)])
+
+    def grouped_gemm_cublaslt_alignment_error(self, op):
+        if op == "2d/2d":
+            return "cublasLt grouped GEMM with jagged K not aligned to 16 bytes"
+        if op == "2d/3d":
+            return "cublasLt grouped GEMM with jagged M not aligned to 16 bytes"
+        if op == "3d/2d":
+            return "cublasLt grouped GEMM with jagged N not aligned to 16 bytes"
+        if op == "3d/3d":
+            return "cublasLt grouped GEMM with K not aligned to 16 bytes"
+        raise AssertionError(f"Invalid op: {op}")
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
+    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 2), "cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(SM90OrLater and not SM100OrLater and _get_torch_cuda_version() < (13, 3),
+                     "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3")
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("jagged_size", [31, 32])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_grouped_gemm_cublaslt_alignment(self, op, jagged_size, a_row_major, b_row_major, dtype):
+        # Verify that cuBLASLt grouped GEMM succeeds with all expected combinations
+        # Always succeeds if jagged_size * sizeof(dtype) is divisible by 16
+        # Otherwise:
+        # For 2d/2d and 3d/3d, both inputs must be column major
+        # For 2d/3d, A needs to be row major or B needs to be column major
+        # For 3d/2d, A needs to be column major or B needs to be row major
+
+        A, B, offs, aligned = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
+        if not aligned:
+            with self.assertRaisesRegex(RuntimeError, self.grouped_gemm_cublaslt_alignment_error(op)):
+                with prefer_cublaslt_grouped_gemm():
+                    torch._grouped_mm(A, B, offs=offs)
+            return
+
+        C_ref = self.grouped_gemm_reference(A, B, offs)
+        with prefer_cublaslt_grouped_gemm():
+            C = torch._grouped_mm(A, B, offs=offs)
+        self.assertEqual(C, C_ref)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
+    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 2), "cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(SM90OrLater and not SM100OrLater and _get_torch_cuda_version() < (13, 3),
+                     "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3")
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("jagged_size", [31, 32])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("mode", ["default", "reduce-overhead"])
+    def test_grouped_gemm_cublaslt_compiled(self, op, jagged_size, a_row_major, b_row_major, dtype, mode):
+        def f_ref(A, B, offs):
+            return torch._grouped_mm(A, B, offs=offs)
+
+        A, B, offs, aligned = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
+        if not aligned:
+            with self.assertRaisesRegex(RuntimeError, self.grouped_gemm_cublaslt_alignment_error(op)):
+                with prefer_cublaslt_grouped_gemm():
+                    f_ref(A, B, offs)
+            return
+
+        with prefer_cublaslt_grouped_gemm():
+            f = torch.compile(f_ref, fullgraph=True, mode=mode)
+            C_ref = f_ref(A, B, offs)
+            C = f(A, B, offs)
+        self.assertEqual(C, C_ref)
+
+    def test_grouped_gemm_doubly_non_contiguous(self):
+        # Verify that doubly-non-contiguous inputs (neither stride is 1)
+        # are rejected by _grouped_mm_validate_inputs.
+        device = "cuda"
+        dtype = torch.bfloat16
+        k = 32
+        ngroups = 5
+        # Create a doubly-non-contiguous 2D matrix: stride on both dims > 1
+        A_full = torch.randn(3, 2 * k, device=device, dtype=dtype)
+        A = A_full[:, 0:2 * k:2]  # shape (3, k), strides (2*k, 2)
+        self.assertNotEqual(A.stride(-1), 1)
+        self.assertNotEqual(A.stride(-2), 1)
+
+        B = torch.randn(ngroups, k, 7, device=device, dtype=dtype)
+        offs = torch.tensor([0, 1, 1, 2, 3], device=device, dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "Invalid strides/sizes"):
+            torch._grouped_mm(A, B, offs=offs)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
+    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 2), "cublaslt grouped gemm requires CUDA Toolkit >= 13.2")
+    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(SM90OrLater and not SM100OrLater and _get_torch_cuda_version() < (13, 3),
+                     "cublaslt grouped gemm on SM 9.0 requires CUDA Toolkit >= 13.3")
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/3d"])
+    def test_grouped_gemm_cublaslt_int64_indexing(self, op):
+        # Verify that the int64 indexing path works correctly when a
+        # leading dimension (stride) exceeds INT32_MAX. Uses as_strided
+        # with M=1 or N=1 so only a small amount of storage is needed
+        # despite the large stride.
+        device = "cuda"
+        dtype = torch.bfloat16
+
+        big_ld = (1 << 31)  # > INT32_MAX, divisible by 8
+        K = 8
+
+        if op == "3d/3d":
+            # 3D x 3D with ngroups=1. mat_a has a large leading dimension
+            # but M=1 so only K elements of storage are actually accessed.
+            M, N = 1, 8
+            storage_a = torch.randn(K, device=device, dtype=dtype)
+            A = torch.as_strided(storage_a, (1, M, K), (M * K, big_ld, 1))
+            B = torch.randn(1, K, N, device=device, dtype=dtype)
+            offs = None
+
+            C_ref = torch.mm(A[0].contiguous(), B[0]).unsqueeze(0)
+        elif op == "2d/3d":
+            # 2D x 3D (jagged M) with ngroups=1. mat_a (2D) has a large
+            # leading dimension but M=1 so only K elements are accessed.
+            M, N = 1, 8
+            storage_a = torch.randn(K, device=device, dtype=dtype)
+            A = torch.as_strided(storage_a, (M, K), (big_ld, 1))
+            B = torch.randn(1, K, N, device=device, dtype=dtype)
+            offs = torch.tensor([1], device=device, dtype=torch.int32)
+
+            C_ref = torch.mm(A.contiguous(), B[0])
+        elif op == "3d/2d":
+            # 3D x 2D (jagged N) with ngroups=1. mat_b (2D) is column-major
+            # with a large column stride but N=1, so only K elements of
+            # storage are actually accessed.
+            M, N = 8, 1
+            A = torch.randn(1, M, K, device=device, dtype=dtype)
+            storage_b = torch.randn(K, device=device, dtype=dtype)
+            B = torch.as_strided(storage_b, (K, N), (1, big_ld))
+            offs = torch.tensor([1], device=device, dtype=torch.int32)
+
+            C_ref = torch.mm(A[0], B.contiguous())
+        elif op == "2d/2d":
+            # 2D x 2D (jagged K) with ngroups=1. mat_a (2D) has a large
+            # leading dimension but M=1 so only K elements of storage are
+            # actually accessed.
+            M, N = 1, 8
+            storage_a = torch.randn(K, device=device, dtype=dtype)
+            A = torch.as_strided(storage_a, (M, K), (big_ld, 1))
+            B = torch.randn(K, N, device=device, dtype=dtype)
+            offs = torch.tensor([K], device=device, dtype=torch.int32)
+
+            C_ref = torch.mm(A.contiguous(), B).unsqueeze(0)
+        else:
+            raise AssertionError(f"Invalid op: {op}")
+
+        with prefer_cublaslt_grouped_gemm():
+            C = torch._grouped_mm(A, B, offs=offs)
+        self.assertEqual(C, C_ref)
+
     @skipCUDAIfNotRocm
+    # Fails with triton 3.7
     def test_grouped_gemm_rocm_ck_flag(self):
-        CK_HINT = "kernel_grouped_gemm_xdl_splitk"
+        CK_EQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
+        CK_UNEQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
         HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
 
-        def uses_ck(kernels: set[str]) -> bool:
-            return any(CK_HINT in k for k in kernels)
+        def has_ck_kernel(kernels: set[str], hint: str) -> bool:
+            return any(hint in k for k in kernels)
 
         def uses_hipblaslt(kernels: set[str]) -> bool:
             return any(HIPBLASLT_HINT in k for k in kernels)
 
-        def run_grouped_mm():
+        def run_grouped_mm(equal_k: bool):
             device = "cuda"
             dtype = torch.bfloat16
-            # row-major 3d-3d
-            G, M, N, K = 4, 16, 32, 64
-            a = torch.randn(G, M, K, device=device, dtype=dtype)
-            b = torch.randn(G, N, K, device=device, dtype=dtype)
-            # 3d-3d grouped GEMM: [G, M, K] @ [G, K, N]
-            out = F.grouped_mm(a, b.transpose(-2, -1), out_dtype=dtype)
-            return out
+            if equal_k:
+                # 3d-3d grouped GEMM with identical K for all groups
+                G, M, N, K = 4, 16, 32, 64
+                a = torch.randn(G, M, K, device=device, dtype=dtype)
+                b = torch.randn(G, N, K, device=device, dtype=dtype)
+                return F.grouped_mm(a, b.transpose(-2, -1), out_dtype=dtype)
 
-        def collect_kernel_names():
+            # 2d-2d grouped GEMM with non-uniform offs, i.e. per-group K is not equal
+            M, N = 16, 32
+            offs = torch.tensor([64, 136], device=device, dtype=torch.int32)
+            K_total = offs[-1].item()
+            a = torch.randn(M, K_total, device=device, dtype=dtype)
+            b = torch.randn(N, K_total, device=device, dtype=dtype)
+            return F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
+
+        def collect_kernel_names(equal_k: bool):
             kernels = set()
             with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=False,
                 with_stack=False,
             ) as prof:
-                run_grouped_mm()
+                run_grouped_mm(equal_k=equal_k)
             for evt in prof.key_averages(group_by_input_shape=False):
                 kernels.add(evt.key)
             return kernels
 
         with rocm_group_gemm_ck_env(None):
-            self.assertTrue(uses_hipblaslt(collect_kernel_names()))
+            self.assertTrue(uses_hipblaslt(collect_kernel_names(equal_k=True)))
         with rocm_group_gemm_ck_env("1"):
-            self.assertTrue(uses_ck(collect_kernel_names()))
+            ck_equal_kernels = collect_kernel_names(equal_k=True)
+            self.assertTrue(has_ck_kernel(ck_equal_kernels, CK_EQUAL_K_HINT))
+
+            ck_unequal_kernels = collect_kernel_names(equal_k=False)
+            self.assertTrue(has_ck_kernel(ck_unequal_kernels, CK_UNEQUAL_K_HINT))
 
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -742,7 +1206,9 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
-        if torch.version.hip:
+        if torch.version.hip and (
+            _get_torch_rocm_version() < (7, 2, 1) or isRocmArchAnyOf(MI200_ARCH)
+        ):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
                 raise unittest.SkipTest(msg)
@@ -809,7 +1275,9 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("high_precision_self", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
-        if torch.version.hip:
+        if torch.version.hip and (
+            _get_torch_rocm_version() < (7, 2, 1) or isRocmArchAnyOf(MI200_ARCH)
+        ):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
                 raise unittest.SkipTest(msg)
@@ -978,73 +1446,6 @@ class TestMatmulCuda(InductorTestCase):
                     op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
 
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
-    @serialTest()
-    def test_greencontext_carveout(self):
-        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
-        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
-        ctx.set_context()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        partial_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t1 = time.perf_counter()
-        ctx.pop_context()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t2 = time.perf_counter()
-        full_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t3 = time.perf_counter()
-        self.assertEqual(partial_res, full_res)
-        self.assertGreater(t1 - t0, t3 - t2)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
-    @serialTest()
-    def test_greencontext_stream_carveout(self):
-        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
-        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
-        ctx_stream = ctx.Stream()
-        with torch.cuda.stream(ctx_stream):
-            torch.matmul(a, a)
-            torch.cuda.synchronize()
-            t0 = time.perf_counter()
-            partial_res = torch.matmul(a, a)
-            torch.cuda.synchronize()
-            t1 = time.perf_counter()
-        torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t2 = time.perf_counter()
-        full_res = torch.matmul(a, a)
-        torch.cuda.synchronize()
-        t3 = time.perf_counter()
-        self.assertEqual(partial_res, full_res)
-        self.assertGreater(t1 - t0, t3 - t2)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
-    @serialTest()
-    def test_greencontext_graphs(self):
-        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
-        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
-        ctx.set_context()
-        partial_res = torch.matmul(a, a)
-        ctx.pop_context()
-        full_res = torch.matmul(a, a)
-        full_res.zero_()
-        partial_res.zero_()
-        torch.cuda.synchronize()
-
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            ctx.set_context()
-            partial_res = torch.matmul(a, a)
-            ctx.pop_context()
-            full_res = torch.matmul(a, a)
-        g.replay()
-        self.assertEqual(partial_res, full_res)
-
-
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
@@ -1089,11 +1490,11 @@ class TestMixedDtypesLinearCuda(TestCase):
             input_ref = input.reshape(-1, input.shape[-1])
 
             # First, test plain multiplication.
-            weight_ref = weight.T.to(input.dtype) * scale.view(1, n)
+            weight_ref = weight.T.to(torch.float32) * scale.float().view(1, n)
             weightq = (
                 pack_int4_to_int8(weight.T) if dtypeq == torch.quint4x2 else weight.T
             )
-            output_ref = torch.mm(input_ref, weight_ref).reshape(*input.shape[:-1], n)
+            output_ref = torch.mm(input_ref.float(), weight_ref).to(input.dtype).reshape(*input.shape[:-1], n)
             output = torch.ops.aten._mixed_dtypes_linear(
                 input,
                 quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
@@ -1104,12 +1505,12 @@ class TestMixedDtypesLinearCuda(TestCase):
             torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
 
             # Second, test the linear operator itself.
-            weight_ref = weight.to(input.dtype) * scale.view(n, 1)
+            weight_ref = weight.to(torch.float32) * scale.float().view(n, 1)
             weightq = pack_int4_to_int8(weight) if dtypeq == torch.quint4x2 else weight
-            bias_ref = bias.view(1, n) if add_bias else None
+            bias_ref = bias.float().view(1, n) if add_bias else None
             output_ref = torch.nn.functional.linear(
-                input_ref, weight_ref, bias=bias_ref
-            ).reshape(*input.shape[:-1], n)
+                input_ref.float(), weight_ref, bias=bias_ref
+            ).to(input.dtype).reshape(*input.shape[:-1], n)
             if activation == "relu":
                 relu = torch.nn.ReLU()
                 output_ref = relu(output_ref)

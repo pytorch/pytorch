@@ -78,8 +78,8 @@ class _TensorPipeRpcBackendOptionsBase(RpcBackendOptions):
         _channels: list | None,
         rpc_timeout: float = ...,
         init_method: str = ...,
-        device_maps: dict[str, dict[torch.device, torch.device]] = {},  # noqa: B006
-        devices: list[torch.device] = [],  # noqa: B006
+        device_maps: dict[str, dict[torch.device, torch.device]] = {},
+        devices: list[torch.device] = [],
     ) -> None: ...
     def _set_device_map(
         self,

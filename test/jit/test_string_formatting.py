@@ -184,7 +184,7 @@ class TestStringFormatting(JitTestCase):
     def test_string_interpolation_with_unknown_format_specifier(self):
         @torch.jit.script
         def fn(arg1: str) -> str:
-            return "%a in template" % arg1  # noqa: F501
+            return "%a in template" % arg1
 
         with self.assertRaisesRegexWithHighlight(
             RuntimeError,

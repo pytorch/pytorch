@@ -4,7 +4,6 @@ import math
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
-from typing import Optional
 
 import torch
 from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -47,7 +46,7 @@ class ExtraOpData:
     # Returns: tuple of (single dim argname if available, dim list argname if available)
     # If the op doesn't support dim-related args at all OR this op only has overloads
     # with multiple dim args (e.g. transpose()), then this returns (None, None).
-    def get_dim_argnames(self) -> tuple[Optional[str], Optional[str]]:
+    def get_dim_argnames(self) -> tuple[str | None, str | None]:
         if self.dim_args is None:
             return (None, None)
 

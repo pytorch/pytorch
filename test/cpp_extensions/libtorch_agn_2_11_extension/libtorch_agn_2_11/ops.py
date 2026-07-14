@@ -57,6 +57,59 @@ def my_from_blob_with_cuda_deleter(numel: int, device) -> Tensor:
     )
 
 
+def my_from_blob_with_lambda_deleter(data_ptr, sizes, strides, device, dtype) -> Tensor:
+    """
+    Creates a Tensor from existing memory with a capturing-lambda deleter.
+
+    The deleter is a capturing lambda that updates a global call count,
+    exercising the capturing-lambda code path in torch_from_blob.
+
+    Args:
+        data_ptr: int - pointer to the data buffer
+        sizes: tuple[int] - size of the tensor
+        strides: tuple[int] - strides of the tensor
+        device: Device - device on which the tensor resides
+        dtype: ScalarType - data type of the tensor
+
+    Returns: Tensor - tensor wrapping the existing memory
+    """
+    return torch.ops.libtorch_agn_2_11.my_from_blob_with_lambda_deleter.default(
+        data_ptr, sizes, strides, device, dtype
+    )
+
+
+def get_lambda_deleter_call_count() -> int:
+    """
+    Returns the number of times the lambda test deleter has been called.
+    """
+    return torch.ops.libtorch_agn_2_11.get_lambda_deleter_call_count.default()
+
+
+def reset_lambda_deleter_call_count() -> None:
+    """
+    Resets the lambda deleter call counter to zero.
+    """
+    torch.ops.libtorch_agn_2_11.reset_lambda_deleter_call_count.default()
+
+
+def my_from_blob_with_cuda_lambda_deleter(numel: int, device) -> Tensor:
+    """
+    Creates a CUDA tensor that owns its memory via cudaMalloc, using a lambda deleter.
+
+    Similar to my_from_blob_with_cuda_deleter but uses the capturing-lambda
+    code path in torch_from_blob.
+
+    Args:
+        numel: int - number of elements in the tensor
+        device: Device - CUDA device
+
+    Returns: Tensor - a 1D float32 tensor of zeros
+    """
+    return torch.ops.libtorch_agn_2_11.my_from_blob_with_cuda_lambda_deleter.default(
+        numel, device
+    )
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9 and libtorch_agn_2_10 csrc/)
 #

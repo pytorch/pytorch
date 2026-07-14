@@ -6,7 +6,7 @@
 
 {%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}
 {%- if is_windows %}
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
 {%- else %}
       PYTORCH_ROOT: /pytorch
 {%- endif %}
@@ -64,5 +64,43 @@
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+{%- endmacro %}
+
+{%- macro upload_extracted_libtorch(lt_config, is_windows=False, use_s3=True) -%}
+!{{ lt_config["build_name"] }}-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: !{{ lt_config["build_name"] }}-extract
+    with:
+{%- if is_windows %}
+      PYTORCH_ROOT: ${{ github.workspace }}
+{%- else %}
+      PYTORCH_ROOT: /pytorch
+{%- endif %}
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: !{{ lt_config["desired_cuda"] }}
+{%- if lt_config["gpu_arch_version"] %}
+      GPU_ARCH_VERSION: "!{{ lt_config["gpu_arch_version"] }}"
+{%- endif %}
+      GPU_ARCH_TYPE: !{{ lt_config["gpu_arch_type"] }}
+{%- if lt_config["libtorch_config"] %}
+      LIBTORCH_CONFIG: !{{ lt_config["libtorch_config"] }}
+{%- endif %}
+      LIBTORCH_VARIANT: !{{ lt_config["libtorch_variant"] }}
+      build_name: !{{ lt_config["build_name"] }}
+      {%- if not use_s3 %}
+      use_s3: False
+      {%- endif %}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
 {%- endmacro %}

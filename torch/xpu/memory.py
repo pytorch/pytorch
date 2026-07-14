@@ -251,7 +251,6 @@ def set_per_process_memory_fraction(fraction: float, device: Device = None) -> N
     device = _get_device_index(device, optional=True)
     if not isinstance(fraction, float):
         raise TypeError("Invalid type for fraction argument, must be `float`")
-    # pyrefly: ignore [missing-attribute]
     torch._C._xpu_setMemoryFraction(fraction, device)
 
 
@@ -271,7 +270,6 @@ def memory_snapshot(
     """
     if not is_initialized():
         return []
-    # pyrefly: ignore [missing-attribute]
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
 
 
@@ -358,7 +356,6 @@ def _snapshot(device: Device = None, augment_with_fx_traces: bool = False):
     Returns:
         The Snapshot dictionary object
     """
-    # pyrefly: ignore [missing-attribute]
     s = torch._C._xpu_memorySnapshot(None)
     if augment_with_fx_traces:
         s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
@@ -467,7 +464,6 @@ def _record_memory_history(
 
             Defaults to ``None`` (record all actions).
     """
-    # pyrefly: ignore [missing-attribute]
     torch._C._xpu_recordMemoryHistory(
         enabled,
         context,
@@ -481,7 +477,6 @@ def _record_memory_history(
 class _XPUAllocator:
     r"""Wrapper over internal XPU memory allocators."""
 
-    # pyrefly: ignore [missing-attribute]
     def __init__(self, allocator: torch._C._xpu_XPUAllocator):
         self._allocator = allocator
 
@@ -528,7 +523,6 @@ class XPUPluggableAllocator(_XPUAllocator):
                 "Failed to load allocator symbols from the shared library."
             )
 
-        # pyrefly: ignore [missing-attribute]
         self._allocator = torch._C._xpu_customAllocator(alloc_fn_addr, free_fn_addr)
 
 
@@ -541,7 +535,6 @@ def change_current_allocator(allocator: _XPUAllocator) -> None:
     Arguments:
         allocator (torch.xpu.memory._XPUAllocator): allocator to be set as the active one.
     """
-    # pyrefly: ignore [missing-attribute]
     torch._C._xpu_changeCurrentAllocator(allocator.allocator())
 
 
@@ -551,7 +544,6 @@ def _get_current_allocator() -> _XPUAllocator:
     Returns:
         _XPUAllocator: the allocator being currently used.
     """
-    # pyrefly: ignore [missing-attribute]
     return _XPUAllocator(torch._C._xpu_getAllocator())
 
 
@@ -630,12 +622,72 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         torch._C._xpu_releasePool(device_index, pool.id)
 
 
+def list_gpu_processes(device: "Device" = None) -> str:
+    r"""Return a printout of running processes and their GPU memory usage on a given device.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    Returns:
+        str: A human-readable summary of each running process and the given GPU memory usage in MB.
+
+    .. note:: Process status is reported at the physical device level and reflects all processes
+        associated with the device.
+    """
+    from ctypes import byref, c_uint32
+
+    from . import (
+        _cached_zes_device_infos,
+        _get_pyzes_version,
+        _import_pyzes,
+        _zes_check,
+        _zes_ensure_device_infos,
+    )
+
+    pyzes = _import_pyzes()
+    version = _get_pyzes_version()
+    if version < (0, 1, 2):
+        raise RuntimeError(
+            f"list_gpu_processes requires pyzes version >= 0.1.2, but found {'.'.join(map(str, version))}"
+        )
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    device_handle = info.device_handle
+    proc_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceProcessesGetState(device_handle, byref(proc_count), None),
+        "Can't get Level Zero Sysman host processes count.",
+    )
+    process_states = (pyzes.zes_process_state_t * proc_count.value)()
+    _zes_check(
+        pyzes.zesDeviceProcessesGetState(
+            device_handle, byref(proc_count), process_states
+        ),
+        "Can't get Level Zero Sysman host processes state.",
+    )
+
+    lines = [f"GPU:{device}"]
+    if proc_count.value == 0:
+        lines.append("  no processes are running")
+    for state in process_states:
+        mem_mb = state.memSize / (1024 * 1024)
+        lines.append(
+            f"  process {state.processId:>10d} uses {mem_mb:>12.3f} MB GPU memory"
+        )
+    return "\n".join(lines)
+
+
 __all__ = [
     "MemPool",
     "XPUPluggableAllocator",
     "change_current_allocator",
     "empty_cache",
     "get_per_process_memory_fraction",
+    "list_gpu_processes",
     "max_memory_allocated",
     "max_memory_reserved",
     "mem_get_info",

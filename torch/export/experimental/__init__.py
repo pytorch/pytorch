@@ -170,7 +170,7 @@ class _ExportPackage:
 
     This design allows users to decouple the exported callables from the actual sample inputs which can
     be helpful for use cases where the exported callable is hidden behind helper functions or when sample
-    inpusts are hard to get.
+    inputs are hard to get.
 
     NOTE: This is an experimental API and anything can be changed in the future.
 
@@ -246,7 +246,7 @@ class _ExportPackage:
         A "fallback" is exported when no overload precondition matches a given set of sample
         inputs. Overloads should
         Fallbacks don't have names and are ordered in a list. It's up to a backend to decide
-        which fallback is used amony multiple ones.
+        which fallback is used among multiple ones.
 
         A reference backend implementation of ExportMethod may look like the following:
         ```
@@ -325,7 +325,7 @@ class _ExportPackage:
             return ep.module()(*args, **kwargs)
 
         if isinstance(fn, torch.nn.Module):
-            _exporter_context = torch._dynamo.eval_frame.OptimizedModule(  # type: ignore[assignment] # noqa: F811
+            _exporter_context = torch._dynamo.eval_frame.OptimizedModule(  # type: ignore[assignment]
                 fn,
                 lambda _: _exporter_context,  # type: ignore[arg-type]
             )

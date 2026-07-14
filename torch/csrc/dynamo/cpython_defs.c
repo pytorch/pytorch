@@ -12,7 +12,7 @@
 #undef Py_BUILD_CORE
 #endif
 
-#if IS_PYTHON_3_15_PLUS
+#if IS_PYTHON_3_16_PLUS
 
 const uint8_t* THP_PyOpcode_Caches = NULL;
 int THP_PyOpcode_Caches_size = 0;
@@ -28,6 +28,20 @@ void init_THPCaches() {}
 
 #if IS_PYTHON_3_11_PLUS
 
+// Rename opcode table/metadata symbols to avoid multiple definition conflict
+// with the identical definitions in libpython at link time.
+#define _PyOpcode_Caches _torch_PyOpcode_Caches
+#define _PyOpcode_Jump _torch_PyOpcode_Jump
+#define _PyOpcode_Deopt _torch_PyOpcode_Deopt
+#if IS_PYTHON_3_13_PLUS
+#define _PyOpcode_num_popped _torch_PyOpcode_num_popped
+#define _PyOpcode_num_pushed _torch_PyOpcode_num_pushed
+#define _PyOpcode_opcode_metadata _torch_PyOpcode_opcode_metadata
+#define _PyOpcode_macro_expansion _torch_PyOpcode_macro_expansion
+#define _PyOpcode_OpName _torch_PyOpcode_OpName
+#define _PyOpcode_PseudoTargets _torch_PyOpcode_PseudoTargets
+#endif
+
 #define Py_BUILD_CORE
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
 
@@ -42,11 +56,22 @@ void init_THPCaches() {}
 
 #undef NEED_OPCODE_TABLES
 #undef Py_BUILD_CORE
+#if IS_PYTHON_3_13_PLUS
+#undef _PyOpcode_PseudoTargets
+#undef _PyOpcode_OpName
+#undef _PyOpcode_macro_expansion
+#undef _PyOpcode_opcode_metadata
+#undef _PyOpcode_num_pushed
+#undef _PyOpcode_num_popped
+#endif
+#undef _PyOpcode_Deopt
+#undef _PyOpcode_Jump
+#undef _PyOpcode_Caches
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this
 // check forces us to manually re-check that the function didn't change on the
 // next major version
-#if IS_PYTHON_3_15_PLUS
+#if IS_PYTHON_3_16_PLUS
 #error \
     "Please ensure that the functions below still match the CPython implementation for 3.15"
 #endif
@@ -497,8 +522,8 @@ const uint8_t* THP_PyOpcode_Caches = NULL;
 int THP_PyOpcode_Caches_size = 0;
 void init_THPCaches() {
 #if IS_PYTHON_3_11_PLUS
-  THP_PyOpcode_Caches = _PyOpcode_Caches;
-  THP_PyOpcode_Caches_size = sizeof(_PyOpcode_Caches) / sizeof(uint8_t);
+  THP_PyOpcode_Caches = _torch_PyOpcode_Caches;
+  THP_PyOpcode_Caches_size = sizeof(_torch_PyOpcode_Caches) / sizeof(uint8_t);
 #endif
 }
 

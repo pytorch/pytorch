@@ -398,10 +398,10 @@ class PadMMTest(TestCase):
         mat2 = torch.ones((batch_size, k, n), device=GPU_TYPE, dtype=torch.float16)
         expected_alignment = get_alignment_size(mat1)
 
-        assert expected_alignment == 8, "Alignment for float16 should be 8"
-        assert can_pad(mat1, mat2, torch.ops.aten.bmm), (
-            "This should pass the common padding criteria"
-        )
+        if expected_alignment != 8:
+            raise AssertionError("Alignment for float16 should be 8")
+        if not can_pad(mat1, mat2, torch.ops.aten.bmm):
+            raise AssertionError("This should pass the common padding criteria")
 
         @torch.compile()
         def bmm(mat1, mat2):
@@ -414,9 +414,8 @@ class PadMMTest(TestCase):
             ".run(", 2, exactly=True
         ).check(f"empty_strided_{GPU_TYPE}((3, 8, 16)").run(code)
 
-        assert torch.allclose(res2, bmm_expected_result), (
-            "BMM results are not identical"
-        )
+        if not torch.allclose(res2, bmm_expected_result):
+            raise AssertionError("BMM results are not identical")
 
     @fresh_cache()
     def test_exclude_padding(self):
@@ -424,9 +423,12 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return a @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        # Size must be big enough such that `is_mm_compute_bound` returns True and we need padding to 4 elements
+        # machine balance is ~8.3 (A100), 14.1 (H100), size must be 3x that, see arithmetic_intensity for M=N=K
+        size = [61, 61]
+        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
-        self.assertTrue(len(local_cache) == 2)
+        self.assertEqual(len(local_cache), 2)
         FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
             repr(local_cache)
         )
@@ -435,10 +437,10 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return (a + 1) @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         # reuse original base timing
-        self.assertTrue(len(local_cache) == 3)
+        self.assertEqual(len(local_cache), 3)
 
         FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
             repr(local_cache)
@@ -486,13 +488,14 @@ class PadMMTest(TestCase):
         mat2 = torch.ones((k, n), device=GPU_TYPE, dtype=torch.bfloat16)
         expected_alignment = get_alignment_size(mat1)
 
-        assert expected_alignment == 8, "Alignment for bfloat16 should be 8"
-        assert can_pad(mat1, mat2, torch.ops.aten.mm), (
-            "This should pass the common padding criteria"
-        )
-        assert should_pad_mm_bf16(mat1.dtype, m, n, k), (
-            "This should pass the should_pad_mm_bf16 padding criteria"
-        )
+        if expected_alignment != 8:
+            raise AssertionError("Alignment for bfloat16 should be 8")
+        if not can_pad(mat1, mat2, torch.ops.aten.mm):
+            raise AssertionError("This should pass the common padding criteria")
+        if not should_pad_mm_bf16(mat1.dtype, m, n, k):
+            raise AssertionError(
+                "This should pass the should_pad_mm_bf16 padding criteria"
+            )
 
         @torch.compile()
         def mm(mat1, mat2):
@@ -505,7 +508,8 @@ class PadMMTest(TestCase):
             ".run(", 2, exactly=True
         ).check(f"empty_strided_{GPU_TYPE}((8, 16)").run(code)
 
-        assert torch.allclose(res2, mm_expected_result), "MM results are not identical"
+        if not torch.allclose(res2, mm_expected_result):
+            raise AssertionError("MM results are not identical")
 
     @fresh_cache()
     @inductor_config.patch(
@@ -531,7 +535,9 @@ class PadMMTest(TestCase):
         ):
             opt_fn = torch.compile(fn, mode="max-autotune")
             ret, code = run_and_get_code(opt_fn, *args)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        # xref: https://github.com/pytorch/pytorch/pull/172780
+        if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
         code = [c for c in code if "decompose_k" not in c]
         # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).

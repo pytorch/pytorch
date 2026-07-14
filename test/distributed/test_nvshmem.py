@@ -12,6 +12,7 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    PLATFORM_SUPPORTS_SYMM_MEM,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -20,15 +21,15 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
+    TEST_WITH_ROCM,
 )
 
 
 # Decorator
 def requires_nvshmem():
     return skip_but_pass_in_sandcastle_if(
-        not symm_mem.is_nvshmem_available(),
-        "test_nvshmem requires NVSHMEM, skipping tests",
+        not PLATFORM_SUPPORTS_SYMM_MEM or not symm_mem.is_nvshmem_available(),
+        "test_nvshmem requires NVSHMEM with SymmMem platform support, skipping tests",
     )
 
 
@@ -73,7 +74,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     def test_alloc(self) -> None:
         self._init_device()
 
@@ -91,7 +91,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         out = symm_mem.empty(numel, dtype=dtype, device=self.device)
         symm_mem.rendezvous(out, group=group_name)
 
-    @skipIfRocm
     def test_alloc_without_device_context(self) -> None:
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
@@ -103,7 +102,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(out.device, self.device)
         symm_mem.rendezvous(out, group=group_name)
 
-    @skipIfRocm
     def test_mempool_tensor_factory(self) -> None:
         """
         Test the effectiveness of MemPool on tensor factory ops.
@@ -128,7 +126,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
-    @skipIfRocm
     def test_mempool_tensor_w_collective(self) -> None:
         """
         Test the effectiveness of MemPool on tensor factory ops.
@@ -151,7 +148,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             tensor, torch.ones(numel, dtype=dtype, device=self.device) * self.world_size
         )
 
-    @skipIfRocm
     def test_mempool_compute_ops(self) -> None:
         """
         Apply MemPool context to a compute op that creates input to collective.
@@ -176,7 +172,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         expected = torch.mm(x0, w)
         self.assertEqual(y, expected)
 
-    @skipIfRocm
     def test_handle_offset(self) -> None:
         """
         Test if handle offset is correctly set.
@@ -254,7 +249,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         else:
             self.assertEqual(handle.multicast_ptr, 0)
 
-    @skipIfRocm
     def test_nvshmem_put(self) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -276,7 +270,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
                 tensor, torch.zeros(numel, dtype=dtype, device=self.device)
             )
 
-    @skipIfRocm
     def test_nvshmem_get(self) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -298,6 +291,82 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             # TODO: remove after we have wait_signal
             dist.barrier()
 
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_ROCM, "nvshmem_get_out not yet implemented for ROCm"
+    )
+    def test_get(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        # Full-buffer get from a peer's allocation.
+        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        hdl = symm_mem.rendezvous(src, group=group_name)
+        dist.barrier()
+
+        if self.rank == 0:
+            dst = torch.empty_like(src)
+            symm_mem.get(dst, hdl, peer=1)
+            torch.testing.assert_close(dst, torch.ones_like(dst))
+
+        dist.barrier()
+
+        # Offset get: copy a sub-region of the peer's allocation.
+        src_base = symm_mem.empty(2 * numel, dtype=dtype, device=self.device)
+        src_base.copy_(
+            torch.arange(2 * numel, dtype=dtype, device=self.device)
+            + self.rank * 2 * numel
+        )
+        hdl = symm_mem.rendezvous(src_base, group=group_name)
+        dist.barrier()
+
+        if self.rank == 0:
+            offset = numel // 2
+            dst = torch.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.get(dst, hdl, peer=1, offset=offset)
+            expected = (
+                torch.arange(offset, offset + numel, dtype=dtype, device=self.device)
+                + 2 * numel
+            )
+            torch.testing.assert_close(dst, expected)
+
+            # Filling a sub-region: pass a view; the rest of dst is untouched.
+            larger_dst = torch.full((numel + 1,), -1, dtype=dtype, device=self.device)
+            symm_mem.get(larger_dst[:numel], hdl, peer=1, offset=offset)
+            self.assertEqual(larger_dst[:numel], expected)
+            self.assertEqual(larger_dst[numel], -1)
+
+            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[::2]
+            with self.assertRaisesRegex(ValueError, "contiguous"):
+                symm_mem.get(noncontig_dst, hdl, peer=1)
+
+            with self.assertRaisesRegex(ValueError, "non-negative"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    hdl,
+                    peer=1,
+                    offset=-1,
+                )
+
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                symm_mem.get(
+                    torch.empty(1, dtype=dtype, device=self.device),
+                    hdl,
+                    peer=1,
+                    offset=hdl.buffer_size // dst.element_size(),
+                )
+
+            with self.assertRaisesRegex(ValueError, "invalid peer"):
+                symm_mem.get(
+                    torch.empty(numel, dtype=dtype, device=self.device),
+                    hdl,
+                    peer=hdl.world_size,
+                )
+
+        dist.barrier()
+
 
 @instantiate_parametrized_tests
 @requires_nvshmem()
@@ -313,7 +382,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     def test_nvshmem_all_to_all(self) -> None:
         self._init_device()
 
@@ -337,7 +405,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         )
         torch.testing.assert_close(out, expected)
 
-    @skipIfRocm
     def test_all_to_all_vdev(self) -> None:
         self._init_device()
 
@@ -398,7 +465,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         )
         torch.testing.assert_close(out[:out_numel], expected)
 
-    @skipIfRocm
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_all_to_all_vdev_2d(self, align: int) -> None:
         torch.manual_seed(42 + self.rank)
@@ -507,7 +573,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             received_chunk = out[start : start + split]
             torch.testing.assert_close(received_chunk, chunk)
 
-    @skipIfRocm
     def test_all_to_all_vdev_2d_offset(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -718,7 +783,6 @@ class DispatchCombineTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_dispatch_combine(self, align: int) -> None:
         """
@@ -743,9 +807,6 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
-    # TODO: FIXIT. Currently, `MultiProcContinuousTest` treats the skip code as a
-    # failure
     @skip_if_lt_x_gpu(4)
     def test_dispatch_combine_subgroup(self) -> None:
         """
@@ -777,13 +838,15 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skipIfRocm
     @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
     @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
     def test_tile_reduce(self, tile_size: int, dtype: torch.dtype) -> None:
         full_size = 1024
-        assert tile_size <= full_size
+        if not (tile_size <= full_size):
+            raise AssertionError(
+                f"Expected tile_size <= full_size, got {tile_size} vs {full_size}"
+            )
 
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -811,7 +874,6 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
 
         torch.testing.assert_close(full_out, expected)
 
-    @skipIfRocm
     @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
     @parametrize(
@@ -826,8 +888,16 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         num_slices_row = (
             self.world_size // num_slices_col
         )  # number of tiles on row dimension
-        assert tile_size * num_slices_col <= full_size
-        assert tile_size * num_slices_row <= full_size
+        if not (tile_size * num_slices_col <= full_size):
+            raise AssertionError(
+                f"tile_size * num_slices_col > full_size: "
+                f"{tile_size * num_slices_col} vs {full_size}"
+            )
+        if not (tile_size * num_slices_row <= full_size):
+            raise AssertionError(
+                f"tile_size * num_slices_row > full_size: "
+                f"{tile_size * num_slices_row} vs {full_size}"
+            )
 
         self._init_device()
         group_name = dist.group.WORLD.group_name

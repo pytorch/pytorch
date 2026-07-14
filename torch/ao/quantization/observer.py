@@ -144,7 +144,7 @@ def _with_callable_args(cls_or_self, **kwargs):
     return r.with_callable_args(**kwargs)
 
 
-ABC: Any = ABCMeta("ABC", (object,), {})  # compatible with Python 2 *and* 3:
+ABC: Any = ABCMeta("ABC", (object,), {})
 
 
 class ObserverBase(ABC, nn.Module):
@@ -1061,7 +1061,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         self, delta_begin: torch.Tensor, delta_end: torch.Tensor, density: torch.Tensor
     ) -> torch.Tensor:
         r"""
-        Compute the norm of the values uniformaly distributed between
+        Compute the norm of the values uniformly distributed between
         delta_begin and delta_end.
         Currently only L2 norm is supported.
 
@@ -1158,7 +1158,6 @@ class HistogramObserver(UniformQuantizationObserverBase):
             # find the left and right bins between the quantile bounds
             l = start_bin
             r = end_bin
-            # pyrefly: ignore [bad-assignment]
             while l < end_bin and cSum[l] < next_alpha * total:
                 l = l + 1
             while r > start_bin and cSum[r] > next_beta * total:
@@ -1862,7 +1861,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         self.zero_point_dtype = zero_point_dtype
         self.preserve_zero = preserve_zero
         self.zero_point_domain = zero_point_domain
-        # populatd during forward
+        # populated during forward
         self.block_size = None
         self.original_dtype = None
 
@@ -1907,6 +1906,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
                         self.scale_dtype,
                         self.zero_point_dtype,
                         self.preserve_zero,
+                        # pyrefly: ignore [missing-attribute]
                         self.zero_point_domain.name,
                     ),
                 )
@@ -1943,6 +1943,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
                     self.target_dtype,
                     self.quant_min,
                     self.quant_max,
+                    # pyrefly: ignore [missing-attribute]
                     self.zero_point_domain.name,
                 ),
                 {},
@@ -1957,6 +1958,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
                     self.target_dtype,
                     self.quant_min,
                     self.quant_max,
+                    # pyrefly: ignore [missing-attribute]
                     self.zero_point_domain.name,
                 ),
                 {"output_dtype": self.original_dtype},

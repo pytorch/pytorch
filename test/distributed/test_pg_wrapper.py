@@ -45,24 +45,25 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
     def _validate_error(self, exception, op_type, rank, tensor, verify_diff=True):
         err = str(exception)
         self.assertTrue(
-            op_type in err, f"Got {err} but expected {op_type} to be in error."
+            op_type in err,
+            lambda msg: f"{msg}\nGot {err} but expected {op_type} to be in error.",
         )
         # User doesn't call barrier with tensor.
         if op_type != "BARRIER":
             self.assertTrue(
                 f"{list(tensor.shape)}" in err,
-                f"Did not find shapes {list(tensor.shape)} in error {err}",
+                lambda msg: f"{msg}\nDid not find shapes {list(tensor.shape)} in error {err}",
             )
             # For CUDA, only assert on device type, not index
             if device_type in str(tensor.device):
                 self.assertTrue(
                     device_type in err,
-                    f"Did not find {device_type} device in error {err}",
+                    lambda msg: f"{msg}\nDid not find {device_type} device in error {err}",
                 )
             else:
                 self.assertTrue(
                     str(tensor.device) in err,
-                    f"Did not find tensor device {str(tensor.device)} in error {err}",
+                    lambda msg: f"{msg}\nDid not find tensor device {str(tensor.device)} in error {err}",
                 )
             # C++ and python type strings are not exactly the same.
             if "float" in str(tensor.dtype):
@@ -77,7 +78,8 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             # Ensure info about how collectives diff is in the error.
             if verify_diff:
                 self.assertTrue(
-                    "Collectives differ in the following" in err, f"Got error {err}"
+                    "Collectives differ in the following" in err,
+                    lambda msg: f"{msg}\nGot error {err}",
                 )
 
     def _test_collective_hang(self, wrapper_pg, use_accel=False):
@@ -371,7 +373,33 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
-        @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
+        def test_reduce_scatter_tensor_coalesced_debug_mode(self):
+            torch.cuda.set_device(self.rank)
+            pg = self._create_wrapper_pg(with_new_group=True)
+            dev = torch.cuda.current_device()
+
+            out_shapes = [(2, 2), (3, 3)]
+            in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
+
+            outputs = [torch.zeros(s, device=dev) for s in out_shapes]
+            inputs = [torch.ones(s, device=dev) * (self.rank + 1) for s in in_shapes]
+
+            work = pg.reduce_scatter_tensor_coalesced(outputs, inputs)
+            work.wait()
+
+            for i, (output, _) in enumerate(zip(outputs, inputs)):
+                expected = torch.ones(out_shapes[i], device=dev) * sum(
+                    range(1, self.world_size + 1)
+                )
+                self.assertTrue(torch.allclose(output, expected))
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        @patch(
+            "torch.distributed.distributed_c10d.is_gloo_available",
+            lambda: False,
+        )
         def test_debug_level_detail_no_gloo(self):
             with self.assertRaisesRegex(
                 AssertionError, "ProcessGroupWrapper unsupported without GLOO backend"
@@ -421,7 +449,10 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
         @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
-        @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
+        @patch(
+            "torch.distributed.distributed_c10d.is_gloo_available",
+            lambda: False,
+        )
         def test_new_group_no_gloo(self):
             def patched_isinstance(obj, clazz):
                 if clazz is _ProcessGroupWrapper:
@@ -436,7 +467,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 self._create_wrapper_pg(with_new_group=True)
                 # nothing to assert, isinstance(pg, _ProcessGroupWrapper)
                 # should never be invoked since it is proceeded by
-                # _GLOO_AVAILABLE check, this test will fail on
+                # Gloo availability check, this test will fail on
                 # an unexpected NameError if not.
 
 
@@ -524,10 +555,26 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
         pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collective_shape_mismatch(pg, use_accel=True)
 
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_reduce_scatter_tensor_coalesced_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+
+        out_shapes = [(2, 2), (3, 3)]
+        in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
+        outputs = [torch.zeros(s) for s in out_shapes]
+        inputs = [torch.ones(s) * (self.rank + 1) for s in in_shapes]
+
+        work = pg.reduce_scatter_tensor_coalesced(outputs, inputs)
+        work.wait()
+        for i, (output, _) in enumerate(zip(outputs, inputs)):
+            expected = torch.ones(out_shapes[i]) * sum(range(1, self.world_size + 1))
+            self.assertTrue(torch.allclose(output, expected))
+
 
 if __name__ == "__main__":
-    assert not (torch.cuda.is_initialized() or torch.xpu.is_initialized()), (
-        "test_pg_wrapper must not have initialized CUDA/XPU context on main process"
-    )
+    if torch.cuda.is_initialized() or torch.xpu.is_initialized():
+        raise AssertionError(
+            "test_pg_wrapper must not have initialized CUDA/XPU context on main process"
+        )
 
     run_tests()

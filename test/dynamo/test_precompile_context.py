@@ -34,7 +34,7 @@ class PrecompileContextTests(InductorTestCase):
         def simple_function(x):
             return x.sin() + x.cos()
 
-        compiled_fn = torch.compile(simple_function)
+        compiled_fn = torch.compile(simple_function)  # noqa: UNSPECIFIED_BACKEND
 
         # Run the compiled function
         x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
@@ -50,7 +50,7 @@ class PrecompileContextTests(InductorTestCase):
         def simple_function(x):
             return x.sin() + x.cos()
 
-        compiled_fn = torch.compile(simple_function)
+        compiled_fn = torch.compile(simple_function)  # noqa: UNSPECIFIED_BACKEND
 
         # Run the compiled function
         x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
@@ -60,12 +60,16 @@ class PrecompileContextTests(InductorTestCase):
         self.assertEqual(len(PrecompileContext._backend_artifacts_by_key), 1)
         for key in PrecompileContext._backend_artifacts_by_key:
             result = PrecompileContext.serialize_artifact_by_key(key)
-            assert isinstance(result, BackendCacheArtifact)
+            if not isinstance(result, BackendCacheArtifact):
+                raise AssertionError(
+                    f"Expected BackendCacheArtifact, got {type(result)}"
+                )
             self.assertEqual(result.key, key)
 
         # This should still work
         result, _ = PrecompileContext.create_cache_entries()
-        assert len(result) == 1
+        if len(result) != 1:
+            raise AssertionError(f"Expected len(result) == 1, got {len(result)}")
 
     @requires_triton()
     def test_editable(self):
@@ -76,7 +80,7 @@ class PrecompileContextTests(InductorTestCase):
         def simple_function(x):
             return x.sin() + x.cos()
 
-        compiled_fn = torch.compile(simple_function)
+        compiled_fn = torch.compile(simple_function)  # noqa: UNSPECIFIED_BACKEND
 
         # Run the compiled function
         x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
@@ -94,13 +98,20 @@ class PrecompileContextTests(InductorTestCase):
         PrecompileContext.edit_artifact(key, edit_fn)
 
         result = PrecompileContext.serialize_artifact_by_key(key)
-        assert isinstance(result, BundledAOTAutogradCacheArtifact)
+        if not isinstance(result, BundledAOTAutogradCacheArtifact):
+            raise AssertionError(
+                f"Expected BundledAOTAutogradCacheArtifact, got {type(result)}"
+            )
         self.assertEqual(result.key, key)
 
         result, _ = PrecompileContext.create_cache_entries()
-        assert len(result) == 1
+        if len(result) != 1:
+            raise AssertionError(f"Expected len(result) == 1, got {len(result)}")
         aot_autograd_artifacts = next(iter(result.values())).backends
-        assert len(aot_autograd_artifacts) == 1
+        if len(aot_autograd_artifacts) != 1:
+            raise AssertionError(
+                f"Expected len(aot_autograd_artifacts) == 1, got {len(aot_autograd_artifacts)}"
+            )
         entry = next(iter(aot_autograd_artifacts.values())).content
         self.assertEqual(entry._my_private_field, 42)
 

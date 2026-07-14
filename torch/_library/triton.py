@@ -4,7 +4,7 @@ import inspect
 import logging
 import threading
 from collections.abc import Callable, Generator, Iterable
-from typing import Any, Optional, Union
+from typing import Any
 
 from torch.utils._exposed_in import exposed_in
 
@@ -296,11 +296,11 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
 @exposed_in("torch.library")
 def triton_op(
     name: str,
-    fn: Optional[Callable] = None,
+    fn: Callable | None = None,
     /,
     *,
-    mutates_args: Union[str, Iterable[str]],
-    schema: Optional[str] = None,
+    mutates_args: str | Iterable[str],
+    schema: str | None = None,
 ) -> Callable:
     """Create a custom operator whose implementation is backed by 1+ triton kernels.
 
@@ -402,7 +402,11 @@ def triton_op(
             name,
             backend_fn,
             mutates_args=mutates_args,
-            schema=infer_schema(fn, mutates_args=mutates_args),
+            schema=(
+                schema
+                if schema is not None
+                else infer_schema(fn, mutates_args=mutates_args)
+            ),
         )
         from .._subclasses.functional_tensor import FunctionalTensorMode
 
@@ -495,6 +499,33 @@ def is_wrap_triton_enabled() -> bool:
     return getattr(wrap_triton_enabled, "value", wrap_triton_enabled_default)
 
 
+def _is_interpreted_triton_kernel(triton_kernel: Callable) -> bool:
+    try:
+        from triton.runtime.interpreter import InterpretedFunction
+    except ImportError:
+        return False
+
+    return isinstance(triton_kernel, InterpretedFunction)
+
+
+def _has_interpreted_triton_autotuner(triton_kernel: Callable) -> bool:
+    try:
+        from triton.runtime.autotuner import Autotuner, Heuristics
+        from triton.runtime.interpreter import InterpretedFunction
+    except ImportError:
+        return False
+
+    seen: set[int] = set()
+    kernel: Any = triton_kernel
+    while isinstance(kernel, (Autotuner, Heuristics)):
+        kernel_id = id(kernel)
+        if kernel_id in seen:
+            return False
+        seen.add(kernel_id)
+        kernel = kernel.fn
+    return isinstance(kernel, InterpretedFunction)
+
+
 def capture_triton(triton_kernel: Callable, /) -> Any:
     """This API has been renamed to wrap_triton"""
     return wrap_triton(triton_kernel)
@@ -568,10 +599,25 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
 
     from torch._higher_order_ops.triton_kernel_wrap import TraceableTritonKernelWrapper
 
-    if not isinstance(triton_kernel, (JITFunction, Autotuner)):
-        raise RuntimeError(
-            "wrap_triton only works on functions annotated with triton.jit or triton.autotune"
-        )
-    if not is_wrap_triton_enabled():
+    if isinstance(triton_kernel, JITFunction):
+        if not is_wrap_triton_enabled():
+            return triton_kernel
+        return TraceableTritonKernelWrapper(triton_kernel, None, None)
+
+    if isinstance(triton_kernel, Autotuner):
+        # TRITON_INTERPRET=1 can make @triton.autotune wrap an
+        # InterpretedFunction. It is eager-launchable but lacks the JIT
+        # metadata the traceable wrapper needs.
+        if _has_interpreted_triton_autotuner(triton_kernel):
+            return triton_kernel
+        if not is_wrap_triton_enabled():
+            return triton_kernel
+        return TraceableTritonKernelWrapper(triton_kernel, None, None)
+
+    # TRITON_INTERPRET=1 makes @triton.jit return InterpretedFunction.
+    if _is_interpreted_triton_kernel(triton_kernel):
         return triton_kernel
-    return TraceableTritonKernelWrapper(triton_kernel, None, None)
+
+    raise RuntimeError(
+        "wrap_triton only works on functions annotated with triton.jit or triton.autotune"
+    )

@@ -11,14 +11,17 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
+import glob
 import importlib
+import importlib.util
 import os
+import platform
 import threading
 import traceback
 import warnings
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, cast, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NewType, Optional, TYPE_CHECKING
 
 import torch
 import torch._C
@@ -29,6 +32,8 @@ from . import _device_limits, gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
+    export_dot,
+    export_graph_data,
     graph,
     graph_pool_handle,
     is_current_stream_capturing,
@@ -52,7 +57,9 @@ _queued_calls: list[
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 
 _HAS_PYNVML = False
+_HAS_AMDSMI = False
 _PYNVML_ERR = None
+_AMDSMI_ERR = None
 try:
     from torch import version as _version
 
@@ -85,12 +92,37 @@ try:
                     paths = ["libamd_smi.so"]
                     if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
                         paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
+                    # TheRock ROCm wheels install the amdsmi python package in
+                    # site-packages/amdsmi and ship the native library under the
+                    # _rocm_sdk_core wheel (site-packages/_rocm_sdk_core/lib)
+                    # rather than on the loader path or under $ROCM_HOME. The
+                    # file there is a versioned soname (e.g. libamd_smi.so.26),
+                    # so amdsmi's bare CDLL("libamd_smi.so") can't find it. Locate
+                    # the package and append the concrete versioned files as a
+                    # last-resort fallback so the hook can redirect to them.
+                    if platform.system() == "Linux":
+                        paths = paths + self._rocm_sdk_core_amdsmi_paths()
                     self.paths: list[str] = paths
+
+                @staticmethod
+                def _rocm_sdk_core_amdsmi_paths() -> list[str]:
+                    try:
+                        spec = importlib.util.find_spec("_rocm_sdk_core")
+                    except (ImportError, ValueError):
+                        return []
+                    if spec is None or not spec.submodule_search_locations:
+                        return []
+                    found: list[str] = []
+                    for location in spec.submodule_search_locations:
+                        found += glob.glob(
+                            os.path.join(location, "lib", "libamd_smi.so*")
+                        )
+                    return sorted(found)
 
                 def hooked_CDLL(
                     self, name: str | Path | None, *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
-                    if name and Path(name).name == "libamd_smi.so":
+                    if name and Path(name).name.startswith("libamd_smi.so"):
                         for path in self.paths:
                             try:
                                 return self.original_CDLL(path, *args, **kwargs)
@@ -104,8 +136,24 @@ try:
                 def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
                     ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
 
-            with _amdsmi_cdll_hook():
-                import amdsmi  # type: ignore[import]
+            try:
+                with _amdsmi_cdll_hook():
+                    import amdsmi  # type: ignore[import]
+                _HAS_AMDSMI = True
+            except ModuleNotFoundError as err:
+                _AMDSMI_ERR = err
+                raise
+            except (KeyError, OSError) as err:
+                # The amdsmi python package is installed but its native library
+                # (libamd_smi.so) could not be discovered/loaded -- e.g. TheRock
+                # ROCm wheels lay amdsmi out so that its own find_smi_library()
+                # misses the versioned libamd_smi.so.* and raises KeyError. Treat
+                # this like a missing optional dependency (degrade to
+                # _HAS_AMDSMI=False) instead of aborting `import torch`.
+                _AMDSMI_ERR = err
+                raise ModuleNotFoundError(
+                    "amdsmi is installed but libamd_smi.so could not be loaded"
+                ) from err
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
@@ -187,16 +235,13 @@ def is_bf16_supported(including_emulation: bool = True):
     if torch.version.hip:
         return True
 
-    # If CUDA is not available, than it does not support bf16 either
+    # If CUDA is not available, then it does not support bf16 either
     if not is_available():
         return False
 
     device = torch.cuda.current_device()
 
-    # Check for CUDA version and device compute capability.
-    # This is a fast way to check for it.
-    cuda_version = torch.version.cuda
-    if cuda_version is not None and torch.cuda.get_device_properties(device).major >= 8:
+    if torch.cuda.get_device_properties(device).major >= 8:
         return True
 
     if not including_emulation:
@@ -248,7 +293,7 @@ class _CompatInterval:
     also allows excluding specific versions from the range.
     """
 
-    def __init__(self, start, exclude: Optional[set[int]] = None):
+    def __init__(self, start, exclude: set[int] | None = None):
         self.major, self.minor = start // 10, start % 10
         self.exclude = set() if exclude is None else exclude
 
@@ -291,7 +336,7 @@ class _CompatSet:
 # - The keys in dict correspond to known sm versions but the values
 #   are merely rules based on sm compatibility guarantees for NVIDIA
 #   devices while accounting for incompatibility of iGPU and dGPU.
-DEVICE_REQUIREMENT: dict[int, Union[_CompatSet, _CompatInterval]] = {
+DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
     50: _CompatInterval(start=50, exclude={53}),
     52: _CompatInterval(start=52, exclude={53}),
     53: _CompatSet({53}),
@@ -307,38 +352,78 @@ DEVICE_REQUIREMENT: dict[int, Union[_CompatSet, _CompatInterval]] = {
     89: _CompatInterval(start=89),
     90: _CompatInterval(start=90),
     100: _CompatInterval(start=100, exclude={101}),
-    101: _CompatSet({101, 110}),
+    101: _CompatSet({101, 110}),  # 101 was renamed to 110
     103: _CompatInterval(start=103),
-    110: _CompatInterval(start=110),
+    110: _CompatSet({101, 110}),  # 101 was renamed to 110
     120: _CompatInterval(start=120),
     121: _CompatInterval(start=121),
 }
 
+# CUDA 13.2 allows SBSA binaries to run on Jetson devices.
+# This dict can be combined with DEVICE_REQUIREMENT once
+# the minimum supported CUDA version is 13.2.
+DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION: dict[
+    int, _CompatSet | _CompatInterval
+] = DEVICE_REQUIREMENT | {
+    70: _CompatInterval(start=70),
+    80: _CompatInterval(start=80),
+    86: _CompatInterval(start=86),
+}
 
-# TORCH_CUDA_ARCH_LIST for PyTorch releases
-PYTORCH_RELEASES_CODE_CC: dict[str, set[int]] = {
-    "12.6": {50, 60, 70, 80, 86, 90},
-    "12.8": {70, 80, 86, 90, 100, 120},
-    "13.0": {75, 80, 86, 90, 100, 110, 120},
+# TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
+# Kept in sync with .ci/manywheel/build_cuda.sh by the validator in
+# .github/scripts/generate_binary_build_matrix.py.
+PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
+    "12.6": {
+        "x86_64": {50, 60, 70, 75, 80, 86, 90},
+        "aarch64": {80, 90},
+    },
+    "13.0": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.2": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
 
 
+def _device_requirement(code_cc):
+    if torch.version.cuda is None:
+        return None
+    requirement = (
+        DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION
+        if tuple(int(x) for x in torch.version.cuda.split(".")) >= (13, 2)
+        else DEVICE_REQUIREMENT
+    )
+    return requirement.get(code_cc, None)
+
+
+def _host_arch_key() -> str:
+    machine = platform.machine().lower()
+    return "aarch64" if machine == "aarch64" else "x86_64"
+
+
 def _code_compatible_with_device(device_cc: int, code_cc: int):
-    if code_cc not in DEVICE_REQUIREMENT:
+    compatible_devices = _device_requirement(code_cc)
+    if compatible_devices is None:
         warnings.warn(
             f"PyTorch was compiled with an unknown compute capability {code_cc // 10}.{code_cc % 10}. "
             + " Please create an issue on Github if this is a valid compute capability.",
             stacklevel=2,
         )
         return device_cc in _CompatInterval(start=code_cc)
-    return device_cc in DEVICE_REQUIREMENT[code_cc]
+    return device_cc in compatible_devices
 
 
 def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int]):
     name = get_device_name(device_index)
 
+    arch = _host_arch_key()
     compatible_releases: list[str] = []
-    for cuda, build_ccs in PYTORCH_RELEASES_CODE_CC.items():
+    for cuda, by_arch in PYTORCH_RELEASES_CODE_CC.items():
+        build_ccs = by_arch.get(arch, set())
         if any(_code_compatible_with_device(device_cc, cc) for cc in build_ccs):
             compatible_releases.append(cuda)
 
@@ -346,15 +431,32 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
         f"Found GPU{device_index} {name} which is of compute capability (CC) {device_cc // 10}.{device_cc % 10}.",
         "The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:",
     ] + [
-        f"- {cc // 10}.{cc % 10} which supports hardware CC {DEVICE_REQUIREMENT[cc]}"
+        f"- {cc // 10}.{cc % 10} which supports hardware CC {_device_requirement(cc)}"
         for cc in code_ccs
     ]
 
     if len(compatible_releases) > 0:
-        releases_str = ", ".join(compatible_releases)
+        version = torch.__version__
+        base_version = version.split("+")[0]
+        is_nightly = "dev" in base_version
+        index_root = (
+            "https://download.pytorch.org/whl/nightly"
+            if is_nightly
+            else "https://download.pytorch.org/whl"
+        )
         lines.append(
-            "Please follow the instructions at https://pytorch.org/get-started/locally/ to "
-            + f"install a PyTorch release that supports one of these CUDA versions: {releases_str}"
+            f"Your installed torch=={version} does not include kernels for this GPU. "
+            "Reinstall the same version against a CUDA build that does, e.g.:"
+        )
+        for cuda in compatible_releases:
+            cu_tag = "cu" + cuda.replace(".", "")
+            lines.append(
+                f"  For CUDA {cuda} use pip install torch=={base_version} --index-url {index_root}/{cu_tag}"
+            )
+    else:
+        lines.append(
+            f"No published PyTorch CUDA builds for release {torch.__version__} support this GPU. "
+            "Visit https://pytorch.org/get-started/locally/ to find a compatible release."
         )
 
     warnings.warn("\n".join(lines), stacklevel=2)
@@ -364,7 +466,11 @@ def _check_capability():
     if torch.version.cuda is None:  # on ROCm we don't want this check
         return
 
-    code_ccs = [_extract_arch_version(cc) for cc in get_arch_list()]
+    arch_list = get_arch_list()
+    if len(arch_list) == 0:
+        return
+
+    code_ccs = [_extract_arch_version(cc) for cc in arch_list]
     for d in range(device_count()):
         major, minor = get_device_capability(d)
         device_cc = 10 * major + minor
@@ -882,7 +988,7 @@ def _parse_visible_devices() -> list[int] | list[str]:
 
 
 def _raw_device_count_amdsmi() -> int:
-    if not _HAS_PYNVML:  # If amdsmi is not available
+    if not _HAS_AMDSMI:
         return -1
     try:
         amdsmi.amdsmi_init()
@@ -916,7 +1022,7 @@ def _raw_device_count_nvml() -> int:
 def _raw_device_uuid_amdsmi() -> list[str] | None:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
-    if not _HAS_PYNVML:  # If amdsmi is not available
+    if not _HAS_AMDSMI:
         return None
     try:
         amdsmi.amdsmi_init()
@@ -1111,9 +1217,15 @@ def device_count() -> int:
         return 0
     if _cached_device_count is not None:
         return _cached_device_count
-    # bypass _device_count_nvml() if rocm (not supported)
-    nvml_count = _device_count_amdsmi() if torch.version.hip else _device_count_nvml()
-    r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+    if _initialized or hasattr(_tls, "is_initializing"):
+        r = torch._C._cuda_getDeviceCount()
+    else:
+        # bypass _device_count_nvml() if rocm (not supported)
+        if torch.version.hip:
+            nvml_count = _device_count_amdsmi()
+        else:
+            nvml_count = _device_count_nvml()
+        r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
     # NB: Do not cache the device count prior to CUDA initialization, because
     # the number of devices can change due to changes to CUDA_VISIBLE_DEVICES
     # setting prior to CUDA initialization.
@@ -1124,7 +1236,7 @@ def device_count() -> int:
 
 def get_arch_list() -> list[str]:
     r"""Return list CUDA architectures this library was compiled for."""
-    if not is_available():
+    if not _is_compiled():
         return []
     arch_flags = torch._C._cuda_getArchFlags()
     if arch_flags is None:
@@ -1246,6 +1358,12 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
+def current_solver_handle():
+    r"""Return cusolverDnHandle_t pointer to current cuSOLVER handle"""
+    _lazy_init()
+    return torch._C._cuda_getCurrentSolverHandle()
+
+
 def set_sync_debug_mode(debug_mode: int | str) -> None:
     r"""Set the debug mode for cuda synchronizing operations.
 
@@ -1299,11 +1417,10 @@ def _get_pynvml_handler(device: Device = None):
 
 
 def _get_amdsmi_handler(device: Device = None):
-    if not _HAS_PYNVML:
+    if not _HAS_AMDSMI:
         raise ModuleNotFoundError(
             "amdsmi does not seem to be installed or it can't be imported."
-            # pyrefly: ignore [invalid-inheritance]
-        ) from _PYNVML_ERR
+        ) from _AMDSMI_ERR
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
@@ -1315,11 +1432,49 @@ def _get_amdsmi_handler(device: Device = None):
     return handle
 
 
+_cached_hip_to_amdsmi: dict[int, int] | None = None
+
+
+def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
+    r"""Return amdsmi index from HIP device index. They are not always the same.
+
+    Assume amdsmi_init() already completes successfully."""
+    global _cached_hip_to_amdsmi
+    if _cached_hip_to_amdsmi is None:
+        amdsmi_handles = amdsmi.amdsmi_get_processor_handles()
+
+        def gen():
+            for amdsmi_idx, handle in enumerate(amdsmi_handles):
+                info = amdsmi.amdsmi_get_gpu_enumeration_info(handle)
+                if "hip_id" in info:
+                    yield info["hip_id"], amdsmi_idx
+
+        _cached_hip_to_amdsmi = dict(gen())
+        if not _cached_hip_to_amdsmi and len(amdsmi_handles) > 1:
+            warnings.warn(
+                "Cannot translate HIP ID to AMD SMI ID due to"
+                " lack of translation information prior to ROCm 6.4."
+                " Functions that rely on amdsmi"
+                " (e.g. temperature()) may operate on wrong devices."
+            )
+    if device not in _cached_hip_to_amdsmi:
+        warnings.warn(
+            f"Cannot translate HIP ID {device} to AMD SMI ID due to"
+            " undetected HIP ID from amdsmi."
+            " amdsmi_get_gpu_enumeration_info() only report these HIP IDs"
+            f" {list(_cached_hip_to_amdsmi.keys())}."
+            " Functions that rely on amdsmi"
+            " (e.g. temperature()) may operate on wrong devices."
+        )
+    return _cached_hip_to_amdsmi.get(device, device)
+
+
 def _get_amdsmi_device_index(device: Device) -> int:
     r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
-    if type(visible_devices[0]) is str:
+    visible_device_is_str = type(visible_devices[0]) is str
+    if visible_device_is_str:
         uuids = _raw_device_uuid_amdsmi()
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
@@ -1332,7 +1487,10 @@ def _get_amdsmi_device_index(device: Device) -> int:
         raise RuntimeError(
             f"device {idx} is not visible (HIP_VISIBLE_DEVICES={visible_devices})"
         )
-    return idx_map[idx]
+    if visible_device_is_str:
+        return idx_map[idx]
+    else:
+        return _get_amdsmi_device_index_from_hip_index(idx_map[idx])
 
 
 def _get_amdsmi_device_memory_used(device: Device = None) -> int:
@@ -1568,6 +1726,7 @@ def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
 
 # pyrefly: ignore [deprecated]
 from .memory import *  # noqa: F403
+from .memory import _use_uvm
 from .random import *  # noqa: F403
 
 
@@ -1879,7 +2038,7 @@ def _compile_kernel(
         return getattr(result, mangled_name)
 
 
-from . import amp, jiterator, nvtx, profiler, sparse, tunable
+from . import amp, graph_annotations, jiterator, nvtx, profiler, sparse, tunable
 
 
 _POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
@@ -1888,26 +2047,36 @@ _POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 __all__ = [
     # Typed storage and tensors
     "BFloat16Storage",
+    # pyrefly: ignore [bad-dunder-all]
     "BFloat16Tensor",
     "BoolStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "BoolTensor",
     "ByteStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "ByteTensor",
     "CharStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "CharTensor",
     "ComplexDoubleStorage",
     "ComplexFloatStorage",
     "DoubleStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "DoubleTensor",
     "FloatStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "FloatTensor",
     "HalfStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "HalfTensor",
     "IntStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "IntTensor",
     "LongStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "LongTensor",
     "ShortStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "ShortTensor",
     "CUDAGraph",
     "CudaError",
@@ -1920,12 +2089,14 @@ __all__ = [
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_disabled",
     "caching_allocator_enable",
     "can_device_access_peer",
     "check_error",
     "cudaStatus",
     "cudart",
     "current_blas_handle",
+    "current_solver_handle",
     "current_device",
     "current_stream",
     "default_generators",
@@ -1935,6 +2106,8 @@ __all__ = [
     "device_memory_used",
     "device_of",
     "empty_cache",
+    "export_dot",
+    "export_graph_data",
     "get_allocator_backend",
     "CUDAPluggableAllocator",
     "change_current_allocator",
@@ -1949,6 +2122,7 @@ __all__ = [
     "get_stream_from_external",
     "get_sync_debug_mode",
     "graph",
+    "graph_annotations",
     "graph_pool_handle",
     "graphs",
     "has_half",

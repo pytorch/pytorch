@@ -2,8 +2,9 @@
 Docker Utility helpers for CLI tasks.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Optional
 
 import docker
 from docker.errors import APIError, NotFound
@@ -12,7 +13,7 @@ from docker.errors import APIError, NotFound
 logger = logging.getLogger(__name__)
 
 # lazy singleton so we don't reconnect every call
-_docker_client: Optional[docker.DockerClient] = None
+_docker_client: docker.DockerClient | None = None
 
 
 def _get_client() -> docker.DockerClient:
@@ -23,7 +24,7 @@ def _get_client() -> docker.DockerClient:
 
 
 def local_image_exists(
-    image_name: str, client: Optional[docker.DockerClient] = None
+    image_name: str, client: docker.DockerClient | None = None
 ) -> bool:
     """Return True if a local Docker image exists."""
     if not image_name:

@@ -30,7 +30,8 @@ class TestMoveConstructorsToGpu(TestCase):
         out_compiled, code = run_and_get_code(torch.compile(func), *args)
         self.assertEqual(out_eager, out_compiled)
 
-        assert len(code) == 1
+        if len(code) != 1:
+            raise AssertionError
         if expect_cpu:
             FileCheck().check("cpp_fused").run(code[0])
         else:
@@ -113,6 +114,28 @@ class TestMoveConstructorsToGpu(TestCase):
 
         inp = torch.rand([100])
         self._check_fn(foo, True, inp)
+
+    def test_random_constructor_not_moved(self):
+        from torch._inductor import config
+
+        for random_fn in [torch.randn, torch.rand]:
+            torch._dynamo.reset()
+
+            def foo(x, fn=random_fn):
+                values = fn(2, x.size(1)).to(x.device)
+                indices = torch.tensor([0, 2], dtype=torch.long).to(x.device)
+                return torch.index_add(x, 0, indices, values)
+
+            inp = torch.randn(4, 8, device=GPU_TYPE)
+
+            with config.patch(fallback_random=True):
+                torch.manual_seed(0)
+                out_eager = foo(inp)
+
+                torch.manual_seed(0)
+                out_compiled = torch.compile(foo)(inp)
+
+            self.assertEqual(out_eager, out_compiled)
 
 
 if __name__ == "__main__":

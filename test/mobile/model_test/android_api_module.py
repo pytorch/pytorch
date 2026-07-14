@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 from torch import Tensor
 
@@ -72,11 +70,11 @@ class AndroidAPIModule(torch.jit.ScriptModule):
         return (input, sum)
 
     @torch.jit.script_method
-    def optionalIntIsNone(self, input: Optional[int]) -> bool:
+    def optionalIntIsNone(self, input: int | None) -> bool:
         return input is None
 
     @torch.jit.script_method
-    def intEq0None(self, input: int) -> Optional[int]:
+    def intEq0None(self, input: int) -> int | None:
         if input == 0:
             return None
         return input

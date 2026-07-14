@@ -109,6 +109,7 @@ includes = [
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
     "torch/csrc/stable/*",
+    "test/cpp/c10d/*",
 ]
 
 includes = [os.path.join(proj_dir, include) for include in includes]
@@ -197,8 +198,7 @@ for hip_platform_file in hip_platform_files:
             print(f"{hip_platform_file} skipped")
         else:
             with open(hip_platform_file, "w") as sources:
-                for line in newlines:
-                    sources.write(line)
+                sources.writelines(newlines)
             print(f"{hip_platform_file} updated")
 
 # NOTE: MSLK sources needing hipify
@@ -225,8 +225,8 @@ mslk_dir = REPO_ROOT / "third_party/mslk/include/mslk/utils/"
 
 if not buck_build:
     mslk_original = mslk_dir / "tuning_cache.cuh"
-
-    extra_files.append(mslk_original.as_posix())
+    if mslk_original.exists():
+        extra_files.append(mslk_original.as_posix())
 
 # TODO Remove once the following submodules are updated to use hipify v2
 hipify_v1_to_v2_files = [
@@ -278,8 +278,7 @@ for hipify_v1_to_v2_file in hipify_v1_to_v2_files:
             print(f"{hipify_v1_to_v2_file} skipped")
         else:
             with open(hipify_v1_to_v2_file, "w") as sources:
-                for line in newlines:
-                    sources.write(line)
+                sources.writelines(newlines)
             print(f"{hipify_v1_to_v2_file} updated")
 
 
@@ -300,6 +299,10 @@ if not buck_build:
     # only update the file if it changes or doesn't exist
     do_write = True
     src_lines = None
+
+    if not mslk_move_src.exists():
+        _error = f"Error: Source file {mslk_move_src} does not exist"
+        sys.exit(_error)
     with open(mslk_move_src) as src:
         src_lines = src.readlines()
     if os.path.exists(mslk_move_dst):
@@ -311,6 +314,5 @@ if not buck_build:
             do_write = False
     if do_write:
         with open(mslk_move_dst, "w") as dst:
-            for line in src_lines:
-                dst.write(line)
+            dst.writelines(src_lines)
         print(f"{mslk_move_dst} updated")
