@@ -49,3 +49,8 @@ struct EighParams {
   uint32_t upper; // UPLO: 1 read upper triangle, 0 read lower
   float tol;
 };
+
+// for LU streaming-panel kernels
+C10_METAL_CONSTEXPR unsigned kLUStreamNT = 256;
+C10_METAL_CONSTEXPR unsigned kLUStreamWarpsPerTG =
+    kLUStreamNT / c10::metal::simdgroup_size;

@@ -9,7 +9,7 @@ from itertools import zip_longest
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._opaque_base import OpaqueBase
+from torch._custom_class_base import CustomClassBase
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _FlatLayout, _MeshLayout
 from torch.types import IntLikeType
@@ -150,7 +150,7 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    class DeviceMesh(OpaqueBase):
+    class DeviceMesh(CustomClassBase):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
@@ -843,41 +843,41 @@ else:
             layout: _MeshLayout,
             submesh_dim_names: tuple[str, ...],
         ) -> "DeviceMesh":
-            root_mesh = self._get_root_mesh()
-            slice_dim_group_name = []
-            if len(self._dim_group_names) > 0:
-                if len(self._dim_group_names) != len(not_none(self._mesh_dim_names)):
-                    raise AssertionError(
-                        "The number of dim_group_names and mesh_dim_names "
-                        "should have the same length if the rank is in the mesh."
-                    )
-                for name in submesh_dim_names:
-                    if name in not_none(self._mesh_dim_names):
-                        slice_dim_group_name.append(
-                            self._dim_group_names[
-                                not_none(self._mesh_dim_names).index(name)
-                            ]
+            with torch._dynamo.disable_nested_graph_breaks():
+                root_mesh = self._get_root_mesh()
+                slice_dim_group_name = []
+                dim_names = not_none(self._mesh_dim_names)
+                if len(self._dim_group_names) > 0:
+                    if len(self._dim_group_names) != len(dim_names):
+                        raise AssertionError(
+                            "The number of dim_group_names and mesh_dim_names "
+                            "should have the same length if the rank is in the mesh."
                         )
-                    else:
-                        # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
-                        # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
-                        # we don't want to optimize the code furthermore.
-                        flatten_mesh = self._flatten_mapping[name]
-                        slice_dim_group_name.append(
-                            flatten_mesh._dim_group_names[
-                                not_none(flatten_mesh._mesh_dim_names).index(name)
-                            ]
-                        )
-            res_submesh = DeviceMesh(
-                self._device_type,
-                _layout=layout,
-                _rank_map=root_mesh._rank_map,
-                mesh_dim_names=submesh_dim_names,
-                _root_mesh=root_mesh,
-                _init_backend=False,
-            )
-            res_submesh._dim_group_names = slice_dim_group_name
-            return res_submesh
+                    for name in submesh_dim_names:
+                        if name in dim_names:
+                            slice_dim_group_name.append(
+                                self._dim_group_names[dim_names.index(name)]
+                            )
+                        else:
+                            # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
+                            # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
+                            # we don't want to optimize the code furthermore.
+                            flatten_mesh = self._flatten_mapping[name]
+                            slice_dim_group_name.append(
+                                flatten_mesh._dim_group_names[
+                                    not_none(flatten_mesh._mesh_dim_names).index(name)
+                                ]
+                            )
+                res_submesh = DeviceMesh(
+                    self._device_type,
+                    _layout=layout,
+                    _rank_map=root_mesh._rank_map,
+                    mesh_dim_names=submesh_dim_names,
+                    _root_mesh=root_mesh,
+                    _init_backend=False,
+                )
+                res_submesh._dim_group_names = slice_dim_group_name
+                return res_submesh
 
         def _create_flatten_mesh(
             self,
@@ -1596,8 +1596,8 @@ _distributed_opaque_types_registered = False
 
 
 def _device_mesh_reconstruct_fn(
-    mesh: "OpaqueBase",
-    get_tracked_proxy: Callable[["OpaqueBase"], "torch.fx.Proxy | None"],
+    mesh: "CustomClassBase",
+    get_tracked_proxy: Callable[["CustomClassBase"], "torch.fx.Proxy | None"],
     tracer: Any,
 ) -> "torch.fx.Proxy | None":
     """Reconstruct a DeviceMesh submesh from a tracked ancestor mesh.
@@ -1675,13 +1675,13 @@ def _register_distributed_opaque_types():
         return
     _distributed_opaque_types_registered = True
 
-    from torch._library.opaque_object import MemberType, register_opaque_type
+    from torch._library.opaque_object import MemberType, register_custom_class
 
     _register_process_group_opaque_type()
 
-    register_opaque_type(
+    register_custom_class(
         DeviceMesh,
-        typ="reference",
+        typ="symbolic",
         reconstruct_fn=_device_mesh_reconstruct_fn,
         guard_fn=lambda obj: [
             obj._flatten_rank_map,
