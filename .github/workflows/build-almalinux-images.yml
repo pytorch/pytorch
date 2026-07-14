@@ -51,6 +51,5 @@ jobs:
           docker-image-name: almalinux-builder
           custom-tag-prefix: ${{ matrix.tag }}
           docker-build-dir: almalinux
-          use-remote-buildkit: true
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
           DOCKER_ID: ${{ secrets.DOCKER_ID }}
