@@ -1,23 +1,25 @@
-# Helpers for wiring Cluster Launch Control (CLC) based dynamic-persistent
-# tile scheduling into our grouped MM kernel. Modeled on the pattern from
-# Tri Dao's flash-attention PR #2218 ("CLC work stealing").
+# Helpers for wiring Cluster Launch Control (CLC) based
+# dynamic-persistent tile scheduling.  Modeled on the pattern from Tri
+# Dao's flash-attention PR #2218 ("CLC work stealing").
 #
-# The core idea: instead of each warp running its own StaticPersistentTileScheduler
-# (which advances a per-warp counter), all consumer warps share a single CLC
-# pipeline. A dedicated CLC producer warp (running on the cluster's leader CTA
-# only) issues clc_query instructions; the hardware dispatches tiles to CTAs
-# and writes responses into smem; all consumer warps wait on the response and
-# read the same tile coords in lockstep.
+# The core idea: instead of each warp running its own
+# StaticPersistentTileScheduler (which advances a per-warp counter),
+# all consumer warps share a single CLC pipeline.  A dedicated
+# scheduler warp on the leader CTA issues CLC queries; that warp also
+# participates as a pipeline consumer so all CTA warps advance the
+# shared response pipeline consistently.
 #
 # This file provides:
-#   - ClcState dataclass wrapping the CuTeDSL hardware scheduler + async
-#     pipeline + producer/consumer states.
-#   - helpers for constructing the CLC problem shape and response pipeline.
+# - ClcState dataclass wrapping the CuTeDSL hardware scheduler + async
+#   pipeline + producer/consumer states.
+# - Helpers for constructing the CLC problem shape and response
+#   pipeline.
 #
-# The grouped kernel uses two CLC layouts. Uniform-M/N groups use direct
-# (M, N, group) CLC coordinates. Non-uniform groups flatten work into L, and
-# the mainload warp broadcasts group/tile metadata through shared memory so
-# other consumer warps avoid repeating the group search.
+# The grouped kernel uses two CLC layouts. Uniform-M/N groups use
+# direct (M, N, group) CLC coordinates. Non-uniform groups flatten
+# work into L, and the mainload warp broadcasts group/tile metadata
+# through shared memory so other consumer warps avoid repeating the
+# group search.
 
 from dataclasses import dataclass
 
@@ -35,15 +37,12 @@ from cutlass.utils import (
 class ClcState:
     """Owns the runtime state shared by all CLC consumers + producer.
 
-    Built once in the kernel after pipeline init; passed to every warp branch
-    so that each warp's per-tile loop consumes from the same hardware CLC
-    pipeline. The CLC producer warp (single warp on the leader CTA) drives
-    prefetch_next_work; everyone else (including same warp position on the
-    non-leader CTA in the cluster) calls consumer_wait / get_current_work /
-    consumer_release.
-
-    All four members are mutable state from cute.jit's perspective; they need
-    extract / new round-tripping so the @cute.jit boundary preserves them.
+    Built once in the kernel after pipeline init; passed to every warp
+    branch so that each warp's per-tile loop consumes from the same
+    hardware CLC pipeline.  The leader CTA's scheduler warp drives
+    prefetch_next_work; all scheduler/mainload/MMA/epilog warp
+    positions, including that leader scheduler warp, call
+    consumer_wait/get_current_work/consumer_release.
     """
 
     _hw_scheduler: ClcDynamicPersistentTileScheduler
@@ -83,9 +82,9 @@ class ClcState:
         )
         return cutlass.utils.WorkTileInfo(work_tile.tile_idx, is_valid)
 
-    # Producer-side: only called by the dedicated CLC scheduler warp on the
-    # leader CTA. Waits for an empty pipeline slot, then issues a CLC query
-    # that hardware will fulfill into that slot.
+    # Producer-side: only called by the dedicated CLC scheduler warp
+    # on the leader CTA.  Waits for an empty pipeline slot, then
+    # issues a CLC query that hardware will fulfill into that slot.
     def prefetch_next_work(self, *, loc=None, ip=None):
         self._pipeline.producer_acquire(self._producer_state, loc=loc, ip=ip)
         mbarrier_addr = self._pipeline.producer_get_barrier(
@@ -98,19 +97,19 @@ class ClcState:
     def consumer_wait(self, *, loc=None, ip=None):
         self._pipeline.consumer_wait(self._consumer_state, loc=loc, ip=ip)
 
-    # Consumer-side: release the stage (one arrival per consumer warp; barrier
-    # advances when all consumer warps have arrived).
+    # Consumer-side: release the stage (one arrival per consumer warp;
+    # barrier advances when all consumer warps have arrived).
     def consumer_release(self, *, loc=None, ip=None):
         self._pipeline.consumer_release(self._consumer_state, loc=loc, ip=ip)
         self._consumer_state.advance(loc=loc, ip=ip)
 
-    # Producer-side cleanup. Drains the pipeline so non-leader CTAs in the
-    # cluster can finish.
+    # Producer-side cleanup.  Drains the pipeline so non-leader CTAs
+    # in the cluster can finish.
     def producer_tail(self, *, loc=None, ip=None):
         self._pipeline.producer_tail(self._producer_state, loc=loc, ip=ip)
 
-    # MLIR value round-tripping. Pattern is the standard CuTeDSL one used
-    # everywhere a dataclass crosses a cute.jit boundary.
+    # MLIR value round-tripping.  Pattern is the standard CuTeDSL one
+    # used everywhere a dataclass crosses a cute.jit boundary.
     def __extract_mlir_values__(self):
         values, self._values_pos = [], []
         for obj in (
@@ -149,13 +148,13 @@ def make_clc_problem_shape(
 ) -> ClcDynamicPersistentTileSchedulerParams:
     """Build CLC scheduler parameters for either flattened or direct work.
 
-    The default layout flattens grouped work into L. Uniform-M/N problems can
-    instead provide their CTA-space (M, N, group) shape directly.
+    The default layout flattens grouped work into L. Uniform-M/N
+    problems can instead provide their CTA-space (M, N, group) shape
+    directly.
 
     `swizzle_size`/`raster_along_m` (v4.5.2 CLC scheduler) control the
     dispatch order across the (M, N) cluster grid; defaults give the
-    pre-v4.5.2 pass-through behavior. Useful as an L2-locality tuning knob
-    when problem_shape has multi-axis cluster work.
+    pre-v4.5.2 pass-through behavior.
     """
     if problem_shape_ntile_mnl is None:
         problem_shape_ntile_mnl = (
@@ -183,19 +182,20 @@ def create_clc_pipeline(
     """Construct the PipelineClcFetchAsync.
 
     Args:
-      barrier_storage: smem pointer to the pipeline mbarrier array (2 *
-        num_stages Int64s)
+      barrier_storage: smem pointer to the pipeline mbarrier array (2
+                       * num_stages Int64s)
       num_stages: number of CLC response slots (>= 1)
-      num_consumer_warps: total consumer warps PER CTA (every launched warp
-        that is not the CLC producer counts here)
+      num_consumer_warps: total CLC-consuming warps per CTA,
+                          including the scheduler warp
       cluster_size: number of CTAs in the cluster
-      cta_layout_vmnk: cluster layout (used by PipelineClcFetchAsync to know
-        signaling mask)
+      cta_layout_vmnk: cluster layout (used by PipelineClcFetchAsync
+                       to know signaling mask)
 
-    Producer count is 1 (CLC pipeline is producer-driven by a single thread
-    via elect_one in advance_to_next_work). Consumer count is
-    `WARP_SIZE * num_consumer_warps * cluster_size` because every consumer
-    warp in every CTA arrives on the CTA-0 empty barrier per stage.
+    Producer count is 1 (CLC pipeline is producer-driven by a single
+    thread via elect_one in advance_to_next_work).  Consumer count is
+    `WARP_SIZE * num_consumer_warps * cluster_size` because every
+    consumer warp in every CTA arrives on the CTA-0 empty barrier per
+    stage.
     """
     producer_group = cutlass_pipeline.CooperativeGroup(cutlass_pipeline.Agent.Thread)
     consumer_group = cutlass_pipeline.CooperativeGroup(

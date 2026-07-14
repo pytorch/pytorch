@@ -15,18 +15,6 @@ from ._clc_scheduler import ClcState, create_clc_pipeline, make_clc_problem_shap
 
 
 class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler):
-    """Wraps the static-persistent group scheduler so we can call
-    `delinearize_z(cta_tile_coord, problem_shape)` on a tile coordinate that
-    comes from CLC dispatch instead of the base class's own iteration state.
-
-    For groups with non-uniform M/N, mainload broadcasts the result through
-    `tile_meta`. Uniform-M/N groups receive direct (M, N, group) CLC coordinates.
-
-    The base class constructor requires per-iteration state we don't use
-    (num_persistent_clusters, current_work_linear_idx, cta_id_in_cluster,
-    num_tiles_executed); `create_for_clc` passes placeholders for those.
-    """
-
     @classmethod
     def create_for_clc(
         cls,
@@ -35,8 +23,6 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
         cluster_tile_shape_mnk,
         problem_shape_mnkl,
     ):
-        # The four Int32 placeholders below are static-persistent iteration
-        # state required by the base constructor but unused under CLC.
         return cls(
             tile_sched_params,
             cutlass.Int32(1),  # num_persistent_clusters (unused)
@@ -137,50 +123,11 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
 
 
 class Sm100GroupedBlockScaledGemmKernel:
-    """This example demonstrates an implementation of grouped blockscaled GEMM using a TMA plus Blackwell SM100 TensorCore
-    warp-specialized persistent kernel.
-
-    :param sf_vec_size: Scalefactor vector size.
-    :type sf_vec_size: int
-    :param mma_tiler_mn: Shape of the Matrix Multiply-Accumulate (MMA) tile (M,N)
-    :type mma_tiler_mn: Tuple[int, int]
-    :param cluster_shape_mn: Cluster dimensions (M,N) for parallel processing
-    :type cluster_shape_mn: Tuple[int, int]
-
-    :note: In current version, A and B tensors must have the same data type
-        - i.e., Float8E4M3FN for A and Float8E5M2 for B is not supported
-
-    :note: Supported combinations of A/B data types, SF data typs and SF vector size:
-        - MXF8: A/B: Float8E5M2/Float8E4M3FN + SF: Float8E8M0FNU + sf_vec_size: 32
-        - MXF4: A/B: Float4E2M1FN + SF: Float8E8M0FNU + sf_vec_size: 32
-        - NVF4: A/B: Float4E2M1FN + SF: Float8E8M0FNU/Float8E4M3FN + sf_vec_size: 16
-
-    :note: Supported accumulator data types:
-        - Float32
-
-    :note: Supported C data types:
-        - Float32
-        - Float16/BFloat16
-        - Float8E4M3FN/Float8E5M2
-    :note: Constraints:
-        - MMA tiler M must be 128 or 256 (use_2cta_instrs)
-        - MMA tiler N must be 64/128/256
-        - Cluster shape M must be multiple of 2 if Mma tiler M is 256
-        - Cluster shape M/N must be positive and power of 2, total cluster size <= 16
-        - Cluster shape M/N must be <= 4 for scale factor multicasts due to limited size of scale factors
-    """
-
-    # Compile-time tuning knobs.
     AB_TMA_LOAD_UNROLL = 4
     NUM_WARPS_PER_CTA = 8
     GENERIC_REG_REQUIREMENT = 136
     ACCUM_REG_REQUIREMENT = 168
-    # CLC dispatch swizzle (v4.5.2+). 1 = pass-through (linear order along L
-    # dim). Higher values reorder dispatches across the (M, N) cluster grid
-    # for better L2 locality. NOTE: for our current problem_shape
-    # (cluster_m, cluster_n, total_num_clusters), the M and N cluster dims
-    # are 1 each (all work along L), so swizzle has limited applicability
-    # until we restructure problem_shape to expose MN locality.
+    # CLC dispatch swizzle; currently mostly inert because work is along L.
     CLC_SWIZZLE_SIZE = 1
 
     def __init__(
@@ -191,26 +138,12 @@ class Sm100GroupedBlockScaledGemmKernel:
         transpose_ab: bool = False,
         uniform_mn_groups: bool = False,
     ):
-        """Initializes the configuration for a Blackwell grouped blockscaled GEMM kernel.
-
-        Besides configurations for dense persistent blockscaled GEMM, there is an extra config specific to grouped blockscaled GEMM:
-
-        :param sf_vec_size: Scalefactor vector size.
-        :type sf_vec_size: int
-        :param mma_tiler_mn: tuple (M, N) shape of the MMA instruction.
-        :type mma_tiler_mn: tuple[int, int]
-        :param cluster_shape_mn: tuple (ClusterM, ClusterN) shape of the cluster.
-        :type cluster_shape_mn: tuple[int, int]
-        :param transpose_ab: Compile-time mode that swaps A/B and SFA/SFB roles.
-        :type transpose_ab: bool
-        """
         self.acc_dtype = cutlass.Float32
         self.sf_vec_size = sf_vec_size
         self.use_2cta_instrs = mma_tiler_mn[0] == 256
         self.cluster_shape_mn = cluster_shape_mn
         self.transpose_ab = transpose_ab
         self.uniform_mn_groups = uniform_mn_groups
-        # K dimension is deferred in _setup_attributes
         self.mma_tiler = (*mma_tiler_mn, 1)
 
         self.cta_group = (
@@ -220,9 +153,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         self.tensormap_update_mode = utils.TensorMapUpdateMode.SMEM
 
         self.occupancy = 1
-        # Warp roles with CLC scheduling. This mirrors the C++ warp categories:
-        # epi_load is reserved, but this epilogue has no producer load, so the
-        # warp is not a participant in the CLC pipeline.
+        # Warp roles; epi_load is reserved but inactive.
         #   - mma warp:           0
         #   - scheduler warp:     1  (CLC producer)
         #   - mainloop load warp: 2  (A/B/SF tensormap update/fence)
@@ -250,7 +181,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                 f"{self.NUM_WARPS_PER_CTA}"
             )
         self.threads_per_cta = 32 * self.NUM_WARPS_PER_CTA
-        # Set barrier for epilogue sync and tmem ptr sync
         self.epilog_sync_barrier = pipeline.NamedBarrier(
             barrier_id=1,
             num_threads=32 * len(self.epilog_warp_id),
@@ -259,49 +189,19 @@ class Sm100GroupedBlockScaledGemmKernel:
             barrier_id=2,
             num_threads=32 * len((self.mma_warp_id, *self.epilog_warp_id)),
         )
-        # Barrier between MMA warp (which does initial tensormap init from
-        # the host-provided copy_atom) and the mainloop load warp (which
-        # then mutates and uses the descriptors per group). Only these two
-        # warps participate; the per-group update happens inline in the
-        # mainload warp now, so no inter-warp tensormap-handoff barriers
-        # are needed during the iteration.
+        # A/B descriptor init handshake.
         self.tensormap_ab_init_barrier = pipeline.NamedBarrier(
             barrier_id=3,
             num_threads=32 * 2,  # MMA + mainload
         )
-        # (Previously: epilog_tensormap_init_barrier coordinated epilog[0]
-        # finishing C-descriptor init with epi_load warp before epi_load used
-        # the descriptor. After moving the C tensormap update inline into
-        # epilog[0], epi_load no longer touches the C descriptor, so this
-        # init handshake protects nothing. Removed.)
-        # Sync point used by the mainload warp to broadcast per-tile metadata
-        # (group_idx, cta_tile_idx_m/n, k_tile_count, problem_shape_mnk) to
-        # the mma and epilog warps via the tile_meta smem region. Replaces
-        # the per-warp delinearize_z that previously ran in 6 warps per tile;
-        # the producer warp does the group search once and shares the result.
+        # Non-uniform metadata handoff.
         self.tile_metadata_ready_barrier = pipeline.NamedBarrier(
             barrier_id=4,
-            # mainload (producer) + mma + 4 epilog (consumers)
             num_threads=32 * (2 + len(self.epilog_warp_id)),
         )
         self.smem_capacity = utils.get_smem_capacity_in_bytes("sm_100")
 
-    # Set up configurations that dependent on gemm inputs.
     def _setup_attributes(self):
-        """Set up configurations that are dependent on GEMM inputs
-
-        This method configures various attributes based on the input tensor properties
-        (data types, leading dimensions) and kernel settings:
-        - Configuring tiled MMA
-        - Computing MMA/cluster/tile shapes
-        - Computing cluster layout
-        - Computing multicast CTAs for A/B/SFA/SFB
-        - Computing epilogue subtile
-        - Setting up A/B/SFA/SFB/C stage counts in shared memory
-        - Computing A/B/SFA/SFB/C shared memory layout
-        - Checking reserved smem bytes size capacity for mbar, tensor memory management and tensormap updates utilization
-        """
-        # Compute mma instruction shapes
         # (MMA_Tile_Shape_M, MMA_Tile_Shape_N, MMA_Inst_Shape_K)
         self.mma_inst_shape_mn = (
             self.mma_tiler[0],
@@ -335,7 +235,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.mma_inst_shape_mn_sfb,
         )
 
-        # Compute mma/cluster/tile shapes
         mma_inst_shape_k = cute.size(tiled_mma.shape_mnk, mode=[2])
         mma_inst_tile_k = 4
         self.mma_tiler = (
@@ -357,7 +256,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             x * y for x, y in zip(self.cta_tile_shape_mnk, (*self.cluster_shape_mn, 1))
         )
 
-        # Compute cluster layout
         self.cluster_layout_vmnk = cute.tiled_divide(
             cute.make_layout((*self.cluster_shape_mn, 1)),
             (tiled_mma.thr_id.shape,),
@@ -367,7 +265,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             (tiled_mma_sfb.thr_id.shape,),
         )
 
-        # Compute number of multicast CTAs for A/B
         self.num_mcast_ctas_a = cute.size(self.cluster_layout_vmnk.shape[2])
         self.num_mcast_ctas_b = cute.size(self.cluster_layout_vmnk.shape[1])
         self.num_mcast_ctas_sfb = cute.size(self.cluster_layout_sfb_vmnk.shape[1])
@@ -375,7 +272,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         self.is_b_mcast = self.num_mcast_ctas_b > 1
         self.is_sfb_mcast = self.num_mcast_ctas_sfb > 1
 
-        # Compute epilogue subtile
         self.epi_tile = sm100_utils.compute_epilogue_tile_shape(
             self.cta_tile_shape_mnk,
             self.use_2cta_instrs,
@@ -383,12 +279,9 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.c_dtype,
         )
 
-        # CLC pipeline depth. 1 stage means we always wait for the just-issued
-        # query to land before consumers read it (matches flash-attn PR #2218).
-        # Higher depth would let the producer pre-fetch further ahead.
+        # Single-stage CLC: issue, wait, consume.
         self.num_clc_stage = 1
 
-        # Setup A/B/C stage count in shared memory and ACC stage count in tensor memory
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
             self.mma_tiler,
@@ -403,7 +296,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.occupancy,
         )
 
-        # Compute A/B/SFA/SFB/C shared memory layout
         self.a_smem_layout_staged = sm100_utils.make_smem_layout_a(
             tiled_mma,
             self.mma_tiler,
@@ -441,7 +333,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             num_c_stage=self.num_c_stage,
         )
 
-        # Use utils.TensorMapUpdateMode.SMEM by default
         tensormap_smem_bytes = (
             Sm100GroupedBlockScaledGemmKernel.bytes_per_tensormap
             * Sm100GroupedBlockScaledGemmKernel.num_tensormaps
@@ -483,51 +374,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         max_active_clusters: cutlass.Constexpr[int],
         stream: cuda.CUstream,
     ):
-        """Execute the GEMM operation in steps:
-        - Setup static attributes before smem/grid/tma computation
-        - Setup TMA load/store atoms and tensors
-        - Compute grid size with regard to hardware constraints
-        - Define shared storage for kernel
-        - Launch the kernel synchronously
-
-        For grouped GEMM, tensor shapes, tensor strides, and tensor address are all provided
-        by different tensors in global memory. The "initial" tensors only carry data type and
-        majorness information.
-
-        :param initial_a: Initial tensor A, used for data type and majorness information.
-        :type initial_a: cute.Tensor
-        :param initial_b: Initial tensor B, used for data type and majorness information.
-        :type initial_b: cute.Tensor
-        :param initial_c: Initial tensor C, used for data type and majorness information.
-        :type initial_c: cute.Tensor
-        :param initial_sfa: Initial tensor SFA, used for data type and majorness information.
-        :type initial_sfa: cute.Tensor
-        :param initial_sfb: Initial tensor SFB, used for data type and majorness information.
-        :type initial_sfb: cute.Tensor
-        :param group_count: The number of GEMM groups.
-        :type group_count: cutlass.Int32
-        :param problem_shape_mnkl: Tensor containing the (M, N, K, L) shape for each group.
-        :type problem_shape_mnkl: cute.Tensor
-        :param strides_abc: Tensor containing the strides for A, B, and C for each group.
-        :type strides_abc: cute.Tensor
-        :param tensor_address_abc: Tensor containing the base addresses for A, B, and C for each group.
-        :type tensor_address_abc: cute.Tensor
-        :param tensor_address_sfasfb: Tensor containing the base addresses for SFA and SFB for each group.
-        :type tensor_address_sfasfb: cute.Tensor
-        :param tensor_addr_global_scale: Tensor containing the base address for the global scale for each group.
-        :type tensor_addr_global_scale: cute.Tensor
-        :param estimate_total_num_clusters: Estimated total number of clusters needed for all groups.
-        :type estimate_total_num_clusters: int
-        :param total_num_clusters: Total number of clusters needed for all groups.
-        :type total_num_clusters: cute.Tensor
-        :param tensormap_cute_tensor: Tensor for storing tensormaps.
-        :type tensormap_cute_tensor: cute.Tensor
-        :param max_active_clusters: Maximum number of active clusters.
-        :type max_active_clusters: cutlass.Constexpr[int]
-        :param stream: CUDA stream for asynchronous execution.
-        :type stream: cuda.CUstream
-        :raises TypeError: If A and B data types do not match.
-        """
         tensor_a = initial_a
         tensor_b = initial_b
         tensor_sfa = initial_sfa
@@ -548,12 +394,9 @@ class Sm100GroupedBlockScaledGemmKernel:
         if cutlass.const_expr(self.a_dtype != self.b_dtype):
             raise TypeError(f"Type mismatch: {self.a_dtype} != {self.b_dtype}")
 
-        # Setup attributes that dependent on gemm inputs
         self._setup_attributes()
 
-        # Setup sfa/sfb tensor by filling A/B tensor to scale factor atom layout.
-        # Use the A/B shapes to build the atom layout, but keep the scale
-        # pointer (blocked MKL) so that the sf_vec dimension is broadcast.
+        # Keep blocked MKL scale pointers while reusing A/B shapes.
         sfa_layout = blockscaled_utils.tile_atom_to_shape_SF(
             tensor_a.shape, self.sf_vec_size
         )
@@ -587,7 +430,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         )
         atom_thr_size = cute.size(tiled_mma.thr_id.shape)
 
-        # Setup TMA load for A
         a_op = sm100_utils.cluster_shape_to_tma_atom_A(
             self.cluster_shape_mn, tiled_mma.thr_id
         )
@@ -601,7 +443,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.cluster_layout_vmnk.shape,
         )
 
-        # Setup TMA load for B
         b_op = sm100_utils.cluster_shape_to_tma_atom_B(
             self.cluster_shape_mn, tiled_mma.thr_id
         )
@@ -615,7 +456,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.cluster_layout_vmnk.shape,
         )
 
-        # Setup TMA load for SFA
         sfa_op = sm100_utils.cluster_shape_to_tma_atom_A(
             self.cluster_shape_mn, tiled_mma.thr_id
         )
@@ -632,7 +472,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             internal_type=cutlass.Int16,
         )
 
-        # Setup TMA load for SFB
         sfb_op = sm100_utils.cluster_shape_to_tma_atom_SFB(
             self.cluster_shape_mn, tiled_mma.thr_id
         )
@@ -657,7 +496,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             a_copy_size + b_copy_size + sfa_copy_size + sfb_copy_size
         ) * atom_thr_size
 
-        # Setup TMA store for C
         epi_smem_layout = cute.slice_(self.c_smem_layout_staged, (None, None, 0))
         tma_atom_c, tma_tensor_c = cpasync.make_tiled_tma_atom(
             cpasync.CopyBulkTensorTileS2GOp(),
@@ -701,7 +539,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             // 8
         )
 
-        # Define shared storage for kernel
         @cute.struct
         class SharedStorage:
             tensormap_buffer: cute.struct.MemRange[
@@ -713,12 +550,10 @@ class Sm100GroupedBlockScaledGemmKernel:
             acc_empty_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_acc_stage]
             tmem_dealloc_mbar_ptr: cute.struct.MemRange[cutlass.Int64, 1]
             tmem_holding_buf: cute.struct.MemRange[cutlass.Int32, 1]
-            # CLC pipeline: 2 mbarriers per stage (full + empty); 4 Int32s
-            # per stage hold the CLC response (m_idx, n_idx, l_idx, valid).
+            # CLC response: (m_idx, n_idx, l_idx, valid).
             clc_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_clc_stage * 2]
             clc_response: cute.struct.MemRange[cutlass.Int32, self.num_clc_stage * 4]
-            # Per-tile metadata broadcast by the mainload warp to mma/epilog
-            # warps after delinearize_z. Fields (in order):
+            # Non-uniform group metadata:
             #   [0] group_idx
             #   [1] cta_tile_idx_m
             #   [2] cta_tile_idx_n
@@ -766,7 +601,6 @@ class Sm100GroupedBlockScaledGemmKernel:
 
         self.shared_storage = SharedStorage
 
-        # Launch the kernel synchronously
         self.kernel(
             tiled_mma,
             tiled_mma_sfb,
@@ -807,7 +641,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         )
         return
 
-    #  GPU device kernel
     @cute.kernel
     def kernel(
         self,
@@ -841,9 +674,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         tensormaps: cute.Tensor,
         direct_problem_shape_mnl,
     ):
-        """
-        GPU device kernel performing the grouped GEMM computation.
-        """
         warp_idx = cute.arch.warp_idx()
         warp_idx = cute.arch.make_warp_uniform(warp_idx)
         if warp_idx == self.scheduler_warp_id:
@@ -855,10 +685,6 @@ class Sm100GroupedBlockScaledGemmKernel:
 
         use_2cta_instrs = cute.size(tiled_mma.thr_id.shape) == 2
 
-        #
-        # Setup cta/thread coordinates
-        #
-        # Coords inside cluster
         bidx, bidy, bidz = cute.arch.block_idx()
         mma_tile_coord_v = bidx % cute.size(tiled_mma.thr_id.shape)
         is_leader_cta = mma_tile_coord_v == 0
@@ -871,15 +697,11 @@ class Sm100GroupedBlockScaledGemmKernel:
         block_in_cluster_coord_sfb_vmnk = cluster_layout_sfb_vmnk.get_flat_coord(
             cta_rank_in_cluster
         )
-        # coord inside cta
         tidx, _, _ = cute.arch.thread_idx()
         tile_sched_params = self._compute_tile_sched(
             total_num_clusters[0], self.cluster_shape_mn
         )
 
-        #
-        # Alloc and init: tensormap buffer, a+b full/empty, accumulator full/empty, tensor memory dealloc barrier
-        #
         smem = utils.SmemAllocator()
         storage = smem.allocate(self.shared_storage)
 
@@ -905,7 +727,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         tmem_dealloc_mbar_ptr = storage.tmem_dealloc_mbar_ptr.data_ptr()
         tmem_holding_buf = storage.tmem_holding_buf.data_ptr()
 
-        # Initialize mainloop ab_pipeline (barrier) and states
         ab_pipeline_producer_group = pipeline.CooperativeGroup(pipeline.Agent.Thread)
         num_tma_producer = self.num_mcast_ctas_a + self.num_mcast_ctas_b - 1
         ab_pipeline_consumer_group = pipeline.CooperativeGroup(
@@ -920,7 +741,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             cta_layout_vmnk=cluster_layout_vmnk,
         )
 
-        # Initialize acc_pipeline (barrier) and states
         acc_pipeline_producer_group = pipeline.CooperativeGroup(pipeline.Agent.Thread)
         num_acc_consumer_threads = 2 if use_2cta_instrs else 1
         acc_pipeline_consumer_group = pipeline.CooperativeGroup(
@@ -934,7 +754,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             cta_layout_vmnk=cluster_layout_vmnk,
         )
 
-        # Tensor memory dealloc barrier init
         if use_2cta_instrs:
             if warp_idx == self.scheduler_warp_id:
                 num_tmem_dealloc_threads = 32
@@ -943,12 +762,8 @@ class Sm100GroupedBlockScaledGemmKernel:
                         tmem_dealloc_mbar_ptr, num_tmem_dealloc_threads
                     )
 
-        # Cluster arrive after barrier init
         pipeline_init_arrive(cluster_shape_mn=self.cluster_shape_mn, is_relaxed=True)
 
-        #
-        # Setup smem tensor A/B/SFA/SFB/C
-        #
         sC = storage.sC.get_tensor(
             c_smem_layout_staged.outer, swizzle=c_smem_layout_staged.inner
         )
@@ -964,9 +779,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         sSFA = storage.sSFA.get_tensor(sfa_smem_layout_staged)
         # (MMA, MMA_N, MMA_K, STAGE)
         sSFB = storage.sSFB.get_tensor(sfb_smem_layout_staged)
-        #
-        # Compute multicast mask for A/B/SFA/SFB buffer full
-        #
         a_full_mcast_mask = None
         b_full_mcast_mask = None
         sfa_full_mcast_mask = None
@@ -985,9 +797,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                 cluster_layout_sfb_vmnk, block_in_cluster_coord_sfb_vmnk, mcast_mode=1
             )
 
-        #
-        # Local_tile partition global tensors
-        #
         # (bM, bK, RestM, RestK, RestL)
         gA_mkl = cute.local_tile(
             mA_mkl, cute.slice_(self.mma_tiler, (None, 0, None)), (None, None, None)
@@ -1013,9 +822,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             mC_mnl, cute.slice_(self.mma_tiler, (None, None, 0)), (None, None, None)
         )
 
-        #
-        # Partition global tensor for TiledMMA_A/B/C
-        #
         thr_mma = tiled_mma.get_slice(mma_tile_coord_v)
         thr_mma_sfb = tiled_mma_sfb.get_slice(mma_tile_coord_v)
         # (MMA, MMA_M, MMA_K, RestM, RestK, RestL)
@@ -1029,10 +835,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         # (MMA, MMA_M, MMA_N, RestM, RestN, RestL)
         tCgC = thr_mma.partition_C(gC_mnl)
 
-        #
-        # Partition global/shared tensor for TMA load A/B
-        #
-        # TMA load A partition_S/D
         a_cta_layout = cute.make_layout(
             cute.slice_(cluster_layout_vmnk, (0, 0, None, 0)).shape
         )
@@ -1045,7 +847,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             cute.group_modes(sA, 0, 3),
             cute.group_modes(tCgA, 0, 3),
         )
-        # TMA load B partition_S/D
         b_cta_layout = cute.make_layout(
             cute.slice_(cluster_layout_vmnk, (0, None, 0, 0)).shape
         )
@@ -1059,7 +860,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             cute.group_modes(tCgB, 0, 3),
         )
 
-        #  TMA Load SFA partition_S/D
         sfa_cta_layout = a_cta_layout
         # ((atom_v, rest_v), STAGE)
         # ((atom_v, rest_v), RestM, RestK, RestL)
@@ -1073,7 +873,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         tAsSFA = cute.filter_zeros(tAsSFA)
         tAgSFA = cute.filter_zeros(tAgSFA)
 
-        # TMA Load SFB partition_S/D
         sfb_cta_layout = cute.make_layout(
             cute.slice_(cluster_layout_sfb_vmnk, (0, None, 0, 0)).shape
         )
@@ -1089,9 +888,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         tBsSFB = cute.filter_zeros(tBsSFB)
         tBgSFB = cute.filter_zeros(tBgSFB)
 
-        #
-        # Partition shared/tensor memory tensor for TiledMMA_A/B/C
-        #
         # (MMA, MMA_M, MMA_K, STAGE)
         tCrA = tiled_mma.make_fragment_A(sA)
         # (MMA, MMA_N, MMA_K, STAGE)
@@ -1103,14 +899,8 @@ class Sm100GroupedBlockScaledGemmKernel:
             cute.append(acc_shape, self.num_acc_stage)
         )
 
-        #
-        # Cluster wait before tensor memory alloc
-        #
         pipeline_init_wait(cluster_shape_mn=self.cluster_shape_mn)
 
-        #
-        # Get tensormap buffer address
-        #
         grid_dim = cute.arch.grid_dim()
         tensormap_workspace_idx = (
             bidz * grid_dim[1] * grid_dim[0] + bidy * grid_dim[0] + bidx
@@ -1136,18 +926,10 @@ class Sm100GroupedBlockScaledGemmKernel:
             tensormaps[(tensormap_workspace_idx, 4, None)].iterator
         )
 
-        #
-        # CLC pipeline + scheduler state. The hardware CLC scheduler dispatches
-        # tiles dynamically into the (m, n, l) coordinate space matching our
-        # original PersistentTileSchedulerParams. Consumer warps wait on the
-        # shared CLC pipeline; the scheduler warp on the leader CTA drives
-        # advance_to_next_work.
-        #
+        # Scheduler produces CLC work; consumers read it.
         clc_response_ptr = storage.clc_response.data_ptr()
         clc_mbar_ptr = storage.clc_mbar_ptr.data_ptr()
-        # Per-tile metadata smem region as a flat 7-element Int32 tensor;
-        # written once per tile by the mainload warp after delinearize_z,
-        # then read by mma and epilog warps after tile_metadata_ready_barrier.
+        # Non-uniform path metadata handoff.
         tile_meta_smem = cute.make_tensor(
             storage.tile_meta.data_ptr(), cute.make_layout(7)
         )
@@ -1197,9 +979,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         )
         is_leader_cluster_cta = cta_rank_in_cluster == 0
 
-        #
-        # Specialized scheduler warp
-        #
         if warp_idx == self.scheduler_warp_id:
             cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)
             work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
@@ -1214,15 +993,8 @@ class Sm100GroupedBlockScaledGemmKernel:
             if is_leader_cluster_cta:
                 clc_state.producer_tail()
 
-        #
-        # Specialized mainloop load warp
-        #
         if warp_idx == self.mainloop_load_warp_id:
             cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)
-            #
-            # Persistent tile scheduling loop — CLC-driven
-            #
-            # grouped gemm tile scheduler helper will compute the group index for the tile we're working on
             group_gemm_ts_helper = ClcGroupedGemmTileSchedulerHelper.create_for_clc(
                 group_count,
                 tile_sched_params,
@@ -1230,7 +1002,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                 problem_sizes_mnkl,
             )
             tensormap_init_done = cutlass.Boolean(False)
-            # group index of last tile
             last_group_idx = cutlass.Int32(-1)
 
             work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
@@ -1239,10 +1010,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                 pipeline.PipelineUserType.Producer, self.num_ab_stage
             )
 
-            # The tma_desc generic-space pointers are kernel-wide constants:
-            # they're inttoptr conversions of the GMEM descriptor pointers
-            # computed once at kernel start. Hoist out of the load loop so
-            # they're not recomputed per k-tile.
+            # Kernel-wide descriptor pointers.
             tma_desc_a = tensormap_manager.get_tensormap_ptr(
                 tensormap_a_gmem_ptr, cute.AddressSpace.generic
             )
@@ -1270,12 +1038,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                     )
                 cur_k_tile_cnt = grouped_gemm_cta_tile_info.cta_tile_count_k
                 cur_group_idx = grouped_gemm_cta_tile_info.group_idx
-                # First-iteration handshake with MMA's tensormap init MUST
-                # happen before the tile_metadata_ready_barrier below,
-                # because MMA arrives at tensormap_ab_init_barrier before
-                # ever reaching its own tile_metadata_ready_barrier; hitting
-                # them in the opposite order on the producer side would
-                # deadlock against MMA on the very first tile.
+                # Keep barrier order aligned with MMA on the first tile.
                 if not tensormap_init_done:
                     self.tensormap_ab_init_barrier.arrive_and_wait()
                     tensormap_init_done = True
@@ -1290,7 +1053,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                         tile_meta_smem[6] = grouped_gemm_cta_tile_info.problem_shape_k
                     self.tile_metadata_ready_barrier.arrive_and_wait()
                 is_group_changed = cur_group_idx != last_group_idx
-                # skip tensormap update if we're working on the same group
                 if is_group_changed:
                     problem_shape_mnk = (
                         grouped_gemm_cta_tile_info.problem_shape_m,
@@ -1303,7 +1065,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                         problem_shape_mnk,
                         strides_abc,
                         ptrs_abc,
-                        0,  # tensor A
+                        0,
                     )
                     real_tensor_b = self.make_tensor_abc_for_tensormap_update(
                         cur_group_idx,
@@ -1311,21 +1073,21 @@ class Sm100GroupedBlockScaledGemmKernel:
                         problem_shape_mnk,
                         strides_abc,
                         ptrs_abc,
-                        1,  # tensor B
+                        1,
                     )
                     real_tensor_sfa = self.make_tensor_sfasfb_for_tensormap_update(
                         cur_group_idx,
                         self.sf_dtype,
                         problem_shape_mnk,
                         ptrs_sfasfb,
-                        0,  # tensor SFA
+                        0,
                     )
                     real_tensor_sfb = self.make_tensor_sfasfb_for_tensormap_update(
                         cur_group_idx,
                         self.sf_dtype,
                         problem_shape_mnk,
                         ptrs_sfasfb,
-                        1,  # tensor SFB
+                        1,
                     )
                     tensormap_manager.update_tensormap(
                         (
@@ -1378,7 +1140,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                     (None, mma_tile_coord_mnl[1], None, mma_tile_coord_mnl[2])
                 ]
 
-                # Peek (try_wait) AB buffer empty for k_tile = prefetch_k_tile_cnt
                 ab_producer_state.reset_count()
                 peek_ab_empty_status = cutlass.Boolean(1)
                 if ab_producer_state.count < cur_k_tile_cnt:
@@ -1389,16 +1150,11 @@ class Sm100GroupedBlockScaledGemmKernel:
                 for k_tile in cutlass.range(
                     0, cur_k_tile_cnt, 1, unroll=self.AB_TMA_LOAD_UNROLL
                 ):
-                    # Conditionally wait for AB buffer empty
                     ab_pipeline.producer_acquire(
                         ab_producer_state, peek_ab_empty_status
                     )
 
-                    # Pipeline state count/index are stored as per-thread
-                    # Int32 even though they're warp-invariant. Promote
-                    # to uniform once so the 4 cute.copy calls below share
-                    # one R2UR.BROADCAST instead of each emitting their
-                    # own internally.
+                    # Share one warp-uniform broadcast.
                     ab_state_count = cute.arch.make_warp_uniform(
                         ab_producer_state.count
                     )
@@ -1407,7 +1163,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                     )
                     tma_bar = ab_pipeline.producer_get_barrier(ab_producer_state)
 
-                    # TMA load A/B/SFA/SFB
                     cute.copy(
                         tma_atom_a,
                         tAgA_slice[(None, ab_state_count)],
@@ -1441,7 +1196,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                         tma_desc_ptr=tma_desc_sfb,
                     )
 
-                    # Peek (try_wait) AB buffer empty for k_tile = prefetch_k_tile_cnt + k_tile + 1
                     ab_producer_state.advance()
                     peek_ab_empty_status = cutlass.Boolean(1)
                     if ab_producer_state.count < cur_k_tile_cnt:
@@ -1450,33 +1204,18 @@ class Sm100GroupedBlockScaledGemmKernel:
                         )
                 last_group_idx = cur_group_idx
 
-                #
-                # Advance to next tile via CLC pipeline
-                #
                 clc_state.consumer_wait()
                 work_tile = clc_state.get_current_work(total_num_clusters[0])
                 clc_state.consumer_release()
 
-            # Ensure the mainload warp arrives on the tensormap init barrier
-            # even when this CTA had no valid work tiles, so the MMA warp
-            # (which unconditionally waits) does not deadlock. Scheduler
-            # warp no longer uses the descriptor, so it doesn't arrive.
+            # Avoid deadlock when this CTA has no valid work.
             if not tensormap_init_done:
                 self.tensormap_ab_init_barrier.arrive_and_wait()
 
-            #
-            # Wait A/B buffer empty
-            #
             ab_pipeline.producer_tail(ab_producer_state)
 
-        #
-        # Specialized MMA warp
-        #
         if warp_idx == self.mma_warp_id:
             cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)
-            #
-            # Initialize tensormaps for A, B, SFA and SFB
-            #
             tensormap_manager.init_tensormap_from_atom(
                 tma_atom_a, tensormap_a_smem_ptr, self.mma_warp_id
             )
@@ -1489,18 +1228,10 @@ class Sm100GroupedBlockScaledGemmKernel:
             tensormap_manager.init_tensormap_from_atom(
                 tma_atom_sfb, tensormap_sfb_smem_ptr, self.mma_warp_id
             )
-            # indicate tensormap initialization has finished
             self.tensormap_ab_init_barrier.arrive_and_wait()
 
-            #
-            # Bar sync for retrieve tensor memory ptr from shared mem
-            #
             self.tmem_alloc_barrier.arrive_and_wait()
 
-            #
-            # Retrieving tensor memory ptr and make accumulator/SFA/SFB tensor
-            #
-            # Make accumulator tmem tensor
             acc_tmem_ptr = cute.arch.retrieve_tmem_ptr(
                 self.acc_dtype,
                 alignment=16,
@@ -1509,7 +1240,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             # (MMA, MMA_M, MMA_N, STAGE)
             tCtAcc_base = cute.make_tensor(acc_tmem_ptr, tCtAcc_fake.layout)
 
-            # Make SFA tmem tensor
             sfa_tmem_ptr = cute.recast_ptr(
                 acc_tmem_ptr + tcgen05.find_tmem_tensor_col_offset(tCtAcc_base),
                 dtype=self.sf_dtype,
@@ -1523,7 +1253,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             )
             tCtSFA = cute.make_tensor(sfa_tmem_ptr, tCtSFA_layout)
 
-            # Make SFB tmem tensor
             sfb_tmem_ptr = cute.recast_ptr(
                 acc_tmem_ptr
                 + tcgen05.find_tmem_tensor_col_offset(tCtAcc_base)
@@ -1538,9 +1267,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                 cute.slice_(sfb_smem_layout_staged, (None, None, None, 0)),
             )
             tCtSFB = cute.make_tensor(sfb_tmem_ptr, tCtSFB_layout)
-            #
-            # Partition for S2T copy of SFA/SFB
-            #
             tiled_copy_s2t_sfa, tCsSFA_compact_s2t, tCtSFA_compact_s2t = (
                 self.mainloop_s2t_copy_and_partition(sSFA, tCtSFA)
             )
@@ -1548,9 +1274,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                 self.mainloop_s2t_copy_and_partition(sSFB, tCtSFB)
             )
 
-            #
-            # Persistent tile scheduling loop — CLC-driven
-            #
             group_gemm_ts_helper = ClcGroupedGemmTileSchedulerHelper.create_for_clc(
                 group_count,
                 tile_sched_params,
@@ -1579,7 +1302,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                 # (MMA, MMA_M, MMA_N)
                 tCtAcc = tCtAcc_base[(None, None, None, acc_producer_state.index)]
 
-                # Peek (try_wait) AB buffer full for k_tile = 0
                 ab_consumer_state.reset_count()
                 peek_ab_full_status = cutlass.Boolean(1)
                 if ab_consumer_state.count < cur_k_tile_cnt and is_leader_cta:
@@ -1587,28 +1309,17 @@ class Sm100GroupedBlockScaledGemmKernel:
                         ab_consumer_state
                     )
 
-                #
-                # Wait for accumulator buffer empty
-                #
                 if is_leader_cta:
                     acc_pipeline.producer_acquire(acc_producer_state)
 
-                #
-                # Reset the ACCUMULATE field for each tile
-                #
                 tiled_mma.set(tcgen05.Field.ACCUMULATE, False)
 
-                #
-                # Mma mainloop
-                #
                 for k_tile in range(cur_k_tile_cnt):
                     if is_leader_cta:
-                        # Conditionally wait for AB buffer full
                         ab_pipeline.consumer_wait(
                             ab_consumer_state, peek_ab_full_status
                         )
 
-                        #  Copy SFA/SFB from smem to tmem
                         s2t_stage_coord = (
                             None,
                             None,
@@ -1629,7 +1340,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                             tCtSFB_compact_s2t,
                         )
 
-                        # tCtAcc += tCrA * tCrSFA * tCrB * tCrSFB
                         num_kblocks = cute.size(tCrA, mode=[2])
                         for kblock_idx in cutlass.range(num_kblocks, unroll_full=True):
                             kblock_coord = (
@@ -1639,7 +1349,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                                 ab_consumer_state.index,
                             )
 
-                            # Set SFA/SFB tensor to tiled_mma
                             sf_kblock_coord = (None, None, kblock_idx)
                             tiled_mma.set(
                                 tcgen05.Field.SFA,
@@ -1658,13 +1367,10 @@ class Sm100GroupedBlockScaledGemmKernel:
                                 tCtAcc,
                             )
 
-                            # Enable accumulate on tCtAcc after first kblock
                             tiled_mma.set(tcgen05.Field.ACCUMULATE, True)
 
-                        # Async arrive AB buffer empty
                         ab_pipeline.consumer_release(ab_consumer_state)
 
-                    # Peek (try_wait) AB buffer full for k_tile = k_tile + 1
                     ab_consumer_state.advance()
                     peek_ab_full_status = cutlass.Boolean(1)
                     if ab_consumer_state.count < cur_k_tile_cnt:
@@ -1673,41 +1379,24 @@ class Sm100GroupedBlockScaledGemmKernel:
                                 ab_consumer_state
                             )
 
-                #
-                # Async arrive accumulator buffer full
-                #
                 if is_leader_cta:
                     acc_pipeline.producer_commit(acc_producer_state)
                 acc_producer_state.advance()
 
-                #
-                # Advance to next tile via CLC pipeline
-                #
                 clc_state.consumer_wait()
                 work_tile = clc_state.get_current_work(total_num_clusters[0])
                 clc_state.consumer_release()
 
-            #
-            # Wait for accumulator buffer empty
-            #
             acc_pipeline.producer_tail(acc_producer_state)
 
-        #
-        # Specialized epilogue warps
-        #
         if warp_idx >= self.epilog_warp_id[0] and warp_idx <= self.epilog_warp_id[-1]:
             cute.arch.setmaxregister_increase(self.ACCUM_REG_REQUIREMENT)
-            # Initialize tensormap for C. The async copy is drained inside
-            # update_tensormap (via cp_async_bulk_wait_group) on the first
-            # group-change iteration below, which is always the first
-            # iteration when starting from last_group_idx = -1, so no
-            # cross-warp init barrier is needed.
+            # First C update drains the async descriptor init.
             tensormap_manager.init_tensormap_from_atom(
                 tma_atom_c,
                 tensormap_c_smem_ptr,
                 self.epilog_warp_id[0],
             )
-            # Allocate tensor memory buffer.
             if warp_idx == self.epilog_warp_id[0]:
                 cute.arch.alloc_tmem(
                     self.num_tmem_alloc_cols,
@@ -1715,11 +1404,8 @@ class Sm100GroupedBlockScaledGemmKernel:
                     is_two_cta=use_2cta_instrs,
                 )
 
-            # Barrier sync for retrieve tensor memory ptr from shared
-            # memory.
             self.tmem_alloc_barrier.arrive_and_wait()
 
-            # Retrieve tensor memory ptr and make accumulator tensor.
             acc_tmem_ptr = cute.arch.retrieve_tmem_ptr(
                 self.acc_dtype,
                 alignment=16,
@@ -1728,10 +1414,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             # (MMA, MMA_M, MMA_N, STAGE)
             tCtAcc_base = cute.make_tensor(acc_tmem_ptr, tCtAcc_fake.layout)
 
-            # Start from here
-            #
-            # Partition for epilogue
-            #
             epi_tidx = tidx % (32 * len(self.epilog_warp_id))
             tiled_copy_t2r, tTR_tAcc_base, tTR_rAcc = (
                 self.epilog_tmem_copy_and_partition(
@@ -1749,9 +1431,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                 )
             )
 
-            #
-            # Persistent tile scheduling loop.
-            #
             group_gemm_ts_helper = ClcGroupedGemmTileSchedulerHelper.create_for_clc(
                 group_count,
                 tile_sched_params,
@@ -1759,16 +1438,13 @@ class Sm100GroupedBlockScaledGemmKernel:
                 problem_sizes_mnkl,
             )
             work_tile = clc_state.initial_work_tile_info(total_num_clusters[0])
-            # Count tiles consumed by this warp; replaces tile_sched.num_tiles_executed.
-            # Each iteration produces subtile_cnt subtiles; num_prev_subtiles is used
-            # to index into the c_buffer rotation.
+            # Used for c_buffer rotation.
             epilog_tile_count = cutlass.Int32(0)
 
             acc_consumer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Consumer, self.num_acc_stage
             )
 
-            # Threads/warps participating in tma store pipeline
             c_producer_group = pipeline.CooperativeGroup(
                 pipeline.Agent.Thread,
                 32,
@@ -1778,14 +1454,11 @@ class Sm100GroupedBlockScaledGemmKernel:
                 producer_group=c_producer_group,
             )
 
-            # Hoist the C tensormap generic-space pointer out of the subtile
-            # loop -- it's an inttoptr conversion of a kernel-wide constant.
+            # Kernel-wide descriptor pointer.
             tma_desc_c = tensormap_manager.get_tensormap_ptr(
                 tensormap_c_gmem_ptr, cute.AddressSpace.generic
             )
-            # Track group transitions for inline C tensormap updates (done by
-            # warp epilog_warp_id[0] only; the trailing epilog_sync_barrier
-            # serves as the post-update sync for the other epilog warps).
+            # epilog[0] updates the C descriptor.
             last_group_idx = cutlass.Int32(-1)
 
             while work_tile.is_valid_tile:
@@ -1802,7 +1475,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                     problem_shape_n = grouped_gemm_cta_tile_info.problem_shape_n
                     problem_shape_k = grouped_gemm_cta_tile_info.problem_shape_k
                 else:
-                    # Read all values immediately because tile_meta is single-buffered.
+                    # tile_meta is single-buffered.
                     self.tile_metadata_ready_barrier.arrive_and_wait()
                     cur_group_idx = tile_meta_smem[0]
                     cta_tile_idx_m = tile_meta_smem[1]
@@ -1812,15 +1485,14 @@ class Sm100GroupedBlockScaledGemmKernel:
                     problem_shape_k = tile_meta_smem[6]
                 is_group_changed = cur_group_idx != last_group_idx
                 if is_group_changed and warp_idx == self.epilog_warp_id[0]:
-                    # Inline C tensormap update; replaces the cross-warp
-                    # ready/tile_done barrier dance the old epi_load warp used.
+                    # Inline C tensormap update.
                     real_tensor_c = self.make_tensor_abc_for_tensormap_update(
                         cur_group_idx,
                         self.c_dtype,
                         (problem_shape_m, problem_shape_n, problem_shape_k),
                         strides_abc,
                         ptrs_abc,
-                        2,  # tensor C
+                        2,
                     )
                     tensormap_manager.update_tensormap(
                         (real_tensor_c,),
@@ -1830,8 +1502,8 @@ class Sm100GroupedBlockScaledGemmKernel:
                         (tensormap_c_smem_ptr,),
                     )
                     tensormap_manager.fence_tensormap_update(tensormap_c_gmem_ptr)
-                # All four epilog warps sync here; this also ensures the
-                # C descriptor update above is visible before TMA store below.
+                # Ensure C descriptor update is visible before TMA
+                # store.
                 self.epilog_sync_barrier.arrive_and_wait()
 
                 mma_tile_coord_mnl = (
@@ -1849,7 +1521,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                     )
                 ]
 
-                # Set tensor memory buffer for current tile
                 # (T2R, T2R_M, T2R_N, EPI_M, EPI_M)
                 tTR_tAcc = tTR_tAcc_base[
                     (None, None, None, None, None, acc_consumer_state.index)
@@ -1862,45 +1533,29 @@ class Sm100GroupedBlockScaledGemmKernel:
                 tTR_tAcc = cute.group_modes(tTR_tAcc, 3, cute.rank(tTR_tAcc))
                 bSG_gC = cute.group_modes(bSG_gC, 1, cute.rank(bSG_gC))
 
-                #
-                # Store accumulator to global memory in subtiles
-                #
                 subtile_cnt = cute.size(tTR_tAcc.shape, mode=[3])
                 num_prev_subtiles = epilog_tile_count * subtile_cnt
-                # Per-group scalar; hoisted out of the subtile loop.
                 global_scale = self.load_global_scale_for_group(
                     cur_group_idx, tensor_addr_global_scale
                 )
                 for subtile_idx in cutlass.range(subtile_cnt, unroll_full=True):
-                    #
-                    # Load accumulator from tensor memory buffer to register
-                    #
                     tTR_tAcc_mn = tTR_tAcc[(None, None, None, subtile_idx)]
                     cute.copy(tiled_copy_t2r, tTR_tAcc_mn, tTR_rAcc)
 
-                    #
-                    # Convert to C type
-                    #
                     acc_vec = tiled_copy_r2s.retile(tTR_rAcc).load()
                     acc_vec = acc_vec * global_scale
                     tRS_rC.store(acc_vec.to(self.c_dtype))
 
-                    #
-                    # Store C to shared memory
-                    #
                     c_buffer = (num_prev_subtiles + subtile_idx) % self.num_c_stage
                     cute.copy(
                         tiled_copy_r2s,
                         tRS_rC,
                         tRS_sC[(None, None, None, c_buffer)],
                     )
-                    # Fence and barrier to make sure shared memory store is visible to TMA store
+                    # Make shared-memory store visible to TMA store.
                     cute.arch.fence_proxy("async.shared", space="cta")
                     self.epilog_sync_barrier.arrive_and_wait()
 
-                    #
-                    # TMA store C to global memory
-                    #
                     if warp_idx == self.epilog_warp_id[0]:
                         cute.copy(
                             tma_atom_c,
@@ -1911,27 +1566,18 @@ class Sm100GroupedBlockScaledGemmKernel:
                         c_pipeline.producer_commit()
                         c_pipeline.producer_acquire()
                     self.epilog_sync_barrier.arrive_and_wait()
-                #
-                # Async arrive accumulator buffer empty
-                #
                 if warp_idx == self.epilog_warp_id[0]:
                     with cute.arch.elect_one():
                         acc_pipeline.consumer_release(acc_consumer_state)
                 self.epilog_sync_barrier.arrive_and_wait()
                 acc_consumer_state.advance()
 
-                #
-                # Advance to next tile via CLC pipeline
-                #
                 epilog_tile_count += 1
                 last_group_idx = cur_group_idx
                 clc_state.consumer_wait()
                 work_tile = clc_state.get_current_work(total_num_clusters[0])
                 clc_state.consumer_release()
 
-            #
-            # Dealloc the tensor memory buffer
-            #
             if warp_idx == self.epilog_warp_id[0]:
                 cute.arch.relinquish_tmem_alloc_permit(is_two_cta=use_2cta_instrs)
             self.epilog_sync_barrier.arrive_and_wait()
@@ -1944,9 +1590,6 @@ class Sm100GroupedBlockScaledGemmKernel:
                 cute.arch.dealloc_tmem(
                     acc_tmem_ptr, self.num_tmem_alloc_cols, is_two_cta=use_2cta_instrs
                 )
-            #
-            # Wait for C store complete
-            #
             c_pipeline.producer_tail()
 
     @cute.jit
@@ -1959,28 +1602,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         tensor_address_abc: cute.Tensor,
         tensor_index: int,
     ):
-        """Extract stride and tensor address for a given group and construct a global tensor for A, B or C.
-
-        This function is used within the kernel to dynamically create a CUTE tensor
-        representing A, B, or C for the current group being processed, using the
-        group-specific address, shape, and stride information.
-
-        :param group_idx: The index of the current group within the grouped GEMM.
-        :type group_idx: cutlass.Int32
-        :param dtype: The data type of the tensor elements (e.g., cutlass.Float16).
-        :type dtype: Type[cutlass.Numeric]
-        :param problem_shape_mnk: The (M, N, K) problem shape for the current group.
-        :type problem_shape_mnk: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32]
-        :param strides_abc: Tensor containing strides for A, B, C for all groups. Layout: (group_count, 3, 2).
-        :type strides_abc: cute.Tensor
-        :param tensor_address_abc: Tensor containing global memory addresses for A, B, C for all groups. Layout: (group_count, 3).
-        :type tensor_address_abc: cute.Tensor
-        :param tensor_index: Specifies which tensor to create: 0 for A, 1 for B, 2 for C.
-        :type tensor_index: int
-        :return: A CUTE tensor representing the requested global memory tensor (A, B, or C) for the specified group.
-        :rtype: cute.Tensor
-        :raises TypeError: If the provided dtype is not a subclass of cutlass.Numeric.
-        """
         ptr_i64 = tensor_address_abc[(group_idx, tensor_index)]
         if cutlass.const_expr(
             not isclass(dtype) or not issubclass(dtype, cutlass.Numeric)
@@ -2003,21 +1624,21 @@ class Sm100GroupedBlockScaledGemmKernel:
         c1 = cutlass.Int32(1)
         c0 = cutlass.Int64(0)
 
-        if cutlass.const_expr(tensor_index == 0):  # tensor A
+        if cutlass.const_expr(tensor_index == 0):
             m = problem_shape_mnk[0]
             k = problem_shape_mnk[2]
             return cute.make_tensor(
                 tensor_gmem_ptr,
                 cute.make_layout((m, k, c1), stride=(stride_mn, stride_k, c0)),
             )
-        elif cutlass.const_expr(tensor_index == 1):  # tensor B
+        elif cutlass.const_expr(tensor_index == 1):
             n = problem_shape_mnk[1]
             k = problem_shape_mnk[2]
             return cute.make_tensor(
                 tensor_gmem_ptr,
                 cute.make_layout((n, k, c1), stride=(stride_mn, stride_k, c0)),
             )
-        else:  # tensor C
+        else:
             m = problem_shape_mnk[0]
             n = problem_shape_mnk[1]
             return cute.make_tensor(
@@ -2034,27 +1655,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         tensor_address_sfasfb: cute.Tensor,
         tensor_index: int,
     ):
-        """Extract tensor address for a given group and construct a global tensor for SFA or SFB.
-
-        This function is used within the kernel to dynamically create a CUTE tensor
-        representing SFA or SFB for the current group being processed, using the
-        group-specific address, shape information.
-
-        :param group_idx: The index of the current group within the grouped GEMM.
-        :type group_idx: cutlass.Int32
-        :param dtype: The data type of the tensor elements (e.g., cutlass.Float16).
-        :type dtype: Type[cutlass.Numeric]
-        :param problem_shape_mnk: The (M, N, K) problem shape for the current group.
-        :type problem_shape_mnk: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32]
-        :param tensor_address_sfasfb: Tensor containing global memory addresses for SFA,
-            SFB for all groups. Layout: (group_count, 2).
-        :type tensor_address_sfasfb: cute.Tensor
-        :param tensor_index: Specifies which tensor to create: 0 for SFA, 1 for SFB.
-        :type tensor_index: int
-        :return: A CUTE tensor representing the requested global memory tensor (SFA, SFB) for the specified group.
-        :rtype: cute.Tensor
-        :raises TypeError: If the provided dtype is not a subclass of cutlass.Numeric.
-        """
         ptr_i64 = tensor_address_sfasfb[(group_idx, tensor_index)]
         if cutlass.const_expr(
             not isclass(dtype) or not issubclass(dtype, cutlass.Numeric)
@@ -2067,7 +1667,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         )
 
         c1 = cutlass.Int32(1)
-        if cutlass.const_expr(tensor_index == 0):  # tensor SFA
+        if cutlass.const_expr(tensor_index == 0):
             m = problem_shape_mnk[0]
             k = problem_shape_mnk[2]
             sfa_layout = blockscaled_utils.tile_atom_to_shape_SF(
@@ -2077,7 +1677,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                 tensor_gmem_ptr,
                 sfa_layout,
             )
-        else:  # tensor SFB
+        else:
             n = problem_shape_mnk[1]
             k = problem_shape_mnk[2]
             sfb_layout = blockscaled_utils.tile_atom_to_shape_SF(
@@ -2112,27 +1712,11 @@ class Sm100GroupedBlockScaledGemmKernel:
         sSF: cute.Tensor,
         tSF: cute.Tensor,
     ) -> tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
-        """
-        Make tiledCopy for smem to tmem load for scale factor tensor, then use it to
-        partition smem memory (source) and tensor memory (destination).
-
-        :param sSF: The scale factor tensor in smem
-        :type sSF: cute.Tensor
-        :param tSF: The scale factor tensor in tmem
-        :type tSF: cute.Tensor
-
-        :return: A tuple containing (tiled_copy_s2t, tCsSF_compact_s2t, tCtSF_compact_s2t) where:
-            - tiled_copy_s2t: The tiled copy operation for smem to tmem load for scale factor tensor(s2t)
-            - tCsSF_compact_s2t: The partitioned scale factor tensor in smem
-            - tSF_compact_s2t: The partitioned scale factor tensor in tmem
-        :rtype: Tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]
-        """
         # (MMA, MMA_MN, MMA_K, STAGE)
         tCsSF_compact = cute.filter_zeros(sSF)
         # (MMA, MMA_MN, MMA_K)
         tCtSF_compact = cute.filter_zeros(tSF)
 
-        # Make S2T CopyAtom and tiledCopy
         copy_atom_s2t = cute.make_copy_atom(
             tcgen05.Cp4x32x128bOp(self.cta_group),
             self.sf_dtype,
@@ -2159,27 +1743,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         epi_tile: cute.Tile,
         use_2cta_instrs: cutlass.Boolean | bool,
     ) -> tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
-        """
-        Make tiledCopy for tensor memory load, then use it to partition tensor memory (source) and register array (destination).
-
-        :param tidx: The thread index in epilogue warp groups
-        :type tidx: cutlass.Int32
-        :param tAcc: The accumulator tensor to be copied and partitioned
-        :type tAcc: cute.Tensor
-        :param gC_mnl: The global tensor C
-        :type gC_mnl: cute.Tensor
-        :param epi_tile: The epilogue tiler
-        :type epi_tile: cute.Tile
-        :param use_2cta_instrs: Whether use_2cta_instrs is enabled
-        :type use_2cta_instrs: bool
-
-        :return: A tuple containing (tiled_copy_t2r, tTR_tAcc, tTR_rAcc) where:
-            - tiled_copy_t2r: The tiled copy operation for tmem to register copy(t2r)
-            - tTR_tAcc: The partitioned accumulator tensor
-            - tTR_rAcc: The accumulated tensor in register used to hold t2r results
-        :rtype: Tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]
-        """
-        # Make tiledCopy for tensor memory load
         copy_atom_t2r = sm100_utils.get_tmem_load_op(
             self.cta_tile_shape_mnk,
             self.c_layout,
@@ -2221,25 +1784,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         tidx: cutlass.Int32,
         sC: cute.Tensor,
     ) -> tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
-        """
-        Make tiledCopy for shared memory store, then use it to partition register array (source) and shared memory (destination).
-
-        :param tiled_copy_t2r: The tiled copy operation for tmem to register copy(t2r)
-        :type tiled_copy_t2r: cute.TiledCopy
-        :param tTR_rC: The partitioned accumulator tensor
-        :type tTR_rC: cute.Tensor
-        :param tidx: The thread index in epilogue warp groups
-        :type tidx: cutlass.Int32
-        :param sC: The shared memory tensor to be copied and partitioned
-        :type sC: cute.Tensor
-        :type sepi: cute.Tensor
-
-        :return: A tuple containing (tiled_copy_r2s, tRS_rC, tRS_sC) where:
-            - tiled_copy_r2s: The tiled copy operation for register to smem copy(r2s)
-            - tRS_rC: The partitioned tensor C (register source)
-            - tRS_sC: The partitioned tensor C (smem destination)
-        :rtype: Tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]
-        """
         copy_atom_r2s = sm100_utils.get_smem_store_op(
             self.c_layout, self.c_dtype, self.acc_dtype, tiled_copy_t2r
         )
@@ -2259,26 +1803,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         epi_tile: cute.Tile,
         sC: cute.Tensor,
     ) -> tuple[cute.CopyAtom, cute.Tensor, cute.Tensor]:
-        """Make tiledCopy for global memory store, then use it to:
-        partition shared memory (source) and global memory (destination) for TMA store version.
-
-        :param tidx: The thread index in epilogue warp groups
-        :type tidx: cutlass.Int32
-        :param atom: The copy_atom_c to be used for TMA store version, or tiled_copy_t2r for none TMA store version
-        :type atom: cute.CopyAtom or cute.TiledCopy
-        :param gC_mnl: The global tensor C
-        :type gC_mnl: cute.Tensor
-        :param epi_tile: The epilogue tiler
-        :type epi_tile: cute.Tile
-        :param sC: The shared memory tensor to be copied and partitioned
-        :type sC: cute.Tensor
-
-        :return: A tuple containing (tma_atom_c, bSG_sC, bSG_gC) where:
-            - tma_atom_c: The TMA copy atom
-            - bSG_sC: The partitioned shared memory tensor C
-            - bSG_gC: The partitioned global tensor C
-        :rtype: Tuple[cute.CopyAtom, cute.Tensor, cute.Tensor]
-        """
         # (EPI_TILE_M, EPI_TILE_N, EPI_M, EPI_N, RestM, RestN, RestL)
         gC_epi = cute.flat_divide(
             gC_mnl[((None, None), 0, 0, None, None, None)], epi_tile
@@ -2312,42 +1836,10 @@ class Sm100GroupedBlockScaledGemmKernel:
         smem_capacity: int,
         occupancy: int,
     ) -> tuple[int, int, int]:
-        """Computes the number of stages for A/B/C operands based on heuristics.
-
-        :param tiled_mma: The tiled MMA object defining the core computation.
-        :type tiled_mma: cute.TiledMma
-        :param mma_tiler_mnk: The shape (M, N, K) of the MMA tiler.
-        :type mma_tiler_mnk: tuple[int, int, int]
-        :param a_dtype: Data type of operand A.
-        :type a_dtype: type[cutlass.Numeric]
-        :param b_dtype: Data type of operand B.
-        :type b_dtype: type[cutlass.Numeric]
-        :param epi_tile: The epilogue tile shape.
-        :type epi_tile: cute.Tile
-        :param c_dtype: Data type of operand C (output).
-        :type c_dtype: type[cutlass.Numeric]
-        :param c_layout: Layout enum of operand C.
-        :type c_layout: utils.LayoutEnum
-        :param sf_dtype: Data type of Scale factor.
-        :type sf_dtype: type[cutlass.Numeric]
-        :param sf_vec_size: Scale factor vector size.
-        :type sf_vec_size: int
-        :param smem_capacity: Total available shared memory capacity in bytes.
-        :type smem_capacity: int
-        :param occupancy: Target number of CTAs per SM (occupancy).
-        :type occupancy: int
-
-        :return: A tuple containing the computed number of stages for:
-                 (ACC stages, A/B operand stages, C stages)
-        :rtype: tuple[int, int, int]
-        """
-        # ACC stages
         num_acc_stage = 1 if mma_tiler_mnk[1] == 256 else 2
 
-        # Default C stages
         num_c_stage = 2
 
-        # Calculate smem layout and size for one stage of A, B, SFA, SFB and C
         a_smem_layout_stage_one = sm100_utils.make_smem_layout_a(
             tiled_mma,
             mma_tiler_mnk,
@@ -2389,17 +1881,10 @@ class Sm100GroupedBlockScaledGemmKernel:
         c_bytes_per_stage = cute.size_in_bytes(c_dtype, c_smem_layout_staged_one)
         c_bytes = c_bytes_per_stage * num_c_stage
 
-        # Calculate A/B/SFA/SFB stages:
-        # Start with total smem per CTA (capacity / occupancy)
-        # Subtract reserved bytes and initial C stages bytes
-        # Divide remaining by bytes needed per A/B/SFA/SFB stage
         num_ab_stage = (
             smem_capacity // occupancy - (mbar_helpers_bytes + c_bytes)
         ) // ab_bytes_per_stage
 
-        # Refine epilogue stages:
-        # Calculate remaining smem after allocating for A/B/SFA/SFB stages and reserved bytes
-        # Add remaining unused smem to epilogue
         num_c_stage += (
             smem_capacity
             - occupancy * ab_bytes_per_stage * num_ab_stage
@@ -2413,16 +1898,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         total_num_clusters: int,
         cluster_shape_mn: tuple[int, int],
     ) -> utils.PersistentTileSchedulerParams:
-        """Compute tile scheduler parameters for grouped GEMM operations.
-
-        :param total_num_clusters: Total number of clusters to process across all groups.
-        :type total_num_clusters: int
-        :param cluster_shape_mn: Shape of each cluster in M, N dimensions.
-        :type cluster_shape_mn: tuple[int, int]
-
-        :return: tile_sched_params: Parameters for the persistent tile scheduler.
-        :rtype: utils.PersistentTileSchedulerParams
-        """
         problem_shape_ntile_mnl = (
             cluster_shape_mn[0],
             cluster_shape_mn[1],
@@ -2435,41 +1910,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         return tile_sched_params
 
     @staticmethod
-    def _compute_grid(
-        tile_sched_params: utils.PersistentTileSchedulerParams,
-        max_active_clusters: cutlass.Constexpr[int],
-    ) -> tuple[int, int, int]:
-        """Compute grid shape for grouped GEMM operations.
-
-        :param tile_sched_params: Parameters for the persistent tile scheduler.
-        :type utils.PersistentTileSchedulerParams
-        :param max_active_clusters: Maximum number of active clusters.
-        :type max_active_clusters: cutlass.Constexpr[int]
-
-        :return: grid: Grid shape for kernel launch.
-        :rtype: tuple[int, ...]
-        """
-        grid = utils.StaticPersistentTileScheduler.get_grid_shape(
-            tile_sched_params, max_active_clusters
-        )
-
-        return grid
-
-    @staticmethod
     def _get_mbar_smem_bytes(**kwargs_stages: int) -> int:
-        """Calculate shared memory consumption for memory barriers based on provided stages.
-
-        Each stage requires 2 barriers, and each barrier consumes 8 bytes of shared memory.
-        The total consumption is the sum across all provided stages. This function calculates the total
-        shared memory needed for these barriers.
-
-        :param kwargs_stages: Variable keyword arguments where each key is a stage name
-                              (e.g., num_acc_stage, num_ab_stage) and each value is the
-                              number of stages of that type.
-        :type kwargs_stages: int
-        :return: Total shared memory bytes required for all memory barriers.
-        :rtype: int
-        """
         num_barriers_per_stage = 2
         num_bytes_per_barrier = 8
         mbar_smem_consumption = sum(
@@ -2480,252 +1921,9 @@ class Sm100GroupedBlockScaledGemmKernel:
         )
         return mbar_smem_consumption
 
-    @staticmethod
-    def is_valid_dtypes_and_scale_factor_vec_size(
-        ab_dtype: type[cutlass.Numeric],
-        sf_dtype: type[cutlass.Numeric],
-        sf_vec_size: int,
-        c_dtype: type[cutlass.Numeric],
-    ) -> bool:
-        """
-        Check if the dtypes and sf_vec_size are valid combinations
-
-        :param ab_dtype: The data type of the A and B operands
-        :type ab_dtype: Type[cutlass.Numeric]
-        :param sf_dtype: The data type of the scale factor
-        :type sf_dtype: Type[cutlass.Numeric]
-        :param sf_vec_size: The vector size of the scale factor
-        :type sf_vec_size: int
-        :param c_dtype: The data type of the output tensor
-        :type c_dtype: Type[cutlass.Numeric]
-
-        :return: True if the dtypes and sf_vec_size are valid, False otherwise
-        :rtype: bool
-        """
-        is_valid = True
-
-        # Check valid ab_dtype
-        if ab_dtype not in {
-            cutlass.Float4E2M1FN,
-            cutlass.Float8E5M2,
-            cutlass.Float8E4M3FN,
-        }:
-            is_valid = False
-
-        # Check valid sf_vec_size
-        if sf_vec_size not in {16, 32}:
-            is_valid = False
-
-        # Check valid sf_dtype
-        if sf_dtype not in {cutlass.Float8E8M0FNU, cutlass.Float8E4M3FN}:
-            is_valid = False
-
-        # Check valid sf_dtype and sf_vec_size combinations
-        if sf_dtype == cutlass.Float8E4M3FN and sf_vec_size == 32:
-            is_valid = False
-        if ab_dtype in {cutlass.Float8E5M2, cutlass.Float8E4M3FN} and sf_vec_size == 16:
-            is_valid = False
-
-        # Check valid c_dtype
-        if c_dtype not in {
-            cutlass.Float32,
-            cutlass.Float16,
-            cutlass.BFloat16,
-            cutlass.Float8E5M2,
-            cutlass.Float8E4M3FN,
-        }:
-            is_valid = False
-
-        return is_valid
-
-    @staticmethod
-    def is_valid_layouts(
-        ab_dtype: type[cutlass.Numeric],
-        c_dtype: type[cutlass.Numeric],
-        a_major: str,
-        b_major: str,
-        c_major: str,
-    ) -> bool:
-        """
-        Check if layouts and dtypes are valid combinations
-
-        :param ab_dtype: The data type of the A and B operands
-        :type ab_dtype: Type[cutlass.Numeric]
-        :param c_dtype: The data type of the output tensor
-        :type c_dtype: Type[cutlass.Numeric]
-        :param a_major: The major dimension of the A tensor
-        :type a_major: str
-        :param b_major: The major dimension of the B tensor
-        :type b_major: str
-        :param c_major: The major dimension of the C tensor
-        :type c_major: str
-
-        :return: True if the layouts are valid, False otherwise
-        :rtype: bool
-        """
-        is_valid = True
-
-        if ab_dtype is cutlass.Float4E2M1FN and not (a_major == "k" and b_major == "k"):
-            is_valid = False
-        return is_valid
-
-    @staticmethod
-    def is_valid_mma_tiler_and_cluster_shape(
-        mma_tiler_mn: tuple[int, int],
-        cluster_shape_mn: tuple[int, int],
-    ) -> bool:
-        """
-        Check if the mma tiler and cluster shape are valid
-
-        :param mma_tiler_mn: The (M, N) shape of the MMA instruction tiler
-        :type mma_tiler_mn: Tuple[int, int]
-        :param cluster_shape_mn: The (ClusterM, ClusterN) shape of the CTA cluster
-        :type cluster_shape_mn: Tuple[int, int]
-
-        :return: True if the mma tiler and cluster shape are valid, False otherwise
-        :rtype: bool
-        """
-        is_valid = True
-        # Skip invalid mma tile shape
-        if mma_tiler_mn[0] not in [128, 256]:
-            is_valid = False
-        if mma_tiler_mn[1] not in [128, 256]:
-            is_valid = False
-        # Skip illegal cluster shape
-        if cluster_shape_mn[0] % (2 if mma_tiler_mn[0] == 256 else 1) != 0:
-            is_valid = False
-
-        # Skip invalid cluster shape
-        is_power_of_2 = lambda x: x > 0 and (x & (x - 1)) == 0  # noqa: E731
-
-        if (
-            cluster_shape_mn[0] * cluster_shape_mn[1] > 16
-            or cluster_shape_mn[0] <= 0
-            or cluster_shape_mn[1] <= 0
-            # Special cluster shape check for scale factor multicasts.
-            # Due to limited size of scale factors, we can't multicast among more than 4 CTAs.
-            or cluster_shape_mn[0] > 4
-            or cluster_shape_mn[1] > 4
-            or not is_power_of_2(cluster_shape_mn[0])
-            or not is_power_of_2(cluster_shape_mn[1])
-        ):
-            is_valid = False
-        return is_valid
-
-    @staticmethod
-    def is_valid_tensor_alignment(
-        problem_sizes_mnkl: list[tuple[int, int, int, int]],
-        ab_dtype: type[cutlass.Numeric],
-        c_dtype: type[cutlass.Numeric],
-        a_major: str,
-        b_major: str,
-        c_major: str,
-    ) -> bool:
-        """
-        Check if the tensor alignment is valid
-
-        :param problem_sizes_mnkl: The problem shape for each group
-        :type problem_sizes_mnkl: List[Tuple[int, int, int, int]]
-        :param ab_dtype: The data type of the A and B operands
-        :type ab_dtype: Type[cutlass.Numeric]
-        :param c_dtype: The data type of the output tensor
-        :type c_dtype: Type[cutlass.Numeric]
-        :param a_major: The major axis of the A tensor
-        :type a_major: str
-        :param b_major: The major axis of the B tensor
-        :type b_major: str
-        :param c_major: The major axis of the C tensor
-        :type c_major: str
-
-        :return: True if the problem shape is valid, False otherwise
-        :rtype: bool
-        """
-        is_valid = True
-
-        def check_contigous_16B_alignment(dtype, is_mode0_major, tensor_shape):
-            major_mode_idx = 0 if is_mode0_major else 1
-            num_major_elements = tensor_shape[major_mode_idx]
-            num_contiguous_elements = 16 * 8 // dtype.width
-            return num_major_elements % num_contiguous_elements == 0
-
-        for m, n, k, l in problem_sizes_mnkl:
-            if (
-                not check_contigous_16B_alignment(ab_dtype, a_major == "m", (m, k, l))
-                or not check_contigous_16B_alignment(
-                    ab_dtype, b_major == "n", (n, k, l)
-                )
-                or not check_contigous_16B_alignment(c_dtype, c_major == "m", (m, n, l))
-            ):
-                is_valid = False
-        return is_valid
-
-    @staticmethod
-    def can_implement(
-        ab_dtype: type[cutlass.Numeric],
-        sf_dtype: type[cutlass.Numeric],
-        sf_vec_size: int,
-        c_dtype: type[cutlass.Numeric],
-        mma_tiler_mn: tuple[int, int],
-        cluster_shape_mn: tuple[int, int],
-        problem_sizes_mnkl: list[tuple[int, int, int, int]],
-        a_major: str,
-        b_major: str,
-        c_major: str,
-    ) -> bool:
-        """
-        Check if the gemm can be implemented
-
-        :param ab_dtype: The data type of the A and B operands
-        :type ab_dtype: Type[cutlass.Numeric]
-        :param sf_dtype: The data type of the scale factor tensor
-        :type sf_dtype: Type[cutlass.Numeric]
-        :param sf_vec_size: The vector size
-        :type sf_vec_size: int
-        :param c_dtype: The data type of the output tensor
-        :type c_dtype: Type[cutlass.Numeric]
-        :param mma_tiler_mn: The (M, N) shape of the MMA instruction tiler
-        :type mma_tiler_mn: Tuple[int, int]
-        :param cluster_shape_mn: The (ClusterM, ClusterN) shape of the CTA cluster
-        :type cluster_shape_mn: Tuple[int, int]
-
-        :param a_major: The major axis of the A tensor
-        :type a_major: str
-        :param b_major: The major axis of the B tensor
-        :type b_major: str
-        :param c_major: The major axis of the C tensor
-        :type c_major: str
-
-        :return: True if the gemm can be implemented, False otherwise
-        :rtype: bool
-        """
-        can_implement = True
-        # Skip unsupported types
-        if not Sm100GroupedBlockScaledGemmKernel.is_valid_dtypes_and_scale_factor_vec_size(
-            ab_dtype, sf_dtype, sf_vec_size, c_dtype
-        ):
-            can_implement = False
-        # Skip unsupported layouts
-        if not Sm100GroupedBlockScaledGemmKernel.is_valid_layouts(
-            ab_dtype, c_dtype, a_major, b_major, c_major
-        ):
-            can_implement = False
-        # Skip invalid mma tile shape and cluster shape
-        if not Sm100GroupedBlockScaledGemmKernel.is_valid_mma_tiler_and_cluster_shape(
-            mma_tiler_mn, cluster_shape_mn
-        ):
-            can_implement = False
-        # Skip illegal problem shape for load/store alignment
-        if not Sm100GroupedBlockScaledGemmKernel.is_valid_tensor_alignment(
-            problem_sizes_mnkl, ab_dtype, c_dtype, a_major, b_major, c_major
-        ):
-            can_implement = False
-        return can_implement
-
-    # Size of smem we reserved for mbarrier, tensor memory management and tensormap update
     reserved_smem_bytes = 1024
     bytes_per_tensormap = 128
     num_tensormaps = 5
-    # size of smem used for tensor memory management
     tensor_memory_management_bytes = 12
 
 
