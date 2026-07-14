@@ -2532,11 +2532,9 @@ class CachingAutotuner(KernelInterface):
         ):
             return None
 
-        # Host-side TMA descriptors are expanded into the flat kernel params
-        # (CUtensorMap + shape + strides) inside StaticallyLaunchedTritonKernel.run;
-        # the _FastCudaLauncher vectorcall bypasses run() and can't do that
-        # variable-length expansion, so use the regular static launcher (which is
-        # still static -- no dynamic-launcher dispatch overhead).
+        # The _FastCudaLauncher vectorcall bypasses run(), so it can't do the
+        # variable-length TMA descriptor expansion; fall back to the regular
+        # (still static) launcher.
         if self.inductor_meta.get("host_tma_descriptor_args"):
             return None
 
@@ -2690,10 +2688,8 @@ class CompileResult(Generic[_T]):
     def _host_tma_pre_runner_lines(
         self, runner_args: list[str], call_args: list[str]
     ) -> tuple[list[str], list[str]]:
-        """Build host-side TMA descriptors in the launcher and substitute them
-        for the raw tensor args. Shared by the dynamic and static launchers.
-        Returns (pre_runner_lines, updated runner_args).
-        """
+        """Build host-side TMA descriptors in the launcher and swap them in for
+        the raw tensor args. Shared by the dynamic and static launchers."""
         host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
         pre_runner_lines: list[str] = []
         if not host_tma_args:
