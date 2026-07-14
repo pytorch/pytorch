@@ -104,7 +104,7 @@ class TestCoordinateDescentTuner(TestCase):
             actual = torch.compile(f)(x)
             self.assertTrue(
                 torch.allclose(expected, actual, atol=1e-4, rtol=1e-4),
-                f"Expected:\n{expected}\nActual:\n{actual}",
+                lambda msg: f"{msg}\nExpected:\n{expected}\nActual:\n{actual}",
             )
 
     def test_value_too_large(self):
