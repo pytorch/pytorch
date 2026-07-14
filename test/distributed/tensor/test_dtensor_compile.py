@@ -76,7 +76,7 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
-class PytreeTuple(torch._opaque_base.OpaqueBase):
+class PytreeTuple(torch._custom_class_base.CustomClassBase):
     """
     Tuple-like values that are treated as leaves of a PyTree.
     """
@@ -140,12 +140,12 @@ class PytreeTuple(torch._opaque_base.OpaqueBase):
 
 # Register PytreeTuple as an opaque value type to enable Dynamo to handle
 # instances created during tracing
-from torch._library.opaque_object import MemberType, register_opaque_type
+from torch._library.opaque_object import MemberType, register_custom_class
 
 
-register_opaque_type(
+register_custom_class(
     PytreeTuple,
-    typ="value",
+    typ="constant",
     members={
         "__getitem__": MemberType.USE_REAL,
         "__iter__": MemberType.USE_REAL,
@@ -222,12 +222,14 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
         super().tearDown()
         dist.destroy_process_group()
 
@@ -1607,9 +1609,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         mod = torch.nn.Linear(4, 4)
         mod.register_forward_hook(fw_hook)
-
-        mod = torch.nn.Linear(4, 4)
-        mod.register_forward_hook(fw_hook)
         mod.weight = torch.nn.Parameter(
             DTensor.from_local(mod.weight, mesh, [Replicate()], run_check=False)
         )
@@ -2086,7 +2085,7 @@ class outer_fn(torch.nn.Module):
         self.assertEqual(
             compile_counter.frame_count,
             1,
-            f"Expected 1 compilation, got {compile_counter.frame_count}",
+            lambda msg: f"{msg}\nExpected 1 compilation, got {compile_counter.frame_count}",
         )
 
     def test_device_mesh_slice(self):
@@ -2344,7 +2343,9 @@ class outer_fn(torch.nn.Module):
         fw_code = backend.fw_graphs[0].print_readable(print_output=False)
         for line in fw_code.splitlines():
             if "view" in line and "-1" in line:
-                self.assertNotIn("//", line, f"Polluted symbolic shape: {line}")
+                self.assertNotIn(
+                    "//", line, lambda msg: f"{msg}\nPolluted symbolic shape: {line}"
+                )
 
     def test_to_local_symbolic_sizes_uneven_shard(self):
         # Regression test to ensure our narrow changes does not cause any
@@ -2683,7 +2684,7 @@ class outer_fn(torch.nn.Module):
         # The symbol must survive — not be guarded to a concrete value
         self.assertFalse(
             x.shape[1].node.expr.is_number,
-            f"pad_tensor created a guard that concretized the symbolic dim: "
+            lambda msg: f"{msg}\npad_tensor created a guard that concretized the symbolic dim: "
             f"expr={x.shape[1].node.expr}",
         )
 
@@ -3084,7 +3085,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertNotIn(
                     "_opaque_obj",
                     fw_code,
-                    f"Forward graph should not contain opaque objects. Graph:\n{fw_code}",
+                    lambda msg: f"{msg}\nForward graph should not contain opaque objects. Graph:\n{fw_code}",
                 )
 
             bw_graph = bw_graph_cell[0]
@@ -3093,7 +3094,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertNotIn(
                     "_opaque_obj",
                     bw_code,
-                    f"Backward graph should not contain opaque objects. Graph:\n{bw_code}",
+                    lambda msg: f"{msg}\nBackward graph should not contain opaque objects. Graph:\n{bw_code}",
                 )
 
     @with_comms
@@ -3135,14 +3136,14 @@ class TestDTensorCompileE2E(DTensorTestBase):
             self.assertNotIn(
                 "_opaque_obj",
                 graph_code,
-                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
+                lambda msg: f"{msg}\nGraph should not contain opaque objects. Graph:\n{graph_code}",
             )
 
             placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
             self.assertGreater(
                 len(placeholders),
                 1,
-                f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
+                lambda msg: f"{msg}\nExpected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
 
     @with_comms
@@ -3186,14 +3187,14 @@ class TestDTensorCompileE2E(DTensorTestBase):
             self.assertNotIn(
                 "_opaque_obj",
                 graph_code,
-                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
+                lambda msg: f"{msg}\nGraph should not contain opaque objects. Graph:\n{graph_code}",
             )
 
             placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
             self.assertGreater(
                 len(placeholders),
                 2,
-                f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
+                lambda msg: f"{msg}\nExpected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
             )
 
 

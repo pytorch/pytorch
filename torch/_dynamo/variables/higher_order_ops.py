@@ -26,9 +26,10 @@ import logging
 import traceback
 import types
 import warnings
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, get_args, Literal, Optional, TYPE_CHECKING, Union
 
 import torch._C
 import torch.fx
@@ -39,7 +40,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
-from torch._dynamo.variables.script_object import TorchScriptObjectVariable
+from torch._dynamo.variables.script_object import CustomClassObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
 from torch._guards import Source
 from torch._higher_order_ops.flex_gemm import FLEX_GEMM_OP_ALIASES
@@ -84,6 +85,13 @@ HOP_VT_Alias = TypeVar("HOP_VT_Alias", bound="TorchHigherOrderOperatorVariable")
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
+
+# How speculate_subgraph constructs subgraph placeholders from sub_args. See
+# NOTE [argument `set_subgraph_inputs`] below for the meaning of each value. This
+# is the single source of truth for the runtime asserts that validate the value.
+SetSubgraphInputs = Literal[
+    "automatic", "automatic_with_forced_inputs", "flatten_manual", "manual"
+]
 
 
 @dataclass
@@ -342,15 +350,15 @@ def overwrite_tensor_vt_proxy(
             (
                 variables.SymNodeVariable,
                 variables.TensorVariable,
-                TorchScriptObjectVariable,
+                CustomClassObjectVariable,
             ),
         ):
             if not (
                 subgraph_vt.is_tensor()
-                or isinstance(subgraph_vt, (SymNodeVariable, TorchScriptObjectVariable))
+                or isinstance(subgraph_vt, (SymNodeVariable, CustomClassObjectVariable))
             ):
                 raise AssertionError(
-                    "Expected subgraph_vt to be a tensor, SymNodeVariable, or TorchScriptObjectVariable"
+                    "Expected subgraph_vt to be a tensor, SymNodeVariable, or CustomClassObjectVariable"
                 )
             orig_vt.proxy = subgraph_vt.proxy
 
@@ -959,25 +967,13 @@ def _call_while_loop(
         include_contiguity=False,
     )
 
-    (
-        cond_graph,
-        body_graph,
-        cond_shared,
-        _body_shared,
-        cond_unique,
-        body_unique,
-    ) = _merge_graph_inputs(
-        cond_graph,
-        cond_lifted_freevars,
-        "cond_fn",
-        body_graph,
-        body_lifted_freevars,
-        "body_fn",
+    shared, (cond_unique, body_unique) = _merge_graph_inputs(
+        [cond_graph, body_graph],
+        [cond_lifted_freevars, body_lifted_freevars],
+        ["cond_fn", "body_fn"],
     )
 
-    # Note: cond_shared and body_shared refer to the same proxy in parent graph
-    # so using either of them is OK. Use cond_shared as it doesn't matter.
-    additional_lifted_inputs = cond_shared + cond_unique + body_unique
+    additional_lifted_inputs = shared + cond_unique + body_unique
     all_while_loop_inputs: list[VariableTracker | Proxy] = (
         list(operands_seq)
         + list(additional_inputs_seq)
@@ -1142,7 +1138,7 @@ def validate_args_and_maybe_create_graph_inputs(
     sub_args: list[VariableTracker],
     tracer: "SubgraphTracer",
     tx: "InstructionTranslatorBase",
-    set_subgraph_inputs: str,
+    set_subgraph_inputs: SetSubgraphInputs,
     description: str,
     sub_args_names: Sequence[str] | None = None,
 ) -> list[Any]:
@@ -1276,108 +1272,104 @@ def validate_args_and_maybe_create_graph_inputs(
         return args
 
 
-# This helper function is used to make sure two graphs share the same input signature. For example,
-# in torch.cond, two branches might lift different set of tensors as inputs. This function helps to
-# dedup the inputs and modify the graphs to take the same set of inputs.
+# N-branch generalization of former _merge_graph_inputs. Used by torch.cond (2 branches)
+# and torch.switch (N branches): both must produce subgraphs with a unified
+# placeholder signature so the higher order op can pass a single operand list.
+#
+# Returns (shared, unique_per_branch):
+#   * shared: proxies present in every branch's lifted freevars. For plain
+#     proxies, "present" means by identity. For get_attr proxies, "present"
+#     means by node target (branches in separate tracing contexts can produce
+#     distinct proxies for the same nn module attr); the proxy from the first
+#     branch is chosen as the canonical representative.
+#   * unique_per_branch[i]: proxies lifted by branch i but not shared.
+# Each block is sorted by node name for determinism.
+#
+# Side effect: each graph is rewritten in-place so its placeholders follow the
+# 1 + N block layout: shared block (no suffix), then one block per branch
+# (suffixed with "_<branch_name>") holding that branch's unique freevars. Only
+# the originating branch's unique placeholders are wired to the inner uses;
+# the other branches' unique blocks become unused placeholders for signature
+# alignment.
 def _merge_graph_inputs(
-    l_graph: torch.fx.Graph,
-    l_lifted_freevars: dict[Proxy, Proxy],
-    l_name: str,
-    r_graph: torch.fx.Graph,
-    r_lifted_freevars: dict[Proxy, Proxy],
-    r_name: str,
-) -> tuple[
-    torch.fx.Graph, torch.fx.Graph, list[Proxy], list[Proxy], list[Proxy], list[Proxy]
-]:
-    def dedup_and_sort_lifted_freevars(
-        l_lifted_freevars: dict[Proxy, Proxy], r_lifted_freevars: dict[Proxy, Proxy]
-    ) -> tuple[list[Proxy], list[Proxy], list[Proxy], list[Proxy]]:
-        # The nn module attributes are guaranteed to be registered into the top-level graph module during
-        # higher order op speculation. Therefore, get_attr nodes in two branches with the same
-        # target refer to the same attribute and we can safely deduplicate them with their target.
-        #
-        # Note: ideally, dynamo should just create a single proxy for the same attribute of a nn module. But
-        # true_branch and false_branch belong to two separate tracing contexts, they may register the same
-        # attribute to top level separately. This creates two get_attr proxies for the same attribute
-        # that have different meta data such as stack_trace (one stack trace for the true_branch,
-        # and the other for false_branch). It seems better to discard the proxy explicitly in cond
-        # than make dynamo create a single proxy for the same get_attr target.
-        def shared_getattrs(
-            l_lifted_proxies: Sequence[Proxy], r_lifted_proxies: Sequence[Proxy]
-        ) -> tuple[dict[Proxy, Proxy], dict[Proxy, Proxy]]:
-            true_targets = {
-                proxy.node.target: proxy
-                for proxy in l_lifted_proxies
-                if proxy.node.op == "get_attr"
-            }
-            l_shared_getattrs = {}
-            r_shared_getattrs = {}
-
-            for false_proxy in r_lifted_proxies:
-                if (
-                    false_proxy.node.op == "get_attr"
-                    and false_proxy.node.target in true_targets
-                ):
-                    true_proxy = true_targets[false_proxy.node.target]
-                    l_shared_getattrs[true_proxy] = true_proxy
-                    r_shared_getattrs[false_proxy] = true_proxy
-            return l_shared_getattrs, r_shared_getattrs
-
-        l_shared_getattrs, r_shared_getattrs = shared_getattrs(
-            l_lifted_freevars.keys(),  # type: ignore[arg-type]
-            r_lifted_freevars.keys(),  # type: ignore[arg-type]
+    graphs: list[torch.fx.Graph],
+    lifted_freevars: list[dict[Proxy, Proxy]],
+    names: list[str],
+) -> tuple[list[Proxy], list[list[Proxy]]]:
+    n = len(graphs)
+    if n != len(lifted_freevars) or n != len(names):
+        raise AssertionError(
+            "Expected graphs, lifted_freevars and names to have the same length"
         )
+    if n == 0:
+        raise AssertionError("Expected at least one graph")
 
-        l_shared_freevars = (l_lifted_freevars.keys() & r_lifted_freevars.keys()).union(
-            l_shared_getattrs.keys()
+    # Step 1: pick a canonical proxy for every distinct outer freevar across
+    # branches, deduplicating get_attrs that share a target. A canonical proxy
+    # is shared iff every branch contributed to it.
+    get_attr_canonical: dict[Any, Proxy] = {}
+    per_branch_outer_to_canonical: list[dict[Proxy, Proxy]] = []
+    canonical_branch_count: Counter[Proxy] = Counter()
+    for branch_lifted in lifted_freevars:
+        outer_to_canonical: dict[Proxy, Proxy] = {}
+        for outer in branch_lifted:
+            canonical = outer
+            if outer.node.op == "get_attr":
+                target = outer.node.target
+                canonical = get_attr_canonical.setdefault(target, outer)
+            outer_to_canonical[outer] = canonical
+        per_branch_outer_to_canonical.append(outer_to_canonical)
+        canonical_branch_count.update(set(outer_to_canonical.values()))
+
+    shared_canonical = {c for c, count in canonical_branch_count.items() if count == n}
+
+    # Step 2: derive the shared block and the per-branch unique blocks. Plain
+    # proxies are the same object across branches, so a single canonical entry
+    # covers all of them; for shared get_attrs the canonical is the branch-0
+    # proxy.
+    def _sort_by_name(vars: Iterable[Proxy]) -> list[Proxy]:
+        return sorted(vars, key=lambda var: var.node.name)
+
+    shared = _sort_by_name(shared_canonical)
+    unique_per_branch = [
+        _sort_by_name(
+            outer
+            for outer, canonical in outer_to_canonical.items()
+            if canonical not in shared_canonical
         )
-        r_shared_freevars = (l_lifted_freevars.keys() & r_lifted_freevars.keys()).union(
-            r_shared_getattrs.keys()
-        )
-        unique_l_freevars = l_lifted_freevars.keys() - l_shared_freevars
-        unique_r_freevars = r_lifted_freevars.keys() - r_shared_freevars
+        for outer_to_canonical in per_branch_outer_to_canonical
+    ]
 
-        def _sort_by_name(vars: list[Proxy]) -> list[Proxy]:
-            return sorted(vars, key=lambda var: var.node.name)
-
-        return (
-            list(_sort_by_name(list(l_shared_freevars))),
-            list(_sort_by_name(list(r_shared_freevars))),
-            list(_sort_by_name(list(unique_l_freevars))),
-            list(_sort_by_name(list(unique_r_freevars))),
-        )
-
-    (l_shared, r_shared, unique_l, unique_r) = dedup_and_sort_lifted_freevars(
-        l_lifted_freevars, r_lifted_freevars
-    )
-
-    # Let's say we capture cond(pred, true_fn, false_fn, (x,))
+    # Let's say we capture cond(pred, true_fn, false_fn, (x,)).
     # With set_graph_input set to automatic,
-    # true_fn has lifted variables x, a, b, c
-    # false_fn has lifted variables x, a, b, d
-    # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
-    # - true_fn(x, a, b, c_true_branch, d_false_branch)
-    # - false_fn(x, a, b, c_true_branch, d_false_branch)
+    #   true_fn has lifted variables x, a, b, c
+    #   false_fn has lifted variables x, a, b, d
+    # Then fixup_branch_inps makes sure both branches have the same signature, i.e.:
+    #   true_fn(x, a, b, c_true_branch, d_false_branch)
+    #   false_fn(x, a, b, c_true_branch, d_false_branch)
     #
-    # More formally, the signature has three parts in the following order:
-    # 1. used in both branches: x, a, b
-    # 2. only used in true branches: c, suffixed with _true_branch
-    # 3. only used in false branches: d, suffixed with _false_branch
-    # Within each part, we re-order the nodes by name to have a derterministic ordering for testing.
+    # For N branches the merged signature has 1 + N blocks: shared (no suffix)
+    # then one suffixed block per branch. Within each block proxies are
+    # ordered by node name for determinism.
     def fixup_branch_inps(
         graph: torch.fx.Graph,
-        lifted_freevars: dict[Proxy, Proxy],
-        shared: Sequence[Proxy],
-        unique_l: Sequence[Proxy],
-        unique_r: Sequence[Proxy],
+        branch_lifted: dict[Proxy, Proxy],
+        outer_to_canonical: dict[Proxy, Proxy],
     ) -> None:
+        # Reverse-map canonical -> this branch's outer proxy so we can find the
+        # old placeholder to replace when emitting the shared block.
+        canonical_to_branch_outer = {c: o for o, c in outer_to_canonical.items()}
+
         def _insert_or_replace_phs(new_args: Sequence[Proxy], name_suffix: str) -> None:
             for arg in new_args:
                 new_ph = graph.placeholder(arg.node.name + name_suffix)
                 new_ph.meta = arg.node.meta
-                # Override with new_ph if there exists a old placeholder.
-                if arg in lifted_freevars:
-                    old_ph = lifted_freevars[arg].node
+                # If this branch lifted `arg` (directly or via a shared
+                # get_attr target), wire the new placeholder to the existing
+                # uses and erase the old placeholder.
+                local_outer = canonical_to_branch_outer.get(arg, arg)
+                if local_outer in branch_lifted:
+                    old_ph = branch_lifted[local_outer].node
                     old_ph.replace_all_uses_with(new_ph)
                     # replace_all_uses_with doesn't clean users. Clean it manually so that we could erase it.
                     old_ph.users = {}
@@ -1388,12 +1380,15 @@ def _merge_graph_inputs(
         )
         with graph.inserting_before(first_not_ph_node):
             _insert_or_replace_phs(shared, "")
-            _insert_or_replace_phs(unique_l, "_" + l_name)
-            _insert_or_replace_phs(unique_r, "_" + r_name)
+            for other_name, other_unique in zip(names, unique_per_branch):
+                _insert_or_replace_phs(other_unique, "_" + other_name)
 
-    fixup_branch_inps(l_graph, l_lifted_freevars, l_shared, unique_l, unique_r)
-    fixup_branch_inps(r_graph, r_lifted_freevars, r_shared, unique_l, unique_r)
-    return l_graph, r_graph, l_shared, r_shared, unique_l, unique_r
+    for graph, branch_lifted, outer_to_canonical in zip(
+        graphs, lifted_freevars, per_branch_outer_to_canonical
+    ):
+        fixup_branch_inps(graph, branch_lifted, outer_to_canonical)
+
+    return shared, unique_per_branch
 
 
 # NOTE: [HigherOrderOperator subgraph input ordering]
@@ -1610,7 +1605,7 @@ def get_hop_args(
     subtracer: "SubgraphTracer",
     sub_args: list[VariableTracker],
     sub_kwargs: dict[str, VariableTracker],
-    set_subgraph_inputs: str,
+    set_subgraph_inputs: SetSubgraphInputs,
     description: str,
 ) -> list[VariableTracker]:
     sub_args_names = maybe_positional_arg_names(f)
@@ -1662,9 +1657,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # order they are see while tracing). This is useful for autograd.Function
     # backward where we do need to account for all the inputs of the backwards
     # to be lifted as inputs for making the fwd-bwd graph consistent.
-    set_subgraph_inputs: Literal[
-        "automatic", "automatic_with_forced_inputs", "flatten_manual", "manual"
-    ] = "automatic",
+    set_subgraph_inputs: SetSubgraphInputs = "automatic",
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
     allow_side_effects: bool = False,
@@ -1793,12 +1786,7 @@ def speculate_subgraph_with_auto_output_flattening(
     if sub_kwargs is None:
         sub_kwargs = {}
 
-    if set_subgraph_inputs not in {
-        "automatic",
-        "automatic_with_forced_inputs",
-        "flatten_manual",
-        "manual",
-    }:
+    if set_subgraph_inputs not in get_args(SetSubgraphInputs):
         raise AssertionError(
             "Please use one of the supported set_subgraph_inputs options."
         )
@@ -1879,7 +1867,7 @@ def speculate_subgraph_with_auto_output_flattening(
 
             def visit(vt: VariableTracker) -> None:
                 if vt.is_tensor() or isinstance(
-                    vt, (SymNodeVariable, TorchScriptObjectVariable)
+                    vt, (SymNodeVariable, CustomClassObjectVariable)
                 ):
                     graph_output_vts.append(vt)
 
@@ -2034,9 +2022,7 @@ def speculate_subgraph(
     # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
     # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
     # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
-    set_subgraph_inputs: Literal[
-        "automatic", "semi_automatic", "flatten_manual", "manual"
-    ] = "automatic",
+    set_subgraph_inputs: SetSubgraphInputs = "automatic",
     restore_side_effects: bool = True,
     should_flatten_outputs: bool = False,
     # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
@@ -2054,12 +2040,7 @@ def speculate_subgraph(
 
     from .builder import SourcelessBuilder
 
-    if set_subgraph_inputs not in {
-        "automatic",
-        "automatic_with_forced_inputs",
-        "flatten_manual",
-        "manual",
-    }:
+    if set_subgraph_inputs not in get_args(SetSubgraphInputs):
         raise AssertionError(
             "Please use one of the supported set_subgraph_inputs options."
         )
@@ -2578,20 +2559,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 ],
             )
 
-        (
-            true_graph,
-            false_graph,
-            true_shared,
-            _false_shared,
-            unique_true,
-            unique_false,
-        ) = _merge_graph_inputs(
-            true_graph,
-            true_lifted_freevars,
-            "true_branch",
-            false_graph,
-            false_lifted_freevars,
-            "false_branch",
+        shared, (unique_true, unique_false) = _merge_graph_inputs(
+            [true_graph, false_graph],
+            [true_lifted_freevars, false_lifted_freevars],
+            ["true_branch", "false_branch"],
         )
 
         true_name = tx.output.install_subgraph(
@@ -2610,8 +2581,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             pred.as_proxy(),
             true_node,
             false_node,
-            # We pick true_shared but it shouldn't matter
-            tuple(true_shared + unique_true + unique_false),
+            tuple(shared + unique_true + unique_false),
         )
 
         return _call_function_and_unflatten_output(
@@ -2622,6 +2592,230 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             None,
             true_spec,
             true_r,
+        )
+
+
+class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.switch"
+    _ALLOW_FALLBACK_TO_EAGER = False
+    supports_input_mutation = False
+    supports_aliasing = False
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from . import ListVariable
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        for i, k in enumerate(["index", "branches", "operands"]):
+            if v := kwargs.pop(k, None):
+                if i != len(args):
+                    raise AssertionError(
+                        "did not provide the right number of non-keyword args"
+                    )
+                args.append(v)
+
+        if len(args) != 3 or kwargs:
+            unimplemented(
+                gb_type="torch.switch: improper args/kwargs",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation=f"torch.switch expects 3 positional arguments (got {len(args)}) "
+                f"and no keyword arguments (got {len(kwargs)}) "
+                "Usage: switch(index, branches, operands)",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        index, branches, operands = args
+        if type(index) is ConstantVariable:
+            # Specialize into one of the branches since index is constant.
+            warnings.warn(
+                "Index is a Python constant. When used with torch.switch, it specializes on one of the branches."
+                " If you want torch.switch to preserve the branches, please make the index a tensor or SymInt.",
+                UserWarning,
+            )
+            idx = index.as_python_constant()
+            branch_fns = branches.unpack_var_sequence(tx)
+            clamped = min(max(0, idx), len(branch_fns) - 1)
+            return branch_fns[clamped].call_function(
+                tx, operands.unpack_var_sequence(tx), {}
+            )
+
+        # index
+        if type(index.realize()) not in (
+            ConstantVariable,
+            TensorVariable,
+            SymNodeVariable,
+        ):
+            unimplemented(
+                gb_type="torch.switch: improper index",
+                context=str(index),
+                explanation="Expected index to be an int or a tensor with a single item "
+                f"but got {str(type(index))} with original python type {str(index.python_type())}.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        # operands
+        if not isinstance(operands, (ListVariable, TupleVariable)):
+            unimplemented(
+                gb_type="torch.switch: improper operands",
+                context=str(operands),
+                explanation=f"Expected operands to be a list/tuple "
+                f"but got {operands.python_type()}.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        operands_seq = operands.unpack_var_sequence(tx)
+        if not only_consist_of(
+            operands, (TensorVariable, ConstantVariable, SymNodeVariable)
+        ):
+            unimplemented(
+                gb_type="torch.switch: improper operands contents",
+                context=str(operands),
+                explanation="Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        # branches
+        if not isinstance(branches, (ListVariable, TupleVariable)):
+            unimplemented(
+                gb_type="torch.switch: improper branches",
+                context=str(branches),
+                explanation="Expected branches to be a list/tuple of callables.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        branch_fns = branches.unpack_var_sequence(tx)
+        if len(branch_fns) == 0:
+            unimplemented(
+                gb_type="torch.switch: empty branches",
+                context=str(branches),
+                explanation="Expected at least one branch.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        for i, branch_fn in enumerate(branch_fns):
+            _check_supported_callable_arg(tx, branch_fn, f"branch{i}")
+
+        # Our strategy for tracing the branches of switch mirrors cond: each
+        # branch is speculated in isolation and the resulting graphs are
+        # merged, asserting the output specs agree. Side effects are not
+        # permitted inside branches because of the path-explosion problem.
+        def speculate_branch(
+            func,
+        ) -> tuple[VariableTracker, OutputSpec, torch.fx.Graph, dict[Proxy, Proxy]]:
+            if self._HOP_NAME is None:
+                raise AssertionError("_HOP_NAME must be set")
+            (
+                (ret_val, ret_spec),
+                ret_graph,
+                ret_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                func,
+                operands_seq,
+                {},
+                self._HOP_NAME,
+                source_target=self.value,
+                should_flatten_outputs=True,
+                remove_consts_from_outputs=False,
+                supports_input_mutation=self.supports_input_mutation,
+                supports_aliasing=self.supports_aliasing,
+            )
+
+            # need to ensure we increase epoch so we don't memoize unbacked bindings
+            # across different subgraphs which can interfere with runtime assertion
+            # generation.
+            if tx.fake_mode is None:
+                raise AssertionError("tx.fake_mode must not be None")
+            tx.fake_mode.epoch += 1
+
+            if not only_consist_of(
+                ret_val, (TensorVariable, ConstantVariable), allow_none=True
+            ):
+                unimplemented(
+                    gb_type="torch.switch: unsupported branch return type",
+                    context=str(ret_val),
+                    explanation="Expected branches to return a possibly nested pytree of tensor or constant int/None leaves.",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+            for ret in ret_val.unpack_var_sequence(tx):
+                if ret.is_python_constant():
+                    const = ret.as_python_constant()
+                    # Python floats in branch outputs are blocked upstream by
+                    # validate_subgraph_output_types (shared HOP gate); we
+                    # mirror the whitelist here to keep the error specific to
+                    # torch.switch. bool is implicitly accepted via the int check.
+                    if not (isinstance(const, int) or const is None):
+                        unimplemented(
+                            gb_type="torch.switch: unsupported branch return type (constant)",
+                            context=str(ret_val),
+                            explanation="Constants returned from branches must be int or None.",
+                            hints=[*graph_break_hints.USER_ERROR],
+                        )
+            return ret_val, ret_spec, ret_graph, ret_lifted_freevars
+
+        branch_states: list[Any] = []
+        branch_nn_modules: list[Any] = []
+        for f in branch_fns:
+            branch_states.append(speculate_branch(f))
+            branch_nn_modules.append(dict(tx.output.nn_modules))
+        branch_rets, branch_specs, branch_graphs, branch_lifted_freevars = zip(
+            *branch_states
+        )
+
+        for i, (spec_a, spec_b) in enumerate(itertools.pairwise(branch_specs)):
+            same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
+                spec_a.treespec, spec_b.treespec
+            ).as_python_constant()
+            # 3.14: NotImplemented cannot be converted to bool
+            if same_spec is not NotImplemented and not same_spec:
+                unimplemented(
+                    gb_type="torch.switch: differing branch outputs",
+                    context=f"branch{i}: {spec_a.treespec}, branch{i + 1}: {spec_b.treespec}, same_spec: {same_spec}",
+                    explanation="Expected branches to return the same pytree structure.",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+
+        # Merge lifted freevars across all branches so they all share the same
+        # placeholder signature. Branches may capture different free variables
+        # (e.g. different nn module attrs), so we union them and add missing
+        # placeholders to any branch graph that lacks them.
+        branch_names_for_merge = [f"branch{i}" for i in range(len(branch_fns))]
+        shared, unique_per_branch = _merge_graph_inputs(
+            list(branch_graphs),
+            list(branch_lifted_freevars),
+            branch_names_for_merge,
+        )
+        all_lifted = shared + [u for branch in unique_per_branch for u in branch]
+
+        branch_names = [
+            tx.output.install_subgraph(
+                f"switch_branch{i}",
+                GraphModule(branch_nn_modules[i], graph),
+            )
+            for i, graph in enumerate(branch_graphs)
+        ]
+
+        branch_nodes = [make_attr(tx, name) for name in branch_names]
+
+        p_args = (
+            index.as_proxy(),
+            branch_nodes,
+            tuple(all_lifted),
+        )
+
+        return _call_function_and_unflatten_output(
+            tx,
+            torch.ops.higher_order.switch,
+            p_args,
+            {},
+            None,
+            branch_specs[0],
+            branch_rets[0],
         )
 
 
@@ -2682,7 +2876,7 @@ def validate_subgraph_output_types(
                     out.is_python_constant()
                     and isinstance(out.as_python_constant(), (int, bool))
                 )
-                or isinstance(out, TorchScriptObjectVariable)
+                or isinstance(out, CustomClassObjectVariable)
             ):
                 continue
             unimplemented(
@@ -3299,6 +3493,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self.supports_input_mutation = not torch.is_grad_enabled()
+
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         if len(kwargs) > 0:
@@ -3376,6 +3572,10 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             supports_aliasing=self.supports_aliasing,
         )
 
+        body_mutated_inputs = set(
+            getattr(body_graph, "_dynamo_mutated_input_indices", ())
+        )
+
         # Check all outputs of map are tensors.
         # For map, outputting None is OK, thus ignore None values in the check
         body_r_vars = unpack_iterable(tx, body_r)
@@ -3383,6 +3583,61 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         _check_all_tensorvariable(
             [br for bm, br in zip(none_mask, body_r_vars) if not bm]
         )
+
+        # Mutation handling: map allows in-place writes only to xs
+        # (each iteration sees a storage-disjoint slice). Mutations of
+        # pos_args or captured freevars are unsafe (see MapImpl.gen_schema
+        # for the contract). Placeholder order is [xs, pos_args, freevars].
+        n_xs = len(unpacked_xs)
+        n_pos = len(unpacked_args)
+
+        pos_args_mutated = sorted(
+            i - n_xs for i in body_mutated_inputs if n_xs <= i < n_xs + n_pos
+        )
+        if pos_args_mutated:
+            unimplemented(
+                gb_type="torch.map: f mutates pos_args",
+                context=f"pos_args={pos_args_mutated}",
+                explanation=(
+                    "map only supports in-place mutation of xs (each "
+                    "iteration sees a storage-disjoint slice). pos_args "
+                    "are loop-invariant: every iteration sees the same "
+                    "tensor, so a mutation makes iterations depend on each "
+                    "other, breaking map's independence contract and "
+                    "introducing a data race under any parallel lowering. "
+                    "Use scan or while_loop if sequential buffer updates "
+                    "are required."
+                ),
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
+
+        freevars_mutated = sorted(
+            i - n_xs - n_pos for i in body_mutated_inputs if i >= n_xs + n_pos
+        )
+        if freevars_mutated:
+            unimplemented(
+                gb_type="torch.map: f mutates a captured tensor",
+                context=f"freevars={freevars_mutated}",
+                explanation=(
+                    "map only supports in-place mutation of xs. A tensor "
+                    "captured from the enclosing scope (lifted parameter) is loop-invariant: "
+                    "every iteration sees the same tensor, so a mutation "
+                    "makes iterations depend on each other, breaking map's "
+                    "independence contract and introducing a data race "
+                    "under any parallel lowering. Pass the buffer through "
+                    "xs, or use scan / while_loop if sequential buffer "
+                    "updates are required."
+                ),
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
+
+        # No storage round-trip needed: aliasing graph-breaks upstream, so the
+        # mutated subgraph placeholder indices are already the parent xs indices.
+        mutated_arg_indices = ",".join(str(i) for i in sorted(body_mutated_inputs))
 
         body_nn_modules = dict(tx.output.nn_modules)
 
@@ -3399,9 +3654,14 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             [arg.as_proxy() for arg in unpacked_args]
             + list(body_lifted_freevars.keys()),
         )
-
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.map_impl, p_args, {}, None, body_spec, body_r
+            tx,
+            torch.ops.higher_order.map_impl,
+            p_args,
+            {"mutated_arg_indices": mutated_arg_indices} if mutated_arg_indices else {},
+            None,
+            body_spec,
+            body_r,
         )
 
 
@@ -6131,6 +6391,7 @@ from .invoke_subgraph import InvokeSubgraphHigherOrderVariable
 # Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
+    "switch": SwitchHigherOrderVariable,
     "while_loop": WhileLoopHigherOrderVariable,
     "while_loop_stack_output": WhileLoopStackOutputHigherOrderVariable,
     "map_impl": MapHigherOrderVariable,

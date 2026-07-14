@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <c10/core/RingBuffer.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
@@ -61,6 +62,7 @@ TORCH_SDT_DEFINE_SEMAPHORE(free)
 #define CU_MEM_HANDLE_TYPE_FABRIC ((CUmemAllocationHandleType)0x8ULL)
 #define CU_IPC_HANDLE_SIZE 64
 typedef struct CUmemFabricHandle_st {
+  // NOLINTNEXTLINE(*-avoid-c-arrays)
   unsigned char data[CU_IPC_HANDLE_SIZE];
 } CUmemFabricHandle_v1;
 typedef CUmemFabricHandle_v1 CUmemFabricHandle;
@@ -144,6 +146,7 @@ namespace Native {
  */
 
 // counter to track order for Mempool Registration
+static std::atomic<int32_t> registration_counter_global{-1};
 
 static char SHAREABLE_HANDLE_VERSION = 3;
 enum ShareableHandleType : char {
@@ -152,8 +155,6 @@ enum ShareableHandleType : char {
 };
 
 namespace {
-
-std::atomic<int32_t> registration_counter_global{-1};
 
 using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
@@ -521,9 +522,10 @@ struct ExpandableSegment {
           (void)hipGetLastError();
 #endif
           for (auto j : c10::irange(begin, i)) {
-            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-            auto h = handles_.at(j).value();
-            handles_.at(j) = std::nullopt;
+            auto& maybe_handle = handles_.at(j);
+            TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
+            auto h = *maybe_handle;
+            maybe_handle = std::nullopt;
 #ifdef USE_ROCM
             C10_CUDA_CHECK(hipMemRelease(h.handle));
 #else
@@ -539,8 +541,7 @@ struct ExpandableSegment {
         C10_CUDA_DRIVER_CHECK(status);
 #endif
       }
-      handles_.at(i) =
-          Handle{.handle = handle, .shareable_handle = std::nullopt};
+      handles_.at(i) = Handle{.handle = handle};
     }
     mapAndSetAccess(begin, end);
     return rangeFromHandles(begin, end);
@@ -594,8 +595,9 @@ struct ExpandableSegment {
 
     buf.write(reinterpret_cast<const char*>(&header), sizeof(ShareHeader));
     for (auto i : c10::irange(begin, end)) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      auto& handle = handles_.at(i).value();
+      auto& maybe_handle = handles_.at(i);
+      TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
+      auto& handle = *maybe_handle;
       if (handle_type_ != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
           int fd = 0;
@@ -706,12 +708,13 @@ struct ExpandableSegment {
           auto err = errno;
           close(static_cast<int>(pidfd));
           for (auto& h : segment->handles_) {
+            TORCH_INTERNAL_ASSERT(h.has_value());
+            const Handle& handle = *h;
 #ifdef USE_ROCM
-            C10_CUDA_CHECK(hipMemRelease(h.value().handle));
+            C10_CUDA_CHECK(hipMemRelease(handle.handle));
 #else
             C10_CUDA_DRIVER_CHECK(
-                // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-                DriverAPI::get()->cuMemRelease_(h.value().handle));
+                DriverAPI::get()->cuMemRelease_(handle.handle));
 #endif
             h = std::nullopt;
           }
@@ -744,8 +747,7 @@ struct ExpandableSegment {
 #endif
         LOG(INFO) << "use posix fd to import expandable segments.";
         close(static_cast<int>(myfd));
-        segment->handles_.emplace_back(
-            Handle{.handle = handle, .shareable_handle = std::nullopt});
+        segment->handles_.emplace_back(handle);
       }
       close(static_cast<int>(pidfd));
 #endif // !_WIN32
@@ -770,8 +772,7 @@ struct ExpandableSegment {
             get_nvml_fabric_info(device),
             "}");
         LOG(INFO) << "use fabric handle to import expandable segments.";
-        segment->handles_.emplace_back(
-            Handle{.handle = handle, .shareable_handle = std::nullopt});
+        segment->handles_.emplace_back(handle);
       }
 #endif
     }
@@ -873,33 +874,34 @@ struct ExpandableSegment {
     C10_CUDA_CHECK(hipMemSetAccess(
         ptr() + begin * segment_size_,
         (end - begin) * segment_size_,
-        desc.data(),
+        &desc[0],
         num_desc));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
         ptr_ + begin * segment_size_,
         (end - begin) * segment_size_,
-        desc.data(),
+        &desc[0],
         num_desc));
 #endif
   }
 
   void mapAndSetAccess(size_t begin, size_t end) {
     for (auto i : c10::irange(begin, end)) {
+      auto& maybe_handle = handles_.at(i);
+      TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
 #ifdef USE_ROCM
       C10_CUDA_CHECK(hipMemMap(
           ptr() + i * segment_size_,
           segment_size_,
           0,
-          handles_.at(i).value().handle,
+          maybe_handle->handle,
           0ULL));
 #else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
           ptr_ + i * segment_size_,
           segment_size_,
           0,
-          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-          handles_.at(i).value().handle,
+          maybe_handle->handle,
           0ULL));
 #endif
     }
@@ -925,9 +927,10 @@ struct ExpandableSegment {
       C10_CUDA_CHECK(cudaDeviceSynchronize());
     }
     for (auto i : c10::irange(begin, end)) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      Handle h = handles_.at(i).value();
-      handles_.at(i) = std::nullopt;
+      auto& maybe_handle = handles_.at(i);
+      TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
+      Handle h = *maybe_handle;
+      maybe_handle = std::nullopt;
 #ifdef USE_ROCM
       C10_CUDA_CHECK(hipMemUnmap(ptr() + segment_size_ * i, segment_size_));
 #else
@@ -949,8 +952,7 @@ struct ExpandableSegment {
   }
   void trimHandles() {
     auto it = std::ranges::find_if(
-        handles_.rbegin(),
-        handles_.rend(),
+        std::views::reverse(handles_),
         [](const std::optional<Handle>& opt) { return opt.has_value(); });
     handles_.erase(it.base(), handles_.end());
   }
@@ -1313,63 +1315,7 @@ cudaError_t cudaMallocMaybeCapturing(void** ptr, size_t size, AllocParams& p) {
   }
 }
 
-template <class T>
-class RingBuffer {
- public:
-  RingBuffer() {
-    // alloc_trace is a pointer because we need to intentionally
-    // leak this on deallocation it can hold references to Python
-    // state which will already be destroyed when we are in exit handlers
-    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
-    alloc_trace = new std::vector<T>();
-  }
-
-  void setMaxEntries(size_t size) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    alloc_trace_max_entries_ = std::max(static_cast<size_t>(1), size);
-  }
-
-  void insertEntries(const T& entry) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    if (alloc_trace->size() < alloc_trace_max_entries_) {
-      alloc_trace->emplace_back(entry);
-    } else {
-      (*alloc_trace)[alloc_trace_next++] = entry;
-      if (alloc_trace_next == alloc_trace_max_entries_) {
-        alloc_trace_next = 0;
-      }
-    }
-  }
-
-  void getEntries(std::vector<T>& result) const {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    result.reserve(result.size() + alloc_trace->size());
-    std::rotate_copy(
-        alloc_trace->begin(),
-        std::next(alloc_trace->begin(), alloc_trace_next),
-        alloc_trace->end(),
-        std::back_inserter(result));
-  }
-
-  void clear() {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    alloc_trace_next = 0;
-    alloc_trace->clear();
-    alloc_trace->shrink_to_fit();
-  }
-
- private:
-  size_t alloc_trace_max_entries_ = 1;
-
-  // Both alloc_trace and alloc_trace_next needs to be used
-  // under alloc_trace_lock.
-  mutable std::mutex alloc_trace_lock;
-  size_t alloc_trace_next = 0;
-  std::vector<T>*
-      alloc_trace; // pointer because we need to intentionally leak this on
-                   // deallocation it can hold references to Python state which
-                   // will already be destroyed when we are in exit handlers
-};
+using c10::RingBuffer;
 } // anonymous namespace
 } // namespace Native
 
@@ -1421,7 +1367,7 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     }
     ss << " has " << format_size(proc.usedGpuMemory) << " memory in use. ";
   }
-  return ss.str();
+  return std::move(ss).str();
 #else
   return "";
 #endif
@@ -1505,7 +1451,7 @@ class DeviceCachingAllocator {
   // record used memory.
   size_t total_allocated_memory = 0;
 
-  cudaDeviceProp device_prop;
+  cudaDeviceProp device_prop{};
 
   // maximum amount of memory that device is allowed to
   // allocate. This is set iff memory fraction is less than 1
@@ -1549,11 +1495,14 @@ class DeviceCachingAllocator {
   // thread local compile context for each device
   static thread_local std::stack<std::string> compile_context;
 
-  // thread local user metadata for annotating allocations
+  // Thread local user metadata recorded on memory history trace entries.
+  // Note: being a static member, this is per-thread process-wide state, NOT
+  // per-device state; setUserMetadata on any DeviceCachingAllocator instance
+  // affects trace entries for all devices used by the calling thread. This is
+  // intentional: metadata labels a region of source code, not a device.
   static thread_local std::string user_metadata;
 
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
       : device_id(id),
         large_blocks(/*small=*/false),
@@ -2359,11 +2308,10 @@ class DeviceCachingAllocator {
     if (graph_reuse_context.find(info.capture_id) ==
         graph_reuse_context.end()) {
       bool found = false;
-      // Use the reverse iterator to search allocation_scopes_ in LIFO order.
-      for (auto& [mempool_id, filter] :
-           std::views::reverse(allocation_scopes_)) {
-        if (filter(stream)) {
-          auto graph_pool = graph_pools.find(mempool_id);
+      // Search allocation_scopes_ in LIFO order.
+      for (auto& [pool_id, scope] : std::views::reverse(allocation_scopes_)) {
+        if (scope(stream)) {
+          auto graph_pool = graph_pools.find(pool_id);
           TORCH_INTERNAL_ASSERT(
               graph_pool != graph_pools.end(),
               "Could not find graph pool for capture.");
@@ -2527,7 +2475,7 @@ class DeviceCachingAllocator {
           SegmentRange(block->ptr, block->size), ss);
       offset = static_cast<const char*>(block->ptr) - full_range.ptr;
     }
-    return ShareableHandle{.offset = offset, .handle = ss.str()};
+    return ShareableHandle{.offset = offset, .handle = std::move(ss).str()};
   }
 
   void recordStream(Block* block, cuda::CUDAStream stream) {
@@ -2936,7 +2884,7 @@ class DeviceCachingAllocator {
 
     for (auto& segment : pps.segments) {
       auto ptr = segment.blocks.at(0).ptr;
-      TORCH_CHECK(ptrs_to_blocks.count(ptr), " could not find ", ptr)
+      TORCH_CHECK(ptrs_to_blocks.contains(ptr), " could not find ", ptr)
       auto block = ptrs_to_blocks[ptr];
 
       setSegmentStateToCheckpoint(block, segment, context, rr);
@@ -3649,11 +3597,10 @@ class DeviceCachingAllocator {
     // warmup). When non-empty we route allocations into the matching private
     // pool. It is usually empty, so we can short-circuit on the common path.
     if (C10_UNLIKELY(!allocation_scopes_.empty())) {
-      // Use the reverse iterator to search allocation_scopes_ in LIFO order.
-      for (auto& [mempool_id, filter] :
-           std::views::reverse(allocation_scopes_)) {
-        if (filter(stream)) {
-          auto it1 = graph_pools.find(mempool_id);
+      // Search allocation_scopes_ in LIFO order.
+      for (auto& [pool_id, scope] : std::views::reverse(allocation_scopes_)) {
+        if (scope(stream)) {
+          auto it1 = graph_pools.find(pool_id);
           TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
           if (size <= kSmallSize) {
             return it1->second->small_blocks;
@@ -3782,13 +3729,13 @@ class DeviceCachingAllocator {
     // Free unused cached blocks to reclaim GPU memory.
     // Unlike release_cached_blocks(), this does not enforce synchronization and
     // therefore should be of less overheads.
+
     if (!allowed_memory_maximum.has_value()) {
       return;
     }
-
     size_t gc_threshold = static_cast<size_t>(
         AcceleratorAllocatorConfig::garbage_collection_threshold() *
-        static_cast<double>(*allowed_memory_maximum));
+        static_cast<double>(allowed_memory_maximum.value()));
     // No need to trigger GC yet
     if (total_allocated_memory <= gc_threshold) {
       return;
@@ -3881,7 +3828,7 @@ class DeviceCachingAllocator {
           static_cast<double>(device_total));
       if (total_allocated_memory + size > max_allowed) {
         stats.num_oom_rejections++;
-        p.oom_rejection_info = OomRejectionInfo{
+        p.oom_rejection_info = {
             .rejected = true,
             .alloc_size = size,
             .total_allocated = total_allocated_memory,
@@ -4332,9 +4279,7 @@ class DeviceCachingAllocator {
   void remove_cudagraph_stream_uses(Block* block) {
     // remove stream uses added during cudagraph capture
     // (i.e., block->stream_uses - block->cudagraph_stream_uses)
-    if (C10_UNLIKELY(
-            block_to_cudagraph_stream_uses.find(block) !=
-            block_to_cudagraph_stream_uses.end())) {
+    if (C10_UNLIKELY(block_to_cudagraph_stream_uses.contains(block))) {
       stream_set streams(std::move(block->stream_uses));
       AT_ASSERT(block->stream_uses.empty());
       for (auto& stream : streams) {
@@ -4526,8 +4471,10 @@ static void uncached_delete(void* ptr) {
 }
 
 static void local_raw_delete(void* ptr);
+// NOLINTBEGIN(misc-use-internal-linkage)
 thread_local std::stack<std::string> DeviceCachingAllocator::compile_context;
 thread_local std::string DeviceCachingAllocator::user_metadata;
+// NOLINTEND(misc-use-internal-linkage)
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
@@ -4753,6 +4700,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     device_allocator[device]->popCompileContext();
+  }
+
+  bool supportsUserMetadata() override {
+    return true;
   }
 
   void setUserMetadata(const std::string& metadata) override {
@@ -5043,10 +4994,10 @@ class NativeCachingAllocator : public CUDAAllocator {
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      const std::shared_ptr<CUDAAllocator>& allocator) override {
+      std::shared_ptr<CUDAAllocator> allocator) override {
     assertValidDevice(device);
     device_allocator[device]->createOrIncrefPool(
-        std::move(mempool_id), allocator);
+        std::move(mempool_id), std::move(allocator));
   }
 
   void setUseOnOOM(

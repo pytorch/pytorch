@@ -1998,9 +1998,15 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
 
     # Internal path needs special care, using the SDK lib path directly.
     if config.is_fbcode():
-        stub_dir = Path(build_paths.sdk_lib) / "stubs"
-        if stub_dir.is_dir() and str(stub_dir) not in lpaths:
-            lpaths.append(str(stub_dir))
+        # Add sdk_lib and its stubs/ (which hold the CUDA libs) unconditionally:
+        # an existence gate fails on the not-yet-materialized EdenFS path, and a
+        # nonexistent -L is harmless to the linker.
+        for cuda_lib_dir in (
+            build_paths.sdk_lib,
+            os.path.join(build_paths.sdk_lib, "stubs"),
+        ):
+            if cuda_lib_dir not in lpaths:
+                lpaths.append(cuda_lib_dir)
 
 
 def _transform_rocm_paths(lpaths: list[str]) -> None:

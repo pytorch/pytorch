@@ -243,6 +243,15 @@ def toolkit_version(device_type: str) -> str:
         return get_cuda_version()
 
 
+def get_device_cutlass_config(device_type: str):
+    """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
+    if device_type == "xpu":
+        return config.xpu
+    from ...config import cutlass as inductor_cutlass_config
+
+    return inductor_cutlass_config
+
+
 @dataclass
 class CUTLASSArgs:
     """
@@ -296,12 +305,13 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         )
         return {}
 
-    gen_arch = (
-        "100" if arch == "103" else arch
-    )  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
+    # SM103 reuses the SM100 generator, but the CUTLASS manifest must keep
+    # the 103a feature arch so unsupported arch-conditional kernels are skipped.
+    gen_arch = "100" if arch == "103" else arch
+    manifest_arch = "103a" if arch == "103" else gen_arch
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
-        architectures=gen_arch,
+        architectures=manifest_arch,
         toolkit_version=version,
         instantiation_level=instantiation_level,
         operations=CUTLASS_OPERATION_KIND,
