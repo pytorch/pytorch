@@ -3832,6 +3832,14 @@
       "Context": "object={self.value}, method={name}, args={args}, kwargs={kwargs}",
       "Explanation": "Detected a method call to a user-defined generator object. This is not fully supported.",
       "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "call_method on generator",
+      "Context": "object={self.value}, method={name}, args={args}, kwargs={kwargs}",
+      "Explanation": "Detected a method call to a user-defined generator object. This is not fully supported.",
+      "Hints": [
         "Set `torch._dynamo.config.enable_faithful_generator_behavior = False`. Note that this ",
         "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily ",
         "evaluating them."
