@@ -65,8 +65,6 @@ __device__ __forceinline__ void load_store(
 
 template <int n>
 struct TensorListMetadata {
-  // Capacities of the per-tensor and per-block arrays below. multi_tensor_apply
-  // must launch before exceeding either, or it overflows the struct.
   static constexpr int32_t max_tensors_per_launch = depth_to_max_tensors[n - 1];
   static constexpr int32_t max_blocks_per_launch = depth_to_max_blocks[n - 1];
   const void* addresses[n][max_tensors_per_launch];
@@ -78,8 +76,6 @@ struct TensorListMetadata {
 
 template <typename scalar_vals_t, int n>
 struct TensorListScalarListMetadata {
-  // Capacities of the per-tensor and per-block arrays below. multi_tensor_apply
-  // must launch before exceeding either, or it overflows the struct.
   static constexpr int32_t max_tensors_per_launch =
       depth_to_max_tensors_scalarlist[n - 1];
   static constexpr int32_t max_blocks_per_launch = depth_to_max_blocks[n - 1];
@@ -91,8 +87,7 @@ struct TensorListScalarListMetadata {
 };
 
 // note(mkozuki): `n` of 1&2 violate the limit of cuda kernel argument size
-// with `c10::complex<double>`, so these specializations use the smaller
-// depth_to_max_tensors_scalarlist_of_complex_double capacity.
+// with `c10::complex<double>`
 template <>
 struct TensorListScalarListMetadata<c10::complex<double>, 1> {
   static constexpr int32_t max_tensors_per_launch =
@@ -125,8 +120,6 @@ struct TensorListScalarListMetadata<c10::complex<double>, 2> {
 // concern (yet).
 template <int n>
 struct FusedOptimizerTensorListMetadata {
-  // Capacities of the per-tensor and per-block arrays below. multi_tensor_apply
-  // must launch before exceeding either, or it overflows the struct.
   static constexpr int32_t max_tensors_per_launch = depth_to_max_tensors[n - 1];
   static constexpr int32_t max_blocks_per_launch = depth_to_max_blocks[n - 1];
   const void* addresses[n][max_tensors_per_launch];
