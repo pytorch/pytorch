@@ -19,7 +19,7 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 import torch
 import torch.fx as fx
@@ -40,7 +40,7 @@ from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
-from torch._subclasses import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -100,12 +100,6 @@ from .utils import (
     strict_zip,
     without_output_descs,
 )
-
-
-if TYPE_CHECKING:
-    from torch._C import _AOTAutogradSavePlan
-else:
-    _AOTAutogradSavePlan = object
 
 
 def _snapshot_external_objects(ctx: Any) -> None:
@@ -2604,7 +2598,6 @@ class AOTDispatchAutogradCompileSpec:
     compiled_bw_func: Callable[..., Any] | None
     maybe_subclass_meta: SubclassMeta | None
     num_symints_saved_for_bw: int
-    num_fw_outs_saved_for_bw: int
     backward_state_indices: list[int]
     disable_amp: bool
     indices_of_inps_to_detach: list[int]
@@ -2617,9 +2610,9 @@ class AOTDispatchAutogradCompileSpec:
     try_save_cache_entry: Callable[..., Any] | None
 
 
-def _codegen_save_from_forward(
+def _build_save_from_forward_plan(
     fw_metadata: ViewAndMutationMeta,
-) -> tuple[Callable[..., Any], _AOTAutogradSavePlan]:
+) -> Any:
     is_graph_input = fw_metadata.saved_tensor_is_graph_input
     num_saved_tensors = len(is_graph_input)
     num_no_vc = fw_metadata.num_tensors_saved_with_no_vc_check
@@ -2649,21 +2642,16 @@ def _codegen_save_from_forward(
         for idx, dims in sorted(fw_metadata.dynamic_saved_tensors_idxs.items())
     )
 
-    # The C++ helper plan is built once at compile time. Store the four
-    # contiguous fw_out ranges directly, plus the sparse saved-tensor metadata.
-    plan = (
+    # The C++ helper plan is built once at compile time. Ranges are
+    # (start, length) in fw_outs. dynamic_saved_tensor_specs is only for saved
+    # tensors: each entry is (saved_tensor_index, indices_of_dynamic_dims).
+    return torch._C._AOTAutogradSavePlan(
         tensors_saved_with_vc_check_range,
         tensors_saved_no_vc_check_range,
         opaque_object_outs_range,
         symint_outs_range,
         tuple(is_graph_input),
-        tuple(fw_metadata.saved_tensor_may_be_view),
         dynamic_saved_tensor_specs,
-    )
-    save_plan = torch._C._aot_autograd_make_save_plan(plan)
-    return (
-        torch._C._aot_autograd_save_from_forward,
-        save_plan,
     )
 
 
@@ -3201,7 +3189,7 @@ def _codegen_compiled_forward(
     backward_state_indices: list[int],
     disable_amp: bool,
     num_rng: int,
-    save_plan: _AOTAutogradSavePlan,
+    save_plan: Any,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
@@ -3246,8 +3234,6 @@ def _codegen_compiled_forward(
 def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
-    num_symints_saved_for_bw: int,
-    num_opaque_objects_saved_for_bw: int,
     inputs_require_grad: bool,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
@@ -3282,18 +3268,9 @@ def _codegen_compiled_backward(
         else:
             buf.writeline("_saved = _ctx_.saved_tensors")
 
-        if num_symints_saved_for_bw > 0:
-            buf.writeline("_symints = _ctx_.symints")
-        else:
-            buf.writeline("_symints = ()")
-
-        if num_opaque_objects_saved_for_bw > 0:
-            buf.writeline("_opaque_objects = _ctx_.opaque_objects")
-        else:
-            buf.writeline("_opaque_objects = ()")
-
         buf.writeline(
-            "all_args = _prologue_(_saved, _symints, _opaque_objects, grad_args)"
+            "all_args = _prologue_(_saved, _ctx_.symints,"
+            " _ctx_.opaque_objects, grad_args)"
         )
         buf.writeline("del _saved")
 
@@ -3383,9 +3360,8 @@ class _AOTDispatchAutogradFunctionFactory:
             _codegen_bw_wrap_fn,
         )
 
-        _save_from_forward, _save_from_forward_plan = _codegen_save_from_forward(
-            fw_metadata
-        )
+        _save_from_forward = torch._C._aot_autograd_save_from_forward
+        _save_from_forward_plan = _build_save_from_forward_plan(fw_metadata)
         _codegen_fwd = _codegen_compiled_forward(
             fw_metadata,
             backward_state_indices,
@@ -3396,8 +3372,6 @@ class _AOTDispatchAutogradFunctionFactory:
         _codegen_bwd = _codegen_compiled_backward(
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
-            num_symints_saved_for_bw_,
-            fw_metadata.num_opaque_objects_saved_for_bw or 0,
             any(inp.requires_grad for inp in fw_metadata.input_info),
         )
 
@@ -3512,8 +3486,6 @@ class _AOTDispatchAutogradFunctionFactory:
 
             @staticmethod
             def _compiled_autograd_key(ctx: Any) -> tuple[Any, ...]:
-                if CompiledFunction.num_symints_saved_for_bw == 0:
-                    return (ctx._autograd_function_id,)
                 return (ctx._autograd_function_id, *ctx.symints)
 
             @staticmethod
@@ -3711,7 +3683,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         if not isinstance(x, torch.Tensor):
             return x, [x]
 
-        if isinstance(x, FakeTensor):
+        if is_fake_tensor(x):
             if not meta.memory_format:
                 raise AssertionError(
                     "meta.memory_format must not be None for FakeTensor"

@@ -38,6 +38,7 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
@@ -599,7 +600,7 @@ def collect_fw_donated_buffer_idxs(
 
     for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
         # Only access storage if a tensor has storage (not sparse)
-        if t is not None and isinstance(t, FakeTensor) and not is_sparse_any(t):
+        if t is not None and is_fake_tensor(t) and not is_sparse_any(t):
             storage_refs.add(StorageWeakRef(t.untyped_storage()))
 
     num_saved_tensor = len(saved_tensors)
@@ -608,7 +609,7 @@ def collect_fw_donated_buffer_idxs(
         t = saved_tensors[i]
         if (
             t is not None
-            and isinstance(t, FakeTensor)
+            and is_fake_tensor(t)
             and not is_sparse_any(t)
             and StorageWeakRef(t.untyped_storage()) not in storage_refs
         ):
@@ -1996,20 +1997,18 @@ def _categorize_saved_tensors_for_backward(
     num_symints_saved_for_bw = 0
     num_opaque_objects_saved_for_bw = 0
     saved_tensor_is_graph_input: list[bool] = []
-    saved_tensor_may_be_view: list[bool] = []
     for idx, node in enumerate(fw_outs_saved_for_bw):
         if is_sym_node(node):
             num_symints_saved_for_bw += 1
         elif is_opaque_node(node):
             num_opaque_objects_saved_for_bw += 1
         elif isinstance(node, torch.fx.Node) and "val" in getattr(node, "meta", {}):
-            if isinstance(node.meta["val"], FakeTensor):
+            if is_fake_tensor(node.meta["val"]):
                 # If the saved_tensor is a view, a graph intermediate,
                 # and returned from the autograd.Function output, we need to
                 # detach() it to prevent a reference cycle. Record
                 # if the saved_tensor is a graph input here to help.
                 saved_tensor_is_graph_input.append(node.op == "placeholder")
-                saved_tensor_may_be_view.append(node.meta["val"]._is_view())
                 # record dynamic tensor activations
                 dynamic_dims: set[int] = {
                     dim
@@ -2022,7 +2021,6 @@ def _categorize_saved_tensors_for_backward(
                 num_opaque_objects_saved_for_bw += 1
         else:
             saved_tensor_is_graph_input.append(False)
-            saved_tensor_may_be_view.append(True)
 
     fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
     fw_metadata.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
@@ -2036,17 +2034,10 @@ def _categorize_saved_tensors_for_backward(
             "expected one saved_tensor_is_graph_input entry per saved tensor, "
             f"got {len(saved_tensor_is_graph_input)} != {num_tensors_saved_for_bw}"
         )
-    if len(saved_tensor_may_be_view) != num_tensors_saved_for_bw:
-        raise AssertionError(
-            "expected one saved_tensor_may_be_view entry per saved tensor, "
-            f"got {len(saved_tensor_may_be_view)} != {num_tensors_saved_for_bw}"
-        )
     fw_metadata.saved_tensor_is_graph_input = saved_tensor_is_graph_input
-    fw_metadata.saved_tensor_may_be_view = saved_tensor_may_be_view
     inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
     inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
     inner_meta.saved_tensor_is_graph_input = saved_tensor_is_graph_input
-    inner_meta.saved_tensor_may_be_view = saved_tensor_may_be_view
 
     # See Note [Activations with no version counter checks in eager]
     # Count tensors saved with no version counter check.
@@ -2547,7 +2538,6 @@ def aot_stage2_autograd(
         entry,  # type: ignore[arg-type]
         _indices_of_inps_to_detach,
         num_symints_saved_for_bw,
-        num_fw_outs_saved_for_bw,
     )
 
 
@@ -2566,7 +2556,6 @@ def _aot_stage2c_make_autograd_function(
     entry: GenericAOTAutogradResult[Any, Any] | None,
     _indices_of_inps_to_detach: list[int],
     num_symints_saved_for_bw: int,
-    num_fw_outs_saved_for_bw: int,
 ) -> DispatchReturn:
     backward_state_indices = [
         idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
@@ -2582,7 +2571,6 @@ def _aot_stage2c_make_autograd_function(
         compiled_bw_func=compiled_bw_func,
         maybe_subclass_meta=maybe_subclass_meta,
         num_symints_saved_for_bw=num_symints_saved_for_bw,
-        num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
         backward_state_indices=backward_state_indices,
         disable_amp=disable_amp,
         indices_of_inps_to_detach=_indices_of_inps_to_detach,
