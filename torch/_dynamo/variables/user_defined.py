@@ -3539,7 +3539,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             AttributeError,
             tx,
             args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
-            kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
         )
 
     def getattro_impl(
