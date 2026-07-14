@@ -142,10 +142,11 @@ from .virtualized import V
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from torch._inductor.output_code import _StrideExprStr
+    from torch._inductor.output_code import _StrideExprStr, CompiledFnRunner
     from torch._ops import OpOverload
     from torch.export.pt2_archive._package_weights import Weights
 
+    from .codecache import CacheInfo
     from .ir import ExternKernelNode
 
 
@@ -995,7 +996,7 @@ def _compile_fx_inner(
 
         mb_compiled_graph: OutputCode | None = None
         key_info = None
-        cache_info = None
+        cache_info: CacheInfo | None = None
         remote_cache = None
         constants = CompiledFxGraphConstantsWithGm(gm)
         # TODO: this time will be slightly inconsistent with the one computed
@@ -1184,7 +1185,7 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
-        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
+        cache_event_metadata = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
             metadata=cache_event_metadata,
@@ -1611,7 +1612,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-                    compiled_fn_runner = None
+                    compiled_fn_runner: CompiledFnRunner | None = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
