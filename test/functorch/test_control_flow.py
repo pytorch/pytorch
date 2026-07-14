@@ -2403,7 +2403,6 @@ def forward(self, pred_1, x_1):
         self.assertTrue("c" in res)
         self.assertEqual(expected, res)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_simple(self):
         def f(x, y):
             return x.sin().cos() * y.cos().sin()
@@ -2418,7 +2417,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_simple_partial_grad(self):
         def f(x, y):
             return x.sin().cos() * y.cos().sin()
@@ -2434,7 +2432,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_no_grad_output(self):
         def f(x, y):
             return x[0].sin().cos() + y, y.cos().sin()
@@ -2450,7 +2447,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_nested_list(self):
         import torch.utils._pytree as pytree
 
@@ -2480,7 +2476,6 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_map_autograd_higher_order(self):
         from torch.autograd.functional import hessian as hes, jacobian as jac
 
@@ -8504,7 +8499,6 @@ def forward(self, arg0_1):
         self.assertEqual(res, g(x, y, z))
         self.check_map_count(gm, 1)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_tracing_map_autograd_symbolic_simple(self):
         def f(x, y):
             return x + y
@@ -8522,7 +8516,6 @@ def forward(self, arg0_1):
         self.assertEqual(res, g(x, y))
         self.check_map_count(gm, 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_tracing_map_autograd_symbolic_list(self):
         import torch.utils._pytree as pytree
 
@@ -8548,7 +8541,6 @@ def forward(self, arg0_1):
         self.assertEqual(res, g(x, y))
         self.check_map_count(gm, 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_tracing_map_autograd_symbolic_dict(self):
         def f(x, y):
             return [x["a"] + y, x["b"] * y]
@@ -8578,7 +8570,6 @@ def forward(self, arg0_1):
         self.assertEqual(res, g(x, y))
         self.check_map_count(gm, 2)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_tracing_map_autograd_aot_functionalized(self):
         def inner(x, y):
             z = x - 1
