@@ -225,7 +225,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         subgraph.graph_module, gemm_op, epilogue_arg_placeholders
     )
     if tuned:
-        from torch._inductor.template_heuristics.flex_gemm import (
+        from torch._inductor.heuristics.template.flex_gemm import (
             candidate_gemm_configs_for_device,
             gemm_config_key,
         )
@@ -235,7 +235,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             for config in candidate_gemm_configs_for_device(layout.device)
         )
     else:
-        from torch._inductor.template_heuristics.flex_gemm import (
+        from torch._inductor.heuristics.template.flex_gemm import (
             default_gemm_config_key,
         )
 
