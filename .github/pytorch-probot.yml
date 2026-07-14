@@ -9,7 +9,6 @@ ciflow_push_tags:
 - ciflow/binaries_wheel
 - ciflow/docker
 - ciflow/dtensor
-- ciflow/dynamo
 - ciflow/h100
 - ciflow/h100-cutlass-backend
 - ciflow/h100-distributed
