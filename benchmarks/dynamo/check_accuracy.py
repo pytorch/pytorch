@@ -76,6 +76,9 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 # Discovered on gfx950 CI after ROCm 7.2 upgrade, eager mode non determinism
                 "alexnet",
                 "demucs",
+                # gfx950 training flakes between pass and fail_accuracy across
+                # runs; tracked in https://github.com/pytorch/pytorch/issues/189893
+                "convnextv2_nano.fcmae_ft_in22k_in1k",
             }
         )
 

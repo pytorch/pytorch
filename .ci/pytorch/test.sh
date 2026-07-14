@@ -1189,9 +1189,16 @@ test_unbacked_parity_smoketest() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  local THRESHOLD=1.0
+  local THRESHOLD=3.0
   local MAX_RETRIES=3
   local MODELS="MobileBertForMaskedLM|DistilBertForMaskedLM|DistillGPT2|T5Small"
+
+  # Per-model regression counts across runs. These models are small (~20-40ms),
+  # so a single run's timing carries >1% noise and different models cross a tight
+  # threshold on different runs. We therefore fail only when the SAME model
+  # regresses above THRESHOLD in a majority of runs, which is what a real
+  # unbacked-vs-backed parity regression looks like.
+  declare -A model_regression_count
 
   # Issue 6: Write per-run output files for post-failure debugging
   run_comparison() {
@@ -1206,9 +1213,10 @@ test_unbacked_parity_smoketest() {
   check_regressions() {
     local run_num=$1
     local output_file="$TEST_REPORTS_DIR/unbacked_parity_results_run${run_num}.txt"
-    # Parse the comparison table and check for regressions > threshold
-    # Returns 0 if regressions found, 1 if no regressions
-    local regressions=()
+    # Parse the comparison table and record which models regressed > threshold
+    # this run into model_regression_count (declared in the caller).
+    # Returns 0 if any regression was found this run, 1 otherwise.
+    local found=1
     while IFS= read -r line; do
       # Issue 3: Broadened regex to match model names with hyphens, slashes, dots
       # Match lines like: "  ModelName                      10.000      10.500    +5.0%"
@@ -1217,16 +1225,13 @@ test_unbacked_parity_smoketest() {
         local diff="${BASH_REMATCH[4]}"
         # Nit: Use awk instead of bc -l to avoid dependency on bc
         if awk "BEGIN{exit !($diff > $THRESHOLD)}"; then
-          regressions+=("$model:+${diff}%")
+          model_regression_count[$model]=$(( ${model_regression_count[$model]:-0} + 1 ))
+          echo "Regression: ${model} +${diff}% (run ${run_num})"
+          found=0
         fi
       fi
     done < "$output_file"
-
-    if [[ ${#regressions[@]} -gt 0 ]]; then
-      echo "Regressions found: ${regressions[*]}"
-      return 0
-    fi
-    return 1
+    return $found
   }
 
   check_failures() {
@@ -1287,14 +1292,14 @@ test_unbacked_parity_smoketest() {
     exit 1
   fi
 
-  # Check for regressions
+  # Fast path: a fully clean first run needs no retries.
   if ! check_regressions 1; then
     echo "✅ PASSED: No regressions above ${THRESHOLD}% threshold"
     exit 0
   fi
 
-  # Regression detected - retry to confirm
-  local regression_count=1
+  # A regression was seen; run the remaining retries so we can require the same
+  # model to regress in a majority of runs before failing.
   for ((retry=2; retry<=MAX_RETRIES; retry++)); do
     echo ""
     echo "=== Retry $retry/$MAX_RETRIES (potential regression detected) ==="
@@ -1306,22 +1311,27 @@ test_unbacked_parity_smoketest() {
       exit 1
     fi
 
-    if check_regressions "$retry"; then
-      ((regression_count++))
+    check_regressions "$retry" || true
+  done
+
+  # Fail only if some model regressed in a majority of runs.
+  local required=$((MAX_RETRIES / 2 + 1))
+  local confirmed=()
+  for model in "${!model_regression_count[@]}"; do
+    if [[ ${model_regression_count[$model]} -ge $required ]]; then
+      confirmed+=("${model}:${model_regression_count[$model]}/${MAX_RETRIES}")
     fi
   done
 
-  # Check if regression was consistent (majority of runs)
-  local required=$((MAX_RETRIES / 2 + 1))
-  if [[ $regression_count -ge $required ]]; then
+  if [[ ${#confirmed[@]} -gt 0 ]]; then
     echo ""
-    echo "❌ REGRESSION CONFIRMED: Detected in $regression_count/$MAX_RETRIES runs (threshold: ${THRESHOLD}%)"
+    echo "❌ REGRESSION CONFIRMED (threshold ${THRESHOLD}%, needed ${required}/${MAX_RETRIES} runs): ${confirmed[*]}"
     exit 1
-  else
-    echo ""
-    echo "✅ PASSED: Regressions were not consistent ($regression_count/$MAX_RETRIES runs, needed $required)"
-    exit 0
   fi
+
+  echo ""
+  echo "✅ PASSED: No model regressed consistently (needed ${required}/${MAX_RETRIES} runs above ${THRESHOLD}%)"
+  exit 0
 }
 
 test_inductor_set_cpu_affinity(){
