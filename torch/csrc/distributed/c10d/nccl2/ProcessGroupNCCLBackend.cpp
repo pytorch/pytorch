@@ -91,6 +91,12 @@ void ProcessGroupNCCL::ensureInitialized(at::Device device) {
   TORCH_CHECK(
       init_state_ == InitializationState::UNINITIALIZED,
       "ProcessGroupNCCL has been finalized");
+  // In the reconfigure regime the communicator is only ever created by
+  // reconfigure(); collectives before the first reconfigure are an error.
+  TORCH_CHECK(
+      !options_c10d_->enable_reconfigure,
+      "ProcessGroupNCCL has not been initialized. Call reconfigure() before "
+      "issuing collectives when enable_reconfigure=True.");
   // Lazy one-time bootstrap (replaces torchcomms' eager init(device)).
   init(device);
 }
