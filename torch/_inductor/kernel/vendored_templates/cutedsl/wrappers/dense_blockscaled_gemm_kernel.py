@@ -124,7 +124,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         # compile/run paths -- a None alpha is not reliably dropped from the
         # runtime signature. args.alpha (a TensorWrapper, len multiple-of-4) is
         # applied elementwise in the epilogue; closure capture cannot read a
-        # runtime tensor there. Mirrors FlashInfer's _prepare_alpha_for_launch.
+        # runtime tensor there.
         alpha = getattr(args, "alpha", None)
         if alpha is None:
             alpha = _ones_alpha()
