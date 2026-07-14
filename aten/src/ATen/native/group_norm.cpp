@@ -197,9 +197,31 @@ Tensor group_norm(
       c10::multiply_integers(input_shape.slice(2));
 
   const Tensor kEmpty;
-  auto memory_format = input.suggest_memory_format();
-  const auto& X = input.device().is_cpu() || input.is_privateuseone() ?
-                  input.contiguous(memory_format) : input.contiguous();
+  const bool preserve_cpu_memory_format =
+      input.device().is_cpu() || input.is_privateuseone();
+  const bool has_symbolic_sizes_strides =
+      input.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  auto memory_format = preserve_cpu_memory_format && !has_symbolic_sizes_strides
+      ? input.suggest_memory_format()
+      : at::MemoryFormat::Contiguous;
+  if (preserve_cpu_memory_format && has_symbolic_sizes_strides &&
+      input.sym_is_contiguous(at::MemoryFormat::ChannelsLast)
+          .statically_known_true(__FILE__, __LINE__)) {
+    memory_format = at::MemoryFormat::ChannelsLast;
+  } else if (
+      preserve_cpu_memory_format &&
+      has_symbolic_sizes_strides &&
+      input.sym_is_contiguous(at::MemoryFormat::ChannelsLast3d)
+          .statically_known_true(__FILE__, __LINE__)) {
+    memory_format = at::MemoryFormat::ChannelsLast3d;
+  }
+  const auto& X = preserve_cpu_memory_format ?
+                  (has_symbolic_sizes_strides
+                       ? input.clone(memory_format)
+                       : input.contiguous(memory_format))
+                  : (has_symbolic_sizes_strides
+                         ? input.clone(at::MemoryFormat::Contiguous)
+                         : input.contiguous());
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.sym_numel() == C);

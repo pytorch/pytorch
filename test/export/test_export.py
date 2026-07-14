@@ -444,6 +444,75 @@ graph():
         }
         ep = export(MyModel(), inps, dynamic_shapes=spec)
 
+    def _test_group_norm_spatial_dynamic_temporal_dim(self, device):
+        class GroupNormSpatial(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm_fn = torch.nn.GroupNorm(num_groups=2, num_channels=4)
+
+            def forward(self, inputs):
+                b, c, t, h, w = inputs.shape
+                inputs = inputs.permute(0, 2, 1, 3, 4).flatten(0, 1)
+                out = self.norm_fn(inputs)
+                return out.reshape(b, t, c, h, w).permute(0, 2, 1, 3, 4)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gn1 = GroupNormSpatial()
+                self.gn2 = GroupNormSpatial()
+
+            def forward(self, x):
+                x = x[:, :, ::2, :, :]
+                x = self.gn1(x)
+                x = x[:, :, ::2, :, :]
+                return self.gn2(x)
+
+        model = Model().to(device)
+        x = torch.randn(1, 4, 28, 8, 8, device=device)
+        dynamic_t = Dim("dim_2", min=1, max=200)
+        dynamic_h = Dim("dim_3", min=2, max=640)
+        dynamic_w = Dim("dim_4", min=2, max=640)
+
+        ep = export(
+            model,
+            (x,),
+            dynamic_shapes={"x": {2: dynamic_t, 3: dynamic_h, 4: dynamic_w}},
+            strict=True,
+        )
+
+        for t in (1, 2, 3, 4, 28):
+            inp = torch.randn(1, 4, t, 8, 8, device=device)
+            self.assertEqual(ep.module()(inp), model(inp))
+
+    def test_group_norm_spatial_dynamic_temporal_dim(self):
+        self._test_group_norm_spatial_dynamic_temporal_dim("cpu")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_group_norm_spatial_dynamic_temporal_dim_cuda(self):
+        self._test_group_norm_spatial_dynamic_temporal_dim("cuda")
+
+    def test_reshape_view_static_size_one_before_dynamic_dim(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                b, t, c, h, w = x.shape
+                return x.reshape(b, t, c, h * w)
+
+        model = Model()
+        x = torch.randn(1, 28, 4, 8, 8)
+        dynamic_t = Dim("dim_1", min=1, max=200)
+
+        ep = export(
+            model,
+            (x,),
+            dynamic_shapes={"x": {1: dynamic_t}},
+            strict=True,
+        )
+
+        for t in (1, 2, 28):
+            inp = torch.randn(1, t, 4, 8, 8)
+            self.assertEqual(ep.module()(inp), model(inp))
+
     @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_view_unify_cross_symbols(self):
         """
@@ -7345,11 +7414,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(x, y), model(x, y)))
         x2 = torch.arange(4).reshape((2, 2))
         y2 = torch.arange(9).reshape((3, 3))
+        expected_guard = escape(
+            "torch.sym_max(1, torch.sym_max(x.size()[1], y.size()[1])) == x.size()[1]"
+        )
         with self.assertRaisesRegex(
             AssertionError,
-            escape(
-                "Guard failed: torch.sym_max(1, torch.sym_max(x.size()[1], y.size()[1])) == x.size()[1]"
-            ),
+            rf"Guard failed: (?:x\.size\(\)\[0\] == 1 or )?{expected_guard}",
         ):
             # TODO: this should not error?
             self.assertTrue(torch.allclose(ep.module()(x2, y2), model(x2, y2)))
