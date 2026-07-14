@@ -2617,42 +2617,33 @@ class AOTDispatchAutogradCompileSpec:
     try_save_cache_entry: Callable[..., Any] | None
 
 
-def _slice_to_indices(s: slice, length: int) -> list[int]:
-    start, stop, step = s.indices(length)
-    if step != 1:
-        raise AssertionError(f"expected slice step 1, got {step}")
-    return list(range(start, stop))
-
-
 def _codegen_save_from_forward(
     fw_metadata: ViewAndMutationMeta,
-    num_fw_outs_saved_for_bw: int,
 ) -> tuple[Callable[..., Any], _AOTAutogradSavePlan]:
-    total_fw_outs = fw_metadata.num_forward + num_fw_outs_saved_for_bw
-    vc_idxs = _slice_to_indices(
-        fw_metadata.tensors_saved_for_backwards_with_vc_check_slice,
-        total_fw_outs,
-    )
-    no_vc_idxs = _slice_to_indices(
-        fw_metadata.tensors_saved_for_backwards_no_vc_check_slice,
-        total_fw_outs,
-    )
-    symint_idxs = _slice_to_indices(
-        fw_metadata.symints_saved_for_backwards_slice,
-        total_fw_outs,
-    )
-    opaque_idxs = _slice_to_indices(
-        fw_metadata.opaque_objects_saved_for_backwards_slice,
-        total_fw_outs,
-    )
-
-    saved_tensor_idxs = [*vc_idxs, *no_vc_idxs]
     is_graph_input = fw_metadata.saved_tensor_is_graph_input
-    if len(is_graph_input) != len(saved_tensor_idxs):
+    num_saved_tensors = len(is_graph_input)
+    num_no_vc = fw_metadata.num_tensors_saved_with_no_vc_check
+    num_symints = fw_metadata.num_symints_saved_for_bw
+    if num_no_vc is None:
+        raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
+    if num_symints is None:
+        raise AssertionError("num_symints_saved_for_bw must not be None")
+    num_opaque = fw_metadata.num_opaque_objects_saved_for_bw or 0
+    num_vc = num_saved_tensors - num_no_vc
+    if num_vc < 0:
         raise AssertionError(
-            "expected one saved_tensor_is_graph_input entry per saved tensor, "
-            f"got {len(is_graph_input)} != {len(saved_tensor_idxs)}"
+            "expected at least num_tensors_saved_with_no_vc_check saved tensors, "
+            f"got {num_saved_tensors} < {num_no_vc}"
         )
+
+    vc_start = fw_metadata.num_forward
+    no_vc_start = vc_start + num_vc
+    opaque_start = no_vc_start + num_no_vc
+    symint_start = opaque_start + num_opaque
+    vc_idxs = list(range(vc_start, no_vc_start))
+    no_vc_idxs = list(range(no_vc_start, opaque_start))
+    opaque_idxs = list(range(opaque_start, symint_start))
+    symint_idxs = list(range(symint_start, symint_start + num_symints))
 
     dynamic_saved_tensor_specs: list[int] = []
     for idx, dims in sorted(fw_metadata.dynamic_saved_tensors_idxs.items()):
@@ -2663,8 +2654,8 @@ def _codegen_save_from_forward(
     plan = (
         len(vc_idxs),
         len(no_vc_idxs),
-        len(symint_idxs),
-        len(opaque_idxs),
+        num_symints,
+        num_opaque,
         *vc_idxs,
         *no_vc_idxs,
         *symint_idxs,
@@ -3357,7 +3348,6 @@ class _AOTDispatchAutogradFunctionFactory:
         compiled_bw_func = self.spec.compiled_bw_func
         maybe_subclass_meta = self.spec.maybe_subclass_meta
         num_symints_saved_for_bw_ = self.spec.num_symints_saved_for_bw
-        num_fw_outs_saved_for_bw = self.spec.num_fw_outs_saved_for_bw
         backward_state_indices = self.spec.backward_state_indices
         disable_amp = self.spec.disable_amp
         lazy_backward_info = self.spec.lazy_backward_info
@@ -3390,10 +3380,7 @@ class _AOTDispatchAutogradFunctionFactory:
             fw_metadata.num_tensors_saved_with_no_vc_check,
             any(inp.requires_grad for inp in fw_metadata.input_info),
         )
-        _codegen_save, _codegen_save_plan = _codegen_save_from_forward(
-            fw_metadata,
-            num_fw_outs_saved_for_bw,
-        )
+        _codegen_save, _codegen_save_plan = _codegen_save_from_forward(fw_metadata)
         _codegen_fwd = _codegen_compiled_forward(
             fw_metadata,
             backward_state_indices,
