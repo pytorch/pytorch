@@ -73,31 +73,6 @@ build_image() {
     "${BUILD_CONTEXT}"
 }
 
-# The autoscaled buildkit pool may be cold / at capacity at start, where buildx's
-# ~20s connect (gRPC default) fails before scale-up. Retry connection failures
-# (not build errors) for ~2h so a capacity-limited build waits for a free pod
-# instead of hard-failing — still within the job timeout. Mirrors the retry loop
-# in .ci/docker/build.sh.
-attempts="${REMOTE_BUILDKIT_CONNECT_ATTEMPTS:-360}"
-delay="${REMOTE_BUILDKIT_CONNECT_DELAY:-15}"
-for attempt in $(seq 1 "${attempts}"); do
-  build_log="$(mktemp)"
-  set +e
-  build_image "$@" 2>&1 | tee "${build_log}"
-  rc="${PIPESTATUS[0]}"
-  set -e
-  if [[ "${rc}" -eq 0 ]]; then
-    rm -f "${build_log}"
-    break
-  fi
-  if [[ "${attempt}" -lt "${attempts}" ]] && grep -qiE \
-    "waiting for connection|context deadline exceeded|server preface|failed to (dial|list workers)|connection (refused|reset)|no such host|transport: Error|i/o timeout|use of closed network connection|EOF" \
-    "${build_log}"; then
-    echo "Remote BuildKit not ready yet (attempt ${attempt}/${attempts}); retrying in ${delay}s..." >&2
-    rm -f "${build_log}"
-    sleep "${delay}"
-    continue
-  fi
-  rm -f "${build_log}"
-  exit "${rc}"
-done
+# The caller (binary-docker-build action) wraps this in a cold-pool
+# connect-retry loop, so just build once here.
+build_image "$@"
