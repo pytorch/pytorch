@@ -115,6 +115,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/collection.cpp",
     "torch/csrc/profiler/cupti/monitor_native.cpp",
     "torch/csrc/profiler/data_flow.cpp",
+    "torch/csrc/profiler/kineto_metadata.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
     "torch/csrc/mtia/profiler/MTIAMemoryProfiler.cpp",
     "torch/csrc/profiler/kineto_client_interface.cpp",
