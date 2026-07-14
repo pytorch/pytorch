@@ -3272,7 +3272,6 @@ class TestXpuOptims(TestCase):
 
         scaler = torch.amp.GradScaler(device="xpu", init_scale=4.0)
         g = torch.xpu.XPUGraph()
-        s = torch.xpu.Stream()
 
         weight = torch.ones((100,), device="xpu", requires_grad=True)
         opt = optim_info.optim_cls([weight], lr=0.1, foreach=foreach, fused=fused)
