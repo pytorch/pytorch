@@ -1137,6 +1137,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
         self.remaining_items: list[VariableTracker] = []
+        inline_tracer.output.track_generator(self)
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -1389,7 +1390,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         try:
             self.gen_send_ex(tx, ConstantVariable.create(None), True)
-        except ObservedGeneratorExit:
+        except ObservedGeneratorExit as e:
+            # Drop the traceback to break the exception -> traceback -> frame ->
+            # (raised_exception, self) reference cycle. Otherwise the generator's
+            # inline_tracer (and the OutputGraph it points at) survives until
+            # cyclic GC instead of being freed by refcount at frame exit.
+            e.__traceback__ = None
             return ConstantVariable.create(None)
         except ObservedUserStopIteration:
             # generator returned a value while closing. gen_send_ex() raises

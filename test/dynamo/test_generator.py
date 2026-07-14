@@ -1323,7 +1323,6 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            nonlocal z
             gen = whoo(t)
             i = next(gen)
             y = gen.close()
@@ -1351,7 +1350,6 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=fullgraph)
         def fn(t):
-            nonlocal z
             gen = whoo(t)
             i = next(gen)
             gen.close()
@@ -1559,6 +1557,92 @@ class TestGeneratorClose(GeneratorTestsBase):
         self.assertEqual(b, t.tan())
         self.assertEqual(z, 2)
 
+    def test_untrack_generator_after_hop(self):
+        # Regression: speculate_subgraph clones SideEffects and leaves the clone
+        # as the live instance, so the set of open generators must be owned by
+        # OutputGraph, not SideEffects. torch.cond's branch speculation swaps in
+        # a clone (which never carried local_generators); exhausting a generator
+        # created before the cond then untracked it on the clone, raising
+        # "ValueError: list.remove(x): x not in list".
+        # See https://github.com/pytorch/pytorch/pull/157149
+        def whoo(t):
+            yield t.sin()
+            yield t.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            a = next(gen)
+            # cond speculates both branches, swapping SideEffects to a clone
+            b = torch.cond(t.sum() > 0, lambda x: x + 1, lambda x: x - 1, (t,))
+            acc = a + b
+            # Exhaust the generator after the swap: untrack must not crash
+            for x in gen:
+                acc = acc + x
+            return acc
+
+        t = torch.randn(2)
+        y = fn(t)
+        ref = torch.cond(t.sum() > 0, lambda x: x + 1, lambda x: x - 1, (t,))
+        self.assertEqual(y, t.sin() + ref + t.cos())
+
+    def test_close_open_generator_after_hop(self):
+        # An open (non-exhausted) generator created before a HOP must still be
+        # closed at compile_subgraph time after SideEffects is swapped, so its
+        # finally block runs. Reads the tracking list from OutputGraph.
+        z = 0
+
+        def whoo(t):
+            nonlocal z
+            try:
+                yield t.sin()
+                yield t.cos()
+            finally:
+                z += 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            a = next(gen)
+            b = torch.cond(t.sum() > 0, lambda x: x + 1, lambda x: x - 1, (t,))
+            return a + b  # gen left open; finally must run via close
+
+        t = torch.randn(2)
+        y = fn(t)
+        ref = torch.cond(t.sum() > 0, lambda x: x + 1, lambda x: x - 1, (t,))
+        self.assertEqual(y, t.sin() + ref)
+        self.assertEqual(z, 1)
+
+    def test_close_open_generator_fast_path(self):
+        # An open generator whose only pending work is a finally block must be
+        # closed at compile_subgraph time even when the frame is eligible for
+        # the fast path (single frame, all-tensor stack, empty side effects).
+        # Returning an input tensor keeps side effects empty -- a freshly
+        # produced tensor (e.g. t.sin()) is tracked as a new mutation and would
+        # divert to the slow path, which closes generators unconditionally.
+        # The fast-path guard `not self.local_generators` at output_graph.py is
+        # what forces close_local_generators to run here so the finally fires.
+        z = 0
+
+        def whoo(t):
+            nonlocal z
+            try:
+                yield t
+                yield t
+            finally:
+                z += 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            next(gen)  # start generator; finally now pending
+            return t  # return input tensor -> fast-path eligible
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t)
+        self.assertEqual(z, 1)
+
 
 class TestGeneratorThrow(GeneratorTestsBase):
     def test_throw(self):
@@ -1578,7 +1662,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         y = self._compile_check(fn, (t,))
         self.assertEqual(y, t.sin() + t.cos())
 
-    @unittest.expectedFailure
     def test_throw_with_finally(self):
         z = 0
 
@@ -1654,8 +1737,13 @@ class TestGeneratorThrow(GeneratorTestsBase):
             a = next(gen)
             try:
                 gen.throw(ValueError)
-            except StopIteration:
+            except StopIteration as e:
+                if len(e.args) > 0:
+                    raise AssertionError(
+                        "Expected StopIteration with no arguments"
+                    ) from e
                 return a
+            raise AssertionError("Expected StopIteration")
 
         t = torch.randn(2)
         y = self._compile_check(fn, (t,))
@@ -1714,7 +1802,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(RuntimeError):
             fn(t)
 
-    @unittest.expectedFailure
     def test_throw_yield_finally(self):
         z = 0
 
@@ -1742,7 +1829,6 @@ class TestGeneratorThrow(GeneratorTestsBase):
         with self.assertRaises(Unsupported):
             fn(t)
 
-    @unittest.expectedFailure
     def test_throw_try_except_finally(self):
         z = 0
 
