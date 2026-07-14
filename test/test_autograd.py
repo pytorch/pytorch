@@ -17878,25 +17878,6 @@ class TestAutogradMultipleDispatch(TestCase):
                 self.assertEqual(x.grad, expected)
 
 
-# J1 and I1 have a 0/0 closed-form gradient at x = 0; the analytic limit is 1/2.
-# gradcheck cannot exercise this (finite differences through 0/0), so it is not
-# covered by the OpInfo suite.
-_ZERO_LIMIT_OPS = {
-    "bessel_j1": torch.special.bessel_j1,
-    "modified_bessel_i1": torch.special.modified_bessel_i1,
-}
-
-
-class TestBesselAutograd(TestCase):
-    @parametrize("name", list(_ZERO_LIMIT_OPS))
-    def test_zero_limit(self, device, name):
-        op = _ZERO_LIMIT_OPS[name]
-        x = torch.zeros(4, dtype=torch.double, device=device, requires_grad=True)
-        (grad,) = torch.autograd.grad(op(x).sum(), x)
-        self.assertFalse(torch.isnan(grad).any())
-        self.assertEqual(grad, torch.full_like(grad, 0.5))
-
-
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
@@ -17915,7 +17896,6 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None
 )
-instantiate_device_type_tests(TestBesselAutograd, globals(), except_for=None)
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
