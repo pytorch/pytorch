@@ -944,7 +944,9 @@ struct InputFlags {
 };
 
 namespace {
-std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
+std::pair<UnpackedInput, InputFlags> unpack_input(
+    PyObject* args,
+    bool fill_record_function_inputs) {
   UnpackedInput unpacked;
   InputFlags flags;
 
@@ -978,7 +980,10 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
       PyObject* needs_grad = tensor.requires_grad() ? Py_True : Py_False;
       Py_INCREF(needs_grad);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
-      unpacked.record_function_inputs.emplace_back(tensor);
+      // tensor -> IValue conversion is expensive, only do it if we need it.
+      if (fill_record_function_inputs) {
+        unpacked.record_function_inputs.emplace_back(tensor);
+      }
     }
     Py_INCREF(arg);
     PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
@@ -1507,16 +1512,22 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
 
   // save a local copy of seq_id before it gets incremented
   auto seq_id = at::sequence_number::peek();
-  auto info_pair = unpack_input(inputs);
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  const bool fill_record_function_inputs =
+      guard.isActive() && guard.needsInputs();
+  auto info_pair = unpack_input(inputs, fill_record_function_inputs);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
 
   // Call record function after all the inputs have been decoded, but
   // before context has been allocated.
-  RECORD_FUNCTION(
-      ((PyTypeObject*)cls)->tp_name,
-      unpacked_input.record_function_inputs,
-      seq_id);
+  if (guard.isActive()) {
+    ::at::detail::record_function_with_scope(
+        guard,
+        ((PyTypeObject*)cls)->tp_name,
+        unpacked_input.record_function_inputs,
+        seq_id);
+  }
 
   const auto& functorch_tls = at::functorch::functorchTLSAccessor();
   if (functorch_tls) {
