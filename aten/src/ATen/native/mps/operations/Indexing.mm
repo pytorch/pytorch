@@ -390,7 +390,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
 
       [computeEncoder setComputePipelineState:pso_step2];
       mtl_setArgs(computeEncoder, block_sums_buf, block_offsets_buf, total_nonzero_buf, num_blocks);
-      uint32_t tg_size_blocks = std::min(1024u, ((num_blocks + 31) / 32) * 32);
+      uint32_t tg_size_blocks = std::min(1024u, c10::metal::round_up(num_blocks, 32u));
       [computeEncoder dispatchThreads:MTLSizeMake(tg_size_blocks, 1, 1)
                 threadsPerThreadgroup:MTLSizeMake(tg_size_blocks, 1, 1)];
     }
