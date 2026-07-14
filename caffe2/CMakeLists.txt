@@ -666,6 +666,28 @@ if(USE_ROCM)
     append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_HIP_SRCS)
     if(NOT WIN32)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_HIP_SRCS)
+      # The native async-TP GEMM has separate CUDA (CUTLASS) and ROCm (CK)
+      # implementations. cuda/AsyncMM.cu is CUDA-only; on ROCm we compile the
+      # hand-written CK version in hip/AsyncMM.hip instead (hipify leaves */hip/*
+      # untouched). The .hip file always provides the async_input_mm dispatcher
+      # symbol (referenced by the op registration); the CK kernel itself is
+      # gated behind USE_ROCM_ASYNC_MM, which is enabled only for the MI3xx
+      # architectures that support it, mirroring BUILD_ASYNC_MM_KERNEL on CUDA.
+      list(REMOVE_ITEM Caffe2_HIP_SRCS
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu)
+      set(ASYNC_MM_HIP_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/hip/AsyncMM.hip")
+      list(APPEND Caffe2_HIP_SRCS ${ASYNC_MM_HIP_FILE})
+      set(_have_async_mm_arch FALSE)
+      foreach(ARCH gfx942 gfx950)
+        if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+          set(_have_async_mm_arch TRUE)
+          break()
+        endif()
+      endforeach()
+      if(_have_async_mm_arch)
+        set_source_files_properties(${ASYNC_MM_HIP_FILE} PROPERTIES
+          COMPILE_DEFINITIONS USE_ROCM_ASYNC_MM)
+      endif()
     endif()
   endif()
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.

@@ -37,7 +37,6 @@ from torch.testing._internal.common_cuda import (
     SM100OrLater,
     SM89OrLater,
     SM90OrLater,
-    TEST_WITH_ROCM,
     xfailIfSM100OrLater,
 )
 from torch.testing._internal.common_device_type import e4m3_type
@@ -828,11 +827,13 @@ class AsyncTPTest(MultiProcContinuousTest):
             A_shard, [B], gather_dim=0, group_name=group_name
         )
 
-        profiler_activities = [torch.profiler.ProfilerActivity.CUDA]
-        if TEST_WITH_ROCM:
-            # CK surfaces the scheduler path through RECORD_FUNCTION instead of
-            # the HIP kernel symbol, so we need CPU activity to observe it.
-            profiler_activities.insert(0, torch.profiler.ProfilerActivity.CPU)
+        # CPU activity is needed on ROCm: CK surfaces the scheduler path through
+        # RECORD_FUNCTION rather than the HIP kernel symbol. Enabled everywhere
+        # for uniformity; it is harmless on CUDA.
+        profiler_activities = [
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ]
 
         with torch.profiler.profile(activities=profiler_activities) as prof:
             ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
