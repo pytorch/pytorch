@@ -183,17 +183,17 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     case ::c10d::ReduceOp::MAX:
       return ncclMax;
     case ::c10d::ReduceOp::BAND:
-      throw std::runtime_error("Cannot use ReduceOp.BAND with NCCL");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
     case ::c10d::ReduceOp::BOR:
-      throw std::runtime_error("Cannot use ReduceOp.BOR with NCCL");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BOR with NCCL");
     case ::c10d::ReduceOp::BXOR:
-      throw std::runtime_error("Cannot use ReduceOp.BXOR with NCCL");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with NCCL");
     case ::c10d::ReduceOp::PREMUL_SUM:
       return RedOpRAII(op, comm, dataType, nccl_api_);
     case ::c10d::ReduceOp::AVG:
       return ncclAvg;
     default:
-      throw std::runtime_error("Unsupported reduce operation");
+      TORCH_CHECK(false, "Unsupported reduce operation");
   }
 }
 
