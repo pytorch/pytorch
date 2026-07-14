@@ -1,3 +1,4 @@
+#include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
@@ -37,6 +38,54 @@ static variable_list call_jvp(
   return jvp_user_function(std::move(owned), std::move(input_grads));
 }
 
+// For small input counts, a linear scan avoids hash table allocation and is
+// expected to be profitable. The 24-input cutoff can be tuned further.
+class InputMap {
+ public:
+  explicit InputMap(size_t num_inputs) {
+    if (num_inputs > kSmallInputMapSize) {
+      large_map_.emplace();
+      large_map_->reserve(num_inputs);
+    }
+  }
+
+  void emplace(at::TensorImpl* input_impl, size_t index) {
+    if (large_map_) {
+      large_map_->emplace(input_impl, index);
+      return;
+    }
+    small_map_.emplace_back(input_impl, index);
+  }
+
+  std::optional<size_t> find(at::TensorImpl* input_impl) const {
+    if (large_map_) {
+      auto it = large_map_->find(input_impl);
+      if (it == large_map_->end()) {
+        return std::nullopt;
+      }
+      return it->second;
+    }
+
+    for (const auto& entry : small_map_) {
+      if (entry.first == input_impl) {
+        return entry.second;
+      }
+    }
+    return std::nullopt;
+  }
+
+  bool contains(at::TensorImpl* input_impl) const {
+    return find(input_impl).has_value();
+  }
+
+ private:
+  static constexpr size_t kSmallInputMapSize = 24;
+  c10::SmallVector<std::pair<at::TensorImpl*, size_t>, kSmallInputMapSize>
+      small_map_{};
+  std::optional<std::unordered_map<at::TensorImpl*, size_t>> large_map_ =
+      std::nullopt;
+};
+
 // This function has two main goals:
 //  1) Use the user-provided jvp function to populate the outputs' forward
 //  gradient 2) Perform error checking to ensure that view and inplace ops are
@@ -58,7 +107,7 @@ static variable_list call_jvp(
 template <typename InputVarsType>
 static void _process_forward_mode_AD(
     const InputVarsType& inputs,
-    std::unordered_map<at::TensorImpl*, size_t> inputs_mapping,
+    InputMap inputs_mapping,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const optional_variable_list& outputs,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
@@ -161,7 +210,8 @@ static void _process_forward_mode_AD(
       continue;
     }
 
-    bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
+    auto input_idx = inputs_mapping.find(out_tensor_impl);
+    bool is_input = input_idx.has_value();
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
 
     if (is_modified) {
@@ -169,7 +219,7 @@ static void _process_forward_mode_AD(
           is_input,
           "Only input Tensors should be given to ctx.mark_dirty(). If a Tensor is not an input, there"
           " is no need to pass it to mark_dirty().");
-      auto inp_idx = inputs_mapping[out_tensor_impl];
+      auto inp_idx = *input_idx;
       if (grad_impls[inp_idx]) {
         // If there was already a forward grad for that input
         // Just make sure that it is modified inplace and returned as-is
@@ -192,7 +242,7 @@ static void _process_forward_mode_AD(
       // At this point, outputs[i] cannot be one of the input (raw_outputs[i]
       // might be but was changed by the backward code)
       TORCH_INTERNAL_ASSERT(
-          inputs_mapping.count(out.unsafeGetTensorImpl()) == 0);
+          !inputs_mapping.contains(out.unsafeGetTensorImpl()));
 
       if (out.is_view() && impl::get_view_autograd_meta(out)->has_fw_view()) {
         // If the output is a view
@@ -285,7 +335,7 @@ static at::Tensor _view_as_self_with_no_grad(
 }
 
 static optional_variable_list _process_backward_mode_ad(
-    const std::unordered_map<at::TensorImpl*, size_t>& inputs_mapping,
+    const InputMap& inputs_mapping,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
@@ -402,7 +452,7 @@ static optional_variable_list _process_backward_mode_ad(
     Variable var = raw_outputs[i].value();
 
     auto out_tensor_impl = var.unsafeGetTensorImpl();
-    bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
+    bool is_input = inputs_mapping.contains(out_tensor_impl);
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
     bool is_differentiable = cdata &&
         non_differentiable.count(out_tensor_impl) == 0 &&
@@ -483,8 +533,7 @@ static optional_variable_list _wrap_outputs_impl(
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
     bool pure_view) {
-  std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
-  inputs_mapping.reserve(input_vars.size());
+  InputMap inputs_mapping(input_vars.size());
   for (const auto i : c10::irange(input_vars.size())) {
     const auto& input_var = input_at(input_vars, i);
     if (input_var.defined()) {
