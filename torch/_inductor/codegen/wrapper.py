@@ -2059,7 +2059,9 @@ class PythonWrapperCodegen(CodeGen):
             if device is None or device.type not in ("cuda", "xpu"):
                 continue
             # Opaque kernels may dereference escaped data_ptr() addresses after
-            # wrapper locals go out of scope.
+            # wrapper locals go out of scope.  This includes caller-owned graph
+            # inputs when their raw address escapes, so record_stream may extend
+            # the caller's storage lifetime on the compute stream.
             if V.graph.scheduler._has_multi_stream_nodes():
                 stream_idxs = OrderedSet(
                     stream_idx
