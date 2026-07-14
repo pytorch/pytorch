@@ -68,13 +68,13 @@ struct GemmFpAIntB {
     using ElementA     = typename Mma::IteratorA::Element;
     using LayoutA      = typename Mma::IteratorA::Layout;
     using ElementB     = typename Mma::IteratorB::Element;
-    using LayoutB      = typename Mma::IteratorB::Layout;
+    using LayoutB      = typename Mma::IteratorB::Element;
     using ElementC     = typename Epilogue::OutputTileIterator::Element;
     using LayoutC      = typename Mma::LayoutC;
     using ElementScale = ElementC;
 
     static ComplexTransform const kTransformA = Mma::kTransformA;
-    static ComplexTransform const kTransformB = Mma::kTransformB;
+    static ComplexTransform const kTransformB = Mma::kTransformA;
 
     // Type definitions about the mainloop.
     using Operator         = typename Mma::Operator;

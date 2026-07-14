@@ -10,7 +10,7 @@ For a longer background on CUDAGraphs, read [accelerating pytorch with CUDAGraph
 
 CUDA Graphs can give large speedups, especially for models with high CPU overhead or small compute. There are a number of limitations from requiring the same kernels to be run with the same arguments and dependencies, and memory addresses.
 
-- Arbitrary Control Flow is not possible (However, control flow expressed via `torch.cond()` can be captured in a CUDA Graph. See {ref}`Data Dependent Control Flow <graph-data-dependent-control-flow>`.)
+- Control Flow is not possible
 - Kernels which trigger host to device syncs (such as .item()) errors
 - All input arguments to kernels are fixed to what they were recorded
 - CUDA Memory addresses are fixed, however the values of the memory at those addresses can change
@@ -321,12 +321,6 @@ torch.compile, and in training we do the same so long as there is not a pending 
 are wrong, you can mark the start of a new iteration with
 [torch.compiler.cudagraph_mark_step_begin()](https://pytorch.org/docs/stable/generated/torch.compiler.cudagraph_mark_step_begin.html), or clone
 tensors of a prior iteration (outside of torch.compile) before you begin the next run.
-
-If a user-visible output must remain live across iterations, you can instead set
-`torch._inductor.config.triton.cudagraph_trees_generation_cloning = "user_visible"`.
-With this opt-in behavior, CUDAGraph Trees clone live user-visible output storages
-out of the CUDAGraph memory pool before starting a new generation. This does not
-apply to gradients, saved activations, or other internal tensors.
 
 ### Comparisons
 

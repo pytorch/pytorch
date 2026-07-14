@@ -16,7 +16,7 @@ case "$ID" in
   ubuntu)
     IS_UBUNTU=1
     ;;
-  almalinux)
+  centos|almalinux)
     IS_UBUNTU=0
     ;;
   *)

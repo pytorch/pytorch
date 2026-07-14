@@ -27,8 +27,6 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     GuardOnDataDependentSymNode,
-    statically_known_true,
-    sym_eq,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.reinplace import _is_view_op
@@ -74,10 +72,6 @@ def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
     node = graph.call_function(fn, args, kwargs)
 
     node.meta["val"] = fake_result
-    if (V.fake_mode.shape_env) and (
-        symbol_to_path := compute_unbacked_bindings(V.fake_mode.shape_env, fake_result)
-    ):
-        node.meta["unbacked_bindings"] = symbol_to_path
 
     return node
 
@@ -160,7 +154,7 @@ def _decompose_scatter_functional(
     view_updated = aten.slice_scatter(view, src, 1, 10, -10)
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
-    assert node.target is _generalized_scatter  # noqa: S101
+    assert node.target is _generalized_scatter
     return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
 
 
@@ -179,9 +173,9 @@ def _decompose_scatter_mutating(
     slice2.copy_(src)
 
     """
-    assert node.target in (_generalized_scatter, _inplace_generalized_scatter)  # noqa: S101
+    assert node.target in (_generalized_scatter, _inplace_generalized_scatter)
     inp, src, view_ops = node.args
-    assert not node.kwargs  # noqa: S101
+    assert not node.kwargs
 
     if node.target is _generalized_scatter:
         inp = graph_call_function(graph, aten.clone, inp)
@@ -189,6 +183,13 @@ def _decompose_scatter_mutating(
     tmp = inp
     for view in view_ops:  # type: ignore[union-attr]
         tmp = graph_call_function(graph, view.target, tmp, *view.args, **view.kwargs)  # type: ignore[union-attr]
+        # we need to set unbacked bindings that could have been created in the view ops.
+        if (V.fake_mode.shape_env) and (
+            symbol_to_path := compute_unbacked_bindings(
+                V.fake_mode.shape_env, tmp.meta["val"]
+            )
+        ):
+            tmp.meta["unbacked_bindings"] = symbol_to_path
 
     graph_call_function(graph, aten.copy_.default, tmp, src)
     return inp  # type: ignore[return-value]
@@ -299,14 +300,10 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         ]
 
     def handle_view_scatter(node: torch.fx.Node):
-        if len(node.args) < 2:
-            raise AssertionError(f"expected at least 2 args, got {len(node.args)}")
+        assert len(node.args) >= 2
         inp, src = node.args[:2]
 
-        if not isinstance(node.target, torch._ops.OpOverload):
-            raise AssertionError(
-                f"expected node.target to be an OpOverload, got {type(node.target)}"
-            )
+        assert isinstance(node.target, torch._ops.OpOverload)
         scatter_view_op = ViewOp(
             _SCATTER_OP_TO_VIEW[node.target],
             args=node.args[2:],
@@ -379,10 +376,6 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
         0,
         extra_check=should_reinplace_scatter,
     ),
-    # Stateless Philox RNG: reinplace the functionalized clone onto the dead
-    # output buffer, so out-of-place uniform()/normal() don't pay an extra copy.
-    aten._philox_uniform.default: InplaceableOp(aten._philox_uniform_.default, 0),
-    aten._philox_normal.default: InplaceableOp(aten._philox_normal_.default, 0),
 }
 
 try:
@@ -420,67 +413,6 @@ META_ONLY_OPS = OrderedSet(
 )
 
 
-def _get_view_base(node: torch.fx.Node) -> torch.fx.Node:
-    while _is_view_op(node.target) and node.args:
-        base = node.args[0]
-        if not isinstance(base, torch.fx.Node):
-            break
-        node = base
-    return node
-
-
-def _same_tensor_metadata(lhs: torch.fx.Node, rhs: torch.fx.Node) -> bool:
-    lhs_val = lhs.meta.get("val")
-    rhs_val = rhs.meta.get("val")
-    if not isinstance(lhs_val, torch.Tensor) or not isinstance(rhs_val, torch.Tensor):
-        return False
-
-    def same_value(lhs_value, rhs_value) -> bool:
-        return statically_known_true(sym_eq(lhs_value, rhs_value))
-
-    def same_sequence(lhs_values, rhs_values) -> bool:
-        return len(lhs_values) == len(rhs_values) and all(
-            same_value(lhs_value, rhs_value)
-            for lhs_value, rhs_value in zip(lhs_values, rhs_values)
-        )
-
-    return (
-        same_sequence(lhs_val.size(), rhs_val.size())
-        and same_sequence(lhs_val.stride(), rhs_val.stride())
-        and same_value(lhs_val.storage_offset(), rhs_val.storage_offset())
-    )
-
-
-def _is_layout_preserving_view_copy_back(
-    dst: torch.fx.Node,
-    src: torch.fx.Node,
-    mutated_arg: torch.fx.Node,
-    src_base: torch.fx.Node,
-) -> bool:
-    return _same_tensor_metadata(src_base, mutated_arg) and _same_tensor_metadata(
-        src, dst
-    )
-
-
-def _is_control_deps_ordering_only_use(
-    user: torch.fx.Node, view: torch.fx.Node
-) -> bool:
-    """Check if view appears only in control_deps' ordering-only additional_deps tuple.
-
-    control_deps schema (control_dependencies.py): control_deps(additional_deps, subgraph, *args)
-    kwargs is always empty -- preserve_node_ordering threads all nodes positionally.
-    """
-    if not (
-        user.op == "call_function"
-        and isinstance(user.target, torch._ops.HigherOrderOperator)
-        and user.target._name == "control_deps"
-    ):
-        return False
-    additional_deps = cast(tuple[torch.fx.Node, ...], user.args[0])
-    pass_through = cast(tuple[torch.fx.Node, ...], user.args[2:])
-    return view in additional_deps and view not in pass_through
-
-
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -503,9 +435,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     copy_args_to_copy_nodes = {}
     # maps argument to the first copy_ node that mutates it.
     copy_nodes = {}
-    # maps (view_arg, inplaceable_op_node) to copy_ nodes that copy a view of
-    # the op result back into the graph input that view_arg aliases.
-    copy_args_to_copy_nodes_via_views = {}
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: dict[Any, int] = {}
@@ -534,23 +463,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             copy_nodes[dst] = node
 
             mutated_inputs.add(node.args[0])
-
-            src_base = _get_view_base(src)
-            if src_base is not src and isinstance(src_base.target, Callable):
-                inplaceable_op = inplaceable_ops.get(src_base.target)
-                if inplaceable_op is not None:
-                    for mutated_arg_idx in inplaceable_op.mutated_args:
-                        mutated_arg = src_base.args[mutated_arg_idx]
-                        if (
-                            isinstance(mutated_arg, torch.fx.Node)
-                            and _get_view_base(mutated_arg) is dst
-                            and _is_layout_preserving_view_copy_back(
-                                dst, src, mutated_arg, src_base
-                            )
-                        ):
-                            copy_args_to_copy_nodes_via_views[
-                                (mutated_arg, src_base)
-                            ] = node
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg):
         node_loc = node_order[node]
@@ -584,10 +496,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     and mutated_arg is user.args[0]
                 ):
                     continue
-                # control_deps args[0] is an ordering-only deps tuple;
-                # appearing there does not constitute a real data use.
-                if _is_control_deps_ordering_only_use(user, view):
-                    continue
                 return True
         return False
 
@@ -611,9 +519,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return all(can_inplace(node, arg) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:
-            return False
-
-        if torch._debug_has_internal_overlap(mutated_arg.meta["val"]) == 1:
             return False
 
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
@@ -640,52 +545,17 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
             return True
         elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
-            # If mutated_arg is a view of a graph input, we can only reinplace
-            # when a later copy_ writes this op's result back to that input.
-            copy_node = copy_args_to_copy_nodes_via_views.get((mutated_arg, node))
-            if copy_node is None:
-                return False
+            # This should never happen in auto_functionalize_v2 non-inference mode,
+            # since all mutated_arg are bases.
 
-            mutated_arg_base = copy_node.args[0]
-            copy_src = copy_node.args[1]
-            if not (
-                isinstance(mutated_arg_base, torch.fx.Node)
-                and isinstance(copy_src, torch.fx.Node)
-                and _is_layout_preserving_view_copy_back(
-                    mutated_arg_base, copy_src, mutated_arg, node
-                )
-            ):
-                return False
-
-            if any_use_of_views_after_node(
-                node,
-                shared_view_nodes,
-                copy_node=copy_node,
-                mutated_arg=mutated_arg_base,
-            ):
-                return False
-            return True
+            # If mutated arg is view of any of the inputs of the graph,
+            # do not allow for inplacing.
+            # This would require more sophisticated algorithm to handle
+            return False
         else:
             return not any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
             )
-
-    def copy_node_for_reinplaced_arg(node, mutated_arg):
-        copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
-        if copy_node is None:
-            copy_node = copy_args_to_copy_nodes_via_views.get((mutated_arg, node))
-            if copy_node is not None:
-                copy_dst = copy_node.args[0]
-                copy_src = copy_node.args[1]
-                if not (
-                    isinstance(copy_dst, torch.fx.Node)
-                    and isinstance(copy_src, torch.fx.Node)
-                    and _is_layout_preserving_view_copy_back(
-                        copy_dst, copy_src, mutated_arg, node
-                    )
-                ):
-                    return None
-        return copy_node
 
     def all_can_inplace(node, mutated_args):
         return all(can_inplace(node, arg) for arg in mutated_args)
@@ -755,8 +625,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return get_node_storage(mutated_arg) in storage_of_reinplaced_args
 
         for arg in old_tensors_to_clone:
-            if arg not in kwargs:
-                raise AssertionError(f"expected {arg} to be in kwargs")
+            assert arg in kwargs
 
             mutated_arg = kwargs[arg]
 
@@ -775,7 +644,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             )
             if should_attempt_reinplace and can_inplace(node, mutated_arg):
                 # In general, we probably do not need those optimizations.
-                copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
+                copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
                 if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
@@ -816,7 +685,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             mutated_args = [node.args[idx] for idx in inplaceable_op.mutated_args]
             if all_can_inplace(node, mutated_args) and inplaceable_op.extra_check(node):
                 for mutated_arg in mutated_args:
-                    copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
+                    copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                     if copy_node is not None:
                         replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
@@ -830,7 +699,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
                 bases_to_clone,
                 base_tensors_dct,
-                _mutable_op._name,
+                node.target,
                 ReInplaceTrigger.AUTO_FUNC_V2,
             )
             # Stash the metadata. There is a pass later on where we decompose
@@ -876,10 +745,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
                 for position, idx in enumerate(mutated_arg_indices):
                     actual_idx = idx + 2  # offset for token and op
-                    if actual_idx >= len(node.args):
-                        raise AssertionError(
-                            f"mutated arg idx {actual_idx} out of range {len(node.args)}"
-                        )
+                    assert actual_idx < len(node.args), (
+                        f"mutated arg idx {actual_idx} out of range {len(node.args)}"
+                    )
                     arg = node.args[actual_idx]
 
                     # Output index is position + 1 (index 0 is the token)
@@ -893,15 +761,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         mutated_tensors_flat.append(arg)
 
                 # Check if all mutated args can be inplaced
-                can_inplace_all = all_can_inplace(node, mutated_tensors_flat)
+                all_can_inplace = all_can_inplace(node, mutated_tensors_flat)
 
                 log.debug(
-                    "reinplace with_effects: mutated_tensors=%s, can_inplace_all=%s",
+                    "reinplace with_effects: mutated_tensors=%s, all_can_inplace=%s",
                     [str(a) for a in mutated_tensors_flat],
-                    can_inplace_all,
+                    all_can_inplace,
                 )
 
-                if can_inplace_all and inplaceable_op.extra_check(node):
+                if all_can_inplace and inplaceable_op.extra_check(node):
                     log.debug(
                         "reinplace with_effects: converting %s -> %s",
                         inner_op,

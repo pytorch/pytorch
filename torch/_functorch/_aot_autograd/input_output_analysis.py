@@ -96,7 +96,6 @@ def remove_dupe_metadata(
                 dynamic_dims=o.dynamic_dims,
                 base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
                 requires_grad=o.requires_grad,
-                requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
             )
             for o in m.output_info
@@ -109,6 +108,7 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
+        is_train=m.is_train,
     )
 
 
@@ -147,7 +147,6 @@ def create_synthetic_base_metadata(
 
     # given the requires_grad info on mutated inputs,
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
-    # pyrefly: ignore [implicit-any]
     input_infos = []
     for outer_indices in synthetic_base_to_indices.values():
         # leaf-ness should be all-or-nothing for aliased tensor.
@@ -194,11 +193,6 @@ def create_synthetic_base_metadata(
                 if len(outer_indices) > 1
                 else m.input_info[outer_indices[0]].mutates_storage_metadata
             ),
-            mutation_is_shallow_copy_data=(
-                False
-                if len(outer_indices) > 1
-                else m.input_info[outer_indices[0]].mutation_is_shallow_copy_data
-            ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
@@ -229,33 +223,25 @@ def create_synthetic_base_metadata(
                 if not is_concrete_int(s)
             },
             base_idx=synthetic_base_info[outer_idx][0],  # type: ignore[index]
-            requires_grad=(requires_grad := outer_args[outer_idx].requires_grad),
-            requires_grad_for_backward=requires_grad,
+            requires_grad=outer_args[outer_idx].requires_grad,
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
     existing_output_infos = []
     for o in m.output_info:
-        synthetic_base_info_for_output = (
-            None if o.base_idx is None else synthetic_base_info[o.base_idx]
-        )
         new_base_idx = (
             None
             if o.base_idx is None
             else (
-                synthetic_base_info_for_output
-                if isinstance(synthetic_base_info_for_output, int)
-                else synthetic_base_info_for_output[0]  # type: ignore[index]
+                synthetic_base_info[o.base_idx]
+                if isinstance(synthetic_base_info[o.base_idx], int)
+                else synthetic_base_info[o.base_idx][0]  # type: ignore[index]
             )
         )
-        # If the original input was merged into a synthetic base, then an
-        # output that was literally that input is now a view of the base.
-        input_merged = o.base_idx is not None and isinstance(
-            synthetic_base_info[o.base_idx], tuple
-        )
+        # If base_idx is changed for OutputType.is_input, we need to update the output type to reflect the change
         new_output_type = (
             OutputType.alias_of_input
-            if o.output_type == OutputType.is_input and input_merged
+            if o.output_type == OutputType.is_input and o.base_idx != new_base_idx
             else o.output_type
         )
         existing_output_infos.append(
@@ -266,7 +252,6 @@ def create_synthetic_base_metadata(
                 # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
-                requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
             )
         )
@@ -319,6 +304,7 @@ def create_synthetic_base_metadata(
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
             subclass_tangent_meta=subclass_tangent_meta,
+            is_train=m.is_train,
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
     )

@@ -1,4 +1,3 @@
-# Owner(s): ["oncall: pt2"]
 name: inductor-perf-b200
 
 on:
@@ -65,7 +64,6 @@ concurrency:
 permissions:
   id-token: write
   contents: read
-  actions: read
 
 jobs:
   get-label-type:
@@ -80,19 +78,18 @@ jobs:
       opt_out_experiments: lf
 
   build:
-    name: cuda13.0-py3.12-gcc11-sm100
+    name: cuda12.8-py3.10-gcc11-sm100
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "mt-"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       # Use a bigger runner here because CUDA_ARCH 9.0 is only built for H100
       # or newer GPUs, so it doesn't benefit much from existing compiler cache
       # from trunk. Also use a memory-intensive runner here because memory is
       # usually the bottleneck
-      runner: l-x86iavx512-48-384
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm100
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks
+      runner: linux.12xlarge.memory
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
@@ -105,7 +102,7 @@ jobs:
     secrets: inherit
 
   test-periodically:
-    name: cuda13.0-py3.12-gcc11-sm100
+    name: cuda12.8-py3.10-gcc11-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event.schedule == '0 7 * * 1-6'
@@ -119,12 +116,10 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
-      export-profiler-trace: "1"
-      enable-torch-trace: "1"
     secrets: inherit
 
   test-weekly:
-    name: cuda13.0-py3.12-gcc11-sm100
+    name: cuda12.8-py3.10-gcc11-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event.schedule == '0 7 * * 0'
@@ -138,12 +133,10 @@ jobs:
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4
-      export-profiler-trace: "1"
-      enable-torch-trace: "1"
     secrets: inherit
 
   test:
-    name: cuda13.0-py3.12-gcc11-sm100
+    name: cuda12.8-py3.10-gcc11-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     with:
@@ -153,8 +146,6 @@ jobs:
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
       timeout-minutes: 720
-      export-profiler-trace: "1"
-      enable-torch-trace: "1"
       disable-monitor: false
       monitor-log-interval: 15
       monitor-data-collect-interval: 4

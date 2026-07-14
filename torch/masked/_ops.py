@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = tuple[int, ...] | None
+    DimOrDims = Optional[tuple[int, ...]]
 
 
 __all__: list[str] = []
@@ -169,7 +169,7 @@ Example::
     )
 
     args_and_kwargs = {
-        # argument name suffixes separated by double underscore will
+        # argument name sufficies separated by double underscore will
         # be removed in the final documentation string.
         "sum": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
         "prod": (("dim",), ("keepdim=False", "dtype=None", "mask=None")),
@@ -397,7 +397,7 @@ Example::
         for k, v in template_data.items()
     )
 
-    # Apply docstring templates to function docstring:
+    # Apply docstring templates to function doctring:
     if func.__doc__ is None:
         doc_template = "\n\n".join([f"{{{op_kind}_{sec}}}" for sec in doc_sections])
     else:
@@ -1679,7 +1679,6 @@ def _std_var(
                 else compute_dtype
             )
             count = count.to(real_dtype)
-            # pyrefly: ignore [no-matching-overload]
             count = torch.subtract(count, correction)
             count = torch.maximum(count, count.new_zeros([]))
         output = torch.divide(total, count).to(dtype=dtype)

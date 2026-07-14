@@ -81,13 +81,11 @@ class ElasticDistributedSampler(DistributedSampler[T]):
 
         # add extra samples to make it evenly divisible
         indices += indices[: (self.total_size - len(indices))]
-        if len(indices) != self.total_size:
-            raise AssertionError
+        assert len(indices) == self.total_size
 
         # subsample
         indices = indices[self.rank : self.total_size : self.num_replicas]
-        if len(indices) != self.num_samples:
-            raise AssertionError
+        assert len(indices) == self.num_samples
 
         return iter(indices)
 

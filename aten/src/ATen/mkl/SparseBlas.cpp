@@ -2,9 +2,6 @@
   Provides the implementations of MKL Sparse BLAS function templates.
 */
 #define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/mkl/Sparse.h>
-
-#if AT_USE_MKL_SPARSE()
 #include <ATen/mkl/Exceptions.h>
 #include <ATen/mkl/SparseBlas.h>
 
@@ -367,4 +364,3 @@ sparse_status_t trsm<c10::complex<double>>(
 }
 
 } // namespace at::mkl::sparse
-#endif

@@ -1,7 +1,8 @@
+# mypy: allow-untyped-defs
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, cast, Optional
 
 import torch
 import torch.fx
@@ -77,7 +78,7 @@ class _MinimizerSettingBase:
     return_intermediate: bool = False
     all_outputs: bool = False
 
-    def __str__(self) -> str:
+    def __str__(self):
         settings_str = "FX Minimizer Settings:\n"
 
         for k, v in vars(self).items():
@@ -109,10 +110,11 @@ class _MinimizerBase:
             [TensorOrTensors, TensorOrTensors, Names], tuple[float, bool]
         ],
         settings: _MinimizerSettingBase,
-        module_exporter: Callable[[Tensors, torch.fx.GraphModule, str], None]
-        | None = None,
-        exclusion_fn: Callable[[NodeList, int, int], None] | None = None,
-    ) -> None:
+        module_exporter: Optional[
+            Callable[[Tensors, torch.fx.GraphModule, str], None]
+        ] = None,
+        exclusion_fn: Optional[Callable[[NodeList, int, int], None]] = None,
+    ):
         if not isinstance(module, torch.fx.GraphModule):
             raise AssertionError(f"Expected GraphModule, got {type(module)}")
 
@@ -189,10 +191,10 @@ class _MinimizerBase:
         a_result: TensorOrTensors,
         b_result: TensorOrTensors,
         submodule: torch.fx.GraphModule,
-    ) -> None:
+    ):
         """
         Store the outputs of self.run_a() and self.run_b() into self.a_outputs and
-        self.b_outputs, so that we can use them when executing preceding nodes that
+        self.b_outputs, so that we can use them when execute preceding nodes that
         use those outputs as inputs.
 
         Args:
@@ -250,7 +252,7 @@ class _MinimizerBase:
             if self.settings.accumulate_error:
                 print(f"Can't find previous stored outputs named {placeholders}!")
 
-            def get_inputs(self: torch.nn.Module, inputs: tuple[Any, ...]) -> None:
+            def get_inputs(self: torch.nn.Module, inputs: Any):
                 nonlocal a_input
                 a_input = inputs
 
@@ -266,7 +268,7 @@ class _MinimizerBase:
 
         return a_input, b_input
 
-    def _tag_nodes(self, selected_nodes: NodeSet) -> None:
+    def _tag_nodes(self, selected_nodes: NodeSet):
         """
         Tag selected nodes with tag "minimize". Nodes with the same tags will
         be split to the same submodule afterwards.
@@ -335,7 +337,7 @@ class _MinimizerBase:
         submod_name: str,
         output_names: Names,
         report_idx: int = -1,
-    ) -> None:
+    ):
         """
         Run the submodule in `split_module` that has name `submod_name`
         using `self.run_a` and `self.run_b` and compare their results.
@@ -547,7 +549,7 @@ class _MinimizerBase:
 
     def _block_traverse_impl(
         self, nodes: NodeList, start_idx: int, end_idx: int, find_last_node: bool
-    ) -> int | None:
+    ) -> Optional[int]:
         """
         Recursive block search implementation.
         find_last_node: If True, search for the last node which result in numerics difference
@@ -651,7 +653,9 @@ class _MinimizerBase:
             else:
                 return self._block_traverse_impl(nodes, start_idx, mid, find_last_node)
 
-    def _block_traverse(self, nodes: NodeList, find_last_node: bool | None) -> NodeSet:
+    def _block_traverse(
+        self, nodes: NodeList, find_last_node: Optional[bool]
+    ) -> NodeSet:
         """
         Traverse topologically sorted node list
         Find minimum block (start_idx, end_idx) which contains the culprit
@@ -671,8 +675,8 @@ class _MinimizerBase:
         start_idx = 0
         end_idx = len(nodes) - 1
 
-        final_start_idx: int | None = start_idx
-        final_end_idx: int | None = end_idx
+        final_start_idx: Optional[int] = start_idx
+        final_end_idx: Optional[int] = end_idx
 
         run_both = find_last_node is None
 
@@ -836,7 +840,7 @@ class _MinimizerBase:
             self.print_report(report)
             return set()
 
-    def _skip_traverse(self, all_nodes: NodeList, skip_nodes: list[str]) -> NodeSet:
+    def _skip_traverse(self, all_nodes: NodeList, skip_nodes: list) -> NodeSet:
         """
         Skip certain nodes in graph based on settings
         """
@@ -856,7 +860,7 @@ class _MinimizerBase:
 
         return culprits
 
-    def _collect_nodes(self, start: str | None, end: str | None) -> NodeList:
+    def _collect_nodes(self, start: Optional[str], end: Optional[str]) -> NodeList:
         """
         Collect nodes in the model that between nodes with name of `start` and `end`.
         These two nodes are also included.
@@ -879,7 +883,7 @@ class _MinimizerBase:
 
         return nodes
 
-    def run_nodes(self, start: str | None = None, end: str | None = None) -> None:
+    def run_nodes(self, start: Optional[str] = None, end: Optional[str] = None):
         """
         Run part of the model from `start` node to `end` node. If `start` is None
         then we start from the beginning of the model. If `end` is None then we
@@ -900,7 +904,7 @@ class _MinimizerBase:
             if node in self.fusions:
                 cur_nodes.update(self.fusions[node])
 
-        output_names: list[str] = []
+        output_names = []
         if self.settings.return_intermediate:
             output_names = [node.name for node in nodes]
 
@@ -913,23 +917,23 @@ class _MinimizerBase:
         ) as e:
             print(e)
 
-    def print_report(self, report: list[str]) -> None:
+    def print_report(self, report: list[str]):
         for i in range(len(report)):
             if i > 0:
                 print(" . " + report[i])
             else:
                 print(report[i])
 
-    def print_reports(self) -> None:
+    def print_reports(self):
         for report in self.reports:
             self.print_report(report)
 
     def minimize(
         self,
-        start: str | None = None,
-        end: str | None = None,
-        skip_nodes: list[str] | None = None,
-        find_last_node: bool | None = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        skip_nodes: Optional[list] = None,
+        find_last_node: Optional[bool] = None,
     ) -> NodeSet:
         """
         Minimizing the model from node with name `start` to node with name `end` base

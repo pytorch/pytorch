@@ -57,6 +57,22 @@ torch.backends.cuda.matmul.allow_tf32 = False
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
+def gpus_for_rank(world_size):
+    """Multigpu tests are designed to simulate the multi nodes with multi
+    GPUs on each node. Nccl backend requires equal #GPUs in each process.
+    On a single node, all visible GPUs are evenly
+    divided to subsets, each process only uses a subset.
+    """
+    visible_devices = list(range(torch.accelerator.device_count()))
+    gpus_per_process = torch.accelerator.device_count() // world_size
+    gpus_for_rank = []
+    for rank in range(world_size):
+        gpus_for_rank.append(
+            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
+        )
+    return gpus_for_rank
+
+
 class StoreTestBase:
     def _create_store(self, i):
         raise RuntimeError("not implemented")
@@ -245,13 +261,6 @@ class StoreTestBase:
         self.assertIn("foo", keys)
         self.assertIn("baz", keys)
 
-    def _test_barrier(self, store):
-        # Barrier with world_size=1 should return immediately
-        store.barrier("test_barrier_key", 1)
-
-    def test_barrier(self):
-        self._test_barrier(self._create_store())
-
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -287,8 +296,7 @@ class FileStoreTest(TestCase, StoreTestBase):
                 "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
             )
             dist.destroy_process_group()
-            if not os.path.exists(file.name):
-                raise AssertionError(f"Expected file {file.name} to exist")
+            assert os.path.exists(file.name)
 
             rpc.shutdown()
             os.remove(file.name)
@@ -299,11 +307,9 @@ class FileStoreTest(TestCase, StoreTestBase):
             store2 = dist.FileStore(file.name, 1)
 
             del store
-            if not os.path.exists(file.name):
-                raise AssertionError(f"Expected file {file.name} to exist")
+            assert os.path.exists(file.name)
             del store2
-            if os.path.exists(file.name):
-                raise AssertionError(f"Expected file {file.name} to not exist")
+            assert not os.path.exists(file.name)
 
     @property
     def num_keys_total(self):
@@ -380,8 +386,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
-            store1 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)
-            store2 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)
+            store1 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
+            store2 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
             self.assertEqual(store1.libuvBackend, self._use_libuv)
             self.assertEqual(store2.libuvBackend, self._use_libuv)
 
@@ -395,10 +401,10 @@ class TCPStoreTest(TestCase, StoreTestBase):
         # object is not destroyed before the second object is created.
         store1 = dist.TCPStore(
             addr, port, 1, True, multi_tenant=True, use_libuv=self._use_libuv
-        )  # type: ignore[call-arg]
+        )  # type: ignore[call-arg] # noqa: F841
         store2 = dist.TCPStore(
             addr, port, 1, True, multi_tenant=True, use_libuv=self._use_libuv
-        )  # type: ignore[call-arg]
+        )  # type: ignore[call-arg] # noqa: F841
         self.assertEqual(store1.libuvBackend, self._use_libuv)
         self.assertEqual(store2.libuvBackend, self._use_libuv)
 
@@ -457,8 +463,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
         del os.environ["USE_LIBUV"]
-        if "USE_LIBUV" in os.environ:
-            raise AssertionError("Expected USE_LIBUV to not be in os.environ")
+        assert "USE_LIBUV" not in os.environ
         rpc.shutdown()
         dist.destroy_process_group()
 
@@ -636,42 +641,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
         del os.environ[MASTER_PORT]
 
         self.assertEqual(second_server.port, store.port)
-
-    def test_barrier(self):
-        store = self._create_store()
-        # Single worker barrier should return immediately
-        store.barrier("test_barrier_key", 1)
-
-    def test_barrier_with_timeout(self):
-        store = self._create_store()
-        store.barrier("test_barrier_timeout_key", 1, timedelta(seconds=10))
-
-    def test_barrier_timeout_expires(self):
-        store = self._create_store()
-        with self.assertRaisesRegex(DistStoreError, "barrier timeout"):
-            store.barrier("test_barrier_fail", 2, timedelta(seconds=0.1))
-
-    def test_barrier_multi_worker(self):
-        server_store = self._create_store()
-        world_size = 4
-
-        def worker(rank):
-            if rank == 0:
-                worker_store = server_store
-            else:
-                worker_store = dist.TCPStore(
-                    host_name=server_store.host,
-                    port=server_store.port,
-                    is_master=False,
-                    wait_for_workers=False,
-                    use_libuv=self._use_libuv,
-                )
-            worker_store.barrier("multi_barrier", world_size, timedelta(seconds=10))
-
-        with ThreadPoolExecutor(max_workers=world_size) as pool:
-            futures = [pool.submit(worker, i) for i in range(world_size)]
-            for f in futures:
-                f.result()
 
 
 class LibUvTCPStoreTest(TCPStoreTest):
@@ -1092,7 +1061,7 @@ class TimeoutTest(TestCase):
                 else:
                     my_store.wait(["foo"], datetime.timedelta(seconds=10))
                 rank_res[rank] = True
-            except BaseException as e:  # noqa: E261
+            except BaseException as e:  # noqa: B036,E261
                 rank_res[rank] = e
             time.sleep(1)
 
@@ -1220,8 +1189,7 @@ class TestClientProtocol(TestCase):
 
 if __name__ == "__main__":
     if device_type != "cpu":
-        if torch.get_device_module()._initialized:
-            raise AssertionError(
-                f"test_distributed must not have initialized {device_type} context on main process"
-            )
+        assert not torch.get_device_module()._initialized, (
+            f"test_distributed must not have initialized {device_type} context on main process"
+        )
     run_tests()

@@ -2,10 +2,10 @@
 import functools
 import itertools
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import patch
 
-from torch._inductor.utils import Placeholder, unique
+from torch._inductor.utils import Placeholder
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
@@ -19,15 +19,9 @@ log = getArtifactLogger(__name__, "output_code")
 
 
 class CuteDSLTemplate(KernelTemplate):
-    """Template for generating CuteDSL (CUTLASS Python DSL) kernels.
-
-    Subclasses may override ``caller_type`` to attach template-specific
-    metadata or precompile behavior while reusing the common render and
-    benchmark request construction.
-    """
+    """Template for generating CuteDSL (CUTLASS Python DSL) kernels."""
 
     kernel_type: type[Any] = CuteDSLTemplateKernel
-    caller_type: type[Any] | None = None
     index_counter = itertools.count()
     all_templates: dict[str, "CuteDSLTemplate"] = {}
 
@@ -35,21 +29,15 @@ class CuteDSLTemplate(KernelTemplate):
         self,
         name: str,
         source: str,
-        subgraph_fn: Any | None = None,
-        mask_fn: Any | None = None,
+        subgraph_fn: Optional[Any] = None,
+        mask_fn: Optional[Any] = None,
     ) -> None:
         super().__init__(name)
         self.source = source
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
         self.template = CuteDSLTemplate._template_from_string(source)
-        # A module that registers templates can be initialized more than once in
-        # a single process (e.g. a double-import path). Tolerate re-registration
-        # under an existing name as long as the template source matches, but
-        # reject a genuine name collision between different templates.
-        existing = self.all_templates.get(name)
-        if existing is not None and existing.source != self.source:
-            raise AssertionError(f"duplicate template name, {name}")
+        assert name not in self.all_templates, f"duplicate template name, {name}"
         CuteDSLTemplate.all_templates[name] = self
 
     @staticmethod
@@ -60,7 +48,7 @@ class CuteDSLTemplate(KernelTemplate):
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
-    ) -> NotImplementedError | None:
+    ) -> Optional[NotImplementedError]:
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
         Returns None if success, otherwise returns the error.
@@ -69,19 +57,18 @@ class CuteDSLTemplate(KernelTemplate):
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.debug("CuteDSL template choice generation failed: %s", e)
+            log.debug("CuteDSL template choice generation failed: %s", e)  # noqa: G200
             return e
         except Exception as e:
-            log.debug("CuteDSL template choice generation error: %s", e)
+            log.debug("CuteDSL template choice generation error: %s", e)  # noqa: G200
             return NotImplementedError(f"CuteDSL template failed: {e}")
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
-        """Generate the CuteDSL kernel caller for template autotuning."""
+        """Generate the CuteDSL kernel caller."""
         input_nodes = kwargs.pop("input_nodes")
         layout = kwargs.pop("layout")
         mutated_inputs = kwargs.pop("mutated_inputs", None)
         subgraphs = kwargs.pop("subgraphs", None)
-        template_kwargs = dict(kwargs)
 
         kernel_name = f"cutedsl_{self.name}_{next(self.index_counter)}"
 
@@ -103,54 +90,15 @@ class CuteDSLTemplate(KernelTemplate):
 
             log.debug("Generated CuteDSL Code:\n%s", code)
 
-            input_call_args = tuple(kernel.args.input_buffers.keys())
-            expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
-            if input_call_args[: len(expected_input_args)] != expected_input_args:
-                raise RuntimeError(
-                    "CuteDSL template input registration order changed while "
-                    "collecting captured subgraph buffers. Expected template "
-                    "inputs to be registered before captured buffers, got "
-                    f"{input_call_args}, expected prefix {expected_input_args}."
-                )
-            extra_capture_names = input_call_args[len(expected_input_args) :]
-
-            # Resolve captured nodes from the graph-level side table
-            # (populated by realize_captures_for_cutedsl) to get view nodes.
-            graph_captures = getattr(V.graph, "_cutedsl_capture_nodes", {})
-            capture_nodes_by_name: dict[str, Any] = {}
-            extra_capture_nodes = []
-            for name in extra_capture_names:
-                node = graph_captures.get(name)
-                if node is None:
-                    node = V.graph.get_buffer(name)
-                capture_nodes_by_name[name] = node
-                extra_capture_nodes.append(node)
-            input_nodes = list(input_nodes) + extra_capture_nodes
-
-            kernel.set_capture_input_nodes(capture_nodes_by_name)
-            with kernel._patch_get_dtype_for_captures():
-                _, call_args, _, _ = kernel.args.python_argdefs()
-            expected_args = list(input_call_args)
-            expected_args.append(self.output_node.get_name())
-            if list(call_args)[: len(expected_args)] != expected_args:
-                raise RuntimeError(
-                    "CuteDSL template benchmark argument order changed while "
-                    "collecting dynamic scalar args. Expected prefix "
-                    f"{expected_args}, got {list(call_args)}."
-                )
-            extra_args = tuple(
-                V.graph.sizevars.optimization_hints(call_args[len(expected_args) :])
-            )
-
             bmreq = CuteDSLBenchmarkRequest(
                 kernel_name=kernel_name,
                 input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
                 output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-                extra_args=extra_args,
+                extra_args=tuple(),
                 source_code=code,
             )
 
-            def make_kernel_render(out_node, hint_override: int | None = None):
+            def make_kernel_render(out_node, hint_override: Optional[int] = None):
                 """
                 Factory function that creates a kernel renderer for the final output.
 
@@ -164,15 +112,13 @@ class CuteDSLTemplate(KernelTemplate):
                     output_node=out_node,
                     subgraphs=subgraphs,
                 )
-                render_kernel.set_capture_input_nodes(capture_nodes_by_name)
 
                 def render():
                     return render_kernel.render(self.template, **kwargs)
 
                 return render_kernel, render
 
-            caller_type = self.caller_type or CuteDSLTemplateCaller
-            return caller_type(
+            return CuteDSLTemplateCaller(
                 name=kernel_name,
                 input_nodes=input_nodes,
                 layout=layout,
@@ -180,7 +126,6 @@ class CuteDSLTemplate(KernelTemplate):
                 bmreq=bmreq,
                 template=self,
                 mutated_inputs=mutated_inputs,
-                template_kwargs=template_kwargs,
             )
 
 
@@ -195,28 +140,18 @@ class CuteDSLTemplateCaller(ChoiceCaller):
         make_kernel_render: Any,
         bmreq: CuteDSLBenchmarkRequest,
         template: "CuteDSLTemplate",
-        mutated_inputs: Iterable[IRNode] | None = None,
-        template_kwargs: dict[str, Any] | None = None,
+        mutated_inputs: Optional[Iterable[IRNode]] = None,
     ):
-        description = self._build_description(name, template_kwargs)
         super().__init__(
             name=name,
             input_nodes=input_nodes,
             layout=layout,
-            description=description,
+            description=f"CuteDSL template {name}",
         )
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
         self.template = template
         self.mutated_inputs = mutated_inputs
-
-    def _build_description(
-        self, name: str, template_kwargs: dict[str, Any] | None
-    ) -> str:
-        if not template_kwargs:
-            return f"CuteDSL template {name}"
-        kwargs_desc = ", ".join(f"{k}={v}" for k, v in template_kwargs.items())
-        return f"CuteDSL template {name} ({kwargs_desc})"
 
     def __str__(self) -> str:
         return f"CuteDSLTemplateCaller({self.name})"

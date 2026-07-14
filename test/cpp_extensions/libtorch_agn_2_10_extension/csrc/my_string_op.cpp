@@ -4,7 +4,6 @@
 
 #include <string>
 #include <string_view>
-#include <utility>
 
 using torch::stable::Tensor;
 
@@ -21,7 +20,7 @@ std::tuple<std::vector<std::string>, int64_t> my_string_op(Tensor t, std::string
   }
 
   auto vec = std::vector<std::string>({std::string(accessor), std::to_string(res), passthru});
-  return std::make_tuple(std::move(vec), res);
+  return std::make_tuple(vec, res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {

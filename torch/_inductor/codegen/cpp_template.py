@@ -5,6 +5,7 @@ import itertools
 import logging
 import sys
 from collections.abc import Callable, Iterable
+from typing import Optional, Union
 from unittest.mock import patch
 
 import sympy
@@ -29,12 +30,12 @@ class CppTemplate(KernelTemplate):
         input_nodes,
         layout: ir.Layout,
         num_threads: int,
-        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
+        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
         self.index = next(self.index_counter)
-        self.output_node: ir.Buffer | list[ir.Buffer] = ir.Buffer(
+        self.output_node: Union[ir.Buffer, list[ir.Buffer]] = ir.Buffer(
             name=f"buf_out{self.index}", layout=layout
         )
         self.layout = layout
@@ -67,15 +68,11 @@ class CppTemplate(KernelTemplate):
             expected_args.extend([node.get_name() for node in self.output_node])
         else:
             expected_args.extend([self.output_node.get_name()])
-        if list(call_args)[: len(expected_args)] != expected_args:
-            raise AssertionError(
-                (
-                    call_args,
-                    expected_args,
-                )
-            )
-        # extra_args are only used for benchmarking, not compiled kernel correctness
-        extra_args = V.graph.sizevars.optimization_hints(
+        assert list(call_args)[: len(expected_args)] == expected_args, (
+            call_args,
+            expected_args,
+        )
+        extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
         # Cast the size hint from int to ctypes.c_ulonglong explicitly
@@ -96,7 +93,7 @@ class CppTemplate(KernelTemplate):
         def make_kernel_render(
             template_node: ir.CppTemplateBuffer,
             flag_template_buffer_has_other_users: bool,
-            epilogue_nodes: list[ir.IRNode] | None = None,
+            epilogue_nodes: Optional[list[ir.IRNode]] = None,
         ):
             kernel = CppTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME), num_threads=self.num_threads

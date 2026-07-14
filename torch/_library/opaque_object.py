@@ -4,25 +4,25 @@ Note [Opaque Objects]
 Opaque objects are the way we allow custom operators to accept a user-defined
 "black box" object as an input.
 
-There are two kinds of opaque types: CONSTANT type and SYMBOLIC type.
+There are two kinds of opaque types: VALUE type and REFERENCE type.
 The distinction determines how torch.compile handles the object.
 
-SYMBOLIC TYPES (default):
+REFERENCE TYPES (default):
 
-Symbolic-typed opaque objects represent mutable stateful objects and are
+Reference-typed opaque objects represent mutable stateful objects and are
 treated as black boxes. In torch.compile, since torch.compile cannot optimize
 the anything (including tensors) within the object, the object must be an
 input to the graph.
 
-You can register a custom class as being a symbolic-typed opaque object class
-through `register_custom_class(MyClass, typ="symbolic")`.
+You can register a custom class as being a reference-based opaque object class
+through `register_opaque_type(MyClass, typ="reference")`.
 
-CONSTANT TYPES:
+VALUE TYPES:
 
-Constant-typed opaque objects represent constant values.
+Value-typed opaque objects represent constant values.
 In torch.compile, the graph specializes on the object like how other constants
 are. Therefore there are a couple of methods on the class that must be
-implemented before registering it as a constant-typed opaque object class:
+implemented before registering it as a value-typed opaque object class:
   - __eq__: torch.compile will create guards based on the equality of this
   object, meaning that a recompilation will happen if __eq__ returns False.
   - __hash__: This must be implemented for Fake Tensor caching
@@ -31,30 +31,21 @@ implemented before registering it as a constant-typed opaque object class:
     where repr_string can reconstruct the object and the dict maps names used in
     repr_string to their corresponding types.
 
-You can register a custom class as being a constant-typed opaque object class
-through `register_custom_class(MyClass, typ="constant")`.
+You can register a custom class as being a reference-based opaque object class
+through `register_opaque_type(MyClass, typ="value")`.
 """
 
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, NewType, TYPE_CHECKING, TypeAlias
+from typing import Any, Literal, NewType, Optional
 from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
-from torch._custom_class_base import CustomClassBase, CustomClassBaseMeta
-
-
-if TYPE_CHECKING:
-    from torch.fx import Proxy
-    from torch.fx.experimental.proxy_tensor import PythonKeyTracer
+from torch._opaque_base import OpaqueBase, OpaqueBaseMeta  # noqa: F401
 
 from .fake_class_registry import register_fake_class
-
-
-log = logging.getLogger(__name__)
 
 
 class MemberType(Enum):
@@ -86,45 +77,21 @@ OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
 
 OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 
-# Type for reconstruct_fn: called by PythonKeyTracer.create_arg when make_fx
-# encounters an untracked opaque reference (e.g. a backward closure capture).
-# Should derive the object from existing graph inputs or return None to fall
-# back to get_attr.  Args: (obj, get_tracked_proxy, tracer).
-ReconstructFn: TypeAlias = Callable[
-    [CustomClassBase, Callable[[CustomClassBase], "Proxy | None"], "PythonKeyTracer"],
-    "Proxy | None",
-]
-
 
 @dataclass
 class _OpaqueTypeInfo:
     class_name: str
-    opaque_typ: Literal["symbolic", "constant"]
+    opaque_typ: Literal["reference", "value"]
     guard_fn: Callable[
         [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
-    hoist: bool
-    reconstruct_fn: ReconstructFn | None
 
 
-# Mapping of type -> (string name, symbolic/constant type)
+# Mapping of type -> (string name, reference/value type)
 _OPAQUE_TYPES: WeakKeyDictionary[Any, _OpaqueTypeInfo] = WeakKeyDictionary()
-# Mapping of class_name -> (type, symbolic/constant type)
+# Mapping of class_name -> (type, reference/value type)
 _OPAQUE_TYPES_BY_NAME: dict[str, _OpaqueTypeInfo] = {}
-
-
-def _resolve_opaque_type_info(cls: Any) -> _OpaqueTypeInfo | None:
-    if cls in _OPAQUE_TYPES:
-        return _OPAQUE_TYPES[cls]
-    if not isinstance(cls, type):
-        return None
-
-    # Allow subclasses too
-    for parent in cls.__mro__[1:]:
-        if parent in _OPAQUE_TYPES:
-            return _OPAQUE_TYPES[parent]
-    return None
 
 
 def get_opaque_type_name(cls: Any) -> str:
@@ -140,23 +107,20 @@ def get_opaque_type_name(cls: Any) -> str:
     Raises:
         ValueError: If the class is not registered as an opaque type.
     """
-    info = _resolve_opaque_type_info(cls)
-    if info is None:
+    if cls not in _OPAQUE_TYPES:
         raise ValueError(
             f"Class {cls} is not registered as an opaque type. "
-            f"Call register_custom_class({cls.__name__}) first."
+            f"Call register_opaque_type({cls.__name__}) first."
         )
-    return info.class_name
+    return _OPAQUE_TYPES[cls].class_name
 
 
-def register_custom_class(
+def register_opaque_type(
     cls: Any,
     *,
     typ: str,
-    hoist=False,
     guard_fn: Any = None,
     members: dict[str, MemberType] | None = None,
-    reconstruct_fn: ReconstructFn | None = None,
 ) -> None:
     """
     Registers the given type as an opaque type which allows this to be consumed
@@ -167,19 +131,12 @@ def register_custom_class(
 
     Args:
         cls (type): The class to register as an opaque type.
-        typ (str): Either "symbolic" or "constant". See Note [Opaque Objects] for
+        typ (str): Either "reference" or "value". See Note [Opaque Objects] for
             more details.
-        hoist (bool): Only applies to constant types. A hoist=True constant type
-            object is lifted as an input to the torch.compile'd graph, instead
-            of being a constant baked into the graph. This is useful to
-            improve compilation times in hierarchical compilation
-            (e.g., change your custom ops to use hoisted strings to avoid
-            baking the string into the Dynamo/AOTAutograd/FX graphs).
-            This flag does nothing for symbolic types.
         guard_fn (callable | None): A function that takes an instance of the opaque
             object and returns a list of values to guard on. These values will be compared
             for equality on each function call, triggering recompilation if they change.
-            Only applicable for symbolic types.
+            Only applicable for reference types.
             Example: lambda obj: [obj.x, obj.y]
         members (dict[str, MemberType] | None): Dictionary mapping member names
             (attributes, properties, or methods) to their MemberType, which controls
@@ -203,33 +160,22 @@ def register_custom_class(
             "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
-    if typ == "reference":
-        log.warning("typ='reference' is deprecated, use typ='symbolic' instead")
-        typ = "symbolic"
-
-    if typ == "value":
-        log.warning("typ='value' is deprecated, use typ='constant' instead")
-        typ = "constant"
-
-    # Constant types store the real object directly during tracing (no
-    # FakeScriptObject wrapper), so they don't need CustomClassBaseMeta.
-    if typ != "constant" and not isinstance(cls, CustomClassBaseMeta):
+    if not isinstance(cls, OpaqueBaseMeta):
         raise TypeError(
-            f"Custom class {cls} must subclass torch._custom_class_base.CustomClassBase "
-            "or 'metaclass=torch._custom_class_base.CustomClassBaseMeta'. "
+            f"Opaque type {cls} must subclass torch._opaque_base.OpaqueBase "
+            "or 'metaclass=torch._opaque_base.OpaqueBaseMeta'. "
             "This is required so that FakeScriptObject can be registered "
             "as a virtual subclass, allowing isinstance() checks to work "
             "during torch.compile tracing. "
         )
 
-    if typ not in ["symbolic", "constant"]:
+    if typ not in ["reference", "value"]:
         raise AssertionError(
-            f"Custom class type must be either 'symbolic' or 'constant', got {typ!r}"
+            f"Opaque type must be either 'reference' or 'value', got {typ!r}"
         )
 
-    if typ == "constant":
-        # Enums use identity-based equality (singletons), which is fine for guarding.
-        if not issubclass(cls, Enum) and cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
+    if typ == "value":
+        if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
             raise TypeError(
                 f"Value-type opaque object of type {cls} is "
                 "expected to have a non-default `__eq__` "
@@ -247,14 +193,13 @@ def register_custom_class(
                 "for FakeTensor caching."
             )
 
-        # Enums are special-cased in get_opaque_obj_repr.
-        if not issubclass(cls, Enum) and not hasattr(cls, "__fx_repr__"):
+        if not hasattr(cls, "__fx_repr__"):
             raise TypeError(
                 f"Value-type opaque object of type {cls} is "
                 "expected to have a `__fx_repr__` method "
                 "implementation as we will use this to reconstruct "
                 "the object in the FX codegen. __fx_repr__ should return "
-                "a tuple of (repr_string, dict[str, type])."
+                "a tuple of (repr_string, set_of_types)."
             )
 
         if guard_fn is not None:
@@ -267,145 +212,56 @@ def register_custom_class(
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    type_info = _OpaqueTypeInfo(
-        name, typ, guard_fn, members or {}, hoist, reconstruct_fn
-    )
+    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {})
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
     torch._C._register_opaque_type(name)
 
 
-def register_opaque_type(
-    cls: Any,
-    *,
-    typ: str,
-    hoist=False,
-    guard_fn: Any = None,
-    members: dict[str, MemberType] | None = None,
-    reconstruct_fn: ReconstructFn | None = None,
-) -> None:
-    log.warning("register_opaque_type is deprecated, use register_custom_class instead")
-    register_custom_class(
-        cls,
-        typ=typ,
-        hoist=hoist,
-        guard_fn=guard_fn,
-        members=members,
-        reconstruct_fn=reconstruct_fn,
-    )
-
-
-# Enums are always opaque constant types.
-register_custom_class(Enum, typ="constant")
-
-
-def is_custom_class_obj(value: object) -> TypeIs[OpaqueType]:
-    if is_custom_class(type(value)):
-        return True
-    from torch._library.fake_class_registry import FakeScriptObject
-
-    if isinstance(value, FakeScriptObject):
-        return is_custom_class(type(value.real_obj))
-    return False
-
-
 def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
-    log.warning("is_opaque_value is deprecated, use is_custom_class_obj instead")
-    return is_custom_class_obj(value)
+    return is_opaque_type(type(value))
 
 
-def should_hoist(cls: Any) -> bool:
-    info = _resolve_opaque_type_info(cls)
-    if info is None:
-        return False
-    return info.hoist
-
-
-def get_reconstruct_fn(cls: type[CustomClassBase]) -> ReconstructFn | None:
-    info = _resolve_opaque_type_info(cls)
-    if info is None:
-        return None
-    return info.reconstruct_fn
-
-
-def has_members(cls: Any) -> bool:
-    info = _resolve_opaque_type_info(cls)
-    if info is None:
-        return False
-    return len(info.members) > 0
-
-
-def is_custom_class(cls: type[Any] | str) -> bool:
+def is_opaque_type(cls: Any) -> bool:
     """
-    Checks if the given type is a registered custom class.
-    Also returns True for subclasses of registered custom classes.
+    Checks if the given type is an opaque type.
     """
     if isinstance(cls, str):
         return torch._C._is_opaque_type_registered(cls)
 
-    if not isinstance(cls, type):
-        log.warning("Passed invalid type `%s` to is_custom_class, returning False", cls)
+    if cls not in _OPAQUE_TYPES:
         return False
 
-    info = _resolve_opaque_type_info(cls)
-    if info is None:
-        return False
-
-    return torch._C._is_opaque_type_registered(info.class_name)
+    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls].class_name)
 
 
-def is_opaque_type(cls: type[Any] | str) -> bool:
-    log.warning("is_opaque_type is deprecated, use is_custom_class instead")
-    return is_custom_class(cls)
-
-
-def is_opaque_constant_type(cls: type[Any] | str) -> bool:
+def is_opaque_value_type(cls: Any) -> bool:
     """
-    Checks if the given type is an opaque **constant** type.
+    Checks if the given type is an opaque **value** type.
     See Note [Opaque Objects] for more information.
     """
-    if not is_custom_class(cls):
+    if not is_opaque_type(cls):
         return False
 
     if isinstance(cls, str):
-        return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "constant"
+        return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "value"
 
-    info = _resolve_opaque_type_info(cls)
-    if info is None:
-        return False
-    return info.opaque_typ == "constant"
-
-
-def is_opaque_value_type(cls: type[Any] | str) -> bool:
-    log.warning(
-        "is_opaque_value_type is deprecated, use is_opaque_constant_type instead"
-    )
-    return is_opaque_constant_type(cls)
-
-
-def is_opaque_symbolic_type(cls: Any) -> bool:
-    """
-    Checks if the given type is an opaque **symbolic** type.
-    See Note [Opaque Objects] for more information.
-    """
-    if not is_custom_class(cls):
-        return False
-
-    if isinstance(cls, str):
-        return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "symbolic"
-
-    info = _resolve_opaque_type_info(cls)
-    if info is None:
-        return False
-    return info.opaque_typ == "symbolic"
+    return _OPAQUE_TYPES[cls].opaque_typ == "value"
 
 
 def is_opaque_reference_type(cls: Any) -> bool:
-    log.warning(
-        "is_opaque_reference_type is deprecated, use is_opaque_symbolic_type instead"
-    )
-    return is_opaque_symbolic_type(cls)
+    """
+    Checks if the given type is an opaque **reference** type.
+    See Note [Opaque Objects] for more information.
+    """
+    if not is_opaque_type(cls):
+        return False
+
+    if isinstance(cls, str):
+        return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "reference"
+
+    return _OPAQUE_TYPES[cls].opaque_typ == "reference"
 
 
 def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
@@ -421,12 +277,6 @@ def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
     For example, if repr_string is "Foo(bar=Bar(1))", the dict should be:
         {"Foo": Foo, "Bar": Bar}
     """
-
-    # Enums are special cased
-    if isinstance(obj, Enum):
-        cls = type(obj)
-        return f"{cls.__name__}.{obj.name}", {cls.__name__: cls}
-
     if not hasattr(obj, "__fx_repr__"):
         raise TypeError(
             f"Value-type opaque object of type {obj} is "
@@ -453,17 +303,17 @@ def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
     return repr_str, globals_dict
 
 
-def get_opaque_obj_info(cls: Any) -> _OpaqueTypeInfo | None:
-    if not is_custom_class(cls):
+def get_opaque_obj_info(cls: Any) -> Optional[_OpaqueTypeInfo]:
+    if not is_opaque_type(cls):
         return None
 
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls]
 
-    return _resolve_opaque_type_info(cls)
+    return _OPAQUE_TYPES[cls]
 
 
-def get_member_type(cls: Any, member_name: str) -> MemberType | None:
+def get_member_type(cls: Any, member_name: str) -> Optional[MemberType]:
     """
     Get the MemberType for a specific member of an opaque object class.
 

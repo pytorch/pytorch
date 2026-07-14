@@ -257,16 +257,23 @@ void woq_matmul_int4_impl_cache(
 
   auto& engine = GpuEngineManager::Instance().get_engine();
 
+  int arg_off = 0;
   // set scale and zero point for matmul args
   matmul_ext.set_attribute(
-      DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, scale.data_ptr(), [&]() {
+      arg_off++,
+      DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS,
+      scale.data_ptr(),
+      [&]() {
         return make_onednn_memory(
             get_onednn_md(scale), engine, scale.data_ptr());
       });
 
   // set zp_md for asymmetric quantization
   matmul_ext.set_attribute(
-      DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp.data_ptr(), [&]() {
+      arg_off++,
+      DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
+      zp.data_ptr(),
+      [&]() {
         int num_groups = k / group_size;
         memory zp_usr_m(
             {{num_groups, n}, memory::data_type::s8, {n, 1}},
@@ -290,7 +297,7 @@ void woq_matmul_int4_impl_cache(
 
   auto& strm = GpuStreamManager::Instance().get_stream();
   auto qint4_matmul_event =
-      matmul_ext.execute(strm, engine, std::move(arg_handles));
+      matmul_ext.execute(strm, engine, std::move(arg_handles), arg_off);
 }
 
 void woq_matmul_int4(

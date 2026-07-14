@@ -1,20 +1,8 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, TypeVar
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
-
-    from .variable import Var
-
-_T = TypeVar("_T")
-
-
+# mypy: allow-untyped-defs
 __all__ = ["hashable", "transitive_get", "raises", "reverse_dict", "xfail", "freeze"]
 
 
-def hashable(x: object) -> bool:
+def hashable(x):
     try:
         hash(x)
         return True
@@ -22,7 +10,7 @@ def hashable(x: object) -> bool:
         return False
 
 
-def transitive_get(key: object, d: dict[Var, object]) -> object:
+def transitive_get(key, d):
     """Transitive dict.get
     >>> d = {1: 2, 2: 3, 3: 4}
     >>> d.get(1)
@@ -35,10 +23,7 @@ def transitive_get(key: object, d: dict[Var, object]) -> object:
     return key
 
 
-def raises(
-    err: type[BaseException],
-    lamda: Callable[[], object],  # codespell:ignore lamda
-) -> bool:
+def raises(err, lamda):  # codespell:ignore lamda
     try:
         lamda()  # codespell:ignore lamda
         return False
@@ -48,7 +33,7 @@ def raises(
 
 # Taken from theano/theano/gof/sched.py
 # Avoids licensing issues because this was written by Matthew Rocklin
-def _toposort(edges: dict[_T, Iterable[_T]]) -> list[_T]:
+def _toposort(edges):
     """Topological sort algorithm by Kahn [1] - O(nodes + vertices)
     inputs:
         edges - a dict of the form {a: {b, c}} where b and c depend on a
@@ -81,15 +66,12 @@ def _toposort(edges: dict[_T, Iterable[_T]]) -> list[_T]:
     return L
 
 
-def reverse_dict(d: dict[_T, Iterable[_T]]) -> dict[_T, tuple[_T, ...]]:
-    """Reverses direction of dependence dict.
-
+def reverse_dict(d):
+    """Reverses direction of dependence dict
     >>> d = {"a": (1, 2), "b": (2, 3), "c": ()}
     >>> reverse_dict(d)  # doctest: +SKIP
     {1: ('a',), 2: ('a', 'b'), 3: ('b',)}
-
-    .. note::
-        dict order are not deterministic. As we iterate on the
+    :note: dict order are not deterministic. As we iterate on the
         input dict, it make the output of this function depend on the
         dict order. So this function output order should be considered
         as undeterministic.
@@ -97,12 +79,11 @@ def reverse_dict(d: dict[_T, Iterable[_T]]) -> dict[_T, tuple[_T, ...]]:
     result = {}  # type: ignore[var-annotated]
     for key in d:
         for val in d[key]:
-            # pyrefly: ignore [unsupported-operation]
             result[val] = result.get(val, ()) + (key,)
-    return result  # pyrefly: ignore[bad-return]
+    return result
 
 
-def xfail(func: Callable[[], object]) -> None:
+def xfail(func):
     try:
         func()
         raise Exception("XFailed test passed")  # pragma:nocover  # noqa: TRY002
@@ -110,7 +91,7 @@ def xfail(func: Callable[[], object]) -> None:
         pass
 
 
-def freeze(d: object) -> object:
+def freeze(d):
     """Freeze container to hashable form
     >>> freeze(1)
     1

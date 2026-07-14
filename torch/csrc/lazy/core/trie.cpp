@@ -76,7 +76,7 @@ void TrieCache::DumpToDotFile(const std::string& file_name) {
   ss << "}\n";
 
   std::ofstream graph_file(file_name);
-  graph_file << std::move(ss).str();
+  graph_file << ss.str();
 }
 
 } // namespace torch::lazy

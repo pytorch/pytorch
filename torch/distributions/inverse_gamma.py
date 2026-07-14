@@ -21,7 +21,7 @@ class InverseGamma(TransformedDistribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = InverseGamma(torch.tensor([2.0]), torch.tensor([3.0]))
         >>> m.sample()
         tensor([ 1.2953])

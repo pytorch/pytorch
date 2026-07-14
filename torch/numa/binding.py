@@ -1,7 +1,7 @@
 """
 In NUMA (Non-Uniform Memory Access) systems, accessing memory on remote NUMA
 nodes incurs additional latency. PyTorch provides NUMA binding utilities to
-promote memory locality by binding worker processes to CPUs near their assigned accelerator devices.
+promote memory locality by binding worker processes to CPUs near their assigned GPUs.
 
 In practice, NUMA binding typically results in 1-10% overall performance improvements,
 but some workloads may obtain much greater benefits or none at all.
@@ -45,19 +45,19 @@ class AffinityMode(str, Enum):
     NODE = "node"
     """
     Each worker process and its threads will be bound to all the CPUs
-    on the NUMA node containing the accelerator device whose local index equals the worker's
-    local rank. If in doubt, use this option rather than the others.
+    on the NUMA node containing the GPU whose local index equals the worker's local rank.
+    If in doubt, use this option rather than the others.
 
-    **Ex.:** If device 3 lives on NUMA node 1, then the worker whose local rank is 3 will
-    only be able to run on the CPUs of NUMA node 1.
+    **Ex.:** If GPU 3 (i.e. ``torch.device("cuda:3")``) lives on NUMA node 1, then the worker
+    whose local rank is 3 will only be able to run on the CPUs of NUMA node 1.
     """
 
     SOCKET = "socket"
     """
     Each worker process and its threads will be bound to all the CPUs on all the NUMA nodes of the
-    socket containing the accelerator device whose local index equals the worker's local rank.
+    socket containing the GPU whose local index equals the worker's local rank.
 
-    **Ex.:** If socket 0 contains device 3 and NUMA nodes 0-1, then the worker whose
+    **Ex.:** If socket 0 contains GPU 3 and NUMA nodes 0-1, then the worker whose
     local rank is 3 will be bound to the CPUs of NUMA nodes 0-1.
 
     For cases where there is only one NUMA node per socket anyway, this is equivalent to NODE.
@@ -66,11 +66,11 @@ class AffinityMode(str, Enum):
     EXCLUSIVE = "exclusive"
     """
     Each worker process and its threads will be bound to an exclusive subset of CPUs
-    on the NUMA node containing the accelerator device whose local index equals the worker's
-    local rank. The CPUs on the NUMA node are divided evenly among all devices on that node,
-    so no two workers share the same CPU cores.
+    on the NUMA node containing the GPU whose local index equals the worker's local rank.
+    The CPUs on the NUMA node are divided evenly among all GPUs on that node, so no two
+    workers share the same CPU cores.
 
-    **Ex.:** If NUMA node 1 has 16 physical cores and devices 2 and 3, then the worker whose
+    **Ex.:** If NUMA node 1 has 16 physical cores and GPUs 2 and 3, then the worker whose
     local rank is 2 will be bound to cores 0-7, and the worker whose local rank is 3 will
     be bound to cores 8-15.
     """
@@ -78,12 +78,11 @@ class AffinityMode(str, Enum):
     CORE_COMPLEX = "core-complex"
     """
     Each worker process and its threads will be bound to a single core complex (a group of cores
-    sharing the same L3 cache) on the NUMA node containing the accelerator device whose local
-    index equals the worker's local rank. Each worker is bound to a different core complex when
-    possible.
+    sharing the same L3 cache) on the NUMA node containing the GPU whose local index equals
+    the worker's local rank. Each worker is bound to a different core complex when possible.
 
     **Ex.:** If NUMA node 1 has two core complexes (cores 0-7 sharing one L3 cache, cores 8-15
-    sharing another) and devices 2 and 3, then the worker whose local rank is 2 will be bound to
+    sharing another) and GPUs 2 and 3, then the worker whose local rank is 2 will be bound to
     cores 0-7, and the worker whose local rank is 3 will be bound to cores 8-15.
     """
 
@@ -105,7 +104,7 @@ class NumaOptions:
 def _maybe_wrap_command_args_with_numa_binding(
     command_args: tuple[str, ...],
     *,
-    device_index: int,
+    gpu_index: int,
     numa_options: NumaOptions | None,
 ) -> tuple[str, ...]:
     """
@@ -113,11 +112,11 @@ def _maybe_wrap_command_args_with_numa_binding(
 
     This function prepends numactl with appropriate CPU affinity flags to the
     provided command arguments, binding the process to CPUs associated with
-    the specified accelerator device's NUMA node.
+    the specified GPU's NUMA node.
 
     Args:
         command_args: The original command arguments to wrap.
-        device_index: The index of the accelerator device that will be used by the subprocess.
+        gpu_index: The index of the GPU that will be used by the subprocess.
         numa_options: Configuration for NUMA binding behavior. If None, returns
             the original command_args unchanged.
 
@@ -131,13 +130,13 @@ def _maybe_wrap_command_args_with_numa_binding(
 
     kwargs = {
         "command_args": command_args,
-        "device_index": device_index,
+        "gpu_index": gpu_index,
         "numa_options": asdict(numa_options),
     }
 
     try:
         logical_cpu_indices = _get_validated_logical_cpus_to_bind_to(
-            device_index=device_index,
+            gpu_index=gpu_index,
             numa_options=numa_options,
         )
 
@@ -167,7 +166,7 @@ _TReturn = TypeVar("_TReturn")
 def _maybe_wrap_with_numa_binding(
     func: Callable[_TParams, _TReturn],
     *,
-    device_index: int,
+    gpu_index: int,
     numa_options: NumaOptions | None,
 ) -> Callable[_TParams, _TReturn]:
     """
@@ -175,11 +174,11 @@ def _maybe_wrap_with_numa_binding(
 
     This decorator applies NUMA CPU affinity to all threads in the current process
     before calling the wrapped function, binding them to CPUs associated with the
-    specified accelerator device's NUMA node.
+    specified GPU's NUMA node.
 
     Args:
         func: The function to wrap with NUMA binding.
-        device_index: The index of the accelerator device that will be used.
+        gpu_index: The index of the GPU that will be used.
         numa_options: Configuration for NUMA binding behavior. If None, returns
             the original function unchanged.
 
@@ -193,7 +192,7 @@ def _maybe_wrap_with_numa_binding(
     @wraps(func)
     def wrapped(*args: _TParams.args, **kwargs: _TParams.kwargs) -> _TReturn:
         _maybe_apply_numa_binding_to_current_process(
-            device_index=device_index,
+            gpu_index=gpu_index,
             # pyrefly: ignore [bad-argument-type]
             numa_options=numa_options,
         )
@@ -203,16 +202,16 @@ def _maybe_wrap_with_numa_binding(
 
 
 def _maybe_apply_numa_binding_to_current_process(
-    *, device_index: int, numa_options: NumaOptions
+    *, gpu_index: int, numa_options: NumaOptions
 ) -> None:
     kwargs = {
-        "device_index": device_index,
+        "gpu_index": gpu_index,
         "numa_options": asdict(numa_options),
     }
 
     try:
         logical_cpu_indices = _get_validated_logical_cpus_to_bind_to(
-            device_index=device_index,
+            gpu_index=gpu_index,
             numa_options=numa_options,
         )
 
@@ -268,11 +267,11 @@ def _handle_exception(
 
 def _get_validated_logical_cpus_to_bind_to(
     *,
-    device_index: int,
+    gpu_index: int,
     numa_options: NumaOptions,
 ) -> set[int]:
     logical_cpu_indices = _get_logical_cpus_to_bind_to(
-        device_index=device_index, numa_options=numa_options
+        gpu_index=gpu_index, numa_options=numa_options
     )
     _raise_if_binding_invalid(logical_cpu_indices=logical_cpu_indices)
 
@@ -319,12 +318,12 @@ def _bind_all_threads_in_current_process_to_logical_cpus(
 
 def _get_logical_cpus_to_bind_to(
     *,
-    device_index: int,
+    gpu_index: int,
     numa_options: NumaOptions,
 ) -> set[int]:
     """
     Args:
-        device_index: The index of the accelerator device that will be used by the subprocess.
+        gpu_index: The index of the GPU that will be used by the subprocess.
             Example: 0
         numa_options: See NumaOptions for details.
 
@@ -332,41 +331,37 @@ def _get_logical_cpus_to_bind_to(
         Set of logical CPU indices to bind to.
     """
     if numa_options.affinity_mode == AffinityMode.NODE:
-        logical_cpus = _node_get_logical_cpus_to_bind_to(device_index=device_index)
+        logical_cpus = _node_get_logical_cpus_to_bind_to(gpu_index=gpu_index)
     elif numa_options.affinity_mode == AffinityMode.SOCKET:
-        logical_cpus = _socket_get_logical_cpus_to_bind_to(device_index=device_index)
+        logical_cpus = _socket_get_logical_cpus_to_bind_to(gpu_index=gpu_index)
     elif numa_options.affinity_mode == AffinityMode.EXCLUSIVE:
-        logical_cpus = _exclusive_get_logical_cpus_to_bind_to(device_index=device_index)
+        logical_cpus = _exclusive_get_logical_cpus_to_bind_to(gpu_index=gpu_index)
     elif numa_options.affinity_mode == AffinityMode.CORE_COMPLEX:
-        logical_cpus = _core_complex_get_logical_cpus_to_bind_to(
-            device_index=device_index
-        )
+        logical_cpus = _core_complex_get_logical_cpus_to_bind_to(gpu_index=gpu_index)
     else:
         raise ValueError(f"Affinity mode {numa_options.affinity_mode} not supported.")
 
     return logical_cpus
 
 
-def _node_get_logical_cpus_to_bind_to(*, device_index: int) -> set[int]:
+def _node_get_logical_cpus_to_bind_to(*, gpu_index: int) -> set[int]:
     """
     Core logic of 'node' numa strategy.
     """
-    numa_node_index = _get_numa_node_index_for_device_index(device_index=device_index)
+    numa_node_index = _get_numa_node_index_for_gpu_index(gpu_index=gpu_index)
 
     return _get_allowed_logical_cpu_indices_for_numa_node(
         numa_node_index=numa_node_index
     )
 
 
-def _socket_get_logical_cpus_to_bind_to(*, device_index: int) -> set[int]:
+def _socket_get_logical_cpus_to_bind_to(*, gpu_index: int) -> set[int]:
     """
     Core logic of 'socket' numa strategy.
     """
-    numa_node_index_of_device = _get_numa_node_index_for_device_index(
-        device_index=device_index
-    )
+    numa_node_index_of_gpu = _get_numa_node_index_for_gpu_index(gpu_index=gpu_index)
     socket_index = _get_socket_index_for_numa_node(
-        numa_node_index=numa_node_index_of_device
+        numa_node_index=numa_node_index_of_gpu
     )
     numa_node_indices = _get_numa_node_indices_for_socket_index(
         socket_index=socket_index
@@ -383,15 +378,15 @@ def _socket_get_logical_cpus_to_bind_to(*, device_index: int) -> set[int]:
     return logical_cpus
 
 
-def _exclusive_get_logical_cpus_to_bind_to(*, device_index: int) -> set[int]:
+def _exclusive_get_logical_cpus_to_bind_to(*, gpu_index: int) -> set[int]:
     """
     Core logic of 'exclusive' numa strategy.
     """
-    numa_node_index = _get_numa_node_index_for_device_index(device_index=device_index)
+    numa_node_index = _get_numa_node_index_for_gpu_index(gpu_index=gpu_index)
 
-    dev_indices = _get_device_indices_for_numa_node(numa_node_index=numa_node_index)
-    dev_indices = sorted(dev_indices)
-    original_device_relative_index = dev_indices.index(device_index)
+    gpu_indices = _get_gpu_indices_for_numa_node(numa_node_index=numa_node_index)
+    gpu_indices = sorted(gpu_indices)
+    original_gpu_relative_index = gpu_indices.index(gpu_index)
 
     allowed_logical_cpu_indices = _get_allowed_logical_cpu_indices_for_numa_node(
         numa_node_index=numa_node_index
@@ -412,35 +407,37 @@ def _exclusive_get_logical_cpus_to_bind_to(*, device_index: int) -> set[int]:
         sorted(physical_core_to_allowed_logical_cpu_indices.items())
     )
 
-    num_physical_cores_per_device = len(
+    num_physical_cores_per_gpu = len(
         physical_core_to_allowed_logical_cpu_indices
-    ) // len(dev_indices)
-    num_devices_to_give_one_extra_physical_core = len(
+    ) // len(gpu_indices)
+    # Often, the number of physical cores will not be perfectly divisible by the number
+    # of GPUs. In those cases, give the lowest GPU indices an extra core
+    num_gpus_to_give_one_extra_physical_core = len(
         physical_core_to_allowed_logical_cpu_indices
-    ) % len(dev_indices)
+    ) % len(gpu_indices)
 
-    if num_physical_cores_per_device < 1:
+    if num_physical_cores_per_gpu < 1:
         raise RuntimeError(
             f"There are only {len(physical_core_to_allowed_logical_cpu_indices)} physical cores on {numa_node_index=},"
-            + f" but there are {len(dev_indices)} devices associated with this NUMA node."
+            + f" but there are {len(gpu_indices)} GPUs associated with this NUMA node."
         )
 
-    start = original_device_relative_index * num_physical_cores_per_device + min(
-        original_device_relative_index, num_devices_to_give_one_extra_physical_core
+    # Compute slice indices for this GPU
+    start = original_gpu_relative_index * num_physical_cores_per_gpu + min(
+        original_gpu_relative_index, num_gpus_to_give_one_extra_physical_core
     )
     end = (
         start
-        + num_physical_cores_per_device
+        + num_physical_cores_per_gpu
         + (
             1
-            if original_device_relative_index
-            < num_devices_to_give_one_extra_physical_core
+            if original_gpu_relative_index < num_gpus_to_give_one_extra_physical_core
             else 0
         )
     )
 
     # Slice and flatten the logical CPUs from the selected physical cores
-    logical_cpu_indices_for_device = {
+    logical_cpu_indices_for_original_gpu = {
         logical_cpu_index
         for logical_cpu_indices in list(
             physical_core_to_allowed_logical_cpu_indices.values()
@@ -448,21 +445,21 @@ def _exclusive_get_logical_cpus_to_bind_to(*, device_index: int) -> set[int]:
         for logical_cpu_index in logical_cpu_indices
     }
 
-    return logical_cpu_indices_for_device
+    return logical_cpu_indices_for_original_gpu
 
 
-def _core_complex_get_logical_cpus_to_bind_to(*, device_index: int) -> set[int]:
+def _core_complex_get_logical_cpus_to_bind_to(*, gpu_index: int) -> set[int]:
     """
     Core logic of 'core-complex' numa strategy.
 
-    Each accelerator device is assigned a full core complex (group of cores sharing
-    L3 cache) within its affined NUMA node.
+    Each GPU is assigned a full core complex (group of cores sharing L3 cache)
+    within its affined NUMA node.
     """
-    numa_node_index = _get_numa_node_index_for_device_index(device_index=device_index)
+    numa_node_index = _get_numa_node_index_for_gpu_index(gpu_index=gpu_index)
 
-    dev_indices = _get_device_indices_for_numa_node(numa_node_index=numa_node_index)
-    dev_indices = sorted(dev_indices)
-    original_device_relative_index = dev_indices.index(device_index)
+    gpu_indices = _get_gpu_indices_for_numa_node(numa_node_index=numa_node_index)
+    gpu_indices = sorted(gpu_indices)
+    original_gpu_relative_index = gpu_indices.index(gpu_index)
 
     allowed_logical_cpu_indices = _get_allowed_logical_cpu_indices_for_numa_node(
         numa_node_index=numa_node_index
@@ -488,14 +485,14 @@ def _core_complex_get_logical_cpus_to_bind_to(*, device_index: int) -> set[int]:
         )
     )
 
-    cache_index_for_device = original_device_relative_index % len(
+    cache_index_for_original_gpu = original_gpu_relative_index % len(
         max_level_cache_to_allowed_logical_cpu_indices
     )
-    logical_cpu_indices_for_device = list(
+    logical_cpu_indices_for_original_gpu = list(
         max_level_cache_to_allowed_logical_cpu_indices.values()
-    )[cache_index_for_device]
+    )[cache_index_for_original_gpu]
 
-    return logical_cpu_indices_for_device
+    return logical_cpu_indices_for_original_gpu
 
 
 K = TypeVar("K")
@@ -588,16 +585,12 @@ def _get_cpu_indices_for_numa_node_MAYBE_NOT_ALLOWED(
     return _get_set_of_int_from_ranges_str(cpu_range_str)
 
 
-def _get_device_count() -> int:
-    return torch.accelerator.device_count()
+def _get_gpu_count() -> int:
+    return torch.cuda.device_count()
 
 
-def _get_numa_node_index_for_device_index(*, device_index: int) -> int:
-    if not torch.accelerator.is_available():
-        raise RuntimeError("No accelerator available for NUMA binding")
-    acc = torch.accelerator.current_accelerator()
-    device_module = torch.get_device_module(acc)
-    device_properties = device_module.get_device_properties(device_index)
+def _get_numa_node_index_for_gpu_index(*, gpu_index: int) -> int:
+    device_properties = torch.cuda.get_device_properties(gpu_index)
 
     domain = device_properties.pci_domain_id  # type: ignore[attr-defined]
     bus = device_properties.pci_bus_id  # type: ignore[attr-defined]
@@ -614,12 +607,11 @@ def _get_numa_node_index_for_device_index(*, device_index: int) -> int:
         return max(int(f.read().strip()), 0)
 
 
-def _get_device_indices_for_numa_node(*, numa_node_index: int) -> set[int]:
+def _get_gpu_indices_for_numa_node(*, numa_node_index: int) -> set[int]:
     return {
-        device_index
-        for device_index in range(_get_device_count())
-        if _get_numa_node_index_for_device_index(device_index=device_index)
-        == numa_node_index
+        gpu_index
+        for gpu_index in range(_get_gpu_count())
+        if _get_numa_node_index_for_gpu_index(gpu_index=gpu_index) == numa_node_index
     }
 
 

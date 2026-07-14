@@ -1,4 +1,3 @@
-# Owner(s): ["module: macos"]
 name: inductor-perf-nightly-macos
 
 on:

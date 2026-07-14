@@ -10,7 +10,7 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial, wraps
-from typing import Literal
+from typing import Literal, Optional, Union
 
 import numpy as np
 from config_utils import heads_input_type, load_config_file, print_default_config
@@ -182,8 +182,8 @@ class Times:
 @dataclass(frozen=True)
 class ExperimentResults:
     fwd_time: float
-    bwd_time: float | None
-    sparsity: float | None = None
+    bwd_time: Optional[float]
+    sparsity: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -270,7 +270,7 @@ def generate_jagged_inputs(
     B, Hq, M, Hkv, N, D = shape
 
     def offsets_to_lengths(
-        offsets: torch.Tensor, device: str | torch.device
+        offsets: torch.Tensor, device: Union[str, torch.device]
     ) -> torch.tensor:
         """Converts a list of offsets to a list of lengths. Reverse op of attn_gym.masks.document_mask.length_to_offsets
 
@@ -650,7 +650,7 @@ def get_average_speedups(results: list[Experiment], type: str, backend: str):
     return table_data
 
 
-def print_results(results: list[Experiment], save_path: str | None = None):
+def print_results(results: list[Experiment], save_path: Optional[str] = None):
     table_data = defaultdict(list)
     for experiment in results:
         backends = experiment.config.backends + ["flex"]
@@ -737,8 +737,6 @@ def generate_score_mod(attn_type: str, shape: tuple[int, ...]) -> Callable | Non
     def head_bias(score, b, h, m, n):
         return score + 2 * h
 
-    on_cuda = torch.cuda.is_available() and torch.version.hip is None
-
     function_dict = {
         "noop": None,
         "causal": None,
@@ -748,8 +746,7 @@ def generate_score_mod(attn_type: str, shape: tuple[int, ...]) -> Callable | Non
         "sliding_window": None,
         "document_mask": None,
         "prefix_lm": None,
-        # approx=True is only supported by CUDA. It uses inline PTX
-        "softcap": generate_tanh_softcap(softcap_value, approx=on_cuda),
+        "softcap": generate_tanh_softcap(softcap_value, approx=True),
     }
 
     score_mod = function_dict[attn_type]
@@ -967,7 +964,7 @@ def generate_FA_callable(
         FA_kwargs["cu_seqlens_k"] = kwargs["offsets"].to(torch.int32)
 
         def offsets_to_lengths(
-            offsets: torch.Tensor, device: str | torch.device
+            offsets: torch.Tensor, device: Union[str, torch.device]
         ) -> torch.tensor:
             lengths = offsets[1:] - offsets[:-1]
             return lengths
@@ -1226,7 +1223,7 @@ def _output_json_for_dashboard(
     import math
     import platform
     from dataclasses import asdict, dataclass
-    from typing import Any
+    from typing import Any, Optional
 
     # Prepare headers and records for JSON output
     records = []
@@ -1272,7 +1269,7 @@ def _output_json_for_dashboard(
             @dataclass
             class BenchmarkInfo:
                 name: str
-                mode: str | None
+                mode: Optional[str]
                 dtype: str
                 extra_info: dict[str, Any]
 
@@ -1288,7 +1285,7 @@ def _output_json_for_dashboard(
                 name: str
                 unit: str
                 benchmark_values: list[float]
-                target_value: float | None
+                target_value: Optional[float]
 
             @dataclass
             class BenchmarkRecord:
@@ -1433,10 +1430,10 @@ def main(
     backend: list[Backend] | None = None,
     max_autotune: bool = False,
     decoding: bool = False,
-    kv_size: list[int] | None = None,
+    kv_size: Optional[list[int]] = None,
     throughput: bool = True,
-    save_path: str | None = None,
-    output_json_for_dashboard: str | None = None,
+    save_path: Optional[str] = None,
+    output_json_for_dashboard: Optional[str] = None,
     benchmark_name: str = "PyTorch operator microbenchmark",
 ) -> None:
     """Run sweep over sizes and score mods for flex attention.

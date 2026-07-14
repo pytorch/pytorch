@@ -5,7 +5,6 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
-#include <torch/headeronly/core/enum_tag.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Metaprogramming.h>
 
@@ -86,45 +85,18 @@ class StableLibrary final {
       const char* name,
       void (*fn)(StableIValue*, uint64_t, uint64_t)) {
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-    STABLE_TORCH_ERROR_CODE_CHECK(
-        torch_library_impl(lib_, name, fn, TORCH_ABI_VERSION));
+    torch_library_impl(lib_, name, fn, TORCH_ABI_VERSION);
 #else
-    STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_library_impl(lib_, name, fn));
+    aoti_torch_library_impl(lib_, name, fn);
 #endif
     return *this;
   }
 
   // corresponds to a limited, stable version of torch::library::def()
   StableLibrary& def(const char* schema) {
-    STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_library_def(lib_, schema));
+    aoti_torch_library_def(lib_, schema);
     return *this;
   }
-
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
-  // corresponds to a limited, stable version of torch::library::def() with tags
-  StableLibrary& def(const char* schema, const std::vector<at::Tag>& tags) {
-    std::vector<int32_t> tag_ints;
-    tag_ints.reserve(tags.size());
-    for (auto t : tags) {
-      tag_ints.push_back(
-          torch::stable::detail::to<int32_t>(torch::stable::detail::from(t)));
-    }
-    STABLE_TORCH_ERROR_CODE_CHECK(torch_library_def_with_tags(
-        lib_, schema, tag_ints.data(), static_cast<int32_t>(tag_ints.size())));
-    return *this;
-  }
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
-
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
-  // corresponds to a limited, stable version of
-  // torch::library::set_python_module()
-  StableLibrary& set_python_module(
-      const char* pymodule,
-      const char* context = "") {
-    torch_library_set_python_module(lib_, pymodule, context);
-    return *this;
-  }
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 };
 
 class StableTorchLibraryInit final {

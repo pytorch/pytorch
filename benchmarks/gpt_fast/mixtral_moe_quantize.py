@@ -1,4 +1,4 @@
-# flake8: noqa: E266
+# flake8: noqa: E266, C417, B950
 from mixtral_moe_model import ConditionalFeedForward
 
 import torch

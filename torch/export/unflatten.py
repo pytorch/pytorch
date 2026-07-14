@@ -16,7 +16,6 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_custom_class_obj
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
@@ -82,7 +81,7 @@ def _disable_interpreter():
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
 def _assign_attr(
-    from_obj: Any,
+    from_obj: torch.Tensor | torch.ScriptObject | torch.nn.Module,
     to_module: torch.nn.Module,
     target: str,
     attr_kind: _AttrKind,
@@ -101,12 +100,6 @@ def _assign_attr(
         for to_module in to_modules:
             if not hasattr(to_module, item):
                 setattr(to_module, item, torch.nn.Module())
-            # Collect `item` and every call-name variant `item@N` present in
-            # _modules, regardless of contiguity. Export passes (e.g.
-            # replace_set_grad_with_hop_pass) can relocate intermediate calls
-            # into HOP subgraphs, leaving non-contiguous indices (e.g. base + @3
-            # with @1/@2 absent); scanning contiguously from @1 would stop at the
-            # gap and never populate the surviving higher-index copies.
             ts.update(
                 t_call  # type: ignore[misc]
                 for k, t_call in to_module._modules.items()
@@ -138,9 +131,9 @@ def _assign_attr(
                     torch.Tensor,
                     torch.ScriptObject,
                 ),
-            ) and not is_custom_class_obj(from_obj):
+            ):
                 raise AssertionError(
-                    f"expected torch.Tensor, torch.ScriptObject, or opaque type for CONSTANT attr_kind, got {type(from_obj)}"
+                    f"expected torch.Tensor or torch.ScriptObject for CONSTANT attr_kind, got {type(from_obj)}"
                 )
             setattr(to_module, field, from_obj)
         elif attr_kind == _AttrKind.MODULE:
@@ -627,7 +620,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
             if len(flat_args) != signature.in_spec.num_leaves:
                 raise TypeError(
                     f"Flat args adaption failed, number of args mismatch "
-                    f"Adapted: {len(flat_args)} \n"
+                    f"Adatped: {len(flat_args)} \n"
                     f"Exported module: {signature.in_spec.num_leaves}"
                 )
             return flat_args
@@ -1290,7 +1283,7 @@ class _ModuleFrame:
         if x.graph is not self.flat_graph:
             raise AssertionError(
                 "expected x.graph to be flat_graph, got different graph"
-            )
+            )  # noqa: F541
         # x is not in subgraph, create a new placeholder for subgraph
         with self.graph.inserting_before(None):
             placeholder_node = self.graph.placeholder(x.name, type_expr=x.type)
@@ -1317,7 +1310,7 @@ class _ModuleFrame:
         if x.graph is not self.flat_graph:
             raise AssertionError(
                 "expected x.graph to be flat_graph, got different graph"
-            )
+            )  # noqa: F541
         if x in self.node_map:
             return self.node_map[x]
         self.print(f"remap_input({x})")
@@ -1657,10 +1650,7 @@ def _reorder_submodules(
         fqn = prefix + name
         _reorder_submodules(child, fqn_order, prefix=fqn.split("@")[0] + ".")
         delattr(parent, name)
-        base_fqn = fqn.split("@")[0]
-        children.append(
-            (fqn_order.get(fqn, fqn_order.get(base_fqn, len(fqn_order))), name, child)
-        )
+        children.append((fqn_order[fqn], name, child))
     children.sort(key=operator.itemgetter(0))
     for _, name, child in children:
         parent.register_module(name, child)

@@ -8,6 +8,7 @@ import subprocess
 import textwrap
 import threading
 import time
+from typing import Optional, Union
 
 from worker.main import WorkerFailure, WorkerOutput
 
@@ -20,9 +21,9 @@ CPU_COUNT: int = multiprocessing.cpu_count()
 class WorkerFailed(Exception):
     """Raised in the main process when a worker failure is detected."""
 
-    def __init__(self, cmd: str, wrapped_trace: str | None = None) -> None:
+    def __init__(self, cmd: str, wrapped_trace: Optional[str] = None) -> None:
         self.cmd: str = cmd
-        self.wrapped_trace: str | None = wrapped_trace
+        self.wrapped_trace: Optional[str] = wrapped_trace
         super().__init__()
 
 
@@ -64,7 +65,7 @@ class CorePool:
         self._reservations: dict[str, tuple[int, ...]] = {}
         self._lock = threading.Lock()
 
-    def reserve(self, n: int) -> str | None:
+    def reserve(self, n: int) -> Optional[str]:
         """Simple first-fit policy.
 
         If successful, return a string for `taskset`. Otherwise, return None.
@@ -94,7 +95,7 @@ class Runner:
     def __init__(
         self,
         work_items: tuple[WorkOrder, ...],
-        core_pool: CorePool | None = None,
+        core_pool: Optional[CorePool] = None,
         cadence: float = 1.0,
     ) -> None:
         self._work_items: tuple[WorkOrder, ...] = work_items
@@ -109,7 +110,7 @@ class Runner:
         # Debug information for ETA and error messages.
         self._start_time: float = -1
         self._durations: dict[WorkOrder, float] = {}
-        self._currently_processed: WorkOrder | None = None
+        self._currently_processed: Optional[WorkOrder] = None
 
         if len(work_items) != len(set(work_items)):
             raise ValueError("Duplicate work items.")
@@ -163,7 +164,7 @@ class Runner:
                 active_jobs.append(job)
                 continue
 
-            result: WorkerOutput | WorkerFailure = job.result
+            result: Union[WorkerOutput, WorkerFailure] = job.result
             if isinstance(result, WorkerOutput):
                 self._results[job.work_order] = result
                 if job.cpu_list is None:

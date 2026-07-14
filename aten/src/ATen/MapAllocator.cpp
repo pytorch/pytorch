@@ -295,21 +295,20 @@ MapAllocator::MapAllocator(WithFd /*unused*/, std::string_view filename, int fd,
 #ifdef HAVE_POSIX_FALLOCATE
           if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
             for (;;) {
-              int err = posix_fallocate(fd, 0, static_cast<off_t>(size));
-              if (err == 0) {
+              if (posix_fallocate(fd, 0, static_cast<off_t>(size)) == 0) {
                 break;
               }
 
-              if (err == EINTR) {
+              if (errno == EINTR) {
                 continue;
               }
 
-              if (err == EINVAL || err == EOPNOTSUPP) {
+              if (errno == EINVAL || errno == EOPNOTSUPP) {
                 // the underlying filesystem does not support the operation
                 break;
               }
 
-              TORCH_CHECK(false, "unable to allocate shared memory(shm) for file <", filename_, ">: ", c10::utils::str_error(err), " (", err, ")");
+              TORCH_CHECK(false, "unable to allocate shared memory(shm) for file <", filename_, ">: ", c10::utils::str_error(errno), " (", errno, ")");
             }
           }
 #endif

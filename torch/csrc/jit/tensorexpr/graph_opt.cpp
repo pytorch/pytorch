@@ -151,7 +151,7 @@ static void moveCatOpToEnd(Node* cat, const std::shared_ptr<Graph>& subgraph) {
         TORCH_INTERNAL_ASSERT(
             use.user->output()->owningGraph() == subgraph.get(),
             buildErrorMessage(
-                "aten::cat user graph does not match the given subgraph."));
+                "aten::cat user graph does not math the given subgraph."));
         auto new_cat = moveCatAfterUse(cat, use.user, subgraph);
         moveCatOpToEnd(new_cat, subgraph);
       }

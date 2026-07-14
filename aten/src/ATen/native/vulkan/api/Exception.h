@@ -1,4 +1,3 @@
-// @allow-raw-throw
 #pragma once
 // @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
 #ifdef USE_VULKAN_API

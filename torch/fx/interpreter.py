@@ -1,8 +1,8 @@
+# mypy: allow-untyped-defs
 import inspect
 import logging
-from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -19,12 +19,15 @@ from .node import Argument, map_aggregate, map_arg, Node, Target
 from .proxy import Proxy
 
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 log = logging.getLogger(__name__)
 
 __all__ = ["Interpreter", "Transformer"]
 
 
-def _format_fx_node(n: Node) -> str:
+def _format_fx_node(n):
     """
     Format a torch.fx.Node into a human-readable string for debug logging.
 
@@ -114,8 +117,8 @@ class Interpreter:
         self,
         module: torch.nn.Module,
         garbage_collect_values: bool = True,
-        graph: Graph | None = None,
-    ) -> None:
+        graph: Optional[Graph] = None,
+    ):
         self.module = module
         self.submodules = dict(self.module.named_modules())
         if graph is not None:
@@ -135,7 +138,7 @@ class Interpreter:
             node_to_last_use: dict[Node, Node] = {}
             self.user_to_last_uses: dict[Node, list[Node]] = {}
 
-            def register_last_uses(n: Node, user: Node) -> None:
+            def register_last_uses(n: Node, user: Node):
                 if n not in node_to_last_use:
                     node_to_last_use[n] = user
                     self.user_to_last_uses.setdefault(user, []).append(n)
@@ -147,8 +150,8 @@ class Interpreter:
     @compatibility(is_backward_compatible=True)
     def run(
         self,
-        *args: Any,
-        initial_env: dict[Node, Any] | None = None,
+        *args,
+        initial_env: Optional[dict[Node, Any]] = None,
         enable_io_processing: bool = True,
     ) -> Any:
         """
@@ -237,7 +240,7 @@ class Interpreter:
                 )
 
     @compatibility(is_backward_compatible=True)
-    def boxed_run(self, args_list: list[Any]) -> Any:
+    def boxed_run(self, args_list):
         """
         Run `module` via interpretation and return the result.  This uses the "boxed"
         calling convention, where you pass a list of arguments, which will be cleared
@@ -264,7 +267,7 @@ class Interpreter:
         return self.run(initial_env=env)
 
     @contextmanager
-    def _set_current_node(self, node: Node) -> Iterator[None]:
+    def _set_current_node(self, node):
         with fx_traceback.set_current_meta(
             node, f"Interpreter_{self.__class__.__name__}"
         ):
@@ -449,7 +452,7 @@ class Interpreter:
 
     # Helper methods
     @compatibility(is_backward_compatible=True)
-    def fetch_attr(self, target: str) -> Any:
+    def fetch_attr(self, target: str):
         """
         Fetch an attribute from the ``Module`` hierarchy of ``self.module``.
 
@@ -470,9 +473,7 @@ class Interpreter:
         return attr_itr
 
     @compatibility(is_backward_compatible=True)
-    def fetch_args_kwargs_from_env(
-        self, n: Node
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    def fetch_args_kwargs_from_env(self, n: Node) -> tuple[tuple, dict]:
         """
         Fetch the concrete values of ``args`` and ``kwargs`` of node ``n``
         from the current execution environment.
@@ -567,18 +568,18 @@ class Transformer(Interpreter):
     """
 
     @compatibility(is_backward_compatible=True)
-    def __init__(self, module: GraphModule) -> None:
+    def __init__(self, module):
         super().__init__(module)
         self.new_graph = Graph()
         self.new_graph.set_codegen(module.graph._codegen)
 
         class TransformerTracer(Tracer):
-            def __init__(self, graph: Graph) -> None:
+            def __init__(self, graph: Graph):
                 super().__init__()
                 self.graph = graph
                 self.tensor_attrs: dict[torch.Tensor, str] = {}  # type: ignore[assignment]
 
-            def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
+            def is_leaf_module(self, _, __) -> bool:
                 return True
 
         self.tracer = TransformerTracer(self.new_graph)
@@ -654,7 +655,7 @@ class Transformer(Interpreter):
             result = super().run(enable_io_processing=False)
         if result is not None:
 
-            def strip_proxy(a: Argument | Proxy) -> Any:
+            def strip_proxy(a: Union[Argument, Proxy]) -> Any:
                 return a.node if isinstance(a, Proxy) else a
 
             new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))

@@ -19,31 +19,27 @@ HOSTNAME = socket.gethostname()
 
 
 class TestConfigModule(TestCase):
-    # Config keys that legitimately contain absolute paths, for example,
-    # /opt/clang-15/bin/clang
-    KNOWN_PATH_CONFIGS = {"cpp.cxx"}
-
     def check_deterministic(self, key: str, value: object):
         if isinstance(value, (int, float, bool)) or value is None:
             return
         elif isinstance(value, str):
             self.assertFalse(
                 PATH_PATTERN.match(value),
-                lambda msg: f"{msg}\nDetected path in config value '{value}', key='{key}', "
+                f"Detected path in config value '{value}', key='{key}', "
                 "this may cause non-deterministic behavior in compile caching.",
             )
             if USERNAME:
                 self.assertNotIn(
                     USERNAME,
                     value,
-                    lambda msg: f"{msg}\nDetected username in config value '{value}', key='{key}', "
+                    f"Detected username in config value '{value}', key='{key}', "
                     "this may cause non-deterministic behavior in compile caching.",
                 )
             if HOSTNAME:
                 self.assertNotIn(
                     HOSTNAME,
                     value,
-                    lambda msg: f"{msg}\nDetected hostname in config value '{value}', key='{key}', "
+                    f"Detected hostname in config value '{value}', key='{key}', "
                     "this may cause non-deterministic behavior in compile caching.",
                 )
         elif isinstance(value, (list, tuple)):
@@ -83,8 +79,6 @@ class TestConfigModule(TestCase):
         torch_config = inductor_config.save_config_portable()
 
         for key, value in torch_config.items():
-            if key in self.KNOWN_PATH_CONFIGS:
-                continue
             self.check_deterministic(key, value)
 
     def test_inductor_config_hash_portable_without_ignore(self):
@@ -99,8 +93,6 @@ class TestConfigModule(TestCase):
                     f"Detected path in config value '.*', key='{cutlass_dir_key}'",
                 ):
                     for key, value in changed_torch_config.items():
-                        if key in self.KNOWN_PATH_CONFIGS:
-                            continue
                         self.check_deterministic(key, value)
             finally:
                 inductor_config._cache_config_ignore_prefix.insert(idx, cutlass_dir_key)

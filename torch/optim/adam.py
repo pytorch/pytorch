@@ -172,7 +172,7 @@ class Adam(Optimizer):
                             device=p.device,
                         )
                         if group["capturable"] or group["fused"]
-                        else torch.tensor(0.0, dtype=_get_scalar_dtype(), device="cpu")
+                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(
@@ -219,7 +219,7 @@ class Adam(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._accelerator_graph_capture_health_check()
+        self._cuda_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -316,7 +316,7 @@ Adam.__doc__ = (
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.
-        betas (tuple[float | Tensor, float | Tensor], optional):
+        betas (tuple[Union[float, Tensor], Union[float, Tensor]], optional):
             coefficients used for computing running averages of gradient and
             its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
@@ -415,7 +415,7 @@ def _single_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform step weight decay
+                # Perform stepweight decay
                 param.mul_(1 - lr * weight_decay)
             else:
                 # Nested if is necessary to bypass jitscript rules
@@ -423,6 +423,7 @@ def _single_tensor_adam(
                     if weight_decay.requires_grad:
                         grad = grad.addcmul_(param.clone(), weight_decay)
                     else:
+                        # pyrefly: ignore [bad-argument-type]
                         grad = grad.add(param, alpha=weight_decay)
                 else:
                     grad = grad.add(param, alpha=weight_decay)
@@ -687,7 +688,7 @@ def _multi_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform step weight decay
+                # Perform stepweight decay
                 torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
                 # Reuse the intermediate memory (device_grads) already allocated for maximize

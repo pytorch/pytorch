@@ -1,6 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-
 from typing import Optional
 
 import torch
@@ -21,7 +20,7 @@ class NnapiModule(torch.nn.Module):
     """
 
     # _nnapi.Compilation is defined
-    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]  # noqa: UP045
+    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]
     weights: list[torch.Tensor]
     out_templates: list[torch.Tensor]
 

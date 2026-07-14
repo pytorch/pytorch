@@ -6,8 +6,6 @@ if not errorlevel 0 (
   exit /b
 )
 
-git submodule update --init --depth 1 third_party/googletest
-
 pushd test
 
 echo Run openreg tests

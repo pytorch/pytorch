@@ -29,7 +29,7 @@ import enum
 import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field  # noqa: F811
 from typing import Any
 
 
@@ -132,10 +132,9 @@ class CompilationCallbackHandler:
             yield
         finally:
             with self.__pending_callbacks_counter_lock:
-                if self.__pending_callbacks_counter <= 0:
-                    raise AssertionError(
-                        "Pending callbacks counter cannot become negative."
-                    )
+                assert self.__pending_callbacks_counter > 0, (
+                    "Pending callbacks counter cannot become negative."
+                )
                 if self.__pending_callbacks_counter == 1:
                     self.run_end_callbacks(args)
                 self.__pending_callbacks_counter -= 1
@@ -146,10 +145,7 @@ class CompilationCallbackHandler:
         """
         self.start_callbacks.clear()
         self.end_callbacks.clear()
-        if self.__pending_callbacks_counter != 0:
-            raise AssertionError(
-                f"Cannot clear callbacks while {self.__pending_callbacks_counter} are pending"
-            )
+        assert self.__pending_callbacks_counter == 0
 
 
 callback_handler = CompilationCallbackHandler()

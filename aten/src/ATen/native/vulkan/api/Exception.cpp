@@ -59,7 +59,7 @@ Error::Error(SourceLocation source_location, std::string msg)
   std::ostringstream oss;
   oss << "Exception raised from " << source_location_ << ": ";
   oss << msg_;
-  what_ = std::move(oss).str();
+  what_ = oss.str();
 }
 
 Error::Error(SourceLocation source_location, const char* cond, std::string msg)
@@ -68,7 +68,7 @@ Error::Error(SourceLocation source_location, const char* cond, std::string msg)
   oss << "Exception raised from " << source_location_ << ": ";
   oss << '(' << cond << ") is false! ";
   oss << msg_;
-  what_ = std::move(oss).str();
+  what_ = oss.str();
 }
 
 } // namespace api

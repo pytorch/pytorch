@@ -81,8 +81,7 @@ class TestPythonBindings(JitTestCase):
     def test_add_input(self):
         gr = torch._C.Graph()
         foo_value = gr.addInput("foo")
-        if foo_value not in gr.inputs():
-            raise AssertionError("foo_value not found in graph inputs")
+        assert foo_value in gr.inputs()
 
     def test_canonicalize(self):
         ir = """

@@ -2,6 +2,7 @@ import itertools
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from functools import partial
+from typing import Union
 
 import numpy as np
 from tabulate import tabulate
@@ -106,7 +107,7 @@ class CompositeMHA(torch.nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        mask: torch.Tensor | CausalBias,
+        mask: Union[torch.Tensor, CausalBias],
     ):
         query_projected = F.linear(query, self.q_proj_weight)
         key_projected = F.linear(key, self.k_proj_weight)

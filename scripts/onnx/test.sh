@@ -40,10 +40,12 @@ args+=("--cov-report")
 args+=("xml:test/coverage.xml")
 args+=("--cov-append")
 
-time python "${top_dir}/test/run_test.py" --onnx --verbose
+time python "${top_dir}/test/run_test.py" --onnx --shard "$SHARD_NUMBER" 2 --verbose
 
-# xdoctests on onnx
-xdoctest torch.onnx --style=google --options="+IGNORE_WHITESPACE"
+if [[ "$SHARD_NUMBER" == "2" ]]; then
+  # xdoctests on onnx
+  xdoctest torch.onnx --style=google --options="+IGNORE_WHITESPACE"
+fi
 
 # Our CI expects both coverage.xml and .coverage to be within test/
 if [ -d .coverage ]; then

@@ -1,6 +1,6 @@
-import enum
 import os
 import sys
+from typing import Optional
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -30,7 +30,7 @@ translation_validation_no_bisect = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
 )
 # Checks whether replaying ShapeEnv events on a freshly constructed one yields
-# a ShapeEnv with the same state. This should be used only in testing.
+# the a ShapeEnv with the same state. This should be used only in testing.
 check_shape_env_recorded_events = False
 
 # TODO: Perhaps consider allowing unions for the configs below (so you can hit
@@ -83,7 +83,7 @@ validate_shape_env_version_key = False
 # issued (as we test if we've hit the limit on-the-fly, whereas we may
 # do further simplifications at final guard issuance time that make guards
 # irrelevant.)
-symbol_guard_limit_before_specialize: int | None = None
+symbol_guard_limit_before_specialize: Optional[int] = None
 
 # This flag changes whether we should use the same symbolic variable to represent input sizes that are the same.
 use_duck_shape = True
@@ -98,13 +98,6 @@ meta_nonzero_assume_all_nonzero = False
 # and relies on size-oblivious semantics to avoid 0/1 specialization guards by marking them size-like.
 # Currently an experimental option for export.
 backed_size_oblivious = False
-
-# When True, the size-oblivious fallback in `_view_unbacked_meta` (used when
-# `backed_size_oblivious=True`) will, before falling through to the specializing
-# recursion that emits Eq(s, 1) via eval_eager, try to discover and commit
-# cross-symbol equalities (Eq(x, y)) that satisfy the view's numel constraint.
-# Only applies when `backed_size_oblivious=True`. Defaults to False.
-unify_view_symbols_bso_meta = False
 
 # Skip dtype check in meta registrations. Only used for systems that does its own dtype checking.
 skip_dtype_check_in_meta_registrations = False
@@ -122,20 +115,5 @@ enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
 # code.
 soft_pending_unbacked_not_found_error = False
 
-# When True, aggressively return fallback values in guard_or opting into
-# guard-free semantics. This optimizes tracing time when symbolic reasoning
-# is expensive. Since guard_or_X already have a general path to take, we
-# can skip expensive static evaluation and just return the fallback value directly.
-# This is usually safe because the fallback represents a valid code path that
-# could be taken anyway.
-# See AggressiveGuardFreeMode below for valid values.
-aggressive_guard_free_semantics = 0
-
 
 install_config_module(sys.modules[__name__])
-
-
-class AggressiveGuardFreeMode(enum.IntEnum):
-    DISABLED = 0
-    VALUE_RANGE_ANALYSIS = 1  # use bound_sympy before returning fallback
-    SKIP_RANGE_ANALYSIS = 2  # skip range analysis entirely, just return fallback_value

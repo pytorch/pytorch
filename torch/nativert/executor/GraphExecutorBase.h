@@ -21,7 +21,6 @@ struct ProfileMetrics {
   std::unordered_map<std::string, int> instancesPerNodeType;
   std::unordered_set<std::string> staticDispatchNodes;
   std::unordered_set<std::string> primNodes;
-  std::vector<int> inputElementsPerNode;
   float totalTime{0};
   std::string name;
 };

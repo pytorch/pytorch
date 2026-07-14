@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch._inductor import config
@@ -21,7 +21,7 @@ log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 
 
 def set_chunking_meta(
-    node: Node, meta: ChunkingMeta | None = None, **kwargs: Any
+    node: Node, meta: Optional[ChunkingMeta] = None, **kwargs: Any
 ) -> bool:
     """
     kwargs can override fields in the passed in `meta`
@@ -41,7 +41,7 @@ def set_chunking_meta(
 
 def update_chunking_meta(node: Node, **kwargs: Any) -> bool:
     """
-    Unlike set_chunking_meta, this function keeps the existing chunking
+    Unlike set_chunking_mete, this function keeps the existing chunking
     metadata if it's not overridden.
     """
     changed = False
@@ -61,10 +61,10 @@ def update_chunking_meta(node: Node, **kwargs: Any) -> bool:
 def set_chunking_meta_if_none(
     nodes: Sequence[Node],
     meta: ChunkingMeta,
-    filter_for_nop: Callable[[Node], bool] | None = None,
+    filter_for_nop: Optional[Callable[[Node], bool]] = None,
 ) -> bool:
     """
-    If filter_for_nop returns true for a node, we set the chunking
+    If filter_fop_nop returns true for a node, we set the chunking
     meta to nop instead.
     """
     changed = False
@@ -82,17 +82,13 @@ def copy_chunking_meta(dst_node: Node, src_node: Node | ChunkingMeta) -> bool:
     if isinstance(src_node, torch.fx.Node):
         src_meta = get_chunking_meta(src_node)
     else:
-        if not isinstance(src_node, ChunkingMeta):
-            raise AssertionError(
-                f"expected src_node to be ChunkingMeta, got {type(src_node)}"
-            )
+        assert isinstance(src_node, ChunkingMeta)
         src_meta = src_node
-    if not src_meta:
-        raise AssertionError("expected src_meta to be truthy")
+    assert src_meta
     return set_chunking_meta(dst_node, src_meta)
 
 
-def get_chunking_meta(node: Node) -> ChunkingMeta | None:
+def get_chunking_meta(node: Node) -> Optional[ChunkingMeta]:
     return node.meta.get("chunking")
 
 
@@ -118,7 +114,7 @@ eligible_amplifier_node = OrderedSet(
 )
 
 
-def find_amplifier_node(graph: Graph) -> Node | None:
+def find_amplifier_node(graph: Graph) -> Optional[Node]:
     r"""
     Find the 'amplifier' node which is a node that generates large
     output with small/medium input.
@@ -210,10 +206,7 @@ def reorder_nodes(graph: Graph) -> Graph:
     for node in post_chunking_nodes:
         _copy_node("postchuking", node)
 
-    if graph._len != new_graph._len:
-        raise AssertionError(
-            f"expected graph._len == new_graph._len, got {graph._len} and {new_graph._len}"
-        )
+    assert graph._len == new_graph._len
     new_graph.eliminate_dead_code()
     new_graph.lint()
 

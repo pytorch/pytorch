@@ -26,7 +26,7 @@ for submodule in submodules:
         full_module_name
     )
 
-from torch.distributed.tensor import (
+from torch.distributed.tensor import (  # noqa: F401
     DeviceMesh,
     distribute_module,
     distribute_tensor,

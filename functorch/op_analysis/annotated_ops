@@ -1,4 +1,9 @@
 data, misc
+rename, named
+align_to, named
+align_as, named
+align_tensors, named
+refine_names, named
 dropout, composite pointwise
 feature_dropout, composite pointwise
 alpha_dropout, reduction
@@ -394,9 +399,11 @@ eig, linalg
 svd, linalg
 swapaxes, alias
 swapdims, alias
+cholesky, linalg
 cholesky_solve, linalg
 solve, linalg
 cholesky_inverse, linalg
+qr, linalg
 geqrf, linalg
 orgqr, alias
 ormqr, linalg

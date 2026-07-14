@@ -5,21 +5,15 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
-from typing import Any, cast, Literal, NoReturn, overload, TYPE_CHECKING
+from typing import Any, cast, NoReturn, overload, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
-from ._fsdp_api import (
-    AllGather,
-    DataParallelMeshDims,
-    MixedPrecisionPolicy,
-    OffloadPolicy,
-    ReduceScatter,
-)
-from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
+from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
+from ._fsdp_common import FSDPMeshInfo
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -37,7 +31,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
 
-    from torch.distributed.tensor import DeviceMesh
+    from torch.distributed.tensor import DeviceMesh, Shard
 
     from ._fsdp_param_group import FSDPParamGroup
 
@@ -66,11 +60,10 @@ def fully_shard(
     *,
     mesh: DeviceMesh | None = ...,
     reshard_after_forward: bool | int | None = ...,
-    shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None = ...,
+    shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: set[nn.Parameter] | None = ...,
-    dp_mesh_dims: DataParallelMeshDims | None = ...,
 ) -> FSDPModule: ...
 
 
@@ -81,11 +74,10 @@ def fully_shard(
     *,
     mesh: DeviceMesh | None = ...,
     reshard_after_forward: bool | int | None = ...,
-    shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None = ...,
+    shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: set[nn.Parameter] | None = ...,
-    dp_mesh_dims: DataParallelMeshDims | None = ...,
 ) -> list[FSDPModule]: ...
 
 
@@ -100,11 +92,10 @@ def fully_shard(
     *,
     mesh: DeviceMesh | None = None,
     reshard_after_forward: bool | int | None = None,
-    shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None = None,
+    shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: set[nn.Parameter] | None = None,
-    dp_mesh_dims: DataParallelMeshDims | None = None,
 ):
     """
     Apply fully sharded data parallelism (FSDP) to ``module``, where FSDP
@@ -142,32 +133,8 @@ def fully_shard(
     overlap. Users generally should *not* call :meth:`fully_shard` only on the
     topmost root module.
 
-    When called with a list (``fully_shard([a, b, ...])``), the model's
-    forward may run only a subset of the grouped modules, with the rest
-    called later in the same iteration. Chunked-loss training with
-    ``fully_shard([norm, head])`` is the motivating case: the main forward
-    runs norm only, then head is invoked per chunk. Caveats:
-
-    - Each standalone per-chunk invocation registers its own post_backward
-      autograd node, so N chunk calls produce N reduce-scatters for that
-      group.
-    - ``mp_policy.cast_forward_inputs`` and ``mp_policy.output_dtype``
-      both apply per module in the group — every invocation (including
-      each standalone per-chunk call) casts its inputs to ``param_dtype``
-      and its output to ``output_dtype``.
-
-    .. note::
-       If ``forward()`` or ``backward()`` raises, FSDP's per-iteration
-       state (iteration forward-root marker, grouped-module run
-       trackers, in-flight collective state, per-group training states)
-       is left in an undefined condition. To recover and run another
-       iteration, call :meth:`FSDPModule.reset_iter_state` on the root
-       FSDP module. The failed iteration's gradients are discarded,
-       including any ``no_sync`` / HSDP partial-reduce accumulation
-       state.
-
     Args:
-        module (Union[nn.Module, List[nn.Module]]): The module or modules to
+        module (Union[nn.Module, List[nn.Module]): The module or modules to
             shard with FSDP and group together for communication.
         mesh (Optional[DeviceMesh]): This data parallel mesh defines the
             sharding and device. If 1D, then parameters are fully sharded
@@ -201,20 +168,11 @@ def fully_shard(
               between forward and backward, the registered parameters must be
               the sharded parameters. For ``False`` or an ``int``, this can be
               done by manually resharding via :meth:`reshard`.
-        shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard | ShardPlacementResult]]]):
-            This callable can be used to override the sharding placement and/or
-            mesh for a parameter. It can return:
-
-            - ``None``: Use default sharding (Shard(0)) on the mesh passed to
-              ``fully_shard``.
-            - :class:`Shard`: Shard the parameter on the specified dimension
-              using the mesh passed to ``fully_shard``.
-            - :class:`ShardPlacementResult`: Specify both the shard placement
-              and a custom :class:`FSDPMeshInfo`. This allows different
-              parameters to be sharded across different process groups, enabling
-              use cases like Mixture of Experts where expert params use a
-              different mesh than regular params.
-
+        shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard]]]):
+            This callable can be used to override the sharding placement for a
+            parameter to shard a parameter on a dimension other than dim-0. If
+            this callable returns a :class:`Shard` placement (not ``None``),
+            then FSDP will shard according to that placement (e.g. ``Shard(1)``).
             If sharding on a nonzero dim, we currently require even sharding,
             i.e. the tensor dim size on that dim must be divisible by the FSDP
             shard mesh size.
@@ -227,12 +185,6 @@ def fully_shard(
         ignored_params: Optional(Set[nn.Parameter]): The set of parameters to be
             ignored by FSDP. They will not be sharded, nor moved to the device
             during init, nor have their gradients reduced in backward.
-        dp_mesh_dims (Optional[DataParallelMeshDims]): When provided,
-            ``mesh`` is treated as the full SPMD mesh, and parameters should be
-            DTensors on this mesh with ``Replicate()`` on all DP dimensions.
-            The ``shard`` field names which dim(s) FSDP shards on (multiple
-            dims are flattened). The ``replicate`` field names the HSDP
-            replication dim(s) (multiple dims are flattened).
 
     Returns:
         FSDPModule: The module with FSDP applied (in-place).
@@ -240,35 +192,21 @@ def fully_shard(
     torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
     _validate_module(module, "fully_shard")
     mesh = mesh or _init_default_mesh()
-    _validate_mesh(mesh, dp_mesh_dims)
-    mesh_info = _get_mesh_info(mesh, dp_mesh_dims)
+    _validate_mesh(mesh)
+    mesh_info = _get_mesh_info(mesh)
     device = _get_device_from_mesh(mesh)
     auto_reshard_after_forward = reshard_after_forward is None
     # If the user does not provide ``reshard_after_forward``, we set it to True.
     # During lazy_init, we identify which module is the root and override its value to False
-    if isinstance(mesh_info, FSDPMeshInfo):
-        if (
-            mesh_info.is_spmd_mesh
-            and not isinstance(reshard_after_forward, bool)
-            and isinstance(reshard_after_forward, int)
-        ):
-            raise NotImplementedError(
-                "reshard_after_forward as int is not yet supported with "
-                "SPMD mesh (dp_mesh_dims)"
-            )
-        post_forward_mesh_info = _get_post_forward_mesh_info(
-            reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
-            mesh_info,
-        )
-    else:
-        # DDPMeshInfo: no sharding, so no post-forward resharding needed
-        post_forward_mesh_info = None
+    post_forward_mesh_info = _get_post_forward_mesh_info(
+        reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
+        mesh_info,
+    )
     arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
         module, device, ignored_params
     )
     state = fully_shard.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy, auto_reshard_after_forward)
-
     _init_param_group(
         state,
         params,
@@ -279,9 +217,6 @@ def fully_shard(
         shard_placement_fn,
         mp_policy,
         offload_policy,
-        reshard_after_forward=reshard_after_forward
-        if not auto_reshard_after_forward
-        else True,
     )
 
     # For Dynamo
@@ -339,7 +274,7 @@ class FSDPModule:
         module. This method is *not* recursive.
         """
         state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
+        if fsdp_param_group := state._fsdp_param_group:
             fsdp_param_group.reshard()
 
     def unshard(self, async_op: bool = False) -> UnshardHandle | None:
@@ -361,44 +296,15 @@ class FSDPModule:
             before pre-forward.
         """
         state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
+        fsdp_param_group = state._fsdp_param_group
+        if fsdp_param_group is not None:
             fsdp_param_group.lazy_init()
             fsdp_param_group.unshard(async_op=async_op)
-        handle = _UnshardHandleImpl(
-            list(state._fsdp_param_groups) if state._fsdp_param_groups else None
-        )
+        handle = _UnshardHandleImpl(fsdp_param_group)
         if async_op:
             return handle
         handle.wait()
         return None
-
-    @_dynamo_disable
-    def reset_iter_state(self) -> None:
-        """
-        Resets FSDP's per-iteration state after an exception aborted a
-        forward or backward mid-flight. The supported recovery workflow is:
-
-        1. Catch the exception from ``forward()`` or ``backward()``.
-        2. Call ``reset_iter_state()`` on the *root* FSDP module.
-        3. Run the next iteration normally.
-
-        The reset waits on any in-flight all-gather/reduce-scatter events,
-        reshards every parameter group, and clears iteration trackers
-        (``iter_forward_root``, ``_modules_to_run_forward``, post-forward
-        order, per-group training states). Any in-flight gradient
-        reductions are discarded: the failed iteration's gradients are
-        lost, including HSDP partial-reduce-accumulation state and
-        ``no_sync`` grad-accumulation state. Callers doing gradient
-        accumulation should treat the microbatch sequence as invalidated
-        and restart it.
-
-        Must be called on the root FSDP module — i.e. the module the
-        top-level ``fully_shard`` was applied to, equivalently the
-        module first forwarded. Calling on a non-root module raises
-        ``RuntimeError``.
-        """
-        state = self._get_fsdp_state()
-        state._reset_iter_state()
 
     def set_is_last_backward(self, is_last_backward: bool) -> None:
         """
@@ -430,7 +336,7 @@ class FSDPModule:
         for module in modules:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
+                if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reduce_grads = requires_gradient_sync
                     fsdp_param_group.all_reduce_grads = requires_gradient_sync
 
@@ -447,7 +353,7 @@ class FSDPModule:
         for module in modules:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
+                if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
 
     def set_reshard_after_forward(
@@ -477,9 +383,8 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 state._auto_reshard_after_forward = False
-                for fsdp_param_group in state._fsdp_param_groups:
-                    if not isinstance(fsdp_param_group.mesh_info, FSDPMeshInfo):
-                        raise AssertionError
+                if fsdp_param_group := state._fsdp_param_group:
+                    assert isinstance(fsdp_param_group.mesh_info, FSDPMeshInfo)
                     fsdp_param_group.post_forward_mesh_info = (
                         _get_post_forward_mesh_info(
                             reshard_after_forward,
@@ -507,7 +412,7 @@ class FSDPModule:
         for module in modules:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
+                if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reshard_after_backward = reshard_after_backward
 
     def set_modules_to_forward_prefetch(self, modules: list[FSDPModule]) -> None:
@@ -560,13 +465,7 @@ class FSDPModule:
             comm (AllGather): Custom all-gather communication.
         """
         state = self._get_fsdp_state()
-        if len(state._fsdp_param_groups) > 1:
-            raise ValueError(
-                "set_custom_all_gather is not supported with multiple param "
-                "groups (from per-param mesh via shard_placement_fn). "
-                "The custom comm would be ambiguous across groups with different meshes."
-            )
-        for fsdp_param_group in state._fsdp_param_groups:
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
             fsdp_param_group._all_gather_comm = comm
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
@@ -579,13 +478,7 @@ class FSDPModule:
             comm (ReduceScatter): Custom reduce_scatter communication.
         """
         state = self._get_fsdp_state()
-        if len(state._fsdp_param_groups) > 1:
-            raise ValueError(
-                "set_custom_reduce_scatter is not supported with multiple param "
-                "groups (from per-param mesh via shard_placement_fn). "
-                "The custom comm would be ambiguous across groups with different meshes."
-            )
-        for fsdp_param_group in state._fsdp_param_groups:
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
             fsdp_param_group._reduce_scatter_comm = comm
 
     def set_all_reduce_hook(
@@ -606,13 +499,7 @@ class FSDPModule:
                 all-reduce stream used by the native HSDP all-reduce.
         """
         state = self._get_fsdp_state()
-        if len(state._fsdp_param_groups) > 1:
-            raise ValueError(
-                "set_all_reduce_hook is not supported with multiple param "
-                "groups (from per-param mesh via shard_placement_fn). "
-                "The hook would be ambiguous across groups with different meshes."
-            )
-        for fsdp_param_group in state._fsdp_param_groups:
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
             fsdp_param_group._all_reduce_hook = hook
             if stream is not None:
                 if fsdp_param_group._is_hsdp:
@@ -653,7 +540,7 @@ class FSDPModule:
             factor (float): Custom divide factor.
         """
         state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
             fsdp_param_group.gradient_divide_factor = factor
 
     def set_force_sum_reduction_for_comms(self, enable: bool) -> None:
@@ -674,124 +561,8 @@ class FSDPModule:
             enable (bool): Whether to only ever use ReduceOp.SUM for comms.
         """
         state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
             fsdp_param_group.force_sum_reduction_for_comms = enable
-
-    def set_reduce_scatter_unused_params(
-        self, reduce_scatter_unused_params: bool, *, recurse: bool = True
-    ) -> None:
-        """
-        Sets whether to include zero gradients for parameters that did not
-        receive a gradient in backward. This is needed when different ranks
-        use different parameters due to conditional control flow (e.g.
-        multi-modal models, mixture of experts), causing mismatched
-        reduce-scatter collectives. Similar to DDP's
-        ``find_unused_parameters``.
-
-        Args:
-            reduce_scatter_unused_params (bool): Whether to include zero
-                gradients for unused parameters in gradient reduction.
-            recurse (bool): Whether to set for all FSDP submodules or just
-                the passed-in module.
-        """
-        self_module = cast(nn.Module, self)
-        modules = list(self_module.modules()) if recurse else [self_module]
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group.reduce_scatter_unused_params = (
-                        reduce_scatter_unused_params
-                    )
-
-    def set_reduce_scatter_max_input_buffers(
-        self, max_input_buffers: int, *, recurse: bool = True
-    ) -> None:
-        """
-        Sets how many gradient reduce-scatter input buffers may be in flight at
-        once -- the copy-in (``chunk_cat``) buffer cap-K (experimental).
-
-        FSDP keeps **1** such buffer in flight by default, so the compute stream
-        must wait on the previous reduce-scatter before the next copy-in can
-        reuse that buffer. When the reduce-scatter is exposed (communication
-        slower than the backward compute meant to hide it), that recycle wait
-        stalls the compute stream. Raising the cap lets the next copy-in write a
-        **fresh** buffer instead of waiting -- removing the stall -- at the cost
-        of extra peak memory for the retained buffers. The copy-in stays on the
-        compute stream; there is no extra stream and no ``record_stream``. This
-        helps only when the reduce-scatter is exposed.
-
-        Args:
-            max_input_buffers (int): Max reduce-scatter input buffers retained in
-                flight (the memory<->overlap dial); must be ``>= 1``. ``1`` is
-                FSDP's default behavior (single buffer; the exposed-RS stall). A
-                small value (e.g. ``2``) bounds peak memory and adds no stall as
-                long as it is ``>=`` the reduce-scatter pipeline depth (otherwise
-                an exposed reduce-scatter trades back a tail stall); a larger
-                value retains more buffers for deeper overlap at higher peak
-                memory.
-            recurse (bool): Whether to set for all FSDP submodules or just the
-                passed-in module.
-        """
-        # bool is an int subclass; reject it so True does not silently mean 1.
-        if isinstance(max_input_buffers, bool) or not isinstance(
-            max_input_buffers, int
-        ):
-            raise TypeError(
-                "max_input_buffers must be an int, got "
-                f"{type(max_input_buffers).__name__}"
-            )
-        if max_input_buffers < 1:
-            raise ValueError(
-                f"max_input_buffers must be a positive int, got {max_input_buffers}"
-            )
-        self_module = cast(nn.Module, self)
-        modules = list(self_module.modules()) if recurse else [self_module]
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group.reduce_scatter_max_input_buffers = (
-                        max_input_buffers
-                    )
-
-    def set_separate_reduce_scatter_group(
-        self, enable: bool = True, *, recurse: bool = True
-    ) -> None:
-        """
-        Enables (or disables) running gradient reduce-scatter on its own process
-        group so it can overlap with all-gather in the backward pass
-        (experimental).
-
-        By default FSDP runs all-gather and reduce-scatter on separate CUDA
-        streams but through the **same** process group -- one NCCL communicator,
-        which processes one collective at a time and so serializes them on the
-        wire. When enabled, FSDP creates a dedicated process group over the shard
-        ranks (``dist.new_group(..., use_local_synchronization=True)``) -- one
-        per distinct set of shard ranks, typically a single communicator -- so
-        the two collectives can progress concurrently when the network can
-        sustain it. This is collective for each shard rank set: like other FSDP
-        comm setup, call it consistently across ranks using this FSDP mesh.
-
-        Args:
-            enable (bool): ``True`` (default) gives reduce-scatter its own
-                process group; ``False`` resets it to the shared shard/all-gather
-                group.
-            recurse (bool): Whether to set for all FSDP submodules or just the
-                passed-in module.
-        """
-        self_module = cast(nn.Module, self)
-        modules = list(self_module.modules()) if recurse else [self_module]
-        # Cache created groups by shard ranks so meshes that shard over the same
-        # ranks share one communicator (typically one total), not one per mesh.
-        new_groups: dict = {}
-        for module in modules:
-            if isinstance(module, FSDPModule):
-                state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group._set_separate_reduce_scatter_group(
-                        enable, new_groups
-                    )
 
     def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
         """
@@ -801,7 +572,7 @@ class FSDPModule:
         backward computation (e.g. embedding).
         """
         state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
             fsdp_param_group.unshard_in_backward = unshard_in_backward
 
     def set_allocate_memory_from_process_group_for_comm(self, enable: bool) -> None:
@@ -822,42 +593,8 @@ class FSDPModule:
             enable (bool): Whether to turn on ProcessGroup allocation.
         """
         state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
             fsdp_param_group.set_allocate_memory_from_process_group(enable)
-
-    def set_symm_mem_for_comm(self, backend: Literal["NCCL"] = "NCCL") -> None:
-        """
-        Sets the symmetric memory (``symm_mem``) backend for allocating the
-        staging buffers used in all-gather collectives. This allows NCCL to use
-        optimized all-gather implementations via symmetric memory. Such
-        optimization may depend on the topology of the system.  For single node,
-        Copy Engine All-Gather may be used. For multi-node, Symmetric Kernel
-        All-Gather may be used.
-
-        To enable Copy Engine All-Gather, you need to set the NCCL process group
-        with the zero-CTA policy.
-        ```python
-        opts = dist.ProcessGroupNCCL.Options()
-        opts.config.cta_policy = dist.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
-        dist.init_process_group(backend="nccl", pg_options=opts, device_id=device)
-        ```
-        Alternatively, you can set the environment variable `NCCL_CTA_POLICY` to 2.
-        ```bash
-        export NCCL_CTA_POLICY=2
-        ```
-        For more details, see [Copy Engine
-        Collectives](https://docs.pytorch.org/docs/2.11/symmetric_memory.html#copy-engine-collectives).
-
-        This cannot be used together with :meth:`set_custom_all_gather` or
-        :meth:`set_custom_reduce_scatter`.
-
-        Args:
-            backend (str): The symmetric memory backend to use. Defaults to
-                ``"NCCL"``. Currently, only ``"NCCL"`` is supported.
-        """
-        state = self._get_fsdp_state()
-        for fsdp_param_group in state._fsdp_param_groups:
-            fsdp_param_group.set_symm_mem(backend)
 
     def _set_unshard_async_op(self, async_op: bool):
         """
@@ -875,7 +612,7 @@ class FSDPModule:
         for module in self_module.modules():
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
-                for fsdp_param_group in state._fsdp_param_groups:
+                if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.unshard_async_op = async_op
 
     def _get_fsdp_state(self) -> FSDPState:
@@ -888,14 +625,13 @@ class FSDPModule:
         self.reshard()
         ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
         state = self._get_fsdp_state()
-        if not state._fsdp_param_groups:
+        if not (fsdp_param_group := state._fsdp_param_group):
             return ret
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
         with torch.no_grad():
-            for fsdp_param_group in state._fsdp_param_groups:
-                for fsdp_param in fsdp_param_group.fsdp_params:
-                    fsdp_param.reset_sharded_param()
+            for fsdp_param in fsdp_param_group.fsdp_params:
+                fsdp_param.reset_sharded_param()
         return ret
 
 
@@ -913,15 +649,14 @@ class UnshardHandle:
 
 
 class _UnshardHandleImpl(UnshardHandle):
-    def __init__(self, fsdp_param_groups: list[FSDPParamGroup] | None):
-        self._fsdp_param_groups = fsdp_param_groups
+    def __init__(self, fsdp_param_group: FSDPParamGroup | None):
+        self._fsdp_param_group = fsdp_param_group
 
     def wait(self):
-        if self._fsdp_param_groups is not None:
-            for fsdp_param_group in self._fsdp_param_groups:
-                fsdp_param_group.wait_for_unshard()
+        if self._fsdp_param_group is not None:
+            self._fsdp_param_group.wait_for_unshard()
             # Avoid keeping a reference
-            self._fsdp_param_groups = None
+            self._fsdp_param_group = None
 
 
 def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
@@ -986,7 +721,7 @@ def share_comm_ctx(modules: list[FSDPModule]) -> None:
     comm_ctx = fsdp_states[0]._comm_ctx
     for fsdp_state in fsdp_states[1:]:
         fsdp_state._comm_ctx = comm_ctx
-        for fsdp_param_group in fsdp_state._fsdp_param_groups:
+        if fsdp_param_group := fsdp_state._fsdp_param_group:
             fsdp_param_group.comm_ctx = comm_ctx
 
 

@@ -14,7 +14,7 @@ from .api import (
     ShardedTensorMetadata,
     TensorProperties,
 )
-from .metadata import ShardMetadata
+from .metadata import ShardMetadata  # noqa: F401
 
 
 if TYPE_CHECKING:

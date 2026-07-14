@@ -17,18 +17,6 @@ inputs:
   checkout-mode:
     description: 'Mode of checkout; one of "normal", "blobless", "treeless".'
     default: "normal"
-  sparse-checkout:
-    description: >
-      Newline-separated list of patterns to sparse-checkout. When set, only the
-      matching paths are materialized in the working tree. Ignored if the
-      partial-clone filter (from checkout-mode) is also honored by the underlying
-      action; passed through to actions/checkout's sparse-checkout input.
-    required: false
-    default: ""
-  sparse-checkout-cone-mode:
-    description: Whether to use cone-mode when doing a sparse checkout.
-    required: false
-    default: "true"
 
 runs:
   using: composite
@@ -72,13 +60,10 @@ runs:
         # --depth=1 for speed, manually fetch history and other refs as necessary
         fetch-depth: ${{ inputs.fetch-depth }}
         single-branch: true
-        fetch-tags: ${{ github.ref_type == 'tag' }}
         submodules: ${{ inputs.submodules }}
         show-progress: false
         filter: ${{ env.filter }}
         submodules-filter: ${{ env.filter }}
-        sparse-checkout: ${{ inputs.sparse-checkout }}
-        sparse-checkout-cone-mode: ${{ inputs.sparse-checkout-cone-mode }}
 
     - name: Clean submodules post checkout
       id: clean-submodules
@@ -108,10 +93,10 @@ runs:
         echo "${GITHUB_WORKSPACE}"
         if [ -z "${NO_SUDO}" ]; then
           retry sudo rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
         else
-          retry find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          retry rm -rf "${GITHUB_WORKSPACE}"
         fi
+        mkdir "${GITHUB_WORKSPACE}"
 
     - name: Checkout PyTorch (try again)
       uses: pytorch/test-infra/.github/actions/checkout@main
@@ -122,10 +107,7 @@ runs:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         fetch-depth: ${{ inputs.fetch-depth }}
         single-branch: true
-        fetch-tags: ${{ github.ref_type == 'tag' }}
         submodules: ${{ inputs.submodules }}
         show-progress: false
         filter: ${{ env.filter }}
         submodules-filter: ${{ env.filter }}
-        sparse-checkout: ${{ inputs.sparse-checkout }}
-        sparse-checkout-cone-mode: ${{ inputs.sparse-checkout-cone-mode }}

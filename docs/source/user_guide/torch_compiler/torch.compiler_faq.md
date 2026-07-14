@@ -56,7 +56,7 @@ are local fusions. So in practice this approach may be sufficient.
 
 For the vast majority of models you probably don’t and you can use
 `torch.compile()` as is but there are a few situations where
-full graphs are necessary and you can ensure a full graph by simply
+full graphs are necessary and you can can ensure a full graph by simply
 running `torch.compile(..., fullgraph=True)`. These situations include:
 
 - Large scale training runs, such as $250K+ that require pipeline parallelism
@@ -138,14 +138,14 @@ There are 3 major ways to accelerate PyTorch code:
 
 1. Kernel fusion via vertical fusions which fuse sequential operations to avoid
    excessive read/writes. For example, fuse 2 subsequent cosines means you
-   can do 1 read and 1 write instead of 2 reads and 2 writes. Horizontal fusion:
+   can can do 1 read 1 write instead 2 reads 2 writes 2. Horizontal fusion:
    the simplest example being batching where a single matrix is multiplied
    with a batch of examples but the more general scenario is a grouped GEMM
    where a group of matrix multiplications are scheduled together
 2. Out of order execution: A general optimization for compilers, by looking ahead
    at the exact data dependencies within a graph we can decide on the most
    opportune time to execute a node and which buffers can be reused
-3. Automatic work placement: Similar to the out-of-order execution point,
+3. Automatic work placement: Similar of the out of order execution point,
    but by matching nodes of a graph to resources like physical hardware or
    memory we can design an appropriate schedule
 
@@ -555,7 +555,7 @@ This should just be used for **debugging purposes** and is in no way a
 replacement for the PyTorch API, as it is **much less performant** and, as a
 private API, **may change without notice**. At any rate, `torch._numpy` is a
 Python implementation of NumPy in terms of PyTorch and it is used internally by `torch.compile` to
-transform NumPy code into PyTorch code. It is rather easy to read and modify,
+transform NumPy code into Pytorch code. It is rather easy to read and modify,
 so if you find any bug in it feel free to submit a PR fixing it or simply open
 an issue.
 

@@ -120,7 +120,7 @@ class LRScheduler:
         self,
         optimizer: Optimizer,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
@@ -380,7 +380,7 @@ class LambdaLR(LRScheduler):
         optimizer: Optimizer,
         lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         self.optimizer = optimizer
 
         self.lr_lambdas: list[Callable[[int], float]]
@@ -413,6 +413,7 @@ class LambdaLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
+                # pyrefly: ignore [unsupported-operation]
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict
@@ -495,7 +496,7 @@ class MultiplicativeLR(LRScheduler):
         optimizer: Optimizer,
         lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         self.optimizer = optimizer
 
         self.lr_lambdas: list[Callable[[int], float]]
@@ -532,6 +533,7 @@ class MultiplicativeLR(LRScheduler):
 
         for idx, fn in enumerate(self.lr_lambdas):
             if not isinstance(fn, types.FunctionType):
+                # pyrefly: ignore [unsupported-operation]
                 state_dict["lr_lambdas"][idx] = fn.__dict__.copy()
 
         return state_dict
@@ -624,7 +626,7 @@ class StepLR(LRScheduler):
         step_size: int,
         gamma: float = 0.1,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         self.step_size = step_size
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -710,7 +712,7 @@ class MultiStepLR(LRScheduler):
         milestones: Iterable[int],
         gamma: float = 0.1,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         self.milestones = Counter(milestones)
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -809,7 +811,7 @@ class ConstantLR(LRScheduler):
         factor: float = 1.0 / 3,
         total_iters: int = 5,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         if factor > 1.0 or factor < 0:
             raise ValueError(
                 "Constant multiplicative factor expected to be between 0 and 1."
@@ -917,7 +919,7 @@ class LinearLR(LRScheduler):
         end_factor: float = 1.0,
         total_iters: int = 5,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         if start_factor > 1.0 or start_factor <= 0:
             raise ValueError(
                 "Starting multiplicative factor expected to be greater than 0 and less or equal to 1."
@@ -1030,7 +1032,7 @@ class ExponentialLR(LRScheduler):
         optimizer: Optimizer,
         gamma: float,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
 
@@ -1122,7 +1124,7 @@ class SequentialLR(LRScheduler):
         schedulers: list[LRScheduler],
         milestones: list[int],
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         if len(schedulers) < 1:
             raise ValueError(
                 f"{self.__class__.__name__} expects at least one scheduler, but got no scheduler."
@@ -1164,15 +1166,14 @@ class SequentialLR(LRScheduler):
         # "Undo" the step performed by other schedulers
         self.recursive_undo()
 
-        # Perform the initial step for only the scheduler meant to run at step 0.
-        idx = bisect_right(self._milestones, 0)
-        self._schedulers[idx]._initial_step()
+        # Perform the initial step for only the first scheduler
+        self._schedulers[0]._initial_step()
 
-        self._last_lr = schedulers[idx].get_last_lr()
+        self._last_lr = schedulers[0].get_last_lr()
 
     def recursive_undo(self, sched=None) -> None:
         """
-        Recursively undo any step performed by the initialization of
+        Recursively undo any step performed by the initialisation of
         schedulers.
         """
         scheds = self if sched is None else sched
@@ -1267,7 +1268,7 @@ class PolynomialLR(LRScheduler):
         total_iters: int = 5,
         power: float = 1.0,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         self.total_iters = total_iters
         self.power = power
         super().__init__(optimizer, last_epoch)
@@ -1391,7 +1392,7 @@ class CosineAnnealingLR(LRScheduler):
         T_max: int,
         eta_min: float = 0.0,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         self.T_max = T_max
         self.eta_min = eta_min
         super().__init__(optimizer, last_epoch)
@@ -1508,7 +1509,7 @@ class ChainedScheduler(LRScheduler):
 
     def __init__(
         self, schedulers: Sequence[LRScheduler], optimizer: Optimizer | None = None
-    ) -> None:
+    ) -> None:  # noqa: D107
         if len(schedulers) < 1:
             raise ValueError(
                 f"{self.__class__.__name__} expects at least one scheduler to be chained, but got no scheduler."
@@ -1611,18 +1612,11 @@ class ReduceLROnPlateau(LRScheduler):
             Default: 10.
         threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes. Default: 1e-4.
-        threshold_mode (str): One of `rel`, `abs`.
-            In `rel` mode, the dynamic threshold is computed as:
-
-            * best * (1 + threshold) if mode == 'max'
-            * best * (1 - threshold) if mode == 'min'
-
-            In `abs` mode, the dynamic threshold is computed as:
-
-            * best + threshold if mode == 'max'
-            * best - threshold if mode == 'min'
-
-            Default: 'rel'.
+        threshold_mode (str): One of `rel`, `abs`. In `rel` mode,
+            dynamic_threshold = best * ( 1 + threshold ) in 'max'
+            mode or best * ( 1 - threshold ) in `min` mode.
+            In `abs` mode, dynamic_threshold = best + threshold in
+            `max` mode or best - threshold in `min` mode. Default: 'rel'.
         cooldown (int): Number of epochs to wait before resuming
             normal operation after lr has been reduced. Default: 0.
         min_lr (float or list): A scalar or a list of scalars. A
@@ -1656,7 +1650,7 @@ class ReduceLROnPlateau(LRScheduler):
         cooldown: int = 0,
         min_lr: list[float] | float = 0,
         eps: float = 1e-8,
-    ) -> None:
+    ) -> None:  # noqa: D107
         if factor >= 1.0:
             raise ValueError("Factor should be < 1.0.")
         self.factor = factor
@@ -1674,6 +1668,7 @@ class ReduceLROnPlateau(LRScheduler):
             self.default_min_lr = None
             self.min_lrs = list(min_lr)
         else:
+            # pyrefly: ignore [bad-assignment]
             self.default_min_lr = min_lr
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
 
@@ -1733,6 +1728,7 @@ class ReduceLROnPlateau(LRScheduler):
                     "of the `optimizer` param groups."
                 )
             else:
+                # pyrefly: ignore [bad-assignment]
                 self.min_lrs = [self.default_min_lr] * len(self.optimizer.param_groups)
 
         for i, param_group in enumerate(self.optimizer.param_groups):
@@ -1742,10 +1738,10 @@ class ReduceLROnPlateau(LRScheduler):
                 _update_param_group_val(param_group, "lr", new_lr)
 
     @property
-    def in_cooldown(self):
+    def in_cooldown(self):  # noqa: D102
         return self.cooldown_counter > 0
 
-    def _is_better(self, a, best):
+    def _is_better(self, a, best):  # noqa: D102
         if self.mode == "min" and self.threshold_mode == "rel":
             rel_epsilon = 1.0 - self.threshold
             return a < best * rel_epsilon
@@ -1899,7 +1895,7 @@ class CyclicLR(LRScheduler):
         base_momentum: float = 0.8,
         max_momentum: float = 0.9,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
@@ -2069,7 +2065,7 @@ class CyclicLR(LRScheduler):
         return lrs
 
     @override
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:  # noqa: D102
         """Return the state of the scheduler as a :class:`dict`.
 
         It contains an entry for every variable in ``self.__dict__`` which
@@ -2150,7 +2146,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         T_mult: int = 1,
         eta_min: float = 0.0,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError(f"Expected positive integer T_0, but got {T_0}")
         if T_mult < 1 or not isinstance(T_mult, int):
@@ -2402,7 +2398,7 @@ class OneCycleLR(LRScheduler):
         final_div_factor: float = 1e4,
         three_phase: bool = False,
         last_epoch: int = -1,
-    ) -> None:
+    ) -> None:  # noqa: D107
         # Validate optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")

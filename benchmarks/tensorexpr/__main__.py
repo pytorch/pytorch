@@ -2,9 +2,9 @@ import argparse
 import itertools
 import os
 
-# from . import conv
-# from . import normalization
-# from . import pooling
+# from . import conv           # noqa: F401
+# from . import normalization  # noqa: F401
+# from . import pooling        # noqa: F401
 from . import (  # noqa: F401
     attention,
     benchmark,

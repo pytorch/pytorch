@@ -1,4 +1,3 @@
-# Owner(s): ["oncall: releng"]
 name: weekly
 
 on:
@@ -14,7 +13,7 @@ permissions: read-all
 jobs:
   update-commit-hash:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
       - name: Checkout repo
@@ -34,7 +33,7 @@ jobs:
 
   update-slow-tests:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
       - name: Checkout repo

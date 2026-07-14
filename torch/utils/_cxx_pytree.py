@@ -1,9 +1,7 @@
-# Owner(s): ["module: pytree"]
-
 """
 Contains utility functions for working with nested python data structures.
 
-A *pytree* is a Python nested data structure. It is a tree in the sense that
+A *pytree* is Python nested data structure. It is a tree in the sense that
 nodes are Python collections (e.g., list, tuple, dict) and the leaves are
 Python values. Furthermore, a pytree should not contain reference cycles.
 
@@ -24,21 +22,13 @@ from typing_extensions import deprecated, Self, TypeIs
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion as _TorchVersion
 from torch.utils._pytree import (
-    Context,
-    DumpableContext,
-    FlattenFn,
-    FlattenWithKeysFn,
-    FromDumpableContextFn,
     is_namedtuple,
     is_namedtuple_class,
     is_namedtuple_instance,
     is_structseq,
     is_structseq_class,
     is_structseq_instance,
-    KeyPath,
-    PyTree,
-    ToDumpableContextFn,
-    UnflattenFn,
+    KeyEntry,
 )
 
 
@@ -59,8 +49,8 @@ from optree import PyTreeSpec  # direct import for type annotations
 __all__ = [
     "PyTree",
     "Context",
-    "FlattenFn",
-    "UnflattenFn",
+    "FlattenFunc",
+    "UnflattenFunc",
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
@@ -111,16 +101,22 @@ S = TypeVar("S")
 U = TypeVar("U")
 R = TypeVar("R")
 
+
 TreeSpec: TypeAlias = PyTreeSpec
-OpTreeUnflattenFn = Callable[[Context, Iterable[Any]], PyTree]
 
-# Keep deprecated alias for backward compatibility
-FlattenFunc = FlattenFn  # deprecated
-UnflattenFunc = UnflattenFn  # deprecated
-FlattenWithKeysFunc = FlattenWithKeysFn  # deprecated
+Context = Any
+PyTree = Any
+FlattenFunc = Callable[[PyTree], tuple[list[Any], Context]]
+UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
+OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
+DumpableContext = Any  # Any json dumpable text
+ToDumpableContextFn = Callable[[Context], DumpableContext]
+FromDumpableContextFn = Callable[[DumpableContext], Context]
+KeyPath = tuple[KeyEntry, ...]
+FlattenWithKeysFunc = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
 
 
-def _reverse_args(func: UnflattenFn) -> OpTreeUnflattenFn:
+def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
     @functools.wraps(func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         return func(*reversed(args), **kwargs)
@@ -130,13 +126,13 @@ def _reverse_args(func: UnflattenFn) -> OpTreeUnflattenFn:
 
 def register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFn,
-    unflatten_fn: UnflattenFn,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
     from_dumpable_context: FromDumpableContextFn | None = None,
-    flatten_with_keys_fn: FlattenWithKeysFn | None = None,
+    flatten_with_keys_fn: FlattenWithKeysFunc | None = None,
 ) -> None:
     """Register a container-like type as pytree node.
 
@@ -162,7 +158,7 @@ def register_pytree_node(
     Example::
 
         >>> # xdoctest: +SKIP
-        >>> # Register a Python type with lambda functions
+        >>> # Registry a Python type with lambda functions
         >>> register_pytree_node(
         ...     set,
         ...     lambda s: (sorted(s), None, None),
@@ -198,8 +194,8 @@ def register_pytree_node(
 )
 def _register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFn,
-    unflatten_fn: UnflattenFn,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
@@ -249,8 +245,8 @@ def _register_pytree_node(
 
 def _private_register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFn,
-    unflatten_fn: UnflattenFn,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
@@ -418,7 +414,6 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
                 f"PyTreeSpec but got item of type {type(treespec)}."
             )
         # Allow passing the PyTreeSpec instance as the first argument
-        # pyrefly: ignore [bad-assignment]
         leaves, treespec = treespec, leaves
     return treespec.unflatten(leaves)
 
@@ -603,7 +598,7 @@ def tree_map_(
     Returns:
         The original ``tree`` with the value at each leaf is given by the side-effect of function
         ``func(x, *xs)`` (not the return value) where ``x`` is the value at the corresponding leaf
-        in ``tree`` and ``xs`` is the tuple of values at corresponding nodes in ``rests``.
+        in ``tree`` and ``xs`` is the tuple of values at values at corresponding nodes in ``rests``.
     """
     return optree.tree_map_(
         func,
@@ -1021,22 +1016,16 @@ def treespec_loads(serialized: str) -> TreeSpec:
     return treespec
 
 
-class _Asterisk(str):
-    __slots__ = ()
-
-    def __new__(cls) -> Self:
-        return super().__new__(cls, "*")
-
+class _DummyLeaf:
     def __repr__(self) -> str:
-        return "*"  # no quotes
-
-
-_asterisk = _Asterisk()
-del _Asterisk
+        return "*"
 
 
 def treespec_pprint(treespec: TreeSpec) -> str:
-    dummy_tree = tree_unflatten([_asterisk] * treespec.num_leaves, treespec)
+    dummy_tree = tree_unflatten(
+        [_DummyLeaf() for _ in range(treespec.num_leaves)],
+        treespec,
+    )
     return repr(dummy_tree)
 
 

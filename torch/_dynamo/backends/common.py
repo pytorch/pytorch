@@ -16,13 +16,12 @@ AOT autograd functionality is particularly important as it enables ahead-of-time
 optimization of both forward and backward passes.
 """
 
-from __future__ import annotations
-
 import contextlib
 import functools
 import logging
-from typing import Any, TYPE_CHECKING
-from typing_extensions import ParamSpec, Required, TypedDict, TypeVar, Unpack
+from collections.abc import Callable, Iterable
+from typing import Any
+from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -36,48 +35,19 @@ from torch._functorch.aot_autograd import (
 from torch.utils._python_dispatch import _disable_current_modes
 
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
-
-    from torch._inductor.compile_fx import CompilerConfigExtra
-    from torch._ops import OpOverload
-
-
 log = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 R = TypeVar("R")
 
 
-class AotAutogradKwargs(TypedDict, total=False):
-    """Keyword arguments accepted by AotAutograd and forwarded verbatim to
-    aot_module_simplified. decompositions may also be a zero-arg thunk returning
-    the decomposition table (a workaround for circular imports); AotAutograd
-    resolves it to the table before forwarding."""
-
-    fw_compiler: Required[Callable[..., Any]]
-    bw_compiler: Callable[..., Any] | None
-    inference_compiler: Callable[..., Any] | None
-    partition_fn: Callable[..., Any]
-    decompositions: (
-        dict[OpOverload, Callable[..., Any]]
-        | Callable[[], dict[OpOverload, Callable[..., Any]]]
-    )
-    keep_inference_input_mutations: bool
-    compiler_config_extra: CompilerConfigExtra | None
-    ignore_shape_env: bool
-    disable_functionalization: bool
-    pre_grad_passes: Callable[..., Any] | None
-    compile_region_name: str | None
-
-
 class AotAutograd:
-    def __init__(self, **kwargs: Unpack[AotAutogradKwargs]) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         self.__name__ = "compiler_fn"
-        self.kwargs: AotAutogradKwargs = kwargs
+        self.kwargs = kwargs
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: Sequence[Any], **kwargs: Any
+        self, gm: torch.fx.GraphModule, example_inputs: Iterable[Any], **kwargs: Any
     ) -> Callable[..., Any]:
         if kwargs:
             log.warning("aot_autograd-based backend ignoring extra kwargs %s", kwargs)
@@ -90,12 +60,18 @@ class AotAutograd:
             )
 
         # Hack to get around circular import problems with aot_eager_decomp_partition
-        decompositions = self.kwargs.get("decompositions")
-        if callable(decompositions):
-            self.kwargs["decompositions"] = decompositions()
+        if callable(self.kwargs.get("decompositions")):
+            self.kwargs["decompositions"] = self.kwargs["decompositions"]()
 
-        # NB: don't delete counter increment
+        # NB: dont delete counter increment
         counters["aot_autograd"]["total"] += 1
+        use_fallback = False
+
+        if use_fallback:
+            log.debug("Unable to use AOT Autograd because graph has mutation")
+            counters["aot_autograd"]["not_ok"] += 1
+            # pyrefly: ignore [bad-return]
+            return gm
 
         def wrap_bw_compiler(bw_compiler_fn: Callable[P, R]) -> Callable[..., R]:
             def _wrapped_bw_compiler(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -121,7 +97,7 @@ class AotAutograd:
         if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
             bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
         elif getattr(bw_compiler, "_is_wrapped_bw_compiler", False):
-            bw_compiler.compiler_fn = bw_compiler  # pyrefly: ignore [missing-attribute]
+            bw_compiler.compiler_fn = bw_compiler
         else:
             bw_compiler = wrap_bw_compiler(bw_compiler)
 
@@ -145,14 +121,7 @@ class AotAutograd:
         try:
             # NB: NOT cloned!
             with enable_aot_logging(), patch_config:
-                # The decompositions thunk is resolved to a concrete table by the
-                # callable check above, but pyrefly cannot narrow that through the
-                # TypedDict subscript assignment, so the spread looks ill-typed.
-                cg = aot_module_simplified(
-                    gm,
-                    example_inputs,
-                    **self.kwargs,  # pyrefly: ignore [bad-argument-type]
-                )
+                cg = aot_module_simplified(gm, example_inputs, **self.kwargs)
                 counters["aot_autograd"]["ok"] += 1
                 return disable(cg, reason="do not trace AOT-compiled graph")
         except TensorifyScalarRestartAnalysis:
@@ -162,7 +131,7 @@ class AotAutograd:
             raise
 
 
-def aot_autograd(**kwargs: Unpack[AotAutogradKwargs]) -> AotAutograd:
+def aot_autograd(**kwargs: Any) -> AotAutograd:
     return AotAutograd(**kwargs)
 
 
@@ -181,7 +150,7 @@ def mem_efficient_fusion_kwargs(use_decomps: bool) -> dict[str, Any]:
     }
 
     if use_decomps:
-        # pyrefly: ignore [bad-typed-dict-key]
+        # pyrefly: ignore[unsupported-operation]
         kwargs["decompositions"] = default_decompositions
 
     return kwargs

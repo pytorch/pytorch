@@ -62,7 +62,7 @@ TEST(TestHalf, Construction) {
 static std::string to_string(const Half& h) {
   std::stringstream ss;
   ss << h;
-  return std::move(ss).str();
+  return ss.str();
 }
 
 TEST(TestHalf, Half2String) {

@@ -11,7 +11,6 @@ from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 __all__ = ["traverse", "traverse_dps"]
 
 DataPipe = IterDataPipe | MapDataPipe
-# pyrefly: ignore [invalid-type-alias]
 DataPipeGraph = dict[int, tuple[DataPipe, "DataPipeGraph"]]
 
 
@@ -121,13 +120,13 @@ def traverse(datapipe: DataPipe, only_datapipe: bool | None = None) -> DataPipeG
     Args:
         datapipe: the end DataPipe of the graph
         only_datapipe: If ``False`` (default), all attributes of each DataPipe are traversed.
-          This argument is deprecated and will be removed after the next release.
+          This argument is deprecating and will be removed after the next release.
     Returns:
         A graph represented as a nested dictionary, where keys are ids of DataPipe instances
         and values are tuples of DataPipe instance and the sub-graph
     """
     msg = (
-        "`traverse` function is deprecated and will be removed after 1.13. "
+        "`traverse` function and will be removed after 1.13. "
         "Please use `traverse_dps` instead."
     )
     if not only_datapipe:
@@ -158,6 +157,5 @@ def _traverse_helper(
     for item in items:
         # Using cache.copy() here is to prevent recursion on a single path rather than global graph
         # Single DataPipe can present multiple times in different paths in graph
-        # pyrefly: ignore [no-matching-overload]
         d[dp_id][1].update(_traverse_helper(item, only_datapipe, cache.copy()))
     return d

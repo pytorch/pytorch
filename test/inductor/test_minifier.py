@@ -241,11 +241,9 @@ with torch.no_grad():
         )
 
     def _aoti_check_relu_repro(self, res):
-        if res is None:
-            raise AssertionError("res is None")
+        assert res is not None
         ep_file_path = res.get_exported_program_path()
-        if ep_file_path is None:
-            raise AssertionError("ep_file_path is None")
+        assert ep_file_path is not None
         gm = export_load(ep_file_path).module(check_guards=False)
         self.assertExpectedInline(
             str(gm.code).strip(),

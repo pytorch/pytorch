@@ -1,8 +1,8 @@
 import torch
 
 import torch_openreg._C  # type: ignore[misc]
-from . import meta
-from .amp import get_amp_supported_dtype
+from . import meta  # noqa: F401
+from .amp import get_amp_supported_dtype  # noqa: F401
 
 
 _initialized = False

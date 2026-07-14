@@ -37,7 +37,7 @@ class Vectorized<float> {
   static constexpr size_type size() {
     return 8;
   }
-  Vectorized() = default;
+  Vectorized() {}
 
   C10_ALWAYS_INLINE Vectorized(vfloat32 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
@@ -284,11 +284,8 @@ class Vectorized<float> {
   Vectorized<float> C10_ALWAYS_INLINE acos() const {
     return {Sleef_acosf4_u10(_vec0), Sleef_acosf4_u10(_vec1)};
   }
-  // Sleef acoshf/sinhf/coshf overflow for large float inputs where the scalar
-  // C library returns finite results, because Sleef uses float-range
-  // intermediates internally while the scalar C library uses double precision.
   Vectorized<float> C10_ALWAYS_INLINE acosh() const {
-    return map(std::acosh);
+    return {Sleef_acoshf4_u10(_vec0), Sleef_acoshf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE asin() const {
     return {Sleef_asinf4_u10(_vec0), Sleef_asinf4_u10(_vec1)};
@@ -378,7 +375,7 @@ class Vectorized<float> {
     return {Sleef_cosf4_u10(_vec0), Sleef_cosf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE cosh() const {
-    return map(std::cosh);
+    return {Sleef_coshf4_u10(_vec0), Sleef_coshf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE floor() const {
     return {vec_floor(_vec0), vec_floor(_vec1)};
@@ -394,7 +391,7 @@ class Vectorized<float> {
     return {Sleef_sinf4_u10(_vec0), Sleef_sinf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE sinh() const {
-    return map(std::sinh);
+    return {Sleef_sinhf4_u10(_vec0), Sleef_sinhf4_u10(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE tan() const {
     return {Sleef_tanf4_u10(_vec0), Sleef_tanf4_u10(_vec1)};

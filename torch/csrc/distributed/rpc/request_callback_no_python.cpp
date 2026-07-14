@@ -367,7 +367,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
       autogradMetadata.autogradContextId);
 
   // Lookup the appropriate 'send' function to enqueue.
-  c10::intrusive_ptr<SendRpcBackward> sendFunction =
+  std::shared_ptr<SendRpcBackward> sendFunction =
       autogradContext->retrieveSendFunction(autogradMetadata.autogradMessageId);
 
   // Attach the gradients to the send function.

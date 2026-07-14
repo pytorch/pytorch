@@ -60,8 +60,7 @@ class TORCH_API Reducer {
       int64_t first_bucket_bytes_cap,
       bool skip_all_reduce_unused_params,
       bool use_python_reducer,
-      std::vector<int64_t> bucket_bytes_cap_list,
-      bool batched_grad_copy = false);
+      std::vector<int64_t> bucket_bytes_cap_list);
 
   ~Reducer() noexcept(false);
 
@@ -163,7 +162,7 @@ class TORCH_API Reducer {
   // a tensor where index i = 1 if the Variable with that index has been used.
   at::Tensor get_local_used_map_on_device() const;
 
-  // A function for users to set sample_rate of collecting
+  // An function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
   // first 10 iterations, after 10 iterations time stats will be
   // recorded once every "sample_rate" training iterations.
@@ -216,11 +215,11 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<bool> expect_sparse_gradients_;
 
-  std::vector<c10::intrusive_ptr<torch::autograd::Node>>
+  std::vector<std::shared_ptr<torch::autograd::Node>>
       grad_accumulators_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
-  std::vector<std::pair<uintptr_t, c10::intrusive_ptr<torch::autograd::Node>>>
+  std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -236,8 +235,6 @@ class TORCH_API Reducer {
   const bool find_unused_parameters_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool gradient_as_bucket_view_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  const bool batched_grad_copy_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<size_t> unused_parameters_;
   // Previous iteration's unused params, used for checking if unused parameters
@@ -314,12 +311,6 @@ class TORCH_API Reducer {
           torch::distributed::autograd::DistAutogradContext::GradCallback>);
 #endif
   void runGradCallbackForVariable(at::Tensor& variable, const GradCallback& cb);
-
-  // Flushes deferred grad-to-bucket copies for a single bucket when
-  // batched_grad_copy_ is enabled. Called from mark_variable_ready (when
-  // bucket.pending == 0) and from delay_all_reduce (after all variables
-  // are marked ready).
-  void flush_deferred_copies(Bucket& bucket, size_t bucket_index);
 
   // This function is called inside `initialize_buckets()`. It initializes both
   // `bucket_views_in` and `bucket_views_out` with views for each variable's
@@ -411,11 +402,6 @@ class TORCH_API Reducer {
     // done on different CUDA streams. We record an event for every copy
     // so that we can synchronize with them prior to kicking off the reduction.
     // std::vector<at::cuda::CUDAEvent> events;
-
-    // Intra-bucket indices of variables whose grad-to-bucket copies are
-    // deferred for batching. Flushed as _foreach_copy_ + flat div_ when
-    // pending == 0. Only used when batched_grad_copy is enabled.
-    std::vector<size_t> deferred_copy_indices;
   };
 
   std::vector<Bucket> buckets_;
@@ -529,7 +515,7 @@ class TORCH_API Reducer {
  private:
   // reset counting for buckets before backward starts
   void reset_bucket_counting();
-  // search unused parameters before backward starts
+  // search unused parameters beore backward starts
   void search_unused_parameters(
       const std::vector<torch::autograd::Variable>& outputs);
   void set_divide_factor();

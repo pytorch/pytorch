@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 import concurrent.futures
+import distutils.sysconfig
 import functools
 import itertools
 import os
 import re
-import sysconfig
 from pathlib import Path
 from typing import Any
 
@@ -322,7 +320,6 @@ def check_headeronly_symbols(install_root: Path) -> None:
     # Filter out platform-specific headers that may not compile everywhere
     platform_specific_keywords = [
         "cpu/vec",
-        "win32-headers.h",
     ]
 
     filtered_headers = []
@@ -472,12 +469,12 @@ def check_lib_symbols_for_abi_correctness(lib: str) -> None:
 
 def main() -> None:
     if "install_root" in os.environ:
-        install_root = Path(os.getenv("install_root"))
+        install_root = Path(os.getenv("install_root"))  # noqa: SIM112
     else:
         if os.getenv("PACKAGE_TYPE") == "libtorch":
             install_root = Path(os.getcwd())
         else:
-            install_root = Path(sysconfig.get_path("purelib")) / "torch"
+            install_root = Path(distutils.sysconfig.get_python_lib()) / "torch"
 
     libtorch_cpu_path = str(install_root / "lib" / "libtorch_cpu.so")
     check_lib_symbols_for_abi_correctness(libtorch_cpu_path)

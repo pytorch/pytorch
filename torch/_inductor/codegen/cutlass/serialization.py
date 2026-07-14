@@ -38,10 +38,9 @@ class CUTLASSOperationSerializer:
         Returns:
             str: JSON string representation of the operation
         """
-        if operation.__class__.__qualname__ != "GemmOperation":
-            raise AssertionError(
-                "Only GemmOperation objects are supported via the main API"
-            )
+        assert operation.__class__.__qualname__ == "GemmOperation", (
+            "Only GemmOperation objects are supported via the main API"
+        )
         return json.dumps(cls._gemm_operation_to_json(operation))
 
     @classmethod
@@ -257,7 +256,7 @@ class CUTLASSOperationSerializer:
     @classmethod
     @functools.lru_cache(None)
     def _json_to_tile_description(
-        cls, json_dict: str | None
+        cls, json_dict: Optional[str]
     ) -> Optional["TileDescription"]:  # type: ignore[name-defined]  # noqa: F821
         """
         Convert JSON dict to TileDescription object.
@@ -314,7 +313,7 @@ class CUTLASSOperationSerializer:
     def _math_instruction_to_json(
         cls,
         math_instruction: Optional["MathInstruction"],  # type: ignore[name-defined]  # noqa: F821
-    ) -> str | None:
+    ) -> Optional[str]:
         """Convert MathInstruction to JSON string.
 
         Args:
@@ -345,7 +344,7 @@ class CUTLASSOperationSerializer:
     @classmethod
     @functools.lru_cache(None)
     def _json_to_math_instruction(
-        cls, json_dict: str | None
+        cls, json_dict: Optional[str]
     ) -> Optional["MathInstruction"]:  # type: ignore[name-defined]  # noqa: F821
         """Convert JSON string to MathInstruction object.
 
@@ -400,7 +399,7 @@ class CUTLASSOperationSerializer:
     def _tensor_description_to_json(
         cls,
         tensor_desc: Optional["TensorDescription"],  # type: ignore[name-defined]  # noqa: F821
-    ) -> str | None:
+    ) -> Optional[str]:
         """Convert TensorDescription to JSON string.
 
         Args:
@@ -425,8 +424,8 @@ class CUTLASSOperationSerializer:
     @functools.lru_cache(None)
     def _json_to_tensor_description(
         cls,
-        json_dict: str | None,
-        tensor_name: str | None = None,
+        json_dict: Optional[str],
+        tensor_name: Optional[str] = None,
     ) -> Optional["TensorDescription"]:  # type: ignore[name-defined]  # noqa: F821
         """Convert JSON string to TensorDescription object.
 
@@ -460,7 +459,7 @@ class CUTLASSOperationSerializer:
 
     @classmethod
     @functools.lru_cache(None)
-    def _enum_to_json(cls, enum_value: Enum | None) -> str | None:
+    def _enum_to_json(cls, enum_value: Optional[Enum]) -> Optional[str]:
         """Convert enum value to JSON string.
 
         Args:
@@ -481,7 +480,7 @@ class CUTLASSOperationSerializer:
 
     @classmethod
     @functools.lru_cache(None)
-    def _json_to_enum(cls, json_dict: str | None, enum_class: Any) -> Enum | None:
+    def _json_to_enum(cls, json_dict: Optional[str], enum_class: Any) -> Optional[Enum]:
         """Convert JSON string to enum value.
 
         Format: {name: "EnumName", value: 1}
@@ -502,7 +501,7 @@ class CUTLASSOperationSerializer:
 
 
 @functools.lru_cache(1)
-def get_cutlass_operation_serializer() -> CUTLASSOperationSerializer | None:
+def get_cutlass_operation_serializer() -> Optional[CUTLASSOperationSerializer]:
     if not try_import_cutlass():
         return None
     return CUTLASSOperationSerializer()

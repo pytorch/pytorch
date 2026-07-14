@@ -5,9 +5,10 @@ NOTE: Fake implementations:
     for more details on how to create fake kernels.
 """
 
+# flake8: noqa: B950
 import math
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -53,24 +54,14 @@ def _rotary_embedding_23_fake_impl(
     x: torch.Tensor,
     cos_cache: torch.Tensor,
     sin_cache: torch.Tensor,
-    position_ids: torch.Tensor | None = None,
+    position_ids: Optional[torch.Tensor] = None,
     *,
     interleaved: bool = False,
     num_heads: int = 0,
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """Fake implementation for RotaryEmbedding-23 for torch.compile purposes."""
-    if x.dim() == 4:
-        # Real impl permutes (0,2,1,3), computes via cat (allocates fresh
-        # contiguous), then permutes back, yielding strides equivalent to
-        # empty_permuted with (0,2,1,3) regardless of input strides.
-        return torch.empty_permuted(
-            x.shape, (0, 2, 1, 3), dtype=x.dtype, device=x.device
-        )
-    # 3D path: real impl ends in torch.reshape(contiguous_output, input_shape),
-    # which always yields contiguous strides. Force contiguous here so the
-    # fake stays aligned even when the caller passes a non-contiguous input.
-    return torch.empty(x.shape, dtype=x.dtype, device=x.device)
+    return x.clone()
 
 
 @_onnx_op("RotaryEmbedding", 23, _rotary_embedding_23_fake_impl)
@@ -78,7 +69,7 @@ def rotary_embedding_23(
     x: torch.Tensor,
     cos_cache: torch.Tensor,
     sin_cache: torch.Tensor,
-    position_ids: torch.Tensor | None = None,
+    position_ids: Optional[torch.Tensor] = None,
     *,
     interleaved: bool = False,
     num_heads: int = 0,
@@ -209,7 +200,7 @@ def rotary_embedding_23(
     return torch.permute(output, (0, 2, 1, 3))
 
 
-def _get_scale_factor(scale: float | None, head_size: int) -> float:
+def _get_scale_factor(scale: Optional[float], head_size: int) -> float:
     """Get the scale factor for attention computation."""
     return scale if scale is not None else (1.0 / math.sqrt(head_size))
 
@@ -232,7 +223,7 @@ def _get_qk_output_for_aten_spda(
     K: torch.Tensor,
     current_q_num_heads: int,
     current_kv_num_heads: int,
-    scale: float | None,
+    scale: Optional[float],
     qk_matmul_output_mode: int,
 ) -> torch.Tensor:
     """Get QK output tensor based on the specified mode."""
@@ -260,7 +251,7 @@ def _compute_qk_output_for_mode_0(
     K: torch.Tensor,
     current_q_num_heads: int,
     current_kv_num_heads: int,
-    scale: float | None,
+    scale: Optional[float],
 ) -> torch.Tensor:
     """Helper function to compute QK output for qk_matmul_output_mode == 0."""
     # Handle GQA manually for QK output
@@ -281,17 +272,17 @@ def _attention_23_fake_impl(
     Q: torch.Tensor,
     K: torch.Tensor,
     V: torch.Tensor,
-    attn_mask: torch.Tensor | None = None,
-    past_key: torch.Tensor | None = None,
-    past_value: torch.Tensor | None = None,
+    attn_mask: Optional[torch.Tensor] = None,
+    past_key: Optional[torch.Tensor] = None,
+    past_value: Optional[torch.Tensor] = None,
     *,
     is_causal: bool = False,
     kv_num_heads: int = 0,
     q_num_heads: int = 0,
     qk_matmul_output_mode: int = 0,
-    scale: float | None = None,
+    scale: Optional[float] = None,
     softcap: float = 0.0,
-    softmax_precision: int | None = None,
+    softmax_precision: Optional[int] = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fake implementation for Attention-23 for torch.compile purposes."""
     batch_size = Q.shape[0]
@@ -366,17 +357,17 @@ def attention_23(
     Q: torch.Tensor,
     K: torch.Tensor,
     V: torch.Tensor,
-    attn_mask: torch.Tensor | None = None,
-    past_key: torch.Tensor | None = None,
-    past_value: torch.Tensor | None = None,
+    attn_mask: Optional[torch.Tensor] = None,
+    past_key: Optional[torch.Tensor] = None,
+    past_value: Optional[torch.Tensor] = None,
     *,
     is_causal: bool = False,
     kv_num_heads: int = 0,
     q_num_heads: int = 0,
     qk_matmul_output_mode: int = 0,
-    scale: float | None = None,
+    scale: Optional[float] = None,
     softcap: float = 0.0,
-    softmax_precision: int | None = None,
+    softmax_precision: Optional[int] = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Attention-23 https://onnx.ai/onnx/operators/onnx__Attention.html#attention-23"""
 
@@ -549,6 +540,8 @@ def attention_23(
     # Reshape output back to 3D if input was 3D
     if input_shape_len == 3:
         # output: (batch_size, q_num_heads, q_sequence_length, v_head_size) -> (batch_size, q_sequence_length, hidden_size)
-        output = output.transpose(1, 2).reshape(batch_size, q_sequence_length, -1)
+        output = (
+            output.transpose(1, 2).contiguous().view(batch_size, q_sequence_length, -1)
+        )
 
     return output, present_key, present_value, qk_output

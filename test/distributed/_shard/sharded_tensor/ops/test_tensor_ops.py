@@ -5,10 +5,7 @@ import copy
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -17,24 +14,18 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 )
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-backend = torch.distributed.get_default_backend_for_device(device_type)
-
-
 class TestTensorOps(ShardedTensorTestBase):
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_nccl()
     def test_deep_copy(self):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
-                f"rank:2/{device_type}:2",
-                f"rank:3/{device_type}:3",
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
             ],
         )
         st = sharded_tensor.rand(spec, (12, 5))
@@ -43,17 +34,17 @@ class TestTensorOps(ShardedTensorTestBase):
         self.assertEqual(copied_st.local_tensor(), st.local_tensor())
         self.assertFalse(copied_st is st)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_nccl()
     def test_inplace_copy(self):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
-                f"rank:2/{device_type}:2",
-                f"rank:3/{device_type}:3",
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
             ],
         )
         st = sharded_tensor.rand(spec, (12, 5))
@@ -70,17 +61,17 @@ class TestTensorOps(ShardedTensorTestBase):
             st_with_grad.copy_(ones_st)
             self.assertEqual(st_with_grad.local_tensor(), ones_st.local_tensor())
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_nccl()
     def test_clone(self):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
-                f"rank:2/{device_type}:2",
-                f"rank:3/{device_type}:3",
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
             ],
         )
         st = sharded_tensor.rand(spec, (12, 5))
@@ -89,17 +80,17 @@ class TestTensorOps(ShardedTensorTestBase):
         self.assertEqual(copied_st.local_tensor(), st.local_tensor())
         self.assertFalse(copied_st is st)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_nccl()
     def test_detach(self):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
-                f"rank:2/{device_type}:2",
-                f"rank:3/{device_type}:3",
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
             ],
         )
         st = sharded_tensor.rand(spec, (12, 5), requires_grad=True)
@@ -114,17 +105,17 @@ class TestTensorOps(ShardedTensorTestBase):
         for local_shard in detached_st.local_shards():
             self.assertFalse(local_shard.tensor.requires_grad)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_nccl()
     def test_set_requires_grad(self):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{device_type}:0",
-                f"rank:1/{device_type}:1",
-                f"rank:2/{device_type}:2",
-                f"rank:3/{device_type}:3",
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
             ],
         )
         st = sharded_tensor.rand(spec, (12, 5))

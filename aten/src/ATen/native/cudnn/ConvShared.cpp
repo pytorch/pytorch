@@ -196,7 +196,7 @@ std::string repro_from_args(const ConvolutionParams& params) {
   ss << "out.backward(torch.randn_like(out))\n";
   ss << "torch.cuda.synchronize()\n\n";
 
-  return std::move(ss).str();
+  return ss.str();
 }
 
 // ---------------------------------------------------------------------
@@ -632,8 +632,7 @@ std::tuple<at::Tensor, at::Tensor> cudnn_convolution_backward(
     }
   }
 
-  return std::tuple<Tensor, Tensor>{
-      std::move(grad_input), std::move(grad_weight)};
+  return std::tuple<Tensor, Tensor>{grad_input, grad_weight};
 }
 
 Tensor cudnn_convolution_transpose_backward_weight(
@@ -703,8 +702,7 @@ std::tuple<at::Tensor, at::Tensor> cudnn_convolution_transpose_backward(
         allow_tf32);
   }
 
-  return std::tuple<Tensor, Tensor>{
-      std::move(grad_input), std::move(grad_weight)};
+  return std::tuple<Tensor, Tensor>{grad_input, grad_weight};
 }
 
 Tensor cudnn_convolution_relu(

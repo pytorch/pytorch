@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/Dimname.h>
 #include <ATen/core/class_type.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
@@ -97,7 +98,7 @@ struct TORCH_API TracingState
 // for when this happens is when we get an IntArrayRef argument with e.g. sizes
 // for view. When tracing, those might be tensors, which let us encode extra
 // data dependencies, but once they get to the ATen call where we actually have
-// the tracing logic, they get converted into a raw IntArrayRef, and we lose
+// the tracing logic, they get converted into a raw IntArrayRef, and we loose
 // all information. To prevent this, we temporarily stash it in here.
 struct ArgumentStash {
   struct IntArrayRefTrace : std::vector<Value*> {
@@ -326,6 +327,10 @@ TORCH_API void addInputs(
     const char* name,
     const std::optional<at::Layout>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    std::optional<at::DimnameList> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,

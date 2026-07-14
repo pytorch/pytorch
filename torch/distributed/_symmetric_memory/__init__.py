@@ -17,7 +17,6 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
-from torch._prims_common import make_contiguous_strides_for
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -113,10 +112,7 @@ def get_symm_mem_workspace(
     tensor = _group_name_to_workspace_tensor.get(group_name)
     size = tensor.numel() * tensor.element_size() if tensor is not None else 0
     if tensor is None or size < min_size:
-        if (
-            torch.accelerator.is_available()
-            and torch.accelerator.current_stream().is_capturing()
-        ):
+        if torch.cuda.is_current_stream_capturing():
             curr_size = 0 if tensor is None else tensor.numel() * tensor.element_size()
             raise RuntimeError(
                 f"get_symm_mem_workspace(): the requested size ({min_size} bytes) "
@@ -131,19 +127,19 @@ def get_symm_mem_workspace(
             (max(size, min_size),),
             [1],
             torch.uint8,
-            torch.device(torch.accelerator.current_device_index()),
+            torch.device(f"cuda:{torch.cuda.current_device()}"),
             group_name,
         )
         _group_name_to_workspace_tensor[group_name] = tensor
     return _SymmetricMemory.rendezvous(tensor)
 
 
-_backend_streams: dict[int, torch.Stream] = {}
+_backend_streams: dict[int, torch.cuda.Stream] = {}
 
 
-def _get_backend_stream(priority: int = 0) -> torch.Stream:
+def _get_backend_stream(priority: int = 0) -> torch.cuda.Stream:
     if priority not in _backend_streams:
-        _backend_streams[priority] = torch.Stream(priority=priority)
+        _backend_streams[priority] = torch.cuda.Stream(priority=priority)
     return _backend_streams[priority]
 
 
@@ -159,7 +155,7 @@ def _pipelined_multi_all_gather_and_consume(
     communication:
 
         gathered = [
-            all_gather_single(x, gather_dim=0, group=group)
+            all_gather_tensor(x, gather_dim=0, group=group)
             for x in shard
         ]
 
@@ -180,23 +176,19 @@ def _pipelined_multi_all_gather_and_consume(
 
     symm_mem.barrier(channel=0)
     backend_stream = _get_backend_stream()
-    backend_stream.wait_stream(torch.accelerator.current_stream())
+    backend_stream.wait_stream(torch.cuda.current_stream())
 
     for x, y in zip(shard, ag_out):
-        if not x.is_contiguous():
-            raise AssertionError(
-                "_pipelined_all_gather_and_consume: all tensors "
-                "in `shard` must be contiguous"
-            )
-        if not y.is_contiguous():
-            raise AssertionError(
-                "_pipelined_all_gather_and_consume: all tensors "
-                "in `ag_out` must be contiguous"
-            )
-        if x.shape[0] * group_size != y.shape[0]:
-            raise AssertionError
-        if x.shape[1:] != y.shape[1:]:
-            raise AssertionError
+        assert x.is_contiguous(), (
+            "_pipelined_all_gather_and_consume: all tensors "
+            "in `shard` must be contiguous"
+        )
+        assert y.is_contiguous(), (
+            "_pipelined_all_gather_and_consume: all tensors "
+            "in `ag_out` must be contiguous"
+        )
+        assert x.shape[0] * group_size == y.shape[0]
+        assert x.shape[1:] == y.shape[1:]
 
     def copy_shard(dst: list[torch.Tensor], src: list[torch.Tensor]) -> None:
         for d, s in zip(dst, src):
@@ -265,7 +257,7 @@ def _pipelined_multi_all_gather_and_consume(
     # and "b" with the first shard_consumer for now.
     copy_shard(dst=local_p2p_bufs, src=shard)
     symm_mem.barrier(channel=1)
-    backend_stream.wait_stream(torch.accelerator.current_stream())
+    backend_stream.wait_stream(torch.cuda.current_stream())
 
     # At this point, all ranks have copied their local shard to
     # their local p2p buffer. Each rank can now copy and consume
@@ -274,7 +266,7 @@ def _pipelined_multi_all_gather_and_consume(
 
     for step in range(1, group_size):
         if step % 2 == 0:
-            stream = torch.accelerator.current_stream()
+            stream = torch.cuda.current_stream()
         else:
             stream = backend_stream
         remote_rank = (step + rank) % group_size
@@ -287,13 +279,13 @@ def _pipelined_multi_all_gather_and_consume(
         # Copy from input to the all-gather output. Opportunistically overlap
         # it with the last shard_consumer.
         if group_size % 2 == 0:
-            stream = torch.accelerator.current_stream()
+            stream = torch.cuda.current_stream()
         else:
             stream = backend_stream
         with stream:
             copy_shard(dst=shards[rank], src=shard)
 
-    torch.accelerator.current_stream().wait_stream(backend_stream)
+    torch.cuda.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)
 
 
@@ -308,7 +300,7 @@ def _pipelined_all_gather_and_consume(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        ag_out = all_gather_single(shard, gather_dim=0, group=group)
+        ag_out = all_gather_tensor(shard, gather_dim=0, group=group)
         shards = ag_out.chunk(group.size())
         for src_rank, shard in enumerate(shards):
             shard_consumer(shard, src_rank)
@@ -352,11 +344,10 @@ def _pipelined_produce_and_all2all(
 
     symm_mem.barrier(channel=0)
     backend_stream = _get_backend_stream()
-    backend_stream.wait_stream(torch.accelerator.current_stream())
+    backend_stream.wait_stream(torch.cuda.current_stream())
 
     def get_p2p_buf(rank: int, idx: int) -> torch.Tensor:
-        if idx not in (0, 1):
-            raise AssertionError
+        assert idx in (0, 1)
         offset = 0 if idx == 0 else out_chunks[0].numel()
         return symm_mem.get_buffer(
             rank, out_chunks[0].shape, out_chunks[0].dtype, offset
@@ -371,7 +362,7 @@ def _pipelined_produce_and_all2all(
     for step in range(1, group_size):
         remote_rank = (rank - step) % group_size
         if step % 2 == 0:
-            stream = torch.accelerator.current_stream()
+            stream = torch.cuda.current_stream()
             p2p_buf = local_p2p_buf_1
             remote_p2p_buf = get_p2p_buf(remote_rank, 1)
         else:
@@ -426,7 +417,7 @@ def _pipelined_produce_and_all2all(
             # scheduled first. Once the first chunk_producer is scheduled in
             # the correct order, there's very little room for the scheduling
             # order of subsequent kernels to be inconsistent across ranks.
-            if step == 2 and torch.cuda.is_available():
+            if step == 2:
                 torch.cuda._sleep(100)
             chunk_producer((rank + step) % group_size, p2p_buf)
             symm_mem.barrier(channel=step % 2)
@@ -436,15 +427,15 @@ def _pipelined_produce_and_all2all(
             symm_mem.barrier(channel=step % 2)
 
     # If the sleep wasn't issued in the above loop, do it now.
-    if group_size == 2 and torch.cuda.is_available():
+    if group_size == 2:
         torch.cuda._sleep(100)
 
     chunk_producer(rank, out_chunks[rank])
-    torch.accelerator.current_stream().wait_stream(backend_stream)
+    torch.cuda.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)
 
 
-lib = torch.library.Library("symm_mem", "DEF")
+lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
 lib.define(
     "fused_all_gather_matmul("
     "Tensor A, Tensor[] Bs, int gather_dim, str group_name, *, bool return_A = True) -> (Tensor?, Tensor[])",
@@ -478,15 +469,6 @@ lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor"
 lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
 )
-# Copy-engine multicast low-contention all-gather that allocates symm_mem output.
-lib.define(
-    "_low_contention_all_gather_ce_multicast(Tensor tensor, str group_name) -> Tensor"
-)
-# Out variant for preallocated symm_mem output, including CUDA graph capture.
-lib.define(
-    "_low_contention_all_gather_ce_multicast_out("
-    "Tensor tensor, str group_name, Tensor(a!) out) -> Tensor(a!)"
-)
 
 lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
 """
@@ -501,7 +483,6 @@ network interfaces.
 
 
 @torch.library.impl(lib, "get_remote_tensors", "CUDA")
-@torch.library.impl(lib, "get_remote_tensors", "XPU")
 def _get_remote_tensors_default(
     local: torch.Tensor, group_name: c10d.GroupName
 ) -> tuple[torch.Tensor, ...]:
@@ -623,8 +604,7 @@ def _fused_all_gather_matmul_impl(
 
     # Computing block-wise matmul along the first dim of A
     if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
-        if A_scale is None:
-            raise AssertionError
+        assert A_scale is not None
         A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
         A_scale_flat = A_scale_shard.new_empty(
             A_scale_shard.shape[0] * group.size(),
@@ -649,8 +629,7 @@ def _fused_all_gather_matmul_impl(
             return_A,
         )
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
-        if A_scale is None:
-            raise AssertionError
+        assert A_scale is not None
         A_scale_shards = (
             A_scale.movedim(gather_dim, 0).flatten(0, -2).chunk(group.size())
         )
@@ -674,13 +653,11 @@ def _fused_all_gather_matmul_impl(
         )
     else:
         if scale_mode == _ScaleMode.TENSOR_WISE:
-            if A_scale is None:
-                raise AssertionError
+            assert A_scale is not None
             for kwargs in kwargs_list:
                 kwargs["scale_a"] = A_scale
         else:
-            if scale_mode != _ScaleMode.UNSCALED:
-                raise AssertionError
+            assert scale_mode == _ScaleMode.UNSCALED
 
         def default_consumer(shard: torch.Tensor, rank: int) -> None:
             for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
@@ -713,7 +690,7 @@ def _pipelined_all_gather_and_consume_last_dim(
 
     symm_mem.barrier(channel=0)
     backend_stream = _get_backend_stream()
-    backend_stream.wait_stream(torch.accelerator.current_stream())
+    backend_stream.wait_stream(torch.cuda.current_stream())
 
     def copy_shard(dst: torch.Tensor, src: torch.Tensor) -> None:
         dst.copy_(src)
@@ -732,7 +709,7 @@ def _pipelined_all_gather_and_consume_last_dim(
 
     copy_shard(dst=local_p2p_buf, src=shard)
     symm_mem.barrier(channel=1)
-    backend_stream.wait_stream(torch.accelerator.current_stream())
+    backend_stream.wait_stream(torch.cuda.current_stream())
 
     # At this point, all ranks have copied their local shard to
     # their local p2p buffer. Each rank can now copy and consume
@@ -741,7 +718,7 @@ def _pipelined_all_gather_and_consume_last_dim(
 
     for step in range(1, group_size):
         if step % 2 == 0:
-            stream = torch.accelerator.current_stream()
+            stream = torch.cuda.current_stream()
         else:
             stream = backend_stream
         remote_rank = (step + rank) % group_size
@@ -754,13 +731,13 @@ def _pipelined_all_gather_and_consume_last_dim(
         # Copy from input to the all-gather output. Opportunistically overlap
         # it with the last shard_consumer.
         if group_size % 2 == 0:
-            stream = torch.accelerator.current_stream()
+            stream = torch.cuda.current_stream()
         else:
             stream = backend_stream
         with stream:
             copy_shard(dst=shards[rank], src=shard)
 
-    torch.accelerator.current_stream().wait_stream(backend_stream)
+    torch.cuda.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)
 
 
@@ -801,7 +778,7 @@ def _fused_all_gather_matmul_last_gather_dim_impl(
     ]
 
     first = True
-    events = [torch.Event() for _ in outputs]
+    events = [torch.cuda.Event() for _ in outputs]
 
     def default_consumer(shard: torch.Tensor, rank: int) -> None:
         nonlocal first
@@ -864,7 +841,6 @@ def _fused_all_gather_matmul_fallback(
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "CUDA")
-@torch.library.impl(lib, "fused_all_gather_matmul", "XPU")
 def _fused_all_gather_matmul(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
@@ -877,7 +853,7 @@ def _fused_all_gather_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        all_gather_single(A_shard, gather_dim, group_name) @ B
+        all_gather_tensor(A_shard, gather_dim, group_name) @ B
 
     Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
     contiguous, no extra copy is required for input layout transformation.
@@ -927,8 +903,6 @@ def _should_use_fused_all_gather_matmul_native(
 
     return (
         "TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP" in os.environ
-        and torch.cuda.is_available()
-        and A_shard.device.type == "cuda"
         and A_shard.is_contiguous()
         and gather_dim == 0
         # _async_input_mm requires local_M to be divisible by world_size.
@@ -1075,8 +1049,7 @@ def _fused_all_gather_scaled_matmul_fallback(
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
         A_scale = A_scale.movedim(gather_dim, 0).flatten(0, -2)
     else:
-        if scale_mode != _ScaleMode.TENSOR_WISE:
-            raise AssertionError
+        assert scale_mode == _ScaleMode.TENSOR_WISE
 
     def scaled_matmul(
         A: torch.Tensor,
@@ -1112,7 +1085,6 @@ def _fused_all_gather_scaled_matmul_fallback(
 
 
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "CUDA")
-@torch.library.impl(lib, "fused_all_gather_scaled_matmul", "XPU")
 def _fused_all_gather_scaled_matmul(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
@@ -1129,7 +1101,7 @@ def _fused_all_gather_scaled_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        A = all_gather_single(A_shard, gather_dim, group_name)
+        A = all_gather_tensor(A_shard, gather_dim, group_name)
         leading_dims = A.shape[:-1]
         res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
         res = res.unflatten(0, leading_dims)
@@ -1189,8 +1161,7 @@ def _fused_all_gather_scaled_matmul(
             group_name,
             True,
         )
-        if A is None:
-            raise AssertionError
+        assert A is not None
         return A, res
 
 
@@ -1221,7 +1192,6 @@ def restride_A_shard_for_fused_all_gather_matmul(
 
 
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "CUDA")
-@torch.library.impl(lib, "fused_matmul_reduce_scatter", "XPU")
 def _fused_matmul_reduce_scatter(
     A: torch.Tensor,
     B: torch.Tensor,
@@ -1233,7 +1203,7 @@ def _fused_matmul_reduce_scatter(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
+        reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
 
     Optimal stride order for A - if A.movedim(scatter_dim, 0) is contiguous, no
     extra copy is required for input layout transformation. Otherwise A needs
@@ -1265,7 +1235,7 @@ def _fused_matmul_reduce_scatter_fallback(
     scatter_dim: int,
     group_name: c10d.GroupName,
 ) -> torch.Tensor:
-    res = funcol.reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
+    res = funcol.reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
     res = funcol.wait_tensor(res)
     return res
 
@@ -1356,7 +1326,6 @@ def _fused_matmul_reduce_scatter_impl(
 
 
 @torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter", "CUDA")
-@torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter", "XPU")
 def _fused_scaled_matmul_reduce_scatter(
     A: torch.Tensor,
     B: torch.Tensor,
@@ -1451,7 +1420,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         use_fast_accum,
     )
     C = C.view(*output_shape[:-1], B.shape[1])
-    res = funcol.reduce_scatter_single(
+    res = funcol.reduce_scatter_tensor(
         C,
         reduce_op,
         orig_scatter_dim,  # need original scatter dim for 3D+ output tensor here
@@ -1655,7 +1624,7 @@ def _maybe_convert_scalar_types_to_dtypes(
 class Work(_Work):
     def __init__(self) -> None:
         super().__init__()
-        self.event = torch.Event()
+        self.event = torch.cuda.Event()
         self.event.record()
 
     def wait(self, timeout: timedelta = timedelta(seconds=0)) -> bool:
@@ -1733,7 +1702,7 @@ def _low_contention_all_gather(
     output = tensor.new_empty(tensor.shape[0] * world_size, *tensor.shape[1:])
     chunks = output.chunk(world_size)
 
-    _get_backend_stream().wait_stream(torch.accelerator.current_stream())
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
     with _get_backend_stream():
         if not input_is_symm_mem:
             local_buf = symm_mem.get_buffer(rank, tensor.shape, tensor.dtype)
@@ -1747,153 +1716,6 @@ def _low_contention_all_gather(
         symm_mem.barrier()
         torch._C._distributed_c10d._register_work(output, Work())
         return output
-
-
-def _require_multicast(device_index: int, op_name: str) -> None:
-    if not _SymmetricMemory.has_multicast_support(DeviceType.CUDA, device_index):
-        raise RuntimeError(f"{op_name} requires multicast support (NVSwitch / NVLS).")
-
-
-# Use one dedicated signal-pad channel for CE multicast, separate from existing
-# low-contention collectives. Its two barriers are ordered on the same stream;
-# if a peer has not consumed the first signal yet, the second barrier's CAS put
-# spins until that peer slot is cleared.
-_CE_MULTICAST_BARRIER_CHANNEL = 3
-
-
-def _lc_ag_out_shape(tensor: torch.Tensor, world_size: int) -> tuple[int, ...]:
-    if tensor.dim() == 0:
-        return (world_size,)
-    return (tensor.shape[0] * world_size, *tensor.shape[1:])
-
-
-def _check_lc_ag_out(
-    tensor: torch.Tensor,
-    output: torch.Tensor,
-    world_size: int,
-    op_name: str,
-) -> None:
-    expected_shape = _lc_ag_out_shape(tensor, world_size)
-    if tuple(output.shape) != expected_shape:
-        raise RuntimeError(
-            f"{op_name}: expected out shape {expected_shape}, "
-            f"but got {tuple(output.shape)}."
-        )
-    if output.dtype != tensor.dtype:
-        raise RuntimeError(
-            f"{op_name}: expected out dtype {tensor.dtype}, but got {output.dtype}."
-        )
-    if output.device != tensor.device:
-        raise RuntimeError(
-            f"{op_name}: expected out device {tensor.device}, but got {output.device}."
-        )
-    if not output.is_contiguous():
-        raise RuntimeError(f"{op_name}: out must be contiguous.")
-
-
-def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
-    required_bytes = (_CE_MULTICAST_BARRIER_CHANNEL + 1) * symm_mem.world_size * 4
-    actual_bytes = _SymmetricMemory.signal_pad_size
-    if actual_bytes < required_bytes:
-        raise RuntimeError(
-            f"low_contention all-gather requires signal_pad_size >= "
-            f"{required_bytes} bytes for world_size={symm_mem.world_size}, but "
-            f"the current size is {actual_bytes} bytes."
-        )
-
-
-@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast", "Meta")
-def _low_contention_all_gather_ce_multicast_meta(
-    tensor: torch.Tensor,
-    group_name: c10d.GroupName,
-) -> torch.Tensor:
-    world_size = c10d._get_group_size_by_name(group_name)
-    return tensor.new_empty(_lc_ag_out_shape(tensor, world_size))
-
-
-@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast", "CUDA")
-def _low_contention_all_gather_ce_multicast(
-    tensor: torch.Tensor,
-    group_name: c10d.GroupName,
-) -> torch.Tensor:
-    """Direct-input copy-engine multicast all-gather into a fresh output."""
-    device_index = (
-        tensor.device.index
-        if tensor.device.index is not None
-        else torch.cuda.current_device()
-    )
-    _require_multicast(device_index, "_low_contention_all_gather_ce_multicast")
-    world_size = c10d._get_group_size_by_name(group_name)
-    out_shape = _lc_ag_out_shape(tensor, world_size)
-    if torch.cuda.is_current_stream_capturing():
-        raise RuntimeError(
-            "_low_contention_all_gather_ce_multicast cannot allocate its output "
-            "during CUDA graph capture. Use "
-            "_low_contention_all_gather_ce_multicast_out with a preallocated "
-            "symmetric-memory output."
-        )
-    device = torch.device("cuda", device_index)
-    with torch.cuda.use_mem_pool(get_mem_pool(device)):
-        output = torch.empty_strided(
-            out_shape,
-            make_contiguous_strides_for(out_shape),
-            dtype=tensor.dtype,
-            device=device,
-        )
-    return _low_contention_all_gather_ce_multicast_impl(tensor, group_name, output)
-
-
-@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast_out", "Meta")
-def _low_contention_all_gather_ce_multicast_out_meta(
-    tensor: torch.Tensor,
-    group_name: c10d.GroupName,
-    out: torch.Tensor,
-) -> torch.Tensor:
-    world_size = c10d._get_group_size_by_name(group_name)
-    _check_lc_ag_out(tensor, out, world_size, "_low_contention_all_gather_ce_multicast")
-    return out
-
-
-@torch.library.impl(lib, "_low_contention_all_gather_ce_multicast_out", "CUDA")
-def _low_contention_all_gather_ce_multicast_out(
-    tensor: torch.Tensor,
-    group_name: c10d.GroupName,
-    out: torch.Tensor,
-) -> torch.Tensor:
-    """Direct-input copy-engine multicast all-gather into caller-provided output."""
-    world_size = c10d._get_group_size_by_name(group_name)
-    _check_lc_ag_out(tensor, out, world_size, "_low_contention_all_gather_ce_multicast")
-    return _low_contention_all_gather_ce_multicast_impl(tensor, group_name, out)
-
-
-def _low_contention_all_gather_ce_multicast_impl(
-    tensor: torch.Tensor,
-    group_name: c10d.GroupName,
-    output: torch.Tensor,
-) -> torch.Tensor:
-    device_index = (
-        output.device.index
-        if output.device.index is not None
-        else torch.cuda.current_device()
-    )
-    _require_multicast(device_index, "_low_contention_all_gather_ce_multicast")
-    symm_mem = rendezvous(output, group_name)
-    if symm_mem is None:
-        raise RuntimeError(
-            "ce_multicast output must be allocated from symmetric memory"
-        )
-    _check_lc_signal_pad_capacity(symm_mem)
-
-    rank = symm_mem.rank
-    shard_bytes = tensor.numel() * tensor.element_size()
-
-    ag_input = tensor if tensor.is_contiguous() else tensor.contiguous()
-    symm_mem.barrier(channel=_CE_MULTICAST_BARRIER_CHANNEL)
-    torch.ops.symm_mem.memcpy_to_multicast_(
-        output, ag_input, rank * shard_bytes, group_name
-    )
-    symm_mem.barrier(channel=_CE_MULTICAST_BARRIER_CHANNEL)
-    return output
 
 
 @torch.library.impl(lib, "_low_contention_reduce_scatter", "Meta")
@@ -1914,12 +1736,11 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
     rank = symm_mem.rank
     world_size = symm_mem.world_size
 
-    if tensor.shape[0] % world_size != 0:
-        raise AssertionError
+    assert tensor.shape[0] % world_size == 0
     a2a_res = torch.empty_like(tensor)
     chunks = a2a_res.chunk(world_size)
 
-    _get_backend_stream().wait_stream(torch.accelerator.current_stream())
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
     with _get_backend_stream():
         # pull + offline reduction
         symm_mem.barrier()
@@ -1953,11 +1774,10 @@ def _low_contention_reduce_scatter_with_workspace(
     rank = workspace.rank
     world_size = workspace.world_size
 
-    if tensor.shape[0] % world_size != 0:
-        raise AssertionError
+    assert tensor.shape[0] % world_size == 0
     chunks = tensor.chunk(world_size)
 
-    _get_backend_stream().wait_stream(torch.accelerator.current_stream())
+    _get_backend_stream().wait_stream(torch.cuda.current_stream())
     with _get_backend_stream():
         # push + offline reduction
         workspace.barrier()
@@ -2143,16 +1963,6 @@ def empty(  # type: ignore[misc]
         return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
 
 
-def _resolve_group_name(group: c10d.GroupName | ProcessGroup) -> c10d.GroupName:
-    from torch._C._distributed_c10d import ProcessGroup
-
-    if isinstance(group, str):
-        return c10d.GroupName(group)
-    if isinstance(group, ProcessGroup):
-        return group.group_name
-    raise TypeError(f"unsupported group type: {type(group)}")
-
-
 def rendezvous(
     tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
 ) -> _SymmetricMemory:
@@ -2169,7 +1979,15 @@ def rendezvous(
         group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
             participating processes. This can be either a group name or a process group object.
     """
-    group_name = _resolve_group_name(group)
+    from torch._C._distributed_c10d import ProcessGroup
+
+    if isinstance(group, str):
+        group_name = c10d.GroupName(group)
+    elif isinstance(group, ProcessGroup):
+        group_name = group.group_name
+    else:
+        raise TypeError(f"rendezvous: unsupported group type: {type(group)}")
+
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
@@ -2177,9 +1995,7 @@ def is_nvshmem_available() -> bool:
     r"""
     is_nvshmem_available() -> bool
 
-    Check if NVSHMEM (CUDA) or rocSHMEM (ROCm) is available in the current
-    build and usable at runtime. On ROCm, rocSHMEM ``VERSION`` must be at
-    least 3.3.0 (see ``rocshmem/rocshmem.hpp``).
+    Check if NVSHMEM is available in current build and on current system.
     """
     try:
         from torch._C._distributed_c10d import _is_nvshmem_available
@@ -2322,79 +2138,7 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
     return _symm_mem_pools[device]
 
 
-def _cuda_get_out(
-    dst: torch.Tensor, hdl: _SymmetricMemory, offset: int, size: int, peer: int
-) -> None:
-    storage_offset = hdl.offset // dst.element_size() + offset
-    remote_src = hdl.get_buffer(peer, (size,), dst.dtype, storage_offset)
-    dst.view(-1)[:size].copy_(remote_src)
-
-
 # One-sided communication APIs.
-def get(
-    dst: torch.Tensor,
-    hdl: _SymmetricMemory,
-    peer: int,
-    offset: int = 0,
-) -> None:
-    r"""
-    get(dst, hdl, peer, offset=0) -> ()
-
-    Copy ``dst.numel()`` elements starting at ``offset`` from ``peer``'s
-    symmetric allocation into local ``dst`` using one-sided symmetric memory
-    access.
-
-    ``hdl`` is the symmetric memory handle returned by
-    :func:`torch.distributed._symmetric_memory.rendezvous`; the remote source
-    is ``peer``'s allocation backing that handle. The number of elements copied
-    is inferred from ``dst``; pass a view (e.g. ``dst[:n]``) to fill only part
-    of a tensor. ``offset`` is expressed in elements of ``dst``'s dtype.
-    ``dst`` can be a regular CUDA tensor or a symmetric-memory tensor; it must
-    be on the same device as ``hdl`` and backed by contiguous memory. The copy
-    is issued on the current CUDA stream.
-
-    Args:
-        dst (Tensor): local destination tensor.
-        hdl (SymmetricMemory): handle whose peer allocation is the remote
-            source.
-        peer (int): rank to copy from.
-        offset (int, optional): element offset into the peer allocation to
-            start reading from. Defaults to ``0``.
-    """
-    if dst.device != hdl.device:
-        raise ValueError("get: dst must be on the same device as hdl")
-    if not dst.is_contiguous():
-        raise ValueError("get: dst must be backed by contiguous memory")
-    if offset < 0:
-        raise ValueError("get: offset must be non-negative")
-    if peer < 0 or peer >= hdl.world_size:
-        raise ValueError("get: invalid peer")
-    size = dst.numel()
-    element_size = dst.element_size()
-    if hdl.offset % element_size != 0:
-        raise RuntimeError("get: handle offset is not element-aligned")
-    start = hdl.offset + offset * element_size
-    end = start + size * element_size
-    if start > hdl.buffer_size or end > hdl.buffer_size:
-        raise ValueError("get: requested range exceeds symmetric allocation")
-
-    backend = get_backend(dst.device)
-    if backend == "CUDA":
-        _cuda_get_out(dst, hdl, offset, size, peer)
-        return
-
-    # `hdl` is a pybind `_SymmetricMemory` object. Dispatcher expects the
-    # TorchBind custom class type `__torch__.torch.classes.c10d.SymmetricMemory`.
-    # Convert via `.boxed()`.
-    hdl_boxed = hdl.boxed() if hasattr(hdl, "boxed") else hdl
-    if backend == "NVSHMEM":
-        torch.ops.symm_mem.nvshmem_get_out(dst, hdl_boxed, offset, size, peer)
-    elif backend == "NCCL":
-        torch.ops.symm_mem.nccl_get_out(dst, hdl_boxed, offset, size, peer)
-    else:
-        raise ValueError(f"get: unsupported backend: {backend}")
-
-
 def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     r"""
     put_signal(src, hdl, peer) -> None
@@ -2438,156 +2182,13 @@ def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
         raise ValueError(f"wait_signal: unsupported backend: {backend}")
 
 
-def reduce_scatter_offset(
-    input: torch.Tensor,
-    out: list[torch.Tensor],
-    group: str,
-    *,
-    dim: int,
-    offsets: list[int] | None = None,
-    dst_ranks: list[int] | None = None,
-    red_op: str = "sum",
-) -> None:
-    r"""
-    reduce_scatter_offset(input, out, group, *, dim, offsets, dst_ranks, red_op='sum') -> None
-
-    Simultaneously reduce N blocks of a 2-D ``input`` tensor from a symmetric
-    memory buffer, routing each block to a specific destination rank.  Only
-    ``dst_ranks[i]`` writes the reduced result for block ``i``; the result is
-    written to a contiguous output tensor, with the same shape as block ``i``.
-
-    The ``dim`` argument controls which dimension is sharded:
-
-    - ``dim=0`` (row sharding): block ``i`` spans
-      ``input[offsets[i-1] : offsets[i], :]``.  Each ``out[j]`` has shape
-      ``(size_j, input.size(1))``.
-    - ``dim=1`` (column sharding): block ``i`` spans
-      ``input[:, offsets[i-1] : offsets[i]]``.  Each ``out[j]`` has shape
-      ``(input.size(0), size_j)``.
-
-    Blocks are described by ``offsets``, an inclusive prefix-sum of block sizes
-    along ``dim`` (first block starts at index 0 by convention).  Block offsets
-    can be even or uneven; when uneven, the following condition must be met: for
-    each ``j``, the ``j``-th owned block must have the same size across all
-    ranks (so that ``out[j]`` has a uniform shape); different ``j``'s may
-    differ.
-
-    Args:
-        input (Tensor): 2-D tensor allocated via symmetric memory (innermost
-            dimension must be contiguous).
-        out (list[Tensor]): Output tensors for this rank's owned blocks.  Must
-            have length equal to the number of blocks owned by this rank (i.e.
-            the count of ``i`` where ``dst_ranks[i] == my_rank``).  Each
-            ``out[j]`` must be contiguous with the same dtype as ``input``.
-        group (str): The name of the ``ProcessGroup`` to perform the operation on.
-        dim (int): Dimension along which blocks are defined (0 or 1).
-        offsets (list[int] | None): Inclusive prefix-sum of block sizes along
-            ``dim``, length N.  If not provided, ``input.size(dim)`` is divided
-            into equal-size blocks based on the size of the ``group``.
-        dst_ranks (list[int] | None): Destination rank for each block.  If not
-            provided, blocks are distributed round-robin across ranks.
-        red_op (str): Reduction operation; currently only ``'sum'`` is supported.
-
-    Example::
-
-        >>> # doctest: +SKIP
-        >>> # Each rank holds a Grouped GEMM gradient buffer in symmetric memory.
-        >>> # The buffer has W experts laid out as equal column blocks; each expert
-        >>> # is reduced to a specific rank (dst_ranks[i] == i % world_size).
-        >>> buf = symm_mem.empty(H, W * C, dtype=torch.bfloat16, device="cuda")
-        >>> symm_mem.rendezvous(buf, group=group_name)
-        >>> offsets = [i * C for i in range(1, W + 1)]  # inclusive prefix-sum
-        >>> dst_ranks = [i % world_size for i in range(W)]
-        >>> n_owned = sum(r == rank for r in dst_ranks)
-        >>> out = [torch.empty(H, C, dtype=torch.bfloat16, device="cuda") for _ in range(n_owned)]
-        >>> symm_mem.reduce_scatter_offset(buf, out, group_name, dim=1, offsets=offsets, dst_ranks=dst_ranks)
-    """
-    backend = get_backend(input.device)
-    if backend == "NCCL":
-        torch.ops.symm_mem.nccl_reduce_scatter_offset(
-            input, out, group, dim, offsets, dst_ranks, red_op
-        )
-    else:
-        raise NotImplementedError(
-            f"reduce_scatter_offset: unsupported backend: {backend}"
-        )
-
-
-def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
-    r"""
-    is_symm_mem_tensor(tensor) -> bool
-
-    Returns ``True`` if ``tensor`` was allocated via symmetric memory
-    (i.e. via :func:`torch.distributed._symmetric_memory.empty` or
-    :meth:`_SymmetricMemory.empty_strided_p2p`).
-
-    This is a non-collective, O(1) check.
-
-    Args:
-        tensor (:class:`torch.Tensor`): the tensor to check.
-    """
-    return _SymmetricMemory.is_symm_mem_tensor(tensor)
-
-
-def all_to_all_nd(
-    input: torch.Tensor,
-    out: torch.Tensor,
-    scatter_dim: int,
-    gather_dim: int,
-    *,
-    group: str,
-) -> None:
-    r"""
-    all_to_all_nd(input, out, scatter_dim, gather_dim, *, group) -> None
-
-    Permute-free all-to-all: shards along ``scatter_dim`` of ``input`` are exchanged
-    so each rank receives one shard per peer; results are laid out along ``gather_dim``
-    of ``out``. Supported pairs are ``(scatter_dim=1, gather_dim=0)`` and
-    ``(scatter_dim=0, gather_dim=1)``.
-
-    For ``scatter_dim=1``, ``gather_dim=0`` (let ``G`` be the group size): ``input`` is
-    ``[rows, G * local_cols]`` or equivalently ``[rows, G, local_cols]``;
-    each rank ``r`` reads column block ``r`` from every peer and writes peer ``j`` into
-    ``out[j]``. ``out`` must be contiguous with shape ``[G, rows, local_cols]`` or the
-    flattened equivalent ``[G * rows, local_cols]``.
-
-    For ``scatter_dim=0``, ``gather_dim=1`` (``G`` is the group size): ``input`` is
-    ``[G * local_rows, cols]`` or equivalently ``[G, local_rows, cols]``;
-    each rank ``r`` reads row block ``r`` from every peer; peer ``j`` is stored in
-    ``out[:, j, :]``. ``out`` must be contiguous with shape ``[local_rows, G, cols]`` or
-    ``[local_rows, G * cols]`` (flattened gather and inner dims).
-
-    Args:
-        input (Tensor): For ``(scatter_dim=1, gather_dim=0)``, 2-D ``[rows, G*local_cols]`` or
-            3-D ``[rows, G, local_cols]`` in symmetric memory (innermost dimension contiguous).
-            For ``(scatter_dim=0, gather_dim=1)``, 2-D ``[G*local_rows, cols]`` or 3-D
-            ``[G, local_rows, cols]`` (same layout).
-        out (Tensor): Contiguous buffer (see shapes above; 2-D allowed where noted).
-        scatter_dim (int): ``0`` or ``1`` — dimension along which the input is partitioned.
-        gather_dim (int): ``0`` or ``1`` — dimension along which peer chunks are
-            concatenated in ``out``.
-        group (str): The name of the ``ProcessGroup`` to perform the operation on.
-    """
-    backend = get_backend(input.device)
-    if backend == "NCCL":
-        torch.ops.symm_mem.nccl_all_to_all_nd(
-            input, out, scatter_dim, gather_dim, group
-        )
-    else:
-        raise NotImplementedError(f"all_to_all_nd: unsupported backend: {backend}")
-
-
 __all__ = [
     "empty",
-    "is_symm_mem_tensor",
     "rendezvous",
     "is_nvshmem_available",
     "set_backend",
     "get_backend",
-    "get",
     "set_signal_pad_size",
     "get_signal_pad_size",
     "get_mem_pool",
-    "reduce_scatter_offset",
-    "all_to_all_nd",
 ]

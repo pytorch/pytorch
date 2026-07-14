@@ -1,6 +1,7 @@
 # The model is from here:
 #   https://github.com/pytorch/examples/blob/master/word_language_model/model.py
 
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -121,7 +122,7 @@ class RNNModelWithTupleHidden(RNNModel):
         """Detach hidden states from their history."""
         return (h[0].detach(), h[1].detach())
 
-    def forward(self, input: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
+    def forward(self, input: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
         emb = self.drop(self.encoder(input))
         output, hidden = self.rnn(emb, hidden)
         output = self.drop(output)

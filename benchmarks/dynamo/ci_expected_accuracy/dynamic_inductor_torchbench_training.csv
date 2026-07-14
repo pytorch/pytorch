@@ -130,6 +130,10 @@ phlippe_resnet,pass,6
 
 
 
+pytorch_CycleGAN_and_pix2pix,pass,6
+
+
+
 pytorch_stargan,pass,6
 
 
@@ -190,7 +194,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,fail_to_run,38
+vision_maskrcnn,fail_to_run,37
 
 
 

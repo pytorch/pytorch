@@ -3,9 +3,8 @@
 import os
 
 import torch
-from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import highest_precision_float
-from torch.testing._internal.opinfo.core import (
+from torch.testing import make_tensor  # noqa: F401
+from torch.testing._internal.opinfo.core import (  # noqa: F401
     BinaryUfuncInfo,
     ErrorInput,
     generate_elementwise_binary_tensors,
@@ -770,9 +769,8 @@ def _sample_inputs_sparse_like_fns(
             tensor, args=(), kwargs=dict(device=device, dtype=dtype, layout=layout)
         )
 
-        hpf = highest_precision_float(device)
-        if dtype is not hpf:
-            yield SampleInput(tensor, args=(), kwargs=dict(dtype=hpf))
+        if dtype is not torch.float64:
+            yield SampleInput(tensor, args=(), kwargs=dict(dtype=torch.float64))
 
         if torch.cuda.is_available():
             other_device = "cuda" if tensor.device.type == "cpu" else "cpu"

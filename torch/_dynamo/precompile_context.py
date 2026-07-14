@@ -5,7 +5,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Optional, TypeVar
 
 import torch
 from torch._dynamo.package import (
@@ -129,13 +129,12 @@ class PrecompileContext:
         """
         Edit the content of an existing artifact
         """
-        if key not in cls._backend_artifacts_by_key:
-            raise AssertionError(f"Key {key} not found in artifacts")
+        assert key in cls._backend_artifacts_by_key, f"Key {key} not found in artifacts"
         artifact = cls._backend_artifacts_by_key[_BackendId(key)]
         artifact.edit_contents(edit_fn)
 
     @classmethod
-    def serialize_artifact_by_key(cls, key: str) -> BackendCacheArtifact[Any] | None:
+    def serialize_artifact_by_key(cls, key: str) -> Optional[BackendCacheArtifact[Any]]:
         """
         Return the backend cache artifact with the associated key
         """

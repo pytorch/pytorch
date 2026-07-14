@@ -189,7 +189,7 @@ def all_gather(
             raise RuntimeError(  # type: ignore[misc]
                 error_msg,
                 exception_list,
-            ) from exception_list[0]  # pyrefly: ignore [bad-raise]
+            ) from exception_list[0]  # pyrefly: ignore [bad-raise, invalid-inheritance]
         return ret_list
     else:
         if not sync_obj.success:
@@ -274,10 +274,13 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
     result = []
     for r in ranges:
         if len(r) == 1:
+            # pyrefly: ignore [bad-argument-type]
             result.append(f"{r.start}")
         elif r.step == 1:
+            # pyrefly: ignore [bad-argument-type]
             result.append(f"{r.start}:{r.stop}")
         else:
+            # pyrefly: ignore [bad-argument-type]
             result.append(f"{r.start}:{r.stop}:{r.step}")
     return ",".join(result)
 
@@ -317,7 +320,7 @@ def _check_cpu_rng_sync(
 def _check_rng_sync_internal(
     generator: torch.Generator, group: dist.ProcessGroup
 ) -> tuple[dict[Any, set], str]:
-    if generator.device.type in {"cuda", "xpu"}:
+    if generator.device.type == "cuda":
         return _check_philox_rng_sync(generator, group)
     elif generator.device.type == "cpu":
         return _check_cpu_rng_sync(generator, group)

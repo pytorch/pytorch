@@ -1,4 +1,3 @@
-# Owner(s): ["oncall: releng"]
 name: trunk-tagging
 
 on:
@@ -22,15 +21,15 @@ permissions:
 jobs:
   tag-trunk-commit:
     name: Tag trunk commit
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     if: github.repository_owner == 'pytorch'
 
     steps:
       - name: Pre-checkout validation
         run: |
           # For workflow_dispatch, validate SHA format before checkout
-          if [ -n "${INPUT_COMMIT_SHA}" ]; then
-            COMMIT_SHA="${INPUT_COMMIT_SHA}"
+          if [ -n "${{ github.event.inputs.commit_sha }}" ]; then
+            COMMIT_SHA="${{ github.event.inputs.commit_sha }}"
 
             # Verify it's a well-formed SHA (40 hex characters)
             if ! echo "${COMMIT_SHA}" | grep -qE '^[a-f0-9]{40}$'; then
@@ -43,8 +42,6 @@ jobs:
             echo "✅ Using current commit SHA - no pre-checkout validation needed"
           fi
 
-        env:
-          INPUT_COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -56,8 +53,8 @@ jobs:
       - name: Set commit SHA
         id: commit
         run: |
-          if [ -n "${INPUT_COMMIT_SHA}" ]; then
-            COMMIT_SHA="${INPUT_COMMIT_SHA}"
+          if [ -n "${{ github.event.inputs.commit_sha }}" ]; then
+            COMMIT_SHA="${{ github.event.inputs.commit_sha }}"
           else
             COMMIT_SHA="${{ github.sha }}"
           fi
@@ -66,8 +63,6 @@ jobs:
             echo "tag_name=trunk/${COMMIT_SHA}"
           } >> "${GITHUB_OUTPUT}"
 
-        env:
-          INPUT_COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
       - name: Validate commit SHA
         run: |
           COMMIT_SHA="${{ steps.commit.outputs.sha }}"
@@ -79,7 +74,7 @@ jobs:
           fi
 
           # For workflow_dispatch, verify the commit exists on main branch
-          if [ -n "${INPUT_COMMIT_SHA}" ]; then
+          if [ -n "${{ github.event.inputs.commit_sha }}" ]; then
             echo "Manual dispatch detected - validating commit is on main branch..."
 
             # Get all commits reachable from main branch
@@ -94,8 +89,6 @@ jobs:
             echo "✅ Commit ${COMMIT_SHA} is valid (automatic push trigger)"
           fi
 
-        env:
-          INPUT_COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
       - name: Create and push tag(s) with retry
         id: check_tag
         env:
@@ -316,10 +309,7 @@ jobs:
             echo "  Name: ${{ steps.commit.outputs.tag_name }}"
             echo "  Commit: ${{ steps.commit.outputs.sha }}"
             echo "  Trigger: ${{ github.event_name }}"
-            if [ -n "${INPUT_COMMIT_SHA}" ]; then
-              echo "  Manual commit: ${INPUT_COMMIT_SHA}"
+            if [ -n "${{ github.event.inputs.commit_sha }}" ]; then
+              echo "  Manual commit: ${{ github.event.inputs.commit_sha }}"
             fi
           fi
-
-        env:
-          INPUT_COMMIT_SHA: ${{ github.event.inputs.commit_sha }}

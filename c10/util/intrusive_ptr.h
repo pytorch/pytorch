@@ -188,11 +188,7 @@ class C10_API intrusive_ptr_target {
   mutable std::atomic<uint64_t> combined_refcount_;
   static_assert(sizeof(std::atomic<uint64_t>) == 8);
   static_assert(alignof(std::atomic<uint64_t>) == 8);
-  // is_always_lock_free check lives in intrusive_ptr.cpp so it's only
-  // evaluated by the host compiler. CUDA-like device compilers parsing this
-  // header may target hardware without 64-bit atomics; see
-  // https://github.com/pytorch/pytorch/issues/171775 (introduced by
-  // https://github.com/pytorch/pytorch/pull/163394).
+  static_assert(std::atomic<uint64_t>::is_always_lock_free);
 
   template <typename T, typename NullType>
   friend class intrusive_ptr;
@@ -983,7 +979,9 @@ class weak_intrusive_ptr final {
   }
 
   void swap(weak_intrusive_ptr& rhs) noexcept {
-    std::swap(target_, rhs.target_);
+    TTarget* tmp = target_;
+    target_ = rhs.target_;
+    rhs.target_ = tmp;
   }
 
   // NB: This should ONLY be used by the std::hash implementation

@@ -1,8 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
-import unittest
-import weakref
 
 import torch
 import torch._dynamo.test_case
@@ -40,8 +38,7 @@ def count_ops(
         return False
 
     if op is not None:
-        if isinstance(op, list):
-            raise AssertionError("Expected op to not be a list")
+        assert not isinstance(op, list)
         ops = [op]
     if freq is not None:
         freqs = [freq]
@@ -54,20 +51,17 @@ def count_ops(
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
             err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
-            if actual_count != freq:
-                raise AssertionError(err_msg)
+            assert actual_count == freq, err_msg
     else:
-        if freqs_ge is None:
-            raise AssertionError("Expected freqs_ge to not be None")
+        assert freqs_ge is not None
         for op, freq_ge in zip(ops, freqs_ge):
             actual_count = 0
             for node in gm.graph.nodes:
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
-            if actual_count < freq_ge:
-                raise AssertionError(
-                    f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
-                )
+            assert actual_count >= freq_ge, (
+                f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
+            )
     return gm
 
 
@@ -98,33 +92,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertIn("inductor_compiled_code", debug_string)
 
         # Result should be correct
-        expected = torch.matmul(x, y)
-        self.assertEqual(result, expected)
-
-    @requires_cuda_and_triton
-    def test_wrap_name_visible_in_debug_mode(self):
-        """Test that named compiled regions surface their name in DebugMode"""
-
-        @torch.compile(
-            backend="inductor",
-            options={"wrap_inductor_compiled_regions": True},
-            fullgraph=True,
-            name="flex_attention",
-        )
-        def fn(x, y):
-            return torch.matmul(x, y)
-
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
-
-        with DebugMode() as debug_mode:
-            result = fn(x, y)
-
-        debug_string = debug_mode.debug_string()
-
-        self.assertIn("inductor_compiled_code", debug_string)
-        self.assertIn("name=flex_attention", debug_string)
-
         expected = torch.matmul(x, y)
         self.assertEqual(result, expected)
 
@@ -952,60 +919,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertEqual(y.grad, y_eager.grad)
 
     @requires_cuda_and_triton
-    def test_sac_outer_compile_inner_name_visible_to_policy(self):
-        """Test that SAC policies can inspect torch.compile region names"""
-
-        @torch.compile(
-            backend="inductor",
-            options={"wrap_inductor_compiled_regions": True},
-            fullgraph=True,
-            name="flex_attention",
-        )
-        def inner_compiled_matmul(x, y):
-            return torch.matmul(x, y)
-
-        seen_region_names = []
-
-        def policy_fn(ctx, op, *args, **kwargs):
-            from torch._higher_order_ops.wrap import inductor_compiled_code
-
-            if op == inductor_compiled_code:
-                seen_region_names.append(kwargs.get("name"))
-            return CheckpointPolicy.PREFER_RECOMPUTE
-
-        def checkpointed_fn(x, y):
-            a = inner_compiled_matmul(x, y)
-            return torch.relu(a)
-
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
-
-        x_eager = x.detach().clone().requires_grad_(True)
-        y_eager = y.detach().clone().requires_grad_(True)
-
-        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
-
-        output = checkpoint(
-            checkpointed_fn,
-            x,
-            y,
-            use_reentrant=False,
-            context_fn=context_fn,
-        )
-        loss = output.sum()
-        loss.backward()
-
-        a_eager = torch.matmul(x_eager, y_eager)
-        b_eager = torch.relu(a_eager)
-        loss_eager = b_eager.sum()
-        loss_eager.backward()
-
-        self.assertIn("flex_attention", seen_region_names)
-        self.assertEqual(output, b_eager)
-        self.assertEqual(x.grad, x_eager.grad)
-        self.assertEqual(y.grad, y_eager.grad)
-
-    @requires_cuda_and_triton
     def test_wrap_no_dispatch_mode_no_hop_invoked(self):
         """
         Test that without TorchDispatchMode, the HOP is NOT invoked.
@@ -1151,314 +1064,20 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
 
-    def test_fake_tensor_mode_works(self):
-        """Test that running compiled code inside FakeTensorMode works with FX graph fallback"""
+    def test_fake_tensor_mode_raises_error(self):
+        """Test that running compiled code inside FakeTensorMode raises a clear error"""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():
             model = torch.nn.Linear(4, 4)
             inp = torch.rand(4, 4)
 
-            # The FX graph is now serialized using SerializedGraphModule, so it
-            # survives cache serialization/deserialization and works with caching
             with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
-                # This should now work - the inductor_compiled_code HOP will
-                # use the stored FX graph to propagate fake tensors
-                result = torch.compile(model)(inp)  # noqa: UNSPECIFIED_BACKEND
-                # Verify the result has the expected shape
-                self.assertEqual(result.shape, (4, 4))
-
-    def test_proxy_tensor_mode_works(self):
-        """Test that running compiled code inside ProxyTensorMode works with FX graph fallback"""
-        from torch._higher_order_ops.wrap import (
-            inductor_code_side_table,
-            inductor_compiled_code,
-            InductorCompiledCallable,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        # Reset the side table for a clean test
-        inductor_code_side_table.reset_table()
-
-        # Create a simple FX graph
-        class SimpleModel(torch.nn.Module):
-            def forward(self, x):
-                return x + 1
-
-        model = SimpleModel()
-        gm = torch.fx.symbolic_trace(model)
-
-        # Create an InductorCompiledCallable
-        # The compiled callable should match FX graph's output convention
-        def simple_compiled(inputs):
-            return inputs[0] + 1
-
-        callable_obj = InductorCompiledCallable(simple_compiled, gm)
-
-        # Wrapper that uses the HOP
-        def wrapper(x):
-            return inductor_compiled_code(callable_obj, [x])
-
-        inp = torch.randn(4, 4)
-        traced = make_fx(wrapper)(inp)
-
-        # Verify the traced graph contains the inductor_compiled_code HOP
-        hop_found = False
-        for node in traced.graph.nodes:
-            if node.op == "call_function" and "inductor_compiled_code" in str(
-                node.target
-            ):
-                hop_found = True
-                # Verify the callable index is an int
-                self.assertIsInstance(node.args[0], int)
-                break
-        self.assertTrue(
-            hop_found, "inductor_compiled_code HOP not found in traced graph"
-        )
-
-        # Verify the traced graph can be executed and produces correct results
-        result = traced(inp)
-        expected = inp + 1
-        torch.testing.assert_close(result, expected)
-
-    def test_hop_call_releases_boxed_inputs_before_dispatch_returns(self):
-        from torch._higher_order_ops.wrap import (
-            inductor_code_side_table,
-            inductor_compiled_code,
-            InductorCompiledCallable,
-        )
-
-        class Holder:
-            pass
-
-        alive_during_call = []
-
-        def compiled_callable(inputs):
-            holder_ref = weakref.ref(inputs[0])
-            inputs.clear()
-            alive_during_call.append(holder_ref() is not None)
-            return (torch.empty(()),)
-
-        inductor_code_side_table.reset_table()
-        callable_obj = InductorCompiledCallable(compiled_callable)
-        callable_idx = inductor_code_side_table.add_callable(callable_obj)
-
-        def call_with_moved_input():
-            holder = Holder()
-            inputs = [holder]
-            holder = None
-            return inductor_compiled_code(callable_idx, inputs)
-
-        try:
-            call_with_moved_input()
-        finally:
-            inductor_code_side_table.reset_table()
-
-        self.assertEqual(alive_during_call, [False])
-
-    def test_hop_fx_codegen_releases_boxed_input_before_dispatch(self):
-        from torch._higher_order_ops.wrap import (
-            inductor_code_side_table,
-            inductor_compiled_code,
-            InductorCompiledCallable,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        alive_during_call = []
-        track_lifetime = False
-
-        def fw_callable(inputs):
-            return (inputs[0] + 1, inputs[0] + 2)
-
-        def bw_callable(inputs):
-            if track_lifetime:
-                holder_ref = weakref.ref(inputs[0])
-                inputs.clear()
-                alive_during_call.append(holder_ref() is not None)
-                return (torch.empty(()),)
-            return (inputs[0] + inputs[1],)
-
-        inductor_code_side_table.reset_table()
-        fw_callable_obj = InductorCompiledCallable(fw_callable)
-        bw_callable_obj = InductorCompiledCallable(bw_callable)
-
-        def wrapper(x):
-            out = inductor_compiled_code(fw_callable_obj, [x], name="minimal_fw")
-            return inductor_compiled_code(
-                bw_callable_obj,
-                [out[0], out[1]],
-                name="minimal_bw",
-            )
-
-        gm = make_fx(wrapper)(torch.randn(4))
-        hop_nodes = [
-            node
-            for node in gm.graph.nodes
-            if node.op == "call_function" and node.target is inductor_compiled_code
-        ]
-        self.assertEqual(len(hop_nodes), 2)
-        target = hop_nodes[1].target
-        self.assertEqual(getattr(target, "_boxed_arg_indices", None), (1,))
-        boxed = "inductor_compiled_code_1_boxed_arg_1 = [getitem, getitem_1];  getitem = getitem_1 = None"
-        self.assertIn(boxed, gm.code)
-        pattern = r"torch\.ops\.higher_order\.inductor_compiled_code\(\d+, inductor_compiled_code_1_boxed_arg_1"
-        self.assertRegex(gm.code, pattern)
-        track_lifetime = True
-
-        try:
-            gm(torch.randn(4))
-        finally:
-            inductor_code_side_table.reset_table()
-
-        self.assertEqual(alive_during_call, [False])
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_hop_codegen_releases_multiple_boxed_inputs_before_dispatch(self):
-        from torch._higher_order_ops.wrap import (
-            inductor_code_side_table,
-            inductor_compiled_code,
-            InductorCompiledCallable,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        device = torch.device("cuda")
-        dtype = torch.uint8
-        num_saved = 2
-        saved_size = 8 * 1024 * 1024
-        iterations = 3
-        live_before_scratch = []
-        peak_during_backward = []
-        baseline_memory = 0
-        track_memory = False
-
-        def cleanup():
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
-
-        def fw_callable(inputs):
-            x = inputs[0]
-            return (x + 1, x + 2)
-
-        def bw_callable(inputs):
-            if track_memory:
-                inputs.clear()
-                live_before_scratch.append(
-                    torch.cuda.memory_allocated() - baseline_memory
-                )
-                scratch = torch.empty((saved_size,), device=device, dtype=dtype)
-                peak_during_backward.append(
-                    torch.cuda.max_memory_allocated() - baseline_memory
-                )
-                del scratch
-                return (torch.empty((), device=device, dtype=dtype),)
-            return (inputs[0] + inputs[1],)
-
-        inductor_code_side_table.reset_table()
-        fw = InductorCompiledCallable(fw_callable)
-        bw = InductorCompiledCallable(bw_callable)
-
-        def wrapper(x):
-            out = inductor_compiled_code(fw, [x], name="minimal_fw")
-            return inductor_compiled_code(
-                bw,
-                [out[i] for i in range(num_saved)],
-                name="minimal_bw",
-            )
-
-        gm = make_fx(wrapper)(torch.empty((saved_size,), dtype=dtype))
-        track_memory = True
-
-        try:
-            for _ in range(iterations):
-                cleanup()
-                inp = torch.empty((saved_size,), device=device, dtype=dtype)
-                baseline_memory = torch.cuda.memory_allocated()
-                out = gm(inp)
-                torch.cuda.synchronize()
-                del out, inp
-                cleanup()
-        finally:
-            inductor_code_side_table.reset_table()
-
-        max_live_before_scratch = max(live_before_scratch)
-        max_peak_during_backward = max(peak_during_backward)
-        self.assertLess(max_live_before_scratch, saved_size // 4)
-        self.assertLess(
-            max_peak_during_backward, num_saved * saved_size + saved_size // 2
-        )
-
-    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
-    def test_sac_cached_value_fifo_mismatch(self):
-        """
-        Regression test for https://github.com/pytorch/pytorch/issues/175258
-
-        When SAC is used with wrap_inductor_compiled_regions=True and a global
-        cache causes different op sequences between forward and recompute, the
-        SAC FIFO queue should not return the wrong cached value.
-
-        The bug: all inductor_compiled_code HOP calls share one FIFO queue keyed
-        by func identity. If a compiled region is skipped during recompute
-        (because its result was cached in a global dict during forward), the queue
-        returns the wrong entry, causing DTensor.__tensor_unflatten__ to receive
-        int tensors when it expects float tensors.
-        """
-        import torch.distributed as dist
-        from torch.distributed.device_mesh import init_device_mesh
-        from torch.distributed.tensor import DTensor, Replicate
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-
-        fake_store = FakeStore()
-        dist.init_process_group(backend="fake", store=fake_store, rank=0, world_size=1)
-
-        try:
-            mesh = init_device_mesh("cpu", mesh_shape=(1,), mesh_dim_names=("dp",))
-
-            @torch.compile(dynamic=False, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
-            def compute_int_stuff(n):
-                return torch.arange(n, dtype=torch.int32)
-
-            @torch.compile(dynamic=False, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
-            def compute_float(q, cached_ints):
-                ql = q.to_local()
-                out = ql * cached_ints.float().sum()
-                return DTensor.from_local(
-                    out, device_mesh=q.device_mesh, placements=q.placements
-                )
-
-            _cache: dict = {}
-
-            def outer_fn(x):
-                # Forward: cache miss, compute_int_stuff runs as inductor_compiled_code.
-                # Recompute: cache hit, compute_int_stuff is skipped; only compute_float
-                # runs. With a single shared FIFO queue this would pop the int-tensor
-                # entry and feed it to compute_float.
-                if "data" not in _cache:
-                    _cache["data"] = compute_int_stuff(x.shape[-1])
-                return compute_float(x, _cache["data"])
-
-            def policy_fn(ctx, op, *args, **kwargs):
-                if isinstance(op, torch._ops.HigherOrderOperator):
-                    if op.name() == "inductor_compiled_code":
-                        return CheckpointPolicy.MUST_SAVE
-                return CheckpointPolicy.PREFER_RECOMPUTE
-
-            context_fn = functools.partial(
-                create_selective_checkpoint_contexts, policy_fn
-            )
-
-            x = DTensor.from_local(
-                torch.randn(4, 4, dtype=torch.float32, requires_grad=True),
-                mesh,
-                (Replicate(),),
-            )
-
-            with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
-                out = checkpoint(
-                    outer_fn, x, use_reentrant=False, context_fn=context_fn
-                )
-                out.sum().backward()
-        finally:
-            dist.destroy_process_group()
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Inductor compiled code cannot be run with FakeTensor inputs",
+                ):
+                    torch.compile(model)(inp)
 
 
 if __name__ == "__main__":

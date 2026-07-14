@@ -35,9 +35,7 @@ void _fused_adam_mps_impl_(TensorList params,
                                                  beta2,
                                                  weight_decay,
                                                  eps,
-                                                 maximize,
-                                                 grad_scale,
-                                                 found_inf);
+                                                 maximize);
 }
 
 void _fused_adam_mps_impl_(TensorList params,
@@ -67,9 +65,7 @@ void _fused_adam_mps_impl_(TensorList params,
                                                  beta2,
                                                  weight_decay,
                                                  eps,
-                                                 maximize,
-                                                 grad_scale,
-                                                 found_inf);
+                                                 maximize);
 }
 
 #ifndef PYTORCH_JIT_COMPILE_SHADERS

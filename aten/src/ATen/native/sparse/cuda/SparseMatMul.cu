@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/Resize.h>
@@ -22,7 +23,6 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDAUtils.h>
@@ -33,8 +33,11 @@
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/functional.h>
 #include <thrust/execution_policy.h>
+#include <thrust/iterator/discard_iterator.h>
+
 
 #include <library_types.h>
 
@@ -458,8 +461,8 @@ void sparse_sparse_matmul_cuda_kernel(
   // Filling the COO row indices
   thrust::for_each(
       policy,
-      cccl_counting_iterator<int64_t>{0ll},
-      cccl_counting_iterator<int64_t>{major_dim},
+      thrust::make_counting_iterator(int64_t(0)),
+      thrust::make_counting_iterator(int64_t(major_dim)),
       [output_indices_accessor,
        csr_output_pointers_accessor,
        major_dim,
@@ -475,8 +478,8 @@ void sparse_sparse_matmul_cuda_kernel(
   // Filling the COO column indices
   thrust::for_each(
     policy,
-    cccl_counting_iterator<int64_t>{0ll},
-    cccl_counting_iterator<int64_t>{csr_output.nnz_},
+    thrust::make_counting_iterator(int64_t(0)),
+    thrust::make_counting_iterator(int64_t(csr_output.nnz_)),
     [output_indices_accessor,
       csr_output_pointers_accessor,
       csr_output_ind_accessor,

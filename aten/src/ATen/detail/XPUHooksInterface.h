@@ -81,10 +81,9 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
   }
 };
 
-// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API XPUHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(XPUHooksRegistry, XPUHooksInterface);
+TORCH_DECLARE_REGISTRY(XPUHooksRegistry, XPUHooksInterface, XPUHooksArgs);
 #define REGISTER_XPU_HOOKS(clsname) \
   C10_REGISTER_CLASS(XPUHooksRegistry, clsname, clsname)
 

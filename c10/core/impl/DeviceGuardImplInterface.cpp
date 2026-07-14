@@ -21,6 +21,11 @@ DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
   registerDeviceGuard(type, impl);
 }
 
+namespace {
+thread_local std::unique_ptr<DeviceGuardImplInterface> tls_fake_device_guard =
+    nullptr;
+} // namespace
+
 void ensureCUDADeviceGuardSet() {
   constexpr auto cuda_idx = static_cast<std::size_t>(DeviceType::CUDA);
 
@@ -33,8 +38,8 @@ void ensureCUDADeviceGuardSet() {
     // In following cases, we override CUDA guard interface with a no-op
     // device guard. When p->deviceCount() == 0, cuda build is enabled, but no
     // cuda devices available.
-    static FakeGuardImpl<DeviceType::CUDA> fake_cuda_guard;
-    device_guard_impl_registry[cuda_idx].store(&fake_cuda_guard);
+    tls_fake_device_guard = std::make_unique<FakeGuardImpl<DeviceType::CUDA>>();
+    device_guard_impl_registry[cuda_idx].store(tls_fake_device_guard.get());
   }
 }
 

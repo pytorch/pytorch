@@ -416,11 +416,7 @@ class CheckpointableDistTensor(torch.Tensor):
         ]
 
     def __get_tensor_shard__(self, index: MetadataIndex) -> torch.Tensor:
-        if not (self._fqn == index.fqn and self._shard_offsets == index.offset):
-            raise AssertionError(
-                f"fqn/offset mismatch: {self._fqn} vs {index.fqn}, "
-                f"{self._shard_offsets} vs {index.offset}"
-            )
+        assert self._fqn == index.fqn and self._shard_offsets == index.offset
         return self._local_tensor
 
     def __repr__(self):
@@ -499,10 +495,7 @@ class TestCheckpointableReshard(DTensorTestBase):
             state_dict=state_dict_to_load,
             storage_reader=dist_cp.FileSystemReader(self.temp_dir),
         )
-        if not torch.equal(loading_local_tensor, expected_loaded_local_val_tensor):
-            raise AssertionError(
-                "Expected loading_local_tensor to equal expected_loaded_local_val_tensor"
-            )
+        assert torch.equal(loading_local_tensor, expected_loaded_local_val_tensor)
 
     @with_comms
     @with_temp_dir
@@ -592,10 +585,7 @@ class TestCheckpointableReshard(DTensorTestBase):
         logger.info(
             f"[{my_rank}] loaded_shards_wrapper : {loading_local_shard_wrapper}"  # noqa: G004
         )
-        if not torch.equal(loading_local_tensor, expected_loaded_local_val_tensor):
-            raise AssertionError(
-                "Expected loading_local_tensor to equal expected_loaded_local_val_tensor"
-            )
+        assert torch.equal(loading_local_tensor, expected_loaded_local_val_tensor)
         dist.barrier()
 
 

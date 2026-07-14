@@ -3,7 +3,6 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-import torch
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, StorageMeta
 from torch.distributed.checkpoint.planner import (
     LoadPlan,
@@ -23,9 +22,6 @@ class WriteResult:
 
     size_in_bytes: int
     storage_data: Any
-
-
-torch.serialization.add_safe_globals([WriteResult])
 
 
 class StorageWriter(abc.ABC):
@@ -51,7 +47,7 @@ class StorageWriter(abc.ABC):
         """
         Calls to indicates a brand new checkpoint write is going to happen.
         A checkpoint_id may be present if users set the checkpoint_id for
-        this checkpoint write. The meaning of the checkpoint_id is
+        this checkpoint write. The meaning of the checkpiont_id is
         storage-dependent. It can be a path to a folder/file or a key for
         a key-value storage.
 
@@ -192,7 +188,7 @@ class StorageReader(abc.ABC):
         """
         Calls to indicates a brand new checkpoint read is going to happen.
         A checkpoint_id may be present if users set the checkpoint_id for
-        this checkpoint read. The meaning of the checkpoint_id is
+        this checkpoint read. The meaning of the checkpiont_id is
         storage-dependent. It can be a path to a folder/file or a key for
         a key-value storage.
 

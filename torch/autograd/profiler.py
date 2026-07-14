@@ -1,11 +1,6 @@
 # mypy: allow-untyped-defs
-import ast
-import copy
-import json
 import logging
-import re
 import uuid
-from bisect import bisect_left
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -87,11 +82,6 @@ except ImportError:
 # useful for fast python checks to reduce latency
 _is_profiler_enabled: bool = False
 
-# https://github.com/pytorch/kineto/blob/a054a4be0db117c579a21747debf19c863631f26/libkineto/src/output_json.cpp#L559
-# Kernel and CUDA runtime API events are connected by ac2g; forward and backward
-# ATen ops are connected by fwdbwd.
-_profile_flow_types = {"fwdbwd", "ac2g"}
-
 
 def _set_is_profiler_enabled(enable: bool):
     global _is_profiler_enabled
@@ -117,62 +107,6 @@ class _ProfilerStats:
     profiler_disable_call_duration_us: int = 0
     parse_kineto_call_duration_us: int = 0
     function_events_build_tree_call_duration_us: int = 0
-
-
-class _EventItem:
-    def __init__(self, event):
-        self.e = event
-        self.start, self.end = self._interval_of()
-
-    def _interval_of(self):
-        start = self.e["ts"]
-        duration = self.e.get("dur", 0)
-        return start, start + duration
-
-
-def _find_events_covered_in(
-    events: list[dict[str, Any]],
-    top_level_events: list[dict[str, Any]],
-):
-    """Find events covered in top level events.
-
-    Returns a dict mapping top-level event uid to covered event uids.
-    """
-    top_level_by_tid = defaultdict(list)
-    for event in top_level_events:
-        top_level_by_tid[event["tid"]].append(_EventItem(event))
-    for tid in top_level_by_tid:
-        top_level_by_tid[tid] = sorted(top_level_by_tid[tid], key=lambda x: x.start)
-    starts_by_tid = {
-        tid: [event.start for event in event_items]
-        for tid, event_items in top_level_by_tid.items()
-    }
-    top_level_id_to_events = defaultdict(set)
-
-    for event in events:
-        if event.get("cat") not in {
-            "cuda_runtime",
-            "cuLaunchKernel",
-            "cpu_op",
-            "cuda_driver",
-            "gpu_memset",
-            "python_function",
-        }:
-            continue
-        if "CallFrom" in event.get("args", {}):
-            continue
-        tid = event.get("tid")
-        if tid not in top_level_by_tid:
-            continue
-        item = _EventItem(event)
-        event_items = top_level_by_tid[tid]
-        idx = bisect_left(starts_by_tid[tid], item.start) - 1
-        if idx < 0 or idx >= len(event_items):
-            continue
-        top_level_item = event_items[idx]
-        if top_level_item.start <= item.start and item.end <= top_level_item.end:
-            top_level_id_to_events[top_level_item.e["uid"]].add(event["uid"])
-    return top_level_id_to_events
 
 
 class profile:
@@ -233,11 +167,6 @@ class profile:
 
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
 
-        post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
-            results. In this context, post-processing happens after the profiling itself has finished.
-            If specified, event parsing will stop after this duration and return partial results. Useful
-            for handling large traces that may take too long to process.
-
 
     .. warning::
         Enabling memory profiling or source attribution incurs additional profiler
@@ -291,8 +220,6 @@ class profile:
         experimental_config=None,
         acc_events=False,
         custom_trace_id_callback=None,
-        post_processing_timeout_s: float | None = None,
-        activity_filters: dict[ProfilerActivity, set[str]] | None = None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -305,12 +232,12 @@ class profile:
                 FutureWarning,
                 stacklevel=2,
             )
-            self.use_device: str | None = "cuda"
+            self.use_device: Optional[str] = "cuda"
         else:
             self.use_device = use_device
         # TODO Consider changing _function_events into data structure with size cap
-        self._function_events: EventList | None = None
-        self._old_function_events: EventList | None = None
+        self._function_events: Optional[EventList] = None
+        self._old_function_events: Optional[EventList] = None
         # Function event processing is done lazily
         self._needs_processing = False
         self.entered = False
@@ -324,32 +251,12 @@ class profile:
         self.acc_events = acc_events
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
-        if experimental_config.trace_only and with_stack:
-            warn(
-                "trace_only=True is incompatible with with_stack=True "
-                "(stack traces require event post-processing). "
-                "Disabling trace_only."
-            )
-            experimental_config = copy.copy(experimental_config)
-            experimental_config.trace_only = False
-        if (
-            experimental_config.profiler_metrics
-            or experimental_config.profiler_measure_per_kernel
-        ):
-            warn(
-                "profiler_metrics and profiler_measure_per_kernel are deprecated "
-                "and ignored. These options will be removed in a future release.",
-                FutureWarning,
-                stacklevel=2,
-            )
         self.experimental_config = experimental_config
-        self.kineto_results: _ProfilerResult | None = None
+        self.kineto_results: Optional[_ProfilerResult] = None
         self.profiling_start_time_ns = 0
         self.profiling_end_time_ns = 0
         self._stats = _ProfilerStats()
         self.custom_trace_id_callback = custom_trace_id_callback
-        self.post_processing_timeout_s = post_processing_timeout_s
-        self.activity_filters = activity_filters or {}
         self.trace_id = ""
         if not self.use_cpu:
             if not use_kineto:
@@ -413,27 +320,20 @@ class profile:
                 )
             self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
-            if use_kineto:
-                # Native tracing mode: use KINETO_PRIVATEUSE1 with registered IActivityProfiler
-                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
-                if ProfilerActivity.PrivateUse1 in _supported_activities():
-                    self.kineto_activities.add(ProfilerActivity.PrivateUse1)
-            else:
-                # Marker-only mode: use fallback state
+            if (
+                not use_kineto
+                or ProfilerActivity.PrivateUse1 not in _supported_activities()
+            ):
                 if not self.use_cpu:
                     raise AssertionError(
-                        "Legacy privateuse1 profiling requires use_cpu=True"
+                        "Legacy custombackend profiling requires use_cpu=True"
                     )
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
+            else:
+                self.kineto_activities.add(ProfilerActivity.PrivateUse1)
 
         if len(self.kineto_activities) == 0:
             raise AssertionError("No activities specified for the profiler")
-
-        if (
-            self.post_processing_timeout_s is not None
-            and self.post_processing_timeout_s < 0
-        ):
-            raise ValueError("post_processing_timeout_s must be non-negative")
 
     def default_trace_id(self):
         # Generate a UUID
@@ -474,11 +374,7 @@ class profile:
     def _prepare_trace(self):
         self.entered = True
         t0 = perf_counter_ns()
-        _prepare_profiler(
-            self.config(create_trace_id=True),
-            self.kineto_activities,
-            activity_filter=self.activity_filters,
-        )
+        _prepare_profiler(self.config(create_trace_id=True), self.kineto_activities)
         t1 = perf_counter_ns()
         self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
 
@@ -519,7 +415,7 @@ class profile:
 
         # If we plan to accumulate events we should post process the function events
         # right away to retain the state across multiple start/stop calls
-        if self.acc_events and not self.experimental_config.trace_only:
+        if self.acc_events:
             self._ensure_function_events()
         return False
 
@@ -539,11 +435,6 @@ class profile:
 
     def _ensure_function_events(self):
         """Process function events lazily if required"""
-        if self.experimental_config.trace_only:
-            raise RuntimeError(
-                "events() is not available when trace_only=True in "
-                "ExperimentalConfig. Use export_chrome_trace() instead."
-            )
         if self._function_events is not None:
             return
         self._needs_processing = False
@@ -551,9 +442,7 @@ class profile:
         t0 = perf_counter_ns()
         parsed_results = []
         if self.kineto_results:
-            parsed_results = self._parse_kineto_results(
-                self.kineto_results, timeout_s=self.post_processing_timeout_s
-            )
+            parsed_results = self._parse_kineto_results(self.kineto_results)
         t1 = perf_counter_ns()
         self._stats.parse_kineto_call_duration_us = int((t1 - t0) / 1000)
 
@@ -573,6 +462,9 @@ class profile:
             for evt in self._old_function_events:
                 self._function_events.append(evt)
             self._old_function_events = None
+
+        if self._function_events is None:
+            raise RuntimeError("Profiler didn't finish running")
 
     @property
     def function_events(self):
@@ -605,381 +497,16 @@ class profile:
 
     table.__doc__ = EventList.table.__doc__
 
-    def _assign_uniq_id_to_event(self, trace):
-        if trace.get("uid_assigned"):
-            return {event["uid"]: event for event in trace["traceEvents"]}
-        uid_2_events = {}
-        for uid, event in enumerate(trace["traceEvents"]):
-            event["uid"] = uid
-            uid_2_events[uid] = event
-        trace["uid_assigned"] = True
-        return uid_2_events
-
-    def _build_flow_mapping(self, trace, flow_events):
-        """Build src/dst event mappings from profiler flow events."""
-        if not flow_events:
-            return {}, {}
-
-        flow_pair: dict[int, list[int | None]] = {}
-        prev_event = None
-        for event in trace["traceEvents"]:
-            if (
-                event.get("name") not in _profile_flow_types
-                and event.get("cat") not in _profile_flow_types
-            ):
-                prev_event = event
-                continue
-            if event.get("ph") == "s":
-                if prev_event is None:
-                    continue
-                pair = flow_pair.setdefault(int(event["id"]), [None, None])
-                pair[0] = prev_event["uid"]
-            elif event.get("ph") == "f":
-                if prev_event is None:
-                    continue
-                pair = flow_pair.setdefault(int(event["id"]), [None, None])
-                pair[1] = prev_event["uid"]
-            prev_event = event
-
-        src2dst = {}
-        dst2src = {}
-        for src, dst in flow_pair.values():
-            if src is None or dst is None:
-                continue
-            src2dst[src] = dst
-            dst2src[dst] = src
-        return src2dst, dst2src
-
-    def _maybe_triton_call(self, kernel_name):
-        return kernel_name.startswith("triton_")
-
-    def _has_kernel_info(self, compile_info, graph_key, kernel_name):
-        graph_info = compile_info.get(graph_key, {})
-        if kernel_name in graph_info:
-            return True
-        kernel_prefix = kernel_name + ":"
-        return any(name.startswith(kernel_prefix) for name in graph_info)
-
-    def _maybe_extern_call(self, event, compile_info, fwd_key, bw_keys, need_bw):
-        kernel_name = event["name"]
-        return not self._has_kernel_info(compile_info, fwd_key, kernel_name) and (
-            not need_bw
-            or all(
-                not self._has_kernel_info(compile_info, bw_key, kernel_name)
-                for bw_key in bw_keys
-            )
-        )
-
-    def add_to_chrome_trace(self, origin_trace):
-        """Add Inductor kernel stack information to a Chrome trace."""
-        from torch._inductor.debug import get_kernel_information_jsons
-
-        compile_linenos = get_kernel_information_jsons()
-        if not compile_linenos:
-            return origin_trace
-
-        trace = origin_trace
-        uid_2_events = self._assign_uniq_id_to_event(trace)
-
-        real_events = []
-        flow_events = []
-        compiled_events = []
-        extern_events = []
-        for event in trace["traceEvents"]:
-            name = event.get("name", "")
-            cat = event.get("cat", "")
-            if name in _profile_flow_types or cat in _profile_flow_types:
-                flow_events.append(event)
-                continue
-
-            real_events.append(event)
-            if cat == "cpu_op" and (
-                name == "CompiledFunctionBackward" or "Torch-Compiled Region" in name
-            ):
-                compiled_events.append(event)
-            if (
-                name
-                and "extern_kernels" in name
-                and cat
-                in (
-                    "cpu_op",
-                    "python_function",
-                )
-            ):
-                extern_events.append(event)
-
-        compiled_events = sorted(compiled_events, key=lambda x: _EventItem(x).start)
-        compiled_event_items = [_EventItem(event) for event in compiled_events]
-        compiled_event_starts = [item.start for item in compiled_event_items]
-        ops_in_compile_region = _find_events_covered_in(real_events, compiled_events)
-        ops_in_extern_region = _find_events_covered_in(real_events, extern_events)
-        src2dst, dst2src = self._build_flow_mapping(trace, flow_events)
-        kernel_uids_by_external_id = defaultdict(list)
-        for event in real_events:
-            if event.get("cat") != "kernel":
-                continue
-            external_id = event.get("args", {}).get("External id")
-            if external_id is not None:
-                kernel_uids_by_external_id[external_id].append(event["uid"])
-
-        def _related_compile_region(compile_event):
-            src_event = uid_2_events[dst2src[compile_event["uid"]]]
-            src_item = _EventItem(src_event)
-            idx = bisect_left(compiled_event_starts, src_item.start) - 1
-            # Compiled regions are expected to be nearly nested around their
-            # source events, so the nearest preceding region usually matches.
-            while idx >= 0:
-                region_item = compiled_event_items[idx]
-                if (
-                    src_item.start > region_item.start
-                    and src_item.end < region_item.end
-                ):
-                    return region_item.e
-                idx -= 1
-            raise ValueError(f"Cannot find compile region for {compile_event}")
-
-        def _parse_compile_region_key(key):
-            try:
-                parsed_key = ast.literal_eval(key)
-            except (SyntaxError, ValueError):
-                return None
-            if (
-                not isinstance(parsed_key, tuple)
-                or len(parsed_key) != 2
-                or not isinstance(parsed_key[0], str)
-                or not isinstance(parsed_key[1], bool)
-            ):
-                return None
-            return parsed_key
-
-        def _backward_graph_keys(compile_info, compile_name):
-            bw_graph_key = str((compile_name, True))
-            keys = [bw_graph_key]
-            if bw_graph_key in compile_info:
-                return keys
-
-            prefix = compile_name + "_"
-            for key, info in compile_info.items():
-                if not info:
-                    continue
-                parsed_key = _parse_compile_region_key(key)
-                if parsed_key is None:
-                    continue
-                graph_name, is_backward = parsed_key
-                if is_backward and graph_name.startswith(prefix):
-                    keys.append(key)
-            return keys
-
-        def _stack_from_kernel_info(kernel_info):
-            if isinstance(kernel_info, dict):
-                return kernel_info.get("stack_traces")
-            return kernel_info
-
-        def _stack_for_kernel(compile_info, graph_key, kernel_name):
-            graph_info = compile_info.get(graph_key, {})
-            kernel_info = graph_info.get(kernel_name)
-            if kernel_info is None:
-                kernel_prefix = kernel_name + ":"
-                for name, info in graph_info.items():
-                    if name.startswith(kernel_prefix):
-                        kernel_info = info
-                        break
-            return _stack_from_kernel_info(kernel_info)
-
-        def _single_stack_for_graph(compile_info, graph_key):
-            stacks = [
-                stack
-                for stack in (
-                    _stack_from_kernel_info(kernel_info)
-                    for kernel_info in compile_info.get(graph_key, {}).values()
-                )
-                if stack is not None
-            ]
-            if len(stacks) == 1:
-                return stacks[0]
-            return None
-
-        def _assign_stack(event, compile_info, fwd_key, bw_keys, kernel_name):
-            for bw_key in bw_keys:
-                stack = _stack_for_kernel(compile_info, bw_key, kernel_name)
-                if stack is not None:
-                    event.setdefault("args", {})["stack"] = stack
-                    return True
-            stack = _stack_for_kernel(compile_info, fwd_key, kernel_name)
-            if stack is not None:
-                event.setdefault("args", {})["stack"] = stack
-                return True
-            return False
-
-        def _assign_single_stack(event, compile_info, fwd_key, bw_keys):
-            for bw_key in bw_keys:
-                stack = _single_stack_for_graph(compile_info, bw_key)
-                if stack is not None:
-                    event.setdefault("args", {})["stack"] = stack
-                    return True
-            stack = _single_stack_for_graph(compile_info, fwd_key)
-            if stack is not None:
-                event.setdefault("args", {})["stack"] = stack
-                return True
-            return False
-
-        def _kernel_events_for_op(op_id):
-            if op_id in src2dst:
-                return [uid_2_events[src2dst[op_id]]]
-            external_id = uid_2_events[op_id].get("args", {}).get("External id")
-            if external_id is None:
-                return []
-            return [
-                uid_2_events[kernel_uid]
-                for kernel_uid in kernel_uids_by_external_id.get(external_id, [])
-            ]
-
-        def _extern_kernel_name(name):
-            match = re.search(r"\b(extern\w+)\s*,", name)
-            return match.group(1) if match else name
-
-        for compile_func_id, scoped_ops in ops_in_compile_region.items():
-            compile_event = uid_2_events[compile_func_id]
-            compile_name = compile_event["name"]
-            need_bw = "Backward" in compile_name
-
-            if need_bw:
-                try:
-                    compile_name = _related_compile_region(compile_event)["name"]
-                except ValueError:
-                    continue
-
-            fw_graph_key = str((compile_name, False))
-            bw_graph_keys = _backward_graph_keys(compile_linenos, compile_name)
-            if fw_graph_key not in compile_linenos and all(
-                bw_graph_key not in compile_linenos for bw_graph_key in bw_graph_keys
-            ):
-                continue
-
-            for op_id in scoped_ops:
-                kernel_events = _kernel_events_for_op(op_id)
-                if not kernel_events:
-                    continue
-                for kernel_event in kernel_events:
-                    assigned_stack = False
-                    warn_if_unrecognized = False
-                    if self._maybe_extern_call(
-                        kernel_event,
-                        compile_linenos,
-                        fw_graph_key,
-                        bw_graph_keys,
-                        need_bw,
-                    ):
-                        for extern_call, related_ops in ops_in_extern_region.items():
-                            if op_id in related_ops:
-                                extern_event = uid_2_events[extern_call]
-                                assigned_stack = _assign_stack(
-                                    kernel_event,
-                                    compile_linenos,
-                                    fw_graph_key,
-                                    bw_graph_keys,
-                                    _extern_kernel_name(extern_event.get("name", "")),
-                                )
-                                if assigned_stack:
-                                    break
-                        if not assigned_stack:
-                            assigned_stack = _assign_single_stack(
-                                kernel_event,
-                                compile_linenos,
-                                fw_graph_key,
-                                bw_graph_keys,
-                            )
-                    elif not self._maybe_triton_call(kernel_event.get("name", "")):
-                        warn_if_unrecognized = True
-                        assigned_stack = _assign_single_stack(
-                            kernel_event,
-                            compile_linenos,
-                            fw_graph_key,
-                            bw_graph_keys,
-                        )
-                    else:
-                        assigned_stack = _assign_stack(
-                            kernel_event,
-                            compile_linenos,
-                            fw_graph_key,
-                            bw_graph_keys,
-                            kernel_event.get("name", ""),
-                        )
-                    if not assigned_stack and warn_if_unrecognized:
-                        log.warning(
-                            "Kernel %s cannot be recognized as a custom kernel or triton kernel. "
-                            "Please try profile with stack=True.",
-                            kernel_event.get("name", ""),
-                        )
-        return trace
-
-    def export_chrome_trace(self, path, metadata=None, use_python_export=False):
+    def export_chrome_trace(self, path):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        if use_python_export and kineto_available():
-            from torch.profiler._chrome_trace_export import (
-                export_chrome_trace as _export,
-            )
-
-            _export(self.kineto_results, path, metadata)  # type: ignore[union-attr]
-        elif kineto_available():
+        if kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
             self._ensure_function_events()
             return self._function_events.export_chrome_trace(path)  # type: ignore[union-attr]
-
-        import torch._inductor.config as inductor_config
-
-        if inductor_config.trace.provenance_tracking_to_timeline:
-            from torch._inductor.debug import get_kernel_information_jsons
-
-            try:
-                # Kineto owns the initial serialization path.  Re-read the exported
-                # trace here so timeline provenance stays decoupled from Kineto's
-                # JSON writer and remains a Python-only post-processing step.
-                with open(path) as f:
-                    trace = json.load(f)
-
-                num_events = len(trace.get("traceEvents", []))
-                max_events = inductor_config.trace.provenance_tracking_max_events
-                if max_events > 0 and num_events > max_events:
-                    log.warning(
-                        "Skipping provenance tracking: trace has %d events "
-                        "(exceeds limit of %d). Set TORCH_COMPILE_DEBUG_MAX_EVENTS=0 "
-                        "to disable this protection or increase the limit.",
-                        num_events,
-                        max_events,
-                    )
-                    return
-
-                if not inductor_config.triton.unique_kernel_names:
-                    log.warning(
-                        "Profiling trace does not contain Triton kernel stack traces "
-                        "because TORCHINDUCTOR_UNIQUE_KERNEL_NAMES=0."
-                    )
-                if inductor_config.cpp_wrapper:
-                    log.warning(
-                        "Profiling trace does not contain compiled kernel stack traces "
-                        "because cpp_wrapper is enabled."
-                    )
-                    return
-                try:
-                    log.info("Add stack trace to compiled kernel.")
-                    trace = self.add_to_chrome_trace(trace)
-                    with open(path, "w") as f:
-                        json.dump(trace, f, indent=1)
-                except MemoryError:
-                    log.error(
-                        "MemoryError during add_to_chrome_trace. "
-                        "Try increasing TORCH_COMPILE_DEBUG_MAX_EVENTS or disable provenance tracking."
-                    )
-                    raise
-                except Exception:
-                    log.exception("Failed to add stack trace to compiled kernel")
-            finally:
-                get_kernel_information_jsons().clear()
 
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
@@ -1004,16 +531,12 @@ class profile:
         group_by_input_shape=False,
         group_by_stack_n=0,
         group_by_overload_name=False,
-        include_python_functions=False,
     ):
         self._ensure_function_events()
         if self._function_events is None:
             raise AssertionError("Expected profiling results")
         return self._function_events.key_averages(
-            group_by_input_shape,
-            group_by_stack_n,
-            group_by_overload_name,
-            include_python_functions,
+            group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
 
     key_averages.__doc__ = EventList.key_averages.__doc__
@@ -1038,14 +561,11 @@ class profile:
         return self._function_events.self_cpu_time_total
 
     def _parse_kineto_results(
-        self, result: _ProfilerResult, timeout_s: float | None = None
+        self, result: _ProfilerResult, timeout_s: Optional[float] = None
     ):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
         timeout_ns = int(timeout_s * 1e9) if timeout_s is not None else None
-        result_events = result.events()
-        if timeout_ns is not None and timeout_ns < 0:
-            raise ValueError("timeout_s must be non-negative")
         start_time_ns = perf_counter_ns()
         timed_out = False
 
@@ -1060,10 +580,10 @@ class profile:
 
         trace_start_ns = result.trace_start_ns()
         mem_records = [
-            [evt, False] for evt in result_events if evt.name() == MEMORY_EVENT_NAME
+            [evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME
         ]
         oom_records = [
-            evt for evt in result_events if evt.name() == OUT_OF_MEMORY_EVENT_NAME
+            evt for evt in result.events() if evt.name() == OUT_OF_MEMORY_EVENT_NAME
         ]
         mem_records_acc = MemRecordsAcc(mem_records)
 
@@ -1097,7 +617,7 @@ class profile:
         frontend_function_events = []
         device_corr_map: dict[int, list[FunctionEvent]] = {}
         max_evt_id = 0
-        for kineto_event in result_events:
+        for kineto_event in result.events():
             if _check_timeout():
                 break
 
@@ -1108,13 +628,14 @@ class profile:
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
             rel_end_ns = kineto_event.end_ns() - trace_start_ns
+            abs_end_ns = kineto_event.end_ns()
 
             cpu_memory_usage = 0
             device_memory_usage = 0
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
                 for mem_record in mem_records_acc.in_interval(
-                    kineto_event.start_ns(), kineto_event.end_ns()
+                    kineto_event.start_ns(), abs_end_ns
                 ):
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     device_memory_usage += _device_memory_usage(mem_record[0])
@@ -1152,21 +673,7 @@ class profile:
                 device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
                 is_user_annotation=kineto_event.is_user_annotation(),
-                is_python_function=kineto_event.is_python_function(),
-                activity_type=kineto_event.activity_type(),
                 metadata_json=kineto_event.metadata_json(),
-                extra_meta=kineto_event.extra_meta() or None,
-                flow_id=kineto_event.flow_id(),
-                flow_type=kineto_event.flow_type(),
-                flow_start=kineto_event.flow_start(),
-                external_id=kineto_event.external_id(),
-                linked_correlation_id=kineto_event.linked_correlation_id(),
-                structured_input_shapes=kineto_event.structured_input_shapes(),
-                structured_input_strides=kineto_event.structured_input_strides(),
-                input_dtypes=kineto_event.dtypes(),
-                python_id=kineto_event.python_id(),
-                python_parent_id=kineto_event.python_parent_id(),
-                python_module_id=kineto_event.python_module_id(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
@@ -1218,7 +725,7 @@ class profile:
                         # parents and children
                         f_evt.thread = fe.thread
 
-        def _create_function_event_for_memory_events(evt):
+        def createFunctionEventForMemoryEvents(evt):
             rel_start_ns = evt.start_ns() - trace_start_ns
             fe = FunctionEvent(
                 id=max_evt_id,
@@ -1249,7 +756,7 @@ class profile:
 
             if not mem_record[1]:
                 max_evt_id += 1
-                fe = _create_function_event_for_memory_events(mem_record[0])
+                fe = createFunctionEventForMemoryEvents(mem_record[0])
                 all_function_events.append(fe)
 
         for oom_record in oom_records:
@@ -1257,7 +764,7 @@ class profile:
                 break
 
             max_evt_id += 1
-            fe = _create_function_event_for_memory_events(oom_record)
+            fe = createFunctionEventForMemoryEvents(oom_record)
             all_function_events.append(fe)
 
         if timed_out:
@@ -1274,20 +781,8 @@ class profile:
         return all_function_events
 
 
-# Set by torch.profiler to the active cupti_monitor ProfilerObserver while a session is
-# running (None otherwise). record_function routes regions to it via push/pop_annotation.
-# Held as an opaque object -- NOT imported from the cupti package -- so record_function never
-# pulls in the cupti chain on a non-cupti run, and there is a single "is a session active"
-# signal (this reference) rather than a separate flag.
-_active_cupti_profiler_observer: Any = None
-
-
-def _set_active_cupti_profiler_observer(observer: Any) -> None:
-    global _active_cupti_profiler_observer
-    _active_cupti_profiler_observer = observer
-
-
-class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritance]
+# pyrefly: ignore [invalid-inheritance]
+class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
 
@@ -1326,9 +821,9 @@ class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritanc
 
     """
 
-    def __init__(self, name: str, args: str | None = None):
+    def __init__(self, name: str, args: Optional[str] = None):
         self.name: str = name
-        self.args: str | None = args
+        self.args: Optional[str] = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
         # TODO: TorchScript ignores standard type annotation here
@@ -1338,29 +833,14 @@ class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritanc
             Optional["torch.classes.profiler._RecordFunction"],
             None,
         )
-        self._cupti_monitor_external_id: int | None = None
 
     def __enter__(self):
         self.record = torch.ops.profiler._record_function_enter_new(
             self.name, self.args
         )
-        # Route the region to the active cupti_monitor observer, if any. The reference is
-        # None unless a cupti_monitor profile is running, so a non-cupti run never touches
-        # the cupti chain. Guarded by is_scripting() (the global access doesn't compile under
-        # TorchScript), and the global is read inside the guard so it is dead-code-eliminated.
-        if not torch.jit.is_scripting():
-            observer = _active_cupti_profiler_observer
-            if observer is not None:
-                self._cupti_monitor_external_id = observer.push_annotation(self.name)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        if not torch.jit.is_scripting():
-            if self._cupti_monitor_external_id is not None:
-                observer = _active_cupti_profiler_observer
-                if observer is not None:
-                    observer.pop_annotation()
-                self._cupti_monitor_external_id = None
         if not self.run_callbacks_on_exit:
             return
 

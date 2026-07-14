@@ -1,4 +1,3 @@
-# Owner(s): ["module: rocm"]
 name: docker-cache-rocm
 
 on:
@@ -31,7 +30,7 @@ jobs:
   download-docker-builds-artifacts:
     if: github.repository_owner == 'pytorch'
     name: download-docker-builds-artifacts
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       pytorch-linux-jammy-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}
       pytorch-linux-noble-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}
@@ -58,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [linux.rocm.mi210.docker-cache]
+        runner: [linux.rocm.mi250.docker-cache]
         docker-image: [
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
@@ -67,26 +66,22 @@ jobs:
     runs-on: "${{ matrix.runner }}"
     steps:
       - name: debug
-        env:
-          DOWNLOAD_OUTPUTS_JSON: ${{ toJSON(needs.download-docker-builds-artifacts.outputs) }}
         run: |
-          echo "Outputs of download-docker-builds-artifacts job: ${DOWNLOAD_OUTPUTS_JSON}"
+          JSON_STRINGIFIED="${{ toJSON(needs.download-docker-builds-artifacts.outputs) }}"
+          echo "Outputs of download-docker-builds-artifacts job: ${JSON_STRINGIFIED}"
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
-          submodules: 'false'
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login
 
       - name: Generate ghrc.io tag
         id: ghcr-io-tag
-        env:
-          ECR_IMAGE: ${{ matrix.docker-image }}
         run: |
-            ecr_image="${ECR_IMAGE}"
+            ecr_image="${{ matrix.docker-image }}"
             ghcr_image="ghcr.io/pytorch/ci-image:${ecr_image##*:}"
             echo "ghcr_image=${ghcr_image}" >> "$GITHUB_OUTPUT"
 
@@ -96,15 +91,11 @@ jobs:
           docker-image: ${{ steps.ghcr-io-tag.outputs.ghcr_image }}
 
       - name: Save as tarball
-        env:
-          BRANCH: ${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
-          ECR_IMAGE: ${{ matrix.docker-image }}
-          GHCR_IMAGE: ${{ steps.ghcr-io-tag.outputs.ghcr_image }}
         run: |
-          docker_image_tag=${ECR_IMAGE}
+          docker_image_tag=${{ matrix.docker-image }}
           docker_image_tag="${docker_image_tag#*:}" # Remove everything before and including first ":"
           docker_image_tag="${docker_image_tag%-*}" # Remove everything after and including last "-"
-          ref_name=${BRANCH}
+          ref_name=${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
           if [[ $ref_name =~ "release/" ]]; then
             ref_suffix="release"
           elif [[ $ref_name == "main" ]]; then
@@ -112,7 +103,7 @@ jobs:
           else
             echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
           fi
-          docker tag "${GHCR_IMAGE}" "${ECR_IMAGE}"
+          docker tag ${{ steps.ghcr-io-tag.outputs.ghcr_image }} ${{ matrix.docker-image }}
           # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
-          docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp "${ECR_IMAGE}"
+          docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ${{ matrix.docker-image }}
           mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar

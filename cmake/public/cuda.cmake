@@ -59,7 +59,15 @@ if("X${CMAKE_CUDA_STANDARD}" STREQUAL "X" )
 endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
+# CMP0074 - find_package will respect <PackageName>_ROOT variables
+cmake_policy(PUSH)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
+  cmake_policy(SET CMP0074 NEW)
+endif()
+
 find_package(CUDAToolkit REQUIRED)
+
+cmake_policy(POP)
 
 if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
   message(FATAL_ERROR "Found two conflicting CUDA versions:\n"
@@ -70,8 +78,8 @@ endif()
 message(STATUS "PyTorch: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "PyTorch: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 12.1)
-  message(FATAL_ERROR "PyTorch requires CUDA 12.1 or above.")
+if(CUDA_VERSION VERSION_LESS 12.0)
+  message(FATAL_ERROR "PyTorch requires CUDA 12.0 or above.")
 endif()
 
 if(CUDA_FOUND)
@@ -128,12 +136,22 @@ endif()
 
 # ---[ CUDA libraries wrapper
 
-# find libnvrtc.so
+# find lbnvrtc.so
 set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
 if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
-  file(SHA256 "${CUDA_NVRTC_LIB}" _cuda_nvrtc_sha256)
-  string(SUBSTRING "${_cuda_nvrtc_sha256}" 0 8 CUDA_NVRTC_SHORTHASH)
-  message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
+  find_package(Python COMPONENTS Interpreter)
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c
+    "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
+    RESULT_VARIABLE _retval
+    OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
+  if(NOT _retval EQUAL 0)
+    message(WARNING "Failed to compute shorthash for libnvrtc.so")
+    set(CUDA_NVRTC_SHORTHASH "XXXXXXXX")
+  else()
+    string(STRIP "${CUDA_NVRTC_SHORTHASH}" CUDA_NVRTC_SHORTHASH)
+    message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
+  endif()
 endif()
 
 # Create new style imported libraries.
@@ -289,14 +307,6 @@ else()
 endif()
 
 # nvrtc
-# cuDNN frontend needs libnvrtc symbols, but linking through CUDA::nvrtc pulls
-# CUDA::cuda_driver transitively. Keep a driver-free target for cuDNN users and
-# reserve caffe2::nvrtc for the stub library that actually needs the driver API.
-add_library(caffe2::nvrtc_runtime INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::nvrtc_runtime PROPERTY INTERFACE_LINK_LIBRARIES
-    "${CUDA_NVRTC_LIB}")
-
 add_library(caffe2::nvrtc INTERFACE IMPORTED)
 set_property(
     TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
@@ -364,11 +374,6 @@ if(MSVC)
   endif()
 elseif(CUDA_DEVICE_DEBUG)
   list(APPEND CUDA_NVCC_FLAGS "-g" "-G")  # -G enables device code debugging symbols
-endif()
-
-# needed for compat with newer versions of clang that use C++20 mangling rules
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=-fclang-abi-compat=17")
 endif()
 
 # Set expt-relaxed-constexpr to suppress Eigen warnings

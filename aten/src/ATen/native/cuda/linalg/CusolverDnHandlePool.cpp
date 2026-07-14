@@ -1,6 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
-#include <c10/macros/Export.h>
 
 namespace at::cuda {
 namespace {
@@ -44,10 +43,6 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUSOLVER_CHECK(cusolverDnSetStream(handle, stream));
   return handle;
-}
-
-extern "C" C10_EXPORT void* at_cuda_getCurrentCUDASolverDnHandle() {
-  return getCurrentCUDASolverDnHandle();
 }
 
 } // namespace at::cuda

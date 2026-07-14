@@ -3,16 +3,13 @@ import collections
 import inspect
 import typing
 from types import GenericAlias
+from typing import Optional, Union
 
 import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
-from .opaque_object import (
-    _resolve_opaque_type_info,
-    is_custom_class,
-    is_opaque_symbolic_type,
-)
+from .opaque_object import _OPAQUE_TYPES, is_opaque_type
 
 
 # This is used as a negative test for
@@ -26,8 +23,7 @@ def infer_schema(
     /,
     *,
     mutates_args,
-    op_name: str | None = None,
-    tags: torch.Tag | typing.Sequence[torch.Tag] | None = (),
+    op_name: Optional[str] = None,
 ) -> str:
     r"""Parses the schema of a given function with type hints. The schema is inferred from the
     function's type hints, and can be used to define a new operator.
@@ -47,11 +43,8 @@ def infer_schema(
         prototype_function: The function from which to infer a schema for from its type annotations.
         op_name (Optional[str]): The name of the operator in the schema. If ``name`` is None, then the
             name is not included in the inferred schema. Note that the input schema to
-            ``torch.library.Library.define`` requires an operator name.
+            ``torch.library.Library.define`` requires a operator name.
         mutates_args ("unknown" | Iterable[str]): The arguments that are mutated in the function.
-        tags (Tag | Sequence[Tag] | None): one or more tags to apply to the
-            inferred schema. Use ``torch.Tag.inplace`` or ``torch.Tag.out`` to
-            infer the conventional aliasing for those operator kinds.
 
     Returns:
         The inferred schema.
@@ -73,18 +66,6 @@ def infer_schema(
     # inspect.signature() and we no longer need to deal with stringified
     # annotations below.
     sig = inspect.signature(prototype_function)
-    if tags is None:
-        tags = ()
-    elif isinstance(tags, torch.Tag):
-        tags = (tags,)
-    is_inplace = torch.Tag.inplace in tags
-    is_out = torch.Tag.out in tags
-    if is_inplace and is_out:
-        raise AssertionError(
-            "torch.Tag.inplace and torch.Tag.out are mutually exclusive"
-        )
-    if type(mutates_args) is not str:
-        mutates_args = tuple(mutates_args)
 
     def error_fn(what):
         raise ValueError(f"infer_schema(func): {what} Got func with signature {sig})")
@@ -92,23 +73,13 @@ def infer_schema(
     def convert_type_string(annotation_type: str):
         try:
             return eval(annotation_type, pf_globals, pf_locals)
-        except NameError as e:
+        except Exception:
             error_fn(
-                f"Unsupported type annotation {annotation_type}. It is not a type. "
-                f"({e}). "
-                f"If you are using 'from __future__ import annotations', note that "
-                f"annotations are evaluated lazily as strings; make sure all types "
-                f"referenced in annotations are importable at module scope, not only "
-                f"inside a local function."
-            )
-        except Exception as e:
-            error_fn(
-                f"Unsupported type annotation {annotation_type}. It is not a type. "
-                f"({type(e).__name__}: {e})"
+                f"Unsupported type annotation {annotation_type}. It is not a type."
             )
 
     def unstringify_types(
-        tys: tuple[type[object] | str, ...],
+        tys: tuple[Union[type[object], str], ...],
     ) -> tuple[tuple[typing.Any, ...], bool]:
         res = []
         changed = False
@@ -121,7 +92,7 @@ def infer_schema(
         else:
             return tys, False  # type: ignore[return-value]
 
-    def unstringify_type(ty: type[object] | str) -> tuple[typing.Any, bool]:
+    def unstringify_type(ty: Union[type[object], str]) -> tuple[typing.Any, bool]:
         # Dig through a generic type and if it contains a stringified type
         # convert that to a real type. The second return value indicates if the
         # type contained a string or not.
@@ -137,11 +108,6 @@ def infer_schema(
     params = []
     seen_args = set()
     saw_kwarg_only_arg = False
-    first_positional_arg_name = None
-    first_positional_arg_schema_type = None
-    first_positional_arg_alias = None
-    out_arg_aliases = []
-    out_arg_names = []
     for idx, (name, param) in enumerate(sig.parameters.items()):
         if not supported_param(param):
             error_fn("We do not support positional-only args, varargs, or varkwargs.")
@@ -161,8 +127,8 @@ def infer_schema(
 
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if is_custom_class(annotation_type):
-                schema_type = _resolve_opaque_type_info(annotation_type).class_name  # type: ignore[union-attr]
+            if is_opaque_type(annotation_type):
+                schema_type = _OPAQUE_TYPES[annotation_type].class_name
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
@@ -195,15 +161,6 @@ def infer_schema(
         if schema_type is None:
             raise AssertionError(f"schema_type is None for param {name}")
 
-        if (
-            param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-            and first_positional_arg_name is None
-        ):
-            first_positional_arg_name = name
-            first_positional_arg_schema_type = schema_type
-            first_positional_arg_alias = f"a{idx}"
-
-        is_mutated = False
         if type(mutates_args) is str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
@@ -211,24 +168,13 @@ def infer_schema(
                     "the arguments that are mutated or the string 'unknown'. "
                 )
             if schema_type.startswith("Tensor"):
-                is_mutated = True
                 schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
         elif name in mutates_args:
-            is_mutated = True
             if not schema_type.startswith("Tensor"):
                 error_fn(
                     f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated"
                 )
             schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
-        if is_out and is_mutated:
-            if param.kind != inspect.Parameter.KEYWORD_ONLY:
-                error_fn("torch.Tag.out requires mutable arguments to be keyword-only.")
-            if schema_type != f"Tensor(a{idx}!)":
-                error_fn(
-                    "torch.Tag.out only supports mutable keyword-only Tensor arguments."
-                )
-            out_arg_aliases.append(f"a{idx}")
-            out_arg_names.append(name)
         seen_args.add(name)
         if param.default is inspect.Parameter.empty:
             # pyrefly: ignore [bad-argument-type]
@@ -263,58 +209,29 @@ def infer_schema(
                 f"mutates_args should contain the names of all args that the "
                 f"custom op mutates, or just the string 'unknown' if you don't know."
             )
-    if is_inplace:
-        if first_positional_arg_name is None:
-            error_fn("torch.Tag.inplace requires a positional Tensor argument.")
-        if first_positional_arg_schema_type != "Tensor":
-            error_fn(
-                "torch.Tag.inplace requires the first positional argument to be a Tensor."
-            )
-        if type(mutates_args) is str or set(mutates_args) != {
-            first_positional_arg_name
-        }:
-            error_fn(
-                "torch.Tag.inplace requires mutates_args to contain exactly "
-                f"the first positional argument, got {mutates_args}."
-            )
-    if is_out and len(out_arg_aliases) == 0:
-        error_fn(
-            "torch.Tag.out requires at least one mutable keyword-only Tensor argument."
-        )
     return_annotation, _ = unstringify_type(sig.return_annotation)
-    if is_out:
-        ret = _infer_out_return_schema(
-            return_annotation, out_arg_aliases, out_arg_names, error_fn
-        )
-    else:
-        ret = parse_return(return_annotation, error_fn)
-    if is_inplace:
-        if ret != "Tensor":
-            error_fn(
-                "torch.Tag.inplace requires the return annotation to be torch.Tensor."
-            )
-        ret = f"Tensor({first_positional_arg_alias}!)"
+    ret = parse_return(return_annotation, error_fn)
     if op_name is not None:
         return f"{op_name}({', '.join(params)}) -> {ret}"
     return f"({', '.join(params)}) -> {ret}"
 
 
 def derived_types(
-    base_type: type | typing._SpecialForm,
+    base_type: Union[type, typing._SpecialForm],
     cpp_type: str,
     list_base: bool,
     optional_base_list: bool,
     optional_list_base: bool,
 ):
-    result: list[tuple[type | typing._SpecialForm | GenericAlias, str]] = [
+    result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
         (base_type, cpp_type),
         # pyrefly: ignore [not-a-type]
-        (typing.Optional[base_type], f"{cpp_type}?"),  # noqa: UP045
+        (typing.Optional[base_type], f"{cpp_type}?"),
     ]
 
-    def derived_seq_types(typ: type | typing._SpecialForm):
+    def derived_seq_types(typ: Union[type, typing._SpecialForm]):
         return (
-            typing.Sequence[typ],  # type: ignore[valid-type]
+            typing.Sequence[typ],  # type: ignore[valid-type]  # noqa: UP006
             typing.List[typ],  # type: ignore[valid-type]  # noqa: UP006
             GenericAlias(collections.abc.Sequence, (typ,)),
             GenericAlias(list, (typ,)),
@@ -328,18 +245,18 @@ def derived_types(
         result.extend(
             (seq_typ, f"{cpp_type}?[]")
             # pyrefly: ignore [not-a-type]
-            for seq_typ in derived_seq_types(typing.Optional[base_type])  # noqa: UP045
+            for seq_typ in derived_seq_types(typing.Optional[base_type])
         )
     if optional_list_base:
         result.extend(
-            (typing.Optional[seq_typ], f"{cpp_type}[]?")  # noqa: UP045
+            (typing.Optional[seq_typ], f"{cpp_type}[]?")
             for seq_typ in derived_seq_types(base_type)
         )
     return result
 
 
 def get_supported_param_types():
-    data: list[tuple[type | typing._SpecialForm, str, bool, bool, bool]] = [
+    data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
         (int, "SymInt", True, False, True),
@@ -383,8 +300,6 @@ def parse_return(annotation, error_fn):
     origin = typing.get_origin(annotation)
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES:
-            if is_opaque_symbolic_type(annotation):
-                return _resolve_opaque_type_info(annotation).class_name  # type: ignore[union-attr]
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
@@ -394,50 +309,17 @@ def parse_return(annotation, error_fn):
 
     args = typing.get_args(annotation)
     for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_symbolic_type(arg):
+        if arg not in SUPPORTED_RETURN_TYPES:
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-
-    def _return_type_str(arg):
-        if ty := SUPPORTED_RETURN_TYPES.get(arg):
-            return ty
-        return _resolve_opaque_type_info(arg).class_name  # type: ignore[union-attr]
-
-    output_ty = ", ".join(_return_type_str(arg) for arg in args)
+    output_ty = ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args])
 
     # use (()) to represent tuple with single element
     if len(args) == 1:
         output_ty = "(" + output_ty + ")"
     return "(" + output_ty + ")"
-
-
-def _infer_out_return_schema(
-    return_annotation,
-    out_arg_aliases,
-    out_arg_names,
-    error_fn,
-):
-    if len(out_arg_aliases) == 1:
-        return_annotation_matches_out_args = return_annotation is Tensor
-    else:
-        return_annotation_matches_out_args = typing.get_origin(
-            return_annotation
-        ) is tuple and typing.get_args(return_annotation) == (Tensor,) * len(
-            out_arg_aliases
-        )
-
-    if not return_annotation_matches_out_args:
-        error_fn(
-            "torch.Tag.out requires the return annotation to match the "
-            f"mutable keyword-only Tensor arguments {tuple(out_arg_names)}."
-        )
-
-    aliased_returns = [f"Tensor({out_arg_alias}!)" for out_arg_alias in out_arg_aliases]
-    if len(aliased_returns) == 1:
-        return aliased_returns[0]
-    return f"({', '.join(aliased_returns)})"
 
 
 SUPPORTED_PARAM_TYPES = get_supported_param_types()
@@ -454,11 +336,14 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     """
     Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
     """
-    type_args = typing.get_args(tuple_type)
+    type_args = getattr(tuple_type, "__args__", None)
+    # Account for different python versions, e.g. python 3.8 would give ()
+    # but python 3.12 would give None.
     if (
         tuple_type is typing.Tuple  # noqa: UP006
         or tuple_type is tuple
-        or not type_args
+        or type_args == ()
+        or type_args is None
     ):
         # Handle the case of an empty tuple type
         return list
@@ -468,4 +353,4 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     elif len(type_args) == 2 and type_args[1] is Ellipsis:
         return list[type_args[0]]  # type: ignore[valid-type]
     else:
-        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]  # noqa: UP007
+        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]

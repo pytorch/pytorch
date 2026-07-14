@@ -192,7 +192,7 @@ _BACKEND_KEYS_TO_OVERRIDE = [
 def _override_composite_implicit_decomp(cia_ops_to_callable):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
-    # ALL composite ops but today's C++ functionalization relies on
+    # ALL composite ops but today's C++ functinalization relies on
     # the fact that it is working with the opset after decomp is run.
     # Hence we can only do it for functional ops. One caveat is that
     # there are some composite ops that lie about their schema (claimed to be
@@ -505,7 +505,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 new_graph_signature = aten_export_artifact.sig
 
                 # In the previous step, we assume constants as buffers for AOTDispatcher to
-                # functionalize properly, so undo that here
+                # functianalize properly, so undo that here
                 new_graph_signature = (
                     _override_graph_signature_for_temp_registered_constants(
                         new_graph_signature, temp_registered_constants
@@ -521,14 +521,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     ep.graph_signature, new_graph_signature
                 )
 
-                constants = {
-                    **ep.constants,
-                    **aten_export_artifact.constants,
-                }
-                constants.update(
-                    _materialize_and_lift_constants(
-                        gm, new_graph_signature, new_fake_constant_attrs
-                    )
+                constants = _materialize_and_lift_constants(
+                    gm, new_graph_signature, new_fake_constant_attrs
                 )
 
                 placeholder_naming_pass(
@@ -577,7 +571,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 if name not in unwrapped_params_buffers:
                     new_state_dict.pop(name)
 
-        return gm, new_graph_signature, new_state_dict, constants
+        return gm, new_graph_signature, new_state_dict
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -806,19 +800,17 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # values; since these become specialized, we replace such metadata with
     # the original values.
     # Also, set the param/buffer metadata back to the placeholders.
-    inputs_to_parameters = new_graph_signature.inputs_to_parameters
-    inputs_to_buffers = new_graph_signature.inputs_to_buffers
     for old_node, new_node in zip(old_placeholders, new_placeholders):
         if not isinstance(old_node.meta["val"], torch.Tensor):
             new_node.meta["val"] = old_node.meta["val"]
 
         if (
-            new_node.target in inputs_to_parameters
-            or new_node.target in inputs_to_buffers
+            new_node.target in new_graph_signature.inputs_to_parameters
+            or new_node.target in new_graph_signature.inputs_to_buffers
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
-    return gm, new_graph_signature, ep.state_dict, ep.constants
+    return gm, new_graph_signature, ep.state_dict
 
 
 def _remove_unnecessary_copy_op_pass(
@@ -827,16 +819,14 @@ def _remove_unnecessary_copy_op_pass(
     """
     Removes redundant copy_ node that was introduced due to mutated buffer.
     """
-    buffers_to_mutate = new_graph_signature.buffers_to_mutate
-    parameters_to_mutate = new_graph_signature.parameters_to_mutate
     with gm._set_replace_hook(new_graph_signature.get_replace_hook()):
         for node in gm.graph.nodes:
             if node.op == "output":
                 args, _ = pytree.tree_flatten(node.args)
                 for out in args:
                     if isinstance(out, torch.fx.Node) and (
-                        out.name in buffers_to_mutate
-                        or out.name in parameters_to_mutate
+                        out.name in new_graph_signature.buffers_to_mutate
+                        or out.name in new_graph_signature.parameters_to_mutate
                     ):
                         if (
                             out.op == "call_function"
@@ -896,16 +886,6 @@ def _get_updated_module_call_graph(
         **graph_signature.inputs_to_parameters,
         **graph_signature.inputs_to_buffers,
     }
-    old_graph_non_user_inputs = {
-        **old_graph_params_buffers,
-        **old_graph_signature.inputs_to_lifted_tensor_constants,
-        **old_graph_signature.inputs_to_lifted_custom_objs,
-    }
-    new_graph_non_user_inputs = {
-        **new_graph_params_buffers,
-        **graph_signature.inputs_to_lifted_tensor_constants,
-        **graph_signature.inputs_to_lifted_custom_objs,
-    }
 
     # use node-level provenance metadata to create a map
     # from old node names to new node names
@@ -917,7 +897,7 @@ def _get_updated_module_call_graph(
     ]
     old_user_input_names = list(
         filter(
-            lambda x: x not in old_graph_non_user_inputs
+            lambda x: x not in old_graph_params_buffers
             and x not in old_graph_signature.input_tokens,
             old_user_input_names,
         )
@@ -930,12 +910,12 @@ def _get_updated_module_call_graph(
         if history := node.meta.get("from_node", []):
             provenance[history[-1].name] = node.name
 
-        # For params and buffers, we might have applied parameterization rule
+        # For params and buffers, we might have applied parameterizaiton rule
         # so that the names might have changed. But for user inputs, we know we
         # must preserve the old name.
         elif node.op == "placeholder":
             if not (
-                node.target in new_graph_non_user_inputs
+                node.target in new_graph_params_buffers
                 or node.target in graph_signature.input_tokens
             ):
                 if node.target in new_user_input_names:
@@ -1022,7 +1002,6 @@ def _decompose_exported_program(
         gm,
         new_graph_signature,
         state_dict,
-        constants,
     ) = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         cia_to_decomp=cia_to_decomp,
@@ -1061,7 +1040,7 @@ def _decompose_exported_program(
         range_constraints=new_range_constraints,
         module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
-        constants=constants,
+        constants=ep.constants,
     )
     return exported_program
 
@@ -1223,24 +1202,11 @@ class ExportedProgram:
         both the name of the buffer as well as the buffer itself.
         """
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
-        # Lazily computed on first use to avoid calling graph_module.state_dict()
-        # unless at least one buffer is absent from state_dict and constants.
-        gm_state_dict = None
         for buffer_name in self.graph_signature.buffers:
             if buffer_name in non_persistent_buffers:
                 yield buffer_name, self.constants[buffer_name]
-            elif buffer_name in self.state_dict:
-                yield buffer_name, self.state_dict[buffer_name]
-            elif buffer_name in self.constants:
-                yield buffer_name, self.constants[buffer_name]
             else:
-                # Nested invoke_subgraph tracing can surface lifted tensor
-                # constants owned by an inner subgraph as persistent buffers
-                # in the top-level graph signature; the tensor lives in the
-                # subgraph submodule rather than state_dict or constants.
-                if gm_state_dict is None:
-                    gm_state_dict = self.graph_module.state_dict()
-                yield buffer_name, gm_state_dict[buffer_name]
+                yield buffer_name, self.state_dict[buffer_name]
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1420,7 +1386,6 @@ class ExportedProgram:
             )
 
         additional_inputs = []
-        gm_state_dict = None
         for input_ in self.graph_signature.input_specs:
             if input_.kind == InputKind.USER_INPUT:
                 continue
@@ -1432,17 +1397,8 @@ class ExportedProgram:
                     # This is a non-persistent buffer, grab it from our
                     # constants instead of the state dict.
                     additional_inputs.append(self.constants[input_.target])
-                elif input_.target in self.state_dict:
-                    additional_inputs.append(self.state_dict[input_.target])
-                elif input_.target in self.constants:
-                    additional_inputs.append(self.constants[input_.target])
                 else:
-                    # Nested invoke_subgraph tracing can leave a lifted tensor
-                    # constant in the subgraph submodule's state rather than
-                    # the top-level state_dict or constants.
-                    if gm_state_dict is None:
-                        gm_state_dict = self.graph_module.state_dict()
-                    additional_inputs.append(gm_state_dict[input_.target])
+                    additional_inputs.append(self.state_dict[input_.target])
             elif input_.kind in (
                 InputKind.CONSTANT_TENSOR,
                 InputKind.CUSTOM_OBJ,
@@ -1465,12 +1421,10 @@ class ExportedProgram:
             print_output=False, colored=False
         ).replace("\n", "\n    ")
         graph_signature = str(self.graph_signature).replace("\n", "\n    ")
-        # No space after "Graph signature:" — graph_signature starts with
-        # a newline; trailing whitespace breaks expecttest snapshots.
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature:{graph_signature}\n"
+            f"Graph signature: {graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string

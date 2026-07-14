@@ -1,5 +1,7 @@
+# mypy: ignore-errors
+
 import traceback
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 import torch
 import torch.fx
@@ -16,26 +18,27 @@ __all__ = ["TensorMetadata", "ShapeProp"]
 
 @compatibility(is_backward_compatible=True)
 class TensorMetadata(NamedTuple):
-    """A structure containing pertinent information about a tensor within a PyTorch program."""
+    # TensorMetadata is a structure containing pertinent information
+    # about a tensor within a PyTorch program.
 
     # General Tensor metadata
     shape: torch.Size
     dtype: torch.dtype
     requires_grad: bool
     stride: tuple[int, ...]
-    memory_format: torch.memory_format | None
+    memory_format: Optional[torch.memory_format]
 
     # Quantization metadata
     is_quantized: bool
     qparams: dict[str, Any]
 
 
-# When include_contiguity is True, we will set contiguity when it's always true for the tensor.
+# When include_contiguity is True, we will set contiguity when its always true for the tensor.
 # Some tensors can represent both contiguous and non-contiguous tensors. e.g: (u0, u1) with (u2, u3).
 # In such situation contiguity is not set. We could also make it a tri-state i.e: (def_contiguous,
 # def_not_contiguous and unknown).
 def _extract_tensor_metadata(
-    result: torch.Tensor, include_contiguity: bool = True
+    result: torch.Tensor, include_contiguity=True
 ) -> TensorMetadata:
     """
     Extract a TensorMetadata NamedTuple describing `result`.
@@ -133,7 +136,7 @@ class ShapeProp(torch.fx.Interpreter):
 
     """
 
-    def __init__(self, gm: torch.fx.GraphModule, fake_mode: Any = None) -> None:
+    def __init__(self, gm, fake_mode=None):
         super().__init__(gm)
         if fake_mode is None:
             fake_mode = detect_fake_mode()
@@ -185,7 +188,7 @@ class ShapeProp(torch.fx.Interpreter):
 
         found_tensor = False
 
-        def extract_tensor_meta(obj: Any) -> Any:
+        def extract_tensor_meta(obj):
             if isinstance(obj, torch.Tensor):
                 nonlocal found_tensor
                 found_tensor = True
@@ -206,7 +209,7 @@ class ShapeProp(torch.fx.Interpreter):
         n.meta["type"] = type(result)
         return result
 
-    def propagate(self, *args: Any) -> Any:
+    def propagate(self, *args):
         """
         Run `module` via interpretation and return the result and
         record the shape and type of each node.

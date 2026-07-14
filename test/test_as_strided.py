@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 
 from collections import deque
+from typing import Optional
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -56,8 +57,7 @@ def enumerate_reachable_states(
         # 1. Unflatten: try factoring each dimension
         for dim in range(ndim):
             size = sizes[dim]
-            if size <= 1:
-                raise AssertionError(f"size must be > 1, got {size}")
+            assert size > 1
             # Try all factorizations x * y = size where both x, y >= 2
             # We only need to check x up to size // 2 since when x > size // 2,
             # y = size // x < 2, which we reject
@@ -153,7 +153,7 @@ class TestAsStrided(TestCase):
         Test that for sizes 2..10, each smaller tensor results in a strict
         subset of possible states compared to the next one.
         """
-        prev_states: set[tuple[tuple[int, ...], tuple[int, ...]]] | None = None
+        prev_states: Optional[set[tuple[tuple[int, ...], tuple[int, ...]]]] = None
         for size in range(2, 11):
             current_states = enumerate_reachable_states(size)
 
@@ -161,12 +161,12 @@ class TestAsStrided(TestCase):
                 # Check that prev_states is a strict subset of current_states
                 self.assertTrue(
                     prev_states.issubset(current_states),
-                    lambda msg: f"{msg}\nStates from size {size - 1} are not a subset of size {size}",
+                    f"States from size {size - 1} are not a subset of size {size}",
                 )
                 # Check that it's a strict subset (not equal)
                 self.assertTrue(
                     len(prev_states) < len(current_states),
-                    lambda msg: f"{msg}\nStates from size {size - 1} should be strictly fewer than size {size}",
+                    f"States from size {size - 1} should be strictly fewer than size {size}",
                 )
 
             prev_states = current_states

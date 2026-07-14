@@ -2,12 +2,7 @@
 import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_HELION,
-    requires_helion,
-    requires_triton,
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_HELION, requires_helion
 
 
 if HAS_HELION:
@@ -16,7 +11,6 @@ if HAS_HELION:
 
 
 class HelionTests(TestCase):
-    @requires_triton()
     @requires_helion()
     def test_add_kernel(self):
         @helion.kernel(config=helion.Config(block_sizes=[1, 2]))
@@ -47,7 +41,6 @@ class HelionTests(TestCase):
         self.assertEqual(out, x + y)
         self.assertEqual(compiled_out, x + y)
 
-    @requires_triton()
     @requires_helion()
     def test_softmax_view_reshape(self):
         @helion.kernel(config={"block_size": 1})

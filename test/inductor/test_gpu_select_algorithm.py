@@ -52,6 +52,7 @@ def patches(fn):
 
     for patcher in [
         dynamo_config.patch(verbose=True),
+        dynamo_config.patch(inline_inbuilt_nn_modules=True),
         inductor_config.patch(
             debug=True,
             max_autotune=True,

@@ -1,0 +1,30 @@
+name: Nitpicker
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+    branches: [main]
+
+  pull_request:
+    types: [opened, reopened]
+    branches: [gh/**/base]
+
+jobs:
+  triage:
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    # Do not comment on nightly builds PR
+    if: ${{ github.event.pull_request.number != 26921 && github.repository_owner == 'pytorch' }}
+    steps:
+    - name: Checkout PyTorch
+      uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+    - uses: ethanis/nitpicker@v1
+      with:
+        nitpicks: '.github/nitpicks.yml'
+        token: "${{ secrets.GITHUB_TOKEN }}"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true

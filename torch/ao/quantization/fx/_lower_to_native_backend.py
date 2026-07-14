@@ -438,11 +438,11 @@ def _load_packed_weight(
     for attr_name in state_dict:
         if attr_name.startswith("_packed_weight") and isinstance(
             state_dict[attr_name], torch._C.ScriptObject
-        ):  # type: ignore[attr-defined]
+        ):  # type: ignore[attr-defined] # noqa: B950
             setattr(self, attr_name, state_dict[attr_name])
             attrs_to_pop.append(attr_name)
 
-    # pop the packed param attributes
+    # pop the packed param attributesn
     for attr_name in attrs_to_pop:
         state_dict.pop(attr_name)
 
@@ -534,7 +534,9 @@ def fold_weight(
     quantized_model.register_load_state_dict_pre_hook(_load_packed_weight)
 
     if keep_original_weights:
-        setattr(quantized_model, ORIGINAL_WEIGHTS_LOOKUP, original_weights_lookup)
+        setattr(  # noqa: B010
+            quantized_model, ORIGINAL_WEIGHTS_LOOKUP, original_weights_lookup
+        )
 
     return quantized_model
 
@@ -1326,7 +1328,7 @@ def special_pattern_replacement(model: GraphModule):
         if is_call_function:
             # pass scale/zer_point arguments from quantize_per_tensor to the default node operator
             # insert an op after the zero_point node so that the scale/zero_point
-            # nodes are available
+            # nodes are is available
             qop = get_quantized_operator(ref_node.target)
             args = list(ref_node.args)
             kwargs = dict(ref_node.kwargs)

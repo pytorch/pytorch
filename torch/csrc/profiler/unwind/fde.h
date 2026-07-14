@@ -63,10 +63,8 @@ struct FDE {
     } else {
       ra_register_ = static_cast<int64_t>(LC.readULEB128());
     }
-    TORCH_INTERNAL_ASSERT(
-        ra_register_ == D_EXPECTED_RA_REG,
-        "unexpected ra register: ",
-        ra_register_);
+    // we assume this in the state
+    TORCH_INTERNAL_ASSERT(ra_register_ == 16, "unexpected number of registers");
     if (augmentation_string_ && *augmentation_string_ == 'z') {
       augmentation_length_ = static_cast<int64_t>(LC.readULEB128());
       Lexer A(LC.loc());
@@ -273,11 +271,6 @@ struct FDE {
             auto delta = L.read<uint32_t>();
             return advance_loc(delta);
           }
-          case DW_CFA_offset_extended: {
-            auto reg = L.readULEB128();
-            auto off = L.readULEB128();
-            return offset(reg, off);
-          }
           case DW_CFA_restore_extended: {
             auto reg = L.readULEB128();
             return restore(reg);
@@ -359,7 +352,7 @@ struct FDE {
             std::stringstream ss;
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             ss << "unknown op code " << (void*)(uint64_t)lowbits;
-            throw UnwindError(std::move(ss).str());
+            throw UnwindError(ss.str());
           }
         }
       }

@@ -45,9 +45,7 @@ static void _fused_sgd_with_momentum_kernel_mps_(TensorList params,
                                                  dampening,
                                                  nesterov,
                                                  maximize,
-                                                 is_first_step,
-                                                 grad_scale,
-                                                 found_inf);
+                                                 is_first_step);
 }
 
 static void _fused_sgd_with_momentum_kernel_mps_(TensorList params,
@@ -97,9 +95,7 @@ static void _fused_sgd_with_momentum_kernel_mps_(TensorList params,
                                                  dampening,
                                                  nesterov,
                                                  maximize,
-                                                 is_first_step,
-                                                 grad_scale,
-                                                 found_inf);
+                                                 is_first_step);
 }
 
 } // namespace mps
@@ -150,9 +146,7 @@ void _fused_sgd_kernel_mps_(TensorList params,
                                                  FusedSgdEncodingFunctor<false /*momentum*/>(),
                                                  weight_decay,
                                                  lr,
-                                                 maximize,
-                                                 grad_scale,
-                                                 found_inf);
+                                                 maximize);
 }
 
 void _fused_sgd_kernel_mps_(TensorList params,
@@ -215,9 +209,7 @@ void _fused_sgd_kernel_mps_(TensorList params,
                                                  FusedSgdEncodingFunctor<false /*momentum*/>(),
                                                  weight_decay,
                                                  lr_tensor,
-                                                 maximize,
-                                                 grad_scale,
-                                                 found_inf);
+                                                 maximize);
 }
 
 } // namespace at::native

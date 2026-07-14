@@ -1,5 +1,5 @@
 """
-Node runtime estimation for overlap scheduling.
+Collective runtime estimation using CUDA events and power-of-2 rounding.
 """
 
 from __future__ import annotations
@@ -8,18 +8,13 @@ import functools
 import itertools
 import operator
 from functools import lru_cache
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.fx as fx
-from torch._inductor import config
-from torch._inductor.fx_passes.bucketing import (
-    _resolve_group_name,
-    _schedulable_wait_node,
-)
+from torch._inductor.fx_passes.bucketing import _schedulable_wait_node
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._logging import getArtifactLogger, trace_structured
-from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 
 
@@ -41,16 +36,12 @@ def _get_collective_key(coll_node: fx.Node) -> str:
         kwargs=coll_node.kwargs,
         normalize_to_only_use_kwargs=True,
     )
-    if opt_args_kwargs is None:
-        raise AssertionError("normalize_function returned None for collective node")
+    assert opt_args_kwargs is not None
     _, kwargs = opt_args_kwargs
-    raw_group_name = kwargs.get("group_name", None)
-    group_name = (
-        _resolve_group_name(raw_group_name) if raw_group_name is not None else None
-    )
+    group_name = kwargs.get("group_name", None)
     group_size = kwargs.get("group_size", None)
 
-    tensor_bytes: int | None = None
+    tensor_bytes: Optional[int] = None
     success, args, kw = fx_utils.get_fake_args_kwargs(coll_node)
     if success:
 
@@ -102,7 +93,7 @@ def _get_collective_cache() -> dict[str, float]:
     return {}
 
 
-def get_cached_runtime(key: str) -> float | None:
+def get_cached_runtime(key: str) -> Optional[float]:
     """Get cached runtime from process-local cache."""
     return _get_collective_cache().get(key)
 
@@ -112,12 +103,11 @@ def set_cached_runtime(key: str, value: float) -> None:
     _get_collective_cache()[key] = value
 
 
-def get_hint(x: int | torch.SymInt) -> int | None:
+def get_hint(x: int | torch.SymInt) -> Optional[int]:
     if isinstance(x, int):
         return x
-    if not isinstance(x, torch.SymInt):
-        raise AssertionError(f"expected int or SymInt, got {type(x)}")
-    return x.hint if x.has_hint() else None
+    assert isinstance(x, torch.SymInt)
+    return x.node.hint if x.node.has_hint() else None
 
 
 def can_benchmark_collective() -> bool:
@@ -138,8 +128,7 @@ def can_benchmark_collective() -> bool:
 
 
 def _median(lst):
-    if len(lst) == 0:
-        raise AssertionError("expected non-empty list for median")
+    assert len(lst) > 0
     return torch.median(torch.tensor(lst)).item()
 
 
@@ -161,7 +150,7 @@ def _benchmark_collective_with_cuda_events_impl(
         stride = [get_hint(s) for s in t.stride()]
 
         if any(s is None for s in itertools.chain(shape, stride)):
-            # This should not happen, as can_benchmark_collective checks for unbacked
+            # This should not happen, as can_benhcmark_collective checks for unbacked
             raise ValueError("Cannot convert tensor with symbolic dimensions")
 
         return rand_strided(shape, stride, device=t.device, dtype=t.dtype)  # type: ignore[arg-type]
@@ -172,23 +161,17 @@ def _benchmark_collective_with_cuda_events_impl(
         (args, kwargs),
     )
 
-    args, kwargs = torch.utils._pytree.tree_map_only(
-        torch.SymInt,
-        lambda s: optimization_hint(s, fallback=config.unbacked_symint_fallback),
-        (args, kwargs),
-    )
-
     # Warmup: call collective once and wait
-    torch.accelerator.synchronize()
+    torch.cuda.synchronize()
     result = n.target(*args, **kwargs)  # type: ignore[operator]
     torch.ops._c10d_functional.wait_tensor(result)
-    torch.accelerator.synchronize()
+    torch.cuda.synchronize()
 
     # Benchmark with CUDA events
     comm_times = []
     for _ in range(nruns):
-        start_evt = torch.Event(enable_timing=True)
-        end_evt = torch.Event(enable_timing=True)
+        start_evt = torch.cuda.Event(enable_timing=True)
+        end_evt = torch.cuda.Event(enable_timing=True)
 
         start_evt.record()
         result = n.target(*args, **kwargs)  # type: ignore[operator]
@@ -235,16 +218,15 @@ def benchmark_collective_with_cuda_events_impl(
         kwargs=n.kwargs,
         normalize_to_only_use_kwargs=True,
     )
-    if opt_args_kwargs is None:
-        raise AssertionError("normalize_function returned None for collective node")
-    group_name = _resolve_group_name(opt_args_kwargs[1]["group_name"])
+    assert opt_args_kwargs is not None
+    group_name = opt_args_kwargs[1]["group_name"]
     group_size = _get_group_size_by_name(group_name)
 
     if not success:
         return None, ""
 
     # Extract actual input size in BYTES (first tensor argument)
-    actual_bytes: int | None = None
+    actual_bytes: Optional[int] = None
 
     def extract_tensor_info(t: torch.Tensor) -> torch.Tensor:
         nonlocal actual_bytes
@@ -255,14 +237,12 @@ def benchmark_collective_with_cuda_events_impl(
 
             total_elems = 1
             for dim in shape:
-                if dim is None:
-                    raise AssertionError(f"expected non-None dim, got {dim}")
+                assert dim is not None
                 total_elems *= dim
 
             actual_bytes = total_elems * t.dtype.itemsize
         else:
-            # out-variants (e.g. all_gather_into_tensor_out) can have multiple tensors
-            pass
+            raise RuntimeError(f"should only be one input tensor to collective {n}")
         return t
 
     torch.utils._pytree.tree_map_only(torch.Tensor, extract_tensor_info, (args, kwargs))
@@ -305,10 +285,7 @@ def _log_compute_estimations(
                 continue
             if "val" in arg.meta:
                 t = arg.meta["val"]
-                if isinstance(t, torch.Tensor):
-                    ret += f" {dtype_abbrs[t.dtype]}{tuple(t.shape)}"
-                elif isinstance(t, torch.SymInt):
-                    ret += f" SymInt({t})"
+                ret += f" {dtype_abbrs[t.dtype]}{tuple(t.shape)}"
         return ret
 
     headers = [
@@ -320,20 +297,13 @@ def _log_compute_estimations(
         "Flops",
     ]
 
-    def _fmt(v: object) -> str:
-        if isinstance(v, torch.types.py_sym_types):
-            if v.node.has_hint():
-                return f"{v}({v.node.hint:.4f})"
-            return str(v)
-        return f"{v:.4f}"
-
     rows = [
         [
             _node_summary(node),
-            _fmt(est_b * 1e3),
-            _fmt(est_a * 1e3),
-            _fmt((est_a / est_b) if est_b > 0 else 0),
-            _fmt((est_a - est_b) * 1e3),
+            f"{est_b * 1e3:.4f}",
+            f"{est_a * 1e3:.4f}",
+            f"{(est_a / est_b) if est_b > 0 else 0:.4f}",
+            f"{(est_a - est_b) * 1e3:.4f}",
             str(count_flops_fx(node)),
         ]
         for node, est_b, est_a in zip(
@@ -383,9 +353,9 @@ def _log_graph_collective_benchmarks(gm: fx.GraphModule, artifact_name: str) -> 
 
 def _log_collective_benchmarks(
     collective_nodes: list[fx.Node],
-    collective_keys: list[str] | None = None,
-    benchmarked_medians: list[float] | None = None,
-    world_size: int | None = None,
+    collective_keys: Optional[list[str]] = None,
+    benchmarked_medians: Optional[list[float]] = None,
+    world_size: Optional[int] = None,
     artifact_name: str = "fx_collectives_analytical_estimation",
 ) -> None:
     """Log collective estimations for tlparse. Includes benchmarks if provided."""

@@ -11,7 +11,7 @@ namespace at::mps {
 
 // The real implementation of MPSHooksInterface
 struct MPSHooks : public at::MPSHooksInterface {
-  MPSHooks() {}
+  MPSHooks(at::MPSHooksArgs) {}
   void init() const override;
 
   // MPSDevice interface
@@ -38,7 +38,6 @@ struct MPSHooks : public at::MPSHooksInterface {
   size_t getDriverAllocatedMemory() const override;
   size_t getRecommendedMaxMemory() const override;
   void setMemoryFraction(double ratio) const override;
-  size_t getMaxBufferLength() const override;
   bool isPinnedPtr(const void* data) const override;
   Allocator* getPinnedMemoryAllocator() const override;
 
@@ -66,9 +65,6 @@ struct MPSHooks : public at::MPSHooksInterface {
   bool hasPrimaryContext(DeviceIndex device_index) const override {
     // When MPS is available, it is always in use for the one device.
     return true;
-  }
-  DeviceIndex deviceCount() const override {
-    return hasMPS() ? 1 : 0;
   }
 };
 

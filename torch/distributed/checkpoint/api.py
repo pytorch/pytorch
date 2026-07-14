@@ -1,8 +1,5 @@
-import builtins
 import traceback as tb
 from typing import Any
-
-import torch
 
 
 WRAPPED_EXCEPTION = tuple[BaseException, tb.StackSummary]
@@ -11,21 +8,7 @@ __all__ = ["CheckpointException"]
 
 
 def _wrap_exception(exc: BaseException) -> WRAPPED_EXCEPTION:
-    summary = tb.extract_tb(exc.__traceback__)
-    # Python 3.13+ stores bytecode objects in FrameSummary._code,
-    # which cannot be pickled. Clear them so gather_object succeeds
-    # and the real exception is reported instead of a misleading
-    # "cannot pickle code objects" TypeError.
-    for frame in summary:
-        if hasattr(frame, "_code"):
-            object.__setattr__(frame, "_code", None)
-    # DCP exchanges exceptions across ranks via object collectives with
-    # weights_only=True, which only deserializes allowlisted types. Downcast
-    # exception types outside builtins to a plain Exception preserving the
-    # original type name and message so the real error survives the exchange.
-    if getattr(builtins, type(exc).__name__, None) is not type(exc):
-        exc = Exception(f"{type(exc).__qualname__}: {exc}")
-    return (exc, summary)
+    return (exc, tb.extract_tb(exc.__traceback__))
 
 
 def _is_wrapped_exception(obj: Any) -> bool:
@@ -57,6 +40,3 @@ class CheckpointException(BaseException):
                 str += "".join(tb.format_list(trace))
             str += "".join(tb.format_exception_only(type(exc), value=exc))
         return str
-
-
-torch.serialization.add_safe_globals([CheckpointException])

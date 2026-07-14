@@ -1,15 +1,7 @@
 # Owner(s): ["module: dynamo"]
-from functools import wraps
-
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo import allow_in_graph
-
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 
 def fn(a, b):
@@ -18,10 +10,7 @@ def fn(a, b):
 
 class InteropTests(torch._dynamo.test_case.TestCase):
     def _common(self, fn):
-        inputs = [
-            torch.randn(10, device=device_type),
-            torch.randn(10, device=device_type),
-        ]
+        inputs = [torch.randn(10), torch.randn(10)]
         ref = fn(*inputs)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(*inputs)
@@ -36,10 +25,7 @@ class InteropTests(torch._dynamo.test_case.TestCase):
         self._common(lambda a, b: script_fn(a, b) + 1)
 
     def test_trace_fn(self):
-        trace_fn = torch.jit.trace(
-            fn,
-            [torch.zeros(10, device=device_type), torch.zeros(10, device=device_type)],
-        )
+        trace_fn = torch.jit.trace(fn, [torch.zeros(10), torch.zeros(10)])
         self._common(lambda a, b: trace_fn(a, b) + 1)
 
     def test_staticmethod_script_fn(self):
@@ -56,6 +42,10 @@ class InteropTests(torch._dynamo.test_case.TestCase):
         self._common(lambda a, b: foo.g(a, b) + 1)
 
     def test_vmap_in_graph(self):
+        from functools import wraps
+
+        from torch._dynamo import allow_in_graph
+
         def traceable(f):
             f = allow_in_graph(f)
 
@@ -66,7 +56,7 @@ class InteropTests(torch._dynamo.test_case.TestCase):
             return wrapper
 
         cnts = torch._dynamo.testing.CompileCounter()
-        x = torch.randn(3, 5, 3, device=device_type)
+        x = torch.randn(3, 5, 3)
 
         def fn(x):
             return torch.vmap(torch.Tensor.t)(x)

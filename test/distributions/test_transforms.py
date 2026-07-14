@@ -453,6 +453,7 @@ def test_jacobian(transform):
         transform.inv, ReshapeTransform
     ):
         expected = x.new_zeros(x.shape[x.dim() - transform.domain.event_dim])
+        expected = x.new_zeros(x.shape[x.dim() - transform.domain.event_dim])
     # 2. Transforms with 0 off-diagonal elements
     elif transform.domain.event_dim == 0:
         jac = jacobian(transform, x_)
@@ -626,9 +627,8 @@ def test_transformed_distribution(
 
 
 def test_save_load_transform():
-    # Evaluating `log_prob` populates the `_inv` cache, which can
-    # contain reference cycles. Here, we check that `__getstate__`
-    # drops the cache, and that we can evaluate the density after loading.
+    # Evaluating `log_prob` will create a weakref `_inv` which cannot be pickled. Here, we check
+    # that `__getstate__` correctly handles the weakref, and that we can evaluate the density after.
     dist = TransformedDistribution(Normal(0, 1), [AffineTransform(2, 3)])
     x = torch.linspace(0, 1, 10)
     log_prob = dist.log_prob(x)

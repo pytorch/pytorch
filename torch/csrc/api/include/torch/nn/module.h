@@ -122,12 +122,10 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///
   /// \rst
   /// .. code-block:: cpp
-  ///
-  ///    MyModule module;
-  ///    module->apply([](nn::Module& module) {
-  ///      std::cout << module.name() << std::endl;
-  ///    });
-  ///
+  ///   MyModule module;
+  ///   module->apply([](nn::Module& module) {
+  ///     std::cout << module.name() << std::endl;
+  ///   });
   /// \endrst
   void apply(const ModuleApplyFunction& function);
 
@@ -136,12 +134,10 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///
   /// \rst
   /// .. code-block:: cpp
-  ///
-  ///    MyModule module;
-  ///    module->apply([](const nn::Module& module) {
-  ///      std::cout << module.name() << std::endl;
-  ///    });
-  ///
+  ///   MyModule module;
+  ///   module->apply([](const nn::Module& module) {
+  ///     std::cout << module.name() << std::endl;
+  ///   });
   /// \endrst
   void apply(const ConstModuleApplyFunction& function) const;
 
@@ -153,12 +149,10 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///
   /// \rst
   /// .. code-block:: cpp
-  ///
-  ///    MyModule module;
-  ///    module->apply([](const std::string& key, nn::Module& module) {
-  ///      std::cout << key << ": " << module.name() << std::endl;
-  ///    });
-  ///
+  ///   MyModule module;
+  ///   module->apply([](const std::string& key, nn::Module& module) {
+  ///     std::cout << key << ": " << module.name() << std::endl;
+  ///   });
   /// \endrst
   void apply(
       const NamedModuleApplyFunction& function,
@@ -172,12 +166,10 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///
   /// \rst
   /// .. code-block:: cpp
-  ///
-  ///    MyModule module;
-  ///    module->apply([](const std::string& key, const nn::Module& module) {
-  ///      std::cout << key << ": " << module.name() << std::endl;
-  ///    });
-  ///
+  ///   MyModule module;
+  ///   module->apply([](const std::string& key, const nn::Module& module) {
+  ///     std::cout << key << ": " << module.name() << std::endl;
+  ///   });
   /// \endrst
   void apply(
       const ConstNamedModuleApplyFunction& function,
@@ -188,12 +180,10 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///
   /// \rst
   /// .. code-block:: cpp
-  ///
-  ///    MyModule module;
-  ///    module->apply([](const std::shared_ptr<nn::Module>& module) {
-  ///      std::cout << module->name() << std::endl;
-  ///    });
-  ///
+  ///   MyModule module;
+  ///   module->apply([](const std::shared_ptr<nn::Module>& module) {
+  ///     std::cout << module->name() << std::endl;
+  ///   });
   /// \endrst
   void apply(const ModulePointerApplyFunction& function) const;
 
@@ -206,13 +196,11 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///
   /// \rst
   /// .. code-block:: cpp
-  ///
-  ///    MyModule module;
-  ///    module->apply([](const std::string& key,
-  ///                     const std::shared_ptr<nn::Module>& module) {
-  ///      std::cout << key << ": " << module->name() << std::endl;
-  ///    });
-  ///
+  ///   MyModule module;
+  ///   module->apply([](const std::string& key,
+  ///                    const std::shared_ptr<nn::Module>& module) {
+  ///     std::cout << key << ": " << module->name() << std::endl;
+  ///   });
   /// \endrst
   void apply(
       const NamedModulePointerApplyFunction& function,
@@ -322,20 +310,18 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
   /// This method is useful when calling `apply()`.
-  ///
   /// \rst
   /// .. code-block:: cpp
   ///
-  ///    void initialize_weights(nn::Module& module) {
-  ///      torch::NoGradGuard no_grad;
-  ///      if (auto* linear = module.as<nn::Linear>()) {
-  ///        linear->weight.normal_(0.0, 0.02);
-  ///      }
-  ///    }
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
+  ///   }
   ///
-  ///    MyModule module;
-  ///    module->apply(initialize_weights);
-  ///
+  ///   MyModule module;
+  ///   module->apply(initialize_weights);
   /// \endrst
   template <typename ModuleType>
   typename ModuleType::ContainedType* as() noexcept;
@@ -343,20 +329,17 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
   /// This method is useful when calling `apply()`.
-  ///
   /// \rst
   /// .. code-block:: cpp
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
+  ///   }
   ///
-  ///    void initialize_weights(nn::Module& module) {
-  ///      torch::NoGradGuard no_grad;
-  ///      if (auto* linear = module.as<nn::Linear>()) {
-  ///        linear->weight.normal_(0.0, 0.02);
-  ///      }
-  ///    }
-  ///
-  ///    MyModule module;
-  ///    module->apply(initialize_weights);
-  ///
+  ///   MyModule module;
+  ///   module->apply(initialize_weights);
   /// \endrst
   template <typename ModuleType>
   const typename ModuleType::ContainedType* as() const noexcept;
@@ -364,20 +347,18 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
   /// This method is useful when calling `apply()`.
-  ///
   /// \rst
   /// .. code-block:: cpp
   ///
-  ///    void initialize_weights(nn::Module& module) {
-  ///      torch::NoGradGuard no_grad;
-  ///      if (auto* linear = module.as<nn::Linear>()) {
-  ///        linear->weight.normal_(0.0, 0.02);
-  ///      }
-  ///    }
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
+  ///   }
   ///
-  ///    MyModule module;
-  ///    module.apply(initialize_weights);
-  ///
+  ///   MyModule module;
+  ///   module.apply(initialize_weights);
   /// \endrst
   template <
       typename ModuleType,
@@ -387,20 +368,18 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
   /// This method is useful when calling `apply()`.
-  ///
   /// \rst
   /// .. code-block:: cpp
   ///
-  ///    void initialize_weights(nn::Module& module) {
-  ///      torch::NoGradGuard no_grad;
-  ///      if (auto* linear = module.as<nn::Linear>()) {
-  ///        linear->weight.normal_(0.0, 0.02);
-  ///      }
-  ///    }
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
+  ///   }
   ///
-  ///    MyModule module;
-  ///    module.apply(initialize_weights);
-  ///
+  ///   MyModule module;
+  ///   module.apply(initialize_weights);
   /// \endrst
   template <
       typename ModuleType,
@@ -458,7 +437,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///
   /// A buffer is intended to be state in your module that does not record
   /// gradients, such as running statistics. Registering it makes it available
-  /// to methods such as `buffers()`, `clone()` or `to()`.
+  /// to methods such as `buffers()`, `clone()` or `to().
   ///
   /// \rst
   /// .. code-block:: cpp
@@ -508,7 +487,8 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Replaces a registered submodule with this `Module`.
   ///
   /// This takes care of the registration, if you used submodule members, you
-  /// should assign the submodule as well, i.e. use as
+  /// should
+  //  assign the submodule as well, i.e. use as
   ///     module->submodule_ = module->replace_module("linear",
   ///     torch::nn::Linear(3, 4));
   /// It only works when a module of the name is already registered.
@@ -524,7 +504,8 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// This method deals with `ModuleHolder`s.
   ///
   /// This takes care of the registration, if you used submodule members, you
-  /// should assign the submodule as well, i.e. use as
+  /// should
+  //  assign the submodule as well, i.e. use as
   ///     module->submodule_ = module->replace_module("linear", linear_holder);
   /// It only works when a module of the name is already registered.
   ///
@@ -702,15 +683,15 @@ std::shared_ptr<ModuleType> Module::replace_module(
 
 template <typename... Ts>
 void Module::to_impl(Ts&&... ts) {
-  /// First call `to()` on every child module.
+  // First call `to()` on every child module.
   for (auto& child : children_) {
     child.value()->to(ts...);
   }
-  /// Then move every parameter to the new dtype/device.
+  // Then move every parameter to the new dtype/device.
   for (auto& parameter : named_parameters(/*recurse=*/false)) {
     parameter->set_data(parameter->to(ts...));
   }
-  /// Then move every buffer to the new dtype/device.
+  // Then move every buffer to the new dtype/device.
   for (auto& buffer : named_buffers(/*recurse=*/false)) {
     buffer->set_data(buffer->to(ts...));
   }
