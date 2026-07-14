@@ -149,7 +149,9 @@ inline const char* TypeName(T v) {
 
 template <>
 inline const char* TypeName(float v) {
-  if (at::globalContext().allowTF32CuBLAS()) {
+  if (at::globalContext().float32Precision(
+          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+      at::Float32Precision::TF32) {
     return "tf32";
   } else {
     return "float";
