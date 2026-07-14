@@ -1238,7 +1238,7 @@ _micro_pipeline_tp: bool = False
 # Enable/disable partitioned scatter optimization for atomic add kernels.
 # Improves kernel performance for high-contention index_put(accumulate=True)
 # at the cost of temporary memory for expanded partition buffers.
-_partitioned_scatter_default = "1" if torch.version.hip else "1"
+_partitioned_scatter_default = "1" if torch.version.hip else "0"
 partitioned_scatter_enabled = (
     os.environ.get(
         "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", _partitioned_scatter_default
