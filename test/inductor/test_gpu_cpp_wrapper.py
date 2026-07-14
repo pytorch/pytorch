@@ -22,7 +22,12 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
+    find_library_location,
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
     parametrize,
     skipIfXpu,
     slowTest,
@@ -281,10 +286,40 @@ class TestGpuWrapper(InductorTestCase):
                 'aoti_torch_call_dispatcher("mylib_symint::add_symint"', code
             )
 
-    def test_cpp_scratch_scales_with_grid_size_for_tma(self):
-        if GPU_TYPE != "cuda" or torch.version.hip:
-            self.skipTest("CUDA-only codegen test")
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_fallback_boxes_none_as_undefined_tensor(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if IS_FBCODE or IS_SANDCASTLE:
+            torch.ops.load_library("//caffe2/test/inductor:custom_ops")
+        elif IS_MACOS:
+            self.skipTest("non-portable load_library call used in test")
+        else:
+            lib_path = find_library_location("libaoti_custom_ops.so")
+            if IS_WINDOWS:
+                lib_path = find_library_location("aoti_custom_ops.dll")
+            if not os.path.exists(lib_path):
+                self.skipTest("libaoti_custom_ops not built")
+            torch.ops.load_library(str(lib_path))
 
+        device = self.device
+
+        def fn(x):
+            return torch.ops.aoti_custom_ops.maybe_weighted(x, None, x.shape[0])
+
+        x = torch.randn(8, 4, device=device)
+        torch._dynamo.mark_dynamic(x, 0)
+        expected = fn(x)
+        compiled = torch.compile(fullgraph=True, options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+        self.assertEqual(actual, expected)
+        # The composite must decompose to the inner op, which is boxed-dispatched
+        # with its undefined weight materialized as an undefined tensor, not None.
+        self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
+        self.assertIn("c10::IValue(at::Tensor())", code)
+
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
+    def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
             0,
             TritonScratchWorkspace(
@@ -297,10 +332,8 @@ class TestGpuWrapper(InductorTestCase):
             "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
         )
 
+    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_triton_wrapper_scales_scratch_with_num_ctas(self):
-        if GPU_TYPE != "cuda" or torch.version.hip:
-            self.skipTest("CUDA-only codegen test")
-
         class FakeWrapper:
             device = "cuda"
 

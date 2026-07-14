@@ -13,6 +13,7 @@
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
+#include <c10/metal/common.h>
 #include <fmt/format.h>
 #include <torch/library.h>
 #include <limits>
@@ -48,9 +49,8 @@ struct MPSScalar {
   union {
     float f; // MPS doesn't support 'double'
     at::Half h;
-    int64_t i;
+    int64_t i; // also used for bool and all narrower signed/unsigned integrals
     uint64_t u;
-    bool b;
     c10::complex<float> cf;
     c10::complex<at::Half> ch;
     at::BFloat16 bf16;
@@ -692,7 +692,7 @@ inline bool supportedFloatingOrComplexType(const TensorBase& t) {
 }
 
 inline bool needsGather(const TensorBase& t) {
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
   return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset());
 }
 
@@ -700,12 +700,13 @@ template <typename T>
 void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
                                                        const std::string& name,
                                                        T params,
-                                                       const std::string& params_type_name) {
+                                                       const std::string& params_type_name,
+                                                       const std::optional<uint32_t> ilp_threshold) {
   using namespace at::mps;
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_unary_kernel_with_params(sub_iter, name, params, params_type_name);
+      exec_unary_kernel_with_params(sub_iter, name, params, params_type_name, ilp_threshold);
     }
     return;
   }
@@ -716,9 +717,16 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
   if (length == 0) {
     return;
   }
+  // ILP is opt-in per call site (mirrors exec_unary_kernel's opt-in castout
+  // ILP): callers that know their functor is cheap enough to be
+  // bandwidth-bound pass a crossover threshold; everyone else keeps the
+  // one-thread-per-element dense kernel.
+  const bool dense_ilp = iter.is_contiguous() && ilp_threshold.has_value() && length >= ilp_threshold.value();
   auto kernel_name = fmt::format("{}_{}_{}_{}{}",
                                  name,
-                                 iter.is_contiguous() ? "dense" : "strided",
+                                 dense_ilp                  ? "dense_ilp"
+                                     : iter.is_contiguous() ? "dense"
+                                                            : "strided",
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  fmt::format("_{}", params_type_name));
@@ -742,6 +750,10 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
         const auto inner = static_cast<NSUInteger>(iter.shape()[0]);
         const auto outer = static_cast<NSUInteger>(length) / inner;
         mtl_dispatch2DJob(computeEncoder, cplState, inner, outer);
+      } else if (dense_ilp) {
+        mtl_setBytes(computeEncoder, length, 3);
+        mtl_dispatch1DJob(
+            computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
       } else {
         mtl_dispatch1DJob(computeEncoder, cplState, length);
       }
