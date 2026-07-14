@@ -1,6 +1,5 @@
-# flake8: noqa: E266, C417, B950
+# flake8: noqa: E266, C417
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -125,8 +124,8 @@ class Transformer(nn.Module):
         self.norm = RMSNorm(config.dim, eps=config.norm_eps)
         self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
 
-        self.freqs_cis: Optional[Tensor] = None
-        self.mask_cache: Optional[Tensor] = None
+        self.freqs_cis: Tensor | None = None
+        self.mask_cache: Tensor | None = None
         self.max_batch_size = -1
         self.max_seq_length = -1
 
@@ -154,7 +153,7 @@ class Transformer(nn.Module):
             torch.ones(self.max_seq_length, self.max_seq_length, dtype=torch.bool)
         )
 
-    def forward(self, idx: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
+    def forward(self, idx: Tensor, input_pos: Tensor | None = None) -> Tensor:
         if self.freqs_cis is None:
             raise AssertionError("Caches must be initialized first")
         mask = self.causal_mask[None, None, input_pos]
@@ -220,7 +219,7 @@ class Attention(nn.Module):
         x: Tensor,
         freqs_cis: Tensor,
         mask: Tensor,
-        input_pos: Optional[Tensor] = None,
+        input_pos: Tensor | None = None,
     ) -> Tensor:
         bsz, seqlen, _ = x.shape
 

@@ -7,6 +7,7 @@ import inspect
 import sys
 import types
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, ClassVar, Concatenate, final, Generic, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
@@ -14,7 +15,11 @@ from typing_extensions import ParamSpec, TypeVar
 import torch
 import torch.utils._pytree as pytree
 from torch import _utils_internal
-from torch._C import _dispatch_is_included_in_alias as is_included_in_alias, DispatchKey
+from torch._C import (
+    _dispatch_is_included_in_alias as is_included_in_alias,
+    DispatchKey,
+    DispatchKeySet,
+)
 from torch._functorch.pyfunctorch import dispatch_functorch, TransformType
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -280,7 +285,9 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name, *, cacheable=False):
+    def __init__(
+        self, name, *, cacheable=False, supports_training_input_mutation=False
+    ):
         super().__init__()
         if type(self) is HigherOrderOperator:
             raise RuntimeError(
@@ -294,6 +301,10 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         self._ns = "higher_order"
         self.__module__ = "torch.ops.higher_order"
         self._cacheable = cacheable
+        # When True, allows mutating inputs that don't require grad during
+        # training. Mutations must be handled by auto_functionalize before
+        # reaching autograd.
+        self._supports_training_input_mutation = supports_training_input_mutation
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -331,7 +342,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             from torch._higher_order_ops.utils import _has_gen_schema
 
-            if _has_gen_schema(self):
+            if not self._supports_training_input_mutation and _has_gen_schema(self):
                 schema = self.gen_schema(*args, **kwargs)
                 if any(arg.is_write for arg in schema.arguments):
                     raise RuntimeError(
@@ -368,6 +379,28 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
+    def _get_overloaded_args(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[torch.Tensor, ...]:
+        # Default HOP behavior matches handle_torch_function_no_python_arg_parser
+        # in torch/csrc/utils/python_arg_parser.cpp.
+        overloaded_args: list[torch.Tensor] = []
+
+        def has_python_key(tensor):
+            return torch._C._dispatch_keys(tensor).has("Python")
+
+        def check_overloaded(arg):
+            if isinstance(arg, torch.Tensor) and has_python_key(arg):
+                overloaded_args.append(arg)
+
+        for arg in (*args, *kwargs.values()):
+            check_overloaded(arg)
+            if isinstance(arg, (list, tuple)):
+                for a in arg:
+                    check_overloaded(a)
+
+        return tuple(overloaded_args)
+
     # Use positional-only argument to avoid naming collide with custom ops arguments
     # that are named "self".
     def dispatch(self, /, dispatch_key, *args, **kwargs):
@@ -383,25 +416,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return dispatch_functorch(self, args, kwargs)
 
         if dispatch_key == DispatchKey.Python:
-            # Keep the following 1:1 with handle_torch_function_no_python_arg_parser
-            # in torch/csrc/utils/python_arg_parser.cpp
-
-            overloaded_args_list = []
-
-            def has_python_key(tensor):
-                return torch._C._dispatch_keys(tensor).has("Python")
-
-            def check_overloaded(arg):
-                if isinstance(arg, torch.Tensor) and has_python_key(arg):
-                    overloaded_args_list.append(arg)
-
-            for arg in (*args, *kwargs.values()):
-                check_overloaded(arg)
-                if isinstance(arg, (list, tuple)):
-                    for a in arg:
-                        check_overloaded(a)
-
-            overloaded_args = tuple(overloaded_args_list)
+            overloaded_args = self._get_overloaded_args(args, kwargs)
 
             # Step 1: dispatch on any user TorchDispatchModes
             from torch.utils._python_dispatch import _pop_mode_temporarily
@@ -528,6 +543,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return torch.overrides.handle_torch_function(
                 self, flat_args, *args, **kwargs
             )
+        del flat_args
 
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
@@ -791,6 +807,31 @@ def get_cached_ops():
     return cached_ops
 
 
+@dataclass
+class _PyObjectDispatcher(Generic[_P, _T]):
+    # [NOTE: PyObject Dispatcher aka pyobj_dispatcher]
+    #
+    # Custom operators whose kernels are implemented in Python currently need
+    # to make 1+ roundtrips into the C++ PyTorch dispatcher. These roundtrips
+    # are expensive; the main expensive thing is converting a PyObject
+    # to an IValue requires copying the at::Tensor, incurring at::Tensor
+    # and PyObject (at::Tensor owns a PyObject) refcount bumps.
+    #
+    # Instead, we introduce a new type of dispatching, "PyObject Dispatching".
+    # When dispatching an operator, we avoid converting PyObject into IValues,
+    # instead doing the dispatch key computation in a reimplementation in the
+    # Python-C API. This dispatch is implemented faithfully compared to the
+    # C++ dispatcher and shares helper functions.
+    #
+    # After we have computed a DispatchKey to dispatch on, we query the C++
+    # Dispatcher for the kernel to be dispatched on. If the kernel is a Python
+    # kernel, then we directly pass the PyObject args to the Python kernel.
+    # if the kernel is a C++ kernel, then we perform a C++ Dispatcher redispatch
+    # (which ends up doing the expensive at::Tensor copies).
+    dispatch: Callable[_P, _T]
+    redispatch: Callable[Concatenate[DispatchKeySet, _P], _T]
+
+
 # Each OpOverload object contains pointer to a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload(OperatorBase, Generic[_P, _T]):
@@ -804,8 +845,12 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     ) -> None:
         super().__init__()
         self._op = op
+        # _op may be swapped to the PyObject dispatch callable. Keep the C++
+        # dispatcher handle separately for code that must bypass that fast path.
+        self._cpp_dispatch_handle = op
         self._op_dk = op_dk
         self._schema = schema
+        self._pyobj_dispatcher: _PyObjectDispatcher[_P, _T] | None = None
         self._overloadpacket = overloadpacket
         self._tags = tags
         self._overloadname = (
@@ -848,6 +893,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
     @cached_property
     def _handle(self) -> torch._C._DispatchOperatorHandle:
+        # Handle to the C++ dispatcher operator entry, used for boxed dispatch.
         return torch._C._dispatch_find_schema_or_throw(
             self._schema.name, self._schema.overload_name
         )
@@ -862,6 +908,11 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
     def __call__(self, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if (
+            self._pyobj_dispatcher is not None
+            and torch._C._peek_should_skip_torch_function()
+        ):
+            return self._cpp_dispatch_handle(*args, **kwargs)
         return self._op(*args, **kwargs)
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
@@ -869,10 +920,13 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     def redispatch(
         self, /, keyset: torch._C.DispatchKeySet, *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
+        pyobj_dispatcher = self._pyobj_dispatcher
+        if pyobj_dispatcher is not None:
+            return pyobj_dispatcher.redispatch(keyset, *args, **kwargs)
         return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
 
     def __hash__(self):
-        return hash(self._op)
+        return hash(self._cpp_dispatch_handle)
 
     # `my_namespace.my_op_name.overload_name`
     def __str__(self):
@@ -921,6 +975,33 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     # particular input 'key'.
     def _uncache_dispatch(self, key: DispatchKey) -> None:
         self._dispatch_cache.pop(key, None)
+
+    def _is_pyobj_dispatcher_enabled(self) -> bool:
+        return self._pyobj_dispatcher is not None
+
+    def _can_enable_pyobj_dispatch(self) -> bool:
+        # TODO(#187974): Support non-Tensor returns by normalizing Python kernel
+        # returns against the operator schema in the PyObject fast path.
+        return all(
+            isinstance(ret.type, torch.TensorType) for ret in self._schema.returns
+        )
+
+    def _enable_pyobj_dispatch(self, enabled: bool = True) -> None:
+        if self._is_pyobj_dispatcher_enabled() == enabled:
+            return
+        if not enabled:
+            self._pyobj_dispatcher = None
+            self._op = self._cpp_dispatch_handle
+            return
+        if not self._can_enable_pyobj_dispatch():
+            return
+        dispatch, redispatch = torch._C._dispatch_make_pyobj_dispatch_fns(
+            self._handle,
+            self._cpp_dispatch_handle,
+            self._handle.redispatch_boxed,
+        )
+        self._pyobj_dispatcher = _PyObjectDispatcher(dispatch, redispatch)
+        self._op = dispatch
 
     # This implements the pre-computation logic for the Python dispatcher.
     def _get_dispatch(self, key: DispatchKey) -> DispatchKey | Callable[_P, _T]:
@@ -1127,12 +1208,23 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
         return handler(*args, **kwargs)
 
 
-def _must_dispatch_in_python(args, kwargs):
-    return pytree.tree_any(
-        lambda obj: isinstance(
-            obj, torch._library.fake_class_registry.FakeScriptObject
-        ),
-        (args, kwargs),
+def _contains_fake_script_object(obj) -> bool:
+    """Check if obj is or contains a FakeScriptObject.
+    This is load-bearing for TorchBindOpOverloads so we avoid pytree
+    since it's much slower.
+    """
+    if isinstance(obj, torch._library.fake_class_registry.FakeScriptObject):
+        return True
+    elif isinstance(obj, (list, tuple)):
+        return any(_contains_fake_script_object(item) for item in obj)
+    elif isinstance(obj, dict):
+        return any(_contains_fake_script_object(v) for v in obj.values())
+    return False
+
+
+def _must_dispatch_in_python(args, kwargs) -> bool:
+    return any(_contains_fake_script_object(arg) for arg in args) or (
+        bool(kwargs) and any(_contains_fake_script_object(v) for v in kwargs.values())
     )
 
 
@@ -1261,6 +1353,9 @@ class OpOverloadPacket(Generic[_P, _T]):
     def overloads(self):
         return [n if n else "default" for n in self._overload_names]
 
+    def op_overloads(self):
+        return [getattr(self, n) for n in self.overloads()]
+
 
 # Note - this mirrors the logic of the cpp_function defined in jit/python/init.cpp
 # _jit_get_operations, which calls _get_operation_for_overload_or_packet.
@@ -1276,7 +1371,7 @@ def _call_overload_packet_from_python(
         return ret
 
     # The following mirrors getOpWithStack.
-    # In cpp, we do a schema matching for the arguments, and call ToIValue to
+    # In cpp, we do a schema matching for the arguments, and call ToIValue
     # to check whether the arguments are valid. But need to do similar things here
     # and check the schema whether the FakeScriptObject is the corresponding fake class
     # of the actual class used in schema.

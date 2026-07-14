@@ -57,6 +57,10 @@ inline void check_inputs_nll_loss2d(
       "but got input of dimension: ",
       input.dim());
   TORCH_CHECK(
+      target.scalar_type() == kLong || target.scalar_type() == kByte,
+      "expected target dtype to be Long or Byte, but got ",
+      target.scalar_type());
+  TORCH_CHECK(
       !weight.defined() || weight.numel() == input.size(1),
       "weight tensor should be defined either for all or no classes");
 
@@ -428,7 +432,7 @@ std::tuple<Tensor, Tensor> nll_loss2d_forward_cpu(
   auto total_weight = at::empty({0}, self.options());
   at::native::nll_loss2d_forward_out_cpu(
       self, target, weight_opt, reduction, ignore_index, output, total_weight);
-  return std::make_tuple(output, total_weight);
+  return std::make_tuple(std::move(output), std::move(total_weight));
 }
 
 Tensor& nll_loss2d_backward_out_cpu(const Tensor& grad_output,

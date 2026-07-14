@@ -12,8 +12,10 @@ FLASH_ATTENTION_HOPPER_DIR="${FLASH_ATTENTION_DIR}/hopper"
 [[ -z "$MANYLINUX_PLAT" ]] && fatal "MANYLINUX_PLAT must be set"
 [[ -z "$CUDA_VERSION" ]] && fatal "CUDA_VERSION must be set"
 [[ -z "$CUDA_SHORT" ]] && fatal "CUDA_SHORT must be set"
+[[ -z "$PYTHON_VERSION" ]] && fatal "PYTHON_VERSION must be set"
 [[ ! -d "$FLASH_ATTENTION_HOPPER_DIR" ]] && fatal "flash attn directory not found $FLASH_ATTENTION_HOPPER_DIR"
 
+TORCH_MIN_VERSION="2.9.0"
 PYTHON="${PYTHON_EXECUTABLE:-python}"
 
 # for ARM builds we need GLIBC 2.29+ so we use upstream linux image
@@ -96,8 +98,8 @@ fi
 
 # stable ABI wheel requires torch>=2.9.0
 # since Python 3.9 support was dropped in torch 2.9.0, we need to use Python 3.10+
-sed -i 's/python_requires=">=3.8"/python_requires=">=3.10"/' setup.py
-sed -i 's/"torch",/"torch>=2.9.0",/' setup.py
+sed -i "s/python_requires=\">=3.8\"/python_requires=\">=${PYTHON_VERSION}\"/" setup.py
+sed -i "s/\"torch\",/\"torch>=${TORCH_MIN_VERSION}\",/" setup.py
 
 "$PYTHON" setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \

@@ -15,7 +15,7 @@ from typing import Union
 
 __all__ = ["EventSource", "Event", "NodeState", "RdzvEvent"]
 
-EventMetadataValue = Union[str, int, float, bool, None]
+EventMetadataValue = str | int | float | bool | None
 
 
 class EventSource(str, Enum):

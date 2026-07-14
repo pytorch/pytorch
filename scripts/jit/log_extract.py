@@ -1,7 +1,7 @@
 import argparse
 import functools
 import traceback
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Tuple
 
 from torch.utils.jit.log_extract import (
     extract_ir,
@@ -29,7 +29,7 @@ Passing in --graphs 0 2 will only run graphs 0 and 2
 def test_runners(
     graphs: List[str],
     runners: List[Tuple[str, Callable]],
-    graph_set: Optional[List[int]],
+    graph_set: List[int] | None,
 ):
     for i, ir in enumerate(graphs):
         _, inputs = load_graph_and_inputs(ir)

@@ -42,7 +42,7 @@ _R = TypeVar("_R")
 log = logging.getLogger(__name__)
 
 
-# These canonicalization are needed here (and not decompositions), as the ops
+# These canonicalizations are needed here (and not decompositions), as the ops
 # we're trying to canonicalize to CompositeImplicitAutograd.
 def _canonicalize(fx_g: fx.GraphModule) -> fx.GraphModule:
     for node in fx_g.graph.find_nodes(
@@ -55,10 +55,12 @@ def _canonicalize(fx_g: fx.GraphModule) -> fx.GraphModule:
 
 @contextmanager
 def _disable_jit_autocast() -> Generator[None, None, None]:
+    # pyrefly: ignore [missing-attribute]
     old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
     try:
         yield
     finally:
+        # pyrefly: ignore [missing-attribute]
         torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
 
 
@@ -76,6 +78,10 @@ def ts_compile(fx_g: fx.GraphModule, inps: Sequence[Any]) -> torch.jit.ScriptMod
     Returns:
         Torch scripted model.
     """
+
+    from torch.fx._lazy_graph_module import _unwrap_lazy_graph_module
+
+    fx_g = _unwrap_lazy_graph_module(fx_g)
 
     with _disable_jit_autocast():
         strip_overloads(fx_g)
@@ -100,11 +106,12 @@ def ts_compile(fx_g: fx.GraphModule, inps: Sequence[Any]) -> torch.jit.ScriptMod
 
         f = torch.jit.script(fx_g)
 
+        # pyrefly: ignore [missing-attribute]
         torch._C._jit_pass_remove_mutation(f.graph)
 
         f = torch.jit.freeze(f.eval())
         f = torch.jit.optimize_for_inference(f)
-        if not any(isinstance(t, torch._subclasses.FakeTensor) for t in inps):
+        if not any(torch._subclasses.fake_tensor.is_fake_tensor(t) for t in inps):
             f(*inps)
     return f
 
@@ -331,7 +338,8 @@ with torch.jit.fuser("fuser2"):
   minifier(fx.symbolic_trace(mod), inps, check_nvfuser_subprocess)
 """
     )
-    from foo import FxModule  # pyrefly: ignore[missing-import]
+    # pyrefly: ignore[missing-import, missing-module-attribute]
+    from foo import FxModule
 
     FxModule().cuda()(*inps)
 
@@ -392,7 +400,7 @@ def _save_fx_default(
     where the two inner lists have the same format.
     If dump_example_input is True, example_inputs will be stored in .pt file.
     Since each function might produce multiple graphs,
-    the graph_index is used to distinguish difference graphs
+    the graph_index is used to distinguish different graphs
     """
     from functorch.compile import aot_module_simplified
 
@@ -443,8 +451,8 @@ def _save_fx_default(
         if dump_example_input:
             torch.save(
                 args,
-                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",  # noqa: B950
-            )  # noqa: E501
+                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",
+            )
 
     def graph_saver_forward(
         gm: fx.GraphModule, example_inputs: list[torch.Tensor]

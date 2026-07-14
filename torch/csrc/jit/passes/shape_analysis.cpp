@@ -106,10 +106,6 @@ void PropertyPropBase::setUnshapedType(Node* node) {
   }
 }
 
-namespace prim {
-using namespace ::c10::prim;
-}
-
 #define SHAPE_ASSERT(cond) \
   if (!(cond))             \
   throw propagation_error()
@@ -323,7 +319,7 @@ class ShapePropagator : public PropertyPropBase {
     std::stringstream ss;
     ss << "unable to create representative value for: " << type_->str()
        << ". File a bug report";
-    throw std::runtime_error(ss.str());
+    throw std::runtime_error(std::move(ss).str());
   }
 
   void broadcastBinary(

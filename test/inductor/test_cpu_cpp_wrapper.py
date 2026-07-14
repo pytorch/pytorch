@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device, HAS_CPU
 
 
 try:
@@ -45,6 +45,7 @@ RUN_CPU = (
     HAS_CPU
     and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
     and not IS_MACOS
+    and has_cpp_wrapper_for_device("cpu")
 )
 
 
@@ -104,7 +105,8 @@ def make_test_case(
         code_string_count = {}
 
     func = getattr(tests, test_name)
-    assert callable(func), "not a callable"
+    if not callable(func):
+        raise AssertionError("not a callable")
     func = slowTest(func) if slow else func
     new_test_name = f"{test_name}_separate" if test_build_separate else test_name
 
@@ -179,6 +181,26 @@ if RUN_CPU:
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
         BaseTest(
+            "test_conv2d_binary_inplace_fusion_failed",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
+            ],
+        ),
+        BaseTest(
+            "test_conv2d_binary_inplace_fusion_pass",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
+            ],
+        ),
+        BaseTest(
             "test_conv2d_unary",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcherGenericCPU(),
@@ -207,7 +229,7 @@ if RUN_CPU:
                 (
                     # skip for now since it's flaky:
                     # https://github.com/pytorch/pytorch/actions/runs/19916391966/job/57096613509?pr=169151
-                    # "test_linear_with_pointwise",
+                    "test_linear_with_pointwise",
                     "test_grouped_linear",
                 )
             )
@@ -259,6 +281,9 @@ if RUN_CPU:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_codegen_int_array_var_cache", "", test_cpu_repro.CPUReproTests()
+        ),
         BaseTest("test_scalar_input"),
         BaseTest("test_scalar_output"),
         BaseTest("test_scaled_dot_product_attention"),

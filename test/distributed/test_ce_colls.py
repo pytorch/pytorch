@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 import sys
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -25,11 +24,11 @@ if not dist.is_available() or not dist.is_nccl_available():
 @requires_cuda_p2p_access()
 class NCCLCopyEngineCollectives(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> Optional[str]:
+    def backend_str(cls) -> str | None:
         return "nccl"
 
     @classmethod
-    def opts(cls) -> Optional[dist.ProcessGroupNCCL.Options]:
+    def opts(cls) -> dist.ProcessGroupNCCL.Options | None:
         # Enable Zero-CTA policy for CE collectives
         opts = dist.ProcessGroupNCCL.Options()
         opts.config.cta_policy = dist.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
@@ -86,14 +85,14 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
 
         with prof:
             # SM
-            dist.all_gather_into_tensor(out_golden, inp_golden)
+            dist.all_gather_single(out_golden, inp_golden)
             # CE + async
-            work = dist.all_gather_into_tensor(out, inp, async_op=True)
+            work = dist.all_gather_single(out, inp, async_op=True)
             work.wait()
             # CE + side stream
             stream.wait_stream(current_stream)
             with torch.cuda.stream(stream):
-                dist.all_gather_into_tensor(out2, inp)
+                dist.all_gather_single(out2, inp)
 
             prof.step()
 

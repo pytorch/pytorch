@@ -3,7 +3,6 @@
 
 import math
 from collections import OrderedDict
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -510,9 +509,9 @@ class MultiheadAttentionContainer(torch.nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_mask: Optional[torch.Tensor] = None,
-        bias_k: Optional[torch.Tensor] = None,
-        bias_v: Optional[torch.Tensor] = None,
+        attn_mask: torch.Tensor | None = None,
+        bias_k: torch.Tensor | None = None,
+        bias_v: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""
         Args:
@@ -590,9 +589,9 @@ class ScaledDotProduct(torch.nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_mask: Optional[torch.Tensor] = None,
-        bias_k: Optional[torch.Tensor] = None,
-        bias_v: Optional[torch.Tensor] = None,
+        attn_mask: torch.Tensor | None = None,
+        bias_k: torch.Tensor | None = None,
+        bias_v: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Uses a scaled dot product with the projected key-value pair to update
         the projected query.

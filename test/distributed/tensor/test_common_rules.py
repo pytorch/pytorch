@@ -30,7 +30,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
 
     def test_einop_basic_propagation(self):
         # plain einsum, mm
-        mesh = DeviceMesh(self.device_type(), torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         mm_call = aten.mm.default
         # propagate col-wise sharding
@@ -82,7 +82,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         self.assertTrue(output_spec.placements[0].is_partial())
 
     def test_einop_pointwise_propagation(self):
-        mesh = DeviceMesh(self.device_type(), torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         add_call = aten.add.Tensor
         # addition
@@ -137,7 +137,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type(), mesh_shape)
+        mesh = DeviceMesh(self.device_type, mesh_shape)
 
         mm_call = aten.mm.default
 
@@ -161,7 +161,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type(), mesh_shape)
+        mesh = DeviceMesh(self.device_type, mesh_shape)
 
         mm_call = aten.mm.default
 
@@ -227,7 +227,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
     def test_einop_multi_sharding_on_mesh_dim(self):
         # einop prop with multi sharding on same mesh dim
         mesh_shape = torch.arange(self.world_size)
-        mesh = DeviceMesh(self.device_type(), mesh_shape)
+        mesh = DeviceMesh(self.device_type, mesh_shape)
 
         mm_call = aten.mm.default
         mat1, mat2 = [0, -1], [0, -1]
@@ -256,7 +256,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type(), mesh_shape)
+        mesh = DeviceMesh(self.device_type, mesh_shape)
 
         add_call = aten.add.Tensor
         mat1, mat2 = [0, -1], [1, -1]
@@ -273,7 +273,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
             einop_rule("ij,ij->ij", OpSchema(add_call, (mat1_spec, mat2_spec), {}))
 
     def test_pointwise_rules_broadcasting(self):
-        mesh = DeviceMesh(self.device_type(), torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         where_call = aten.where.self
         inp1, inp2, inp3 = [0], [], [-1, -1]
@@ -298,7 +298,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         self.assertEqual(output_spec.dim_map, [-1, 0])
 
     def test_pointwise_rules_suggestion(self):
-        mesh = DeviceMesh(self.device_type(), torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         lerp_call = aten.lerp.Scalar
         # propagate point-wise sharding
@@ -329,7 +329,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type(), mesh_shape)
+        mesh = DeviceMesh(self.device_type, mesh_shape)
 
         add_call = aten.add.Tensor
 
@@ -374,7 +374,7 @@ class CommonRulesTest(DTensorContinuousTestBase):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
         )
-        mesh = DeviceMesh(self.device_type(), mesh_shape)
+        mesh = DeviceMesh(self.device_type, mesh_shape)
 
         add_call = aten.add_.Tensor
 

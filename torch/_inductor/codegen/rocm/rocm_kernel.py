@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch._inductor.config as config
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
@@ -71,7 +71,7 @@ class ROCmTemplateKernel(ROCmKernel):
         outputs: list[IRNode],
         size_args: list[str],
         names_str: str = "",
-        input_reorder: Optional[list[int]] = None,
+        input_reorder: list[int] | None = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -96,7 +96,11 @@ class ROCmTemplateKernel(ROCmKernel):
             input_reorder = [4, 0, 1, 2, 3]
 
         if input_reorder is not None:
-            assert len(inputs) == len(input_reorder)
+            if len(inputs) != len(input_reorder):
+                raise AssertionError(
+                    f"expected len(inputs) == len(input_reorder), "
+                    f"got {len(inputs)} and {len(input_reorder)}"
+                )
         else:
             input_reorder = list(range(len(inputs)))
 
@@ -139,7 +143,10 @@ class ROCmTemplateKernel(ROCmKernel):
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
-            assert isinstance(wrapper, CppWrapperCpu)
+            if not isinstance(wrapper, CppWrapperCpu):
+                raise AssertionError(
+                    f"expected wrapper to be CppWrapperCpu, got {type(wrapper)}"
+                )
             wrapper.initialized_kernels[name] = self
             # Kinda hacky because we always originally initialize name with "KERNEL_NAME"
             # So, we replace with the real kernel name passed as an arg to this function.
@@ -228,13 +235,11 @@ class ROCmTemplateCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         make_kernel_render: Callable[
-            [ROCmTemplateBuffer, Optional[Sequence[IRNode]]], str
+            [ROCmTemplateBuffer, Sequence[IRNode] | None], str
         ],
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[
-            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
-        ],  # type: ignore[type-arg]
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -244,11 +249,13 @@ class ROCmTemplateCaller(ChoiceCaller):
         self.info_kwargs = info_kwargs
 
     def precompile(self) -> None:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to be set")
         self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to be set")
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)
@@ -268,7 +275,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "ROCm",

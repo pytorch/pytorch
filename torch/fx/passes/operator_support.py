@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import abc
 import typing as t
 
@@ -23,12 +22,13 @@ __all__ = [
 TargetTypeName = str
 
 # Arguments' dtypes for a given node, see `OperatorSupport`
-SupportedArgumentDTypes = t.Optional[
+SupportedArgumentDTypes = (
     tuple[
         t.Sequence[t.Sequence[torch.dtype]],
         dict[str, t.Sequence[torch.dtype]],
     ]
-]
+    | None
+)
 
 SupportDict = t.Mapping[TargetTypeName, SupportedArgumentDTypes]
 
@@ -66,7 +66,7 @@ class OperatorSupport(OperatorSupportBase):
 
     _support_dict: SupportDict
 
-    def __init__(self, support_dict: t.Optional[SupportDict] = None):
+    def __init__(self, support_dict: SupportDict | None = None) -> None:
         self._support_dict = support_dict or {}
 
     def is_node_supported(
@@ -162,7 +162,7 @@ def chain(*op_support: OperatorSupportBase) -> OperatorSupportBase:
     any of it reports False.
     """
 
-    def _chain(submods, node) -> bool:
+    def _chain(submods: t.Mapping[str, torch.nn.Module], node: torch.fx.Node) -> bool:
         return all(x.is_node_supported(submods, node) for x in op_support)
 
     return create_op_support(_chain)
@@ -175,7 +175,9 @@ def any_chain(*op_support: OperatorSupportBase) -> OperatorSupportBase:
     any of it reports True.
     """
 
-    def _any_chain(submods, node) -> bool:
+    def _any_chain(
+        submods: t.Mapping[str, torch.nn.Module], node: torch.fx.Node
+    ) -> bool:
         return any(x.is_node_supported(submods, node) for x in op_support)
 
     return create_op_support(_any_chain)
@@ -218,7 +220,7 @@ class OpSupports:
         return create_op_support(_decline_if_node_in_names)
 
 
-def _get_arg_dtype(arg: torch.fx.Node) -> t.Any:
+def _get_arg_dtype(arg: torch.fx.Node) -> torch.dtype:
     if not isinstance(arg, torch.fx.Node):
         raise AssertionError(f"Expected torch.fx.Node, got {type(arg)}")
     tensor_meta = arg.meta.get("tensor_meta")  # type: ignore[union-attr]

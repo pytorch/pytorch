@@ -1,16 +1,18 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional, Union
+from typing import Any, cast, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch._higher_order_ops.print import print as hop_print
+from torch._higher_order_ops.schema import HopSchema
 from torch._higher_order_ops.torchbind import call_torchbind
+from torch._higher_order_ops.utils import register_fake
 from torch._library.custom_ops import CustomOpDef
 from torch._library.effects import EffectType
 from torch._library.utils import RegistrationHandle
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -44,7 +46,7 @@ def _get_op_qualname(op: _op_identifier) -> str:
 
 
 def _register_effectful_op(
-    op: _op_identifier, effect: Optional[EffectType]
+    op: _op_identifier, effect: EffectType | None
 ) -> RegistrationHandle:
     qualname = _get_op_qualname(op)
     entry = torch._library.simple_registry.singleton.find(qualname)
@@ -52,16 +54,20 @@ def _register_effectful_op(
     return handle
 
 
-def _get_effect(op: _op_identifier) -> Optional[_EffectType]:
+def _get_effect(op: _op_identifier) -> _EffectType | None:
     qualname = _get_op_qualname(op)
     entry = torch._library.simple_registry.singleton.find(qualname)
     return entry.effect.effect
 
 
 _register_effectful_op("aten::_print", _EffectType.ORDERED)
+# _linalg_check_errors has no tensor output, but it raises on invalid linalg
+# results and must be preserved by functionalization/DCE.
+_register_effectful_op("aten::_linalg_check_errors", _EffectType.ORDERED)
 _register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
 _register_effectful_op(call_torchbind, _EffectType.ORDERED)
 _register_effectful_op(hop_print, _EffectType.ORDERED)
+_register_effectful_op(invoke_leaf_function, _EffectType.ORDERED)
 
 
 class WithEffects(HigherOrderOperator):
@@ -149,17 +155,15 @@ def with_effects_dense(
     return (new_token, out)
 
 
-@with_effects.py_impl(FakeTensorMode)
+@register_fake(with_effects, skip_cache=True)
 def with_effects_fake(
-    mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
     *args: tuple[Any, ...],
     **kwargs: dict[str, Any],
 ) -> tuple[torch.Tensor, ...]:
-    with mode:
-        result = with_effects_dense(token, op, *args, **kwargs)
-        return result
+    result = with_effects_dense(token, op, *args, **kwargs)
+    return result
 
 
 @with_effects.py_impl(ProxyTorchDispatchMode)
@@ -214,13 +218,15 @@ def with_effects_functional(
     return ctx.wrap_tensors(result)
 
 
-def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema:
+_EFFECTFUL_HOPS_WITH_SCHEMA = {hop_print, invoke_leaf_function}
+
+
+def _get_schema(op, args, kwargs: dict | None = None) -> torch.FunctionSchema:
     if isinstance(op, torch._ops.OpOverload):
         return op._schema
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
-    elif op == hop_print:
-        # hop_print currently expects (format_str, *kwargs) as its arguments
+    elif op in _EFFECTFUL_HOPS_WITH_SCHEMA:
         extra_kwargs = kwargs or {}
         return op.gen_schema(*args, **extra_kwargs)
     else:
@@ -258,8 +264,9 @@ def handle_effects(
             raise AssertionError(
                 f"Could not find a token for effect {key} which came from the function {op}"
             )
-        proxy_tensor_mode = torch._C._get_dispatch_mode(
-            torch._C._TorchDispatchModeKey.PROXY
+        proxy_tensor_mode = cast(
+            "ProxyTorchDispatchMode | None",
+            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY),
         )
         if proxy_tensor_mode is not None:
             # If we discovered a new token during tracing, we are in backward.
@@ -298,7 +305,17 @@ def handle_effects(
         )
 
     schema = _get_schema(op, unwrapped_args, unwrapped_kwargs)
-    if len(schema.returns) == 0:
+
+    if isinstance(schema, HopSchema):
+        if len(schema.returns) == 0:
+            unwrapped_outs = ()
+        else:
+            if len(unwrapped_outs) != len(schema.returns):
+                raise AssertionError(
+                    f"expected {len(schema.returns)} outputs but got {len(unwrapped_outs)}"
+                )
+            unwrapped_outs = tuple(unwrapped_outs)
+    elif len(schema.returns) == 0:
         if unwrapped_outs[0] is not None:
             raise AssertionError(f"expected no outputs but got {unwrapped_outs[0]}")
         unwrapped_outs = None  # type: ignore[assignment]

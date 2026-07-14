@@ -4,7 +4,7 @@ import contextlib
 import itertools
 import sys
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import distributed as dist
@@ -91,7 +91,7 @@ class TestGradAcc(FSDPTestContinuous):
         batch_dim: int,
         configs: list[_GradAccConfig],
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[BackwardPrefetch],
+        backward_prefetch: BackwardPrefetch | None,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):
@@ -152,9 +152,10 @@ class TestGradAcc(FSDPTestContinuous):
             batches.append(tuple(permute_tensor(t) for t in batch))
         for batch1, batch2 in itertools.combinations(batches, r=2):
             for t1, t2 in zip(batch1, batch2):
-                assert not torch.all(t1 == t2), (
-                    "Check the test to make sure that batches are distinct"
-                )
+                if torch.all(t1 == t2):
+                    raise AssertionError(
+                        "Check the test to make sure that batches are distinct"
+                    )
 
         # Concatenate the batches along the given batch dimension
         concat_batch: tuple[torch.Tensor, ...] = tuple(

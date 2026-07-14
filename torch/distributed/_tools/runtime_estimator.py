@@ -72,9 +72,19 @@ class RuntimeEstimator(TorchDispatchMode):
 
     _no_fallback_kernel: set[torch._ops._OpNamespace] = set()
     fake_mode: FakeTensorMode
+    gpu_type: str | None = None
 
-    def __init__(self) -> None:
+    def __init__(self, gpu_type: str | None = None) -> None:
+        """
+        Args:
+            gpu_type (str | None): Optional datasheet device name (e.g.
+                ``"NVIDIA H100"``) to pin the roofline peak FLOPS and DRAM
+                bandwidth to instead of querying the current device. This
+                makes ``operator-level-cost-model`` estimates deterministic
+                and hardware-independent. Only affects the roofline estimator.
+        """
         super().__init__()
+        self._gpu_type = gpu_type
         self._estimate: Callable
         self._estimate_mode_type: str
         self._mod_tracker = ModTracker()
@@ -87,7 +97,7 @@ class RuntimeEstimator(TorchDispatchMode):
         self.mod_bw_post_order: list[str] = []
         self.total_runtime: float = 0.0
 
-    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969  # noqa: PGH004,B950
+    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969
     # NB: returns fake tensors
     @classmethod
     def _maybe_run_and_benchmark_fallback_kernel(  # type: ignore[no-untyped-def]
@@ -141,13 +151,13 @@ class RuntimeEstimator(TorchDispatchMode):
             warmup_iters, actual_iters = 2, 3
             for _ in range(warmup_iters):
                 func(*args, **kwargs)
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record(torch.cuda.current_stream())
+            start_event = torch.Event(enable_timing=True)
+            end_event = torch.Event(enable_timing=True)
+            start_event.record(torch.accelerator.current_stream())
             for _ in range(actual_iters):
                 func(*args, **kwargs)
-            end_event.record(torch.cuda.current_stream())
-            torch.cuda.synchronize()
+            end_event.record(torch.accelerator.current_stream())
+            torch.accelerator.synchronize()
             cuda_time = start_event.elapsed_time(end_event)
             mean_op_time = cuda_time / actual_iters
 
@@ -198,9 +208,10 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
-        assert isinstance(cls.fake_mode, FakeTensorMode), (
-            "Initialize/Assign FakeTensorMode before using this function"
-        )
+        if not isinstance(cls.fake_mode, FakeTensorMode):
+            raise AssertionError(
+                "Initialize/Assign FakeTensorMode before using this function"
+            )
         mean_op_time = 0.0
         if func._overloadpacket not in _VIEW_OPS:
             try:
@@ -216,7 +227,7 @@ class RuntimeEstimator(TorchDispatchMode):
         res = func(*args, **kwargs or {})
         return (res, mean_op_time)
 
-    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589  # noqa: PGH004,B950
+    # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_inductor/scheduler.py#L589
     @classmethod
     def _roofline_estimate(cls, func, args, kwargs) -> tuple[Any, float]:  # type: ignore[no-untyped-def]
         """
@@ -232,9 +243,10 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
-        assert torch.cuda.is_available(), (
-            "Roofline estimation needs to access CUDA capabilities to make estimations"
-        )
+        if not torch.accelerator.is_available():
+            raise AssertionError(
+                "Roofline estimation needs to access CUDA capabilities to make estimations"
+            )
 
         # Roofline Cost Model Explanation
 
@@ -267,7 +279,9 @@ class RuntimeEstimator(TorchDispatchMode):
         if func_packet not in _IGNORE_OPS:
             flat_args_kwargs, args_spec = pytree.tree_flatten((args, kwargs))
             flat_outs, out_spec = pytree.tree_flatten(out)
-            transfer_time = get_transfer_time(flat_args_kwargs, flat_outs)
+            transfer_time = get_transfer_time(
+                flat_args_kwargs, flat_outs, gpu_type=cls.gpu_type
+            )
 
             out_dtypes = {
                 t.dtype
@@ -278,7 +292,9 @@ class RuntimeEstimator(TorchDispatchMode):
             args, kwargs = pytree.tree_unflatten(flat_args_kwargs, args_spec)
             out = pytree.tree_unflatten(flat_outs, out_spec)
 
-            compute_time = get_compute_time(func_packet, args, kwargs, out, out_dtypes)
+            compute_time = get_compute_time(
+                func_packet, args, kwargs, out, out_dtypes, gpu_type=cls.gpu_type
+            )
             # We get the estimated time as the max of the transfer time and
             # compute time. We divide by 1e6 to get the time in ms
             op_time = max(transfer_time, compute_time) / 1e6
@@ -357,10 +373,12 @@ class RuntimeEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:
         fake_mode = active_fake_mode()
-        assert isinstance(fake_mode, FakeTensorMode), (
-            "No FakeTensorMode found, designed to used under FakeTensorMode"
-        )
+        if not isinstance(fake_mode, FakeTensorMode):
+            raise AssertionError(
+                "No FakeTensorMode found, designed to be used under FakeTensorMode"
+            )
         RuntimeEstimator.fake_mode = fake_mode
+        RuntimeEstimator.gpu_type = self._gpu_type
         self.total_runtime = 0.0
         self.mod_runtimes = defaultdict(lambda: defaultdict(lambda: 0.0))
         self.mod_fw_pre_order.clear()

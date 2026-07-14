@@ -130,7 +130,7 @@ class ASGD(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -189,7 +189,7 @@ ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
         {_capturable_doc}
 
     .. _Acceleration of stochastic approximation by averaging:
-        https://meyn.ece.ufl.edu/wp-content/uploads/sites/77/archive/spm_files/Courses/ECE555-2011/555media/poljud92.pdf
+        https://doi.org/10.1137/0330046
 
     """
 
@@ -264,7 +264,6 @@ def _single_tensor_asgd(
             ax.copy_(param)
 
         if capturable:
-            # pyrefly: ignore [unsupported-operation]
             eta.copy_(lr / ((1 + lambd * lr * step_t) ** alpha))
             mu.copy_(1 / torch.maximum(step_t - t0, torch.ones_like(step_t)))
         else:

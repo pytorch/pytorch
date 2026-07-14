@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch._export.error import InternalError
@@ -22,7 +21,7 @@ def is_view_op(schema: torch._C.FunctionSchema) -> bool:
     return (alias_info is not None) and (not alias_info.is_write)
 
 
-def get_view_copy_of_view_op(schema: torch._C.FunctionSchema) -> Optional[OpOverload]:
+def get_view_copy_of_view_op(schema: torch._C.FunctionSchema) -> OpOverload | None:
     if is_view_op(schema) and schema.name.startswith("aten::"):
         view_op_name = schema.name.split("::")[1]
         view_op_overload = (
