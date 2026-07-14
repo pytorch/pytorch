@@ -515,7 +515,6 @@ def triton_reduce_partials_first_dim(
     )
     return out
 
-
 lib = torch.library.Library("symm_mem", "DEF")
 lib.define(
     "fused_all_gather_matmul("
@@ -1071,6 +1070,7 @@ def _fused_all_gather_matmul_native_cuda(
                 _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
 
     current_stream.wait_stream(backend_stream)
+    backend_stream.wait_stream(current_stream)
 
     symm_mem.barrier()
     return A, out
@@ -1081,6 +1081,20 @@ def _fused_all_gather_matmul_native_rocm(
     B: torch.Tensor,
     group_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # ROCm-specific variant of the native all-gather + matmul.
+    #
+    # It differs from the CUDA path (_fused_all_gather_matmul_native_cuda) in the
+    # producer/consumer ordering required by the CK async-input GEMM: an extra
+    # barrier is issued before any signal is written so that every rank's
+    # A_signals buffer is zero-initialized before a peer can set a chunk-ready
+    # flag, avoiding a read-before-init race observed on ROCm. The local shard is
+    # tracked separately from the symmetric-memory (remote) buffer so the local
+    # copy does not depend on the rendezvous buffer.
+    #
+    # NOTE: the divergence from the CUDA path is a ROCm/CK ordering requirement,
+    # not a fundamental algorithm difference; it should be raised with the ROCm
+    # team so the two paths can converge once CK guarantees the ordering
+    # internally.
     local_A_shard = A_shard
     remote_A_shard = A_shard
 
@@ -1104,9 +1118,7 @@ def _fused_all_gather_matmul_native_rocm(
     A = local_A_shard.new_empty(
         local_A_shard.shape[0] * world_size, local_A_shard.shape[1]
     )
-    A_signals = torch.zeros(
-        world_size, dtype=torch.uint32, device=local_A_shard.device
-    )
+    A_signals = torch.zeros(world_size, dtype=torch.uint32, device=local_A_shard.device)
     A_shards = A.chunk(world_size)
 
     # Order signal initialization before backend-stream signal writes.
