@@ -6185,10 +6185,10 @@ Tensor bessel_j1_backward(
     const Tensor& result) {
   return AT_DISPATCH_FLOATING_TYPES(
       self.scalar_type(), "bessel_j1_backward", [&]() {
-        // J1'(x) = J0(x) - J1(x)/x. At x = 0 this is 0/0 numerically, but the
-        // analytic limit is 0.5, so we force it for (near-)zero inputs. The
+        // J1'(x) = J0(x) - J1(x) / x. At x = 0 this is 0/0, but the
+        // analytic limit is 0.5, so we clamp it for near-zero inputs. The
         // `where` on a `safe_self` keeps NaNs from the untaken branch out of
-        // the gradient (see https://github.com/pytorch/pytorch/issues/52248).
+        // the gradient.
         auto eps = std::numeric_limits<scalar_t>::epsilon();
         auto self_is_not_tiny = self.abs() > eps;
 
@@ -6197,6 +6197,7 @@ Tensor bessel_j1_backward(
         auto gradx =
             (at::special_bessel_j0(safe_self) -
              (result * safe_self.reciprocal()));
+             
         return grad *
             at::where(
                    self_is_not_tiny,
