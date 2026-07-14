@@ -240,24 +240,6 @@ def _sequence_length(value: Any) -> int:
     return len(value)
 
 
-_COW_TENSOR_UNSUPPORTED = object()
-
-
-def _try_is_cow_tensor(value: Any) -> bool | object:
-    if not isinstance(value, torch.Tensor):
-        return _COW_TENSOR_UNSUPPORTED
-    if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
-        return _COW_TENSOR_UNSUPPORTED
-    return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
-
-
-def _cow_tensor_matches(value: Any, expected: Any) -> bool:
-    if not isinstance(expected, bool):
-        return False
-    actual = _try_is_cow_tensor(value)
-    return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
-
-
 dunder_attrs_assumed_constants = (
     "__defaults__",
     "__kwdefaults__",
@@ -816,7 +798,6 @@ def _get_closure_vars() -> dict[str, object]:
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
-            "___cow_tensor_matches": _cow_tensor_matches,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
             "inf": float("inf"),
@@ -2493,26 +2474,6 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager(guard).add_false_match_guard(
                 get_verbose_code_parts(code, guard), guard.user_stack
             )
-
-    @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: _try_is_cow_tensor(value),
-        eval_fn=lambda value, metadata: _cow_tensor_matches(value, metadata),
-    )
-    def COW_TENSOR_MATCH(self, guard: Guard) -> None:
-        expected = _try_is_cow_tensor(self.get(guard))
-        if not isinstance(expected, bool):
-            raise AssertionError("COW_TENSOR_MATCH requires a plain Tensor")
-
-        def guard_fn(x: Any) -> bool:
-            return _cow_tensor_matches(x, expected)
-
-        code = f"___cow_tensor_matches({self.arg_ref(guard)}, {expected!r})"
-        self._set_guard_export_info(guard, [code])
-        self.get_guard_manager(guard).add_lambda_guard(
-            guard_fn,
-            get_verbose_code_parts(code, guard),
-            guard.user_stack,
-        )
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
