@@ -3673,15 +3673,23 @@ class SIMDScheduling(BaseScheduling):
         """Autotune each combo subkernel standalone at compile time and read back its winning
         config.
 
-        Each subkernel is codegened and benchmarked through the standard
-        generate_kernel_code_from_nodes -> benchmark_codegened_module path (the same one
-        benchmark_fused_nodes uses), so it inherits preserve_rng_state, argument cloning, the
-        n_spills guard and the perf cache. Its coalesce analysis is threaded through so the
-        benchmarked tiling matches what the combo emits. The autotuner leaves the winner in
-        launchers[0]; subkernels with a single candidate config (or an in-memory / on-disk
-        autotune-cache hit) are taken directly with no benchmark.
+        Triton precompiles are submitted to the async compile pool as each subkernel is codegened.
+        The subkernels are then benchmarked in compile-completion order through the standard
+        benchmark_codegened_module path (the same one benchmark_fused_nodes uses), so device
+        benchmarking overlaps the remaining precompiles while retaining preserve_rng_state,
+        argument cloning, the n_spills guard and the perf cache. Subkernels with a single candidate
+        config (or an in-memory / on-disk autotune-cache hit) are taken directly with no benchmark.
         """
-        winners: list[Any] = []
+        from concurrent.futures import as_completed
+
+        from ..async_compile import AsyncCompile
+
+        async_compile = AsyncCompile()
+        use_process_pool = async_compile.use_process_pool()
+        work: list[tuple[Any, bool, bool, Any]] = []
+        futures_by_autotuner: dict[int, Any] = {}
+        seen_autotuners: OrderedSet[int] = OrderedSet()
+
         for pn in group:
             node_info = node_schedule_map[pn]
             # Cooperative reductions are disabled to match how the combo emits its subkernels.
@@ -3703,6 +3711,21 @@ class SIMDScheduling(BaseScheduling):
                 and configs is not None
                 and len(configs) == 1
             )
+            autotuner_id = id(autotuner)
+            duplicate = autotuner_id in seen_autotuners
+            seen_autotuners.add(autotuner_id)
+            future = futures_by_autotuner.get(autotuner_id)
+            if not already_tuned and not duplicate and not single and use_process_pool:
+                future = async_compile.triton("triton_", src_code)
+                futures_by_autotuner[autotuner_id] = future
+            work.append((mod, already_tuned or duplicate, single, future))
+
+        winners: list[Any | None] = [None] * len(work)
+
+        def benchmark(index: int) -> None:
+            mod, already_tuned, single, _ = work[index]
+            autotuner = mod.triton_
+            configs = autotuner.configs
             if not already_tuned and not single:
                 # Runs the autotuner (or loads the perf cache); the winner lands in launchers[0].
                 self.benchmark_codegened_module(mod)
@@ -3721,8 +3744,40 @@ class SIMDScheduling(BaseScheduling):
                 if cached
                 else "combo_subkernel_autotune"
             ] += 1
-            winners.append(launchers[0].config if launchers else configs[0])
-        return winners
+            if launchers:
+                winners[index] = launchers[0].config
+            else:
+                if configs is None:
+                    raise AssertionError("expected combo subkernel autotune configs")
+                winners[index] = configs[0]
+
+        pending: dict[Any, list[int]] = {}
+        ready: list[int] = []
+        for index, (*_, future) in enumerate(work):
+            raw_future = getattr(future, "future", None)
+            if raw_future is None:
+                ready.append(index)
+            else:
+                pending.setdefault(raw_future, []).append(index)
+
+        resolved_futures: OrderedSet[int] = OrderedSet()
+        for index in ready:
+            future = work[index][-1]
+            if future is not None and id(future) not in resolved_futures:
+                future.result()
+                resolved_futures.add(id(future))
+            benchmark(index)
+
+        for raw_future in as_completed(pending):
+            indices = pending[raw_future]
+            future = work[indices[0]][-1]
+            future.result()
+            for index in indices:
+                benchmark(index)
+
+        if any(winner is None for winner in winners):
+            raise AssertionError("expected all combo subkernels to be autotuned")
+        return [winner for winner in winners if winner is not None]
 
     def _build_combo_kernel(
         self,
