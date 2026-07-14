@@ -6,7 +6,9 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
 
@@ -316,12 +318,10 @@ static int64_t _jvp_decrement_nesting() {
 }
 
 static int64_t _vmap_increment_nesting(
-    c10::SymInt batch_size,
+    const c10::SymInt& batch_size,
     const std::string& randomness) {
   return initAndPushDynamicLayer(
-      TransformType::Vmap,
-      std::move(batch_size),
-      get_randomness_enum(randomness));
+      TransformType::Vmap, batch_size, get_randomness_enum(randomness));
 }
 
 static int64_t _vmap_decrement_nesting() {
@@ -501,6 +501,63 @@ static std::tuple<Tensor, std::optional<int64_t>> unwrapBatched(
   return std::make_tuple(tensor, std::nullopt);
 }
 
+static PyObject* unwrapDeadWrappers(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(PyTuple_Check(args), "expected a tuple of arguments");
+  const auto num_args = PyTuple_GET_SIZE(args);
+  // Lazily allocate only after finding a dead wrapper; otherwise return args.
+  THPObjectPtr result;
+
+  for (Py_ssize_t idx = 0; idx < num_args; idx++) {
+    auto* item = PyTuple_GET_ITEM(args, idx);
+    if (THPVariable_Check(item)) {
+      const auto& tensor = THPVariable_Unpack(item);
+      if (!isDeadTensorWrapper(tensor)) {
+        if (result) {
+          Py_INCREF(item);
+          PyTuple_SET_ITEM(result.get(), idx, item);
+        }
+        continue;
+      }
+
+      if (!result) {
+        result = PyTuple_New(num_args);
+        if (!result) {
+          return nullptr;
+        }
+        for (Py_ssize_t copy_idx = 0; copy_idx < idx; copy_idx++) {
+          auto* copied_item = PyTuple_GET_ITEM(args, copy_idx);
+          Py_INCREF(copied_item);
+          PyTuple_SET_ITEM(result.get(), copy_idx, copied_item);
+        }
+      }
+
+      auto* unwrapped = THPVariable_Wrap(unwrapIfDead(tensor));
+      if (unwrapped == nullptr) {
+        return nullptr;
+      }
+      PyTuple_SET_ITEM(result.get(), idx, unwrapped);
+    } else if (result) {
+      Py_INCREF(item);
+      PyTuple_SET_ITEM(result.get(), idx, item);
+    }
+  }
+
+  if (!result) {
+    Py_INCREF(args);
+    return args;
+  }
+  return result.release();
+  END_HANDLE_TH_ERRORS
+}
+
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+static PyMethodDef unwrapDeadWrappersDef = {
+    "unwrap_dead_wrappers",
+    unwrapDeadWrappers,
+    METH_O,
+    nullptr};
+
 void initFuncTorchBindings(PyObject* module) {
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_functorch");
@@ -559,6 +616,16 @@ void initFuncTorchBindings(PyObject* module) {
   m.def(
       "get_single_level_autograd_function_allowed",
       &at::functorch::getSingleLevelAutogradFunctionAllowed);
+  THPObjectPtr module_name(PyModule_GetNameObject(m.ptr()));
+  TORCH_CHECK(module_name, "failed to get _functorch module name");
+  PyObject* unwrap_dead_wrappers =
+      PyCFunction_NewEx(&unwrapDeadWrappersDef, nullptr, module_name.get());
+  if (unwrap_dead_wrappers == nullptr ||
+      PyModule_AddObject(
+          m.ptr(), "unwrap_dead_wrappers", unwrap_dead_wrappers) < 0) {
+    Py_XDECREF(unwrap_dead_wrappers);
+    TORCH_CHECK(false, "failed to add unwrap_dead_wrappers to _functorch");
+  }
   m.def("unwrap_if_dead", &unwrapIfDead);
   m.def("is_dead_tensor_wrapper", &isDeadTensorWrapper);
   m.def("dlevel", &dlevel, "dlevel");
