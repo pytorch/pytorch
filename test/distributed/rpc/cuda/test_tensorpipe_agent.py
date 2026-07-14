@@ -11,7 +11,10 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+)
 from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
     TensorPipeRpcAgentTestFixture,
 )
@@ -25,14 +28,15 @@ from torch.testing._internal.distributed.rpc_utils import (
 if torch.cuda.is_available():
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
-globals().update(
-    generate_tests(
-        "TensorPipe",
-        TensorPipeRpcAgentTestFixture,
-        GENERIC_CUDA_TESTS + TENSORPIPE_CUDA_TESTS,
-        __name__,
-    )
+_generated_tests = generate_tests(
+    "TensorPipe",
+    TensorPipeRpcAgentTestFixture,
+    GENERIC_CUDA_TESTS + TENSORPIPE_CUDA_TESTS,
+    __name__,
 )
+for _cls in _generated_tests.values():
+    _cls.hw_classification = HardwareClassification.CUDA
+globals().update(_generated_tests)
 
 
 if __name__ == "__main__":
