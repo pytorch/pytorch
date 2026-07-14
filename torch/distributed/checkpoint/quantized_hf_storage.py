@@ -123,7 +123,9 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 slice(offset, offset + length)
                 for offset, length in zip(req.storage_offsets, req.lengths)
             )
-            tensor = f.get_slice(tensor_fqn)[slices]
+            item_md = self.storage_data[req.storage_index]
+            storage_key = item_md.storage_key or tensor_fqn
+            tensor = f.get_slice(storage_key)[slices]
 
         target_tensor = planner.resolve_tensor(req).detach()
 
