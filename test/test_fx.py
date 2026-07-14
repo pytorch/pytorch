@@ -1391,11 +1391,13 @@ class TestFX(JitTestCase):
         without_stream_line = next(
             line for line in text.splitlines() if f"%{without_stream.name} " in line
         )
+        # Graph.__str__ mirrors GraphModule.print_readable: node.meta["custom"]
+        # is rendered as a trailing "# Annotation: {...}" comment.
         self.assertTrue(
-            with_stream_line.rstrip().endswith(", stream=2)"),
+            with_stream_line.rstrip().endswith("# Annotation: {'stream': 2}"),
             with_stream_line,
         )
-        self.assertNotIn("stream=", without_stream_line)
+        self.assertNotIn("Annotation", without_stream_line)
 
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),

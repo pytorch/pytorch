@@ -683,15 +683,26 @@ class Node(_NodeBase):
                 type_annotation = (
                     f"{_type_repr(self.type)} " if self.type is not None else ""
                 )
-            stream_annotation = ""
+            # Surface node.meta["custom"] annotations (e.g. the assigned stream)
+            # the same way GraphModule.print_readable does -- see the
+            # "Annotation: {...}" rendering in torch/fx/graph.py -- so that
+            # print(gm.graph) and print_readable() show the same information,
+            # with long values truncated identically.
+            annotation_str = ""
             custom = self.meta.get("custom")
-            if isinstance(custom, dict) and "stream" in custom:
-                stream_annotation = f", stream={custom['stream']}"
+            if isinstance(custom, dict) and custom:
+                annotation_trunc = {}
+                for key, value in custom.items():
+                    value_str = str(value)
+                    annotation_trunc[key] = (
+                        value_str[:40] + "..." if len(value_str) > 40 else value
+                    )
+                annotation_str = f"  # Annotation: {annotation_trunc}"
             return (
                 f"%{self.name} : {type_annotation}[num_users={len(self.users)}] = "
                 f"{self.op}[target={self._pretty_print_target(self.target)}]("
-                f"args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)}"
-                f"{stream_annotation})"
+                f"args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})"
+                f"{annotation_str}"
             )
 
     @compatibility(is_backward_compatible=True)
