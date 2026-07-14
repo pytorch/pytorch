@@ -3091,7 +3091,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyNativeDeviceTypes
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_gradient_type_promotion(self, device):
         inputs = (
             make_tensor((4, 4), device=device, dtype=torch.float32),

@@ -170,7 +170,6 @@ class TestSubclass(TestCase):
 
     @parametrize_tensor_cls
     @parametrize("leave_parametrized", [False, True])
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_parametrization(self, tensor_cls, leave_parametrized):
         # TODO: Either implement set_() properly for these tensor subclasses or apply a
         # more general fix to avoid the need for special set_() handling. For now, skip
