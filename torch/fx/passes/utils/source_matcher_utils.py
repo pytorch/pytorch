@@ -7,6 +7,7 @@ from typing import Any
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.node import Node
+from torch.utils._ordered_set import OrderedSet
 
 
 __all__ = ["get_source_partitions", "check_subgraphs_connected", "SourcePartition"]
@@ -128,28 +129,28 @@ def get_source_partitions(
                 add_to_partition(source_fn[1], source_fn[0], node)
 
     def make_partition(nodes: list[Node], module_type: type) -> SourcePartition:
-        # Use dicts (not sets) as ordered sets: Node objects hash by identity,
-        # so a plain set's iteration order depends on object memory addresses
-        # and is not stable across runs/processes. Keying by node and taking
-        # the keys preserves first-seen (deterministic) insertion order while
-        # still deduplicating, matching every other caller's expectations
-        # about get_source_partitions() being reproducible.
-        input_nodes: dict[Node, None] = {}
-        output_nodes: dict[Node, None] = {}
-        params: dict[Node, None] = {}
+        # OrderedSet gives us deterministic, insertion-ordered iteration
+        # (it's dict-backed under the hood). A plain set() here is wrong
+        # because Node hashes by identity, so its iteration order depends
+        # on object memory addresses rather than the graph, which made
+        # get_source_partitions() return input_nodes/output_nodes/params
+        # in a different order across otherwise-identical runs.
+        input_nodes: OrderedSet[Node] = OrderedSet()
+        output_nodes: OrderedSet[Node] = OrderedSet()
+        params: OrderedSet[Node] = OrderedSet()
         for node in nodes:
             for arg in node.args:
                 if isinstance(arg, Node) and arg not in nodes and arg.op != "get_attr":
-                    input_nodes[arg] = None
+                    input_nodes.add(arg)
 
             if node.op == "get_attr":
-                params[node] = None
+                params.add(node)
                 # get_attr nodes won't be output nodes
                 continue
 
             for user in node.users:
                 if user not in nodes:
-                    output_nodes[node] = None
+                    output_nodes.add(node)
 
         return SourcePartition(
             nodes,
