@@ -107,6 +107,10 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
     def world_size(self) -> int:
         return 4
 
+    @property
+    def device_type(self) -> str:
+        return "cpu"
+
     @with_comms
     @with_temp_dir
     def test_checkpointable_tensor_shard_save_load(self):
@@ -149,14 +153,11 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
         target.local_sizes = ((shard_size,),)
         state_dict = {"proto": target}
 
-        with patch(
-            "torch.distributed.distributed_c10d._get_pg_default_device",
-            return_value=torch.device("cpu"),
-        ):
-            dcp.load(state_dict, checkpoint_id=self.temp_dir)
+        dcp.load(state_dict, checkpoint_id=self.temp_dir)
 
         loaded = state_dict["proto"]
         self.assertFalse(loaded.is_meta)
+        self.assertEqual(torch.device("cpu"), loaded.device)
         self.assertIsInstance(loaded, CheckpointableTensor)
         self.assertEqual(torch.Size([shard_size]), loaded.size())
         self.assertEqual((self.world_size * shard_size,), loaded.global_shape)
