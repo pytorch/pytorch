@@ -178,7 +178,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if is_inference and config.reorder_for_locality:
+    if config.reorder_for_locality and (
+        is_inference or config.reorder_for_locality_in_training
+    ):
         GraphTransformObserver(gm, "reorder_for_locality").apply_graph_pass(
             reorder_for_locality
         )
@@ -920,7 +922,13 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
 
 def register_lowering_pattern(
-    pattern, extra_check=_return_true, pass_number=1
+    pattern,
+    extra_check=_return_true,
+    pass_number=1,
+    *,
+    output_metadata_ignores_input_storage: bool = True,
+    output_metadata_is_input: int | str | None = None,
+    output_metadata_fn: Callable[..., Any] | None = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
@@ -930,6 +938,9 @@ def register_lowering_pattern(
         extra_check,
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[pass_number],
+        output_metadata_ignores_input_storage=output_metadata_ignores_input_storage,
+        output_metadata_is_input=output_metadata_is_input,
+        output_metadata_fn=output_metadata_fn,
     )
 
 
@@ -1005,16 +1016,26 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
     """Based on a pattern in OPTForCausalLM"""
 
     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        # match full()'s fill_value cast
+        fill_value = int(bool(fill_value) if is_boolean_dtype(dtype) else fill_value)
         # cumsum promotes all integral types to int64
         dtype = torch.int64
 
+    out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
+    # pyrefly: ignore[bad-argument-type]
+    integral_out = bool_out or is_integer_dtype(out_dtype)
+    if integral_out:
+        fill_value = int(bool(fill_value) if bool_out else fill_value)
+    acc_dtype = torch.int64 if integral_out else torch.float64
+
     def repl(*shape):
         dim_size = shape[dim]
-        idx = torch.arange(1, dim_size + 1, device=device, dtype=dtype)
+        idx = torch.arange(1, dim_size + 1, device=device, dtype=acc_dtype)
 
         inter_shape = [1] * len(shape)
         inter_shape[dim] = dim_size
-        return (idx * fill_value).view(inter_shape).expand(shape)
+        return (idx * fill_value).view(inter_shape).expand(shape).to(out_dtype)
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
@@ -1681,6 +1702,7 @@ def decompose_auto_functionalized(graph):
     ),
     pass_number=2,
     extra_check=is_valid_splitwithsizes_cat,
+    output_metadata_is_input="input_",
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
@@ -1735,6 +1757,7 @@ def is_valid_cat_splitwithsizes(match):
     ),
     pass_number=2,
     extra_check=is_valid_cat_splitwithsizes,
+    output_metadata_is_input="input_",
 )
 def cat_splitwithsizes_replace(match, input_):
     return input_
@@ -1758,12 +1781,40 @@ def view_to_reshape(gm):
     _recursive_view_to_reshape(gm.graph)
 
 
+def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool:
+    if inp.op in ("placeholder", "get_attr"):
+        return True
+
+    inp_val = inp.meta.get("val")
+    output_val = output.meta.get("val")
+    if not (isinstance(inp_val, torch.Tensor) and isinstance(output_val, torch.Tensor)):
+        return False
+
+    if len(inp_val.shape) != len(output_val.shape):
+        return True
+
+    same_shape = statically_known_true(sym_eq(inp_val.shape, output_val.shape))
+    if not same_shape:
+        for inp_dim, output_dim in zip(inp_val.shape, output_val.shape):
+            if statically_known_true(sym_eq(inp_dim, 1)) and not statically_known_true(
+                sym_eq(output_dim, 1)
+            ):
+                return True
+        return False
+
+    return inp_val.layout == torch.strided and any(
+        statically_known_true(sym_eq(stride, 0)) for stride in inp_val.stride()
+    )
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()
+    if not _is_bias_like_addmm_input(inp, output):
+        return False
     return all(is_pointwise_use(use) for use in output.users)
 
 

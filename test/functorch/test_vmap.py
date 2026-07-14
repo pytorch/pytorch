@@ -4440,14 +4440,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # RuntimeError: When vmap-ing torch.nn.functional.one_hot,
         # please provide an explicit positive num_classes argument.
         xfail("nn.functional.one_hot"),
-        # RuntimeError: Expected all tensors to be on the same device,
-        # but found at least two devices, cuda:0 and cpu!
-        xfail("eq", device_type="cuda"),
-        xfail("ge", device_type="cuda"),
-        xfail("gt", device_type="cuda"),
-        xfail("le", device_type="cuda"),
-        xfail("lt", device_type="cuda"),
-        xfail("ne", device_type="cuda"),
         # RuntimeError: aten::_flash_attention_forward hit the vmap fallback which is currently disabled
         xfail("torch.ops.aten._flash_attention_forward"),
     }
@@ -4553,7 +4545,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 skip(
                     "to"
                 ),  # RuntimeError: required rank 4 tensor to use channels_last format
-                xfail("fill"),
                 # Batch norm got a batched tensor as input while the running_mean or running_var,
                 # which will be updated in place, were not batched.
                 xfail("native_batch_norm"),
@@ -4565,7 +4556,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 # masked index as input which is not supported
                 xfail("index_put", ""),
                 xfail("isin"),
-                xfail("masked_fill"),
                 xfail("masked_scatter"),
                 xfail("masked_select"),
                 xfail("nanquantile"),
@@ -4671,17 +4661,13 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("as_strided_scatter", ""),
                 xfail("equal", ""),
                 xfail("linalg.lu", ""),
+                xfail("linalg.polar"),  # no batch rule
                 skip("linalg.ldl_solve", ""),
                 skip("_softmax_backward_data"),
                 # One or more of the overload doesn't have a Batch rule.
                 xfail("bincount"),
-                # RuntimeError: Expected all tensors to be on the same device,
-                # but found at least two devices, cuda:0 and cpu!
-                xfail("ge", device_type="cuda"),
-                xfail(
-                    "searchsorted"
-                ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
                 xfail("native_group_norm"),
+                xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
             }
         ),
     )
@@ -4947,6 +4933,79 @@ class TestVmapOperatorsOpInfo(TestCase):
                 torch.tensor([[0, 1], [2, 3]], device=device),
                 torch.randn(2, device=device),
             )
+
+    def test_masked_fill__Tensor(self, device):
+        def test():
+            B = 2
+            # Both self, mask, and value batched
+            args = (
+                torch.randn(B, 3, device=device),
+                torch.randn(B, 3, device=device) > 0,
+                torch.randn(B, device=device),
+            )
+            self.vmap_inplace_test(Tensor.masked_fill_, args, {}, (0, 0, 0))
+
+            # self and mask batched, value not batched
+            args = (
+                torch.randn(B, 3, device=device),
+                torch.randn(B, 3, device=device) > 0,
+                torch.tensor(1.0, device=device),
+            )
+            self.vmap_inplace_test(Tensor.masked_fill_, args, {}, (0, 0, None))
+
+            # self batched, mask and value not batched
+            args = (
+                torch.randn(B, 3, device=device),
+                torch.randn(3, device=device) > 0,
+                torch.tensor(1.0, device=device),
+            )
+            self.vmap_inplace_test(Tensor.masked_fill_, args, {}, (0, None, None))
+
+            # self not batched (should error)
+            args = (
+                torch.randn(3, device=device),
+                torch.randn(B, 3, device=device) > 0,
+                torch.randn(B, device=device),
+            )
+            self.vmap_inplace_test(Tensor.masked_fill_, args, {}, (None, 0, 0))
+
+        check_vmap_fallback(self, test, Tensor.masked_fill_)
+
+    def test_masked_fill_Tensor_broadcast(self, device):
+        B = 2
+        # self rank > mask rank, both batched
+        self.vmap_outplace_test(
+            torch.masked_fill,
+            (
+                torch.randn(B, 2, 3, device=device),
+                torch.randn(B, 3, device=device) > 0,
+                torch.randn(B, device=device),
+            ),
+            {},
+            (0, 0, 0),
+        )
+        # mask rank > self rank, both batched
+        self.vmap_outplace_test(
+            torch.masked_fill,
+            (
+                torch.randn(B, 3, device=device),
+                torch.randn(B, 2, 3, device=device) > 0,
+                torch.randn(B, device=device),
+            ),
+            {},
+            (0, 0, 0),
+        )
+        # self batched, mask unbatched with different rank
+        self.vmap_outplace_test(
+            torch.masked_fill,
+            (
+                torch.randn(B, 2, 3, device=device),
+                torch.randn(3, device=device) > 0,
+                torch.randn(B, device=device),
+            ),
+            {},
+            (0, None, 0),
+        )
 
     @tf32_on_and_off(0.005)
     def test_conv_double_backward(self, device):

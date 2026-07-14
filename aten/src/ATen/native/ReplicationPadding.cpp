@@ -63,18 +63,24 @@ TORCH_META_FUNC(replication_pad1d_backward) (
   IntArrayRef paddingSize
 ) {
   int64_t dimw = 1;
+  int64_t dimc = 0;
   TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
   int64_t pad_l = paddingSize[0];
   int64_t pad_r = paddingSize[1];
 
   if (input.ndimension() == 3) {
     dimw++;
+    dimc++;
   }
 
   /* sizes */
+  int64_t ichannel = input.size(dimc);
   int64_t iwidth = input.size(dimw);
   int64_t owidth  = iwidth + pad_l + pad_r;
 
+  TORCH_CHECK(ichannel == gradOutput.size(dimc),
+      "gradOutput channel unexpected. Expected: ", ichannel,
+      ", Got: ", gradOutput.size(dimc));
   TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth,
       " Got: ", gradOutput.size(dimw));
@@ -187,20 +193,26 @@ void replication_pad2d_backward_out_cpu_template(
   int pad_r = paddingSize[1];
   int pad_t = paddingSize[2];
   int pad_b = paddingSize[3];
+  int dimc = 0;
   int dimw = 2;
   int dimh = 1;
 
   if (input.dim() == 4) {
+    dimc++;
     dimw++;
     dimh++;
   }
 
   /* sizes */
+  int64_t ichannel = input.size(dimc);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
   int64_t oheight = iheight + pad_t + pad_b;
   int64_t owidth  = iwidth + pad_l + pad_r;
 
+  TORCH_CHECK(ichannel == gradOutput.size(dimc),
+      "gradOutput channel unexpected. Expected: ", ichannel, ", Got: ",
+      gradOutput.size(dimc));
   TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput.size(dimw));

@@ -49,7 +49,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: arc,lf
+      check_experiments: lf
 
   linux-jammy-cuda13_0-py3_12-gcc11-sm100-build:
     name: linux-jammy-cuda13.0-py3.12-gcc11-sm100
@@ -67,7 +67,6 @@ jobs:
           { config: "smoke_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
       # config: "smoke_b200" maps to test_python_smoke_b200() in .ci/pytorch/test.sh
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.0"
@@ -83,7 +82,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-sm100-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-sm100-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-sm100-build.outputs.test-matrix }}
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.0"
