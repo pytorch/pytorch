@@ -787,8 +787,11 @@ def _compose_bias_into_epilogue(
     lines = epilogue_fn_code.splitlines()
     def_line = lines[0]
     body = lines[1:]
-    # Add bias as the 2nd parameter (after the required `accum`).
-    def_line = def_line.replace("(accum", f"(accum, {bias_name}", 1)
+    # Add bias as the 2nd parameter (after the required `accum`), unless the
+    # fused epilogue already reads the same buffer -- then it is already a
+    # parameter and re-adding it would emit `def fn(accum, b, b)` (SyntaxError).
+    if bias_name not in epilogue_reads:
+        def_line = def_line.replace("(accum", f"(accum, {bias_name}", 1)
     # Rewrite fused-body references to the accumulator to the biased value.
     rewritten = [re.sub(r"\baccum\b", "biased", bl) for bl in body]
     composed = "\n".join([def_line, f"    biased = accum + {bias_name}", *rewritten])

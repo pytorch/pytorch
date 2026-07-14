@@ -911,7 +911,10 @@ def add_nv_universal_addmm_choices(
     # dim must match N; higher-rank or column-only biases are left to fallbacks.
     n = layout.size[-1]
     bias_size = bias_node.get_size()
-    if len(bias_size) > 2:
+    # Only rank-1 (row vector) or rank-2 (full) biases are supported. The
+    # epilogue indexes bias_size[-1], so a rank-0 scalar bias would IndexError;
+    # reject it (and higher-rank biases) so they fall through to other backends.
+    if not 1 <= len(bias_size) <= 2:
         return
     if not V.graph.sizevars.statically_known_equals(bias_size[-1], n):
         return
