@@ -3504,22 +3504,13 @@ class XPUBMGPersistentInt8MMTemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        # Oracle-verified configs for INT8 on BMG (118 shapes tested)
-        # 7 configs cover all 66 winning shapes for bmg_persistent
         self.mm_configs = [
-            # config_1: BM=256,BN=128,BK=64,NS=3,NW=16 (17 wins)
             GemmConfig(256, 128, 64, 3, 16),
-            # config_4: BM=256,BN=256,BK=64,NS=2,NW=32 (16 wins)
             GemmConfig(256, 256, 64, 2, 32),
-            # config_6: BM=128,BN=512,BK=64,NS=2,NW=32 (15 wins)
             GemmConfig(128, 512, 64, 2, 32),
-            # config_7: BM=256,BN=256,BK=128,NS=2,NW=32 (8 wins)
             GemmConfig(256, 256, 128, 2, 32),
-            # config_5: BM=32,BN=256,BK=32,NS=2,NW=8 (6 wins)
             GemmConfig(32, 256, 32, 2, 8),
-            # config_3: BM=8,BN=512,BK=32,NS=2,NW=8 (3 wins)
             GemmConfig(8, 512, 32, 2, 8),
-            # config_2: BM=8,BN=512,BK=32,NS=2,NW=16 (1 win)
             GemmConfig(8, 512, 32, 2, 16),
         ]
         self.exhaustive_configs = self.mm_configs
@@ -3552,14 +3543,9 @@ class XPUBMGTiled2DInt8MMTemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        # Oracle-verified configs for INT8 tiled2d on BMG (118 shapes tested)
-        # 3 configs cover all 52 winning shapes for bmg_tiled2d
         self.mm_configs = [
-            # config_5: BM=32,BN=256,BK=32,NS=2,NW=8 (24 wins)
             GemmConfig(32, 256, 32, 2, 8),
-            # config_3: BM=8,BN=512,BK=32,NS=2,NW=8 (19 wins)
             GemmConfig(8, 512, 32, 2, 8),
-            # config_2: BM=8,BN=512,BK=32,NS=2,NW=16 (9 wins)
             GemmConfig(8, 512, 32, 2, 16),
         ]
         self.exhaustive_configs = self.mm_configs
