@@ -832,9 +832,15 @@ class TritonTemplateKernel(TritonKernel):
         )
         contiguous_index = self.rename_indexing(contiguous_index)
         self.body.writeline(f"{xindex_name} = " + texpr(contiguous_index))
-        self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
-            xindex_name
-        )
+        xindex_entry = self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths))
+        old_symbol = xindex_entry.symbol()
+        xindex_entry.set_name(xindex_name)
+        # Keep the kernel's range-symbol registry in sync with the renamed entry so
+        # downstream Triton block-shape inference can resolve the (possibly epilogue-
+        # scoped) index symbol; mirrors the TMA block-indexing re-key elsewhere here.
+        if self.range_tree_nodes.get(old_symbol) is xindex_entry:
+            del self.range_tree_nodes[old_symbol]
+        self.range_tree_nodes[xindex_entry.symbol()] = xindex_entry
         self.template_mask = mask
         self.template_indices = indices
         return contiguous_index
