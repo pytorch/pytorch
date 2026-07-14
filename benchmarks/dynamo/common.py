@@ -4037,6 +4037,11 @@ UNBACKED_PARITY_THRESHOLDS = {"MobileBertForMaskedLM": 3.0}
 DEFAULT_UNBACKED_PARITY_THRESHOLD = 1.0
 
 
+def _unbacked_parity_diff_pct(backed_ms, unbacked_ms):
+    """Percent by which the unbacked compiled time exceeds the backed one."""
+    return (unbacked_ms - backed_ms) / backed_ms * 100
+
+
 def _run_compare_backed_unbacked(runner, args):
     """Run backed and unbacked per-model, alternating, and compare speedup."""
     import re
@@ -4055,7 +4060,7 @@ def _run_compare_backed_unbacked(runner, args):
             b_ms = modes.get("backed_ms")
             u_ms = modes.get("unbacked_ms")
             if b_ms is not None and u_ms is not None:
-                ms_diff_pct = (u_ms - b_ms) / b_ms * 100
+                ms_diff_pct = _unbacked_parity_diff_pct(b_ms, u_ms)
                 print(
                     f"  {name:<40s} {b_ms:>10.3f} {u_ms:>11.3f} {ms_diff_pct:>+7.1f}%",
                     flush=True,
@@ -4168,7 +4173,7 @@ def _run_compare_backed_unbacked(runner, args):
         ):
             b_ms = all_results[model]["backed_ms"]
             u_ms = all_results[model]["unbacked_ms"]
-            ms_diff_pct = (u_ms - b_ms) / b_ms * 100
+            ms_diff_pct = _unbacked_parity_diff_pct(b_ms, u_ms)
             print(
                 f"  => diff: {ms_diff_pct:+.1f}% ({b_ms:.3f} ms vs {u_ms:.3f} ms)",
                 flush=True,
@@ -4192,13 +4197,15 @@ def _run_compare_backed_unbacked(runner, args):
     for name, modes in all_results.items():
         b_ms = modes.get("backed_ms")
         u_ms = modes.get("unbacked_ms")
-        if b_ms and u_ms:
-            diff_pct = (u_ms - b_ms) / b_ms * 100
+        if b_ms is not None and u_ms is not None:
+            diff_pct = _unbacked_parity_diff_pct(b_ms, u_ms)
             threshold = UNBACKED_PARITY_THRESHOLDS.get(
                 name, DEFAULT_UNBACKED_PARITY_THRESHOLD
             )
             if diff_pct > threshold:
-                regressions.append(f"{name}:+{diff_pct:.1f}% (threshold {threshold:.1f}%)")
+                regressions.append(
+                    f"{name}: +{diff_pct:.2f}% > {threshold:.1f}% threshold"
+                )
     if regressions:
         print(f"UNBACKED_PARITY_REGRESSION: {', '.join(regressions)}", flush=True)
     else:
