@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng"]
 name: linux-binary-build
 
 # Reusable build workflow for linux binary (manywheel/libtorch).

@@ -42,7 +42,22 @@ class TestHOPInfra(TestCase):
 
         self.assertTrue(
             len(missing_ops) == 0,
-            f"Missing hop_db OpInfo entries for {missing_ops}, please add them to torch/testing/_internal/hop_db.py",
+            lambda msg: f"{msg}\nMissing hop_db OpInfo entries for {missing_ops}, please add them to torch/testing/_internal/hop_db.py",
+        )
+
+    def test_hop_db_has_no_decorators_or_skips(self):
+        """hop_db entries should not decide how tests are skipped or decorated."""
+        offending_op_infos = [
+            op.full_name for op in hop_db if op.decorators or op.skips
+        ]
+
+        self.assertEqual(
+            offending_op_infos,
+            [],
+            msg=(
+                "Move hop_db decorators/skips to the tests that need them "
+                "instead of storing them on the OpInfo."
+            ),
         )
 
     def test_all_hops_are_imported(self):
@@ -98,7 +113,7 @@ class TestHOPInfra(TestCase):
             self.assertIs(
                 hop,
                 copied_hop,
-                f"deepcopy of HigherOrderOperator '{name}' should return the same object (singleton pattern)",
+                lambda msg: f"{msg}\ndeepcopy of HigherOrderOperator '{name}' should return the same object (singleton pattern)",
             )
             self.assertEqual(id(hop), id(copied_hop))
 

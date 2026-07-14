@@ -7,17 +7,17 @@ from __future__ import annotations
 
 import collections
 import functools
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
+from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._opaque_base import OpaqueBase
-from torch._subclasses import FakeTensor, FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake
+from torch._custom_class_base import CustomClassBase
+from torch._subclasses.fake_tensor import is_fake, is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -28,12 +28,13 @@ from .utils import strict_zip
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+    from torch._subclasses import FakeTensorMode
     from torch.types import IntLikeType
 
     from .descriptors import AOTInput, AOTOutput
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 zip = strict_zip
+
+ActInputPath: TypeAlias = tuple[int, tuple[str, ...]]
+ActInputPaths: TypeAlias = Sequence[ActInputPath]
 
 
 OutputType = Enum(
@@ -138,6 +142,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
+    mutation_is_shallow_copy_data: bool
     requires_grad: bool
     keep_input_mutations: bool
 
@@ -228,6 +233,16 @@ class MemoryFormatMeta:
 class PlainTensorMeta:
     unwrapped_idx: int
     memory_format: MemoryFormatMeta | None = None
+    size_symbol_placeholders: tuple[bool, ...] = ()
+    stride_symbol_placeholders: tuple[bool, ...] = ()
+
+    @property
+    def arg_count(self) -> int:
+        return (
+            1
+            + sum(self.size_symbol_placeholders)
+            + sum(self.stride_symbol_placeholders)
+        )
 
 
 @dataclass
@@ -279,10 +294,12 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: type | None = None
     memory_format: MemoryFormatMeta | None = None
+    outer_size_from_attr: str | None = None
+    outer_stride_from_attr: str | None = None
 
     def compute_outer_size_and_stride(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
+        all_args: Sequence[torch.Tensor | IntLikeType | CustomClassBase],
         *,
         curr_start_idx: int,
     ) -> tuple[
@@ -313,18 +330,20 @@ class SubclassCreationMeta:
 
     def creation_fn(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
+        all_args: Sequence[torch.Tensor | IntLikeType | CustomClassBase],
         *,
         is_runtime: bool,
     ) -> torch.Tensor:
-        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
+        inner_tensors: dict[str, torch.Tensor | CustomClassBase] = {}
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
             if isinstance(creation_meta, OpaqueMeta):
                 opaque = all_args[curr_start_idx]
-                if not isinstance(opaque, OpaqueBase):
-                    raise AssertionError(f"OpaqueBase expected, got {type(opaque)}")
+                if not isinstance(opaque, CustomClassBase):
+                    raise AssertionError(
+                        f"CustomClassBase expected, got {type(opaque)}"
+                    )
                 inner_tensors[attr] = opaque
                 curr_start_idx += 1
                 continue
@@ -332,7 +351,7 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 if not isinstance(subclass, Tensor):
                     raise AssertionError("Tensor expected")
-                curr_start_idx += 1
+                curr_start_idx += creation_meta.arg_count
             else:
                 subclass = creation_meta.creation_fn(
                     all_args,
@@ -355,6 +374,16 @@ class SubclassCreationMeta:
                 all_args,
                 curr_start_idx=curr_start_idx,
             )
+            if self.outer_size_from_attr is not None:
+                size_attr = inner_tensors[self.outer_size_from_attr]
+                if not isinstance(size_attr, Tensor):
+                    raise AssertionError("Tensor expected")
+                outer_size = size_attr.size()
+            if self.outer_stride_from_attr is not None:
+                stride_attr = inner_tensors[self.outer_stride_from_attr]
+                if not isinstance(stride_attr, Tensor):
+                    raise AssertionError("Tensor expected")
+                outer_stride = stride_attr.stride()
         else:
             outer_size, outer_stride = self.outer_size, self.outer_stride
 
@@ -503,10 +532,11 @@ class ViewAndMutationMeta:
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
 
-    # Input indices that held AsyncCollectiveTensors at compile time.
-    # Used to emit direct trigger_wait() calls at runtime instead of
+    # Input paths that held AsyncCollectiveTensors at compile time. A path is
+    # (input_index, attr_path), where an empty attr_path means the top-level
+    # input. Used to emit direct trigger_wait() calls at runtime instead of
     # scanning every arg on every graph invocation.
-    act_input_indices: list[int] = field(default_factory=list)
+    act_input_paths: list[ActInputPath] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -668,8 +698,7 @@ class ViewAndMutationMeta:
         # Eventually, we should kill this and replace with real backward guards.
         # (we want to precompute the "runtime" types, so replace FakeTensor with torch.Tensor)
         self.output_types = [
-            torch.Tensor if isinstance(x, FakeTensor) else type(x)
-            for x in self.traced_tangents
+            torch.Tensor if is_fake_tensor(x) else type(x) for x in self.traced_tangents
         ]
 
         self.is_rng_op_functionalized = config.functionalize_rng_ops
@@ -1264,7 +1293,7 @@ class AOTState:
     fake_mode: FakeTensorMode
 
 
-FxValue = Tensor | int | SymInt | BackwardState | OpaqueBase
+FxValue = Tensor | int | SymInt | BackwardState | CustomClassBase
 
 
 class CompilerWrapper:
