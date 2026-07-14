@@ -219,7 +219,7 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
-from .dicts import ConstDictVariable, MappingProxyVariable
+from .dicts import ConstDictVariable, MappingProxyVariable, OrderedItemsDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
@@ -1230,9 +1230,8 @@ class VariableBuilder:
                 )
                 return self.tx.output.side_effects.track_object_existing(value, result)
             elif istype(value, collections.OrderedDict):
-                dict_vt = ConstDictVariable(
+                dict_vt = OrderedItemsDictVariable(
                     result,  # type: ignore[arg-type]
-                    user_cls=collections.OrderedDict,
                     mutation_type=ValueMutationExisting(),
                     source=self.source,
                 )
@@ -2152,9 +2151,11 @@ class VariableBuilder:
             )
 
             is_ordered_dict = isinstance(value, collections.OrderedDict)
-            dict_vt = ConstDictVariable(
+            dict_vt_cls = (
+                OrderedItemsDictVariable if is_ordered_dict else ConstDictVariable
+            )
+            dict_vt = dict_vt_cls(
                 result,
-                user_cls=(collections.OrderedDict if is_ordered_dict else dict),
                 mutation_type=ValueMutationExisting(),
                 source=self.source,
             )
@@ -5181,7 +5182,6 @@ class SourcelessBuilder:
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
-            type(value),
             mutation_type=ValueMutationNew(),
         )
         handlers[list] = lambda tx, value: ListVariable(
@@ -5193,7 +5193,11 @@ class SourcelessBuilder:
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
         )
-        handlers[collections.OrderedDict] = handlers[dict]
+        handlers[collections.OrderedDict] = lambda tx, value: OrderedItemsDictVariable(
+            {create(tx, k): create(tx, v) for k, v in value.items()},
+            mutation_type=ValueMutationNew(),
+        )
+        # immutable_dict is a dict subclass; represent it as a plain dict VT.
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
         # Sourceless MappingProxyType object can be encountered while tracing
@@ -5201,7 +5205,6 @@ class SourcelessBuilder:
         handlers[types.MappingProxyType] = lambda tx, value: MappingProxyVariable(
             ConstDictVariable(
                 {create(tx, k): create(tx, v) for k, v in value.items()},
-                dict,
                 mutation_type=ValueMutationNew(),
             ),
         )
