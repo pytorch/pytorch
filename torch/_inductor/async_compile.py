@@ -410,6 +410,12 @@ class AsyncCompile:
                 "Process pool not ready after %ss; falling back to serial", timeout
             )
             return False
+        except (BrokenProcessPool, RuntimeError) as e:
+            # A warmup worker died or the pool was closed. The readiness probe
+            # failing must degrade to serial (the documented contract), not
+            # propagate and abort the caller's algorithm selection.
+            log.warning("Process pool unusable (%s); falling back to serial", e)
+            return False
         return True
 
     @classmethod
