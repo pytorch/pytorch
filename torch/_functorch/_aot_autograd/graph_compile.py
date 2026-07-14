@@ -1996,6 +1996,7 @@ def _categorize_saved_tensors_for_backward(
     num_symints_saved_for_bw = 0
     num_opaque_objects_saved_for_bw = 0
     saved_tensor_is_graph_input: list[bool] = []
+    saved_tensor_may_be_view: list[bool] = []
     for idx, node in enumerate(fw_outs_saved_for_bw):
         if is_sym_node(node):
             num_symints_saved_for_bw += 1
@@ -2008,6 +2009,7 @@ def _categorize_saved_tensors_for_backward(
                 # detach() it to prevent a reference cycle. Record
                 # if the saved_tensor is a graph input here to help.
                 saved_tensor_is_graph_input.append(node.op == "placeholder")
+                saved_tensor_may_be_view.append(node.meta["val"]._is_view())
                 # record dynamic tensor activations
                 dynamic_dims: set[int] = {
                     dim
@@ -2020,6 +2022,7 @@ def _categorize_saved_tensors_for_backward(
                 num_opaque_objects_saved_for_bw += 1
         else:
             saved_tensor_is_graph_input.append(False)
+            saved_tensor_may_be_view.append(True)
 
     fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
     fw_metadata.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
@@ -2033,10 +2036,17 @@ def _categorize_saved_tensors_for_backward(
             "expected one saved_tensor_is_graph_input entry per saved tensor, "
             f"got {len(saved_tensor_is_graph_input)} != {num_tensors_saved_for_bw}"
         )
+    if len(saved_tensor_may_be_view) != num_tensors_saved_for_bw:
+        raise AssertionError(
+            "expected one saved_tensor_may_be_view entry per saved tensor, "
+            f"got {len(saved_tensor_may_be_view)} != {num_tensors_saved_for_bw}"
+        )
     fw_metadata.saved_tensor_is_graph_input = saved_tensor_is_graph_input
+    fw_metadata.saved_tensor_may_be_view = saved_tensor_may_be_view
     inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
     inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
     inner_meta.saved_tensor_is_graph_input = saved_tensor_is_graph_input
+    inner_meta.saved_tensor_may_be_view = saved_tensor_may_be_view
 
     # See Note [Activations with no version counter checks in eager]
     # Count tensors saved with no version counter check.

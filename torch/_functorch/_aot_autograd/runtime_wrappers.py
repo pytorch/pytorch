@@ -2640,33 +2640,29 @@ def _codegen_save_from_forward(
     no_vc_start = vc_start + num_vc
     opaque_start = no_vc_start + num_no_vc
     symint_start = opaque_start + num_opaque
-    vc_idxs = list(range(vc_start, no_vc_start))
-    no_vc_idxs = list(range(no_vc_start, opaque_start))
-    opaque_idxs = list(range(opaque_start, symint_start))
-    symint_idxs = list(range(symint_start, symint_start + num_symints))
+    tensors_saved_with_vc_check_range = (vc_start, num_vc)
+    tensors_saved_no_vc_check_range = (no_vc_start, num_no_vc)
+    opaque_object_outs_range = (opaque_start, num_opaque)
+    symint_outs_range = (symint_start, num_symints)
+    dynamic_saved_tensor_specs = tuple(
+        (idx, tuple(sorted(dims)))
+        for idx, dims in sorted(fw_metadata.dynamic_saved_tensors_idxs.items())
+    )
 
-    dynamic_saved_tensor_specs: list[int] = []
-    for idx, dims in sorted(fw_metadata.dynamic_saved_tensors_idxs.items()):
-        dynamic_saved_tensor_specs.extend((idx, len(dims), *sorted(dims)))
-
-    # Keep the C++ helper plan compact and explicit: counts, fw_out indices,
-    # graph-input flags, then saved-tensor dynamic-dim marks.
+    # The C++ helper plan is built once at compile time. Store the four
+    # contiguous fw_out ranges directly, plus the sparse saved-tensor metadata.
     plan = (
-        len(vc_idxs),
-        len(no_vc_idxs),
-        num_symints,
-        num_opaque,
-        *vc_idxs,
-        *no_vc_idxs,
-        *symint_idxs,
-        *opaque_idxs,
-        *is_graph_input,
-        len(fw_metadata.dynamic_saved_tensors_idxs),
-        *dynamic_saved_tensor_specs,
+        tensors_saved_with_vc_check_range,
+        tensors_saved_no_vc_check_range,
+        opaque_object_outs_range,
+        symint_outs_range,
+        tuple(is_graph_input),
+        tuple(fw_metadata.saved_tensor_may_be_view),
+        dynamic_saved_tensor_specs,
     )
     save_plan = torch._C._aot_autograd_make_save_plan(plan)
     return (
-        torch._C._aot_autograd_save_for_backward,
+        torch._C._aot_autograd_save_from_forward,
         save_plan,
     )
 
@@ -3205,15 +3201,16 @@ def _codegen_compiled_forward(
     backward_state_indices: list[int],
     disable_amp: bool,
     num_rng: int,
+    save_plan: _AOTAutogradSavePlan,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
     buf = PySourceBuilder(
         "_compiled_forward",
-        args="ctx, args, _rng_add_, _save_, _save_plan_, _finalize_, _compiled_fw_",
+        args="ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_",
         artifact_name="compiled_function_forward",
     )
-    buf.bind(torch=torch, BackwardState=BackwardState)
+    buf.bind(torch=torch, BackwardState=BackwardState, _save_plan_=save_plan)
 
     with buf.indent():
         if backward_state_indices:
@@ -3249,6 +3246,8 @@ def _codegen_compiled_forward(
 def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
+    num_symints_saved_for_bw: int,
+    num_opaque_objects_saved_for_bw: int,
     inputs_require_grad: bool,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
@@ -3283,9 +3282,18 @@ def _codegen_compiled_backward(
         else:
             buf.writeline("_saved = _ctx_.saved_tensors")
 
+        if num_symints_saved_for_bw > 0:
+            buf.writeline("_symints = _ctx_.symints")
+        else:
+            buf.writeline("_symints = ()")
+
+        if num_opaque_objects_saved_for_bw > 0:
+            buf.writeline("_opaque_objects = _ctx_.opaque_objects")
+        else:
+            buf.writeline("_opaque_objects = ()")
+
         buf.writeline(
-            "all_args = _prologue_(_saved, _ctx_.symints,"
-            " _ctx_.opaque_objects, grad_args)"
+            "all_args = _prologue_(_saved, _symints, _opaque_objects, grad_args)"
         )
         buf.writeline("del _saved")
 
@@ -3375,17 +3383,22 @@ class _AOTDispatchAutogradFunctionFactory:
             _codegen_bw_wrap_fn,
         )
 
-        _codegen_bwd = _codegen_compiled_backward(
-            rng_state.num_rng,
-            fw_metadata.num_tensors_saved_with_no_vc_check,
-            any(inp.requires_grad for inp in fw_metadata.input_info),
+        _save_from_forward, _save_from_forward_plan = _codegen_save_from_forward(
+            fw_metadata
         )
-        _codegen_save, _codegen_save_plan = _codegen_save_from_forward(fw_metadata)
         _codegen_fwd = _codegen_compiled_forward(
             fw_metadata,
             backward_state_indices,
             disable_amp,
             rng_state.num_rng,
+            _save_from_forward_plan,
+        )
+        _codegen_bwd = _codegen_compiled_backward(
+            rng_state.num_rng,
+            fw_metadata.num_tensors_saved_with_no_vc_check,
+            num_symints_saved_for_bw_,
+            fw_metadata.num_opaque_objects_saved_for_bw or 0,
+            any(inp.requires_grad for inp in fw_metadata.input_info),
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3499,6 +3512,8 @@ class _AOTDispatchAutogradFunctionFactory:
 
             @staticmethod
             def _compiled_autograd_key(ctx: Any) -> tuple[Any, ...]:
+                if CompiledFunction.num_symints_saved_for_bw == 0:
+                    return (ctx._autograd_function_id,)
                 return (ctx._autograd_function_id, *ctx.symints)
 
             @staticmethod
@@ -3508,8 +3523,7 @@ class _AOTDispatchAutogradFunctionFactory:
                     ctx,
                     deduped_flat_tensor_args,
                     rng_state.add_forward_args,
-                    _codegen_save,
-                    _codegen_save_plan,
+                    _save_from_forward,
                     forward_epilogue.finalize,
                     CompiledFunction.compiled_fw,
                 )
