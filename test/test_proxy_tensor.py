@@ -405,7 +405,6 @@ def forward(self, x_1):
             self.assertTrue("norm" not in str(n.target))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
 

@@ -30,7 +30,6 @@ from .bytecode_transformation import (
     create_jump_absolute,
     create_load_const,
     Instruction,
-    is_jump_absolute,
     overwrite_instruction,
     transform_code_object,
     unique_id,
@@ -667,28 +666,6 @@ class ContinueExecutionCache:
                 if pop_nested_resume_result:
                     # pop the result of calling the nested resume function
                     prefix.append(create_instruction("POP_TOP"))
-
-                # LOAD_ATTR method variant (arg % 2 == 1) pushes both method
-                # and NULL/self, but the nested resume only returns the method.
-                # Push the missing NULL/self so the stack matches the target.
-                if sys.version_info >= (3, 12):
-                    target_idx = instructions.index(target)
-                    prev_inst = instructions[target_idx - 1] if target_idx > 0 else None
-                    if (
-                        prev_inst is not None
-                        and prev_inst.opname == "LOAD_ATTR"
-                        and prev_inst.arg is not None
-                        and prev_inst.arg % 2
-                    ):
-                        if sys.version_info >= (3, 13):
-                            prefix.append(create_instruction("PUSH_NULL"))
-                        else:
-                            prefix.extend(
-                                [
-                                    create_instruction("PUSH_NULL"),
-                                    create_instruction("SWAP", arg=2),
-                                ]
-                            )
             else:
                 # Set is_tracing_resume_prologue back to allow graph breaks after the jump
                 prefix.extend(
@@ -749,46 +726,6 @@ class ContinueExecutionCache:
             create_load_const(None),
             create_instruction("RAISE_VARARGS", arg=1),
         ]
-
-    @staticmethod
-    def _find_prefix_jump_target_offset(
-        code: types.CodeType,
-        prefix_offset: int,
-    ) -> int:
-        """Find the JUMP at the end of the prefix and return its target's offset.
-
-        When a graph break occurs during the nested resume call in the prefix,
-        both init_offset and resume_offset land in the prefix. The prefix ends
-        with a JUMP to the body; this function finds that target so we can map
-        it back to the original code.
-        """
-        result = -1
-
-        def transform(
-            instructions: list[Instruction], code_options: dict[str, Any]
-        ) -> None:
-            nonlocal result
-            idx = next(
-                (
-                    i
-                    for i, inst in enumerate(instructions)
-                    if inst.offset == prefix_offset
-                ),
-                -1,
-            )
-            if idx < 0:
-                return
-            for i in range(idx, len(instructions)):
-                if (
-                    is_jump_absolute(instructions[i])
-                    and instructions[i].target is not None
-                ):
-                    # pyrefly: ignore [missing-attribute]
-                    result = cast(int, instructions[i].target.offset)
-                    return
-
-        transform_code_object(code, transform)
-        return result
 
     @classmethod
     def generate_based_on_original_code_object(
@@ -859,18 +796,9 @@ class ContinueExecutionCache:
         # We should not be running into ambiguous graph break issues here.
         orig_resume_offset = find_orig_offset(resume_offset)
         if orig_resume_offset <= -1:
-            # The resume offset is in the prefix. This happens when the graph
-            # break occurred during the nested resume call in the prefix.
-            # The prefix ends with a JUMP to the body; map that target instead.
-            jump_target_offset = cls._find_prefix_jump_target_offset(
-                code, resume_offset
+            raise AssertionError(
+                "resume instruction not found in original code - this is a bug."
             )
-            if jump_target_offset > -1:
-                orig_resume_offset = find_orig_offset(jump_target_offset)
-            if orig_resume_offset <= -1:
-                raise AssertionError(
-                    "resume instruction not found in original code - this is a bug."
-                )
 
         if sys.version_info >= (3, 11):
             # setup_fn_target_offsets currently contains the target offset of

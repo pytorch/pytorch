@@ -791,7 +791,6 @@ class TestAutograd(TestCase):
             unpack_hook_ref = scope()
             self.assertIsNone(unpack_hook_ref())
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_will_engine_execute_node(self):
         counter = [0]
 
