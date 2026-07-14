@@ -12,16 +12,8 @@ inputs:
   custom-tag-prefix:
     description: Custom tag prefix for the docker image
     required: false
-  use-remote-buildkit:
-    description: |
-      Build on a remote BuildKit builder (OSDC/ARC, which has no host docker
-      daemon) and push straight to docker.io, instead of building on a local
-      docker daemon. The referenced <docker-build-dir>/build.sh must honor the
-      REMOTE_BUILDKIT env var (see .ci/docker/build.sh).
-    required: false
-    default: 'false'
   buildkit-addr:
-    description: Address of the remote BuildKit builder (used when use-remote-buildkit is true).
+    description: Address of the remote BuildKit builder.
     required: false
     default: 'tcp://buildkitd-amd64.buildkit:1234'
   docker-repository:
@@ -41,9 +33,10 @@ runs:
     - name: Checkout PyTorch
       uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
-    # ── Remote BuildKit path (OSDC/ARC, no host docker daemon) ──────────
+    # Build on a remote BuildKit builder (OSDC/ARC has no host docker daemon)
+    # and push straight to the registry. The referenced <docker-build-dir>/build.sh
+    # honors REMOTE_BUILDKIT (see .ci/docker/build.sh).
     - name: Set up Docker Buildx (remote, no bootstrap)
-      if: ${{ inputs.use-remote-buildkit == 'true' }}
       shell: bash
       run: |
         set -ex
@@ -54,7 +47,6 @@ runs:
           "${{ inputs.buildkit-addr }}"
 
     - name: Build (and, on push, publish) via remote BuildKit
-      if: ${{ inputs.use-remote-buildkit == 'true' }}
       env:
         REMOTE_BUILDKIT: "1"
         DOCKER_TOKEN: ${{ inputs.DOCKER_TOKEN }}
@@ -100,56 +92,3 @@ runs:
 
         # build.sh reads REMOTE_BUILDKIT and buildx-pushes the passed -t tags.
         ".ci/docker/${DOCKER_BUILD_DIR}/build.sh" "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}" "${TAGS[@]}"
-
-    # ── Local docker daemon path (EC2) ──────────────────────────────────
-    - name: Calculate docker image
-      id: calculate-docker-image
-      if: ${{ inputs.use-remote-buildkit != 'true' }}
-      uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-      with:
-        docker-image-name: ${{ inputs.docker-image-name }}
-        docker-build-dir: .ci/docker
-        custom-tag-prefix: ${{ inputs.custom-tag-prefix }}
-        docker-build-script: ${{ inputs.docker-build-dir }}/build.sh
-        always-rebuild: true
-        push: true
-
-    - name: Tag and (if WITH_PUSH) push docker image to docker.io
-      if: ${{ inputs.use-remote-buildkit != 'true' }}
-      env:
-        DOCKER_TOKEN: ${{ inputs.DOCKER_TOKEN }}
-        DOCKER_ID: ${{ inputs.DOCKER_ID }}
-        DOCKER_IMAGE_NAME: ${{ inputs.docker-image-name }}
-        DOCKER_IMAGE_PREFIX: ${{ inputs.custom-tag-prefix }}
-        CREATED_FULL_DOCKER_IMAGE_NAME: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      shell: bash
-      run: |
-        set -euox pipefail
-        GITHUB_REF=${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}
-        GIT_BRANCH_NAME=${GITHUB_REF##*/}
-        GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
-        CI_FOLDER_SHA=$(git rev-parse HEAD:.ci/docker)
-
-        DOCKER_IMAGE_NAME_PREFIX=docker.io/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}
-
-        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}
-        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
-        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
-        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}
-
-        # Pretty sure Github will mask tokens and I'm not sure if it will even be
-        # printed due to pipe, but just in case
-        set +x
-        if [[ ${WITH_PUSH:-false} == "true" ]]; then
-          echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
-          # Only push the floating base tag from main; release branch rebuilds
-          # must not clobber the image that main CI consumes. The suffixed tags
-          # (branch / commit / .ci/docker hash) are still published so release
-          # builds can pin to ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}.
-          if [[ "${GIT_BRANCH_NAME}" == "main" ]]; then
-            docker push ${DOCKER_IMAGE_NAME_PREFIX}
-          fi
-          docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
-          docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
-          docker push ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}
-        fi

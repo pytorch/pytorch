@@ -64,7 +64,6 @@ jobs:
           docker-image-name: ${{ matrix.name }}
           custom-tag-prefix: ${{ matrix.tag }}
           docker-build-dir: manywheel
-          use-remote-buildkit: true
           buildkit-addr: ${{ matrix.buildkit_addr }}
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
           DOCKER_ID: ${{ secrets.DOCKER_ID }}
