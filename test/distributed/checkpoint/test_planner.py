@@ -142,6 +142,10 @@ class TestSavePlan(TestCase):
         self.assertEqual(tensor_wi.tensor_data.chunk.offsets, torch.Size([0]))
         self.assertEqual(tensor_wi.tensor_data.chunk.sizes, torch.Size([10]))
 
+        bytes_wi = next(wi for wi in plan.items if wi.type == WriteItemType.BYTE_IO)
+        self.assertEqual(bytes_wi.index, MetadataIndex("value"))
+        self.assertIsNone(bytes_wi.tensor_data)
+
     @with_temp_dir
     def test_checkpointable_tensor_shard_save_load(self):
         expected = torch.arange(8, dtype=torch.float32)

@@ -14,6 +14,7 @@ from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
 )
 from torch.distributed.checkpoint.metadata import (
+    ChunkStorageMetadata,
     Metadata,
     STATE_DICT_TYPE,
     STORAGE_TYPES,
@@ -22,6 +23,7 @@ from torch.distributed.checkpoint.metadata import (
 )
 from torch.distributed.checkpoint.planner import LoadItemType, LoadPlan, LoadPlanner
 from torch.distributed.checkpoint.planner_helpers import _create_chunk_list
+from torch.distributed.checkpoint.protocol import _is_checkpointable_tensor
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
 from torch.distributed.checkpoint.state_dict_saver import _save_state_dict
 from torch.distributed.checkpoint.storage import StorageReader
@@ -107,7 +109,13 @@ class BroadcastingTorchSaveReader(StorageReader):
                 # pyrefly: ignore [unsupported-operation]
                 tensor = torch_state_dict[req.storage_index.fqn].to(pg_device)
             else:
-                tensor = torch.empty_like(planner.state_dict[req.storage_index.fqn])
+                target = planner.state_dict[req.storage_index.fqn]
+                if _is_checkpointable_tensor(target):
+                    tensor = cast(torch.Tensor, target).new_empty(
+                        torch.Size(target.global_shape)
+                    )
+                else:
+                    tensor = torch.empty_like(target)
 
             dist.broadcast(tensor, src=self.coordinator_rank, async_op=False)
 
@@ -197,10 +205,22 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
                     f"At this time {type(self).__name__} only supports loading Tensors."
                 )
 
+            if _is_checkpointable_tensor(tensor):
+                tensor_size = torch.Size(tensor.global_shape)
+                chunks = [
+                    ChunkStorageMetadata(
+                        offsets=torch.Size([0] * len(tensor_size)),
+                        sizes=tensor_size,
+                    )
+                ]
+            else:
+                tensor_size = tensor.size()
+                chunks = _create_chunk_list(tensor)
+
             state_dict_metadata[key] = TensorStorageMetadata(
                 TensorProperties(dtype=tensor.dtype),
-                tensor.size(),
-                _create_chunk_list(tensor),
+                tensor_size,
+                chunks,
             )
         self.metadata = Metadata(state_dict_metadata=state_dict_metadata)
 
