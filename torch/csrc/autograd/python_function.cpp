@@ -152,7 +152,9 @@ static PyObject* unpack_saved_variables(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* to_py_size(c10::SymIntArrayRef sym_sizes) {
+PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
+  c10::SymIntArrayRef sym_sizes(size);
+
   auto ret = THPObjectPtr(THPSizeType.tp_alloc(
       &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
   if (!ret)
@@ -269,7 +271,9 @@ auto PyNode::apply_with_saved_impl(
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
 
   const auto& is_variable_input = py_fn->is_variable_input;
-  const auto& next_edges = this->next_edges();
+  const auto& input_infos = py_fn->input_info;
+  // input_info only contains info from variable inputs and should be a subset
+  TORCH_INTERNAL_ASSERT(is_variable_input.size() >= input_infos.size());
 
   // The gradients returned in the backwards need to match the number of inputs
   // to the forward, and their metadata, so we pass the fwdInputs
@@ -283,19 +287,13 @@ auto PyNode::apply_with_saved_impl(
     if (!is_variable_input[i]) {
       // input at i is not a variable, skip index
       PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, Py_NewRef(Py_None));
+      offset++;
       continue;
     }
 
-    TORCH_INTERNAL_ASSERT(offset < static_cast<int>(next_edges.size()));
-    const auto& edge = next_edges[offset++];
-    if (!edge.is_valid()) {
-      PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, Py_NewRef(Py_None));
-      continue;
-    }
+    const auto& input_info = input_infos[i - offset];
 
-    const auto& input_info = edge.function->input_metadata(edge.input_nr);
-
-    THPObjectPtr device(THPDevice_New(input_info.device()));
+    THPObjectPtr device(THPDevice_New(input_info.device));
     if (!device)
       throw_python_error();
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
@@ -303,20 +301,16 @@ auto PyNode::apply_with_saved_impl(
     if (!fwdInputMetadata)
       throw python_error();
     PyTuple_SET_ITEM(
-        fwdInputMetadata.get(), 0, autograd::utils::wrap(input_info.layout()));
+        fwdInputMetadata.get(), 0, autograd::utils::wrap(input_info.layout));
     PyTuple_SET_ITEM(fwdInputMetadata.get(), 1, device.release());
     PyTuple_SET_ITEM(
         fwdInputMetadata.get(),
         2,
-        autograd::utils::wrap(at::typeMetaToScalarType(input_info.dtype())));
-    PyTuple_SET_ITEM(
-        fwdInputMetadata.get(),
-        3,
-        to_py_size(input_info.shape_as_dim_vector()));
+        autograd::utils::wrap(input_info.scalar_type));
+    PyTuple_SET_ITEM(fwdInputMetadata.get(), 3, to_py_size(input_info.size));
 
     PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, fwdInputMetadata.release());
   }
-  TORCH_INTERNAL_ASSERT(offset == static_cast<int>(next_edges.size()));
   THPObjectPtr saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
 
@@ -1232,6 +1226,15 @@ PyObject* process_outputs(
     throw python_error();
 
   grad_fn->cdata->clear_input_metadata();
+
+  // Record type, device, and size information about inputs
+  if (is_executable) {
+    grad_fn->input_info.clear();
+    grad_fn->input_info.reserve(unpacked.input_vars.size());
+    for (const auto* var : unpacked.input_vars) {
+      grad_fn->input_info.emplace_back(*var);
+    }
+  }
 
   std::unordered_set<at::TensorImpl*> to_save_if_setup_context{};
   std::vector<std::optional<at::Tensor>> tensors_to_save{};
