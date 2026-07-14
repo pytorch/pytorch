@@ -1382,6 +1382,16 @@ THPObjectPtr call_forward_with_ctx(
       nullptr));
 }
 
+THPObjectPtr create_ctx_instance(PyObject* backward_cls) {
+  if (!PyType_Check(backward_cls) ||
+      !PyType_IsSubtype(
+          reinterpret_cast<PyTypeObject*>(backward_cls), &THPFunctionType)) {
+    return THPObjectPtr(PyObject_CallNoArgs(backward_cls));
+  }
+  return THPObjectPtr(THPFunction_new(
+      reinterpret_cast<PyTypeObject*>(backward_cls), nullptr, nullptr));
+}
+
 THPObjectPtr make_ctx_input_output_tuple(
     THPFunction* ctx,
     UnpackedInput& unpacked_input,
@@ -1626,7 +1636,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls)
     return nullptr;
-  THPObjectPtr ctx_obj(PyObject_CallFunctionObjArgs(backward_cls, nullptr));
+  THPObjectPtr ctx_obj(create_ctx_instance(backward_cls));
   if (!ctx_obj)
     return nullptr;
   auto* ctx = reinterpret_cast<THPFunction*>(ctx_obj.get());
