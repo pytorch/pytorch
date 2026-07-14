@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import functools
 import math
 import unittest
 
@@ -244,6 +245,16 @@ class TestInductorConfig(TestCase):
         ):
             code = torch._inductor.config.codegen_config()
             self.assertNotIn("post_grad_custom", code)
+
+    def test_codegen_skips_inductor_choices_class(self):
+        # A functools.partial factory has a non-round-trippable repr; it must be
+        # excluded from codegen_config() so extracted repros stay valid Python
+        # (it is cache-serialized separately via _cache_config_factory_keys).
+        with torch._inductor.config.patch(
+            inductor_choices_class=functools.partial(dummy_fn)
+        ):
+            code = torch._inductor.config.codegen_config()
+            self.assertNotIn("inductor_choices_class", code)
 
     def test_select_decomp_table_fallback_embedding_bag_byte_unpack(self):
         """Test that select_decomp_table removes embedding_bag_byte_unpack when fallback is enabled"""

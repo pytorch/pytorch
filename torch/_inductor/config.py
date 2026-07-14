@@ -2950,6 +2950,10 @@ _save_config_ignore: list[str] = [
     # CUDAGraphPolicy objects are not picklable and only affect
     # post_compile wrapping, not compiled code itself.
     "cudagraph_policy",
+    # A custom InductorChoices factory (e.g. a functools.partial) has a
+    # non-round-trippable repr; excluding it keeps codegen_config() valid
+    # Python. It is serialized for caching via _cache_config_factory_keys.
+    "inductor_choices_class",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
