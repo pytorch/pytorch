@@ -460,7 +460,7 @@ def _is_pytreespec_instance(obj: Any, /) -> TypeIs[PyTreeSpec | python_pytree.Tr
 def treespec_leaf(
     *,
     none_is_leaf: bool = False,
-    namespace: str = "",
+    namespace: str = "",  # unused
 ) -> PyTreeSpec:
     return PyTreeSpec(
         (),
@@ -469,7 +469,7 @@ def treespec_leaf(
         (),
         None,
         none_is_leaf=none_is_leaf,
-        namespace=namespace,
+        namespace="",
     )
 
 
