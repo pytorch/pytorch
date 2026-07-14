@@ -2527,6 +2527,8 @@ class SwitchTests(TestCase):
                 for inp in inputs:
                     torch._dynamo.mark_dynamic(inp, 0)
 
+        # Exercise every branch index (0 .. num_branches-1) so that all
+        # generated code paths are verified against the eager reference.
         for inputs in input_sets:
             for branch_idx in range(num_branches):
                 idx_tensor = torch.tensor(branch_idx, device=device)
@@ -2544,7 +2546,6 @@ class SwitchTests(TestCase):
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_switch_simple(self, device, dynamic):
-        # three branches, single operand, all three indices exercised
         self._run_test(
             model=SwitchModels.Simple(),
             inputs=(torch.randn(10, 20),),

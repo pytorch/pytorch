@@ -4647,11 +4647,9 @@ class PythonWrapperCodegen(CodeGen):
 
         selector = node.selector.codegen_reference()
         if not isinstance(node.selector, ir.ShapeAsConstantBuffer):
-            # move the Tensor selector to host
-            if node.is_cond:
-                selector = f"{selector}.item()"
-            else:
-                selector = f"int({selector}.item())"
+            # move the Tensor selector to host; always as int so the branch loop
+            # can use uniform index comparisons (cond: True==1, False==0)
+            selector = f"int({selector}.item())"
 
         self.writeline(f"{name} = [None] * {len(node.outputs)}")
 
@@ -4665,22 +4663,18 @@ class PythonWrapperCodegen(CodeGen):
                 self.codegen_subgraph(branch, outer_inputs, name)
             self.writeline(ExitSubgraphLine(self))
 
-        if node.is_cond:
-            # torch.cond: exactly two branches -- plain if/else, no index comparison.
-            true_branch, false_branch = node.branches
-            _emit_branch("if", f" {selector}", true_branch)
-            _emit_branch("else", "", false_branch)
-        else:
-            # torch.switch: N branches -- if/elif chain with index comparison, else for last.
-            num_branches = len(node.branches)
-            for b_idx, branch in enumerate(node.branches):
-                if b_idx == 0:
-                    keyword, condition = "if", f" {selector} == 0"
-                elif b_idx < num_branches - 1:
-                    keyword, condition = "elif", f" {selector} == {b_idx}"
-                else:
-                    keyword, condition = "else", ""
-                _emit_branch(keyword, condition, branch)
+        # For cond, branches=[true, false] but True==1 and False==0, so reverse
+        # the list so that index 0->false branch and index 1->true branch.
+        branches = list(reversed(node.branches)) if node.is_cond else list(node.branches)
+        num_branches = len(branches)
+        for b_idx, branch in enumerate(branches):
+            if b_idx == 0:
+                keyword, condition = "if", f" {selector} == 0"
+            elif b_idx < num_branches - 1:
+                keyword, condition = "elif", f" {selector} == {b_idx}"
+            else:
+                keyword, condition = "else", ""
+            _emit_branch(keyword, condition, branch)
 
     def codegen_while_loop(self, while_loop, stack_output):
         """while_loop is codegened as a host side while_loop"""

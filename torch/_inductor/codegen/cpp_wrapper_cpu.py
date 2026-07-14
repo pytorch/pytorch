@@ -2816,12 +2816,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             outer_outputs.append(out.get_name())
 
         if not isinstance(node.selector, ir.ShapeAsConstantBuffer):
-            # use the ABI shim to extract the scalar selector value from the Tensor
+            # use the ABI shim to extract the scalar selector value from the Tensor;
+            # always as int64 so the branch loop can use uniform index comparisons
+            # (cond: True==1, False==0)
             selector_var = f"{node.selector.get_name()}_scalar"
             if selector_var not in self.used_switch_selector:
-                dtype = torch.bool if node.is_cond else torch.int64
                 self.codegen_tensor_item(
-                    dtype,
+                    torch.int64,
                     node.selector.codegen_reference(),
                     selector_var,
                 )
@@ -2838,21 +2839,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.writeline(ExitSubgraphLine(self))
 
         def emit_switch_body() -> None:
-            if node.is_cond:
-                # torch.cond: exactly two branches -- plain if/else, no index comparison.
-                true_branch, false_branch = node.branches
-                _emit_branch(f"if ({selector_var}) {{", true_branch)
-                _emit_branch("} else {", false_branch)
-            else:
-                # torch.switch: N branches -- if/else-if chain with index comparison.
-                for b_idx, branch in enumerate(node.branches):
-                    if b_idx == 0:
-                        header = f"if ({selector_var} == 0) {{"
-                    elif b_idx < len(node.branches) - 1:
-                        header = f"}} else if ({selector_var} == {b_idx}) {{"
-                    else:
-                        header = "} else {"
-                    _emit_branch(header, branch)
+            # For cond, branches=[true, false] but True==1 and False==0, so reverse
+            # the list so that index 0->false branch and index 1->true branch.
+            branches = list(reversed(node.branches)) if node.is_cond else list(node.branches)
+            for b_idx, branch in enumerate(branches):
+                if b_idx == 0:
+                    header = f"if ({selector_var} == 0) {{"
+                elif b_idx < len(branches) - 1:
+                    header = f"}} else if ({selector_var} == {b_idx}) {{"
+                else:
+                    header = "} else {"
+                _emit_branch(header, branch)
             self.writeline("}")
 
         if not V.graph.is_dual_wrapper_mode:
