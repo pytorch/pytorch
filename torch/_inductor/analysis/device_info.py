@@ -220,6 +220,34 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_bw_gbs=608.0,
         dram_gb=32.0,
     ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/232876/\
+    # intel-data-center-gpu-max-1100/specifications.html
+    "Intel(R) Data Center GPU Max 1100": DeviceInfo(
+        # XeCore count: 56,
+        # vector/matrix engines per XeCore: 8
+        # freq: 1.55GHz
+        tops={
+            # Vector engine
+            torch.float64: 11.1,
+            torch.float32: 22.2,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 22.2,
+            # Matrix engine
+            torch.float16: 355.5,
+            torch.bfloat16: 355.5,
+            # not supported, fall back to float32 numbers
+            torch.float8_e8m0fnu: 22.2,
+            torch.float8_e8m0fnu: 22.2,
+            torch.float8_e4m3fnuz: 22.2,
+            torch.float8_e5m2: 22.2,
+            torch.float8_e5m2fnuz: 22.2,
+            torch.float8_e8m0fnu: 22.2,
+            torch.int8: 711.1,
+        },
+        dram_bw_gbs=1228.8,
+        dram_gb=48,
+    ),
 }
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
