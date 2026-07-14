@@ -63,7 +63,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         if expect_type_error is not None:
             self.assertFalse(
                 expect_type_error,
-                f"Expected {op.__name__}({a!r}, {b!r}) to raise TypeError "
+                lambda msg: f"{msg}\nExpected {op.__name__}({a!r}, {b!r}) to raise TypeError "
                 f"but eager returned {expected!r}",
             )
 
