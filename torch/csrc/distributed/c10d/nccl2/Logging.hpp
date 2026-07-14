@@ -1,6 +1,8 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
 
@@ -49,3 +51,5 @@ inline std::string getRankPrefix(Comm* comm) {
       ##__VA_ARGS__,                           \
       TC_LOG_WITH_PREFIX_BUILDER(__VA_ARGS__), \
       TC_LOG_PLAIN(__VA_ARGS__))
+
+#endif // USE_C10D_NCCL
