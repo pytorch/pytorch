@@ -2534,7 +2534,15 @@ class TritonKernelOverrides(TritonOverrides):
         # operator to save the branching cost.
         for node in nodes:
             for arg in node.args:
-                if arg.target != "load" or should_unwrap_unspec_arg(arg.args[1]):
+                if (
+                    arg.target != "load"
+                    or should_unwrap_unspec_arg(arg.args[1])
+                    # A load whose producer is fused into this kernel is
+                    # served from the CSE store cache and emits no tl.load,
+                    # so the masked-load `other` would be silently dropped;
+                    # fall back to an explicit tl.where.
+                    or arg.args[1] in V.kernel.cse.store_cache
+                ):
                     need_where = True
                     break
 
