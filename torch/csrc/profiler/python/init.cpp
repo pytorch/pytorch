@@ -383,13 +383,36 @@ void initPythonBindings(PyObject* module) {
       .value("ITT", ActiveProfilerType::ITT)
       .value("PRIVATEUSE1", ActiveProfilerType::PRIVATEUSE1);
 
-  py::enum_<ActivityType>(m, "ProfilerActivity")
-      .value("CPU", ActivityType::CPU)
-      .value("XPU", ActivityType::XPU)
-      .value("MTIA", ActivityType::MTIA)
-      .value("CUDA", ActivityType::CUDA)
-      .value("HPU", ActivityType::HPU)
-      .value("PrivateUse1", ActivityType::PrivateUse1);
+  py::enum_<ActivityType>(
+      m, "ProfilerActivity", "Device kinds that the profiler supports.")
+      .value("CPU", ActivityType::CPU, "CPU events (operators, runtime, ...).")
+      .value(
+          "XPU",
+          ActivityType::XPU,
+          "Intel XPU device activity. In a fine-grained activity dict "
+          "(``{ProfilerActivity.XPU: [...]}``), names that are not XPU "
+          "activity types are interpreted as Intel XPU hardware metric names "
+          "and enable the per-kernel scope profiler, e.g. "
+          "``{ProfilerActivity.XPU: [\"GpuTime\", \"GpuCoreClocks\"]}``. The "
+          "metric values are attached to each kernel as Perfetto counters. "
+          "Hardware metric collection requires ``ZET_ENABLE_METRICS=1`` and "
+          "access to the GPU performance counters "
+          "(``perf_stream_paranoid``/``observation_paranoid`` set to ``0``). "
+          "Metric names are device-specific and defined by the driver, not by "
+          "PyTorch. Because a dict entry collects exactly what it lists, "
+          "requesting only metrics (e.g. "
+          "``{ProfilerActivity.XPU: [\"GpuTime\"]}``) does not also collect "
+          "the default XPU activities; list the desired activity type names "
+          "alongside the metrics to keep tracing them, e.g. "
+          "``{ProfilerActivity.XPU: [\"CONCURRENT_KERNEL\", \"XPU_RUNTIME\", "
+          "\"GpuTime\"]}``.")
+      .value("MTIA", ActivityType::MTIA, "MTIA device activity.")
+      .value("CUDA", ActivityType::CUDA, "CUDA kernels and runtime.")
+      .value("HPU", ActivityType::HPU, "HPU device activity.")
+      .value(
+          "PrivateUse1",
+          ActivityType::PrivateUse1,
+          "PrivateUse1 backend activity.");
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
       .def(
