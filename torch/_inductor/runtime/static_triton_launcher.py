@@ -23,6 +23,41 @@ def _tma_arg_helpers():
     return make_arg, TensorDescriptor
 
 
+def expand_host_tma_descriptor(cache, pos, tensor, name, shape, strides, block, meta):
+    """Build the expanded kernel params for one host-side TMA descriptor
+    ([CUtensorMap, *shape, *strides]) and cache them per descriptor position.
+
+    Called from the generated static launcher on the hot path. On a cache hit
+    (same TMA-aligned base address) it returns the previously-encoded
+    CUtensorMap, skipping both the TensorDescriptor construction/validation and
+    cuTensorMapEncodeTiled. The descriptor only encodes addressing (not buffer
+    contents), so reuse is safe whenever the address/shape/strides match.
+
+    A misaligned input is cloned fresh each call (the clone is freed after the
+    launch), so its descriptor must NOT be cached -- we only cache when the base
+    is already TMA-aligned (the assume_aligned_inputs path).
+    """
+    from ..utils import TMA_ALIGNMENT
+    from .triton_heuristics import _host_tma_aligned
+
+    make_tensordesc_arg, TensorDescriptor = _tma_arg_helpers()
+    data_ptr = tensor.data_ptr()
+    aligned = data_ptr % TMA_ALIGNMENT == 0
+    if aligned:
+        cached = cache.get(pos)
+        if cached is not None and cached[0] == data_ptr:
+            return cached[1]
+        base = tensor
+    else:
+        # _host_tma_aligned clones (warning once) -- the clone is uncacheable.
+        base = _host_tma_aligned(tensor, name)
+    desc = TensorDescriptor(base, shape, strides, block)
+    expanded = tuple(make_tensordesc_arg(desc, meta))
+    if aligned:
+        cache[pos] = (data_ptr, expanded)
+    return expanded
+
+
 class StaticallyLaunchedTritonKernel:
     """
     Parses the metadata of a CompiledKernel from Triton into a structure that can
@@ -309,8 +344,13 @@ class StaticallyLaunchedTritonKernel:
         return state
 
     def _expand_tma_args(self, args: tuple[object, ...]) -> tuple[object, ...]:
-        """Expand host-side TMA TensorDescriptor args into the flat kernel params
-        (CUtensorMap + shape + strides) so they match the expanded type string."""
+        """Fallback expansion of host-side TMA TensorDescriptor args into the
+        flat kernel params (CUtensorMap + shape + strides). The static launcher
+        normally pre-expands (with caching) in the generated launcher via
+        expand_host_tma_descriptor, so by the time run() is reached the args are
+        already expanded and this is a no-op; it only fires if a TensorDescriptor
+        reaches run() directly.
+        """
         make_tensordesc_arg, TensorDescriptor = _tma_arg_helpers()
 
         meta = self.tensordesc_meta
