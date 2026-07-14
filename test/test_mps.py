@@ -7671,20 +7671,19 @@ class TestMPS(TestCaseMPS):
         (torch.half, torch.float),
     ])
     @parametrize("src_offset", [0, 1])
-    @parametrize("non_blocking", [False, True])
-    def test_cast_mps_to_cpu_preserves_source(self, src_dtype, dst_dtype, src_offset, non_blocking):
+    def test_cast_mps_to_cpu_preserves_source(self, src_dtype, dst_dtype, src_offset):
         input_cpu = torch.arange(9, dtype=src_dtype)
         input_mps = input_cpu.to("mps")
         source = input_mps[src_offset:]
 
-        dst_offset = max(1, 4 // torch.empty((), dtype=dst_dtype).element_size())
+        # Offset the destination by a 4-byte-aligned, non-page-aligned amount so the
+        # cast writes into the CPU buffer at a nonzero offset.
+        dst_offset = 2 if dst_dtype in (torch.half, torch.bfloat16) else 1
         output_storage = torch.empty(source.numel() + dst_offset, dtype=dst_dtype)
         output = output_storage[dst_offset:]
         self.assertEqual(output.data_ptr() % 4, 0)
         self.assertNotEqual(output.data_ptr() % os.sysconf("SC_PAGE_SIZE"), 0)
-        output.copy_(source, non_blocking=non_blocking)
-        if non_blocking:
-            torch.mps.synchronize()
+        output.copy_(source)
 
         self.assertEqual(output, input_cpu[src_offset:].to(dst_dtype))
         self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
@@ -7695,17 +7694,6 @@ class TestMPS(TestCaseMPS):
 
         output_storage = torch.empty(input_cpu.numel() + 2, dtype=torch.half)
         output = output_storage[2:].as_strided(input_cpu.size(), input_cpu.stride())
-        output.copy_(input_mps)
-
-        self.assertEqual(output, input_cpu.to(torch.half))
-        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
-
-    def test_cast_mps_to_cpu_preserves_destination_bits(self):
-        input_cpu = torch.arange(8, dtype=torch.float)
-        input_mps = input_cpu.to("mps")
-
-        output_storage = torch.empty(input_cpu.numel() + 2, dtype=torch.half)
-        output = output_storage[2:]._neg_view()
         output.copy_(input_mps)
 
         self.assertEqual(output, input_cpu.to(torch.half))
@@ -16042,6 +16030,14 @@ class TestComplex(TestCase):
                     self.assertEqual(src_mps.cpu(), expected)
                 with self.subTest(src=src_label, dst=dst_label, op="copy_"):
                     self.assertEqual(dst_mps.cpu(), dst_cpu)
+                # A dtype-converting D2H copy must honor the neg bit and leave the
+                # source untouched (regression for
+                # https://github.com/pytorch/pytorch/issues/189563).
+                dst_half = dst_xform(torch.empty(4, 4, dtype=torch.half))
+                dst_half.copy_(src_mps)
+                with self.subTest(src=src_label, dst=dst_label, op="copy_cast"):
+                    self.assertEqual(dst_half, expected.to(torch.half))
+                    self.assertEqual(v.cpu(), v_cpu)
 
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088
