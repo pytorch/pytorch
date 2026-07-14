@@ -426,7 +426,7 @@ std::string AliasDb::getElementName(const Element* e) const {
       ss << '%' << v->debugName() << ", ";
     }
     ss << ')';
-    return ss.str();
+    return std::move(ss).str();
   }
 }
 
@@ -481,7 +481,7 @@ std::string AliasDb::toString() const {
     ss << '\n';
   }
   ss << '\n';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 bool AliasDb::dumpToGraphvizFile(const char* filename) const {
@@ -518,7 +518,7 @@ std::string AliasDb::toGraphviz() const {
         ss << "\\%" << v->debugName() << ", ";
       }
       ss << ")\"";
-      return ss.str();
+      return std::move(ss).str();
     }
   };
 
@@ -550,7 +550,7 @@ std::string AliasDb::toGraphviz() const {
   }
 
   dot << "}\n";
-  return dot.str();
+  return std::move(dot).str();
 }
 
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
@@ -626,7 +626,7 @@ void AliasDb::analyzeImpl(Node* node) {
           node->kind().toDisplayString(),
           " but it isn't a special case.  ",
           "Argument types: ",
-          oss.str());
+          std::move(oss).str());
     }
   }
 
@@ -2013,7 +2013,7 @@ void Lint(const AliasDb* db) {
          << "It was defined in " << *v->node();
     }
   }
-  TORCH_INTERNAL_ASSERT(!failed, ss.str());
+  TORCH_INTERNAL_ASSERT(!failed, std::move(ss).str());
 
   // Two checks that we want to add but can't until the mutation API is more
   // fully developed.

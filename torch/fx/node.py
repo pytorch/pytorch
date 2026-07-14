@@ -119,6 +119,24 @@ if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
 
 
+def _device_annotation(device: torch.device) -> str:
+    # Render a tensor's device for graph printing. Under compile-on-one-rank the device
+    # index is rank-specific; drop it when it is the current default device for the
+    # accelerator (e.g. "cuda:3" -> "cuda") so the printed graph is byte-identical across
+    # ranks. A non-current index keeps its index, preserving debuggability.
+    import torch.compiler.config as compiler_config
+
+    if compiler_config.compile_on_one_rank and device.index is not None:
+        acc = torch.accelerator.current_accelerator()
+        if (
+            acc is not None
+            and device.type == acc.type
+            and device.index == torch.accelerator.current_device_index()
+        ):
+            return device.type
+    return str(device)
+
+
 @compatibility(is_backward_compatible=False)
 def has_side_effect(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
@@ -230,6 +248,8 @@ def _format_arg(arg: object, max_list_len: float = float("inf")) -> str:
 
     if isinstance(arg, Node):
         return "%" + str(arg)
+    elif isinstance(arg, torch.device):
+        return _device_annotation(arg)
     else:
         return str(arg)
 
@@ -280,7 +300,7 @@ class Node(_NodeBase):
     # All of the nodes that use the value produced by this Node
     # Note one user may correspond to several uses, e.g. the node for ``x + x``
     # would appear once here, but represents two uses.
-    # Is a dict to act as an "ordered set". Keys are significant, value dont-care
+    # Is a dict to act as an "ordered set". Keys are significant, value don't-care
     users: dict["Node", None]
     # Type expression representing the output value of this node.
     # This should contain the same class of Type objects that would appear
@@ -674,7 +694,7 @@ class Node(_NodeBase):
                 )
             ):
                 stride_annotation = f"{stringify_shape(meta_val.stride())}"
-                device_annotation = f"{meta_val.device}"
+                device_annotation = _device_annotation(meta_val.device)
                 type_annotation = (
                     f'Tensor "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
                     f'{stride_annotation}{device_annotation}"'

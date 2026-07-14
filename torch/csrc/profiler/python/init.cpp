@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
+#include <torch/csrc/profiler/cupti/monitor_python.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
@@ -138,10 +139,6 @@ namespace torch::profiler {
  */
 
 namespace {
-uint64_t cuptiApproximateTimeCallback() {
-  return c10::getApproximateTime();
-}
-
 class ApproximateClockPyConverter {
  public:
   // NOLINTNEXTLINE(modernize-use-equals-default)
@@ -238,7 +235,8 @@ void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
 
 PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
-  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+  if (torch::profiler::impl::ProfilerStateBase::getGlobal() != nullptr ||
+      torch::profiler::impl::ProfilerStateBase::getTLS() != nullptr) {
     auto self = (RecordFunctionFast*)selfGeneric;
     TORCH_INTERNAL_ASSERT(
         !self->guard,
@@ -332,7 +330,8 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
 
 PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
-  if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
+  if (torch::profiler::impl::ProfilerStateBase::getGlobal() != nullptr ||
+      torch::profiler::impl::ProfilerStateBase::getTLS() != nullptr) {
     auto self = (RecordFunctionFast*)selfGeneric;
     TORCH_INTERNAL_ASSERT(
         self->guard,
@@ -384,13 +383,36 @@ void initPythonBindings(PyObject* module) {
       .value("ITT", ActiveProfilerType::ITT)
       .value("PRIVATEUSE1", ActiveProfilerType::PRIVATEUSE1);
 
-  py::enum_<ActivityType>(m, "ProfilerActivity")
-      .value("CPU", ActivityType::CPU)
-      .value("XPU", ActivityType::XPU)
-      .value("MTIA", ActivityType::MTIA)
-      .value("CUDA", ActivityType::CUDA)
-      .value("HPU", ActivityType::HPU)
-      .value("PrivateUse1", ActivityType::PrivateUse1);
+  py::enum_<ActivityType>(
+      m, "ProfilerActivity", "Device kinds that the profiler supports.")
+      .value("CPU", ActivityType::CPU, "CPU events (operators, runtime, ...).")
+      .value(
+          "XPU",
+          ActivityType::XPU,
+          "Intel XPU device activity. In a fine-grained activity dict "
+          "(``{ProfilerActivity.XPU: [...]}``), names that are not XPU "
+          "activity types are interpreted as Intel XPU hardware metric names "
+          "and enable the per-kernel scope profiler, e.g. "
+          "``{ProfilerActivity.XPU: [\"GpuTime\", \"GpuCoreClocks\"]}``. The "
+          "metric values are attached to each kernel as Perfetto counters. "
+          "Hardware metric collection requires ``ZET_ENABLE_METRICS=1`` and "
+          "access to the GPU performance counters "
+          "(``perf_stream_paranoid``/``observation_paranoid`` set to ``0``). "
+          "Metric names are device-specific and defined by the driver, not by "
+          "PyTorch. Because a dict entry collects exactly what it lists, "
+          "requesting only metrics (e.g. "
+          "``{ProfilerActivity.XPU: [\"GpuTime\"]}``) does not also collect "
+          "the default XPU activities; list the desired activity type names "
+          "alongside the metrics to keep tracing them, e.g. "
+          "``{ProfilerActivity.XPU: [\"CONCURRENT_KERNEL\", \"XPU_RUNTIME\", "
+          "\"GpuTime\"]}``.")
+      .value("MTIA", ActivityType::MTIA, "MTIA device activity.")
+      .value("CUDA", ActivityType::CUDA, "CUDA kernels and runtime.")
+      .value("HPU", ActivityType::HPU, "HPU device activity.")
+      .value(
+          "PrivateUse1",
+          ActivityType::PrivateUse1,
+          "PrivateUse1 backend activity.");
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
       .def(
@@ -412,11 +434,8 @@ void initPythonBindings(PyObject* module) {
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
-          "    profiler_metrics : a list of CUPTI profiler metrics used\n"
-          "       to measure GPU performance events.\n"
-          "       If this list contains values Kineto runs in CUPTI profiler mode\n"
-          "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
-          "       or for the entire measurement duration.\n"
+          "    profiler_metrics : DEPRECATED and ignored.\n"
+          "    profiler_measure_per_kernel (bool) : DEPRECATED and ignored.\n"
           "    verbose (bool) : whether the trace file has `Call stack` field or not.\n"
           "    performance_events : a list of profiler events to be used for measurement.\n"
           "    enable_cuda_sync_events : for CUDA profiling mode, enable adding CUDA synchronization events\n"
@@ -509,6 +528,12 @@ void initPythonBindings(PyObject* module) {
                 t.size() > 12 ? t[12].cast<bool>() : false,
                 t.size() > 13 ? t[13].cast<bool>() : false);
           }))
+      // profiler_metrics and profiler_measure_per_kernel are deprecated
+      // no-ops, exposed read-only so the Python layer can detect them and warn.
+      .def_readonly("profiler_metrics", &ExperimentalConfig::profiler_metrics)
+      .def_readonly(
+          "profiler_measure_per_kernel",
+          &ExperimentalConfig::profiler_measure_per_kernel)
       .def_readwrite(
           "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)
       .def_readwrite("trace_only", &ExperimentalConfig::trace_only);
@@ -715,10 +740,7 @@ void initPythonBindings(PyObject* module) {
       .def(py::init<>())
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
-  m.def("_cupti_approximate_time_callback_address", []() {
-    return reinterpret_cast<uintptr_t>(&cuptiApproximateTimeCallback);
-  });
-
+  initCuptiMonitorBindings(m);
   if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
     throw python_error();
   }

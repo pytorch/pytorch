@@ -22,7 +22,6 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_precondition,
 )
 from torch._inductor.runtime.caching import encoders, memoizers
-from torch._prims_common import is_contiguous_or_false
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -159,11 +158,6 @@ def can_pad(
         if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
-        if _padding_would_materialize_non_contiguous_tf32_input(
-            mat1, mat2, op, m_padded_length, k_padded_length, n_padded_length
-        ):
-            return False
-
     # In deterministic mode, we can't safely benchmark - disallow padding
     # Check this after other basic checks so force_shape_pad/autoheuristic can override
     if (
@@ -190,39 +184,6 @@ def get_padded_length(x: int | torch.SymInt, alignment_size: int) -> int:
         return 0
 
     return int((x // alignment_size + 1) * alignment_size) - x
-
-
-def _padding_would_materialize_non_contiguous_tf32_input(
-    mat1: Tensor,
-    mat2: Tensor,
-    op: torch._ops.OpOverloadPacket,
-    m_padded_length: int,
-    k_padded_length: int,
-    n_padded_length: int,
-) -> bool:
-    if (
-        not mat1.is_cuda
-        or mat1.dtype != torch.float32
-        or mat2.dtype != torch.float32
-        or torch.backends.cuda.matmul.fp32_precision != "tf32"
-    ):
-        return False
-
-    if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
-        mat1_would_be_padded = m_padded_length != 0 or k_padded_length != 0
-        mat2_would_be_padded = k_padded_length != 0 or n_padded_length != 0
-    elif op is torch.ops.aten.bmm:
-        mat1_would_be_padded = m_padded_length != 0 or k_padded_length != 0
-        mat2_would_be_padded = k_padded_length != 0 or n_padded_length != 0
-    else:
-        return False
-
-    # Padding materializes non-contiguous inputs with a different layout.  For
-    # fp32 TF32 matmuls that can select a different cuBLAS accumulation path and
-    # move results outside the tolerances expected for the unpadded operation.
-    return (mat1_would_be_padded and not is_contiguous_or_false(mat1)) or (
-        mat2_would_be_padded and not is_contiguous_or_false(mat2)
-    )
 
 
 def pad_dim(x: Tensor, padded_length: int, dim: int) -> Tensor:
@@ -970,7 +931,7 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
         else:
             device = "cpu"
 
-    # sizes/values dont actually matter for initial trace
+    # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
 
     dim2a = functools.partial(torch.empty, (4, 4), device=device, requires_grad=True)
@@ -1008,7 +969,12 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
             should_pad_addmm,
         ),
     ]:
-        assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
+        if not isinstance(
+            workaround, dict
+        ):  # mypy is unable to infer the type properly
+            raise AssertionError(
+                f"expected workaround to be a dict, got {type(workaround)}"
+            )
         name = pattern.__name__
 
         gen_register_replacement(

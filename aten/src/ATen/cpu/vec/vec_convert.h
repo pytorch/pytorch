@@ -51,7 +51,7 @@ struct VecRoundConvert {
         static_cast<src_t>(std::numeric_limits<dst_t>::max());
     for (int i = 0; i < count; i++) {
       dst_buf[i] = static_cast<dst_t>(
-          std::min(std::max(std::round(src_buf[i]), min_val), max_val));
+          std::clamp(std::round(src_buf[i]), min_val, max_val));
     }
     return VectorizedN<dst_t, dst_n>::loadu(dst_buf, count);
   }

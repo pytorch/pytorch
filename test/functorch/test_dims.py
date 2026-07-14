@@ -117,13 +117,15 @@ class TestMin(TestCase):
         gc.collect()
         # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
         self.assertEqual(
-            extra_memory, 0, f"extra cuda memory left allocated: {extra_memory}"
+            extra_memory,
+            0,
+            lambda msg: f"{msg}\nextra cuda memory left allocated: {extra_memory}",
         )
         self.assertEqual(
             len(interesting),
             0,
             (
-                f"extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
+                lambda msg: f"{msg}\nextra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
                 f"{[type(t) for t in interesting]}"
             ),
         )
