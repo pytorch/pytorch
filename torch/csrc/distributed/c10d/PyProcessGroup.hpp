@@ -50,6 +50,9 @@ class PyProcessGroup : public ProcessGroup {
         pybind11::get_override(static_cast<const cname*>(this), #name); \
     if (override) {                                                     \
       auto o = override(__VA_ARGS__);                                   \
+      if (o.is_none()) {                                                \
+        return c10::intrusive_ptr<Work>();                              \
+      }                                                                 \
       return c10::make_intrusive<PyWorkHolder>(std::move(o));           \
     }                                                                   \
     return cname::name(__VA_ARGS__);                                    \
