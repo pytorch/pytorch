@@ -10397,7 +10397,6 @@ class TestLinalgCudaOnly(TestCase):
     def test_tf32_tunableop(self, device, dtype):
         with tf32_enabled():
             with self._tunableop_ctx():
-                torch.backends.cuda.matmul.allow_tf32 = True
                 torch.cuda.tunable.set_rotating_buffer_size(0)
 
                 # Reference number of results
@@ -10455,7 +10454,6 @@ class TestLinalgCudaOnly(TestCase):
 
         with tf32_enabled():
             with self._tunableop_ctx():
-                torch.backends.cuda.matmul.allow_tf32 = True
                 ordinal = torch.cuda.current_device()
                 torch.cuda.tunable.set_rotating_buffer_size(0)
 
