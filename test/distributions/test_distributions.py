@@ -114,7 +114,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     dtypesIfXPU,
     expectedFailureMPS,
-    expectedFailureMPSPre15,
     instantiate_device_type_tests,
     skipMPS,
 )
@@ -1364,115 +1363,6 @@ class TestDistributions(DistributionsTestCase):
 
         gradcheck(apply_fn, (s,) + tuple(ctor_params), raise_exception=True)
 
-    def test_zero_excluded_binomial(self, device):
-        vals = Binomial(
-            total_count=torch.tensor(1.0, device=device),
-            probs=torch.tensor(0.9, device=device),
-        ).sample(torch.Size((100000000,)))
-        self.assertTrue((vals >= 0).all())
-        vals = Binomial(
-            total_count=torch.tensor(1.0, device=device),
-            probs=torch.tensor(0.1, device=device),
-        ).sample(torch.Size((100000000,)))
-        self.assertTrue((vals < 2).all())
-        vals = Binomial(
-            total_count=torch.tensor(1.0, device=device),
-            probs=torch.tensor(0.5, device=device),
-        ).sample(torch.Size((10000,)))
-        zeros_count = (vals == 0.0).sum()
-        ones_count = (vals == 1.0).sum()
-        if zeros_count <= 4000:
-            raise AssertionError(
-                f"Expected (vals == 0.0).sum() > 4000, got {zeros_count}"
-            )
-        if ones_count <= 4000:
-            raise AssertionError(
-                f"Expected (vals == 1.0).sum() > 4000, got {ones_count}"
-            )
-
-    def test_torch_binomial_dtype_errors(self, device):
-        dtypes = [torch.int, torch.long, torch.short]
-
-        for count_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
-            total_prob = torch.tensor([0.5, 0.5], dtype=torch.float, device=device)
-
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for count.*"
-            ):
-                torch.binomial(total_count, total_prob)
-
-        for prob_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=torch.float, device=device)
-            total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype, device=device)
-
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for prob.*"
-            ):
-                torch.binomial(total_count, total_prob)
-
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_poisson_sample_on_device(self, device):
-        set_rng_seed(1)
-        for rate in [0.12, 0.9, 4.0]:
-            self._check_sampler_discrete(
-                Poisson(torch.tensor([rate], device=device)),
-                scipy.stats.poisson(rate),
-                f"Poisson(lambda={rate}, {torch.device(device).type})",
-                failure_rate=1e-3,
-            )
-
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gamma_shape_on_device(self, device):
-        alpha = torch.randn(2, 3, device=device).exp().requires_grad_()
-        beta = torch.randn(2, 3, device=device).exp().requires_grad_()
-        alpha_1d = torch.randn(1, device=device).exp().requires_grad_()
-        beta_1d = torch.randn(1, device=device).exp().requires_grad_()
-        self.assertEqual(Gamma(alpha, beta).sample().size(), (2, 3))
-        self.assertEqual(Gamma(alpha, beta).sample((5,)).size(), (5, 2, 3))
-        self.assertEqual(Gamma(alpha_1d, beta_1d).sample((1,)).size(), (1, 1))
-        self.assertEqual(Gamma(alpha_1d, beta_1d).sample().size(), (1,))
-        self.assertEqual(Gamma(0.5, 0.5).sample().size(), ())
-        self.assertEqual(Gamma(0.5, 0.5).sample((1,)).size(), (1,))
-
-        def ref_log_prob(idx, x, log_prob):
-            a = alpha.view(-1)[idx].detach().cpu()
-            b = beta.view(-1)[idx].detach().cpu()
-            expected = scipy.stats.gamma.logpdf(x.cpu(), a, scale=1 / b)
-            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
-
-        self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
-
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_gamma_sample_on_device(self, device):
-        set_rng_seed(0)
-        for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
-            a, b = (
-                torch.tensor([alpha], device=device),
-                torch.tensor([beta], device=device),
-            )
-            self._check_sampler_sampler(
-                Gamma(a, b),
-                scipy.stats.gamma(alpha, scale=1.0 / beta),
-                f"Gamma(alpha={alpha}, beta={beta})",
-                failure_rate=1e-4,
-            )
-
-    def test_beta_underflow_on_device(self, device):
-        set_rng_seed(1)
-        num_samples = 50000
-        conc = torch.tensor(1e-2, dtype=torch.float64, device=device)
-        beta_samples = Beta(conc, conc).sample([num_samples])
-        self.assertEqual((beta_samples == 0).sum(), 0)
-        self.assertEqual((beta_samples == 1).sum(), 0)
-        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
-        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
-        atol = 0.12 if torch.device(device).type != "cpu" else 0.05
-        self.assertEqual(frac_zeros, 0.5, atol=atol, rtol=0)
-        self.assertEqual(frac_ones, 0.5, atol=atol, rtol=0)
-
     def _check_forward_ad(self, fn):
         with fwAD.dual_level():
             x = torch.tensor(1.0)
@@ -1515,7 +1405,7 @@ class TestDistributions(DistributionsTestCase):
                 sample = dist.sample()
                 self.assertFalse(
                     sample.requires_grad,
-                    msg=f"{Dist.__name__} example {i + 1}/{len(params)}, .sample() is not detached",
+                    msg=lambda msg: f"{msg}\n{Dist.__name__} example {i + 1}/{len(params)}, .sample() is not detached",
                 )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
@@ -1530,7 +1420,7 @@ class TestDistributions(DistributionsTestCase):
                 sample = dist.rsample()
                 self.assertTrue(
                     sample.requires_grad,
-                    msg=f"{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad",
+                    msg=lambda msg: f"{msg}\n{Dist.__name__} example {i + 1}/{len(params)}, .rsample() does not require grad",
                 )
 
     @expectedFailureMPS
@@ -1541,10 +1431,13 @@ class TestDistributions(DistributionsTestCase):
                 try:
                     self.assertTrue(
                         type(dist.sample()) is type(dist.enumerate_support()),
-                        msg=(
-                            "{} example {}/{}, return type mismatch between "
-                            + "sample and enumerate_support."
-                        ).format(Dist.__name__, i + 1, len(params)),
+                        msg=lambda msg: f"{msg}\n"
+                        + (
+                            (
+                                "{} example {}/{}, return type mismatch between "
+                                + "sample and enumerate_support."
+                            ).format(Dist.__name__, i + 1, len(params))
+                        ),
                     )
                 except NotImplementedError:
                     pass
@@ -1586,7 +1479,7 @@ class TestDistributions(DistributionsTestCase):
                 self.assertIn(
                     Dist,
                     distributions_with_examples,
-                    f"Please add {Dist.__name__} to the _get_examples list in test_distributions.py",
+                    lambda msg: f"{msg}\nPlease add {Dist.__name__} to the _get_examples list in test_distributions.py",
                 )
 
     def test_support_attributes(self):
@@ -3443,7 +3336,6 @@ class TestDistributions(DistributionsTestCase):
         Wishart(torch.tensor(ndim), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPSPre15
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_log_prob(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -3723,6 +3615,31 @@ class TestDistributions(DistributionsTestCase):
                 failure_rate=1e-4,
             )
 
+    def test_gamma_sample_generator(self):
+        gamma = Gamma(torch.tensor(2.0), torch.tensor(1.0))
+        device = gamma.concentration.device
+        # sampling with a generator honors the requested shape
+        gen = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(gamma.sample((5,), generator=gen).size(), (5,))
+        self.assertEqual(gamma.sample((5, 3), generator=gen).size(), (5, 3))
+        # sampling without a generator still works
+        self.assertEqual(gamma.sample((5,)).size(), (5,))
+        # same seed produces identical samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(42)
+        self.assertEqual(
+            gamma.sample((5,), generator=gen1), gamma.sample((5,), generator=gen2)
+        )
+        # different seeds produce different samples
+        gen1 = torch.Generator(device=device).manual_seed(42)
+        gen2 = torch.Generator(device=device).manual_seed(99)
+        self.assertFalse(
+            torch.allclose(
+                gamma.sample((5,), generator=gen1),
+                gamma.sample((5,), generator=gen2),
+            )
+        )
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto(self):
         scale = torch.randn(2, 3).abs().requires_grad_()
@@ -3913,7 +3830,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertLess(
                 max_error,
                 0.01,
-                f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .mean",
+                lambda msg: f"{msg}\nKumaraswamy example {i + 1}/{len(cases)}, incorrect .mean",
             )
             expected = samples.var(0)
             actual = m.variance
@@ -3922,7 +3839,7 @@ class TestDistributions(DistributionsTestCase):
             self.assertLess(
                 max_error,
                 0.01,
-                f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
+                lambda msg: f"{msg}\nKumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -4158,7 +4075,10 @@ class TestDistributions(DistributionsTestCase):
         # Check that small alphas do not cause NANs.
         for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
-            self.assertTrue(np.isfinite(x) and x > 0, f"Invalid Beta.sample(): {x}")
+            self.assertTrue(
+                np.isfinite(x) and x > 0,
+                lambda msg: f"{msg}\nInvalid Beta.sample(): {x}",
+            )
 
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)
@@ -4763,6 +4683,129 @@ class TestDistributions(DistributionsTestCase):
                     )
 
                 self.assertFalse(dist.log_prob(sanitized_mode).isnan().any())
+
+
+# TODO: Enable CUDA/XPU in `instantiate_device_type_tests` and remove the following class
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
+class TestDistributionsGPU(DistributionsTestCase):
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
+    def test_zero_excluded_binomial(self):
+        vals = Binomial(
+            total_count=torch.tensor(1.0).to(device_type),
+            probs=torch.tensor(0.9).to(device_type),
+        ).sample(torch.Size((100000000,)))
+        self.assertTrue((vals >= 0).all())
+        vals = Binomial(
+            total_count=torch.tensor(1.0).to(device_type),
+            probs=torch.tensor(0.1).to(device_type),
+        ).sample(torch.Size((100000000,)))
+        self.assertTrue((vals < 2).all())
+        vals = Binomial(
+            total_count=torch.tensor(1.0).to(device_type),
+            probs=torch.tensor(0.5).to(device_type),
+        ).sample(torch.Size((10000,)))
+        # vals should be roughly half zeroes, half ones
+        zeros_count = (vals == 0.0).sum()
+        ones_count = (vals == 1.0).sum()
+        if zeros_count <= 4000:
+            raise AssertionError(
+                f"Expected (vals == 0.0).sum() > 4000, got {zeros_count}"
+            )
+        if ones_count <= 4000:
+            raise AssertionError(
+                f"Expected (vals == 1.0).sum() > 4000, got {ones_count}"
+            )
+
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
+    def test_torch_binomial_dtype_errors(self):
+        dtypes = [torch.int, torch.long, torch.short]
+        device = device_type
+
+        for count_dtype in dtypes:
+            total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
+            total_prob = torch.tensor([0.5, 0.5], dtype=torch.float, device=device)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "binomial only supports floating-point dtypes for count.*",
+            ):
+                torch.binomial(total_count, total_prob)
+
+        for prob_dtype in dtypes:
+            total_count = torch.tensor([10, 10], dtype=torch.float, device=device)
+            total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype, device=device)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "binomial only supports floating-point dtypes for prob.*",
+            ):
+                torch.binomial(total_count, total_prob)
+
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_poisson_gpu_sample(self):
+        set_rng_seed(1)
+        for rate in [0.12, 0.9, 4.0]:
+            self._check_sampler_discrete(
+                Poisson(torch.tensor([rate]).to(device_type)),
+                scipy.stats.poisson(rate),
+                f"Poisson(lambda={rate}, {device_type})",
+                failure_rate=1e-3,
+            )
+
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gamma_gpu_shape(self):
+        alpha = torch.randn(2, 3).to(device_type).exp().requires_grad_()
+        beta = torch.randn(2, 3).to(device_type).exp().requires_grad_()
+        alpha_1d = torch.randn(1).to(device_type).exp().requires_grad_()
+        beta_1d = torch.randn(1).to(device_type).exp().requires_grad_()
+        self.assertEqual(Gamma(alpha, beta).sample().size(), (2, 3))
+        self.assertEqual(Gamma(alpha, beta).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(Gamma(alpha_1d, beta_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Gamma(alpha_1d, beta_1d).sample().size(), (1,))
+        self.assertEqual(Gamma(0.5, 0.5).sample().size(), ())
+        self.assertEqual(Gamma(0.5, 0.5).sample((1,)).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            a = alpha.view(-1)[idx].detach().cpu()
+            b = beta.view(-1)[idx].detach().cpu()
+            expected = scipy.stats.gamma.logpdf(x.cpu(), a, scale=1 / b)
+            self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
+
+        self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_gamma_gpu_sample(self):
+        set_rng_seed(0)
+        for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
+            a, b = (
+                torch.tensor([alpha]).to(device_type),
+                torch.tensor([beta]).to(device_type),
+            )
+            self._check_sampler_sampler(
+                Gamma(a, b),
+                scipy.stats.gamma(alpha, scale=1.0 / beta),
+                f"Gamma(alpha={alpha}, beta={beta})",
+                failure_rate=1e-4,
+            )
+
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
+    def test_beta_underflow_gpu(self):
+        set_rng_seed(1)
+        num_samples = 50000
+        conc = torch.tensor(1e-2, dtype=torch.float64).to(device_type)
+        beta_samples = Beta(conc, conc).sample([num_samples])
+        self.assertEqual((beta_samples == 0).sum(), 0)
+        self.assertEqual((beta_samples == 1).sum(), 0)
+        # assert support is concentrated around 0 and 1
+        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+        # TODO: increase precision once imbalance on GPU is fixed.
+        self.assertEqual(frac_zeros, 0.5, atol=0.12, rtol=0)
+        self.assertEqual(frac_ones, 0.5, atol=0.12, rtol=0)
+
 
 # These tests are only needed for a few distributions that implement custom
 # reparameterized gradients. Most .rsample() implementations simply rely on
@@ -6098,7 +6141,7 @@ class TestKL(DistributionsTestCase):
         for p, q in self.infinite_examples:
             self.assertTrue(
                 (kl_divergence(p, q) == inf).all(),
-                f"Incorrect KL({type(p).__name__}, {type(q).__name__})",
+                lambda msg: f"{msg}\nIncorrect KL({type(p).__name__}, {type(q).__name__})",
             )
 
     def test_kl_edgecases(self):
@@ -7320,6 +7363,10 @@ instantiate_device_type_tests(
     TestDistributions,
     globals(),
     allow_mps=True,
+    except_for=(
+        "cuda",
+        "xpu",
+    ),
 )
 
 if __name__ == "__main__" and torch._C.has_lapack:

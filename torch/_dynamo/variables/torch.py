@@ -101,7 +101,7 @@ from .functions import (
 )
 from .lists import ListVariable, TupleVariable
 from .object_protocol import vt_is_iterable
-from .script_object import TorchScriptObjectVariable
+from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -132,6 +132,27 @@ V = TypeVar("V")
 T = TypeVar("T")
 
 log = logging.getLogger(__name__)
+
+
+def _is_supported_out_tensor_layout(
+    fake_out: torch.Tensor, *, false_if_dde: bool
+) -> bool:
+    # Functionalization can preserve standard dense memory formats, but not
+    # arbitrary non-contiguous view strides.
+    return (
+        torch._prims_common.is_contiguous(fake_out, false_if_dde=false_if_dde)
+        or torch._prims_common.is_contiguous_for_memory_format(
+            fake_out,
+            memory_format=torch.channels_last,
+            false_if_dde=false_if_dde,
+        )
+        or torch._prims_common.is_contiguous_for_memory_format(
+            fake_out,
+            memory_format=torch.channels_last_3d,
+            false_if_dde=false_if_dde,
+        )
+    )
+
 
 supported_ctx_manager_classes = dict.fromkeys(
     [
@@ -1843,7 +1864,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     if not (
                         args[0].is_python_constant()
                         or (
-                            isinstance(args[0], TorchScriptObjectVariable)
+                            isinstance(args[0], CustomClassObjectVariable)
                             and args[  # pyrefly: ignore[missing-attribute]
                                 0
                             ].value.script_class_name  # pyrefly: ignore[missing-attribute]
@@ -1873,9 +1894,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
 
                 def get_arg_value(arg: VariableTracker) -> Any:
-                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # CustomClassObjectVariable for ProcessGroup doesn't support
                     # as_python_constant(), so extract real_obj directly
-                    if isinstance(arg, TorchScriptObjectVariable):
+                    if isinstance(arg, CustomClassObjectVariable):
                         return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
                     return arg.as_python_constant()
 
@@ -3079,7 +3100,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         strict=True,
                     )
                 )
-                return ConstDictVariable(items, dict)
+                return ConstDictVariable(items)
             return result
 
         @register(torch._functorch.eager_transforms._autograd_grad)
@@ -3392,7 +3413,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                                 *graph_break_hints.SUPPORTABLE,
                             ],
                         )
-                    if not torch._prims_common.is_contiguous(fake_out):
+                    if not _is_supported_out_tensor_layout(
+                        fake_out, false_if_dde=False
+                    ):
                         # It's difficult to handle strides correctly in functionalization
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented(
@@ -3427,7 +3450,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                if not torch._prims_common.is_contiguous_or_false(fake_out):
+                if not _is_supported_out_tensor_layout(fake_out, false_if_dde=True):
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented(
