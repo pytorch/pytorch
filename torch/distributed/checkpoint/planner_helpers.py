@@ -227,7 +227,8 @@ def _create_write_item_for_tensor(fqn: str, tensor: torch.Tensor) -> WriteItem:
 def _get_checkpointable_tensor_write_items(
     fqn: str, tensor: CheckpointableTensor
 ) -> list[WriteItem]:
-    assert isinstance(tensor, torch.Tensor)  # noqa: S101
+    if not isinstance(tensor, torch.Tensor):
+        raise TypeError("CheckpointableTensor must also be a torch.Tensor")
     properties = TensorProperties.create_from_tensor(tensor)
     return [
         WriteItem(
