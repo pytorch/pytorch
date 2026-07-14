@@ -11,10 +11,9 @@ from .triton_helpers import get_constexprs
 
 @functools.lru_cache(None)
 def _tma_arg_helpers():
-    """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion --
-    avoids re-importing on the hot launch path. ``make_arg(arg, metadata)``
-    returns ``[CUtensorMap, *shape, *strides]``. The nvidia backend's
-    ``make_tensordesc_arg`` ignores its third arg, so we pass None."""
+    """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion.
+    make_arg(arg, metadata) -> [CUtensorMap, *shape, *strides]; the nvidia
+    backend's make_tensordesc_arg ignores its third arg, so we pass None."""
     from triton.backends.nvidia.driver import make_tensordesc_arg
     from triton.tools.tensor_descriptor import TensorDescriptor
 
@@ -261,13 +260,21 @@ class StaticallyLaunchedTritonKernel:
         type chars triton lowers it to (mirrors nvidia driver expand_signature):
         nvTmaDesc path -> CUtensorMap + shape(i32) + strides(i64); host-decomposed
         path -> base ptr + shape/strides(i64) + 2 flags + shape(i32) + strides(i64).
-        """
-        import re
 
-        match = re.match(r"tensordesc<([^\[>]*)\[([^\]]*)\]", ty)
-        if match is None:
-            raise NotImplementedError(f"Could not parse tensordesc type: {ty}")
-        ndim = match.group(2).count(",") + 1
+        This mirrors the string parse in triton's own expand_signature: the only
+        thing we need is the descriptor's rank, which lives in the shape list of
+        the serialized "tensordesc<dtype[d0, d1, ...]>" form. We parse that string
+        here rather than importing expand_signature because that helper's argument
+        signature differs across triton versions (a 2-arg (signature, meta) form
+        in the fb-triton nvidia driver vs a 3-arg (signature, meta,
+        descriptor_type) form as backends converge on a shared helper), so
+        importing it would break across triton bumps; the serialized string
+        format is stable.
+        TODO: switch to triton's expand_signature once the versions converge on a
+        single argument signature.
+        """
+        # Caller guarantees ty.startswith("tensordesc<"), so "[shape]" is present.
+        ndim = ty[ty.index("[") + 1 : ty.index("]")].count(",") + 1
         meta = self.tensordesc_meta
         idx = self._tensordesc_idx
         self._tensordesc_idx += 1

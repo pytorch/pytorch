@@ -106,22 +106,36 @@ CUdeviceptr getPointer(PyObject* obj) {
 }
 
 #if !defined(USE_ROCM)
-// Mirror triton's PyCUtensorMapObject layout (nvidia/driver.c) so we can read
-// the 128-byte CUtensorMap that fill_tma_descriptor_tiled() produces. Host-side
-// TMA kernels take this descriptor as a by-value kernel parameter.
+// CUtensorMap is a fixed 128-byte CUDA driver ABI type passed to the kernel by
+// value; catch a header change to its size at compile time.
+static_assert(
+    sizeof(CUtensorMap) == 128,
+    "CUtensorMap is expected to be 128 bytes (CUDA ABI change?)");
+
+// Mirror of triton's PyCUtensorMap object (nvidia/backend/driver.c) so we can
+// read its embedded CUtensorMap.
 struct PyCUtensorMapObject {
   PyObject_HEAD
   alignas(alignof(CUtensorMap)) CUtensorMap tensorMap;
 };
 
-// Return a pointer to the 128-byte CUtensorMap for a host-side TMA descriptor
-// argument. Supports triton's native PyCUtensorMap (fast path) and duck-typed
-// objects exposing tma_desc_cpu_ptr(). The pointer is owned by `obj`, which the
-// caller must keep alive across the synchronous kernel launch (cuLaunchKernel
-// copies the param bytes before returning).
+// Pointer to the CUtensorMap in a host-side TMA descriptor arg (triton's
+// PyCUtensorMap, or a duck-typed tma_desc_cpu_ptr()). Owned by `obj`, which
+// must stay alive across the launch.
 void* getTmaDescPtr(PyObject* obj) {
   if (std::strcmp(
           Py_TYPE(obj)->tp_name, "triton.backends.nvidia.PyCUtensorMap") == 0) {
+    // Fail loudly if triton's object no longer matches our mirror: tp_basicsize
+    // catches a resized field or a CUDA-major mismatch (alignof is 64 on 12.x
+    // vs 128 on 13.x). A same-size reorder isn't caught here; correctness tests
+    // are.
+    TORCH_CHECK(
+        Py_TYPE(obj)->tp_basicsize == sizeof(PyCUtensorMapObject),
+        "triton PyCUtensorMap layout changed (tp_basicsize=",
+        Py_TYPE(obj)->tp_basicsize,
+        ", expected ",
+        sizeof(PyCUtensorMapObject),
+        "); the static launcher's CUtensorMap mirror is stale");
     return &reinterpret_cast<PyCUtensorMapObject*>(obj)->tensorMap;
   }
   // Duck-typed fallback: tma_desc_cpu_ptr() -> host pointer to a CUtensorMap.
@@ -382,8 +396,8 @@ void parseKernelArgs(
 #if defined(USE_ROCM)
         TORCH_CHECK(false, "tensordesc kernel args are not supported on ROCm");
 #else
-        // The descriptor lives in the Python arg (alive for this launch); point
-        // the kernel arg directly at its 128 bytes -- no 8-byte slot needed.
+        // Point the kernel arg at the descriptor's 128 bytes; no 8-byte slot,
+        // so skip the slot write.
         kernelArgs[i] = getTmaDescPtr(item);
         continue;
 #endif
@@ -900,8 +914,7 @@ static PyObject* fast_launcher_vectorcall(
 #if defined(USE_ROCM)
         TORCH_CHECK(false, "tensordesc kernel args are not supported on ROCm");
 #else
-        // Override the pre-bound slot pointer: the kernel arg must point at the
-        // descriptor's 128 bytes (owned by `item`, alive for this launch).
+        // Override the pre-bound slot to point at the descriptor's 128 bytes.
         self->kernelArgs[i] = getTmaDescPtr(item);
         continue;
 #endif
