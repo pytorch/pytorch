@@ -764,6 +764,73 @@ class ExceptionVariable(VariableTracker):
         return VariableTracker.build(tx, self.debug_repr())
 
 
+class StopIterationVariable(ExceptionVariable):
+    def __init__(
+        self,
+        exc_type: Any,
+        args: list[VariableTracker],
+        init_kwargs: dict[str, VariableTracker] | None = None,
+        source: Source | None = None,
+        mutation_type: MutationType | None = None,
+    ) -> None:
+        self.value = args[0] if args else variables.ConstantVariable.create(None)
+        super().__init__(exc_type, args, init_kwargs, source, mutation_type)
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "value":
+            return self.value
+        return super().getattro_impl(tx, name)
+
+
+class _KwargAttrExceptionVariable(ExceptionVariable):
+    # Base for exceptions whose constructor accepts keyword-only attributes that
+    # default to None (e.g. NameError's `name`, AttributeError's `name`/`obj`).
+    # Subclasses list the attribute names in `_kwarg_attrs`; they are popped from
+    # init_kwargs, exposed via getattr, and restored on reconstruct.
+    _kwarg_attrs: tuple[str, ...] = ()
+
+    def __init__(
+        self,
+        exc_type: Any,
+        args: list[VariableTracker],
+        init_kwargs: dict[str, VariableTracker] | None = None,
+        source: Source | None = None,
+        mutation_type: MutationType | None = None,
+    ) -> None:
+        init_kwargs = dict(init_kwargs) if init_kwargs else {}
+        none = variables.ConstantVariable.create(None)
+        self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
+        super().__init__(exc_type, args, init_kwargs, source, mutation_type)
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name in self._attrs:
+            return self._attrs[name]
+        return super().getattro_impl(tx, name)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        super().reconstruct(codegen)
+        for name, val in self._attrs.items():
+            if not (istype(val, ConstantVariable) and val.value is None):
+                codegen.dup_top()
+                codegen(val)
+                codegen.extend_output(codegen.rot_n(2))
+                codegen.store_attr(name)
+
+
+class AttributeErrorVariable(_KwargAttrExceptionVariable):
+    # https://docs.python.org/3/library/exceptions.html#AttributeError
+    _kwarg_attrs = ("name", "obj")
+
+
+class NameErrorVariable(_KwargAttrExceptionVariable):
+    # https://docs.python.org/3/library/exceptions.html#NameError
+    _kwarg_attrs = ("name",)
+
+
 class UnknownVariable(VariableTracker):
     """
     It could be anything!
