@@ -2618,7 +2618,7 @@ class OutputGraph(OutputGraphCommon):
         ret: dict[str, list[int | str]] = {}
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value", None)
-            if isinstance(example_value, torch._subclasses.FakeTensor):
+            if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                 size = example_value.shape
                 ret[node.name] = [s if isinstance(s, int) else repr(s) for s in size]
         return ret
@@ -2628,7 +2628,7 @@ class OutputGraph(OutputGraphCommon):
         graph_sizes_str += f"===== {name} =====\n"
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value", None)
-            if isinstance(example_value, torch._subclasses.FakeTensor):
+            if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                 size = example_value.shape
                 graph_sizes_str += f"{node.name}: {tuple(size)}\n"
                 concrete_size = []
@@ -2697,7 +2697,9 @@ class OutputGraph(OutputGraphCommon):
             ):
                 all_states: list[Any] = [None] * compile_pg.size()
 
-                dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
+                dist.all_gather_object(
+                    all_states, ds.local_state, group=compile_pg, weights_only=True
+                )
 
                 ds.all_states = all_states
             # Clear speculation log, because are tracing may diverge due to
@@ -2727,7 +2729,7 @@ class OutputGraph(OutputGraphCommon):
                 continue
 
             fake_tensor = var.as_proxy().node.meta.get("example_value")
-            if not isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor):
+            if not torch._subclasses.fake_tensor.is_fake_tensor(fake_tensor):
                 raise AssertionError(
                     f"expected example_value to be a FakeTensor, got {type(fake_tensor)}"
                 )
@@ -3497,7 +3499,7 @@ class OutputGraph(OutputGraphCommon):
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value")
             if (
-                isinstance(example_value, FakeTensor)
+                isinstance(example_value, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
                 and example_value.item_memo is not None
                 and hasattr(example_value.item_memo.node._expr, "name")
                 and all(u.target == "item" for u in node.users)
