@@ -25,7 +25,6 @@ from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
 from .constraints import (
     flex_gemm_local_reduce_config_error,
     is_flex_gemm_partial_reduction_shape,
-    LOCAL_REDUCE_AUX_METADATA_ERROR,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
     LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
@@ -160,28 +159,18 @@ def flex_gemm_ordered_outputs(result, aux_outs, local_reduce_outs, local_reduce_
             raise AssertionError("FlexGEMM expects at most one local-reduce output")
 
 
-def validate_flex_gemm_local_reduce_scope(
-    gemm_op: torch._ops.OpOverload, local_reduce
-) -> None:
-    """Keep generated local-reduce support scoped to dense mm."""
-    if local_reduce is None:
-        return
-    if gemm_op is not torch.ops.aten.mm.default:
-        raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
-
-
 def flex_gemm_local_reduce_metas(
     gemm_op: torch._ops.OpOverload,
     local_reduce,
 ) -> tuple[Any, ...]:
-    """Return local-reduce output metadata after validating consumer compatibility."""
-    validate_flex_gemm_local_reduce_scope(gemm_op, local_reduce)
-    if local_reduce is None or local_reduce.store_node is None:
+    """Return local-reduce output metadata after validating its GEMM scope."""
+    if local_reduce is None:
         return ()
-    local_reduce_meta = local_reduce.store_node.meta.get("val")
-    if local_reduce_meta is None:
-        raise NotImplementedError(LOCAL_REDUCE_AUX_METADATA_ERROR)
-    return (local_reduce_meta,)
+    if gemm_op is not torch.ops.aten.mm.default:
+        raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
+    if local_reduce.store is None:
+        return ()
+    return (local_reduce.store.node.meta["val"],)
 
 
 def flex_gemm_config_keys_for_local_reduce(
@@ -302,6 +291,9 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
     epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
     outputs = epilogue_analysis.outputs
+    local_reduce_store = (
+        None if outputs.local_reduce is None else outputs.local_reduce.store
+    )
     output_meta = outputs.output.meta.get("val")
     if output_meta is None:
         raise NotImplementedError(
@@ -399,5 +391,5 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         result,
         aux_outs,
         local_reduce_outs,
-        outputs.local_reduce.aux_index if outputs.local_reduce is not None else None,
+        None if local_reduce_store is None else local_reduce_store.aux_index,
     )

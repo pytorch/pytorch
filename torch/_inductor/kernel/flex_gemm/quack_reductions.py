@@ -33,7 +33,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
-    LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR,
     local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
     statically_known_equal,
@@ -152,22 +151,6 @@ def _grouped_layout_matches_source_shape(
             return False
 
 
-def _grouped_layout_from_source_shape(
-    shape: tuple[Any, ...], source_shape: tuple[Any, ...]
-) -> GroupedTensorSSALayout | None:
-    candidates = []
-    match shape:
-        case (*_, int(group)) if group > 0:
-            candidates.append(GroupedTensorSSALayout(axis=1, group_size=group))
-    match shape:
-        case (*_, int(group), _) if group > 0:
-            candidates.append(GroupedTensorSSALayout(axis=0, group_size=group))
-    for layout in candidates:
-        if _grouped_layout_matches_source_shape(shape, source_shape, layout):
-            return layout
-    return None
-
-
 def grouped_tensor_layout(
     shape: Any, source_shape: Any | None = None
 ) -> GroupedTensorSSALayout | None:
@@ -180,9 +163,16 @@ def grouped_tensor_layout(
     if source_shape is not None:
         source_shape = normalize_shape(source_shape)
         if isinstance(source_shape, tuple) and len(source_shape) == 2:
-            layout = _grouped_layout_from_source_shape(shape, source_shape)
-            if layout is not None:
-                return layout
+            candidates = []
+            match shape:
+                case (*_, int(group)) if group > 0:
+                    candidates.append(GroupedTensorSSALayout(axis=1, group_size=group))
+            match shape:
+                case (*_, int(group), _) if group > 0:
+                    candidates.append(GroupedTensorSSALayout(axis=0, group_size=group))
+            for layout in candidates:
+                if _grouped_layout_matches_source_shape(shape, source_shape, layout):
+                    return layout
             if _syntactic_grouped_tensor_layout(shape) is not None:
                 raise NotImplementedError(LOCAL_REDUCE_GROUPED_RESHAPE_ERROR)
             return None
@@ -407,16 +397,6 @@ def _local_reduce_store_arg(
     return _cute_arg(value, env)
 
 
-def has_local_reduce_store_source(
-    value: Any, sources: dict[torch.fx.Node, Any]
-) -> bool:
-    if isinstance(value, torch.fx.Node):
-        return value in sources
-    if isinstance(value, (tuple, list)):
-        return any(has_local_reduce_store_source(item, sources) for item in value)
-    return False
-
-
 def tensor_meta_shape(node: torch.fx.Node) -> tuple[Any, ...] | None:
     """Return fake-tensor shape metadata when the FX value is tensor-like."""
     meta = node.meta.get("val")
@@ -425,47 +405,28 @@ def tensor_meta_shape(node: torch.fx.Node) -> tuple[Any, ...] | None:
     return None
 
 
-def canonical_shape(shape: tuple[Any, ...]) -> tuple[str, ...]:
-    """Canonicalize tensor metadata shapes for symbolic broadcast comparisons."""
-    return tuple(str(dim) for dim in shape)
-
-
-def shapes_match(lhs: tuple[Any, ...], rhs: tuple[Any, ...]) -> bool:
-    """Compare shape metadata using Inductor's symbolic-shape string convention."""
-    return canonical_shape(lhs) == canonical_shape(rhs)
-
-
-def is_broadcastable_to_shape(
-    shape: tuple[Any, ...], output_shape: tuple[Any, ...]
-) -> bool:
-    """Return whether Inductor shape propagation expands a tensor to output shape."""
-    canonical_output_shape = canonical_shape(output_shape)
-    try:
-        broadcast_shape = get_broadcasted_shape(
-            canonical_shape(shape), canonical_output_shape
-        )
-    except AssertionError:
-        return False
-    if broadcast_shape is None:
-        return False
-    return tuple(broadcast_shape) == canonical_output_shape
-
-
 def node_preserves_tensor_shapes(node: torch.fx.Node) -> bool:
     """Reject pointwise broadcasts that cannot preserve a grouped TensorSSA input."""
     output_shape = tensor_meta_shape(node)
     if output_shape is None:
         return False
-    has_matching_tensor_input = False
+    output_shape_key = tuple(str(dim) for dim in output_shape)
+    has_same_shape_input = False
     for input_node in iter_fx_node_inputs((node.args, node.kwargs)):
         input_shape = tensor_meta_shape(input_node)
         if input_shape is None:
             continue
-        if shapes_match(input_shape, output_shape):
-            has_matching_tensor_input = True
-        elif not is_broadcastable_to_shape(input_shape, output_shape):
+        input_shape_key = tuple(str(dim) for dim in input_shape)
+        if input_shape_key == output_shape_key:
+            has_same_shape_input = True
+            continue
+        try:
+            broadcast_shape = get_broadcasted_shape(input_shape_key, output_shape_key)
+        except AssertionError:
             return False
-    return has_matching_tensor_input
+        if broadcast_shape is None or tuple(broadcast_shape) != output_shape_key:
+            return False
+    return has_same_shape_input
 
 
 def is_pointwise_node(node: torch.fx.Node) -> bool:
@@ -488,30 +449,6 @@ def iter_fx_node_inputs(value: Any):
     yield from result
 
 
-def propagate_grouped_tensorssa_layout(
-    node: torch.fx.Node, grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout]
-) -> GroupedTensorSSALayout | None:
-    layouts = [
-        grouped_tensors[arg]
-        for arg in iter_fx_node_inputs((node.args, node.kwargs))
-        if arg in grouped_tensors
-    ]
-    if not layouts:
-        return None
-    layout = layouts[0]
-    if any(item != layout for item in layouts):
-        raise NotImplementedError(LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR)
-    return layout
-
-
-def shape_arg_value(value: Any) -> Any:
-    match value:
-        case torch.fx.Node(meta={"val": shape_value}):
-            return shape_value
-        case _:
-            return value
-
-
 def view_or_reshape_args(node: torch.fx.Node) -> tuple[Any, tuple[Any, ...]] | None:
     if node.op == "call_function" and node.target in (
         torch.ops.aten.view.default,
@@ -519,7 +456,10 @@ def view_or_reshape_args(node: torch.fx.Node) -> tuple[Any, tuple[Any, ...]] | N
     ):
         shape = node.args[1]
         if isinstance(shape, (tuple, list, torch.Size)):
-            return node.args[0], tuple(shape_arg_value(arg) for arg in shape)
+            return node.args[0], tuple(
+                arg.meta.get("val", arg) if isinstance(arg, torch.fx.Node) else arg
+                for arg in shape
+            )
     return None
 
 
@@ -548,14 +488,11 @@ def lower_view_or_reshape(
     if view_args is None:
         return None
     source_node, _ = view_args
-    if (
-        isinstance(source_node, torch.fx.Node)
-        and source_node in local_reduce_store_sources
-    ):
-        local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
-        return _cute_arg(source_node, env)
     if not isinstance(source_node, torch.fx.Node):
         return None
+    if source_node in local_reduce_store_sources:
+        local_reduce_store_sources[node] = local_reduce_store_sources[source_node]
+        return _cute_arg(source_node, env)
     source = _cute_arg(source_node, env)
     grouped_layout = grouped_tensors.get(node)
     if grouped_layout is not None:
@@ -597,22 +534,15 @@ FUNCTION_UNSUPPORTED_REDUCTIONS = frozenset(
 )
 
 
-def reduction_node_args(
-    node: torch.fx.Node, *, has_dtype: bool
-) -> tuple[Any, Any, Any, Any]:
-    """Extract the common Tensor reduction argument convention from FX nodes."""
-    input_node = node.args[0]
-    dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-    keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
-    dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
-    return input_node, dim, keepdim, dtype if has_dtype else None
-
-
 def reduction_from_node(node: torch.fx.Node) -> tuple[Any, Any, Any, Any, str] | None:
     if node.op != "call_function" or node.target not in FUNCTION_REDUCTION_TYPES:
         return None
     reduction_type, has_dtype = FUNCTION_REDUCTION_TYPES[node.target]
-    return (*reduction_node_args(node, has_dtype=has_dtype), reduction_type)
+    input_node = node.args[0]
+    dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+    keepdim = node.args[2] if len(node.args) > 2 else node.kwargs.get("keepdim", False)
+    dtype = node.args[3] if len(node.args) > 3 else node.kwargs.get("dtype")
+    return input_node, dim, keepdim, dtype if has_dtype else None, reduction_type
 
 
 def unsupported_reduction_from_node(node: torch.fx.Node) -> str | None:
@@ -718,8 +648,7 @@ def lower_tensorssa_reduce(
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
-    local_reduce_physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction]
-    | None = None,
+    local_reduce_physical_reductions: dict[torch.fx.Node, FlexGemmPhysicalReduction],
 ) -> Any | None:
     """Lower value reductions while deferring cross-fragment finalization to QuACK."""
     reduction = reduction_from_node(node)
@@ -745,10 +674,9 @@ def lower_tensorssa_reduce(
     source = _cute_arg(input_node, env)
     needs_physical_combine = layout.needs_physical_combine
     if needs_physical_combine:
-        if local_reduce_physical_reductions is not None:
-            local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
-                desc.combine_expr, finalize_expr
-            )
+        local_reduce_physical_reductions[node] = FlexGemmPhysicalReduction(
+            desc.combine_expr, finalize_expr
+        )
         if layout.axis == 0:
             local_reduce_store_sources[node] = source
             return source
