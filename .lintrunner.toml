@@ -835,6 +835,7 @@ exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
     'c10/cuda/CUDACachingAllocator.cpp',
+    'c10/cuda/CUDAMallocAsyncAllocator.cpp',
     '**/fb/**',
 ]
 command = [
