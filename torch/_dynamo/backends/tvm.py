@@ -21,7 +21,7 @@ The backend can be used with torch.compile():
 """
 
 import functools
-import importlib
+import importlib.util
 import logging
 import os
 import sys
@@ -51,17 +51,51 @@ def tvm(
 ) -> Callable[..., Any]:
     if options is None:
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
-    if options is None:
-        raise AssertionError("options must not be None")
     try:
-        import tvm  # type: ignore[import]
-        from tvm import relay  # type: ignore[import]
-        from tvm.contrib import graph_executor  # type: ignore[import]
+        import tvm  # type: ignore[import]  # noqa: F401
     except ImportError as e:
         raise ImportError(
             "Please install apache-tvm to use the tvm backend. "
             "See https://tvm.apache.org/docs/install/index.html for instructions."
         ) from e
+
+    # relay was removed in TVM 0.20; newer pip wheels only ship the relax
+    # frontend, so dispatch on whichever API the installed TVM provides.
+    if importlib.util.find_spec("tvm.relay") is not None:
+        return _tvm_relay_compile(gm, example_inputs, options)
+    if importlib.util.find_spec("tvm.relax.frontend.torch") is not None:
+        return _tvm_relax_compile(gm, example_inputs, options)
+    raise ImportError(
+        "The installed apache-tvm provides neither the legacy relay frontend nor "
+        "the relax torch frontend, so the tvm backend cannot compile this graph."
+    )
+
+
+def _tvm_relax_compile(
+    gm: fx.GraphModule,
+    example_inputs: list[torch.Tensor],
+    options: MappingProxyType[str, Any],
+) -> Callable[..., Any]:
+    from tvm.relax.frontend.torch import relax_dynamo  # type: ignore[import]
+
+    scheduler = options.get("scheduler", None) or os.environ.get("TVM_SCHEDULER", None)
+    if scheduler in ("auto_scheduler", "meta_schedule"):
+        log.warning(
+            "scheduler=%s has no equivalent in the relax TVM backend; "
+            "falling back to the default relax pipeline.",
+            scheduler,
+        )
+    return relax_dynamo()(gm, example_inputs)
+
+
+def _tvm_relay_compile(
+    gm: fx.GraphModule,
+    example_inputs: list[torch.Tensor],
+    options: MappingProxyType[str, Any],
+) -> Callable[..., Any]:
+    import tvm  # type: ignore[import]
+    from tvm import relay  # type: ignore[import]
+    from tvm.contrib import graph_executor  # type: ignore[import]
 
     jit_mod = torch.jit.trace(gm, example_inputs)
     device = device_from_inputs(example_inputs)
@@ -157,25 +191,23 @@ def tvm(
             return tvm.nd.array(torch_tensor.cpu().numpy())
         return tvm.nd.from_dlpack(torch_tensor)
 
+    # input info is fixed at compile time, so query it once instead of per call
+    shape_info, _ = m.get_input_info()
+    active_inputs = set(shape_info.keys())
+
     def exec_tvm(*i_args: torch.Tensor) -> list[torch.Tensor]:
         args = [a.contiguous() for a in i_args]
-        shape_info, _ = m.get_input_info()
-        active_inputs = set(shape_info.keys())
         for idx, arg in enumerate(args, 0):
-            if arg.dim() != 0:
-                if arg.requires_grad:
-                    arg = arg.detach()
-                inp_name = f"inp_{idx}"
-                if inp_name not in active_inputs:
-                    log.warning(
-                        "input %s skipped as not found in tvm's runtime library",
-                        inp_name,
-                    )
-                    continue
-                m.set_input(
+            inp_name = f"inp_{idx}"
+            if inp_name not in active_inputs:
+                log.warning(
+                    "input %s skipped as not found in tvm's runtime library",
                     inp_name,
-                    to_tvm_tensor(arg),
                 )
+                continue
+            if arg.requires_grad:
+                arg = arg.detach()
+            m.set_input(inp_name, to_tvm_tensor(arg))
         m.run()
         return [to_torch_tensor(m.get_output(i)) for i in range(m.get_num_outputs())]
 
@@ -191,11 +223,8 @@ tvm_auto_scheduler = functools.partial(
 
 
 def has_tvm() -> bool:
-    try:
-        importlib.import_module("tvm")
-        return True
-    except ImportError:
-        return False
+    # avoid the heavy tvm import just to check availability
+    return importlib.util.find_spec("tvm") is not None
 
 
 @functools.cache
