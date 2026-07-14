@@ -80,7 +80,13 @@ from ..utils import (
     tensortype_to_dtype,
     unpack_iterable,
 )
-from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    GetSet,
+    Member,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable, FakeIdVariable
 from .dicts import (
     ConstDictVariable,
@@ -341,6 +347,50 @@ class BaseBuiltinVariable(VariableTracker):
 
     _fn: Any = None
 
+    # Type attribute readers shared by BaseBuiltinVariable and BuiltinVariable.
+    # Each reader declines (returns None) when the wrapped callable is not a type,
+    # letting getattro_impl fall through to its dynamic getattr handling.
+    # CPython classification (Objects/typeobject.c):
+    #   __bases__ -> type_getsets[] type_get_bases (getset)
+    #   __base__  -> type_members[] {T_OBJECT, offsetof(tp_base), Py_READONLY}
+    #   __flags__ -> type_members[] {T_ULONG, offsetof(tp_flags), Py_READONLY}
+    def _type_get_bases(
+        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        fn = self.as_python_constant()
+        if not isinstance(fn, type):
+            return None
+        source = self.source and AttrSource(self.source, "__bases__")
+        items = [
+            VariableTracker.build(tx, b, source and GetItemSource(source, i))
+            for i, b in enumerate(fn.__bases__)
+        ]
+        return variables.TupleVariable(items, source=source)
+
+    def _type_get_base(
+        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        fn = self.as_python_constant()
+        if not isinstance(fn, type):
+            return None
+        source = self.source and AttrSource(self.source, "__base__")
+        return VariableTracker.build(tx, fn.__base__, source)
+
+    def _type_get_flags(
+        self: "BaseBuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        fn = self.as_python_constant()
+        if not isinstance(fn, type):
+            return None
+        source = self.source and AttrSource(self.source, "__flags__")
+        return VariableTracker.build(tx, fn.__flags__, source)
+
+    tp_getset = {"__bases__": GetSet(_type_get_bases, None)}
+    tp_members = {
+        "__base__": Member(_type_get_base, None),
+        "__flags__": Member(_type_get_flags, None),
+    }
+
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "BaseBuiltinVariable":
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
@@ -358,17 +408,12 @@ class BaseBuiltinVariable(VariableTracker):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # Declarative type-attribute dispatch, mirroring the consultation at the
+        # top of VariableTracker.getattro_impl. Inlined here because this
+        # override keeps its own GetAttrVariable fallback instead of delegating
+        # to super().
         fn = self.as_python_constant()
         source = self.source and AttrSource(self.source, name)
-        if isinstance(fn, type) and name in {"__bases__", "__base__", "__flags__"}:
-            if name == "__bases__":
-                bases = fn.__bases__
-                items = [
-                    VariableTracker.build(tx, b, source and GetItemSource(source, i))
-                    for i, b in enumerate(bases)
-                ]
-                return variables.TupleVariable(items, source=source)
-            return VariableTracker.build(tx, getattr(fn, name), source)
         attr = getattr(fn, name, None)
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
@@ -506,6 +551,21 @@ class BuiltinVariable(BaseBuiltinVariable):
         "fn",
         *VariableTracker._nonvar_fields,
     }
+
+    # __name__ -> type_getsets[] type_get_name (getset). Unlike the type-attribute
+    # readers on BaseBuiltinVariable, BuiltinVariable exposes __name__ for any
+    # wrapped callable (not just types), so it never declines.
+    def _builtin_type_get_name(
+        self: "BuiltinVariable", tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        source = self.source and AttrSource(self.source, "__name__")
+        return VariableTracker.build(tx, self.fn.__name__, source)
+
+    tp_getset = {
+        **BaseBuiltinVariable.tp_getset,
+        "__name__": GetSet(_builtin_type_get_name, None),
+    }
+    tp_members = BaseBuiltinVariable.tp_members
 
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "BuiltinVariable":
@@ -2508,18 +2568,11 @@ class BuiltinVariable(BaseBuiltinVariable):
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # Declarative type-attribute dispatch (__name__, __bases__, __base__,
+        # __flags__), mirroring the consultation at the top of
+        # VariableTracker.getattro_impl. Inlined because this override keeps its
+        # own object / GetAttrVariable handling below instead of delegating.
         source = self.source and AttrSource(self.source, name)
-        if name == "__name__":
-            return VariableTracker.build(tx, self.fn.__name__, source)
-        if isinstance(self.fn, type) and name in {"__bases__", "__base__", "__flags__"}:
-            if name == "__bases__":
-                bases = self.fn.__bases__
-                items = [
-                    VariableTracker.build(tx, b, source and GetItemSource(source, i))
-                    for i, b in enumerate(bases)
-                ]
-                return variables.TupleVariable(items, source=source)
-            return VariableTracker.build(tx, getattr(self.fn, name), source)
         if self.fn is object:
             # for object, we can just directly read the attribute
             try:
