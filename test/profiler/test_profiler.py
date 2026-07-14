@@ -224,7 +224,7 @@ class TestProfilerCUDA(TestCase):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
         self.assertTrue(
             not (is_increasing and max_diff > 100 * 1024),
-            msg=f"memory usage is increasing, {str(last_rss)}",
+            msg=lambda msg: f"{msg}\nmemory usage is increasing, {str(last_rss)}",
         )
 
     def test_custom_module_input_op_ids(self):
@@ -399,7 +399,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
             event_name = "cuda_sync" if torch.version.cuda else "hipDeviceSynchronize"
             self.assertTrue(
                 event_name in cats,
-                f"Expected to find {event_name} event found = {cats}",
+                lambda msg: f"{msg}\nExpected to find {event_name} event found = {cats}",
             )
 
         print("Testing enable_cuda_sync_events in _ExperimentalConfig")
@@ -1519,7 +1519,9 @@ class TestProfiler(TestCase):
             trace_only_counts = count_by_cat(trace_only_trace)
             for cat in ("kernel", "ac2g"):
                 self.assertGreater(
-                    default_counts[cat], 0, f"expected {cat} events in default trace"
+                    default_counts[cat],
+                    0,
+                    lambda msg: f"{msg}\nexpected {cat} events in default trace",
                 )
                 self.assertEqual(
                     default_counts[cat],
@@ -1690,7 +1692,7 @@ class TestProfiler(TestCase):
                     self.assertGreaterEqual(
                         args.get("Record function id", -1),
                         0,
-                        f"Failed finding record funciont for op = {e}",
+                        lambda msg: f"{msg}\nFailed finding record funciont for op = {e}",
                     )
 
     def test_profiler_strides(self):
@@ -1870,6 +1872,27 @@ class TestProfiler(TestCase):
                 # of mm to addmm or other impl, or changing internal order of args
                 self.assertTrue(len(e.input_shapes) > 0)
                 self.assertTrue(len(e.input_shapes[0]) > 0)
+
+    def test_custom_autograd_function_input_shapes(self):
+        class CustomRecordShapes(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, scale, y):
+                return x + y * scale
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, None, grad
+
+        x = torch.ones(2, 3, requires_grad=True)
+        y = torch.ones(4, requires_grad=True)
+        with profile(record_shapes=True) as prof:
+            CustomRecordShapes.apply(x, 2.0, y[:3])
+
+        events = [
+            event for event in prof.events() if event.name == "CustomRecordShapes"
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].input_shapes, [[2, 3], [], [3]])
 
     def test_concrete_inputs_profiling(self):
         x = torch.rand(2, 6)
@@ -2736,13 +2759,17 @@ class TestProfilerDevice(TestCase):
                 for alloc_fn in allocs:
                     self.assertTrue(alloc_fn in stat_metrics)
                     self.assertGreater(
-                        stat_metrics[alloc_fn], 0, f"alloc_fn = {alloc_fn}"
+                        stat_metrics[alloc_fn],
+                        0,
+                        lambda msg: f"{msg}\nalloc_fn = {alloc_fn}",
                     )
             if deallocs is not None:
                 for dealloc_fn in deallocs:
                     self.assertTrue(dealloc_fn in stat_metrics)
                     self.assertLess(
-                        stat_metrics[dealloc_fn], 0, f"alloc_fn = {dealloc_fn}"
+                        stat_metrics[dealloc_fn],
+                        0,
+                        lambda msg: f"{msg}\nalloc_fn = {dealloc_fn}",
                     )
 
         def create_cpu_tensor():
@@ -3427,7 +3454,9 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 args = ke.get("args", {})
                 name = ke.get("name", "<unknown>")
                 for key in ["device", "stream", "correlation"]:
-                    self.assertIn(key, args, f"kernel '{name}' missing '{key}'")
+                    self.assertIn(
+                        key, args, lambda msg: f"{msg}\nkernel '{name}' missing '{key}'"
+                    )
                 has_grid = "grid" in args
                 has_block = "block" in args
                 self.assertEqual(
@@ -4619,7 +4648,7 @@ class TestProfilerEventsParity(TestCase):
                 self.assertIn(
                     (e.name, e.activity_type),
                     json_name_cats,
-                    f"activity_type mismatch for {e.name}",
+                    lambda msg: f"{msg}\nactivity_type mismatch for {e.name}",
                 )
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
@@ -4692,7 +4721,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertNotIn(
                 key,
                 event_records,
-                f"Duplicate FunctionEvent record key encountered: {key}",
+                lambda msg: f"{msg}\nDuplicate FunctionEvent record key encountered: {key}",
             )
             event_records[key] = metadata_dict_from_function_event(fe)
 
@@ -4726,7 +4755,7 @@ class TestProfilerEventsParity(TestCase):
             self.assertNotIn(
                 key,
                 json_records,
-                f"Duplicate Chrome trace record key encountered: {key}",
+                lambda msg: f"{msg}\nDuplicate Chrome trace record key encountered: {key}",
             )
             json_records[key] = metadata_dict_from_trace_args(args)
 
@@ -4964,7 +4993,11 @@ class TestMetadataJsonFormat(TestCase):
         ]
         expected = common_keys if TEST_WITH_ROCM else common_keys + cuda_only_keys
         for key in expected:
-            self.assertIn(key, parsed, f"Missing field '{key}' in kernel metadataJson")
+            self.assertIn(
+                key,
+                parsed,
+                lambda msg: f"{msg}\nMissing field '{key}' in kernel metadataJson",
+            )
 
     def test_kernel_metadata_field_types(self):
         md = self._get_kernel_metadata()
@@ -4984,7 +5017,7 @@ class TestMetadataJsonFormat(TestCase):
             self.assertIsInstance(
                 parsed[key],
                 int,
-                f"Expected int for '{key}', got {type(parsed[key]).__name__}",
+                lambda msg: f"{msg}\nExpected int for '{key}', got {type(parsed[key]).__name__}",
             )
         for key in ["grid", "block"]:
             self.assertIsInstance(parsed[key], list)
