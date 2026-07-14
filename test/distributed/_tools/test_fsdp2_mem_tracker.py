@@ -124,7 +124,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
             accuracy,
             1.0,
             delta=0.1,
-            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
+            msg=lambda msg: f"{msg}\nTracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del model
         del inp
@@ -174,7 +174,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
             accuracy,
             1.0,
             delta=0.1,
-            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
+            msg=lambda msg: f"{msg}\nTracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del inp
         del model
@@ -313,7 +313,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
             accuracy,
             1.0,
             delta=0.1,
-            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
+            msg=lambda msg: f"{msg}\nTracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del inp
         del model

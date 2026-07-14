@@ -423,8 +423,11 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
+  // NOLINTBEGIN(performance-use-std-move): the extra refcount from copying
+  // (rather than moving) tmp_a/tmp_b is load-bearing, see NB comment above.
   a->cdata = tmp_b;
   b->cdata = tmp_a;
+  // NOLINTEND(performance-use-std-move)
 
   // Fix up the PyObjects associated with each TensorImpl
   a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
@@ -2746,6 +2749,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_cached_tensor", [](const at::Tensor& t) {
     return at::caching::is_cached_tensor(t);
+  });
+
+  py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
+    return t.is_fake();
   });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
