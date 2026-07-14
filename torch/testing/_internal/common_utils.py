@@ -1175,7 +1175,6 @@ def discover_test_cases_recursively(suite_or_case):
         return [suite_or_case]
     rc = []
     for element in suite_or_case:
-        print(element)
         rc.extend(discover_test_cases_recursively(element))
     return rc
 
@@ -2719,6 +2718,44 @@ def set_default_dtype(dtype):
         yield
     finally:
         torch.set_default_dtype(saved_dtype)
+
+
+class set_default_dtype_if_supported:
+    """Decorator like set_default_dtype, but only sets the dtype if the device
+    supports it.
+
+    Calls the test object's `DeviceTypeTestBase.get_primary_device()` method at
+    call time, so this only works on test classes that have had
+    `instantiate_device_type_tests` applied to them.
+    """
+
+    def __init__(self, dtype):
+        self._dtype = dtype
+
+    def __call__(self, fn):
+        @functools.wraps(fn)
+        def wrapper(test_self, *args, **kwargs):
+            device = test_self.get_primary_device()
+            dtype_supported = True
+            try:
+                torch.empty(0, device=device, dtype=self._dtype)
+            except TypeError:
+                dtype_supported = False
+
+            saved_dtype = None
+
+            if dtype_supported:
+                saved_dtype = torch.get_default_dtype()
+                torch.set_default_dtype(self._dtype)
+
+            try:
+                return fn(test_self, *args, **kwargs)
+            finally:
+                if saved_dtype is not None:
+                    torch.set_default_dtype(saved_dtype)
+
+        return wrapper
+
 
 @contextlib.contextmanager
 def set_default_tensor_type(tensor_type):
@@ -4603,6 +4640,12 @@ class TestCase(expecttest.TestCase):
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
+    def _formatMessage(self, msg, standardMsg) -> str:  # type: ignore[override]
+        # Allow a callable msg, invoked lazily on failure to build the message.
+        if callable(msg):
+            return msg(standardMsg)
+        return super()._formatMessage(msg, standardMsg)
+
     def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() is y.type()
         self.assertEqual(x.device, y.device)
@@ -5810,14 +5853,18 @@ def get_cycles_per_ms(device: str = "cuda") -> float:
             return cycles_per_ms
     else:
         def measure() -> float:
-            start = torch.cuda.Event(enable_timing=True)
-            end = torch.cuda.Event(enable_timing=True)
-            start.record()
-            torch.cuda._sleep(test_cycles)
-            end.record()
-            end.synchronize()
-            cycles_per_ms = test_cycles / start.elapsed_time(end)
-            return cycles_per_ms
+            if hasattr(torch.get_device_module(device), "_sleep"):
+                start = torch.Event(enable_timing=True)
+                end = torch.Event(enable_timing=True)
+                start.record()
+                torch.get_device_module(device)._sleep(test_cycles)
+                end.record()
+                end.synchronize()
+                cycles_per_ms = test_cycles / start.elapsed_time(end)
+                return cycles_per_ms
+            else:
+                cycles_per_ms = 1000000.0
+                return cycles_per_ms
 
     # Get 10 values and remove the 2 max and 2 min and return the avg.
     # This is to avoid system disturbance that skew the results, e.g.

@@ -7,7 +7,7 @@ import tempfile
 import types
 import unittest
 from unittest import skipUnless
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -392,7 +392,7 @@ class TestTritonHeuristics(TestCase):
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
             ROCmConfigHeuristic,
@@ -463,6 +463,33 @@ class TestTritonHeuristics(TestCase):
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
 )
+
+
+class TestCachingAutotunerPrecompileDriverSetup(TestCase):
+    @skipIfRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_warm_cache_only_precompile_skips_driver_setup_in_context(self):
+        from torch._inductor.runtime import triton_helpers
+
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        num_configs = len(args["configs"])
+        self.assertGreaterEqual(num_configs, 2)
+        autotuner = CachingAutotuner(**args)
+
+        with (
+            triton_helpers.skip_gpu_driver_setup(),
+            patch.object(
+                type(triton.runtime.driver),
+                "active",
+                new_callable=PropertyMock,
+                side_effect=RuntimeError("driver.active should not be read"),
+            ) as mock_driver_active,
+        ):
+            autotuner.precompile(warm_cache_only=True)
+
+        # Covers every synchronous _precompile_config() iteration.
+        mock_driver_active.assert_not_called()
+        self.assertEqual(len(autotuner.compile_results), num_configs)
 
 
 # Triton's HIP MLIR pipeline raises AttributeError("'NoneType' object has no
@@ -690,7 +717,7 @@ class TestArgumentCloneAndRestore(TestCase):
         self.assertTrue(torch.allclose(gpu_tensor, gpu_tensor_clone))
         self.assertTrue(
             peak_mem_after <= peak_mem_before + self.MEM_TOLERANCE,
-            f"{peak_mem_before=} v.s. {peak_mem_after=}",
+            lambda msg: f"{msg}\n{peak_mem_before=} v.s. {peak_mem_after=}",
         )
 
         # Avoid OOM in CI
@@ -810,7 +837,7 @@ class TestDumpLaunchTensors(TestCase):
                     self.assertLessEqual(
                         len(indices),
                         max_runs,
-                        f"Kernel {base_name} has more runs ({len(indices)}) than max ({max_runs})",
+                        lambda msg: f"{msg}\nKernel {base_name} has more runs ({len(indices)}) than max ({max_runs})",
                     )
 
                     # Verify the indices are within [0, max_runs)
@@ -818,7 +845,7 @@ class TestDumpLaunchTensors(TestCase):
                         self.assertLess(
                             idx,
                             max_runs,
-                            f"Run index {idx} exceeds max_runs-1 ({max_runs - 1})",
+                            lambda msg: f"{msg}\nRun index {idx} exceeds max_runs-1 ({max_runs - 1})",
                         )
 
         finally:
@@ -1116,7 +1143,7 @@ class TestFastLauncherDeviceSupport(TestCase):
         return CachingAutotuner(
             fn=triton_,
             triton_meta=triton_meta,
-            configs=[triton_config({"x": 1}, 1)],
+            configs=[triton_config({"x": 1}, 1, warp_size=device.warp_size_or_default)],
             save_cache_hook=False,
             mutated_arg_names=[],
             reset_to_zero_arg_names=[],
@@ -1427,7 +1454,15 @@ class TestWarpSizeUnification(TestCase):
         none_props = DeviceProperties(
             type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=None
         )
-        self.assertEqual(none_props.warp_size_or_default, 32)
+        with self.assertRaisesRegex(
+            RuntimeError, "cuda device properties must report warp_size"
+        ):
+            none_props.warp_size_or_default
+
+        cpu_props = DeviceProperties(
+            type="cpu", index=0, multi_processor_count=80, cc=80, warp_size=None
+        )
+        self.assertEqual(cpu_props.warp_size_or_default, 32)
 
         w32 = DeviceProperties(
             type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=32
@@ -1483,6 +1518,74 @@ class TestWarpSizeUnification(TestCase):
             size_hints, 128, num_warps=1, min_elem_per_thread=4, warp_size=64
         )
         self.assertEqual(cfg64.kwargs["XBLOCK"], 2 * cfg32.kwargs["XBLOCK"])
+
+
+class TestMakeLaunchersMemory(TestCase):
+    def test_failed_config_exception_not_retained(self):
+        """Regression (D107597017 / PR #184285): CachingAutotuner._make_launchers
+        must not retain the failed-config build exception past its return. That
+        exception's traceback pins its frame chain -- and via those frames' f_back
+        the benchmarking callers up to do_bench, whose 256MB Triton L2-flush buffer
+        then leaks one-per-autotuned-kernel until cyclic GC (which never runs under
+        gc.disable(), as APS training does). Pure reference-cycle check, no GPU: a
+        sentinel standing in for the L2 buffer, held only by a frame that calls
+        _make_launchers, must be freed by refcount once _make_launchers returns.
+        """
+        import contextlib
+        import gc
+        import types
+        import weakref
+
+        class _Result:
+            config = types.SimpleNamespace(num_stages=1, kwargs={})
+
+        results = [_Result(), _Result()]
+
+        def fake_make_launcher(result):
+            # First config builds; the last fails, returning a live exception whose
+            # traceback references this call stack -- as the real _make_launcher does
+            # for OutOfResources / OutOfMemoryError.
+            if result is results[0]:
+                return object(), None
+            try:
+                raise RuntimeError("out of resource (test)")
+            except RuntimeError as e:
+                return None, e
+
+        fake_self = types.SimpleNamespace(
+            launchers=[],
+            compile_results=results,
+            triton_meta={"device": 0},
+            inductor_meta={},
+            get_device_interface=lambda: None,
+            _make_launcher=fake_make_launcher,
+        )
+
+        class _Sentinel:
+            pass
+
+        def run():
+            l2_buffer = _Sentinel()  # stands in for do_bench's L2-flush buffer
+            ref = weakref.ref(l2_buffer)
+            with patch(
+                "torch._dynamo.device_interface.DeviceGuard",
+                lambda *args, **kwargs: contextlib.nullcontext(),
+            ):
+                CachingAutotuner._make_launchers(fake_self)
+            return ref
+
+        gc.disable()
+        try:
+            ref = run()
+            self.assertIsNone(
+                ref(),
+                "_make_launchers retained the failed-config exception; its traceback "
+                "pins caller frames (do_bench's L2-flush buffer) until cyclic GC.",
+            )
+        finally:
+            gc.enable()
+
+        self.assertEqual(len(fake_self.launchers), 1)
 
 
 if __name__ == "__main__":

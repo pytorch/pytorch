@@ -1481,7 +1481,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     @inference_dtypes
     def test_cslt_sparse_mm_search(self, device, dtype):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        A_compressed = torch._cslt_compress(A)
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
@@ -1495,7 +1494,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     @inference_dtypes
     def test_csrc_cslt_sparse_mm_search(self, device, dtype):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        A_compressed = torch._cslt_compress(A)
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)

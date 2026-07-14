@@ -307,6 +307,13 @@ class _StageBackwardMeta:
     ]  # Stage i's input_grads → Stage i-1's output_grads
 
 
+# Transmitted between stages via send/recv_object_list (which deserialize
+# with weights_only=True by default).
+torch.serialization.add_safe_globals(
+    [_TensorMeta, _DTensorMeta, _StageForwardMeta, _StageBackwardMeta]
+)
+
+
 def _make_tensor_from_meta(
     meta: _TensorMeta,
     device: torch.device | str,
@@ -534,7 +541,7 @@ def generate_stage_to_rank_mapping(
         rank_index = 0
         for stage_index in range(num_stages):
             mapping[stage_index] = rank_index
-            # dont change rank if we are on the border (to keep v shape)
+            # don't change rank if we are on the border (to keep v shape)
             if (stage_index + 1) % pp_size == 0:
                 continue
             if (stage_index // pp_size) % 2 == 0:
