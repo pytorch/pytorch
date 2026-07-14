@@ -224,10 +224,9 @@ def _create_write_item_for_tensor(fqn: str, tensor: torch.Tensor) -> WriteItem:
 
 
 def _get_checkpointable_tensor_write_items(
-    fqn: str, tensor: torch.Tensor
+    fqn: str, tensor: CheckpointableTensor
 ) -> list[WriteItem]:
-    checkpointable_tensor = cast(CheckpointableTensor, tensor)
-    properties = TensorProperties.create_from_tensor(tensor)
+    properties = TensorProperties.create_from_tensor(cast(torch.Tensor, tensor))
     return [
         WriteItem(
             index=MetadataIndex(fqn, chunk.offsets, idx),
@@ -235,7 +234,7 @@ def _get_checkpointable_tensor_write_items(
             tensor_data=TensorWriteData(
                 chunk=chunk,
                 properties=properties,
-                size=torch.Size(checkpointable_tensor.global_shape),
+                size=torch.Size(tensor.global_shape),
             ),
         )
         for idx, chunk in enumerate(_get_checkpointable_tensor_chunks(tensor))

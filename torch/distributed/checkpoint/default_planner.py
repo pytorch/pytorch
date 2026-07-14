@@ -47,10 +47,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _init_state_dict,
     _merge_delta_local_plans,
 )
-from torch.distributed.checkpoint.protocol import (
-    _is_checkpointable_tensor,
-    CheckpointableTensor,
-)
+from torch.distributed.checkpoint.protocol import _is_checkpointable_tensor
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.tensor import DTensor
 
@@ -506,7 +503,7 @@ def create_default_local_load_plan(
             and getattr(obj, "size", None) is not None
         ):
             obj_size = (
-                torch.Size(cast(CheckpointableTensor, obj).global_shape)
+                torch.Size(obj.global_shape)
                 if _is_checkpointable_tensor(obj)
                 else obj.size()
             )
