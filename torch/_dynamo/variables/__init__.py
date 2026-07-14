@@ -63,6 +63,7 @@ from .dicts import (
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedItemsDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
@@ -133,6 +134,7 @@ from .misc import (
     AutogradFunctionVariable,
     CallMethodVariable,
     CellVariable,
+    ContextVarVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
@@ -217,6 +219,7 @@ __all__ = [
     "CellVariable",
     "ConstantVariable",
     "ConstDictVariable",
+    "ContextVarVariable",
     "ContextWrappingVariable",
     "ChainVariable",
     "CountIteratorVariable",
@@ -257,6 +260,7 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "OrderedDictVariable",
+    "OrderedItemsDictVariable",
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
