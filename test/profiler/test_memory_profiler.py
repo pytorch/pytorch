@@ -876,24 +876,24 @@ class TestMemoryProfilerE2E(TestCase):
             aten::mul.Tensor                         1 (INPUT), 3 (INPUT)                          -> 4 (INPUT)
             aten::mul.Tensor                         1 (INPUT), 5 (INPUT)                          -> 6 (INPUT)
             aten::cat                                4 (INPUT), 6 (INPUT)                          -> 7 (INPUT)
-            aten::binary_cross_entropy_with_logits   7 (INPUT), 2 (INPUT)                          -> 18 (INPUT)
+            aten::binary_cross_entropy_with_logits   7 (INPUT), 2 (INPUT)                          -> 19 (INPUT)
 
             -- Backward ---------------------------------------------------------------------------------------------
-            aten::ones_like                          18 (INPUT)                                    -> 21 (INPUT)
-            aten::sigmoid                            7 (INPUT)                                     -> 22 (TEMPORARY)
-            aten::sub.Tensor                         22 (TEMPORARY), 2 (INPUT)                     -> 23 (TEMPORARY)
-            aten::mul.Tensor                         23 (TEMPORARY), 21 (INPUT)                    -> 24 (AUTOGRAD_DETAIL)
-            aten::div_.Scalar                        24 (AUTOGRAD_DETAIL)                          -> 24 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       24 (AUTOGRAD_DETAIL)                          -> 24 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       24 (AUTOGRAD_DETAIL)                          -> 24 (AUTOGRAD_DETAIL)
-            aten::mul.Tensor                         24 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 27 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    27 (AUTOGRAD_DETAIL)                          -> 28 (GRADIENT)
-            aten::view                               28 (GRADIENT)                                 -> 28 (GRADIENT)
-            aten::detach                             28 (GRADIENT)                                 -> ???
-            aten::mul.Tensor                         24 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 29 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    29 (AUTOGRAD_DETAIL)                          -> 30 (GRADIENT)
-            aten::view                               30 (GRADIENT)                                 -> 30 (GRADIENT)
-            aten::detach                             30 (GRADIENT)                                 -> ???""",
+            aten::ones_like                          19 (INPUT)                                    -> 22 (INPUT)
+            aten::sigmoid                            7 (INPUT)                                     -> 23 (TEMPORARY)
+            aten::sub.Tensor                         23 (TEMPORARY), 2 (INPUT)                     -> 24 (TEMPORARY)
+            aten::mul.Tensor                         24 (TEMPORARY), 22 (INPUT)                    -> 25 (AUTOGRAD_DETAIL)
+            aten::div_.Scalar                        25 (AUTOGRAD_DETAIL)                          -> 25 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       25 (AUTOGRAD_DETAIL)                          -> 25 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       25 (AUTOGRAD_DETAIL)                          -> 25 (AUTOGRAD_DETAIL)
+            aten::mul.Tensor                         25 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 28 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    28 (AUTOGRAD_DETAIL)                          -> 29 (GRADIENT)
+            aten::view                               29 (GRADIENT)                                 -> 29 (GRADIENT)
+            aten::detach                             29 (GRADIENT)                                 -> ???
+            aten::mul.Tensor                         25 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 30 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    30 (AUTOGRAD_DETAIL)                          -> 31 (GRADIENT)
+            aten::view                               31 (GRADIENT)                                 -> 31 (GRADIENT)
+            aten::detach                             31 (GRADIENT)                                 -> ???""",
         )
 
     def test_categories_e2e_simple_fwd_bwd_step(self) -> None:
@@ -926,28 +926,28 @@ class TestMemoryProfilerE2E(TestCase):
             aten::mul.Tensor                         1 (INPUT), 3 (PARAMETER)                      -> 4 (ACTIVATION)
             aten::mul.Tensor                         1 (INPUT), 5 (PARAMETER)                      -> 6 (ACTIVATION)
             aten::cat                                4 (ACTIVATION), 6 (ACTIVATION)                -> 7 (ACTIVATION)
-            aten::binary_cross_entropy_with_logits   7 (ACTIVATION), 2 (INPUT)                     -> 18 (ACTIVATION)
+            aten::binary_cross_entropy_with_logits   7 (ACTIVATION), 2 (INPUT)                     -> 19 (ACTIVATION)
 
             -- Backward ---------------------------------------------------------------------------------------------
-            aten::ones_like                          18 (ACTIVATION)                               -> 21 (ACTIVATION)
-            aten::sigmoid                            7 (ACTIVATION)                                -> 22 (TEMPORARY)
-            aten::sub.Tensor                         22 (TEMPORARY), 2 (INPUT)                     -> 23 (TEMPORARY)
-            aten::mul.Tensor                         23 (TEMPORARY), 21 (ACTIVATION)               -> 24 (AUTOGRAD_DETAIL)
-            aten::div_.Scalar                        24 (AUTOGRAD_DETAIL)                          -> 24 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       24 (AUTOGRAD_DETAIL)                          -> 24 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       24 (AUTOGRAD_DETAIL)                          -> 24 (AUTOGRAD_DETAIL)
-            aten::mul.Tensor                         24 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 27 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    27 (AUTOGRAD_DETAIL)                          -> 28 (GRADIENT)
-            aten::view                               28 (GRADIENT)                                 -> 28 (GRADIENT)
-            aten::detach                             28 (GRADIENT)                                 -> 28 (GRADIENT)
-            aten::mul.Tensor                         24 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 29 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    29 (AUTOGRAD_DETAIL)                          -> 30 (GRADIENT)
-            aten::view                               30 (GRADIENT)                                 -> 30 (GRADIENT)
-            aten::detach                             30 (GRADIENT)                                 -> 30 (GRADIENT)
+            aten::ones_like                          19 (ACTIVATION)                               -> 22 (ACTIVATION)
+            aten::sigmoid                            7 (ACTIVATION)                                -> 23 (TEMPORARY)
+            aten::sub.Tensor                         23 (TEMPORARY), 2 (INPUT)                     -> 24 (TEMPORARY)
+            aten::mul.Tensor                         24 (TEMPORARY), 22 (ACTIVATION)               -> 25 (AUTOGRAD_DETAIL)
+            aten::div_.Scalar                        25 (AUTOGRAD_DETAIL)                          -> 25 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       25 (AUTOGRAD_DETAIL)                          -> 25 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       25 (AUTOGRAD_DETAIL)                          -> 25 (AUTOGRAD_DETAIL)
+            aten::mul.Tensor                         25 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 28 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    28 (AUTOGRAD_DETAIL)                          -> 29 (GRADIENT)
+            aten::view                               29 (GRADIENT)                                 -> 29 (GRADIENT)
+            aten::detach                             29 (GRADIENT)                                 -> 29 (GRADIENT)
+            aten::mul.Tensor                         25 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 30 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    30 (AUTOGRAD_DETAIL)                          -> 31 (GRADIENT)
+            aten::view                               31 (GRADIENT)                                 -> 31 (GRADIENT)
+            aten::detach                             31 (GRADIENT)                                 -> 31 (GRADIENT)
 
             -- Optimizer --------------------------------------------------------------------------------------------
-            aten::add_.Tensor                        3 (PARAMETER), 30 (GRADIENT)                  -> 3 (PARAMETER)
-            aten::add_.Tensor                        5 (PARAMETER), 28 (GRADIENT)                  -> 5 (PARAMETER)""",
+            aten::add_.Tensor                        3 (PARAMETER), 31 (GRADIENT)                  -> 3 (PARAMETER)
+            aten::add_.Tensor                        5 (PARAMETER), 29 (GRADIENT)                  -> 5 (PARAMETER)""",
         )
 
     def test_categories_e2e_simple_module_fwd(self) -> None:
