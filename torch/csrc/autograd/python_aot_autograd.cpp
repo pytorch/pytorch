@@ -68,6 +68,10 @@ AOTAutogradSavePlan* unpack_save_plan(PyObject* obj) {
 }
 
 PyObject* detach_if_intermediate_view(PyObject* item, bool is_graph_input) {
+  TORCH_INTERNAL_ASSERT(
+      THPVariable_Check(item),
+      "AOTAutograd expected saved tensor output to be a Tensor");
+
   // Saved views that are graph intermediates must be detached before storing on
   // ctx, otherwise ctx can keep the intermediate view and its grad_fn alive in
   // a reference cycle. Graph inputs are already held by the autograd
