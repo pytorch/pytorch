@@ -3539,6 +3539,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             AttributeError,
             tx,
             args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
+            kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
         )
 
     def getattro_impl(
@@ -4698,11 +4699,10 @@ class OrderedDictVariable(UserDefinedDictVariable):
         **kwargs: Any,
     ) -> None:
         if dict_vt is None:
-            from .dicts import ConstDictVariable
+            from .dicts import OrderedItemsDictVariable
 
-            dict_vt = ConstDictVariable(
+            dict_vt = OrderedItemsDictVariable(
                 {},
-                user_cls=collections.OrderedDict,
                 mutation_type=ValueMutationNew(),
             )
         super().__init__(value, dict_vt=dict_vt, **kwargs)
