@@ -4,6 +4,7 @@
 
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLCCA.hpp>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -183,17 +184,17 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     case ::c10d::ReduceOp::MAX:
       return ncclMax;
     case ::c10d::ReduceOp::BAND:
-      throw std::runtime_error("Cannot use ReduceOp.BAND with NCCL");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
     case ::c10d::ReduceOp::BOR:
-      throw std::runtime_error("Cannot use ReduceOp.BOR with NCCL");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BOR with NCCL");
     case ::c10d::ReduceOp::BXOR:
-      throw std::runtime_error("Cannot use ReduceOp.BXOR with NCCL");
+      TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with NCCL");
     case ::c10d::ReduceOp::PREMUL_SUM:
       return RedOpRAII(op, comm, dataType, nccl_api_);
     case ::c10d::ReduceOp::AVG:
       return ncclAvg;
     default:
-      throw std::runtime_error("Unsupported reduce operation");
+      TORCH_CHECK(false, "Unsupported reduce operation");
   }
 }
 
@@ -591,11 +592,109 @@ void ProcessGroupNCCL::returnEvent(cudaEvent_t event) {
   }
 }
 
-// CCA (CUDA caching allocator) memory-hook registration is deferred: it
-// auto-registers allocator segments with NCCL for symmetric-memory / window
-// support, which is not part of this initial port. Collectives work without it.
-void ProcessGroupNCCL::attachMemoryHook() {}
+void ProcessGroupNCCL::attachMemoryHook() {
+  NcclCachingAllocatorHook::getInstance().registerComm(this);
+}
 
-void ProcessGroupNCCL::detachMemoryHook() {}
+void ProcessGroupNCCL::detachMemoryHook() {
+  NcclCachingAllocatorHook::getInstance().deregisterComm(this);
+}
+
+void ProcessGroupNCCL::register_address(void* addr, size_t len) {
+  if (nccl_comm_ == nullptr) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  TORCH_CHECK(
+      !memoryRegistrationHandles_.count(addr),
+      "Memory already registered with NCCL");
+  void* handle = nullptr;
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->commRegister(nccl_comm_, addr, len, &handle),
+      "Failed to register memory with NCCL");
+  // Symmetric-window (NCCL_WIN_COLL_SYMMETRIC) registration is collective and
+  // cannot run from the allocator hook, which fires on arbitrary threads. It
+  // happens lazily in ensureSegmentWindow(), keyed by the base recorded here.
+  memoryRegistrationHandles_.emplace(
+      addr, RegistrationHandle{handle, nullptr, len});
+}
+
+void ProcessGroupNCCL::deregister_address(void* addr) {
+  if (nccl_comm_ == nullptr) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  auto it = memoryRegistrationHandles_.find(addr);
+  if (it == memoryRegistrationHandles_.end()) {
+    return;
+  }
+  if (it->second.winHandle != nullptr) {
+    NCCL_CHECK_IGNORE(
+        nccl_api_,
+        nccl_api_->commWindowDeregister(nccl_comm_, it->second.winHandle),
+        "ncclCommWindowDeregister failed for segment");
+  }
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->commDeregister(nccl_comm_, it->second.regHandle),
+      "Failed to deregister memory with NCCL");
+  memoryRegistrationHandles_.erase(it);
+}
+
+std::pair<ncclWindow_t, size_t> ProcessGroupNCCL::lookupSegmentWindow(
+    const void* ptr) {
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  const auto target = reinterpret_cast<uintptr_t>(ptr);
+  // memoryRegistrationHandles_ is sorted by base address; upper_bound + step
+  // back finds the segment whose base <= target.
+  auto it = memoryRegistrationHandles_.upper_bound(const_cast<void*>(ptr));
+  if (it == memoryRegistrationHandles_.begin()) {
+    return {nullptr, 0};
+  }
+  --it;
+  const auto base = reinterpret_cast<uintptr_t>(it->first);
+  if (target >= base + it->second.len || it->second.winHandle == nullptr) {
+    return {nullptr, 0};
+  }
+  return {it->second.winHandle, target - base};
+}
+
+ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
+  if (nccl_comm_ == nullptr) {
+    return ncclInvalidUsage;
+  }
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  const auto target = reinterpret_cast<uintptr_t>(ptr);
+  auto it = memoryRegistrationHandles_.upper_bound(const_cast<void*>(ptr));
+  if (it == memoryRegistrationHandles_.begin()) {
+    return ncclInvalidArgument;
+  }
+  --it;
+  const auto base = reinterpret_cast<uintptr_t>(it->first);
+  if (target >= base + it->second.len) {
+    return ncclInvalidArgument;
+  }
+  if (it->second.winHandle != nullptr) {
+    return ncclSuccess;
+  }
+  ncclWindow_t win = nullptr;
+  auto rc = nccl_api_->commWindowRegister(
+      nccl_comm_, it->first, it->second.len, &win, NCCL_WIN_COLL_SYMMETRIC);
+  if (rc != ncclSuccess) {
+    return rc;
+  }
+  if (win == nullptr) {
+    // NCCL returned success but left the window handle unset. Observed on
+    // configurations without a transport capable of symmetric memory (no
+    // NVLink and no InfiniBand). Treat as unsupported so callers can surface
+    // a meaningful error or skip.
+    return ncclInvalidUsage;
+  }
+  it->second.winHandle = win;
+  return ncclSuccess;
+}
 
 } // namespace c10d::nccl2
