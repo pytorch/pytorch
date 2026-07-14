@@ -49,9 +49,13 @@ jobs:
       test-matrix: |
         { include: [
           { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "dynamo_wrapped", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
       python-version: ${{ matrix.python-version }}
       compiler: clang18
