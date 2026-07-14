@@ -513,6 +513,84 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
+def _get_nested_region_inductor_config_patches(
+    gm: GraphModule,
+) -> dict[str, Any] | None:
+    nested_config = getattr(gm, "meta", {}).get("nested_region_config")
+    patches = getattr(nested_config, "inductor_config_patches", None)
+    return patches or None
+
+
+def _patch_nested_region_inductor_config(
+    gm: GraphModule,
+) -> AbstractContextManager[None]:
+    patches = _get_nested_region_inductor_config_patches(gm)
+    if patches is None:
+        return contextlib.nullcontext()
+    return config.patch(patches)
+
+
+def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
+    # Seed each invoke_subgraph subgraph module's meta from the node meta, which
+    # (unlike a GraphModule's meta) survives FX transforms. Re-run at the start of
+    # every pass phase because each is an independent entry point that may see a
+    # freshly-created module (e.g. the partitioned backward graph); setdefault
+    # makes re-entry on an already-seeded module a no-op.
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        nested_config = node.meta.get("custom", {}).get("nested_region_config")
+        if nested_config is None:
+            continue
+        subgraph_node = node.args[0]
+        if (
+            not isinstance(subgraph_node, torch.fx.Node)
+            or subgraph_node.op != "get_attr"
+            or not isinstance(subgraph_node.target, str)
+        ):
+            continue
+        subgraph = getattr(gm, subgraph_node.target, None)
+        if isinstance(subgraph, GraphModule):
+            subgraph.meta.setdefault("nested_region_config", nested_config)
+
+
+def _any_subgraph_enables_cudagraphs(gm: GraphModule) -> bool:
+    """True if any invoke_subgraph region opts into triton.cudagraphs."""
+    for mod in gm.modules():
+        if not isinstance(mod, GraphModule):
+            continue
+        for node in mod.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            nested_config = node.meta.get("custom", {}).get("nested_region_config")
+            patches = getattr(nested_config, "inductor_config_patches", None)
+            if patches and patches.get("triton.cudagraphs"):
+                return True
+    return False
+
+
+def _any_subgraph_cudagraph_pref_differs(
+    gm: GraphModule, outer_cudagraphs: bool
+) -> bool:
+    """
+    True if any invoke_subgraph region's explicit triton.cudagraphs preference
+    differs from the enclosing graph's, so it must be isolated into its own
+    partition (to capture or exclude it).
+    """
+    for mod in gm.modules():
+        if not isinstance(mod, GraphModule):
+            continue
+        for node in mod.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            nested_config = node.meta.get("custom", {}).get("nested_region_config")
+            patches = getattr(nested_config, "inductor_config_patches", None)
+            if patches is not None and "triton.cudagraphs" in patches:
+                if bool(patches["triton.cudagraphs"]) != outer_cudagraphs:
+                    return True
+    return False
+
+
 def _recursive_pre_grad_passes(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -522,17 +600,19 @@ def _recursive_pre_grad_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
-        if not config.use_pre_grad_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_pre_grad_passes:
+                return gm
 
-        add_passes = config.add_pre_grad_passes
-        remove_passes = config.remove_pre_grad_passes
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            # as we don't have recursive example inputs, passing empty set here
-            new_subgraph = _recursive_pre_grad_passes(subgraph, ())
-            setattr(gm, subgraph_name, new_subgraph)
-        return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
+            add_passes = config.add_pre_grad_passes
+            remove_passes = config.remove_pre_grad_passes
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                # as we don't have recursive example inputs, passing empty set here
+                new_subgraph = _recursive_pre_grad_passes(subgraph, ())
+                setattr(gm, subgraph_name, new_subgraph)
+            return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
 def _recursive_joint_graph_passes(
@@ -552,29 +632,35 @@ def _recursive_joint_graph_passes(
         log_pt2_compile_event=True,
         dynamo_compile_column_us="joint_graph_pass_time_us",
     ):
-        if not config.use_joint_graph_passes:
-            return gm
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_joint_graph_passes:
+                return gm
 
-        # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
-        # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
-        # invoke_subgraph HOP before calling the partitioner on the outer graph.
-        # AOTAutograd has access to partition_fn, which internally calls the
-        # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
-        # skip_invoke_subgraph.
-        old_subgraph_names = OrderedSet(_get_subgraph_names(gm, skip_invoke_subgraph))
-        for subgraph_name in old_subgraph_names:
-            _run_on_sub_graph_module(subgraph_name)
-
-        out_gm = joint_graph_passes(gm, input_device)
-
-        # Some joint graph passes may create new sub graph module. Run one round
-        # for the newly created graph modules.
-        # We should not skip graphs for invoke_subgraph HOPs for newly
-        # generated subgraphs.
-        for subgraph_name in _get_subgraph_names(out_gm, skip_invoke_subgraph=False):
-            if subgraph_name not in old_subgraph_names:
+            # invoke_subgraph already runs the _recursive_joint_graph_passes.  In
+            # AOTAutograd, `run_joint_graph_passes_on_hops` partitions the
+            # invoke_subgraph HOP before calling the partitioner on the outer graph.
+            # AOTAutograd has access to partition_fn, which internally calls the
+            # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
+            # skip_invoke_subgraph.
+            old_subgraph_names = OrderedSet(
+                _get_subgraph_names(gm, skip_invoke_subgraph)
+            )
+            for subgraph_name in old_subgraph_names:
                 _run_on_sub_graph_module(subgraph_name)
-        return out_gm
+
+            out_gm = joint_graph_passes(gm, input_device)
+
+            # Some joint graph passes may create new sub graph module. Run one round
+            # for the newly created graph modules.
+            # We should not skip graphs for invoke_subgraph HOPs for newly
+            # generated subgraphs.
+            for subgraph_name in _get_subgraph_names(
+                out_gm, skip_invoke_subgraph=False
+            ):
+                if subgraph_name not in old_subgraph_names:
+                    _run_on_sub_graph_module(subgraph_name)
+            return out_gm
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
@@ -583,13 +669,15 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         log_pt2_compile_event=True,
         dynamo_compile_column_us="post_grad_pass_time_us",
     ):
-        if not config.use_post_grad_passes:
-            return
+        _propagate_invoke_subgraph_nested_region_config(gm)
+        with _patch_nested_region_inductor_config(gm):
+            if not config.use_post_grad_passes:
+                return
 
-        for subgraph_name in _get_subgraph_names(gm):
-            subgraph = getattr(gm, subgraph_name)
-            _recursive_post_grad_passes(subgraph, is_inference)
-        post_grad_passes(gm, is_inference)
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                _recursive_post_grad_passes(subgraph, is_inference)
+            post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -932,6 +1020,8 @@ def _compile_fx_inner(
         raise AssertionError(
             f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
         )
+
+    _propagate_invoke_subgraph_nested_region_config(gm)
 
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
@@ -2466,11 +2556,13 @@ def get_num_model_outputs(model: GraphModule) -> int:
 
 def cudagraph_annotation_context(
     cudagraphs: BoxedBool,
+    patch_config: bool = True,
 ) -> contextlib.AbstractContextManager[None]:
-    # When an annotation force-enables cudagraphs but the global config has them
-    # off, patch config.triton.cudagraphs for the duration of compilation,
-    # so existing codepaths that access config.triton.cudagraphs work
-    if cudagraphs.value and not config.triton.cudagraphs:
+    # Force-enabled cudagraphs with the global config off: patch
+    # config.triton.cudagraphs so codepaths that read it agree. Skipped
+    # (patch_config False) when only a nested region opted in, so the enclosing
+    # graph keeps its own compile-time decision.
+    if patch_config and cudagraphs.value and not config.triton.cudagraphs:
         return config.patch({"triton.cudagraphs": True})
     return contextlib.nullcontext()
 
@@ -2482,11 +2574,19 @@ class CompilerConfigExtra:
     forward_device: BoxedDeviceIndex
     forward_is_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
+    # Whether cudagraph_annotation_context should patch config.triton.cudagraphs
+    # (False when only a nested region opted in).
+    patch_config_for_cudagraphs: bool = False
+    # Enable graph partition for this compile (even if globally off) to isolate a
+    # region whose cudagraphs preference differs from the enclosing graph.
+    enable_region_graph_partition: bool = False
 
 
 def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
+    """Compute the cudagraphs / graph-partition decisions and ids shared by the
+    forward and backward compiles."""
     gm_meta = gm.meta if isinstance(gm, GraphModule) else None
 
     # Although cudagraphs may have been enabled via config, various
@@ -2523,6 +2623,33 @@ def create_compiler_config_extra(
                 "disabling cudagraphs for backward due to override_cudagraphs annotation"
             )
 
+    # The top-level cudagraphs decision (config + annotation); patched into
+    # config.triton.cudagraphs by cudagraph_annotation_context.
+    patch_config_for_cudagraphs = cudagraphs.value
+
+    # A nested region may opt into cudagraphs even when the top level is off.
+    # Enable the runtime decision so the region is captured, without patching the
+    # top-level config (the enclosing graph keeps its off decision).
+    if not cudagraphs.value:
+        inner_gm = gm if isinstance(gm, GraphModule) else getattr(gm, "gm", None)
+        if inner_gm is not None and _any_subgraph_enables_cudagraphs(inner_gm):
+            cudagraphs = BoxedBool(True)
+            cudagraphs_log.info(
+                "enabling cudagraphs at runtime for a nested invoke_subgraph "
+                "region that opted in (top-level config left unchanged)"
+            )
+
+    # Enable graph partition for this compile so a region with a differing
+    # cudagraphs preference is isolated (should_partition inlines everything
+    # else).
+    enable_region_graph_partition = False
+    if not config.graph_partition:
+        inner_gm = gm if isinstance(gm, GraphModule) else getattr(gm, "gm", None)
+        if inner_gm is not None and _any_subgraph_cudagraph_pref_differs(
+            inner_gm, config.triton.cudagraphs
+        ):
+            enable_region_graph_partition = True
+
     # TODO: The modern style is to use CompileId from TracingContext to
     # identify Inductor compilation.  However, this CompileId cannot
     # uniquely identify multiple Inductor compilations that arise from
@@ -2543,6 +2670,8 @@ def create_compiler_config_extra(
         forward_device=forward_device,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
         forward_is_partitioned=forward_is_partitioned,
+        patch_config_for_cudagraphs=patch_config_for_cudagraphs,
+        enable_region_graph_partition=enable_region_graph_partition,
     )
 
 
@@ -2672,7 +2801,18 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
-    with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
+    region_graph_partition_ctx = (
+        config.patch("graph_partition", True)
+        if compiler_config_extra.enable_region_graph_partition
+        else contextlib.nullcontext()
+    )
+    with (
+        cudagraph_annotation_context(
+            compiler_config_extra.cudagraphs,
+            compiler_config_extra.patch_config_for_cudagraphs,
+        ),
+        region_graph_partition_ctx,
+    ):
         result = inner_compile(
             gm,
             example_inputs,
@@ -2743,7 +2883,9 @@ def compile_fx_backward(
                 if config.cpp_wrapper
                 else contextlib.nullcontext()
             ),
-            cudagraph_annotation_context(cudagraphs),
+            cudagraph_annotation_context(
+                cudagraphs, compiler_config_extra.patch_config_for_cudagraphs
+            ),
         ):
             return inner_compile(
                 gm,

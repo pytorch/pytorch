@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch._dynamo.backends.debugging import aot_eager_decomp_partition_with_mode
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._higher_order_ops.invoke_subgraph import get_invoke_subgraph_compile_options
 from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
@@ -148,6 +149,16 @@ class TestCase(InductorTestCase):
     def tearDown(self):
         super().tearDown()
         torch._dynamo.reset()
+
+
+def _module_def_body(code: str, header: str) -> str:
+    """Return the indented body of the module-level def starting at `header`."""
+    body = []
+    for line in code.split(header, 1)[1].splitlines():
+        if line and not line[0].isspace():
+            break
+        body.append(line)
+    return "\n".join(body)
 
 
 if HAS_CUDA_AND_TRITON:
@@ -453,6 +464,110 @@ if HAS_CUDA_AND_TRITON:
                 FileCheck().check(
                     "skipping cudagraphs due to graph with symbolic shapes inputs"
                 ).run(utils_log_stream.getvalue())
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        def test_invoke_subgraph_region_cudagraph_optin(self):
+            # Region opts in, enclosing graph off, graph_partition globally off:
+            # the region becomes its own cudagraph partition, the add stays inline.
+            nested_config = get_invoke_subgraph_compile_options(
+                inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            code = codes[0]
+            self.assertIn("def partition_0(args):", code)
+            self.assertIn("def repeated_subgraph0(args):", code)
+            # The region launcher runs inside the cudagraph partition fn.
+            partition_body = _module_def_body(code, "def partition_0(args):")
+            self.assertIn("repeated_subgraph0(", partition_body)
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNotNone(self.get_manager())
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        def test_invoke_subgraph_region_cudagraph_optout(self):
+            # Region opts out, enclosing graph on, graph_partition globally off:
+            # the region is excluded from the cudagraph, the rest is captured.
+            nested_config = get_invoke_subgraph_compile_options(
+                inductor_config_patches={"triton.cudagraphs": False}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y)
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            code = codes[0]
+            self.assertIn("def partition_0(args):", code)
+            # The region launcher is not inside the cudagraph partition fn.
+            partition_body = _module_def_body(code, "def partition_0(args):")
+            self.assertNotIn("repeated_subgraph0(", partition_body)
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNotNone(self.get_manager())
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
+
+        @dynamo_config.patch("enable_invoke_subgraph_regional_compile", True)
+        @dynamo_config.patch("inline_single_use_invoke_subgraph", False)
+        @config.patch("graph_partition", False)
+        @config.patch("triton.cudagraphs", False)
+        def test_invoke_subgraph_region_cudagraph_unsafe_body_skips(self):
+            # Region opts in but its body has a non-cudagraphable op (a host
+            # round-trip), so cudagraphs are skipped for it; result still correct.
+            nested_config = get_invoke_subgraph_compile_options(
+                inductor_config_patches={"triton.cudagraphs": True}
+            )
+
+            @torch.compiler.nested_compile_region(options=nested_config)
+            def g(x, y):
+                return torch.cos(x), torch.sin(y).cpu().cuda()
+
+            def fn(x, y):
+                a, b = g(x, y)
+                return a + b
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+            x = torch.randn(10, 4, device="cuda")
+            y = torch.randn(10, 4, device="cuda")
+            result, codes = run_and_get_code(lambda: opt_fn(x, y))
+
+            self.assertEqual(result, fn(x, y))
+            # The unsafe region is not turned into a cudagraph partition.
+            self.assertNotIn("def partition_0(args):", codes[0])
+
+            for _ in range(3):
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+            self.assertIsNone(self.get_manager())
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
