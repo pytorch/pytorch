@@ -120,7 +120,6 @@ if TYPE_CHECKING:
         TritonKernelType,
     )
 
-    from .dicts import DunderDictVariable
     from .lists import BaseListVariable, ListVariable
     from .tensor import TensorVariable
 
@@ -401,12 +400,6 @@ def fn_getattro_impl(
 
 
 class BaseUserFunctionVariable(VariableTracker):
-    def __init__(
-        self, dict_vt: "DunderDictVariable | None" = None, **kwargs: Any
-    ) -> None:
-        super().__init__(**kwargs)
-        self.dict_vt: DunderDictVariable | None = dict_vt
-
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -417,11 +410,6 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def get_source(self) -> Source | None:
         return self.source
-
-    def get_dict_vt(self, tx: "InstructionTranslatorBase") -> "DunderDictVariable":
-        if self.dict_vt is None:
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
-        return self.dict_vt
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
@@ -1236,9 +1224,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
             tracer.push(arg)
-            if exc:
-                self.throw_pending()
-            return tracer.inline_call_()
+            with self.inline_tracer.link_gi_exc_state():
+                if exc:
+                    self.throw_pending()
+                return tracer.inline_call_()
         except ObservedException:
             # An exception propagating out of the generator frame finishes it,
             # mirroring CPython setting gi_frame_state = FRAME_CLEARED.
@@ -1315,7 +1304,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             val = exc.call_function(tx, [], {})
         if not isinstance(val, ExceptionVals):
             raise AssertionError(f"Expected an exception variable, got {val}")
-        tx.exn_vt_stack.set_current_exception(val, set_context=True)
+        self.inline_tracer.exn_vt_stack.set_current_exception(val, set_context=False)
 
     def _frame_state_created(self) -> bool:
         return self.inline_tracer.frame_state == FrameState.FRAME_CREATED
@@ -1391,13 +1380,13 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def throw_pending(self) -> None:
         tracer = self.inline_tracer
         curr_exc = tracer.exn_vt_stack.get_current_exception()
-        observed = get_dynamo_observed_exception(curr_exc.python_type())(
-            f"raised exception {curr_exc}"
-        )
+        observed = get_dynamo_observed_exception(curr_exc.python_type())()
+        # TODO: This is a temporary workaround
+        tracer.exn_vt_stack.set_current_exception(curr_exc)
         tracer.exception_handler(observed)
 
     def gen_throw(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> VariableTracker:
         # * Raises an exception at the point where the generator was paused, and
         # returns the next value yielded by the generator.
@@ -1405,6 +1394,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # * If the generator function does not catch the passed-in exception,
         # or raises a different exception, then that exception propagates to the caller.
 
+        arg = args[1] if len(args) > 1 else args[0]
         self._setup_exception(tx, arg)
         return self.gen_send_ex(tx, ConstantVariable.create(None), True)
 
@@ -1420,7 +1410,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         elif name == "close":
             return self.gen_close(tx)
         elif name == "throw":
-            return self.gen_throw(tx, args[0])
+            return self.gen_throw(tx, args)
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -3390,7 +3380,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 )
 
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
-        meta = ConstDictVariable(non_constant_args, dict)
+        meta = ConstDictVariable(non_constant_args)
         tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,
