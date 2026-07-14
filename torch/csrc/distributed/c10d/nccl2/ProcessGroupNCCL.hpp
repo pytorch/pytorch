@@ -214,6 +214,19 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void eagerConnectSingleDevice(at::Device device) override;
   void shutdown() override;
   void abort() override;
+  ::c10d::ErrorType getError() override;
+
+  // Fault tolerance / reconfigure API (see Backend.hpp). The handle encodes
+  // "nccl2:<rank>:<uuid>:<store host:port>"; reconfigure() tears down the
+  // current communicator generation (if any) and bootstraps a fresh ncclComm
+  // over the surviving/new members. Implemented in
+  // ProcessGroupNCCLReconfigure.cpp.
+  bool supportsReconfigure() const override {
+    return true;
+  }
+  ::c10d::ReconfigureHandle get_reconfigure_handle() const override;
+  c10::intrusive_ptr<::c10d::Work> reconfigure(
+      const ::c10d::ReconfigureOptions& opts) override;
 
   void registerAbortHook(int64_t hook_id, ::c10d::AbortHook hook) override;
   void unregisterAbortHook(int64_t hook_id) override;
@@ -469,6 +482,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::string name_;
 
   c10::intrusive_ptr<Options> options_c10d_;
+
+  // Identifies the current communicator generation in the reconfigure regime;
+  // -1 until the first reconfigure(). Baked into the reconfigure handle so
+  // peers can detect membership of the same generation.
+  int64_t reconfigure_uuid_{-1};
 
   // Abort hooks (c10d::Backend API; storage was in torchcomms' TorchCommBackend
   // base, folded in here).

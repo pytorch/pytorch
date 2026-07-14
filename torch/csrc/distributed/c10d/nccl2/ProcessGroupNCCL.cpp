@@ -204,6 +204,17 @@ void ProcessGroupNCCL::abort() {
   comm_state_ = CommState::ERROR;
 }
 
+::c10d::ErrorType ProcessGroupNCCL::getError() {
+  switch (comm_state_.load()) {
+    case CommState::TIMEOUT:
+      return ::c10d::ErrorType::TIMEOUT;
+    case CommState::ERROR:
+      return ::c10d::ErrorType::COMM_ERROR;
+    default:
+      return ::c10d::ErrorType::SUCCESS;
+  }
+}
+
 void ProcessGroupNCCL::finalize() {
   if (init_state_ == InitializationState::UNINITIALIZED) {
     throw std::runtime_error("ProcessGroupNCCL not initialized");
