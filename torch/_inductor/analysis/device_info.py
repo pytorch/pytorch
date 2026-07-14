@@ -238,11 +238,9 @@ _device_mapping: dict[str, DeviceInfo] = {
             torch.bfloat16: 355.5,
             # not supported, fall back to float32 numbers
             torch.float8_e8m0fnu: 22.2,
-            torch.float8_e8m0fnu: 22.2,
             torch.float8_e4m3fnuz: 22.2,
             torch.float8_e5m2: 22.2,
             torch.float8_e5m2fnuz: 22.2,
-            torch.float8_e8m0fnu: 22.2,
             torch.int8: 711.1,
         },
         dram_bw_gbs=1228.8,
@@ -321,10 +319,11 @@ def datasheet_tops(
 
 def datasheet_dram_bw_gbs(device_name: str | None = None) -> float | None:
     """
-    Get the theoretical DRAM bandwidth (GB/s) of the named device from the
-    datasheet, or None if the device is not present.
+    Get the theoretical DRAM bandwidth (GB/s) of a device from the datasheet,
+    or None if the device is not present.
 
-    If ``device_name`` is None, the current device is queried.
+    If ``device_name`` is given, that named device is looked up; otherwise the
+    current CUDA/XPU device is queried.
     """
     if device_name is None:
         if torch.cuda.is_available():
