@@ -1137,6 +1137,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
         self.remaining_items: list[VariableTracker] = []
+        inline_tracer.output.track_generator(self)
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -1193,6 +1194,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def pygen_yf(self) -> VariableTracker | None:
+        if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
+            return self.inline_tracer.stack[-1]
+        return None
+
     def gen_send_ex2(
         self,
         tx: "InstructionTranslatorBase",
@@ -1228,6 +1234,37 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 if exc:
                     self.throw_pending()
                 return tracer.inline_call_()
+        except ObservedUserStopIteration:
+            # PEP 479: pre-3.12 has no STOPITERATION_ERROR opcode, so convert a
+            # StopIteration that escapes the generator body to RuntimeError here
+            # at the frame boundary. https://github.com/python/cpython/pull/99006
+            # A normal return sets FRAME_CLEARED and raises a synthetic
+            # StopIteration to signal exhaustion; that one must stay a
+            # StopIteration, so only convert when the body was still executing.
+            was_executing = tracer.frame_state == FrameState.FRAME_EXECUTING
+            tracer.frame_state = FrameState.FRAME_COMPLETED
+            if sys.version_info < (3, 12) and was_executing:
+                # Match CPython's _PyErr_FormatFromCause: set __context__ and
+                # __cause__ directly rather than pushing onto the exception
+                # stack (which must stay balanced -- genobject.c pops the
+                # generator's gi_exc_state before the conversion runs, so the
+                # caller's stack is left unchanged). do_raise sets __cause__;
+                # set __context__ first so set_exception_obj's implicit chaining
+                # leaves it untouched.
+                prev = tracer.exn_vt_stack.get_raised_exception()
+                rt = VariableTracker.build(tx, RuntimeError).call_function(
+                    tx,
+                    [VariableTracker.build(tx, "generator raised StopIteration")],
+                    {},
+                )
+                rt.call_method(
+                    tx,
+                    "__setattr__",
+                    [ConstantVariable.create("__context__"), prev],
+                    {},
+                )
+                tx.do_raise(rt, prev)
+            raise
         except ObservedException:
             # An exception propagating out of the generator frame finishes it,
             # mirroring CPython setting gi_frame_state = FRAME_CLEARED.
@@ -1297,14 +1334,17 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", exc: VariableTracker
     ) -> None:
         # Set up the exception to be raised in the generator frame
-        from torch._dynamo.symbolic_convert import ExceptionVals
+        from torch._dynamo.symbolic_convert import ExceptionTypes, ExceptionVals
 
-        val = exc
-        if isinstance(exc, variables.BuiltinVariable):
-            val = exc.call_function(tx, [], {})
+        # Instantiate if an exception type was passed (builtin or user-defined).
+        if not isinstance(exc, (ExceptionTypes, ExceptionVals)):
+            raise TypeError(
+                f"Expected an exception type or instance, got {exc.python_type_name()}"
+            )
+        val = tx._create_exception_instance(exc)
         if not isinstance(val, ExceptionVals):
             raise AssertionError(f"Expected an exception variable, got {val}")
-        self.inline_tracer.exn_vt_stack.set_current_exception(val, set_context=False)
+        self.inline_tracer.exn_vt_stack.set_raised_exception(val)
 
     def _frame_state_created(self) -> bool:
         return self.inline_tracer.frame_state == FrameState.FRAME_CREATED
@@ -1351,16 +1391,31 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if self._frame_state_finished():
             return ConstantVariable.create(None)
 
-        self._setup_exception(tx, VariableTracker.build(tx, GeneratorExit))
+        err = False
+        yf = self.pygen_yf()
+        if yf:
+            with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
+                try:
+                    yf.call_method(tx, "close", [], {})
+                except ObservedException:
+                    err = True
+
+        if err is False:
+            self._setup_exception(tx, VariableTracker.build(tx, GeneratorExit))
 
         try:
             self.gen_send_ex(tx, ConstantVariable.create(None), True)
-        except ObservedGeneratorExit:
+        except ObservedGeneratorExit as e:
+            # Drop the traceback to break the exception -> traceback -> frame ->
+            # (raised_exception, self) reference cycle. Otherwise the generator's
+            # inline_tracer (and the OutputGraph it points at) survives until
+            # cyclic GC instead of being freed by refcount at frame exit.
+            e.__traceback__ = None
             return ConstantVariable.create(None)
         except ObservedUserStopIteration:
             # generator returned a value while closing. gen_send_ex() raises
             # StopIteration with the value returned
-            curr_exc = tracer.exn_vt_stack.get_current_exception()
+            curr_exc = tracer.exn_vt_stack.get_raised_exception()
             if not isinstance(curr_exc, variables.ExceptionVariable):
                 # make pyrefly happy
                 raise AssertionError(
@@ -1379,10 +1434,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def throw_pending(self) -> None:
         tracer = self.inline_tracer
-        curr_exc = tracer.exn_vt_stack.get_current_exception()
+        curr_exc = tracer.exn_vt_stack.get_raised_exception()
         observed = get_dynamo_observed_exception(curr_exc.python_type())()
-        # TODO: This is a temporary workaround
-        tracer.exn_vt_stack.set_current_exception(curr_exc)
+        curr_type = VariableTracker.build(tracer, curr_exc.exc_type)
+        tracer.set_exception_obj(curr_type, curr_exc)
         tracer.exception_handler(observed)
 
     def gen_throw(
@@ -1393,10 +1448,34 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # * If the generator exits without yielding, raise StopIteration
         # * If the generator function does not catch the passed-in exception,
         # or raises a different exception, then that exception propagates to the caller.
+        def throw_here():
+            self._setup_exception(tx, arg)
+            return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+
+        from torch._dynamo.symbolic_convert import pyerr_given_exception_match
 
         arg = args[1] if len(args) > 1 else args[0]
-        self._setup_exception(tx, arg)
-        return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+        yf = self.pygen_yf()
+        tracer = self.inline_tracer
+
+        if yf:
+            # CPython has an extra flag for handling async generators
+            if pyerr_given_exception_match(arg, GeneratorExit):
+                try:
+                    # CPython uses gen_close_iter here
+                    with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
+                        yf.call_method(tx, "close", [], {})
+                except ObservedException:
+                    pass
+                return throw_here()
+
+            try:
+                with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
+                    return yf.call_method(tx, "throw", [arg], {})
+            except ObservedException:
+                return self.gen_send_ex(tx, ConstantVariable.create(None), True)
+
+        return throw_here()
 
     def call_method(
         self,
