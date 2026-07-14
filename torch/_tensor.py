@@ -1361,7 +1361,10 @@ class Tensor(torch._C.TensorBase):
             return handle_torch_function(Tensor.unflatten, (self,), self, dim, sizes)
 
         if not sizes:
-            raise RuntimeError("unflatten: sizes must be non-empty")
+            raise RuntimeError(
+                "unflatten: sizes must be non-empty. "
+                "Provide at least one dimension size, e.g., unflatten(0, [dim1, dim2])."
+            )
 
         return super().unflatten(dim, sizes)
 

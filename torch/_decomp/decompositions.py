@@ -580,12 +580,16 @@ def nll_loss_backward(
     no_batch_dim = self.dim() == 1 and target.dim() == 0
     if not (no_batch_dim or (self.shape[0] == target.shape[0])):
         raise AssertionError(
-            f"size mismatch (got input: {self.shape}, target: {target.shape})"
+            f"cross_entropy_loss backward: size mismatch "
+            f"(got input: {self.shape}, target: {target.shape}). "
+            f"The target tensor should have the same first dimension as the input "
+            f"(batch size)."
         )
     if total_weight.numel() != 1:
         raise AssertionError(
-            f"expected total_weight to be a single element tensor, got: "
-            f"{total_weight.shape} ({total_weight.numel()} elements)"
+            f"cross_entropy_loss: expected total_weight to be a single element tensor, "
+            f"got: {total_weight.shape} ({total_weight.numel()} elements). "
+            f"total_weight should typically be a scalar tensor with value 1.0."
         )
 
     if weight is not None and weight.numel() != self.shape[-1]:
