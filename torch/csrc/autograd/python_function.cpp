@@ -780,7 +780,7 @@ static void _wrap_outputs(
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
-    const auto& wrapped_output = wrapped_outputs[i];
+    auto& wrapped_output = wrapped_outputs[i];
     // Keep the non-tensor outputs as is.
     if (!THPVariable_Check(obj) || !wrapped_output.has_value()) {
       if (is_executable) {
@@ -801,7 +801,8 @@ static void _wrap_outputs(
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
-      PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
+      PyTuple_SetItem(
+          outputs, i, THPVariable_Wrap(std::move(wrapped_output.value())));
     }
   }
 }
