@@ -13,12 +13,10 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
     CuteDSLTemplate,
     CuteDSLTemplateCaller,
 )
-from torch._inductor.heuristics.template.flex_gemm import GemmConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     LOCAL_REDUCE_COMBINE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
-    LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR,
 )
 from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
 from torch._inductor.select_algorithm import PartialRender
@@ -43,21 +41,8 @@ class FlexGemmEpilogueLocalReduceConfig:
         """Translate lowering's output-consumer plan into template metadata."""
         if local_reduce is None:
             return None
-        if local_reduce.store_node is None:
-            if out_index is not None:
-                raise RuntimeError("feed-main local reductions cannot have out_index")
-            if not local_reduce.feeds_main:
-                raise RuntimeError(LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR)
-            return FlexGemmEpilogueLocalReduceConfig(
-                local_reduce.geometry,
-                feeds_main=True,
-            )
-        if out_index is None:
-            raise RuntimeError(LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR)
         return FlexGemmEpilogueLocalReduceConfig(
-            local_reduce.geometry,
-            out_index,
-            local_reduce.feeds_main,
+            local_reduce.match.geometry, out_index, local_reduce.feeds_main
         )
 
     @property
