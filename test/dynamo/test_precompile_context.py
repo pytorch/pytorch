@@ -34,7 +34,7 @@ class PrecompileContextTests(InductorTestCase):
         def simple_function(x):
             return x.sin() + x.cos()
 
-        compiled_fn = torch.compile(simple_function)
+        compiled_fn = torch.compile(simple_function)  # noqa: UNSPECIFIED_BACKEND
 
         # Run the compiled function
         x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
@@ -50,7 +50,7 @@ class PrecompileContextTests(InductorTestCase):
         def simple_function(x):
             return x.sin() + x.cos()
 
-        compiled_fn = torch.compile(simple_function)
+        compiled_fn = torch.compile(simple_function)  # noqa: UNSPECIFIED_BACKEND
 
         # Run the compiled function
         x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
@@ -80,7 +80,7 @@ class PrecompileContextTests(InductorTestCase):
         def simple_function(x):
             return x.sin() + x.cos()
 
-        compiled_fn = torch.compile(simple_function)
+        compiled_fn = torch.compile(simple_function)  # noqa: UNSPECIFIED_BACKEND
 
         # Run the compiled function
         x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
