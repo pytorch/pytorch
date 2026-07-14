@@ -119,3 +119,4 @@ torch_library_set_python_module: TORCH_VERSION_2_13_0
 torch_new_generator_handle: TORCH_VERSION_2_13_0
 torch_new_stable_ivalue: TORCH_VERSION_2_13_0
 torch_stream_native_handle: TORCH_VERSION_2_13_0
+torch_has_storage: TORCH_VERSION_2_14_0
