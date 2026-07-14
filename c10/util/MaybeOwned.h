@@ -167,17 +167,19 @@ class MaybeOwned final {
     return *this;
   }
 
-  static MaybeOwned borrowed(const T& t) {
+  [[nodiscard]] static MaybeOwned borrowed(const T& t) {
     return MaybeOwned(t);
   }
 
-  static MaybeOwned owned(T&& t) noexcept(
+  [[nodiscard]] static MaybeOwned owned(T&& t) noexcept(
       std::is_nothrow_move_constructible_v<T>) {
     return MaybeOwned(std::move(t));
   }
 
   template <class... Args>
-  static MaybeOwned owned(std::in_place_t /*unused*/, Args&&... args) {
+  [[nodiscard]] static MaybeOwned owned(
+      std::in_place_t /*unused*/,
+      Args&&... args) {
     return MaybeOwned(std::in_place, std::forward<Args>(args)...);
   }
 
@@ -195,11 +197,11 @@ class MaybeOwned final {
   // This is an implementation detail!  You should know what you're doing
   // if you are testing this.  If you just want to guarantee ownership move
   // this into a T
-  bool unsafeIsBorrowed() const {
+  [[nodiscard]] bool unsafeIsBorrowed() const {
     return isBorrowed_;
   }
 
-  const T& operator*() const& {
+  [[nodiscard]] const T& operator*() const& {
     if (isBorrowed_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
@@ -209,7 +211,7 @@ class MaybeOwned final {
         : own_;
   }
 
-  const T* operator->() const {
+  [[nodiscard]] const T* operator->() const {
     if (isBorrowed_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
@@ -223,7 +225,7 @@ class MaybeOwned final {
   // it. borrowed/owned state remains the same, and either we
   // reference the same borrow as before or we are an owned moved-from
   // T.
-  T operator*() && {
+  [[nodiscard]] T operator*() && {
     if (isBorrowed_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           MaybeOwnedTraits<T>::debugBorrowIsValid(borrow_));
