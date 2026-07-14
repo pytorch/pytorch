@@ -373,33 +373,50 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         When side_effects is provided, also walks attributes stored in
         store_attr_mutations (e.g. dataclass fields set during tracing
         that aren't in the VT's __dict__).
+
+        Implemented with an explicit worklist rather than recursion so that
+        deeply chained structures (e.g. the ~N-node buffer built by
+        itertools.tee over a long iterable) do not overflow the Python stack.
+        Children are pushed in reverse so they are popped in their original
+        order, matching the pre-order DFS the previous recursive version
+        produced (callers rely on the visitation order, e.g. for graph output
+        ordering).
         """
         if cache is None:
             cache = {}
 
-        idx = id(value)
-        if idx in cache:
-            return
-        # save `value` to keep it alive and ensure id() isn't reused
-        cache[idx] = value
+        worklist = [value]
+        while worklist:
+            cur = worklist.pop()
+            idx = id(cur)
+            if idx in cache:
+                continue
+            # save `cur` to keep it alive and ensure id() isn't reused
+            cache[idx] = cur
 
-        if isinstance(value, VariableTracker):
-            value = value.unwrap()
-            fn(value)
-            value = value.unwrap()  # calling fn() might have realized it
-            nonvars = value._nonvar_fields
-            for key, subvalue in value.__dict__.items():
-                if key not in nonvars:
-                    cls.visit(fn, subvalue, cache, side_effects)
-            if side_effects is not None and value in side_effects.store_attr_mutations:
-                for attr_vt in side_effects.store_attr_mutations[value].values():
-                    cls.visit(fn, attr_vt, cache, side_effects)
-        elif istype(value, (list, tuple)):
-            for subvalue in value:
-                cls.visit(fn, subvalue, cache, side_effects)
-        elif istype(value, (dict, collections.OrderedDict)):
-            for subvalue in value.values():
-                cls.visit(fn, subvalue, cache, side_effects)
+            children: list[Any]
+            if isinstance(cur, VariableTracker):
+                cur = cur.unwrap()
+                fn(cur)
+                cur = cur.unwrap()  # calling fn() might have realized it
+                nonvars = cur._nonvar_fields
+                children = [
+                    subvalue
+                    for key, subvalue in cur.__dict__.items()
+                    if key not in nonvars
+                ]
+                if (
+                    side_effects is not None
+                    and cur in side_effects.store_attr_mutations
+                ):
+                    children.extend(side_effects.store_attr_mutations[cur].values())
+            elif istype(cur, (list, tuple)):
+                children = list(cur)
+            elif istype(cur, (dict, collections.OrderedDict)):
+                children = list(cur.values())
+            else:
+                continue
+            worklist.extend(reversed(children))
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"

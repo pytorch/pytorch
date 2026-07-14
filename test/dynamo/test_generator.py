@@ -1647,6 +1647,46 @@ class TestGeneratorClose(GeneratorTestsBase):
         self.assertEqual(y, t)
         self.assertEqual(z, 1)
 
+    def test_close_replays_new_object_attr_mutation(self):
+        # A generator closed at frame exit may, in its finally block, act on a
+        # new object reachable only through the generator's frame. Its attribute
+        # mutations (AttributeMutationNew) must survive prune_dead_object_new so
+        # close() can replay the finally; otherwise the mutation is lost.
+        class C:
+            pass
+
+        def fn(t):
+            marker = []
+
+            def gen():
+                obj = C()
+                obj.data = marker  # AttributeMutationNew on a new object
+                try:
+                    yield t.sin()
+                finally:
+                    obj.data.append(1)  # replayed when the generator is closed
+
+            g = gen()
+            next(g)
+            return t.sin(), marker
+
+        t = torch.randn(3)
+        self.assertEqual(fn(t), self._compile_check(fn, args=(t,)))
+
+    def test_deep_tee_buffer_no_recursion_error(self):
+        # VariableTracker.visit walks generator/iterator state during compile.
+        # A long itertools.tee buffer is a deeply chained structure; visit uses
+        # an explicit worklist so it must not overflow the Python stack.
+        n = 2000  # exceeds the default recursion limit
+
+        def fn(t):
+            a, b = itertools.tee(iter(range(n)))
+            list(a)  # advance one side so the shared tee buffer grows to n
+            return t + 1
+
+        t = torch.randn(3)
+        self._compile_check(fn, args=(t,))
+
 
 class TestGeneratorThrow(GeneratorTestsBase):
     def test_throw(self):
