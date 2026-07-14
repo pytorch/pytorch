@@ -2053,7 +2053,6 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_xpu
     @expected_not_implemented_on_mps
     def test_bf16_score_mod_captured_grad_dtype(self, device):
         """
@@ -2437,6 +2436,67 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch._dynamo.reset()
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @dtypes(torch.float16)
+    @dtypesIfCUDA(torch.float16)
+    @common_utils.parametrize("detach_temp", [False, True])
+    @expected_not_implemented_on_mps
+    def test_captured_0d_scalar_grad(self, device, dtype, detach_temp):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.temp = nn.Parameter(
+                    torch.tensor(0.7, device=device, dtype=torch.float32)
+                )
+
+            def forward(self, q, k, v):
+                temp = self.temp
+
+                def score_mod(score, b, h, q_idx, kv_idx):
+                    if detach_temp:
+                        return score + temp.detach()
+                    return score * temp + temp
+
+                return flex_attention(q, k, v, score_mod=score_mod)
+
+        torch.manual_seed(123)
+        shape = (1, 2, 16, 16)
+        q = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        grad = torch.randn(shape, device=device, dtype=dtype)
+        q2 = q.detach().clone().requires_grad_()
+        k2 = k.detach().clone().requires_grad_()
+        v2 = v.detach().clone().requires_grad_()
+        m1 = M()
+        m2 = M()
+        m2.load_state_dict(m1.state_dict())
+
+        out1 = m1(q, k, v)
+        out1.backward(grad)
+        out2 = torch.compile(m2)(q2, k2, v2)
+        out2.backward(grad)
+        if device == "cuda":
+            torch.cuda.synchronize()
+
+        pairs = [
+            (out1, out2),
+            (q.grad, q2.grad),
+            (k.grad, k2.grad),
+            (v.grad, v2.grad),
+        ]
+        if detach_temp:
+            self.assertIsNone(m1.temp.grad)
+            self.assertIsNone(m2.temp.grad)
+        else:
+            self.assertIsNotNone(m1.temp.grad)
+            self.assertIsNotNone(m2.temp.grad)
+            pairs.append((m1.temp.grad, m2.temp.grad))
+        for a, b in pairs:
+            self.assertEqual(a, b, atol=1e-2, rtol=1e-2)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -2701,7 +2761,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 input_names = ["query", "key", "value"]
                 for grad, input_name in zip(grads, input_names):
                     self.assertIsNotNone(
-                        grad, f"{input_name} should receive gradients in {description}"
+                        grad,
+                        lambda msg: f"{msg}\n{input_name} should receive gradients in {description}",
                     )
 
     @supported_platform
@@ -2907,7 +2968,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             is_divisible = S % 128 == 0
             expected_flag = f"IS_DIVISIBLE : tl.constexpr = {is_divisible}"
             self.assertIn(
-                expected_flag, str(code), f"S={S} should have {expected_flag}"
+                expected_flag,
+                str(code),
+                lambda msg: f"{msg}\nS={S} should have {expected_flag}",
             )
 
             self.assertEqual(out.shape, (2, 4, S, 64))
@@ -4308,8 +4371,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (key, key.grad, "key"),
             (value, value.grad, "value"),
         ]:
-            self.assertIsNotNone(grad, f"Grad {name} should be computed")
-            self.assertFalse(torch.isnan(grad).any(), f"Grad {name} contains NaN")
+            self.assertIsNotNone(
+                grad, lambda msg: f"{msg}\nGrad {name} should be computed"
+            )
+            self.assertFalse(
+                torch.isnan(grad).any(), lambda msg: f"{msg}\nGrad {name} contains NaN"
+            )
 
             # When input has stride[-1]=1, verify stride order is preserved
             if leaf.stride()[-1] == 1:
@@ -5344,6 +5411,59 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return inv_dist * score
 
         self.run_test(euclidean_dist_pos_embed, torch.bfloat16, device=device)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # exercises the Triton default-config tile clamping path
+    def test_narrow_kv_block_size_uses_clamped_default_config(self, device):
+        """The single default config must clamp its tiles to fit a narrower KV
+        sparse block size instead of erroring, in both forward and backward."""
+        q, k, v = (
+            torch.randn(
+                2, 8, 2048, 128, device=device, dtype=torch.bfloat16, requires_grad=True
+            )
+            for _ in range(3)
+        )
+        block_mask = create_block_mask(
+            _causal_mask, None, None, 2048, 2048, BLOCK_SIZE=(128, 64), device=device
+        )
+        out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+        ref = flex_attention(q, k, v, block_mask=block_mask)
+        torch.testing.assert_close(out, ref, atol=2e-2, rtol=2e-2)
+
+        grad_out = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (q, k, v), grad_out, retain_graph=True)
+        ref_grads = torch.autograd.grad(ref, (q, k, v), grad_out, retain_graph=True)
+        for g, rg in zip(grads, ref_grads):
+            torch.testing.assert_close(g, rg, atol=2e-2, rtol=2e-2)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # exercises the Triton IS_DIVISIBLE sparse-block guard
+    def test_sparse_block_not_dividing_seqlen(self, device):
+        """Sparse blocks that overhang a 128-divisible seq len must not be
+        walked unmasked past KV_LEN (silent OOB corruption)."""
+
+        def tail_only(b, h, m, n):
+            return n >= 256
+
+        S = 384
+        q, k, v = (
+            torch.randn(2, 4, S, 64, device=device, requires_grad=True)
+            for _ in range(3)
+        )
+        block_mask = create_block_mask(
+            tail_only, None, None, S, S, BLOCK_SIZE=256, device=device
+        )
+        out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+        ref = flex_attention(q, k, v, block_mask=block_mask)
+        torch.testing.assert_close(out, ref, atol=2e-2, rtol=2e-2)
+
+        grad_out = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (q, k, v), grad_out, retain_graph=True)
+        ref_grads = torch.autograd.grad(ref, (q, k, v), grad_out, retain_graph=True)
+        for g, rg in zip(grads, ref_grads):
+            torch.testing.assert_close(g, rg, atol=2e-2, rtol=2e-2)
 
     @supported_platform
     @skip_on_cpu
@@ -8406,17 +8526,17 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             if original_value is None:
                 self.assertIsNone(
                     reconstructed_value,
-                    f"Tensor attribute {attr_name} should be None but got {reconstructed_value}",
+                    lambda msg: f"{msg}\nTensor attribute {attr_name} should be None but got {reconstructed_value}",
                 )
             else:
                 self.assertIsInstance(
                     original_value,
                     torch.Tensor,
-                    f"Expected {attr_name} to be a Tensor",
+                    lambda msg: f"{msg}\nExpected {attr_name} to be a Tensor",
                 )
                 self.assertTrue(
                     torch.equal(original_value, reconstructed_value),
-                    f"Tensor attribute {attr_name} not equal after reconstruction",
+                    lambda msg: f"{msg}\nTensor attribute {attr_name} not equal after reconstruction",
                 )
 
         # Verify all context attributes are equal (using _CONTEXT_ATTRS)
@@ -8493,7 +8613,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         for attr_name in BlockMask._TENSOR_ATTRS + BlockMask._CONTEXT_ATTRS:
             self.assertTrue(
                 hasattr(reconstructed_mask, attr_name),
-                f"Reconstructed mask missing attribute: {attr_name}",
+                lambda msg: f"{msg}\nReconstructed mask missing attribute: {attr_name}",
             )
             original_value = getattr(block_mask, attr_name)
             reconstructed_value = getattr(reconstructed_mask, attr_name)
@@ -8501,12 +8621,12 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             if isinstance(original_value, torch.Tensor):
                 self.assertTrue(
                     torch.equal(original_value, reconstructed_value),
-                    f"Tensor attribute {attr_name} not equal after reconstruction",
+                    lambda msg: f"{msg}\nTensor attribute {attr_name} not equal after reconstruction",
                 )
             elif original_value is None:
                 self.assertIsNone(
                     reconstructed_value,
-                    f"Attribute {attr_name} should be None but got {reconstructed_value}",
+                    lambda msg: f"{msg}\nAttribute {attr_name} should be None but got {reconstructed_value}",
                 )
             else:
                 self.assertEqual(
@@ -9094,7 +9214,7 @@ class TestLearnableBiases(InductorTestCase):
         self.assertLessEqual(
             comp_error,
             (ref_error * fudge_factor),
-            f"\nTensor: {tensor_name}\nCompiled error ({comp_error:.8f}) exceeds "
+            lambda msg: f"{msg}\nTensor: {tensor_name}\nCompiled error ({comp_error:.8f}) exceeds "
             f"reference error ({ref_error:.8f}) * fudge_factor ({fudge_factor})",
         )
 
@@ -9835,7 +9955,8 @@ class TestLearnableBiases(InductorTestCase):
 
                 json_file = log_file + ".json"
                 self.assertTrue(
-                    os.path.exists(json_file), f"Log file {json_file} was not created"
+                    os.path.exists(json_file),
+                    lambda msg: f"{msg}\nLog file {json_file} was not created",
                 )
 
                 with open(json_file) as f:
@@ -10179,7 +10300,7 @@ class TestLearnableBiases(InductorTestCase):
             flex_error = rmse(flex, gold)
             self.assertTrue(
                 ref_error * 1.2 >= flex_error,
-                f"{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
+                lambda msg: f"{msg}\n{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
             )
 
 

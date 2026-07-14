@@ -3,7 +3,6 @@
 """Tests for sequence protocol operations (sq_*) in PyTorch Dynamo."""
 
 import collections
-import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -200,6 +199,25 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         result = a + b
         self.assertEqual(result, (1, 2, 3, 4))
 
+    # --- User-defined tuple subclass construction ---
+
+    @make_dynamo_test
+    def test_user_defined_tuple_construct_empty(self):
+        # tuple.__new__(cls) with no iterable arg builds an empty tuple.
+        a = UserDefinedTuple()
+        self.assertEqual(a, ())
+        self.assertEqual(len(a), 0)
+        self.assertIs(type(a), UserDefinedTuple)
+
+    @make_dynamo_test
+    def test_user_defined_tuple_construct_from_iterables(self):
+        self.assertEqual(UserDefinedTuple([]), ())
+        self.assertEqual(UserDefinedTuple(set()), ())
+        self.assertEqual(UserDefinedTuple([1, 2, 3]), (1, 2, 3))
+        self.assertEqual(UserDefinedTuple(obj for obj in [1, 2, 3]), (1, 2, 3))
+        nested = tuple(UserDefinedTuple([obj]) for obj in [1, 2, 3])
+        self.assertEqual(nested, ((1,), (2,), (3,)))
+
     # --- User-defined deque subclass concatenation ---
 
     @make_dynamo_test
@@ -231,12 +249,6 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
             self.assertEqual(list(d), list(ref))
             self.assertEqual(d.maxlen, ref.maxlen)
 
-    # In-place concat (+=) on a deque subclass is not yet supported: it routes
-    # to the base deque __iadd__, whose type-identity check rejects the RHS
-    # UserDefinedDeque operand (it is not unwrapped to its base deque first),
-    # raising TypeError. Eager's deque.__iadd__ accepts any iterable. Tracked
-    # for a later gate.
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_user_defined_deque_inplace_concat(self):
         a = UserDefinedDeque([1, 2])
@@ -281,6 +293,39 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d += collections.deque([3, 4])
         # Result respects maxlen of 3
         self.assertEqual(list(d), [2, 3, 4])
+
+    # --- Inplace deque repeat (*=) ---
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat(self):
+        d = collections.deque([1, 2])
+        d *= 3
+        self.assertEqual(list(d), [1, 2, 1, 2, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_with_maxlen(self):
+        d = collections.deque([1, 2], maxlen=3)
+        d *= 3
+        # A bounded deque keeps the last maxlen items after repeating.
+        self.assertEqual(list(d), [2, 1, 2])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_maxlen_zero(self):
+        d = collections.deque([1, 2], maxlen=0)
+        d *= 3
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_zero(self):
+        d = collections.deque([1, 2, 3])
+        d *= 0
+        self.assertEqual(list(d), [])
+
+    @make_dynamo_test
+    def test_deque_inplace_repeat_negative(self):
+        d = collections.deque([1, 2, 3])
+        d *= -1
+        self.assertEqual(list(d), [])
 
     # --- list re-init (list.__init__) ---
 
@@ -415,6 +460,102 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         d = collections.deque([1, 2])
         with self.assertRaises(TypeError):
             d.copy(1)
+
+    # --- deque iterator mutation detection ---
+
+    @make_dynamo_test
+    def test_deque_iter_mutated_pop_raises(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.pop()
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_iter_mutated_append_raises(self):
+        d = collections.deque()
+        it = iter(d)
+        d.append(10)
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_reversed_iter_mutated_raises(self):
+        d = collections.deque("abc")
+        it = reversed(d)
+        d.appendleft("z")
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_iter_unmutated_ok(self):
+        d = collections.deque("abc")
+        self.assertEqual(list(iter(d)), ["a", "b", "c"])
+        self.assertEqual(list(reversed(d)), ["c", "b", "a"])
+
+    @make_dynamo_test
+    def test_deque_reverse_iterator_type(self):
+        klass = type(reversed(collections.deque()))
+        self.assertEqual(list(klass(collections.deque("abcd"))), list(reversed("abcd")))
+
+    @make_dynamo_test
+    def test_deque_forward_iterator_type(self):
+        klass = type(iter(collections.deque()))
+        self.assertEqual(list(klass(collections.deque("abcd"))), list("abcd"))
+
+    @make_dynamo_test
+    def test_deque_reverse_iterator_bad_arg(self):
+        klass = type(reversed(collections.deque()))
+        with self.assertRaises(TypeError):
+            klass([1, 2, 3])
+
+    # Eager parity: only mutations that bump CPython's deque->state invalidate
+    # an active iterator. reverse() and setitem do NOT bump; delitem and a
+    # non-empty extend do.
+
+    @make_dynamo_test
+    def test_deque_iter_reverse_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.reverse()
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_setitem_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d[0] = "Z"
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_delitem_raises(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        del d[0]
+        with self.assertRaises(RuntimeError):
+            next(it)
+
+    @make_dynamo_test
+    def test_deque_iter_extend_empty_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.extend([])
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_extendleft_empty_does_not_raise(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.extendleft([])
+        next(it)  # must not raise
+
+    @make_dynamo_test
+    def test_deque_iter_extend_nonempty_raises(self):
+        d = collections.deque("abcdefg")
+        it = iter(d)
+        d.extend([1])
+        with self.assertRaises(RuntimeError):
+            next(it)
 
     # --- torch.Size concatenation ---
 
@@ -1125,6 +1266,73 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
                 return "type_error"
 
         self.assertEqual(fn(), "type_error")
+
+
+class TestRangeIteratorSetstate(torch._dynamo.test_case.TestCase):
+    # range_iterator.__setstate__(k) sets the iterator index, clamped to
+    # [0, len], mirroring CPython rangeiter_setstate.
+
+    def test_setstate_resumes_from_index(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(10, 20, 2))
+            it.__setstate__(2)
+            return list(it)
+
+        self.assertEqual(fn(), [14, 16, 18])
+
+    def test_setstate_on_reversed(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = reversed(range(10, 20, 2))
+            it.__setstate__(3)
+            return list(it)
+
+        self.assertEqual(fn(), [12, 10])
+
+    def test_setstate_negative_clamps_to_zero(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(5))
+            it.__setstate__(-100)
+            return list(it)
+
+        self.assertEqual(fn(), [0, 1, 2, 3, 4])
+
+    def test_setstate_overshoot_clamps_to_len(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(5))
+            it.__setstate__(100)
+            return list(it)
+
+        self.assertEqual(fn(), [])
+
+    def test_setstate_after_partial_consume(self):
+        # __setstate__ is RELATIVE to the current advanced position: after two
+        # next() calls (index 2), __setstate__(7) advances 7 more -> index 9,
+        # so only [9] remains. Matches eager CPython.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(10))
+            next(it)
+            next(it)
+            it.__setstate__(7)
+            return list(it)
+
+        self.assertEqual(fn(), [9])
+
+    def test_length_hint_tracks_index(self):
+        # After one next() (index 1), __setstate__(4) advances 4 -> index 5,
+        # so 5 items remain. Matches eager CPython.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            it = iter(range(10))
+            next(it)
+            it.__setstate__(4)
+            return it.__length_hint__()
+
+        self.assertEqual(fn(), 5)
 
 
 class TestRangeDynamicBounds(torch._dynamo.test_case.TestCase):
