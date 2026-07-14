@@ -157,23 +157,18 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     // 4 bytes alignment required on macos for blits.
     TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
 
-    id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
-    Tensor maybeCastedSource;
+    id<MTLBuffer> blitSourceBuffer = sourceBuffer;
+    Tensor blitSource = src;
+    NSUInteger blitSourceOffset = storage_byte_offset;
     bool needsBlit = true;
     if (src_.dtype() != dst.dtype()) {
-      uint32_t dst_offs_for_cast = 0;
-      if (destOffset == 0 && storage_byte_offset == 0) {
-        // Return the casted tensor directly if there's no destination offset
-        needsBlit = false;
-        maybeCastedSourceBuffer = destBuffer;
-      } else if (src.element_size() < dst.element_size()) {
-        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-        maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
-      }
-
-      // In case of dtype change, first convert src inplace via a Metal castout kernel writing into
-      // maybeCastedSourceBuffer (which may be the wrapped CPU destBuffer, a fresh MPS temp, or
-      // sourceBuffer itself when src.element_size() >= dst.element_size()).
+      // Unified memory: cast straight from the MPS source into the CPU-wrapped
+      // destination buffer at the requested offsets. This avoids the temporary
+      // that used to alias the live source buffer and blitting from it (see
+      // #189563). src and dst are dense with identical strides here, so a linear
+      // castout of numel elements from the source offset to the dest offset is a
+      // faithful conversion.
+      needsBlit = false;
       const bool needs_conj = src.is_conj() != dst.is_conj();
       const bool needs_neg = src.is_neg() != dst.is_neg();
       const bool fused_conj_neg = needs_conj && needs_neg && c10::isComplexType(src.scalar_type());
@@ -185,8 +180,8 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
                                 sourceBuffer,
                                 static_cast<uint32_t>(storage_byte_offset),
                                 src.scalar_type(),
-                                maybeCastedSourceBuffer,
-                                dst_offs_for_cast,
+                                destBuffer,
+                                static_cast<uint32_t>(destOffset),
                                 dst.scalar_type(),
                                 static_cast<uint32_t>(src.numel()),
                                 /*ilp_threshold=*/0u);
@@ -199,12 +194,12 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
       const size_t size_to_copy = (src.nbytes() / src.element_size()) * dst.element_size();
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
-      TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
+      TORCH_INTERNAL_ASSERT(blitSourceBuffer && dst_tensor_nbytes > 0);
       uint64_t profile_id =
-          getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
+          getMPSProfiler().beginProfileCopy(blitSourceBuffer, destBuffer, blitSource, dst, size_to_copy, non_blocking);
 
       stream->copy_and_sync(
-          maybeCastedSourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
+          blitSourceBuffer, destBuffer, size_to_copy, blitSourceOffset, destOffset, non_blocking, profile_id);
     }
   }
   if (!dst.is_same(dst_)) {
