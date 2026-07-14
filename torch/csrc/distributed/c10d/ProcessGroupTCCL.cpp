@@ -43,7 +43,8 @@ namespace {
 at::Tensor mpsSharedCpuView(const at::Tensor& mpsTensor) {
   auto* allocator = at::mps::getIMPSAllocator();
   const void* storage_ptr = mpsTensor.storage().data_ptr().get();
-  auto [cpu_ptr, retain_count] = allocator->getSharedBufferPtr(storage_ptr);
+  // Pair is {cpu_ptr, retain_count}; only the pointer is used here.
+  const void* cpu_ptr = allocator->getSharedBufferPtr(storage_ptr).first;
   TORCH_INTERNAL_ASSERT(
       cpu_ptr != nullptr,
       "MPS tensor does not have a shared (unified memory) backing buffer. ",
@@ -320,10 +321,14 @@ ProcessGroupTCCL::Options::Options(std::chrono::milliseconds timeout)
 ProcessGroupTCCL::TCCLWork::TCCLWork(
     OpType opType, uint64_t seq, std::vector<at::Tensor> outputs)
     : Work(/*rank=*/-1, opType), seq_(seq), outputs_(std::move(outputs)) {
-  // Build the result Future (mirrors ProcessGroupGloo::createFutureAsOutput):
-  // carries a List[Tensor]; its device list is the outputs' non-CPU devices so
-  // device-aware consumers (DDP's reducer) chain correctly.
-
+  // Build the result Future carrying a List[Tensor]. Intentionally NO device
+  // list (unlike ProcessGroupGloo::createFutureAsOutput): a Future's device
+  // list only exists to order the callback against pending async GPU work on
+  // those devices' streams. Here there is nothing to order -- MPS is
+  // single-queue and the collective runs to completion on a CPU worker thread,
+  // so when the Future fires the data is already in place. DDP's reducer still
+  // chains correctly. A device list added ~140 us/op of pure overhead that
+  // synchronizes nothing, so we omit it.
   future_ = c10::make_intrusive<c10::ivalue::Future>(
       c10::ListType::create(c10::TensorType::get()));
 }
