@@ -253,6 +253,13 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
             a.eig()
 
+    def test_qr_removed_error(self, device):
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            torch.qr(a)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            a.qr()
+
     def test_symeig_removed_error(self, device):
         a = make_tensor(5, 5, device=device, dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
@@ -2364,7 +2371,7 @@ class TestLinalg(TestCase):
         # Valid if (vals[0]=λ AND vals[1]=λ*) OR (vals[0]=λ* AND vals[1]=λ)
         self.assertTrue(
             (match_0_pos and match_1_neg) or (match_0_neg and match_1_pos),
-            f"Expected conjugate pair {{λ, λ*}}, got {vals_complex[0]}, {vals_complex[1]}"
+            lambda msg: f"{msg}\nExpected conjugate pair {{λ, λ*}}, got {vals_complex[0]}, {vals_complex[1]}"
         )
 
         # Verify output is complex type
@@ -4069,53 +4076,6 @@ class TestLinalg(TestCase):
 
         check([a, make_tensor(3, dtype=dtype, device=device)], None, "cannot be multiplied")
         check([a, make_tensor((3, 2), dtype=dtype, device=device), a], None, "cannot be multiplied")
-
-    @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
-    @skipCPUIfNoLapack
-    @skipCUDAIfNoCusolver
-    @dtypes(*floating_and_complex_types())
-    def test_qr(self, device, dtype):
-        def run_test(tensor_dims, some):
-            A = torch.randn(*tensor_dims, dtype=dtype, device=device)
-            Q, R = torch.qr(A, some=some)
-
-            # Check0: Q[-2:] = (m, n_columns), R[-2:] = (n_columns, n)
-            m, n = tensor_dims[-2:]
-            n_columns = m if (not some) and m > n else min(m, n)
-            self.assertEqual(Q.size(-2), m)
-            self.assertEqual(R.size(-1), n)
-            self.assertEqual(Q.size(-1), n_columns)
-
-            A_ = A.cpu().numpy()
-            Q_ = Q.cpu().numpy()
-            R_ = R.cpu().numpy()
-
-            # Check1: A = QR
-            self.assertEqual(A_, np.matmul(Q_, R_))
-
-            # Check2: A = QR (with out)
-            Q_out, R_out = torch.full_like(Q, math.nan), torch.full_like(R, math.nan)
-            torch.qr(A, some=some, out=(Q_out, R_out))
-            Q_out_ = Q_out.cpu().numpy()
-            R_out_ = R_out.cpu().numpy()
-            self.assertEqual(A_, np.matmul(Q_out_, R_out_))
-
-            # Check3: Q == Q_out, R == R_out
-            self.assertEqual(Q_, Q_out_)
-            self.assertEqual(R_, R_out_)
-
-            # Check4: Q^{T}Q = I, triu(R) = R
-            eye = torch.eye(n_columns, device=device, dtype=dtype).expand(Q.shape[:-2] + (n_columns, n_columns)).cpu().numpy()
-            self.assertEqual(np.matmul(Q_.swapaxes(-1, -2).conj(), Q_), eye)
-            self.assertEqual(R.triu(), R)
-
-        tensor_dims_list = [(0, 5), (0, 0), (5, 0),  # Empty Tensors
-                            (2, 1, 0, 5), (2, 1, 0, 0), (2, 1, 5, 0), (2, 0, 5, 5),  # Batched empty Tensors
-                            (3, 5), (5, 5), (5, 3),  # Single matrix
-                            (7, 3, 5), (7, 5, 5), (7, 5, 3),  # 3-dim Tensors
-                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
-        for tensor_dims, some in itertools.product(tensor_dims_list, [True, False]):
-            run_test(tensor_dims, some)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
@@ -8085,7 +8045,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             # slogdet implementations when det is near zero due to precision
             # issues.
             if sdet.item() < 0:
-                self.assertTrue(logdet.item() != logdet.item(), f'{desc} (logdet negative case)')
+                self.assertTrue(logdet.item() != logdet.item(), lambda msg: f'{msg}\n{desc} (logdet negative case)')
             else:
                 self.assertEqual(logdet.exp(), target_logabsdet.exp(),
                                  atol=1e-6, rtol=0, msg=lambda msg: f'{msg}\n{desc} (logdet non-negative case)')
@@ -8095,7 +8055,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # Testing bug in #34061 (https://github.com/pytorch/pytorch/issues/34061)
         for n in range(250, 551, 100):
             mat = torch.randn(n, n, dtype=dtype, device=device)
-            q, _ = torch.qr(mat)
+            q, _ = torch.linalg.qr(mat)
             ref_det, ref_logabsdet = reference_slogdet(q)
             test_single_det(q, (ref_det, ref_logabsdet), 'orthogonal')
 
@@ -9069,6 +9029,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         n = 50_000
         A = torch.ones(n, n, dtype=dtype, device=device)
         B = torch.randn(n, dtype=dtype, device=device)
+
+        if (
+            torch.device(device).type == "cuda"
+            and dtype == torch.float32
+            and not TEST_WITH_ROCM
+            and torch.cuda.get_device_capability(device) == (11, 0)
+        ):
+            # Remove this sentinel when zero-workspace cublasSgemv works on SM 11.0.
+            previous_workspace_size = torch.backends.cuda.cublas_workspace_size()
+            cublas_error = "CUBLAS_STATUS_NOT_SUPPORTED.*cublasSgemv"
+            try:
+                torch.backends.cuda.cublas_workspace_size(0)
+                with self.assertRaisesRegex(RuntimeError, cublas_error):
+                    torch.matmul(A, B)
+            finally:
+                torch.backends.cuda.cublas_workspace_size(previous_workspace_size)
+                torch._C._cuda_clearCublasWorkspaces()
+
         C = torch.matmul(A, B)
 
         # Sanity Checks
@@ -9960,41 +9938,163 @@ class TestLinalgCudaOnly(TestCase):
         if not torch.cuda.is_bf16_supported():
             raise unittest.SkipTest("bfloat16 not supported on this CUDA device")
 
-        with self._tunableop_ctx():
-            torch.cuda.tunable.set_rotating_buffer_size(0)
-            torch.cuda.tunable.set_max_tuning_duration(1)
-            torch.cuda.tunable.set_max_tuning_iterations(3)
+        def parse_tunable_log(log):
+            tuned = {}
+            current_key = None
 
-            A = torch.randn(128, 256, device=device, dtype=dtype)
-            B = torch.randn(256, 96, device=device, dtype=dtype)
-            torch.matmul(A, B)
+            finding_re = re.compile(
+                r"finding fastest for ([^(]+)\(([^)]+)\) out of (\d+) candidates"
+            )
+            tuning_re = re.compile(
+                r"tuning using .* instance id=\d+, ([^(]+)\(([^)]+)\) (.+)$"
+            )
+            timing_re = re.compile(
+                r"found (?:better|slower) instance id=\d+\. ([0-9.e+-]+)ms\. (.+?) min "
+            )
+            fastest_re = re.compile(r"found fastest for ([^(]+)\(([^)]+)\) (.+)$")
 
-            X = torch.randn(512, 512, device=device, dtype=dtype)
-            W = torch.randn(512, 512, device=device, dtype=dtype)
-            bias = torch.randn(512, device=device, dtype=dtype)
-            torch.nn.functional.linear(X, W, bias)
+            for line in log.splitlines():
+                finding_match = finding_re.search(line)
+                if finding_match:
+                    current_key = (finding_match.group(1), finding_match.group(2))
+                    tuned[current_key] = {
+                        "candidate_count": int(finding_match.group(3)),
+                        "tried": set(),
+                        "timings": {},
+                        "winner": None,
+                    }
+                    continue
 
-            for b, m, k, n in (
-                    (8, 128, 256, 192),
-                    (16, 128, 256, 256),
-                    (8, 256, 256, 256),
-                    (2, 512, 512, 512)):
-                batch_A = torch.randn(b, m, k, device=device, dtype=dtype)
-                batch_B = torch.randn(b, k, n, device=device, dtype=dtype)
-                torch.bmm(batch_A, batch_B)
+                tuning_match = tuning_re.search(line)
+                if tuning_match:
+                    key = (tuning_match.group(1), tuning_match.group(2))
+                    tuned.setdefault(
+                        key,
+                        {
+                            "candidate_count": 0,
+                            "tried": set(),
+                            "timings": {},
+                            "winner": None,
+                        },
+                    )["tried"].add(tuning_match.group(3))
+                    continue
 
-            results = torch.cuda.tunable.get_results()
-            result_strings = [str(row) for row in results]
-            self.assertTrue(
-                any("Gemm_Cublaslt_" in row for row in result_strings), results)
-            self.assertTrue(
-                any("GemmTunableOp" in row for row in result_strings), results)
-            self.assertTrue(
-                any("GemmStridedBatchedTunableOp" in row for row in result_strings),
-                results)
-            self.assertTrue(
-                any("GemmAndBiasTunableOp" in row for row in result_strings),
-                results)
+                timing_match = timing_re.search(line)
+                if timing_match and current_key is not None:
+                    tuned[current_key]["timings"][timing_match.group(2)] = float(
+                        timing_match.group(1)
+                    )
+                    continue
+
+                fastest_match = fastest_re.search(line)
+                if fastest_match:
+                    key = (fastest_match.group(1), fastest_match.group(2))
+                    tuned.setdefault(
+                        key,
+                        {
+                            "candidate_count": 0,
+                            "tried": set(),
+                            "timings": {},
+                            "winner": None,
+                        },
+                    )["winner"] = fastest_match.group(3)
+
+            return tuned
+
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        # Create the results file in the parent so we can always clean it up,
+        # even if the subprocess is killed before its own teardown runs.
+        results_dir = tempfile.mkdtemp(prefix="tunableop_cublaslt_candidate_")
+        results_filename = os.path.join(results_dir, "results.csv")
+
+        script = textwrap.dedent(
+            """
+            import torch
+
+            results_filename = {results_filename!r}
+            try:
+                torch.cuda.tunable.enable(False)
+                torch.cuda.tunable.record_untuned_enable(False)
+                torch.cuda.tunable.tuning_enable(True)
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(3)
+                torch.cuda.tunable.set_cublaslt_requested_algo_count(8)
+                torch.cuda.tunable.set_rotating_buffer_size(0)
+                torch.cuda.tunable.set_numerical_check_tolerances(False)
+                torch.cuda.tunable.set_filename(results_filename, False)
+                torch.cuda.tunable.enable(True)
+
+                device = {device!r}
+                dtype = {dtype}
+
+                A = torch.randn(128, 256, device=device, dtype=dtype)
+                B = torch.randn(256, 96, device=device, dtype=dtype)
+                torch.matmul(A, B)
+
+                X = torch.randn(512, 512, device=device, dtype=dtype)
+                W = torch.randn(512, 512, device=device, dtype=dtype)
+                bias = torch.randn(512, device=device, dtype=dtype)
+                torch.nn.functional.linear(X, W, bias)
+
+                for b, m, k, n in (
+                        (8, 128, 256, 192),
+                        (16, 128, 256, 256),
+                        (8, 256, 256, 256),
+                        (2, 512, 512, 512)):
+                    batch_A = torch.randn(b, m, k, device=device, dtype=dtype)
+                    batch_B = torch.randn(b, k, n, device=device, dtype=dtype)
+                    torch.bmm(batch_A, batch_B)
+            finally:
+                torch.cuda.tunable.enable(False)
+            """
+        ).format(results_filename=results_filename, device=device, dtype=dtype)
+
+        env = os.environ.copy()
+        env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
+        env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+                check=True,
+            )
+        finally:
+            shutil.rmtree(results_dir, ignore_errors=True)
+
+        tuned = parse_tunable_log(result.stdout)
+        self.assertGreater(len(tuned), 0, result.stdout)
+        self.assertTrue(any(key[0].startswith("GemmTunableOp") for key in tuned), tuned)
+        self.assertTrue(
+            any(key[0].startswith("GemmStridedBatchedTunableOp") for key in tuned),
+            tuned,
+        )
+        self.assertTrue(any(key[0].startswith("GemmAndBiasTunableOp") for key in tuned), tuned)
+        self.assertTrue(
+            any(
+                info["candidate_count"] > 1
+                and any(c.startswith("Gemm_Cublaslt_") for c in info["tried"])
+                and len(info["timings"]) > 1
+                for info in tuned.values()
+            ),
+            (tuned, result.stdout),
+        )
+
+        for key, info in tuned.items():
+            if not info["timings"]:
+                continue
+            self.assertIn(info["winner"], info["timings"], (key, info, result.stdout))
+            winner_time = info["timings"][info["winner"]]
+            fastest_time = min(info["timings"].values())
+            self.assertEqual(winner_time, fastest_time, (key, info))
 
     @skipIfRocm
     @dtypes(torch.half)
