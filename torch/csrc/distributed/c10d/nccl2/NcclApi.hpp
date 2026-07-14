@@ -2,6 +2,8 @@
 
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -475,3 +477,5 @@ class DefaultNcclApi : public NcclApi {
 };
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
