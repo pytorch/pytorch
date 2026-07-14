@@ -3850,8 +3850,15 @@ def _sync_decision_cross_ranks(
         all_inputs = [None for _ in range(torch.distributed.get_world_size())]
         with no_dispatch(), unset_fake_temporarily():
             # TODO: maybe use a different process group?
-            torch.distributed.all_gather_object(all_inputs, inputs)
-        return all(all_inputs[0] == x for x in all_inputs)
+            torch.distributed.all_gather_object(all_inputs, inputs, weights_only=True)
+            for rank, x in enumerate(all_inputs):
+                if all_inputs[0] != x:
+                    log.debug(
+                        "Skipping sync decision cross rank due to different inputs between rank 0 and rank %s",
+                        rank,
+                    )
+                    return False
+        return True
 
     if has_same_nodes(joint_graph):
         with no_dispatch(), unset_fake_temporarily():
@@ -3861,7 +3868,9 @@ def _sync_decision_cross_ranks(
             saved_ops_names_all_ranks: list[list[str]] = [
                 [] for _ in range(torch.distributed.get_world_size())
             ]
-            torch.distributed.all_gather_object(saved_ops_names_all_ranks, objects[0])
+            torch.distributed.all_gather_object(
+                saved_ops_names_all_ranks, objects[0], weights_only=True
+            )
             saved_sizes: list[int] = []
             saved_ops_with_sizes: dict[str, int] = {}
 
