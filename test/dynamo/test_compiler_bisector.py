@@ -84,7 +84,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
             with patch_exp_decomp():
-                vq_compiled = torch.compile(vq)
+                vq_compiled = torch.compile(vq)  # noqa: UNSPECIFIED_BACKEND
                 x = torch.randn(4, 400, 256, device=GPU_TYPE)
                 with torch._dynamo.utils.preserve_rng_state():
                     vq(x)
@@ -125,7 +125,7 @@ class TestCompilerBisector(TestCase):
             inp = torch.rand([10])
 
             out = foo(inp)
-            out_c = torch.compile(foo)(inp)
+            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
 
             return torch.allclose(out, out_c)
 
@@ -162,7 +162,7 @@ class TestCompilerBisector(TestCase):
             inp = torch.rand([10], device=GPU_TYPE)
 
             out = foo(inp)
-            out_c = torch.compile(foo)(inp)
+            out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
 
             return torch.allclose(out, out_c)
 
@@ -183,7 +183,7 @@ class TestCompilerBisector(TestCase):
             with preserve_rng_state():
                 out = foo()
             with preserve_rng_state():
-                out_c = torch.compile(foo)()
+                out_c = torch.compile(foo)()  # noqa: UNSPECIFIED_BACKEND
 
             return torch.allclose(out, out_c)
 
@@ -229,7 +229,7 @@ class TestCompilerBisector(TestCase):
                 torch._dynamo.reset()
 
                 try:
-                    torch.testing.assert_close(torch.compile(op)(x), op(x))
+                    torch.testing.assert_close(torch.compile(op)(x), op(x))  # noqa: UNSPECIFIED_BACKEND
                 except Exception:
                     return False
                 return True
@@ -251,7 +251,7 @@ class TestCompilerBisector(TestCase):
             torch.manual_seed(0)
             inp = torch.randn(16, 16, 768, dtype=dtype, device=GPU_TYPE)
             eager_scale = calculate_scale(inp)
-            compile_scale = torch.compile(calculate_scale)(inp)
+            compile_scale = torch.compile(calculate_scale)(inp)  # noqa: UNSPECIFIED_BACKEND
 
             return torch.equal(eager_scale, compile_scale)
 
@@ -269,7 +269,7 @@ class TestCompilerBisector(TestCase):
 
                 inp = torch.rand([100], device=GPU_TYPE)
 
-                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
+                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))  # noqa: UNSPECIFIED_BACKEND
 
         out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
@@ -367,8 +367,8 @@ class TestCompilerBisector(TestCase):
             counters.clear()
             CompilerBisector.bisection_enabled = True
             try:
-                foo_c = torch.compile(foo, mode="reduce-overhead")
-                bar_c = torch.compile(bar, mode="reduce-overhead")
+                foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+                bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
                 x = torch.randn(10, device=GPU_TYPE)
                 foo_c(x)
                 bar_c(x)
