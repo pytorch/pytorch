@@ -109,8 +109,10 @@ def _validate_block_mask_shape(
         torch._check(kv_len >= block_mask_kv_len, _BLOCK_MASK_TOO_LARGE_ERROR)
         return
 
-    # Case 2: Dynamo-backed lengths must not emit checks that force equality guards.
+    # Case 2: Dynamo-backed lengths keep upper bounds but avoid equality guards.
     if torch.compiler.is_dynamo_compiling():
+        torch._check(q_len <= block_mask_q_len, _BLOCK_MASK_TOO_SMALL_ERROR)
+        torch._check(kv_len <= block_mask_kv_len, _BLOCK_MASK_TOO_SMALL_ERROR)
         return
 
     # Case 3: eager/non-Dynamo callers still validate statically known mismatches.

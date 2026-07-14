@@ -8080,7 +8080,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 torch.randn(1, 1, S, 64, dtype=dtype, device=device) for _ in range(3)
             )
             for x in (q, k, v):
-                torch._dynamo.mark_dynamic(x, 2, min=128, max=1024)
+                torch._dynamo.mark_dynamic(x, 2, min=128, max=320)
             return q, k, v
 
         counter = CompileCounterWithBackend("eager")
@@ -8096,6 +8096,19 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 )
 
         self.assertEqual(counter.frame_count, 1)
+
+        def create_plain_inputs(S):
+            return tuple(
+                torch.randn(1, 1, S, 64, dtype=dtype, device=device) for _ in range(3)
+            )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def flex_attention_plain(q, k, v):
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        flex_attention_plain(*create_plain_inputs(320))
+        with self.assertRaisesRegex(Exception, "block_mask was created for a smaller length"):
+            flex_attention_plain(*create_plain_inputs(512))
 
     @supported_platform
     @common_utils.parametrize("full_indices", [False, True])
