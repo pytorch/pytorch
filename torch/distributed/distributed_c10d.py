@@ -390,10 +390,10 @@ class Backend(str):  # noqa: SLOT000
         "cpu": GLOO,
         "cuda": NCCL,
         "xpu": XCCL,
-        # TCCL (Thunderbolt RDMA) is the MPS backend when torch is built with
-        # USE_C10D_TCCL. Without it (_TCCL_AVAILABLE == False) this maps to Gloo,
-        # which will raise on MPS tensors.
-        "mps": TCCL if _TCCL_AVAILABLE else GLOO,
+        # TCCL (Thunderbolt RDMA) is the MPS backend; requires USE_C10D_TCCL.
+        # If torch was built without it, backend creation raises a clear
+        # "rebuild with USE_TCCL=1" error (see _create_tccl_process_group).
+        "mps": TCCL,
     }
 
     backend_capability: dict[str, list[str]] = {
