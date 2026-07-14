@@ -113,8 +113,9 @@ esac
 if [[ -n ${MANY_LINUX_VERSION} && -z ${DOCKERFILE_SUFFIX} ]]; then
     DOCKERFILE_SUFFIX=_${MANY_LINUX_VERSION}
 fi
-# Only activate this if in CI
-if [ "$(uname -m)" != "s390x" ] && [ -v CI ]; then
+# The daemon tweak only applies to the local-docker-daemon path; the remote
+# BuildKit path (OSDC/ARC) has no local daemon.
+if [ "$(uname -m)" != "s390x" ] && [ -v CI ] && [ -z "${REMOTE_BUILDKIT:-}" ]; then
     # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
     # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
     sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
@@ -122,15 +123,67 @@ if [ "$(uname -m)" != "s390x" ] && [ -v CI ]; then
     sudo systemctl restart docker
 fi
 
-tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
+if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
+    # Remote BuildKit path (OSDC/ARC, no local daemon): buildx-push straight to
+    # the registry. The caller passes the target tag(s) as trailing `-t ...`
+    # args ("$@"); WITH_PUSH gates publishing (PRs only validate the build).
+    output_flag=""
+    if [[ "${WITH_PUSH:-false}" == "true" ]]; then
+        output_flag="--push"
+    fi
 
-DOCKER_BUILDKIT=1 docker build  \
-    ${DOCKER_GPU_BUILD_ARG} \
-    --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
-    --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
-    --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
-    --target "${TARGET}" \
-    -t "${tmp_tag}" \
-    $@ \
-    -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
-    "${TOPDIR}/.ci/docker/"
+    build_image() {
+        docker buildx build \
+            ${DOCKER_GPU_BUILD_ARG} \
+            --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
+            --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
+            --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
+            --target "${TARGET}" \
+            --progress plain \
+            ${output_flag} \
+            "$@" \
+            -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
+            "${TOPDIR}/.ci/docker/"
+    }
+
+    # The autoscaled buildkit pool may be cold / at capacity at start, where
+    # buildx's ~20s connect (gRPC default) fails before scale-up. Retry
+    # connection failures (not build errors) for ~2h so a capacity-limited build
+    # waits for a free pod instead of hard-failing. Mirrors .ci/docker/build.sh.
+    attempts="${REMOTE_BUILDKIT_CONNECT_ATTEMPTS:-360}"
+    delay="${REMOTE_BUILDKIT_CONNECT_DELAY:-15}"
+    for attempt in $(seq 1 "${attempts}"); do
+        build_log="$(mktemp)"
+        set +e
+        build_image "$@" 2>&1 | tee "${build_log}"
+        rc="${PIPESTATUS[0]}"
+        set -e
+        if [[ "${rc}" -eq 0 ]]; then
+            rm -f "${build_log}"
+            break
+        fi
+        if [[ "${attempt}" -lt "${attempts}" ]] && grep -qiE \
+            "waiting for connection|context deadline exceeded|server preface|failed to (dial|list workers)|connection (refused|reset)|no such host|transport: Error|i/o timeout|use of closed network connection|EOF" \
+            "${build_log}"; then
+            echo "Remote BuildKit not ready yet (attempt ${attempt}/${attempts}); retrying in ${delay}s..." >&2
+            rm -f "${build_log}"
+            sleep "${delay}"
+            continue
+        fi
+        rm -f "${build_log}"
+        exit "${rc}"
+    done
+else
+    tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
+
+    DOCKER_BUILDKIT=1 docker build  \
+        ${DOCKER_GPU_BUILD_ARG} \
+        --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
+        --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
+        --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
+        --target "${TARGET}" \
+        -t "${tmp_tag}" \
+        $@ \
+        -f "${TOPDIR}/.ci/docker/manywheel/Dockerfile${DOCKERFILE_SUFFIX}" \
+        "${TOPDIR}/.ci/docker/"
+fi
