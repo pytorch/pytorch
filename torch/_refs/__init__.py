@@ -395,6 +395,7 @@ def _broadcast_shapes(*_shapes):
         guarding_hint_or_throw,
         has_guarding_hint,
         is_nested_int,
+        statically_known_true,
     )
 
     backed_so = torch.fx.experimental._config.backed_size_oblivious
@@ -418,6 +419,15 @@ def _broadcast_shapes(*_shapes):
     common_shape: list[int | torch.SymInt] = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
+
+    def guard_or_false_unless_exporting(x):
+        # During export, metadata-time size-one checks become user-visible
+        # constraints. In normal compile they are needed to preserve hinted
+        # broadcasting behavior, so keep the original guard_or_false semantics.
+        if torch.compiler.is_exporting():
+            return statically_known_true(x)
+        return guard_or_false(x)
+
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
             # NB: handle nested ints specially to avoid invalid guarding on Ne(j0, 1).
@@ -449,17 +459,19 @@ def _broadcast_shapes(*_shapes):
                         torch._check(shape[idx] == 1)
                     if b == 1 and a != 1:
                         torch._check(common_shape[idx] == 1)
-                if guard_or_false(shape[idx] == common_shape[idx]):
+                if guard_or_false_unless_exporting(shape[idx] == common_shape[idx]):
                     continue
 
-            if guard_or_false(common_shape[idx] == 1):
+            if guard_or_false_unless_exporting(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
 
-            if not is_nested_int(shape[idx]) and guard_or_false(shape[idx] == 1):
+            if not is_nested_int(shape[idx]) and guard_or_false_unless_exporting(
+                shape[idx] == 1
+            ):
                 # broadcast case .
                 continue
             else:
@@ -483,12 +495,19 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     def should_expand(a: ShapeType, b: ShapeType) -> bool:
         from torch.fx.experimental.symbolic_shapes import (
             guard_or_false,
+            statically_known_true,
             sym_and,
             sym_or,
         )
 
         if len(a) != len(b):
             return True
+
+        if torch.compiler.is_exporting():
+            for x, y in zip(a, b):
+                if not statically_known_true(x == y):
+                    return True
+            return False
 
         for x, y in zip(a, b):
             if guard_or_false(x != y):
@@ -3362,6 +3381,12 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: list[int]) -> TensorLikeT
     return x
 
 
+def _contiguous_or_clone_without_guards(x: TensorLikeType) -> TensorLikeType:
+    if is_contiguous_or_false(x):
+        return x
+    return x.clone(memory_format=torch.contiguous_format)
+
+
 @register_decomposition(aten.native_group_norm.default)
 def native_group_norm(
     input: Tensor,
@@ -3407,8 +3432,12 @@ def native_group_norm(
                 bias, [1, num_groups, num_channels // num_groups, 1]
             )
             b = b + bias_reshaped
-        w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
-        b = b.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
+        w = _contiguous_or_clone_without_guards(w).as_strided(
+            [batch_size, num_channels], [num_channels, 1]
+        )
+        b = _contiguous_or_clone_without_guards(b).as_strided(
+            [batch_size, num_channels], [num_channels, 1]
+        )
         broadcast_dims = list(range(2, input.ndim))
         unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
         unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
@@ -4023,6 +4052,8 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 def _reshape_view_helper_core_alg(
     a: TensorLikeType, shape, allow_copy: bool
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     # NOTE [Reshape Algorithm]
     # This algorithm works by attempting to greedily construct the desired dimensions in
     # the output shape, left to right. It does this by, conceptually, accumulating
@@ -4053,6 +4084,16 @@ def _reshape_view_helper_core_alg(
             # NOTE: using split_dim instead of unsqueeze may seem silly here,
             # but it's necessary to get the strides correct
             a_ = prims.split_dim(a_, last_dim, a_.shape[last_dim])
+            idx = idx + 1
+            continue
+
+        # A target dimension of length 1 can be produced by splitting
+        # non-statically-size-1 source dimensions with an outer length of 1.
+        # Do this before equality checks so symbolic source sizes do not
+        # specialize on whether they are 1.
+        if isinstance(length, utils.IntWithoutSymInt) and length == 1:
+            if not statically_known_true(a_.shape[idx] == 1):
+                a_ = prims.split_dim(a_, idx, 1)
             idx = idx + 1
             continue
 

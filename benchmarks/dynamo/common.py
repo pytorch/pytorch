@@ -4886,6 +4886,12 @@ def run(runner, args, original_dir=None):
             current_settings = vars(args)
             set_model_name(name)
 
+            if args.accuracy:
+                # Some benchmark model constructors mutate global determinism
+                # flags. Reapply after loading so eager-vs-eager checks are
+                # testing the compiler path, not model setup side effects.
+                setup_determinism(args)
+
             # Look for stuff that looks like batch size, and mark it dynamic.
             # Better integration would integrate directly with benchmark suite
             # but cannot conveniently do this

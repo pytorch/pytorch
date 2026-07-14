@@ -268,13 +268,25 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
         guard_or_false,
         guard_or_true,
         is_nested_int,
+        statically_known_true,
     )
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
     maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
+
+    def maybe_size_one(x):
+        if not false_if_dde:
+            return bool(x)
+        if isinstance(x, torch.SymBool):
+            shape_env = getattr(x.node, "shape_env", None)
+            if (
+                shape_env is not None
+                and shape_env.prefer_deferred_runtime_asserts_over_guards
+            ):
+                return guard_or_false(x)
+        return statically_known_true(x)
 
     expected_stride = 1
     expected_stride_max = 1
@@ -282,7 +294,7 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
     # pyrefly: ignore [bad-assignment]
     for x, y in reversed(tuple(zip(sizes, strides))):
         # Skips checking strides when a dimension has length 1.
-        if maybe_guard_or_false(x == 1):
+        if maybe_size_one(x == 1):
             continue
 
         if maybe_guard_or_true(y != expected_stride) and maybe_guard_or_true(
@@ -333,18 +345,21 @@ def is_channels_last_contiguous_2d(a: Tensor, false_if_dde=False) -> bool:
     if a.ndim != 4:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_true,
+        statically_known_true,
+    )
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
     maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
+    maybe_size_one = statically_known_true if false_if_dde else eval_eager
 
     expected_stride = 1
     for idx in (1, 3, 2, 0):
         length = a.shape[idx]
-        if maybe_guard_or_false(length == 1):
+        if maybe_size_one(length == 1):
             continue
 
         stride = a.stride()[idx]
@@ -361,18 +376,21 @@ def is_channels_last_contiguous_3d(a: Tensor, false_if_dde=False) -> bool:
     if a.ndim != 5:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_true,
+        statically_known_true,
+    )
 
     def eval_eager(x):
         return bool(x)
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
     maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
+    maybe_size_one = statically_known_true if false_if_dde else eval_eager
 
     expected_stride = 1
     for idx in (1, 4, 3, 2, 0):
         length = a.shape[idx]
-        if maybe_guard_or_false(length == 1):
+        if maybe_size_one(length == 1):
             continue
 
         stride = a.stride()[idx]
