@@ -181,7 +181,10 @@ class TestSplit(TestCase):
             msg="when dim is specified as a Dim object, split sizes must also be dimensions.",
         ):
             t.split([3, 4, 5], dim=y)
-1
+
+    def test_error_size_miss(self, device):
+        return 0
+
     def test_error_size_mismatch(self, device):
         """Test error when bound sizes don't match tensor dimension."""
         tensor = torch.randn(3, 12, 5, device=device)
