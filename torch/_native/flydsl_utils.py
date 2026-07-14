@@ -1,3 +1,7 @@
+"""Runtime and dispatcher helpers for optional FlyDSL native operators."""
+
+from __future__ import annotations
+
 import functools
 import importlib.machinery
 import importlib.util
@@ -24,59 +28,49 @@ from .registry import (
 
 log = logging.getLogger(__name__)
 
-
 _FLYDSL_DSL_NAME = "flydsl"
+
+# RMSNorm backward first shipped in FlyDSL 0.2.3. The copied kernel is also
+# validated against the current 0.2.4 API. Unknown versions fall back to ATen
+# unless a developer explicitly sets TORCH_NATIVE_SKIP_VERSION_CHECK=1.
 _FLYDSL_REQUIRED_VERSIONS: set[Version] = {
-    Version("0.2.2"),
+    Version("0.2.3"),
+    Version("0.2.4"),
 }
 
 
 def _flydsl_runtime_unavailable_reason() -> str | None:
     flydsl_spec = importlib.util.find_spec("flydsl")
     if flydsl_spec is None or flydsl_spec.submodule_search_locations is None:
-        return "missing optional dependency `flydsl` (importlib.util.find_spec(flydsl) failed)"
+        return "missing optional dependency `flydsl`"
 
-    # importlib.util.find_spec("flydsl._mlir") imports the parent package as a
-    # side effect. Query the package paths directly so `import torch` stays lazy.
+    # Looking up ``flydsl._mlir`` directly imports the parent package. Search
+    # the package paths instead so ``import torch`` remains fork-safe and lazy.
     mlir_spec = importlib.machinery.PathFinder.find_spec(
-        "_mlir",
-        list(flydsl_spec.submodule_search_locations),
+        "_mlir", list(flydsl_spec.submodule_search_locations)
     )
     if mlir_spec is None:
-        return "missing optional dependency `flydsl._mlir` (runtime bindings are not built)"
-
+        return "missing optional dependency `flydsl._mlir` (runtime is not built)"
     return None
 
 
 @functools.cache
 def _check_runtime_available() -> tuple[bool, Version | None]:
-    """
-    Check if flydsl is available.
+    """Check FlyDSL availability without importing or initializing the GPU."""
 
-    NOTE: Doesn't import flydsl at this point.
-    """
-    # Skip all checks if running on CPU-only binary.
     if not _cuda.is_built():
-        return (False, None)
+        return False, None
 
     import torch
 
     if torch.version.hip is None:
-        return (False, None)
+        return False, None
 
     reason = _flydsl_runtime_unavailable_reason()
-    if reason is None:
-        available = True
-        version = _available_version("flydsl")
-    else:
-        # info, not warning: missing optional deps is the common case on stock
-        # builds and we don't want to spam stderr on `import torch`. Surface
-        # it via TORCH_LOGS=+native_dsl when diagnosing why an override is
-        # silent.
-        log.info("FlyDSL operators require optional package `flydsl`; %s", reason)
-        available = False
-        version = None
-    return available, version
+    if reason is not None:
+        log.info("FlyDSL native operators are disabled: %s", reason)
+        return False, None
+    return True, _available_version("flydsl")
 
 
 def runtime_available() -> bool:
@@ -84,7 +78,7 @@ def runtime_available() -> bool:
     return available
 
 
-def runtime_version() -> None | Version:
+def runtime_version() -> Version | None:
     _, version = _check_runtime_available()
     return version
 
@@ -96,12 +90,15 @@ def _version_is_ok() -> bool:
         return True
     if version in _FLYDSL_REQUIRED_VERSIONS:
         return True
-    if version is not None and Version(version.base_version) in _FLYDSL_REQUIRED_VERSIONS:
+    if (
+        version is not None
+        and Version(version.base_version) in _FLYDSL_REQUIRED_VERSIONS
+    ):
         return True
 
     log.info(
-        "flydsl version %s is not known-good (ok: %s); "
-        "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
+        "FlyDSL version %s is not known-good (supported: %s); "
+        "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 only for local experiments",
         version,
         _FLYDSL_REQUIRED_VERSIONS,
     )
@@ -109,9 +106,8 @@ def _version_is_ok() -> bool:
 
 
 def deregister_op_overrides() -> None:
-    """
-    Deregister all ops through FlyDSL.
-    """
+    """Temporarily deregister all FlyDSL overrides."""
+
     _deregister_op_overrides_impl(disable_dsl_names=_FLYDSL_DSL_NAME)
 
 
@@ -125,16 +121,10 @@ def register_op_override(
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
 ) -> None:
-    """
-    See torch/_native/registry.py for the underlying implementation
-    and arguments. This is a thin, DSL-checking wrapper over
-    _register_op_override_impl.
-    """
-    available, _ = _check_runtime_available()
-    if (not available) or check_native_jit_disabled():
-        return
+    """Register an override only when the known-good FlyDSL runtime exists."""
 
-    if not _version_is_ok():
+    available, _ = _check_runtime_available()
+    if not available or check_native_jit_disabled() or not _version_is_ok():
         return
 
     _register_op_override_impl(
@@ -149,6 +139,4 @@ def register_op_override(
     )
 
 
-# Register this DSL module with the registry.
-# Note: Import-time registration ensures DSL is available when module is loaded.
 dsl_registry.register_dsl("flydsl", cast(DSLModuleProtocol, sys.modules[__name__]))

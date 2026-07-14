@@ -1,13 +1,8 @@
-"""In-process specialization cache for FlyDSL native-op compile wrappers.
+"""Small in-process specialization cache for FlyDSL native operators.
 
-FlyDSL already owns the heavy compiler artifact cache, including its persistent
-on-disk entries. PyTorch still benefits from a tiny native-op level cache: it
-keeps the ``flyc.compile(...)`` result for a specialization such as
-``(hidden_size, dtype, arch, backend)`` so repeated operator calls can skip
-rebuilding the launcher and re-entering FlyDSL's compile path.
-
-This mirrors the call shape of Quack/CuteDSL's ``@jit_cache`` while deliberately
-not copying its persistent ``.o`` cache behavior.
+FlyDSL already caches compiler artifacts on disk. This cache keeps the
+``flyc.compile`` result for one in-process specialization, so repeated eager
+operator calls do not rebuild the Python launcher.
 """
 
 # mypy: allow-untyped-defs
@@ -23,11 +18,12 @@ CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "currsize"])
 
 
 class _JitCacheWrapper:
-    """Cache a compile function whose explicit arguments are specialization keys.
+    """Cache a compile helper by its explicit specialization arguments.
 
-    ``compile_args`` is a reserved keyword for cache-miss-only sample inputs such
-    as tensors or streams that ``flyc.compile`` needs to infer ABI metadata.
-    Those values are intentionally excluded from the cache key.
+    ``compile_args`` contains sample tensors and a stream that FlyDSL needs on
+    a cache miss. They are intentionally excluded from the key: stable values
+    such as hidden size, dtype, architecture, device and epsilon are passed as
+    normal arguments and form the key instead.
     """
 
     def __init__(self, fn):
@@ -74,12 +70,6 @@ class _JitCacheWrapper:
 
 
 def jit_cache(fn):
-    """Decorate a FlyDSL compile helper using its explicit args as the key.
-
-    The decorated function should take stable specialization parameters as its
-    normal arguments. Runtime sample objects can be passed by callers through the
-    reserved ``compile_args=...`` keyword; they are forwarded only on cache miss
-    and do not participate in keying.
-    """
+    """Decorate a FlyDSL compile helper with the cache described above."""
 
     return _JitCacheWrapper(fn)
