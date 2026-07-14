@@ -6676,18 +6676,30 @@ if HAS_CUDA_AND_TRITON:
         @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
         def test_cudagraph_empty_partition_raises_error(self):
             """Verify RuntimeError is raised when partitions are empty and cudagraph_or_error=True"""
-            # 1. Simulate empty partitions returning from the post-compile step
+            @torch.library.custom_op(
+                "test_cudagraph_empty_partition::unsafe_mul",
+                mutates_args=(),
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def unsafe_mul(x: torch.Tensor) -> torch.Tensor:
+                return x * 2.0
 
-            def f(x):
-                return torch.cond(x.sum() > 0, lambda x: x * 2, lambda x: x * 3, (x,))
+            @unsafe_mul.register_fake
+            def _(x: torch.Tensor) -> torch.Tensor:
+                return torch.empty_like(x)
 
-            x = torch.randn(4, device="cuda")
+            def f(x: torch.Tensor) -> torch.Tensor:
+                return unsafe_mul(x)
 
-            # Enable cudagraph_or_error only for this test to force an error on empty partitions.
-            with config.patch("triton.cudagraph_or_error", True):
+            with config.patch(
+                {
+                    "triton.cudagraph_trees": True,
+                    "triton.cudagraph_or_error": True,
+                }
+            ):
                 compiled_fn = torch.compile(f, mode="reduce-overhead")
                 with self.assertRaisesRegex(RuntimeError, "skipping cudagraphs as len"):
-                    compiled_fn(x)
+                    compiled_fn(torch.randn(4, device="cuda"))
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
     instantiate_parametrized_tests(TestCUDAGraphPolicy)
