@@ -50,12 +50,12 @@ import warnings
 from collections.abc import Mapping
 from contextlib import contextmanager
 from logging import getLogger
-from pathlib import Path
 from typing import Any, NamedTuple, TYPE_CHECKING, TypeAlias
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
+    from pathlib import Path
 
 import torch
 from torch.cuda._utils import (
@@ -1130,7 +1130,7 @@ def remove_kernel_annotations(exec_graph_ids: Iterable[int]) -> None:
 
 
 def register_fqn_annotation_hooks(
-    model: "torch.nn.Module",
+    model: torch.nn.Module,
 ) -> list[Any]:
     """Register forward hooks that annotate CUDA graph kernels with module FQNs.
 
