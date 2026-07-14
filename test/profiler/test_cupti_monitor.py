@@ -218,6 +218,35 @@ class TestCuptiRecords(TestCase):
         self.assertNotIn(2, m._id_chains)
         self.assertIn(1, m._id_chains)
 
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_drain_polls_pm_consumers(self):
+        # Regression: PM-sampling frames must be pulled on the drain path. flush() and
+        # the background drain loop both funnel through _drain_and_dispatch, so the PM
+        # poll is folded there -- the native self-flush thread never touches the PM ring
+        # (poll()/deliver are GIL work). Pure: a fake consumer, no CUDA/session.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor import CuptiMonitor
+
+        class _FakeHandle:
+            def __init__(self):
+                self.polls = 0
+
+            def poll(self):
+                self.polls += 1
+                return {"start_ns": np.array([100, 200], dtype=np.int64)}
+
+        m = CuptiMonitor()
+        delivered: list = []
+        handle = _FakeHandle()
+        m._pm_consumers[lambda frame: delivered.append(frame)] = handle
+
+        m._drain_and_dispatch()
+
+        self.assertEqual(handle.polls, 1)
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(list(delivered[0]["start_ns"]), [100, 200])
+
     def test_metadata_store_roundtrip(self):
         # The CollTrace-replacement metadata store: producers put a JSON object keyed
         # by the CURRENT external-correlation id on this thread's stack (pushed around
@@ -501,7 +530,12 @@ class TestCuptiMonitorCUDA(TestCase):
 
         lock = threading.Lock()
         columns: list = []
-        monitor = CuptiMonitor()
+        # Fully caller-driven (both periods < 0): no background self-flush and no
+        # background drain, so the explicit flush(sync=True) below is the sole,
+        # deterministic flush + drain -- nothing races it to consume the decoded columns.
+        monitor = CuptiMonitor(
+            background_flush_period_s=-1, background_drain_period_s=-1
+        )
 
         def on_columns(cols):
             if kind in cols:
@@ -536,6 +570,112 @@ class TestCuptiMonitorCUDA(TestCase):
             self.assertEqual(len(start), len(name))
             self.assertTrue(all(int(e) - int(s) >= 0 for s, e in zip(start, end)))
         self.assertTrue(any(len(n) > 0 for c in columns for n in c[int(Kernel.NAME)]))
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_worker_loop_self_flush_delivers_without_caller_flush(self):
+        # worker_loop() with a flush period set (self_flush): the native decode thread
+        # drives cuptiActivityFlushAll on its cadence and decodes the completed buffers
+        # itself, so records surface with NO caller flush(). Background drain is off, so
+        # the only Python work is an explicit drain -- flush() is never called.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        kind = ActivityKind.CONCURRENT_KERNEL
+        lock = threading.Lock()
+        columns: list = []
+        # A real (spread-out) cadence, not a tight spin: the decode thread's first flush is
+        # backdated to fire at worker start -- before these kernels exist -- so the kernels'
+        # buffers are only delivered by the NEXT cadence flush ~period later. Records showing
+        # up therefore proves the periodic self-flush actually fires on schedule.
+        flush_period_s = 5.0
+        monitor = CuptiMonitor(
+            background_flush_period_s=flush_period_s, background_drain_period_s=-1
+        )
+
+        def on_columns(cols):
+            if kind in cols:
+                with lock:
+                    columns.append(cols[kind])
+
+        try:
+            obs = monitor.register({kind: {Kernel.START, Kernel.END}}, on_columns)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.addCleanup(monitor.unregister, obs)
+
+        x = torch.randn(128, 128, device="cuda")
+        for _ in range(4):
+            x = torch.relu(x @ x)
+        x.sum().item()
+        torch.cuda.synchronize()
+
+        # Poll past one cadence: the decode thread self-flushes+decodes on its period
+        # (buffers_completed grows with no flush()); drain pulls the decoded columns to the
+        # observer. Deadline comfortably exceeds the period so the cadence flush lands.
+        deadline = time.time() + flush_period_s * 3 + 5.0
+        total = 0
+        while time.time() < deadline:
+            monitor._drain_and_dispatch()
+            with lock:
+                total = sum(len(c[int(Kernel.START)]) for c in columns)
+            if total > 0:
+                break
+            time.sleep(0.1)
+        self.assertGreater(monitor.stats()["buffers_completed"], 0)
+        self.assertGreater(total, 0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_worker_loop_no_self_flush_waits_for_caller_flush(self):
+        # worker_loop() with no flush period (self_flush off): the decode thread blocks on
+        # get_completed() and never self-flushes, so with a normal buffer nothing is
+        # delivered until the caller drives flush(). Both cadences off (caller-driven).
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti.cupti_python import CuptiError
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        kind = ActivityKind.CONCURRENT_KERNEL
+        lock = threading.Lock()
+        columns: list = []
+        monitor = CuptiMonitor(
+            background_flush_period_s=-1, background_drain_period_s=-1
+        )
+
+        def on_columns(cols):
+            if kind in cols:
+                with lock:
+                    columns.append(cols[kind])
+
+        try:
+            obs = monitor.register({kind: {Kernel.START, Kernel.END}}, on_columns)
+        except CuptiError as e:
+            self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
+        self.addCleanup(monitor.unregister, obs)
+
+        x = torch.randn(128, 128, device="cuda")
+        for _ in range(4):
+            x = torch.relu(x @ x)
+        x.sum().item()
+        torch.cuda.synchronize()
+
+        # No self-flush and no caller flush: the idle decode thread decodes nothing.
+        time.sleep(0.2)
+        monitor._drain_and_dispatch()
+        with lock:
+            before = sum(len(c[int(Kernel.START)]) for c in columns)
+        self.assertEqual(monitor.stats()["buffers_completed"], 0)
+        self.assertEqual(before, 0)
+
+        # The caller-driven flush is what delivers the records.
+        monitor.flush(sync=True)
+        with lock:
+            after = sum(len(c[int(Kernel.START)]) for c in columns)
+        self.assertGreater(monitor.stats()["buffers_completed"], 0)
+        self.assertGreater(after, 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_approx_timestamp_callback_engages_under_udr(self):
@@ -758,7 +898,7 @@ class TestCuptiMonitorCUDA(TestCase):
                     len(next(iter(c.values()))) if c else 0
                 )
 
-        m = CuptiMonitor(buffer_size=1024, flush_period_s=0.02)
+        m = CuptiMonitor(buffer_size=1024, background_flush_period_s=0.02)
         want = {
             ActivityKind.CONCURRENT_KERNEL: {
                 Kernel.START,

@@ -334,6 +334,15 @@ class _PyLibCupti:
             or 0
         )
 
+    def get_flush_fn_address(self) -> int:
+        """Raw address of ``cuptiActivityFlushAll``, for the native decode worker to
+        drive the periodic plain flush directly -- so the native module needs no
+        libcupti link either (mirrors ``get_next_record_fn_address``). Returns 0 if
+        the symbol is absent."""
+        if not hasattr(self._lib, "cuptiActivityFlushAll"):
+            return 0
+        return ctypes.cast(self._lib.cuptiActivityFlushAll, ctypes.c_void_p).value or 0
+
     def get_timestamp(self, sub_handle: int) -> int:
         """CUPTI's normalized nanosecond clock for a subscriber -- the same timebase
         as activity record START/END timestamps, so a value captured here is directly
