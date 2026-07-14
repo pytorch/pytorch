@@ -578,7 +578,9 @@ class TestNew2dParallelTraining(DTensorContinuousTestBase):
                         continue
                     if type(p2) is DTensor:
                         p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
-                    self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
+                    self.assertTrue(
+                        torch.allclose(p1, p2), lambda msg: f"{msg}\n{p1} vs {p2}"
+                    )
 
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_state_enable_extension(self):

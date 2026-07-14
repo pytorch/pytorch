@@ -204,6 +204,17 @@ void ProcessGroupNCCL::abort() {
   comm_state_ = CommState::ERROR;
 }
 
+::c10d::ErrorType ProcessGroupNCCL::getError() {
+  switch (comm_state_.load()) {
+    case CommState::TIMEOUT:
+      return ::c10d::ErrorType::TIMEOUT;
+    case CommState::ERROR:
+      return ::c10d::ErrorType::COMM_ERROR;
+    default:
+      return ::c10d::ErrorType::SUCCESS;
+  }
+}
+
 void ProcessGroupNCCL::finalize() {
   if (init_state_ == InitializationState::UNINITIALIZED) {
     throw std::runtime_error("ProcessGroupNCCL not initialized");
@@ -1454,9 +1465,11 @@ NCCLException::NCCLException(
     const std::string& message,
     ncclResult_t result,
     ncclComm_t comm)
-    : message_(
-          message + ": " + nccl_api.getErrorString(result) +
-          " \nNCCL Last Error: " + nccl_api.getLastError(comm)),
+    : message_(fmt::format(
+          "{}: {} \nNCCL Last Error: {}",
+          message,
+          nccl_api.getErrorString(result),
+          nccl_api.getLastError(comm))),
       result_(result) {}
 
 const char* NCCLException::what() const noexcept {
