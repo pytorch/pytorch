@@ -183,30 +183,34 @@ class TestDecomp(NNTestCase):
     def test_small_mm_no_pointwise_for_large_dims(self, device):
         if device == "cpu":
             self.skipTest("GPU-only test")
-        from torch._inductor.utils import run_and_get_code
+        from torch._dynamo.utils import counters
+
+        counters.clear()
 
         def fn(a, b):
             return torch.mm(a, b)
 
         a = torch.randn(256, 5, device=device)
         b = torch.randn(5, 5, device=device)
-        _, (code,) = run_and_get_code(torch.compile(fn), a, b)
-        self.assertIn("extern_kernels.mm", code)
+        torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 0)
 
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @config.patch(max_autotune_gemm=True)
     def test_small_mm_no_pointwise_under_max_autotune(self, device):
         if device == "cpu":
             self.skipTest("GPU-only test")
-        from torch._inductor.utils import run_and_get_code
+        from torch._dynamo.utils import counters
+
+        counters.clear()
 
         def fn(a, b):
             return torch.mm(a, b)
 
         a = torch.randn(256, 3, device=device)
         b = torch.randn(3, 4, device=device)
-        _, (code,) = run_and_get_code(torch.compile(fn), a, b)
-        self.assertIn("extern_kernels.mm", code)
+        torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 0)
 
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize(
