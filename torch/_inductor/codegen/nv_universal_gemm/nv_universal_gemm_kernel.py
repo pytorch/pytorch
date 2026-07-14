@@ -228,16 +228,9 @@ def _worker_nvgemm_autotuning_precompile(
     Returns (None, elapsed_us) for compatibility with the precompile callback.
     """
     import os
-    import sys
     import time
 
     os.environ.update(extra_env)
-
-    # Block-scaled (nvfp4/mxfp8) CuTeDSL compilation recurses deep (nested
-    # scale-factor swizzle layouts) -- fine under the main process's raised limit
-    # but over the subprocess worker's default 1000. Match a generous limit so
-    # scaled precompile runs in a worker like dense does.
-    sys.setrecursionlimit(max(sys.getrecursionlimit(), 10000))
 
     start_ns = time.time_ns()
 
