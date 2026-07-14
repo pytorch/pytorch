@@ -3021,6 +3021,11 @@ class TestFakeTensor(TestCase):
         self._test_fake_helper(device, dtype, op, context_fn)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
+        if "xpu" in device and (
+            "fft" in op.name or "nn.functional.max_unpool2d" in op.name
+        ):
+            self.skipTest("Skip on XPU for torch-xpu-ops/issues/3599")
+
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample in samples:
