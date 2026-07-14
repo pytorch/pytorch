@@ -518,6 +518,10 @@ PyObject* PyNode::to_py_args(
     pybind11::gil_scoped_release gil;
     return variable.zeros(dg);
   };
+  auto metadata_zeros_without_gil = [](const InputMetadata& metadata) {
+    pybind11::gil_scoped_release gil;
+    return metadata.zeros_like();
+  };
 
   auto num_inputs = inputs.size();
   THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
@@ -530,6 +534,13 @@ PyObject* PyNode::to_py_args(
         (input_metadata(i).was_default_constructed() &&
          !py_fn->materialize_non_diff_grads)) {
       input = THPVariable_Wrap(inputs[i]);
+    } else if (
+        output_info[i].is_empty &&
+        !input_metadata(i).was_default_constructed()) {
+      // The empty output_info entry is a placeholder for an ordinary
+      // differentiable output. The node's InputMetadata has the same
+      // shape/options data we need to materialize an undefined grad output.
+      input = THPVariable_Wrap(metadata_zeros_without_gil(input_metadata(i)));
     } else {
       input =
           THPVariable_Wrap(zeros_without_gil(output_info[i], *device_guard));
@@ -839,7 +850,15 @@ static void _wrap_outputs(
              isDifferentiableType(wrapped_output->scalar_type()));
         bool use_zeros_like =
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
-        self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
+        if (is_differentiable && !use_zeros_like) {
+          // This slot is still positional, but for ordinary differentiable
+          // outputs we can use the node's InputMetadata later instead of
+          // copying duplicate VariableInfo here.
+          self->output_info.emplace_back();
+        } else {
+          self->output_info.emplace_back(
+              wrapped_output.value(), use_zeros_like);
+        }
       }
       PyTuple_SetItem(
           outputs, i, THPVariable_Wrap(std::move(wrapped_output.value())));
