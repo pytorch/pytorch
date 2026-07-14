@@ -2,6 +2,7 @@
 
 #include <ATen/core/TensorBase.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <utility>
 
 namespace at {
 
@@ -26,7 +27,7 @@ struct TORCH_API TensorGeometry {
       strides_[i] = expected_stride;
       expected_stride *= sizes_[i];
     }
-    numel_ = expected_stride;
+    numel_ = std::move(expected_stride);
   }
 
   explicit TensorGeometry(const TensorBase& t)
