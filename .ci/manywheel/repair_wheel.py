@@ -27,10 +27,21 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from auditwheel.wheeltools import add_platforms, get_wheel_platforms, InWheelCtx
+from auditwheel.wheeltools import add_platforms, InWheelCtx
 
 
 PATCHELF = "/usr/local/bin/patchelf"
+
+
+def wheel_platform_tags(wheel_name: str) -> list[str]:
+    """Platform tags encoded in a wheel filename.
+
+    The filename is ``{name}-{version}-{python}-{abi}-{platform}.whl``; the
+    platform field is the last ``-``-delimited component and may itself be a
+    ``.``-joined set of tags (e.g. ``linux_x86_64`` or
+    ``manylinux1_x86_64.manylinux_2_17_x86_64``).
+    """
+    return wheel_name.removesuffix(".whl").rsplit("-", 1)[-1].split(".")
 
 
 @dataclass
@@ -361,7 +372,7 @@ def repair_wheel(
         # metadata. add_platforms updates ctx.out_wheel to the new name; RECORD
         # regeneration and repacking happen when the context exits.
         add_platforms(
-            ctx, [platform_tag], remove_platforms=get_wheel_platforms(wheel.name)
+            ctx, [platform_tag], remove_platforms=wheel_platform_tags(wheel.name)
         )
 
 
