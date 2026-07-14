@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import _compat_pickle
 import copyreg
 import functools
 import importlib
@@ -305,7 +306,7 @@ def _validate_loaded_sparse_tensors(weights_only=False):
             return
         # We disable pinning check (see check_pinning=False below) to
         # avoid gh-153143. In fact, pinning check is unnecessary
-        # anywhy when loading sparse data from external sources.
+        # anyway when loading sparse data from external sources.
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
@@ -1156,6 +1157,16 @@ NAME_MAPPING = {
     ("exceptions", "StandardError"): ("builtins", "Exception"),
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
+
+# Protocol 2 pickle (torch.save's default) maps builtin exceptions to the
+# Python 2 "exceptions" module via REVERSE_NAME_MAPPING; map them back so
+# allowlisted exception types resolve under their builtins.* names.
+NAME_MAPPING.update(
+    {
+        ("exceptions", name): ("builtins", name)
+        for name in _compat_pickle.PYTHON2_EXCEPTIONS
+    }
+)
 
 
 def _chunk_or_narrow_cat(

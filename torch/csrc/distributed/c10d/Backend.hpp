@@ -170,11 +170,11 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support shrink"));
   }
 
-  virtual void setTimeout(std::chrono::milliseconds timeout) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ", getBackendName(), " does not support setting timeout"));
+  virtual void setTimeout(std::chrono::milliseconds /*timeout*/) {
+    TORCH_WARN(
+        "Backend ",
+        getBackendName(),
+        " does not support setting timeout; the new value is ignored");
   }
 
   // Fault Tolerance / Reconfigure API
@@ -504,17 +504,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not support monitoredBarrier, only GLOO supports monitored barrier."));
   }
 
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store. Only implemented
-  // for GLOO and NCCL backends currently.
+  // Deprecated no-op: sequence numbers now always start at 0 on every rank, so
+  // there is no initial value to agree on. Kept for backward compatibility with
+  // existing callers; it warns and does nothing.
   virtual void setSequenceNumberForGroup() {
-    auto backendName = getBackendName();
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            backendName,
-            " does not yet support sequence numbers."));
+    TORCH_WARN_ONCE(
+        "setSequenceNumberForGroup() is deprecated and is now a no-op; "
+        "sequence numbers always start at 0 on every rank. Remove calls to "
+        "_set_sequence_number_for_group().");
   }
 
   // Retrieves the current sequence number for the whole group, which should be
@@ -713,10 +710,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // appropriate logging etc.
   void init();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const int rank_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const int size_;
+  int rank_;
+  int size_;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;

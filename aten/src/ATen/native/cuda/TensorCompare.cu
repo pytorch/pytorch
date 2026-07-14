@@ -44,11 +44,14 @@ void isneginf_kernel_impl(TensorIteratorBase &iter) {
 void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_cuda", [&] {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
-      scalar_t result = ::min(::max(v, lower), upper);
+      scalar_t result = (v < lower) ? lower : v;
+      result = (upper < result) ? upper : result;
 
-      result = at::_isnan(upper) ? upper : result;
-      result = at::_isnan(lower) ? lower : result;
-      result = at::_isnan(v) ? v : result;
+      if constexpr (std::numeric_limits<scalar_t>::has_quiet_NaN) {
+        result = at::_isnan(upper) ? upper : result;
+        result = at::_isnan(lower) ? lower : result;
+        result = at::_isnan(v) ? v : result;
+      }
 
       return result;
     });
@@ -62,15 +65,24 @@ void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar li
     auto lim1_val = lim1.to<opmath_t>();
 
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      opmath_t val = static_cast<opmath_t>(v);
       // Propagate nan, which doesn't propagate automatically for ROCm
       if (_isnan(static_cast<opmath_t>(v))) {
         return v;
       } else if (minmax==at::native::detail::ClampLimits::Min){
-        return ::max(static_cast<opmath_t>(v), lim0_val);
+        if (val == lim0_val)
+          return v;
+        return (val < lim0_val) ? static_cast<scalar_t>(lim0_val) : v;
       } else if (minmax==at::native::detail::ClampLimits::Max){
-        return ::min(static_cast<opmath_t>(v), lim0_val);
+        if (val == lim0_val)
+          return v;
+        return (val > lim0_val) ? static_cast<scalar_t>(lim0_val) : v;
       } else {
-        return ::min(::max(static_cast<opmath_t>(v), lim0_val), lim1_val);
+        // The following replaces std::clamp(val, low, high) and is a viable solution for
+        // both CUDA and ROCm since std::clamp and this replacement generates the same PTX.
+        // The replacement should generate the same PTX as std::clamp. See https://godbolt.org/z/Wde9KW3v4
+        opmath_t result = (val < lim0_val) ? lim0_val : val;
+        return scalar_t((lim1_val < result) ? lim1_val : result);
       }
     });
   });

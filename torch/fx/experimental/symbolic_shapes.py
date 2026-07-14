@@ -57,11 +57,11 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtrackingtensor
+from torch._custom_class_base import CustomClassBase
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-from torch._opaque_base import OpaqueBase
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
@@ -110,6 +110,7 @@ if TYPE_CHECKING:
     from torch import Tensor
     from torch._dynamo.source import TensorPropertySource
     from torch._subclasses.fake_tensor import FakeTensor
+    from torch.fx.experimental.dynamic_spec import IntVar, ShapesSpec, TensorSpec
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 
@@ -1006,7 +1007,7 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
     elif val is None:
         pass
     # see Note: [Generator arguments in AOTDispatcher]
-    elif isinstance(val, torch.Generator) or is_opaque_value(val):
+    elif isinstance(val, torch.Generator) or is_custom_class_obj(val):
         pass
     elif isinstance(val, FakeScriptObject):
         pass
@@ -1334,11 +1335,11 @@ def _free_unbacked_symbols_with_path(
         and not is_batchedtensor(a)
         and not is_gradtrackingtensor(a)
     ):
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_real_tensor
 
-        if not isinstance(a, FakeTensor):
+        if not is_fake_tensor(a):
             raise AssertionError(f"Expected FakeTensor, got {type(a)}")
-        match_tensor(a, a.real_tensor)
+        match_tensor(a, maybe_get_real_tensor(a))
     elif (
         isinstance(a, (torch.SymInt, torch.SymFloat))
         and isinstance(s := expr(a), sympy.Symbol)
@@ -3018,19 +3019,12 @@ class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
 @dataclass(frozen=True, slots=True)
 class _ShapeGuardsHelper:
     exprs: list[str]
-    source_locations: list[SLoc | None]
 
 
 # A dataclass for storing C++ expressions and helper variables
 @dataclass(frozen=True, slots=True)
 class _CppShapeGuardsHelper(_ShapeGuardsHelper):
     source_to_symbol: dict[Source, sympy.Symbol]
-
-
-@dataclass(frozen=True, slots=True)
-class _ShapeGuardExpression:
-    expr: str
-    sloc: SLoc | None
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPythonPrinter):
@@ -4010,7 +4004,6 @@ class ShapeEnv:
         )
 
         self.guards: list[ShapeGuard] = []
-        self._evaluate_guards_source_location: SLoc | None = None
         self.axioms: dict[sympy.Expr, sympy.Expr] = {}
 
         # A set of ids that have already been allocated. This is used
@@ -4356,7 +4349,6 @@ class ShapeEnv:
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
-            "_evaluate_guards_source_location",
             # Cached state for optimization_hint unbacked canonicalization
             "_equality_graph",
             "_unbacked_replacements",
@@ -6479,11 +6471,11 @@ class ShapeEnv:
                                     inner_context.constraint_strides,  # type: ignore[attr-defined]
                                 )
                             )
-                        case OpaqueBase():
+                        case CustomClassBase():
                             pass
                         case unexpected:
                             raise AssertionError(
-                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                                f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                             )
             else:
                 sources_tensors_constraints = [
@@ -6524,7 +6516,6 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         all_exprs: list[list[str]] = [[] for _ in langs]
-        all_source_locations: list[list[SLoc | None]] = [[] for _ in langs]
 
         self.dim_constraints = DimConstraints(
             symbol_to_source,
@@ -6564,9 +6555,7 @@ class ShapeEnv:
                 if is_dim(source):
                     self.dim_constraints.add_equality(source, expr)
 
-                for exprs, source_locations, printer, lang in zip(
-                    all_exprs, all_source_locations, printers, langs
-                ):
+                for exprs, printer, lang in zip(all_exprs, printers, langs):
                     res = f"{printer.print_source(source)} == {printer.doprint(expr)}"
 
                     if lang == "verbose_python":
@@ -6584,7 +6573,6 @@ class ShapeEnv:
                         else:
                             res = f"{res}  # (unknown source {srcname}, please file a bug)"
                     exprs.append(res)
-                    source_locations.append(None)
 
                 if (
                     isinstance(source, TensorPropertySource)
@@ -6658,14 +6646,11 @@ class ShapeEnv:
                         raise AssertionError("dim_constraints must not be None")
                     is_trivial = self.dim_constraints.add(expr)
 
-                for exprs, source_locations, printer, lang in zip(
-                    all_exprs, all_source_locations, printers, langs
-                ):
+                for exprs, printer, lang in zip(all_exprs, printers, langs):
                     guard_expr = printer.doprint(expr)
                     if lang == "verbose_python":
                         guard_expr = f"{guard_expr}  # {guard.sloc}"
                     exprs.append(guard_expr)
-                    source_locations.append(guard.sloc)
 
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
@@ -6756,20 +6741,12 @@ class ShapeEnv:
                     verbose_expr = f"{rf} <= {r.upper}  # {vr_sloc.upper}"
             if bounds:
                 bound = sympy.And(*bounds, evaluate=False)
-                bound_sloc = (
-                    vr_sloc.lower
-                    if r.lower not in (-sympy.oo, -int_oo)
-                    else vr_sloc.upper
-                )
 
-                for exprs, source_locations, printer, lang in zip(
-                    all_exprs, all_source_locations, printers, langs
-                ):
+                for exprs, printer, lang in zip(all_exprs, printers, langs):
                     if lang == "verbose_python":
                         exprs.append(verbose_expr)
                     else:
                         exprs.append(printer.doprint(bound))
-                    source_locations.append(bound_sloc)
                 # NB: verbose_exprs are done above
 
                 # Check constraints
@@ -6800,9 +6777,7 @@ class ShapeEnv:
             # merry hell with the reasoning.
             if symbol_is_type(symbol, SymT.FLOAT):
                 res = f"not math.isnan({py_printer.print_source(sources[0])})"
-                for exprs, source_locations, printer, lang in zip(
-                    all_exprs, all_source_locations, printers, langs
-                ):
+                for exprs, printer, lang in zip(all_exprs, printers, langs):
                     if lang == "verbose_python":
                         exprs.append(
                             f"{res}  # implicit guard for float input due to NaN specialization in the framework"
@@ -6813,7 +6788,6 @@ class ShapeEnv:
                         exprs.append(f"~std::isnan({printer.print_source(sources[0])})")
                     else:
                         raise NotImplementedError(f"Unimplemented for lang: {lang}")
-                    source_locations.append(None)
 
         # Exclusion guard for stable graph selection with automatic dynamic.
         #
@@ -6894,16 +6868,13 @@ class ShapeEnv:
                     excl_expr = sympy.Or(
                         *[sympy.Ne(sym, val, evaluate=False) for sym, val in all_pairs]
                     )
-                for exprs, source_locations, printer, lang in zip(
-                    all_exprs, all_source_locations, printers, langs
-                ):
+                for exprs, printer, lang in zip(all_exprs, printers, langs):
                     guard_expr = printer.doprint(excl_expr)
                     if lang == "verbose_python":
                         guard_expr = (
                             f"{guard_expr}  # exclusion guard for automatic dynamic"
                         )
                     exprs.append(guard_expr)
-                    source_locations.append(None)
 
         if constraint_violations:
             warn_msgs: list[str] = []
@@ -6974,21 +6945,15 @@ class ShapeEnv:
             self._check_translation_validate()
 
         helpers: list[_ShapeGuardsHelper] = []
-        for exprs, source_locations, printer, lang in zip(
-            all_exprs, all_source_locations, printers, langs
-        ):
+        for exprs, printer, lang in zip(all_exprs, printers, langs):
             if lang == "cpp":
                 if not isinstance(printer, _ShapeGuardCppPrinter):
                     raise AssertionError(
                         f"Expected _ShapeGuardCppPrinter, got {type(printer)}"
                     )
-                helpers.append(
-                    _CppShapeGuardsHelper(
-                        exprs, source_locations, printer.source_to_symbol
-                    )
-                )
+                helpers.append(_CppShapeGuardsHelper(exprs, printer.source_to_symbol))
             else:
-                helpers.append(_ShapeGuardsHelper(exprs, source_locations))
+                helpers.append(_ShapeGuardsHelper(exprs))
         return helpers
 
     def produce_guards_expression(
@@ -7003,45 +6968,18 @@ class ShapeEnv:
         for the given placeholders and returns a string expression to be evaluated
         by evaluate_guards_expression given concrete values for the placeholders.
         """
-        guards_expr, _ = self.produce_guards_expression_with_source_info(
-            placeholders, guards=guards, ignore_static=ignore_static
-        )
-        return guards_expr
-
-    def produce_guards_expression_with_source_info(
-        self,
-        placeholders: Sequence[SymInt | FakeTensor],
-        *,
-        guards: list[ShapeGuard] | None = None,
-        ignore_static: bool = True,
-    ) -> tuple[str | None, list[_ShapeGuardExpression] | None]:
-        """
-        Like produce_guards_expression(), but also returns each individual
-        guard expression paired with the ShapeGuard source location that
-        produced it, when one is available.
-        """
         from torch._dynamo.source import LocalSource
 
         arg_names = [f"t{i}" for i in range(len(placeholders))]
-        produced_guards = self.produce_guards_verbose(
-            placeholders,  # pyrefly: ignore [bad-argument-type]
+        produced_guards = self.produce_guards(
+            placeholders,
             [LocalSource(a) for a in arg_names],
             guards=guards,
             ignore_static=ignore_static,
-            langs=("python",),
-        )[0]
-        if produced_guards.exprs:
-            if len(produced_guards.source_locations) != len(produced_guards.exprs):
-                raise AssertionError(
-                    "guard expressions and source locations must stay in sync"
-                )
-            source_locations = produced_guards.source_locations
-            guards_with_source = [
-                _ShapeGuardExpression(expr, sloc)
-                for expr, sloc in zip(produced_guards.exprs, source_locations)
-            ]
-            return " and ".join(produced_guards.exprs), guards_with_source
-        return None, None
+        )
+        if produced_guards:
+            return " and ".join(produced_guards)
+        return None
 
     def evaluate_symexpr(self, code: str) -> int | float | bool:
         """
@@ -7067,27 +7005,6 @@ class ShapeEnv:
         """
         arg_names = [f"t{i}" for i in range(len(args))]
         return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
-
-    def evaluate_guards_expression_with_source_info(
-        self, guards: Sequence[_ShapeGuardExpression], args: Sequence[object]
-    ) -> bool:
-        """
-        Evaluate a sequence produced by
-        produce_guards_expression_with_source_info(), using each stored source
-        location when replaying symbolic guards into this ShapeEnv.
-        """
-        arg_names = [f"t{i}" for i in range(len(args))]
-        locals_ = {"L": dict(zip(arg_names, args))}
-        old_sloc = self._evaluate_guards_source_location
-        try:
-            for guard in guards:
-                self._evaluate_guards_source_location = guard.sloc
-                result = eval(guard.expr, SYMPY_INTERP, locals_)
-                if not bool(result):
-                    return False
-        finally:
-            self._evaluate_guards_source_location = old_sloc
-        return True
 
     def evaluate_guards_for_args(
         self,
@@ -7374,7 +7291,12 @@ class ShapeEnv:
         # axioms with compute hint NYE
         if compute_hint and axioms:
             raise AssertionError("compute_hint and axioms cannot both be set")
-        expr = self.simplify(expr, size_oblivious)
+        expr = self.simplify(
+            expr,
+            size_oblivious,
+            axioms=axioms,
+            var_to_range=var_to_range,
+        )
 
         if compute_hint:
             expr = expr.xreplace(self.backed_var_to_val).xreplace(
@@ -7477,7 +7399,14 @@ class ShapeEnv:
         self._update_version_counter()
 
     @_lru_cache
-    def simplify(self, expr: _SympyT, size_oblivious: bool = False) -> _SympyT:
+    def simplify(
+        self,
+        expr: _SympyT,
+        size_oblivious: bool = False,
+        *,
+        axioms: tuple[SympyBoolean] | None = None,
+        var_to_range: tuple[tuple[sympy.Symbol, ValueRanges[sympy.Expr]]] | None = None,
+    ) -> _SympyT:
         """Use known constraints and replacements to simplify the given expr"""
         expr = safe_expand(expr)
         expr = self.replace(expr)
@@ -7493,9 +7422,17 @@ class ShapeEnv:
                 if b == 1 or b == 0:
                     a, b = b, a
 
-                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1)):
+                if a == 1 and self._maybe_evaluate_static(
+                    sympy.Ge(b, 1),
+                    axioms=axioms,
+                    var_to_range=var_to_range,
+                ):
                     min_max_replacements[atom] = b
-                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
+                if a == 0 and self._maybe_evaluate_static(
+                    sympy.Ge(b, 0),
+                    axioms=axioms,
+                    var_to_range=var_to_range,
+                ):
                     min_max_replacements[atom] = b
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
@@ -7678,6 +7615,29 @@ class ShapeEnv:
                 "guard_or_false, guard_or_true and statically_known_true."
             )
 
+        # If the ShapesSpec/ParamsSpec dynamic-shapes API is in use, this DDE is
+        # often a derived dim / unanchored IntVar whose relation has not been
+        # lowered. Point the user at the `assumptions=` bypass and list any
+        # un-materialized relations so the cause is visible (the structural check
+        # `_finalize_spec_wiring` runs post-trace, so a branch can DDE first).
+        spec_msg = ""
+        pending = self._shape_spec_pending_assumptions
+        if self._spec_symbol_to_compile_symbol or pending:
+            spec_msg = (
+                "\n\nThe ShapesSpec/ParamsSpec dynamic-shapes API is in use. You can "
+                "often resolve this by adding a relational assumption to your "
+                "ShapesSpec, e.g. `assumptions=[a == 2 * b]`, so the relation is "
+                "known at trace time."
+            )
+            if pending:
+                relations = "\n".join(
+                    f"  - {re.sub(r'#[0-9]+', '', str(b))}" for _free, b in pending
+                )
+                spec_msg += (
+                    "\nThe following spec relation(s) were not materialized before "
+                    f"this guard and may be the cause:\n{relations}"
+                )
+
         msg = (
             f"{desc} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
@@ -7690,6 +7650,7 @@ class ShapeEnv:
             "For more debugging help, see "
             "https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit?usp=sharing\n"
             + maybe_extra_debug
+            + spec_msg
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
@@ -8761,10 +8722,9 @@ class ShapeEnv:
                     # at this point, we've evaluated the concrete expr value, and have
                     # flipped/negated the guard if necessary. Now we know what to guard
                     # or defer to runtime assert on.
-                    guard_sloc = self._evaluate_guards_source_location
-                    if guard_sloc is None:
-                        guard_sloc = self._get_sloc()
-                    guard = ShapeGuard(g, guard_sloc, size_oblivious=size_oblivious)
+                    guard = ShapeGuard(
+                        g, self._get_sloc(), size_oblivious=size_oblivious
+                    )
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
             else:
@@ -9218,7 +9178,230 @@ def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
     shape_env = sym_node.shape_env
     if shape_env is None:
         raise AssertionError("shape_env is required for _get_placeholder_expr")
-    result = sym_node._expr
-    if result in shape_env.unbacked_renamings:
-        return shape_env.unbacked_renamings[result]
+    result = cast(sympy.Expr, sym_node._expr)
+    if shape_env.unbacked_renamings:
+        return result.xreplace(shape_env.unbacked_renamings)
     return result
+
+
+# ---------------------------------------------------------------------------
+# ShapesSpec wiring: bind spec leaves into the real (compile-time) ShapeEnv.
+#
+# These helpers operate on ShapeEnv plus the spec types from
+# torch.fx.experimental.dynamic_spec. They live here because they are
+# fundamentally shape-env operations (mutating var_to_hint_override,
+# _spec_symbol_to_compile_symbol, _shape_spec_pending_assumptions, etc.)
+# and are consumed by both make_fx and the dynamo strict export tracer.
+# ---------------------------------------------------------------------------
+
+
+def _symbolic_context_from_shapes_spec(
+    e: Any,
+    source: Source,
+    tensor_spec: TensorSpec | None,
+    view_base_context: SymbolicContext | None,
+    shape_env_to_source_to_symbol_cache: dict[Any, Any],
+) -> StatefulSymbolicContext:
+    if tensor_spec is not None and len(tensor_spec) != e.dim():
+        raise ValueError(
+            f"TensorSpec has {len(tensor_spec)} dims but tensor {source.name} "
+            f"has {e.dim()} dims"
+        )
+    dynamic_sizes = []
+    dynamic_strides = [DimDynamic.INFER_STRIDE] * e.dim()
+
+    for i in range(e.dim()):
+        if tensor_spec is None:
+            dynamic_sizes.append(DimDynamic.STATIC)
+        else:
+            dim_spec = tensor_spec[i]
+            if isinstance(dim_spec, int):
+                actual_size = e.size(i)
+                if actual_size != dim_spec:
+                    raise ValueError(
+                        f"shapes_spec declares dim {i} as static with value "
+                        f"{dim_spec}, but got {actual_size}"
+                    )
+                dynamic_sizes.append(DimDynamic.STATIC)
+            elif isinstance(dim_spec, torch.SymInt):
+                dynamic_sizes.append(DimDynamic.UNBACKED)
+            elif dim_spec is None:
+                dynamic_sizes.append(DimDynamic.STATIC)
+            else:
+                raise ValueError(
+                    f"shapes_spec dim {i}: unexpected value {dim_spec!r} "
+                    f"(expected LeafIntSpec)"
+                )
+
+    return StatefulSymbolicContext(
+        dynamic_sizes=dynamic_sizes,
+        dynamic_strides=dynamic_strides,
+        view_base_context=view_base_context,
+        tensor_source=source,
+        shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+    )
+
+
+def _wire_tensor_spec_dims(tensor_spec: TensorSpec, fake_tensor: torch.Tensor) -> None:
+    """Wire each ``ShapeVar``/``IntVar`` dim of ``tensor_spec`` to the
+    corresponding fake-tensor symbolic size via ``_wire_spec_slot``.
+    """
+    for dim_i in range(fake_tensor.dim()):
+        dim_spec = tensor_spec[dim_i]
+        if dim_spec is None or isinstance(dim_spec, int):
+            continue
+        size_sym = fake_tensor.size(dim_i)
+        if not isinstance(size_sym, torch.SymInt):
+            continue
+        _wire_spec_slot(dim_spec, size_sym)
+
+
+def _wire_spec_slot(
+    spec: IntVar | SymInt,
+    size_sym: torch.SymInt,
+) -> None:
+    """Wire an IntVar or SymInt spec leaf into the real shape env.
+
+    A spec leaf may be:
+      - IntVar:  bare spec variable. Records
+        ``_spec_symbol_to_compile_symbol[A.sympy_sym] = u_new`` so future bare/derived
+        uses can resolve A; emits a runtime eq-check on repeat occurrences
+        (dedup).
+      - SymInt:  derived expression (e.g. ``A * 2 + 1``) backed by the spec
+        ShapeEnv. Emits
+        ``torch._check(u_new == expr.xreplace(_spec_symbol_to_compile_symbol))``, or
+        defers to ``_shape_spec_pending_assumptions`` if any free spec symbol isn't
+        bound yet (drained on the next bare-IntVar binding).
+
+    ``_spec_symbol_to_compile_symbol`` only ever holds IntVar sympy.Symbol entries.
+
+    ``size_sym`` is the freshly allocated unbacked SymInt for this leaf's
+    input (tensor dim or scalar arg).
+    """
+    from torch.fx.experimental.dynamic_spec import IntVar
+    from torch.utils._typing_utils import not_none
+
+    shape_env = not_none(size_sym.node.shape_env)
+
+    if isinstance(spec, IntVar):
+        # Bare IntVar — first occurrence binds the spec sym to this input;
+        # subsequent occurrences dedup via runtime eq-check.
+        spec_sym = spec.sympy_sym
+        compile_expr = size_sym.node.expr
+        # Apply optimization hint on EVERY occurrence: var_to_hint_override
+        # is per-symbol and doesn't propagate via equivalence.
+        if spec.optimization_hint is not None:
+            shape_env.var_to_hint_override[compile_expr] = spec.optimization_hint
+        if spec_sym not in shape_env._spec_symbol_to_compile_symbol:
+            shape_env._spec_symbol_to_compile_symbol[spec_sym] = compile_expr
+            # Bounds apply ONLY on the canonical (first) symbol. Subsequent
+            # occurrences are tied to this one via the Eq runtime assert
+            # below; ShapeEnv._set_replacement / _refine_ranges intersect
+            # var_to_range across both sides of an integer Eq, so the
+            # bounds propagate to every other occurrence's symbol
+            # automatically.
+            if spec.min is not None:
+                torch._check(size_sym >= spec.min)
+            if spec.max is not None:
+                torch._check(size_sym <= spec.max)
+            _drain_shape_spec_pending_assumptions(shape_env)
+        else:
+            existing_expr = shape_env._spec_symbol_to_compile_symbol[spec_sym]
+            shape_env.guard_or_defer_runtime_assert(
+                sympy.Eq(compile_expr, existing_expr),
+                f"IntVar({spec.name}) dedup eq-check",
+            )
+    elif isinstance(spec, torch.SymInt):
+        spec_expr = spec.node.expr
+        free = spec_expr.free_symbols
+        deferred_bool = sympy.Eq(size_sym.node.expr, spec_expr)
+        if free.issubset(shape_env._spec_symbol_to_compile_symbol):
+            _emit_pending_spec_assumption(shape_env, deferred_bool)
+        else:
+            shape_env._shape_spec_pending_assumptions.append((free, deferred_bool))
+    else:
+        raise TypeError(
+            f"_wire_spec_slot: expected IntVar or SymInt, got {type(spec).__name__}"
+        )
+
+
+def _emit_pending_spec_assumption(shape_env: ShapeEnv, bool_expr: sympy.Expr) -> None:
+    """Substitute spec symbols and defer the resulting boolean as a runtime
+    assert. ``bool_expr`` is a sympy boolean (e.g. ``Eq``, ``Gt``) whose free
+    spec symbols must already be present in ``_spec_symbol_to_compile_symbol``."""
+    substituted = bool_expr.xreplace(shape_env._spec_symbol_to_compile_symbol)
+    shape_env.guard_or_defer_runtime_assert(substituted, "shapes_spec deferred check")
+
+
+def _drain_shape_spec_pending_assumptions(shape_env: ShapeEnv) -> None:
+    """Re-scan pending derived/assumption checks; emit any whose deps are now bound.
+
+    TODO: optimize with an inverted index (sym → pending entries) if the
+    pending list grows large. Inductor uses this pattern in
+    ``graph.py:ras_by_symbol``. Spec wiring typically has < 10 entries so
+    the linear scan here is fine; revisit if profiling shows otherwise.
+    """
+    pending = shape_env._shape_spec_pending_assumptions
+    if not pending:
+        return
+    subst_keys = shape_env._spec_symbol_to_compile_symbol.keys()
+    keep = []
+    for free, bool_expr in pending:
+        if free.issubset(subst_keys):
+            _emit_pending_spec_assumption(shape_env, bool_expr)
+        else:
+            keep.append((free, bool_expr))
+    shape_env._shape_spec_pending_assumptions[:] = keep
+
+
+def _wire_spec_assumptions(shape_env: ShapeEnv, shapes_spec: ShapesSpec) -> None:
+    """Append each ShapesSpec.assumptions SymBool to the pending list.
+    Called BEFORE any input is processed.
+    """
+    for a in shapes_spec._assumptions:
+        bool_expr = a.node.expr
+        shape_env._shape_spec_pending_assumptions.append(
+            (bool_expr.free_symbols, bool_expr)
+        )
+
+
+def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
+    """Verify all pending spec assumptions/derived-dim checks have been
+    emitted (i.e. every spec IntVar referenced by a derived expression or
+    user assumption has been bound by some bare-IntVar input slot).
+    """
+    pending = shape_env._shape_spec_pending_assumptions
+    if not pending:
+        return
+
+    subst_keys = shape_env._spec_symbol_to_compile_symbol.keys()
+
+    # Strip "#N" uid suffixes for user-facing error messages so callers see
+    # the original IntVar name ("a") rather than the disambiguated internal
+    # form ("a#0"). Works on both single sympy.Symbols and stringified
+    # expressions (e.g. "a#0 > b#1" -> "a > b").
+    def _pretty(s: object) -> str:
+        return re.sub(r"#\d+", "", str(s))
+
+    # Build a "expr (unbound: [...])" line per pending check that still
+    # has unbound deps.
+    lines = []
+    all_unbound: set[sympy.Symbol] = set()
+    for free, bool_expr in pending:
+        missing = free - subst_keys
+        if not missing:
+            raise RuntimeError(
+                f"_finalize_spec_wiring: pending entry has all symbols bound "
+                f"({bool_expr}); _drain_shape_spec_pending_assumptions should "
+                f"have removed it before finalize."
+            )
+        all_unbound |= missing
+        missing_names = sorted(_pretty(s) for s in missing)
+        lines.append(f"  - {_pretty(bool_expr)}  (unbound: {missing_names})")
+    raise ValueError(
+        f"shapes_spec: {len(lines)} pending check(s) reference unbound "
+        f"IntVar(s) {sorted(_pretty(s) for s in all_unbound)}. Every IntVar "
+        f"used in a derived expression or assumption must also appear as a "
+        f"bare-IntVar slot somewhere in the spec. Offending checks:\n"
+        + "\n".join(lines)
+    )

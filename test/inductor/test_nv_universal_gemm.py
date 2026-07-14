@@ -11,11 +11,11 @@ from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
     EPILOGUE_FN_NAME,
 )
-from torch._inductor.scheduler import Scheduler
-from torch._inductor.template_heuristics.nv_universal_gemm import (
+from torch._inductor.heuristics.template.nv_universal_gemm import (
     HeuristicConfig,
     NVUniversalGemmHeuristics,
 )
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
     ceildiv,
@@ -865,7 +865,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 self.assertIn(
                     "in_ptr0, in_ptr1, out_ptr0, stream=None",
                     line,
-                    f"Unexpected kernel signature: {line.strip()}",
+                    lambda msg: f"{msg}\nUnexpected kernel signature: {line.strip()}",
                 )
 
     def test_epilogue_with_aux_input(self):
@@ -1012,7 +1012,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         finite = [(ms, p) for ms, p in bench_results if ms != float("inf")]
         self.assertTrue(
             finite,
-            f"All NVGEMM benchmarks returned inf — workspace handling likely "
+            lambda msg: f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
             f"broken. Results: {bench_results}",
         )
 

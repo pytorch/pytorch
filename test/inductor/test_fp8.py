@@ -5,13 +5,15 @@ import unittest
 from unittest import mock
 
 import torch
+import torch._inductor.lowering as inductor_lowering
 from torch import Tensor
 from torch._C import FileCheck
-from torch._inductor import config, inductor_prims, utils
+from torch._inductor import config, inductor_prims, ir, utils
 from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
+from torch._inductor.lowering import clone as lowering_clone, register_lowering
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, sympy_index_symbol_with_prefix
 from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defined]
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
@@ -42,6 +44,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     is_big_gpu,
 )
+from torch.utils._sympy.symbol import SymT
 from torch.utils._triton import has_triton_tma_device
 
 
@@ -587,6 +590,65 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(expected, actual)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
+    @onlyCUDA
+    @parametrize(
+        "scale_a_shape,scale_b_shape",
+        [
+            ((1,), ()),
+            ((), (1,)),
+            ((1, 1, 1), ()),
+            ((1, 1, 1), (1,)),
+            ((1, 1, 1), (1, 1)),
+        ],
+    )
+    def test_scaled_mm_mixed_tensorwise_scale_ranks(
+        self, scale_a_shape, scale_b_shape, device
+    ):
+        M = N = K = 64
+        x_fp8 = torch.ones(M, K, device=device, dtype=torch.float8_e4m3fn)
+        w_fp8 = torch.ones(N, K, device=device, dtype=torch.float8_e4m3fn)
+        scale_a = torch.ones(scale_a_shape, device=device)
+        scale_b = torch.ones(scale_b_shape, device=device)
+
+        def fn(x_fp8, w_fp8, scale_a, scale_b):
+            return torch._scaled_mm(
+                x_fp8,
+                w_fp8.T,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.float32,
+            )
+
+        expected = fn(x_fp8, w_fp8, scale_a, scale_b)
+        actual = torch.compile(fn, fullgraph=True)(x_fp8, w_fp8, scale_a, scale_b)
+        self.assertEqual(expected, actual, rtol=1e-2, atol=1e-2)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm(msg="FP8 scaled_mm tensorwise eager path is not supported by hipBLAS")
+    @onlyCUDA
+    def test_scaled_mm_rejects_high_rank_scale_b(self, device):
+        M = N = K = 64
+        x_fp8 = torch.ones(M, K, device=device, dtype=torch.float8_e4m3fn)
+        w_fp8 = torch.ones(N, K, device=device, dtype=torch.float8_e4m3fn)
+        scale_a = torch.ones(1, 1, 1, device=device)
+        scale_b = torch.ones(1, 1, 1, device=device)
+
+        def fn(x_fp8, w_fp8, scale_a, scale_b):
+            return torch._scaled_mm(
+                x_fp8,
+                w_fp8.T,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.float32,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, r"t\(\) expects"):
+            fn(x_fp8, w_fp8, scale_a, scale_b)
+        with self.assertRaisesRegex(RuntimeError, r"t\(\) expects"):
+            torch.compile(fn, fullgraph=True)(x_fp8, w_fp8, scale_a, scale_b)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
@@ -622,9 +684,6 @@ class TestFP8Lowering(TestCase):
         bias = None
         if has_bias:
             bias = torch.randn(N, device=device, dtype=torch.bfloat16)
-
-        if "xpu" in device and use_fast_accum:
-            self.skipTest("XPU does not support use_fast_accum=True for now")
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
@@ -790,8 +849,6 @@ class TestFP8Lowering(TestCase):
         use_fast_accum: bool,
         device,
     ):
-        if "xpu" in device and use_fast_accum:
-            self.skipTest("XPU does not support use_fast_accum=True for now")
         dtype_float8 = torch.float8_e4m3fn
         dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
 
@@ -881,8 +938,6 @@ class TestFP8Lowering(TestCase):
         persistent_matmul: bool,
         device,
     ):
-        if "xpu" in device and use_fast_accum:
-            self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for row-wise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
         dtype_float8 = torch.float8_e4m3fn
@@ -1049,8 +1104,6 @@ class TestFP8Lowering(TestCase):
         scaling_block_sizes: tuple[int, int, int, int],
         device,
     ):
-        if "xpu" in device and use_fast_accum:
-            self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
         dtype_float8 = torch.float8_e4m3fn
@@ -1480,8 +1533,63 @@ class TestFP8Lowering(TestCase):
                     self.assertEqual(
                         input_values[0][i],
                         input_values[1][i],
-                        msg=f"idx {i} seed {seed}",
+                        msg=lambda msg: f"{msg}\nidx {i} seed {seed}",
                     )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyCUDA
+    def test_mxfp8_dtype_view_indexer_e2e(self, device):
+        with (
+            torch.library._scoped_library("test_fp8", "FRAGMENT") as lib,
+            mock.patch.dict(inductor_lowering.lowerings),
+        ):
+            lib.define("dtype_view_indexing_consumer(Tensor x) -> Tensor")
+            torch.library.impl(lib, "dtype_view_indexing_consumer", "CUDA")(
+                lambda x: x.clone()
+            )
+            torch.library.impl(lib, "dtype_view_indexing_consumer", "Meta")(
+                lambda x: torch.empty_like(x)
+            )
+
+            def lowering(x):
+                x.realize()
+                ir.as_storage_and_layout(x.unwrap_view(), freeze=True)
+                index = [
+                    sympy_index_symbol_with_prefix(SymT.INDEX, i)
+                    for i in range(len(x.get_size()))
+                ]
+                x.make_indexer()(index)
+                return lowering_clone(x)
+
+            register_lowering(
+                torch.ops.test_fp8.dtype_view_indexing_consumer.default,
+                type_promotion_kind=None,
+            )(lowering)
+
+            def fn(x):
+                x = x.reshape(128, 4, 32)
+                amax = torch.amax(torch.abs(x), -1, keepdim=True).float()
+                descale = amax / torch.finfo(torch.float8_e4m3fn).max
+                exponent = torch.where(
+                    torch.isnan(descale),
+                    torch.full((), 255, dtype=torch.uint8, device=x.device),
+                    (
+                        torch.clamp(torch.ceil(torch.log2(descale)), min=-127, max=127)
+                        + 127
+                    ).to(torch.uint8),
+                )
+                scale = exponent.view(torch.float8_e8m0fnu)
+                return torch.ops.test_fp8.dtype_view_indexing_consumer.default(
+                    scale
+                ).squeeze(-1)
+
+            x = torch.randn((128, 128), device=device, dtype=torch.bfloat16)
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(actual.shape, (128, 4))
+        self.assertEqual(actual.dtype, torch.float8_e8m0fnu)
+        self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyOn(["cuda", "xpu", "cpu"])
@@ -1598,6 +1706,50 @@ class TestFP8Lowering(TestCase):
             output_dtype=torch.bfloat16,
         )
         self.assertEqual(out_no_swizzle, out_explicit)
+
+    @onlyCUDA
+    @skipIfRocm  # ROCm MX gemm requires NO_SWIZZLE; swizzle is NVIDIA-only
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
+    def test_scaled_mm_v2_swizzle_compile(self, device):
+        """Swizzled scales (MX recipes on NVIDIA require SWIZZLE_32_4_4) are
+        not supported by any inductor template; the lowering must fall back
+        to the ATen kernel instead of failing compile."""
+        from torch.nn.functional import SwizzleType
+
+        M, K, N = 128, 128, 128
+        BLOCK_SIZE = 32
+        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        B_ref = torch.eye(N, device=device, dtype=torch.bfloat16)
+        A = A_ref.to(torch.float8_e4m3fn)
+        B = B_ref.to(torch.float8_e4m3fn)
+        A_scale = torch.full(
+            (M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        )
+        B_scale = torch.full(
+            (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        )
+        A_scale = to_blocked(A_scale)
+        B_scale = to_blocked(B_scale)
+
+        def fn(A, B, A_scale, B_scale):
+            return scaled_mm(
+                A,
+                B.t(),
+                A_scale,
+                ScalingType.BlockWise1x32,
+                B_scale,
+                ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+        y_eager = fn(A, B, A_scale, B_scale)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        y_compiled, (code,) = run_and_get_code(compiled, A, B, A_scale, B_scale)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
+        # The swizzled path must use the ATen fallback, not a generated kernel
+        FileCheck().check("_scaled_mm_v2").run(code)
 
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")

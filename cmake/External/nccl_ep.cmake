@@ -37,7 +37,29 @@ if(NOT __NCCL_EP_INCLUDED)
     set(__NCCL_EP_ARCH_ARG "-DCMAKE_CUDA_ARCHITECTURES=${__NCCL_EP_ARCHS}")
   endif()
 
-  message(STATUS "Configuring NCCL EP as third-party dependency (__caffe2_nccl_ep)")
+  # Branch on how torch links NCCL (USE_NCCL_EP supports both):
+  #  - USE_SYSTEM_NCCL=OFF (source/dev): torch statically embeds the submodule
+  #    NCCL, so build libnccl_ep.a against it and have the extension statically
+  #    link it -- self-contained, no nccl4py, no runtime libnccl_ep.so.
+  #  - USE_SYSTEM_NCCL=ON (wheel/CI): torch dynamically links the system NCCL, so
+  #    build libnccl_ep.so against that same NCCL; the extension NEEDED-links it
+  #    and resolves it (and its JIT headers) from the nccl4py wheel at runtime.
+  if(USE_SYSTEM_NCCL)
+    if(DEFINED ENV{NCCL_INCLUDE_DIR})
+      get_filename_component(__NCCL_EP_NCCL_HOME "$ENV{NCCL_INCLUDE_DIR}" DIRECTORY)
+    else()
+      list(GET NCCL_INCLUDE_DIRS 0 __nccl_inc)
+      get_filename_component(__NCCL_EP_NCCL_HOME "${__nccl_inc}" DIRECTORY)
+    endif()
+    set(__NCCL_EP_LIB "libnccl_ep.so")
+    set(__NCCL_EP_DEPENDS "")
+  else()
+    set(__NCCL_EP_NCCL_HOME "${__NCCL_BUILD_DIR}")
+    set(__NCCL_EP_LIB "libnccl_ep.a")
+    set(__NCCL_EP_DEPENDS nccl_external)
+  endif()
+
+  message(STATUS "Configuring NCCL EP (__caffe2_nccl_ep): ${__NCCL_EP_LIB} against NCCL at ${__NCCL_EP_NCCL_HOME}")
   ExternalProject_Add(nccl_ep_external
     SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/nccl_ep_build
     BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/nccl_ep
@@ -51,25 +73,26 @@ if(NOT __NCCL_EP_INCLUDED)
       # libcudart does, matching how libtorch_cuda links it.
       -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared
       ${__NCCL_EP_ARCH_ARG}
-      -DNCCL_HOME=${__NCCL_BUILD_DIR}
+      -DNCCL_HOME=${__NCCL_EP_NCCL_HOME}
       -DNCCL_EP_BUILDDIR=${__NCCL_BUILD_DIR}
       -DNCCL_EP_SOURCE_DIR=${PROJECT_SOURCE_DIR}/third_party/nccl/contrib/nccl_ep
-    # Build the static lib; the _nccl_ep extension statically links it, so its
-    # ncclEp* symbols are embedded in the extension and its nccl* references
-    # resolve against torch_cuda's own (statically-linked) NCCL. No runtime
-    # libnccl_ep.so and no nccl4py dependency.
-    BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_ep.a"
+    BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/${__NCCL_EP_LIB}"
     INSTALL_COMMAND ""
-    # NCCL (Makefile) must finish first: nccl_ep links -lnccl and includes its headers.
-    DEPENDS nccl_external
+    # In the static path NCCL (Makefile) must finish first; in the system path
+    # NCCL is already present so there is no in-tree dependency.
+    DEPENDS ${__NCCL_EP_DEPENDS}
   )
 
-  set(NCCL_EP_LIBRARIES "${__NCCL_BUILD_DIR}/lib/libnccl_ep.a")
+  set(NCCL_EP_LIBRARIES "${__NCCL_BUILD_DIR}/lib/${__NCCL_EP_LIB}")
   set(NCCL_EP_INCLUDE_DIRS "${__NCCL_BUILD_DIR}/include")
-  # The runtime JIT resolves NCCL_EP_HOME -> include/nccl_ep and NCCL_HOME ->
-  # include/nccl.h; the submodule build installs both under this one dir, which
-  # the extension bakes in as the default (see torch/CMakeLists.txt).
-  set(NCCL_EP_JIT_HOME "${__NCCL_BUILD_DIR}" CACHE INTERNAL "nccl-ep JIT header home")
+
+  if(NOT USE_SYSTEM_NCCL)
+    # Static path only: bake the in-tree JIT header dir so the extension
+    # self-configures NCCL_EP_HOME / NCCL_HOME (both resolve under this one dir:
+    # include/nccl_ep and include/nccl.h). The dynamic path instead gets these
+    # from nccl4py at runtime, so leave NCCL_EP_JIT_HOME unset there.
+    set(NCCL_EP_JIT_HOME "${__NCCL_BUILD_DIR}" CACHE INTERNAL "nccl-ep JIT header home")
+  endif()
 
   add_library(__caffe2_nccl_ep INTERFACE)
   add_dependencies(__caffe2_nccl_ep nccl_ep_external)
