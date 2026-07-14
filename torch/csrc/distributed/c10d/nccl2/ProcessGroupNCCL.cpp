@@ -210,10 +210,9 @@ void ProcessGroupNCCL::abort() {
       return ::c10d::ErrorType::TIMEOUT;
     case CommState::ERROR:
       return ::c10d::ErrorType::COMM_ERROR;
-    case CommState::NORMAL:
+    default:
       return ::c10d::ErrorType::SUCCESS;
   }
-  return ::c10d::ErrorType::SUCCESS;
 }
 
 void ProcessGroupNCCL::finalize() {
