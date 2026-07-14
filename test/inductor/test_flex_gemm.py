@@ -1071,14 +1071,14 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             )
 
     def test_local_reduce_aux_result_requires_grouped_source(self):
-        from torch._inductor.kernel.flex_gemm.epilogue import local_reduce_aux_result
+        from torch._inductor.kernel.flex_gemm.epilogue import FlexGemmEpilogueEmitter
 
         graph = torch.fx.Graph()
         aux = graph.placeholder("aux")
         with self.assertRaisesRegex(NotImplementedError, "grouped TensorSSA"):
-            local_reduce_aux_result(aux, {})
-        self.assertEqual(local_reduce_aux_result(aux, {aux: "tmp0"}), "tmp0")
-        self.assertIsNone(local_reduce_aux_result(None, {}))
+            FlexGemmEpilogueEmitter.aux_result(aux, {})
+        self.assertEqual(FlexGemmEpilogueEmitter.aux_result(aux, {aux: "tmp0"}), "tmp0")
+        self.assertIsNone(FlexGemmEpilogueEmitter.aux_result(None, {}))
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_swap_ab_rejects_local_reduce_aux(self):
@@ -2218,6 +2218,35 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
             actual, aux = compiled(a, b)
             self.assertTupleAuxMatchesReference(actual, aux, a, b, epilogue_fn)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_temporary_grouped_reshape_without_reduction(self):
+        m, n, k, group = 128, 96, 64, 3
+
+        def epilogue(acc):
+            grouped = acc.float().view(m, n // group, group)
+            return (grouped + 1.0).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            (a @ b).float() + 1.0,
+            (a.double() @ b.double()) + 1.0,
+            k,
+        )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

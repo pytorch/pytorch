@@ -10,6 +10,12 @@ M-axis groups currently always use QuACK's physical row-lane/warp combine path,
 even when the group is small enough to fit in one fragment. Inductor owns the
 FX pattern matching and output contracts; these helpers describe the supported
 TensorSSA shapes and generated combine/finalize expressions QuACK needs.
+
+The main caller is ``materialize_flex_gemm_epilogue`` in ``epilogue.py``.
+FlexGEMM lowering first calls ``analyze_flex_gemm_epilogue``, which uses this
+module's layout and reduction-recognition helpers. Materialization then routes
+FX nodes through ``lower_view_or_reshape``, ``lower_prepare_softmax_online``,
+and ``lower_tensorssa_reduce`` to emit CuTeDSL source.
 """
 
 import dataclasses
@@ -24,7 +30,6 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     tensorssa_reduction,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
-    grouped_reduce_dims_match,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
@@ -36,6 +41,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
 
 def normalize_shape(shape: Any) -> Any:
@@ -57,6 +63,11 @@ class GroupedTensorSSALayout:
     @property
     def reduce_dims(self) -> tuple[int, ...]:
         return (-1, 2) if self.axis == 1 else (-2, 1)
+
+    def matches_reduction_dim(self, dim: Any) -> bool:
+        """Return whether an FX reduction selects this layout's grouped dimension."""
+        dims = tuple(dim) if isinstance(dim, (list, tuple)) else (dim,)
+        return len(dims) == 1 and dims[0] in self.reduce_dims
 
     def fragment_group_size_expr(self, source: Any) -> str:
         """Return the local group size available in this epilogue fragment."""
@@ -420,6 +431,7 @@ def lower_view_or_reshape(
     env: dict[torch.fx.Node, Any],
     kernel: Any,
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
+    active_grouped_layouts: OrderedSet[GroupedTensorSSALayout],
     local_reduce_store_sources: dict[torch.fx.Node, Any],
     preserve_value_layout: bool = False,
 ) -> Any | None:
@@ -439,7 +451,7 @@ def lower_view_or_reshape(
     source = _cute_arg(source_node, env)
     grouped_layout = grouped_tensors.get(node)
     if grouped_layout is not None:
-        if preserve_value_layout:
+        if preserve_value_layout or grouped_layout not in active_grouped_layouts:
             return source
         return _generate_like(
             kernel,
@@ -568,7 +580,7 @@ def lower_prepare_softmax_online(
             "unsupported FlexGEMM physical local reduction: prepare_softmax_online "
             "needs a multi-value generated physical reducer"
         )
-    if not grouped_reduce_dims_match(dim, layout.reduce_dims):
+    if not layout.matches_reduction_dim(dim):
         raise NotImplementedError(
             "unsupported FlexGEMM epilogue local reduction: prepare_softmax_online "
             "currently supports only the grouped dimension"
@@ -613,7 +625,7 @@ def lower_tensorssa_reduce(
     if input_node not in grouped_tensors:
         raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
     layout = grouped_tensors[input_node]
-    if not grouped_reduce_dims_match(dim, layout.reduce_dims):
+    if not layout.matches_reduction_dim(dim):
         raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
     reduction_name = cast(
         ReductionType, "sum" if reduction_type == "mean" else reduction_type
