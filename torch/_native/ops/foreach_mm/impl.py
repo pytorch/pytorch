@@ -35,6 +35,7 @@ Notes:
 """
 
 import warnings
+from functools import cache
 from typing import Literal
 
 import torch
@@ -55,18 +56,10 @@ _NVMATH_DEPS = [
 # This is the cuBLAS library version, not the CUDA toolkit version.
 _MIN_CUBLASLT_GROUPED_GEMM_VERSION = 130200
 
-# Availability is a process-global property of the loaded cuBLASLt; resolve once.
-_nvmath_available: bool | None = None
 
-
+# Cached: availability is a process-global property of the loaded cuBLASLt.
+@cache
 def _check_nvmath_cublaslt() -> bool:
-    global _nvmath_available
-    if _nvmath_available is None:
-        _nvmath_available = _nvmath_grouped_gemm_available()
-    return _nvmath_available
-
-
-def _nvmath_grouped_gemm_available() -> bool:
     if _unavailable_reason(_NVMATH_DEPS) is not None:
         return False
     try:
