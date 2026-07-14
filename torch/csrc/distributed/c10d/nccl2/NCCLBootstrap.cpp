@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <ATen/cuda/CUDAContext.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -318,3 +320,5 @@ ncclComm_t NCCLBootstrap::createNcclComm(
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
