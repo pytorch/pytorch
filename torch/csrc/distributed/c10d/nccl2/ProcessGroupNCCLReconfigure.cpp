@@ -47,13 +47,13 @@ std::string getStoreAddress(const c10::intrusive_ptr<::c10d::Store>& store) {
   return c10::str(tcpStore->getHost(), ":", tcpStore->getPort());
 }
 
-struct NcclReconfigureHandle {
+struct NCCLReconfigureHandle {
   int rank;
   int64_t uuid;
   std::string storeAddress;
 };
 
-NcclReconfigureHandle parseNcclReconfigureHandle(
+NCCLReconfigureHandle parseNCCLReconfigureHandle(
     const ::c10d::ReconfigureHandle& handle) {
   auto first = handle.find(':');
   TORCH_CHECK(
@@ -94,7 +94,7 @@ std::vector<::c10d::ReconfigureHandle> getOrderedReconfigureHandles(
       uniqueHandles.size() == handles.size(),
       "Reconfigure handles must be unique");
   for (const auto& handle : handles) {
-    parseNcclReconfigureHandle(handle);
+    parseNCCLReconfigureHandle(handle);
   }
   return handles;
 }
