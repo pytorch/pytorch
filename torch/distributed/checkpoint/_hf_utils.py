@@ -16,6 +16,8 @@ SUFFIX = ".safetensors"
 # metadata keys
 CUSTOM_METADATA_KEY = "DCP_SHARDING_INFO"
 DEFAULT_EXTRA_METADATA_KEY = "__metadata__"
+LOGICAL_FQN_KEY = "logical_fqn"
+GLOBAL_SHAPE_KEY = "global_shape"
 SAVED_OFFSETS_KEY = "saved_offsets"
 SHAPE_KEY = "shape"
 DATA_KEY = "data"
@@ -53,6 +55,7 @@ class _HFStorageInfo:
     relative_path: str
     shape: torch.Size
     dtype: torch.dtype
+    storage_key: str | None = None
 
 
 def _gen_file_name(
