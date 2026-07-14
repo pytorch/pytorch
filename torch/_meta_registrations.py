@@ -2456,7 +2456,9 @@ def meta__pdist_forward(self: Tensor, p: float = 2) -> Tensor:
 
 @register_meta(aten._pdist_backward)
 @out_wrapper()
-def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) -> Tensor:
+def meta__pdist_backward(
+    grad_output: Tensor, self: Tensor, p: float, pdist: Tensor
+) -> Tensor:
     torch._check(
         self.is_contiguous(), lambda: "_pdist_backward requires self to be contiguous"
     )
@@ -2588,8 +2590,9 @@ def _compute_reduction_shape(self, dims, keepdim):
 # exists so meta kernels which have diverge per device will be more
 # accurate when run with FakeTensors
 def device_hint(tensor) -> "str":
-    if isinstance(tensor, torch._subclasses.FakeTensor):
-        return tensor.fake_device.type
+    fake_device = torch._subclasses.fake_tensor.maybe_get_fake_device(tensor)
+    if fake_device is not None:
+        return fake_device.type
     elif (
         hasattr(tensor, "device")
         and hasattr(tensor.device, "type")
@@ -2735,14 +2738,11 @@ def calc_conv_nd_return_shape(
     # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
     # CUDA (cuDNN) and HIP handle zero-sized conv_transpose outputs by short-circuiting,
     # but other backends fail: CPU rejects it and MPS asserts "Placeholder tensor is empty".
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
     from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
-    device = (
-        input_tensor.fake_device
-        if isinstance(input_tensor, FakeTensor)
-        else input_tensor.device
-    )
+    fake_device = maybe_get_fake_device(input_tensor)
+    device = fake_device if fake_device is not None else input_tensor.device
 
     # ROCm reports device.type as "cuda"; keep the existing NVIDIA CUDA behavior
     # unchanged and only apply the new check to HIP.
@@ -4444,7 +4444,7 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
 
 @register_meta(aten._cdist_backward)
 @out_wrapper()
-def meta_cdist_backward(grad, x1, x2, p, cdist):
+def meta_cdist_backward(grad_output, x1, x2, p, cdist):
     c1 = x1.shape[-1]
     r1 = x1.shape[-2]
     r2 = x2.shape[-2]
@@ -8358,10 +8358,20 @@ def _meta_grouped_mm_common(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
             lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
+    elif mat_a.dtype == torch.bfloat16:
+        torch._check(
+            mat_b.dtype == mat_a.dtype,
+            lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        )
+    elif mat_a.dtype == torch.float16:
+        torch._check(
+            mat_b.dtype == mat_a.dtype,
+            lambda: f"Expected mat_b dtype to match mat_a dtype, got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+        )
     else:
         torch._check(
-            mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
-            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+            False,
+            lambda: f"Expected mat_a to be BFloat16 or supported Float16 matrix, got {mat_a.dtype}.",
         )
 
     torch._check(
@@ -8523,10 +8533,20 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
+            torch._check(
+                offs.stride() == (1,),
+                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+            )
     else:
         torch._check(
             offs is None,
             lambda: "Offsets tensor provided, but is not needed for 3D/3D multiplicand layouts.",
+        )
+
+    if mat_a.dtype == torch.float16:
+        torch._check(
+            _grouped_mm_fp16_cublaslt_supported(mat_a, mat_b, offs),
+            lambda: "Float16 grouped_mm requires cuBLASLt grouped GEMM support.",
         )
 
     torch._check(
@@ -8534,12 +8554,47 @@ def _meta_grouped_mm_common(
         lambda: "Bias tensor provided, but it is not supported yet.",
     )
 
-    torch._check(
-        out_dtype is None or out_dtype == torch.bfloat16,
-        lambda: "If output dtype provided, it must be torch.bfloat16.",
-    )
+    if scaled:
+        torch._check(
+            out_dtype is None or out_dtype == torch.bfloat16,
+            lambda: "If output dtype provided, it must be torch.bfloat16.",
+        )
+    else:
+        out_dtype = out_dtype or mat_a.dtype
+        torch._check(
+            out_dtype == mat_a.dtype,
+            lambda: "Grouped gemm output dtype must match `mat_a` dtype.",
+        )
 
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
+
+
+def _grouped_mm_fp16_cublaslt_supported(
+    mat_a: Tensor, mat_b: Tensor, offs: Tensor | None
+) -> bool:
+    if device_hint(mat_a) != "cuda" or device_hint(mat_b) != "cuda":
+        return False
+    if not torch.cuda.is_available():
+        return False
+    mat_a_is_2d = mat_a.dim() == 2
+    mat_b_is_2d = mat_b.dim() == 2
+    batch_count = (
+        offs.size(0)
+        if offs is not None and (mat_a_is_2d or mat_b_is_2d)
+        else mat_a.size(0)
+    )
+    if batch_count < 1 or batch_count > 1024:
+        return False
+    device_capability = torch.cuda.get_device_capability()
+    cuda_version: tuple[int, int] = (0, 0)
+    if torch.version.cuda:
+        parts = torch.version.cuda.split(".")
+        cuda_version = (int(parts[0]), int(parts[1]))
+    if device_capability[0] == 9:
+        return cuda_version >= (13, 3)
+    return cuda_version >= (13, 2) and (
+        device_capability[0] == 10 or device_capability == (11, 0)
+    )
 
 
 @register_meta(aten._grouped_mm)
@@ -8970,6 +9025,7 @@ def activate_meta():
                 "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
                 "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
+                "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
             }
         ):
             pass
