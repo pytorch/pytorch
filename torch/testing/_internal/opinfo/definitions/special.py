@@ -122,11 +122,13 @@ _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
 
 # Restricting the x > 0 Bessel ops to domain=(0, None) makes the unary sample
-# generator clamp samples with clamp_min, which has no CPU kernel for the barebones
-# unsigned integer types. Skip the affected forward reference-numerics tests there.
-_domain_uint_skips = tuple(
+# generator clamp samples with clamp_min, whose CPU and CUDA kernels both dispatch
+# via AT_DISPATCH_ALL_TYPES and so exclude the barebones unsigned integer types.
+# xfail (rather than skip) the affected forward reference-numerics tests so they
+# flip once clamp_min gains support for these types.
+_domain_uint_xfails = tuple(
     DecorateInfo(
-        unittest.skip("clamp_min unimplemented for unsigned int types"),
+        unittest.expectedFailure,
         "TestUnaryUfuncs",
         test_name,
         dtypes=_unsigned_int_types,
@@ -494,7 +496,7 @@ op_db: list[OpInfo] = [
         ref=scipy.special.y0 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
         domain=(0, None),
-        skips=_domain_uint_skips,
+        skips=_domain_uint_xfails,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -525,7 +527,7 @@ op_db: list[OpInfo] = [
         ref=scipy.special.y1 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
         domain=(0, None),
-        skips=_domain_uint_skips,
+        skips=_domain_uint_xfails,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -762,7 +764,7 @@ op_db: list[OpInfo] = [
         ref=scipy.special.k0 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
         domain=(0, None),
-        skips=_domain_uint_skips,
+        skips=_domain_uint_xfails,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
@@ -781,7 +783,7 @@ op_db: list[OpInfo] = [
         ref=scipy.special.k1 if TEST_SCIPY else None,
         backward_dtypes=floating_types(),
         domain=(0, None),
-        skips=_domain_uint_skips,
+        skips=_domain_uint_xfails,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
