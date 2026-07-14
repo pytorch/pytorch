@@ -979,12 +979,21 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     def _is_pyobj_dispatcher_enabled(self) -> bool:
         return self._pyobj_dispatcher is not None
 
+    def _can_enable_pyobj_dispatch(self) -> bool:
+        # TODO(#187974): Support non-Tensor returns by normalizing Python kernel
+        # returns against the operator schema in the PyObject fast path.
+        return all(
+            isinstance(ret.type, torch.TensorType) for ret in self._schema.returns
+        )
+
     def _enable_pyobj_dispatch(self, enabled: bool = True) -> None:
         if self._is_pyobj_dispatcher_enabled() == enabled:
             return
         if not enabled:
             self._pyobj_dispatcher = None
             self._op = self._cpp_dispatch_handle
+            return
+        if not self._can_enable_pyobj_dispatch():
             return
         dispatch, redispatch = torch._C._dispatch_make_pyobj_dispatch_fns(
             self._handle,

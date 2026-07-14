@@ -531,6 +531,11 @@ def _patch_nested_region_inductor_config(
 
 
 def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
+    # Seed each invoke_subgraph subgraph module's meta from the node meta, which
+    # (unlike a GraphModule's meta) survives FX transforms. Re-run at the start of
+    # every pass phase because each is an independent entry point that may see a
+    # freshly-created module (e.g. the partitioned backward graph); setdefault
+    # makes re-entry on an already-seeded module a no-op.
     for node in gm.graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.invoke_subgraph
     ):
