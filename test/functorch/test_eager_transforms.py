@@ -1282,6 +1282,47 @@ class TestGradTransform(TestCase):
 
 @markDynamoStrictTest
 class TestAutogradFunction(TestCase):
+    @skipIfTorchDynamo("internal API test")
+    def test_unwrap_dead_wrappers(self, device):
+        ft = torch._C._functorch
+        unwrap_dead_wrappers = torch._functorch.utils.unwrap_dead_wrappers
+
+        def make_dead_wrapper(tensor):
+            level = ft._grad_increment_nesting()
+            try:
+                wrapped = ft._wrap_for_grad(tensor, level)
+            finally:
+                ft._grad_decrement_nesting()
+            self.assertTrue(ft.is_dead_tensor_wrapper(wrapped))
+            return wrapped
+
+        empty = ()
+        self.assertIs(unwrap_dead_wrappers(empty), empty)
+
+        non_tensors = (None, 1, "arg")
+        self.assertIs(unwrap_dead_wrappers(non_tensors), non_tensors)
+
+        live_tensor = torch.randn(2, device=device)
+        mixed_live = ("arg", live_tensor, None)
+        self.assertIs(unwrap_dead_wrappers(mixed_live), mixed_live)
+
+        for dead_idx in range(3):
+            live_before = torch.randn(2, device=device)
+            live_after = torch.randn(2, device=device)
+            base = torch.randn(2, device=device)
+            dead = make_dead_wrapper(base)
+            args = [live_before, "arg", live_after]
+            args[dead_idx] = dead
+            args = tuple(args)
+
+            result = unwrap_dead_wrappers(args)
+            self.assertIsNot(result, args)
+            self.assertEqual(result[dead_idx], base)
+            self.assertFalse(ft.is_dead_tensor_wrapper(result[dead_idx]))
+            for idx in range(3):
+                if idx != dead_idx:
+                    self.assertIs(result[idx], args[idx])
+
     def test_set_materialize_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod
