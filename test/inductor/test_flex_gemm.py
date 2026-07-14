@@ -810,7 +810,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmLocalReduceGeometry,
         )
         from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmLocalReduceContract,
+            FlexGemmEpilogueGraph,
+            FlexGemmLocalReduceAnalysis,
+            FlexGemmLocalReduceMatch,
+            FlexGemmLocalReduceStore,
             FlexGemmOutputLocalReducePlan,
             FlexGemmOutputPlan,
             tuple_output_plan,
@@ -819,45 +822,38 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         graph = torch.fx.Graph()
         node = graph.placeholder("x")
         aux = graph.placeholder("aux")
+        geometry = FlexGemmLocalReduceGeometry(8, 0)
+        match = FlexGemmLocalReduceMatch(aux, geometry)
+        analysis = FlexGemmLocalReduceAnalysis(FlexGemmEpilogueGraph({}))
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(object())
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(node, (object(),))
         with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
-            FlexGemmLocalReduceContract(object(), FlexGemmLocalReduceGeometry(8, 0))
-        with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
-            FlexGemmOutputLocalReducePlan(FlexGemmLocalReduceGeometry(8, 0), object())
-        with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
-            tuple_output_plan(object(), ())
-        with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
-            tuple_output_plan(node, (object(),))
+            FlexGemmLocalReduceMatch(object(), geometry)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmOutputLocalReducePlan(
-                FlexGemmLocalReduceGeometry(8, 0), aux, store_node=aux
-            )
+            FlexGemmOutputLocalReducePlan(object())
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmOutputLocalReducePlan(
-                FlexGemmLocalReduceGeometry(8, 0),
-                aux,
-                store_node=aux,
-                aux_index=-1,
-            )
+            FlexGemmOutputLocalReducePlan(match)
+        with self.assertRaisesRegex(RuntimeError, "output plans"):
+            FlexGemmLocalReduceStore(object(), 0)
+        with self.assertRaisesRegex(RuntimeError, "output plans"):
+            FlexGemmLocalReduceStore(aux, -1)
+        with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
+            tuple_output_plan(object(), (), analysis)
+        with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
+            tuple_output_plan(node, (object(),), analysis)
         FlexGemmOutputPlan(
             node,
             (aux,),
             FlexGemmOutputLocalReducePlan(
-                FlexGemmLocalReduceGeometry(8, 0),
-                aux,
-                store_node=aux,
-                aux_index=0,
+                match, store=FlexGemmLocalReduceStore(aux, 0)
             ),
         )
         FlexGemmOutputPlan(
             node,
             (aux,),
-            FlexGemmOutputLocalReducePlan(
-                FlexGemmLocalReduceGeometry(8, 0), aux, feeds_main=True
-            ),
+            FlexGemmOutputLocalReducePlan(match, feeds_main=True),
         )
 
     def test_ordered_outputs_restore_local_reduce_position(self):
