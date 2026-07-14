@@ -1737,11 +1737,16 @@ struct AOTAutogradSavePlan {
   int64_t num_opaque;
   std::vector<int64_t> indices;
   std::vector<uint8_t> is_graph_input;
+  std::vector<PyObject*> dynamic_dims;
 };
 
 static void AOTAutogradSavePlan_dealloc(AOTAutogradSavePlan* self) {
+  for (auto* dims : self->dynamic_dims) {
+    Py_XDECREF(dims);
+  }
   self->indices.~vector<int64_t>();
   self->is_graph_input.~vector<uint8_t>();
+  self->dynamic_dims.~vector<PyObject*>();
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
@@ -1806,6 +1811,46 @@ static PyObject* prepare_saved_tensor(
 
   Py_INCREF(item);
   return item;
+}
+
+static void mark_dynamo_propagated_dynamic_indices(
+    PyObject* tensor,
+    PyObject* dims) {
+  static constexpr const char* attr = "_dynamo_propagated_dynamic_indices";
+  PyObject* existing = PyObject_GetAttrString(tensor, attr);
+  if (!existing) {
+    if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+      throw python_error();
+    }
+    PyErr_Clear();
+    THPObjectPtr dims_copy(PySet_New(dims));
+    if (!dims_copy) {
+      throw python_error();
+    }
+    if (PyObject_SetAttrString(tensor, attr, dims_copy.get()) < 0) {
+      throw python_error();
+    }
+    return;
+  }
+
+  THPObjectPtr existing_ptr(existing);
+  THPObjectPtr updated(PyNumber_InPlaceOr(existing_ptr.get(), dims));
+  if (!updated) {
+    throw python_error();
+  }
+  if (PyObject_SetAttrString(tensor, attr, updated.get()) < 0) {
+    throw python_error();
+  }
+}
+
+static void maybe_mark_dynamic_saved_tensor(
+    PyObject* tensor,
+    const AOTAutogradSavePlan* plan,
+    int64_t saved_tensor_idx) {
+  auto* dims = plan->dynamic_dims[saved_tensor_idx];
+  if (dims) {
+    mark_dynamo_propagated_dynamic_indices(tensor, dims);
+  }
 }
 
 static void check_symint_item(PyObject* item, int64_t idx) {
@@ -1932,6 +1977,9 @@ static PyObject* THPModule_aot_autograd_make_save_plan(
   //   [counts]
   //   [fw_out indices for tensors, symints, opaque objects]
   //   [one graph-input flag per saved tensor]
+  //   [number of dynamic saved tensors]
+  //   [saved tensor index, number of dims, dims... for each dynamic saved
+  //   tensor]
   //
   // Parse it once at compile time into this private C++ object so the runtime
   // save path can use typed fields and vectors directly.
@@ -1944,9 +1992,10 @@ static PyObject* THPModule_aot_autograd_make_save_plan(
       "invalid AOTAutograd save plan counts");
   const auto num_saved_tensors = num_vc + num_no_vc;
   const auto num_indices = num_saved_tensors + num_symints + num_opaque;
-  auto expected_size =
+  auto dynamic_start =
       static_cast<Py_ssize_t>(4 + num_indices + num_saved_tensors);
-  TORCH_CHECK(plan_size == expected_size, "invalid AOTAutograd save plan size");
+  TORCH_CHECK(
+      plan_size >= dynamic_start + 1, "invalid AOTAutograd save plan size");
 
   auto* plan = reinterpret_cast<AOTAutogradSavePlan*>(
       AOTAutogradSavePlanType.tp_alloc(&AOTAutogradSavePlanType, 0));
@@ -1959,6 +2008,7 @@ static PyObject* THPModule_aot_autograd_make_save_plan(
   plan->num_opaque = num_opaque;
   new (&plan->indices) std::vector<int64_t>();
   new (&plan->is_graph_input) std::vector<uint8_t>();
+  new (&plan->dynamic_dims) std::vector<PyObject*>();
 
   try {
     plan->indices.reserve(num_indices);
@@ -1971,6 +2021,46 @@ static PyObject* THPModule_aot_autograd_make_save_plan(
       plan->is_graph_input.push_back(
           read_plan_i64(plan_obj, graph_input_start + i) != 0);
     }
+    plan->dynamic_dims.resize(num_saved_tensors, nullptr);
+
+    auto cursor = dynamic_start;
+    auto num_dynamic_saved_tensors = read_plan_i64(plan_obj, cursor++);
+    TORCH_CHECK(
+        num_dynamic_saved_tensors >= 0,
+        "invalid AOTAutograd save plan dynamic tensor count");
+    for ([[maybe_unused]] const auto i :
+         c10::irange(num_dynamic_saved_tensors)) {
+      TORCH_CHECK(
+          cursor + 2 <= plan_size, "invalid AOTAutograd save plan size");
+      auto saved_tensor_idx = read_plan_i64(plan_obj, cursor++);
+      auto num_dims = read_plan_i64(plan_obj, cursor++);
+      TORCH_CHECK(
+          saved_tensor_idx >= 0 && saved_tensor_idx < num_saved_tensors,
+          "invalid AOTAutograd save plan dynamic saved tensor index");
+      TORCH_CHECK(num_dims >= 0, "invalid AOTAutograd save plan dynamic dims");
+      TORCH_CHECK(
+          num_dims <= plan_size - cursor, "invalid AOTAutograd save plan size");
+      TORCH_CHECK(
+          plan->dynamic_dims[saved_tensor_idx] == nullptr,
+          "duplicate AOTAutograd dynamic saved tensor index");
+
+      THPObjectPtr dims(PySet_New(nullptr));
+      if (!dims) {
+        throw python_error();
+      }
+      for ([[maybe_unused]] const auto dim_idx : c10::irange(num_dims)) {
+        THPObjectPtr dim(
+            PyLong_FromLongLong(read_plan_i64(plan_obj, cursor++)));
+        if (!dim) {
+          throw python_error();
+        }
+        if (PySet_Add(dims.get(), dim.get()) < 0) {
+          throw python_error();
+        }
+      }
+      plan->dynamic_dims[saved_tensor_idx] = dims.release();
+    }
+    TORCH_CHECK(cursor == plan_size, "invalid AOTAutograd save plan size");
   } catch (...) {
     Py_DECREF(reinterpret_cast<PyObject*>(plan));
     throw;
@@ -1985,20 +2075,10 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
     PyObject* const* args,
     Py_ssize_t nargs) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      nargs == 3 || nargs == 4,
-      "expected ctx, fw_outs, plan, and optional return_saved_tensors");
+  TORCH_CHECK(nargs == 3, "expected ctx, fw_outs, and plan");
   PyObject* ctx = args[0];
   PyObject* fw_outs = args[1];
   PyObject* plan_obj = args[2];
-  bool return_saved_tensors = false;
-  if (nargs == 4) {
-    auto return_saved_tensors_int = PyObject_IsTrue(args[3]);
-    if (return_saved_tensors_int < 0) {
-      throw python_error();
-    }
-    return_saved_tensors = return_saved_tensors_int != 0;
-  }
   TORCH_CHECK(THPFunction_Check(ctx), "ctx must be a torch autograd Function");
   auto* fn = reinterpret_cast<THPFunction*>(ctx);
   const auto* plan = unpack_save_plan(plan_obj);
@@ -2006,7 +2086,6 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
   const auto num_no_vc = plan->num_no_vc;
   const auto num_symints = plan->num_symints;
   const auto num_opaque = plan->num_opaque;
-  const auto num_saved_tensors = num_vc + num_no_vc;
   const auto no_vc_start = num_vc;
   const auto symint_start = no_vc_start + num_no_vc;
   const auto opaque_start = symint_start + num_symints;
@@ -2018,27 +2097,14 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
   if (!to_save) {
     throw python_error();
   }
-  THPObjectPtr saved_tensors;
-  if (return_saved_tensors) {
-    // Dynamic saved tensor marking still happens in Python because it sets a
-    // Python attribute. Return the exact saved objects so Python marks the
-    // detached tensors, not the original fw_out views.
-    saved_tensors =
-        THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(num_saved_tensors)));
-    if (!saved_tensors) {
-      throw python_error();
-    }
-  }
   for (const auto i : c10::irange(num_vc)) {
     auto idx = plan->indices[i];
     auto is_graph_input = plan->is_graph_input[i] != 0;
     PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
-    PyObject* saved = prepare_saved_tensor(item, idx, is_graph_input);
-    if (return_saved_tensors) {
-      Py_INCREF(saved);
-      PyList_SET_ITEM(saved_tensors.get(), static_cast<Py_ssize_t>(i), saved);
-    }
-    PyTuple_SET_ITEM(to_save.get(), static_cast<Py_ssize_t>(i), saved);
+    THPObjectPtr saved(prepare_saved_tensor(item, idx, is_graph_input));
+    maybe_mark_dynamic_saved_tensor(saved.get(), plan, i);
+    PyTuple_SET_ITEM(
+        to_save.get(), static_cast<Py_ssize_t>(i), saved.release());
   }
   Py_CLEAR(fn->to_save);
   fn->to_save = to_save.release();
@@ -2053,13 +2119,10 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
     auto idx = plan->indices[no_vc_start + i];
     auto is_graph_input = plan->is_graph_input[no_vc_start + i] != 0;
     PyObject* item = get_sequence_item(fw_outs, static_cast<Py_ssize_t>(idx));
-    PyObject* saved = prepare_saved_tensor(item, idx, is_graph_input);
-    if (return_saved_tensors) {
-      Py_INCREF(saved);
-      PyList_SET_ITEM(
-          saved_tensors.get(), static_cast<Py_ssize_t>(num_vc + i), saved);
-    }
-    PyList_SET_ITEM(no_vc_list.get(), static_cast<Py_ssize_t>(i), saved);
+    THPObjectPtr saved(prepare_saved_tensor(item, idx, is_graph_input));
+    maybe_mark_dynamic_saved_tensor(saved.get(), plan, no_vc_start + i);
+    PyList_SET_ITEM(
+        no_vc_list.get(), static_cast<Py_ssize_t>(i), saved.release());
   }
   if (PyObject_SetAttrString(ctx, "_tensors_no_vc_check", no_vc_list.get()) <
       0) {
@@ -2071,9 +2134,6 @@ static PyObject* THPModule_aot_autograd_save_for_backward(
   set_opaque_objects_attr_from_indices(
       ctx, fw_outs, plan, opaque_start, num_opaque);
 
-  if (return_saved_tensors) {
-    return saved_tensors.release();
-  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
