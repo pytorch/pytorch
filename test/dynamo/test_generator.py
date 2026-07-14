@@ -864,7 +864,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, t.sin())
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
-    @unittest.expectedFailure
     def test_cleanup_throw_subgen_return_value(self):
         # CLEANUP_THROW must resume the delegating generator with the
         # subgenerator's return value (StopIteration.value). When the
@@ -895,7 +894,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, t.sin())
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
-    @unittest.expectedFailure
     def test_cleanup_throw_empty_stopiteration(self):
         def nested_generator():
             yield 1
@@ -2309,6 +2307,224 @@ class TestGeneratorCoroutine(GeneratorTestsBase):
         self.assertEqual(data, [27, 2])
         self.assertRaises(StopIteration, g.send, 1)
         self.assertEqual(data, [27, 27])
+
+
+class _DelegatingIterator:
+    # An iterator (not a generator) implementing the generator protocol, used to
+    # exercise `yield from <iterator>` where the subiterator has its own
+    # throw()/close(). Defined at module scope so tracing doesn't hit the local
+    # class definition (__build_class__) limitation.
+    def __init__(self, log):
+        self.log = log
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return 1
+
+    def send(self, value):
+        return 1
+
+    def throw(self, typ, val=None, tb=None):
+        self.log.append("iter throw")
+        return 2
+
+    def close(self):
+        self.log.append("iter close")
+
+
+class TestSubgeneratorDelegation(GeneratorTestsBase):
+    # Delegation semantics for send/throw/close through `yield from`. CPython
+    # forwards throw() and close() into the subiterator the delegating
+    # generator is suspended on; these tests assert the subgenerator's own
+    # handlers/finally run, which distinguishes real forwarding from raising
+    # the exception at the outer `yield from` point.
+
+    @make_dynamo_test
+    def test_send_into_subgen(self):
+        got = []
+
+        def subgen():
+            x = yield 1
+            got.append(x)
+            yield 2
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        self.assertEqual(next(g), 1)
+        self.assertEqual(g.send(42), 2)
+        self.assertEqual(got, [42])
+
+    @make_dynamo_test
+    def test_throw_into_subgen_caught(self):
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+            except ValueError:
+                log.append("subgen caught")
+                yield 2
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        self.assertEqual(next(g), 1)
+        self.assertEqual(g.throw(ValueError), 2)
+        self.assertEqual(log, ["subgen caught"])
+
+    @make_dynamo_test
+    def test_throw_into_subgen_uncaught_runs_finally(self):
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+            finally:
+                log.append("subgen finally")
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        next(g)
+        self.assertRaises(ValueError, g.throw, ValueError)
+        self.assertEqual(log, ["subgen finally"])
+
+    @make_dynamo_test
+    def test_throw_generator_exit_into_subgen(self):
+        # throw(GeneratorExit) through `yield from` closes the subiterator, then
+        # raises the GeneratorExit in the outer frame (CPython's `goto
+        # throw_here`), rather than throwing into the already-closed subiterator.
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+            finally:
+                log.append("subgen finally")
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        self.assertEqual(next(g), 1)
+        self.assertRaises(GeneratorExit, g.throw, GeneratorExit)
+        self.assertEqual(log, ["subgen finally"])
+
+    @make_dynamo_test
+    def test_throw_through_nested_yield_from(self):
+        log = []
+
+        def leaf():
+            try:
+                yield 1
+            except ValueError:
+                log.append("leaf caught")
+                yield 2
+
+        def mid():
+            yield from leaf()
+
+        def outer():
+            yield from mid()
+
+        g = outer()
+        next(g)
+        self.assertEqual(g.throw(ValueError), 2)
+        self.assertEqual(log, ["leaf caught"])
+
+    @make_dynamo_test
+    def test_close_runs_subgen_finally(self):
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+                yield 2
+            finally:
+                log.append("subgen finally")
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["subgen finally"])
+
+    @make_dynamo_test
+    def test_close_subgen_catches_generator_exit(self):
+        log = []
+
+        def subgen():
+            try:
+                yield 1
+            except GeneratorExit:
+                log.append("subgen exit")
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["subgen exit"])
+
+    @make_dynamo_test
+    def test_close_subgen_ignores_generator_exit(self):
+        def subgen():
+            try:
+                yield 1
+            except GeneratorExit:
+                yield 2
+
+        def outer():
+            yield from subgen()
+
+        g = outer()
+        next(g)
+        self.assertRaisesRegex(RuntimeError, "generator ignored GeneratorExit", g.close)
+
+    @make_dynamo_test
+    def test_throw_into_iterator_subiter(self):
+        log = []
+
+        def outer():
+            yield from _DelegatingIterator(log)
+
+        g = outer()
+        self.assertEqual(next(g), 1)
+        self.assertEqual(g.throw(ValueError), 2)
+        self.assertEqual(log, ["iter throw"])
+
+    @make_dynamo_test
+    def test_close_into_iterator_subiter(self):
+        log = []
+
+        def outer():
+            yield from _DelegatingIterator(log)
+
+        g = outer()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["iter close"])
+
+    @make_dynamo_test
+    @unittest.expectedFailure
+    def test_throw_into_iterator_without_throw(self):
+        # A plain iterator (no throw method): the exception is raised in the
+        # outer frame at the yield-from point (CPython's `goto throw_here`).
+        def outer():
+            yield from iter([1, 2, 3])
+
+        g = outer()
+        next(g)
+        self.assertRaises(ValueError, g.throw, ValueError)
 
 
 instantiate_parametrized_tests(GeneratorTests)

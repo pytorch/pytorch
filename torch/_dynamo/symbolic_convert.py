@@ -1281,6 +1281,15 @@ def pyexception_instance_check(val: VariableTracker) -> TypeIs[ExceptionVals]:
     )
 
 
+def pyerr_given_exception_match(err: VariableTracker, exc: type[BaseException]) -> bool:
+    # Mirror's PyErr_GivenExceptionMatch
+    if pyexception_class_check(err):
+        return issubclass(err.fn, exc)
+    if pyexception_instance_check(err):
+        return issubclass(err.exc_type, exc)
+    return False
+
+
 def pygen_fetch_stopiteration_value(val: ExceptionVals) -> VariableTracker:
     # Mirror's CPython PyGen_FetchStopIterationValue
     if issubclass(val.exc_type, StopIteration):
@@ -6451,6 +6460,15 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         finally:
             self.exn_vt_stack.pop_segment()
 
+    @contextlib.contextmanager
+    def temporarily_set_frame_state(self, state: FrameState):
+        saved_frame_state = self.frame_state
+        try:
+            self.frame_state = state
+            yield
+        finally:
+            self.frame_state = saved_frame_state
+
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
             return super().inline_call_()
@@ -6462,7 +6480,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()
         self.generated_items.append(top)
-        if inst.argval == 1:
+        prev = self.instructions[self.indexof[inst] - 1].opname
+        if inst.opname == "YIELD_FROM" or prev == "SEND":
             self.frame_state = FrameState.FRAME_SUSPENDED_YIELD_FROM
         else:
             self.frame_state = FrameState.FRAME_SUSPENDED
