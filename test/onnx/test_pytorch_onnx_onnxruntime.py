@@ -10824,7 +10824,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         if torch.all(torch.eq(x, torch.from_numpy(ort_outs[0]))):
             raise AssertionError("Outputs should not match input after dropout")
 
-        script_model = torch.jit.script(model)
         output = model(x)
         model_onnx = io.BytesIO()
         torch.onnx.export(
@@ -10884,7 +10883,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
-        script_model = torch.jit.script(model)
         y = model(input)
         output = y.cpu().numpy()
         model_onnx = io.BytesIO()

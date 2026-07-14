@@ -158,7 +158,7 @@ class TestNodeLifecycle(TestCase):
         del a, b, marker, grad_fn
         self.assertIsNone(
             marker_ref(),
-            f"not freed by refcount: {node_type} {hook_type} {backward_state}",
+            lambda msg: f"{msg}\nnot freed by refcount: {node_type} {hook_type} {backward_state}",
         )
 
     def _check_freed_by_gc(self, node_type, hook_type, backward_state):
@@ -168,7 +168,8 @@ class TestNodeLifecycle(TestCase):
         del a, b, marker, grad_fn
         gc.collect()
         self.assertIsNone(
-            marker_ref(), f"not freed by GC: {node_type} {hook_type} {backward_state}"
+            marker_ref(),
+            lambda msg: f"{msg}\nnot freed by GC: {node_type} {hook_type} {backward_state}",
         )
 
     # === No hooks ===
