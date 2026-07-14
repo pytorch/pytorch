@@ -17,8 +17,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._subclasses import FakeTensor, FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake
+from torch._subclasses.fake_tensor import is_fake, is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+    from torch._subclasses import FakeTensorMode
     from torch.types import IntLikeType
 
     from .descriptors import AOTInput, AOTOutput
@@ -233,6 +233,16 @@ class MemoryFormatMeta:
 class PlainTensorMeta:
     unwrapped_idx: int
     memory_format: MemoryFormatMeta | None = None
+    size_symbol_placeholders: tuple[bool, ...] = ()
+    stride_symbol_placeholders: tuple[bool, ...] = ()
+
+    @property
+    def arg_count(self) -> int:
+        return (
+            1
+            + sum(self.size_symbol_placeholders)
+            + sum(self.stride_symbol_placeholders)
+        )
 
 
 @dataclass
@@ -341,7 +351,7 @@ class SubclassCreationMeta:
                 subclass = all_args[curr_start_idx]
                 if not isinstance(subclass, Tensor):
                     raise AssertionError("Tensor expected")
-                curr_start_idx += 1
+                curr_start_idx += creation_meta.arg_count
             else:
                 subclass = creation_meta.creation_fn(
                     all_args,
@@ -688,8 +698,7 @@ class ViewAndMutationMeta:
         # Eventually, we should kill this and replace with real backward guards.
         # (we want to precompute the "runtime" types, so replace FakeTensor with torch.Tensor)
         self.output_types = [
-            torch.Tensor if isinstance(x, FakeTensor) else type(x)
-            for x in self.traced_tangents
+            torch.Tensor if is_fake_tensor(x) else type(x) for x in self.traced_tangents
         ]
 
         self.is_rng_op_functionalized = config.functionalize_rng_ops
