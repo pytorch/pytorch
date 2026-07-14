@@ -529,6 +529,37 @@ class TestSourceMatcher(JitTestCase):
                 module_partitions[torch.nn.ReLU][0],
             )
         )
+    def test_partition_input_output_order_is_deterministic(self):
+        # Regression test: input_nodes/output_nodes/params used to be built
+        # as plain sets. Since fx.Node hashes by identity, iterating a set
+        # of Nodes has an order that depends on object memory addresses and
+        # can differ across otherwise-identical runs, which made downstream
+        # consumers of get_source_partitions() flaky (see issue #147170).
+        class GatherLayer(torch.nn.Module):
+            def forward(self, x):
+                idx = torch.zeros(x.shape[0], dtype=torch.long)
+                return torch.gather(
+                    x.detach(), 0, idx.unsqueeze(-1).expand(-1, x.shape[1])
+                )
+
+        m = GatherLayer()
+        orderings = set()
+        for _ in range(50):
+            gm = torch.fx.symbolic_trace(m)
+            for node in gm.graph.nodes:
+                if node.op == "call_function" and "gather" in str(node.target):
+                    node.meta["source_fn_stack"] = [(node.name, torch.gather)]
+            partitions = get_source_partitions(gm.graph, [torch.gather])
+            for partition_list in partitions.values():
+                for partition in partition_list:
+                    orderings.add(tuple(n.name for n in partition.input_nodes))
+
+        self.assertEqual(
+            len(orderings),
+            1,
+            f"input_nodes ordering should be deterministic, got {orderings}",
+        )
+
 
 
 instantiate_parametrized_tests(TestSourceMatcher)
