@@ -228,3 +228,6 @@ class ChunkShardingSpec(ShardingSpec):
         st._sharding_spec = self
 
         return st
+
+
+torch.serialization.add_safe_globals([ChunkShardingSpec])
