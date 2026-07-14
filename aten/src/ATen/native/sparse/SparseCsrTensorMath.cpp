@@ -141,6 +141,7 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
 (const Tensor& self, const int64_t size, const bool out_int32) {
   TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector, but got ",
               self.dim(), " dimensional tensor.");
+  TORCH_CHECK(size >= 0, "size must be non-negative, got ", size);
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -1404,7 +1405,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
 
   int64_t nnz = self._nnz();
   if (nnz == 0) {
-    return std::make_tuple(out, arg_out);
+    return std::make_tuple(std::move(out), std::move(arg_out));
   }
 
   // only need to calculate the out args

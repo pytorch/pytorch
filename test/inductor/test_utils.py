@@ -1,8 +1,12 @@
 # Owner(s): ["module: inductor"]
 
+import builtins
 import importlib.util
+import tempfile
 import unittest
 from collections.abc import Callable, Iterator
+from pathlib import Path
+from unittest import mock
 
 from sympy import I, Max, Min, Symbol, sympify
 
@@ -17,7 +21,12 @@ from torch._inductor.fx_utils import (
     FakeTensorUpdater,
     get_fake,
 )
-from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
+from torch._inductor.utils import (
+    get_device_tflops,
+    load_template,
+    sympy_str,
+    sympy_subs,
+)
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
@@ -234,20 +243,24 @@ class TestUtils(TestCase):
             for t, t2, args, kwargs in trues:
                 fx_node_1, fx_node_2 = create_fx_node(t, t2, args, kwargs)
                 self.assertTrue(
-                    countable_fx(fx_node_1), f"Expected true {t}: {fx_node_1}"
+                    countable_fx(fx_node_1),
+                    lambda msg: f"{msg}\nExpected true {t}: {fx_node_1}",
                 )
                 self.assertTrue(
-                    countable_fx(fx_node_2), f"Expected true {t}: {fx_node_2}"
+                    countable_fx(fx_node_2),
+                    lambda msg: f"{msg}\nExpected true {t}: {fx_node_2}",
                 )
                 self.assertNotEqual(count_flops_fx(fx_node_1), None)
                 self.assertNotEqual(count_flops_fx(fx_node_2), None)
             for f, f2, args, kwargs in falses:
                 fx_node_1, fx_node_2 = create_fx_node(f, f2, args, kwargs)
                 self.assertFalse(
-                    countable_fx(fx_node_1), f"Expected false {f}: {fx_node_1}"
+                    countable_fx(fx_node_1),
+                    lambda msg: f"{msg}\nExpected false {f}: {fx_node_1}",
                 )
                 self.assertFalse(
-                    countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
+                    countable_fx(fx_node_2),
+                    lambda msg: f"{msg}\nExpected false {f}: {fx_node_2}",
                 )
 
     def test_flops_fx_higher_order_op(self):
@@ -310,6 +323,38 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
+
+
+class TestLoadTemplate(TestCase):
+    def test_load_template_uses_utf8(self):
+        # load_template must decode templates as UTF-8 regardless of the ambient
+        # locale. On a host whose default encoding is ascii, reading a template
+        # that contains a non-ascii byte otherwise raises UnicodeDecodeError,
+        # producing a host-dependent (flaky) compile failure.
+        real_open = builtins.open
+
+        def ascii_default_open(*args, **kwargs):
+            # Emulate an ascii-locale host: open() with no explicit encoding
+            # decodes as ascii (open's 4th positional arg is encoding).
+            if kwargs.get("encoding") is None and (len(args) < 4 or args[3] is None):
+                kwargs["encoding"] = "ascii"
+            return real_open(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "t.py.jinja").write_text("# unicode \u2014\n", encoding="utf-8")
+            with mock.patch("builtins.open", ascii_default_open):
+                content = load_template("t", Path(d))
+        self.assertIn("\u2014", content)
+
+    def test_load_template_invalid_utf8_names_the_file(self):
+        # A template that is genuinely not valid UTF-8 (e.g. saved in a non-UTF-8
+        # codepage) must raise an error that names the offending file, not an
+        # opaque UnicodeDecodeError that hides which template is bad.
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "bad.py.jinja").write_bytes(b"# not utf-8: \x97\n")
+            with self.assertRaises(ValueError) as cm:
+                load_template("bad", Path(d))
+        self.assertIn("bad.py.jinja", str(cm.exception))
 
 
 class TestRuntimeEstimation(TestCase):
@@ -437,6 +482,7 @@ class TestFakeTensorUpdater(TestCase):
         *,
         output_metadata_ignores_input_storage: bool = False,
         output_metadata_is_input: int | str | None = None,
+        output_metadata_fn: Callable[..., object] | None = None,
     ) -> Callable[[torch.Tensor], torch.Tensor]:
         def lowering_fn(x: torch.Tensor) -> torch.Tensor:
             raise AssertionError("lowering_fn should not run under FakeTensorUpdater")
@@ -448,6 +494,7 @@ class TestFakeTensorUpdater(TestCase):
         lowering_fn._inductor_lowering_output_metadata_is_input = (  # type: ignore[attr-defined]
             output_metadata_is_input
         )
+        lowering_fn._inductor_lowering_output_metadata_fn = output_metadata_fn  # type: ignore[attr-defined]
         return lowering_fn
 
     @classmethod
@@ -838,7 +885,10 @@ class TestFakeTensorUpdater(TestCase):
         y = graph.placeholder("y")
         neg = graph.call_function(aten.neg.default, (x,))
         lowered = graph.call_function(
-            self._make_inductor_lowering_function(output_metadata_is_input="input_"),
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True,
+                output_metadata_is_input="input_",
+            ),
             (),
             {"input_": neg},
         )
@@ -861,6 +911,69 @@ class TestFakeTensorUpdater(TestCase):
         self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
         self.assertEqual(tuple(lowered.meta["val"].shape), (4, 5))
 
+    def test_inductor_lowering_node_metadata_fn_updates_direct_arg_change(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_fn=lambda input_, shape: aten.reshape.default(
+                    input_, shape
+                )
+            ),
+            (x, (6,)),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            lowered.meta["val"] = aten.reshape.default(x.meta["val"], (6,))
+
+            updater = FakeTensorUpdater(gm)
+            lowered.args = (y, (20,))
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (20,))
+
+    def test_inductor_lowering_node_metadata_fn_preserves_view_aliasing(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=False,
+                output_metadata_fn=lambda input_, shape: aten.reshape.default(
+                    input_, shape
+                ),
+            ),
+            (x, (6,)),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            lowered.meta["val"] = aten.reshape.default(x.meta["val"], (6,))
+
+            updater = FakeTensorUpdater(gm)
+            lowered.args = (y, (6,))
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (6,))
+        self.assertEqual(
+            lowered.meta["val"].untyped_storage()._cdata,
+            y.meta["val"].untyped_storage()._cdata,
+        )
+
     def test_pass_through_inductor_lowering_node_rejects_missing_input_metadata(
         self,
     ):
@@ -868,7 +981,10 @@ class TestFakeTensorUpdater(TestCase):
         x = graph.placeholder("x")
         neg = graph.call_function(aten.neg.default, (x,))
         lowered = graph.call_function(
-            self._make_inductor_lowering_function(output_metadata_is_input="input_"),
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True,
+                output_metadata_is_input="input_",
+            ),
             (),
             {"input_": neg},
         )
