@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-"""Shared FlexGEMM local-reduce constants, contracts, and validation helpers."""
+"""Shared FlexGEMM local-reduce geometry, constants, and validation helpers."""
 
 import dataclasses
 from collections.abc import Sequence
@@ -70,9 +70,6 @@ LOCAL_REDUCE_C_ALPHA_BETA_ERROR = (
 LOCAL_REDUCE_SWAP_AB_ERROR = (
     "FlexGEMM local reductions do not support swap_ab configs yet"
 )
-LOCAL_REDUCE_AUX_METADATA_ERROR = (
-    "FlexGEMM local-reduce aux outputs require aux output metadata"
-)
 LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
     "FlexGEMM local-reduce aux output must be produced by a grouped TensorSSA reduction"
 )
@@ -113,25 +110,21 @@ LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR = (
 LOCAL_REDUCE_GROUPED_RESHAPE_ERROR = (
     "FlexGEMM local-reduce grouped reshape must split exactly one GEMM output dimension"
 )
-LOCAL_REDUCE_MIXED_CONTRACT_ERROR = (
-    "FlexGEMM local reductions do not support mixing different local-reduce contracts"
+LOCAL_REDUCE_MIXED_MATCH_ERROR = (
+    "FlexGEMM local reductions do not support mixing different grouped layouts"
 )
-LOCAL_REDUCE_FEED_MAIN_MIXED_CONTRACT_ERROR = (
-    "FlexGEMM local-reduce broadcast values do not support mixing different "
-    "local-reduce contracts"
+LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
+    "FlexGEMM local-reduce broadcast values must share one grouped layout"
 )
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
-LOCAL_REDUCE_CONTRACT_NODE_ERROR = "local-reduce contracts require tensor nodes"
+LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
 LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR = "local-reduce output plans require tensor nodes"
 LOCAL_REDUCE_RUNTIME_OUT_ERROR = "compressed local reductions require local_reduce_out"
 LOCAL_REDUCE_RUNTIME_DENSE_MM_ERROR = (
     "FlexGEMM local reductions currently support only 2-D aten.mm"
 )
 LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {actual}"
-LOCAL_REDUCE_TEMPLATE_OUT_INDEX_ERROR = (
-    "compressed local-reduce stores require out_index"
-)
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
@@ -257,7 +250,7 @@ def local_reduce_needs_physical_callbacks(axis: int, group: int) -> bool:
 
 
 def validate_local_reduce_runtime_dense_mm(ndim: int) -> None:
-    """Keep runtime wrappers on the only layout QuACK currently contracts for.
+    """Keep runtime wrappers on the only layout QuACK currently supports.
 
     Local-reduce group/axis semantics are defined relative to dense ``mm`` output
     dimensions. Batched or vectorized matmul layouts would need separate shape
