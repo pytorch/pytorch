@@ -3187,7 +3187,7 @@ class InstructionTranslatorBase(
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
         if sys.version_info >= (3, 12):
-            assert inst.arg is not None and inst.arg % 2 == 0, (
+            assert inst.arg is not None and inst.arg % 2 == 0, (  # noqa: S101
                 "LOAD_ATTR method variant should have been normalized by "
                 "remove_load_attr_method_variant in cleaned_instructions"
             )
