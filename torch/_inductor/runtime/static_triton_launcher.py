@@ -238,8 +238,14 @@ class StaticallyLaunchedTritonKernel:
         TODO: switch to triton's expand_signature once the versions converge on a
         single argument signature.
         """
-        # Caller guarantees ty.startswith("tensordesc<"), so "[shape]" is present.
-        ndim = ty[ty.index("[") + 1 : ty.index("]")].count(",") + 1
+        import re
+
+        # Same regex triton's expand_signature uses. We only need the rank, so
+        # the captured dtype group is unused (kept to match triton's pattern).
+        match = re.match(r"tensordesc<([^\[>]*)\[([^\]]*)\]", ty)
+        if match is None:
+            raise NotImplementedError(f"Could not parse tensordesc type: {ty}")
+        ndim = match.group(2).count(",") + 1
         meta = self.tensordesc_meta
         idx = self._tensordesc_idx
         self._tensordesc_idx += 1
