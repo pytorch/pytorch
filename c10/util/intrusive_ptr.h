@@ -569,7 +569,7 @@ class intrusive_ptr final {
     return *this;
   }
 
-  TTarget* get() const noexcept {
+  [[nodiscard]] TTarget* get() const noexcept {
     return target_;
   }
 
@@ -595,32 +595,32 @@ class intrusive_ptr final {
   }
 
   // We do a lot of null-pointer checks in our code, good to have this be cheap.
-  bool defined() const noexcept {
+  [[nodiscard]] bool defined() const noexcept {
     return target_ != NullType::singleton();
   }
 
-  uint32_t use_count() const noexcept {
+  [[nodiscard]] uint32_t use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->refcount(std::memory_order_relaxed);
   }
 
-  uint32_t weak_use_count() const noexcept {
+  [[nodiscard]] uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->weakcount(std::memory_order_relaxed);
   }
 
-  bool unique() const noexcept {
+  [[nodiscard]] bool unique() const noexcept {
     return use_count() == 1;
   }
 
   /**
    * Stronger than unique() in that it must not have any weakrefs as well.
    */
-  bool is_uniquely_owned() const noexcept {
+  [[nodiscard]] bool is_uniquely_owned() const noexcept {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(target_ != NullType::singleton());
     return detail::is_uniquely_owned(
         target_->combined_refcount_.load(std::memory_order_acquire));
@@ -1011,7 +1011,7 @@ class weak_intrusive_ptr final {
     return target_;
   }
 
-  uint32_t use_count() const noexcept {
+  [[nodiscard]] uint32_t use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
@@ -1019,14 +1019,14 @@ class weak_intrusive_ptr final {
         std::memory_order_relaxed); // refcount, not weakcount!
   }
 
-  uint32_t weak_use_count() const noexcept {
+  [[nodiscard]] uint32_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
     return target_->weakcount(std::memory_order_relaxed);
   }
 
-  bool expired() const noexcept {
+  [[nodiscard]] bool expired() const noexcept {
     return use_count() == 0;
   }
 
