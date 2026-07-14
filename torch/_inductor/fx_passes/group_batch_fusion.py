@@ -9,8 +9,8 @@ from typing import Any
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
-from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
 
