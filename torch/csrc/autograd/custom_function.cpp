@@ -382,7 +382,10 @@ static optional_variable_list _process_backward_mode_ad(
   };
 
   optional_variable_list outputs;
-  std::unordered_set<at::TensorImpl*> outputs_impl; // For dirty_inputs check
+  std::optional<std::unordered_set<at::TensorImpl*>> outputs_impl;
+  if (!dirty_inputs.empty()) {
+    outputs_impl.emplace();
+  }
   outputs.reserve(num_outputs);
   int num_diff_outputs = 0;
 
@@ -443,7 +446,9 @@ static optional_variable_list _process_backward_mode_ad(
       ++num_diff_outputs;
     }
 
-    outputs_impl.insert(out_tensor_impl);
+    if (outputs_impl) {
+      outputs_impl->insert(out_tensor_impl);
+    }
     outputs.emplace_back(var);
   }
 
@@ -462,11 +467,13 @@ static optional_variable_list _process_backward_mode_ad(
 
   // All the modified Tensors must be returned as is for the rewrite to be
   // valid.
-  for (auto& dirty_input : dirty_inputs) {
-    TORCH_CHECK(
-        outputs_impl.count(dirty_input) > 0,
-        "Some elements marked as dirty during the forward method were not returned as output. The"
-        " inputs that are modified inplace must all be outputs of the Function.");
+  if (outputs_impl) {
+    for (auto& dirty_input : dirty_inputs) {
+      TORCH_CHECK(
+          outputs_impl->count(dirty_input) > 0,
+          "Some elements marked as dirty during the forward method were not returned as output. The"
+          " inputs that are modified inplace must all be outputs of the Function.");
+    }
   }
 
   return outputs;
