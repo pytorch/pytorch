@@ -866,10 +866,9 @@ static void _wrap_outputs(
   }
 }
 
-static void _get_tensors_to_save(
+static void _prepare_tensors_to_save(
     THPFunction* self,
     std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    std::vector<std::optional<at::Tensor>>& tensors_to_save,
     bool overridden_setup_context,
     bool is_executable) {
   if (self->saved_for_forward && overridden_setup_context) {
@@ -890,53 +889,60 @@ static void _get_tensors_to_save(
       }
     }
   }
-  if (self->to_save) {
-    THPFunction_assert(
-        PyTuple_Check(self->to_save),
-        "autograd internal "
-        "error: to_save attribute is expected to be a tuple but is ",
-        THPUtils_typename(self->to_save));
+  if (!self->to_save) {
+    return;
+  }
 
-    Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
-    for (const auto i : c10::irange(num_saved)) {
-      PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
-      if (Py_IsNone(obj)) {
-        tensors_to_save.emplace_back(std::nullopt);
-        continue;
-      } else if (THPVariable_Check(obj)) {
-        const auto& tensor = THPVariable_Unpack(obj);
-        if (overridden_setup_context) {
-          to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
-        }
-        if (is_executable) {
-          tensors_to_save.emplace_back(tensor);
-        }
-      } else {
-        if (is_executable) {
-          // TODO: We should really just ALWAYS throw an error here, but
-          // doing so will break some internal tests. We should fix those.
-          TORCH_CHECK_TYPE(
-              false,
-              fmt::format(
-                  "save_for_backward can only save variables, but argument {} is of "
-                  "type {}",
-                  i,
-                  Py_TYPE(obj)->tp_name));
-        }
-      }
+  THPFunction_assert(
+      PyTuple_Check(self->to_save),
+      "autograd internal "
+      "error: to_save attribute is expected to be a tuple but is ",
+      THPUtils_typename(self->to_save));
+  if (!overridden_setup_context) {
+    return;
+  }
+
+  Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
+  for (const auto i : c10::irange(num_saved)) {
+    PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
+    if (Py_IsNone(obj)) {
+      continue;
+    } else if (THPVariable_Check(obj)) {
+      const auto& tensor = THPVariable_Unpack(obj);
+      to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
+    } else if (is_executable) {
+      // TODO: We should really just ALWAYS throw an error here, but
+      // doing so will break some internal tests. We should fix those.
+      TORCH_CHECK_TYPE(
+          false,
+          fmt::format(
+              "save_for_backward can only save variables, but argument {} is of "
+              "type {}",
+              i,
+              Py_TYPE(obj)->tp_name));
     }
-    Py_CLEAR(self->to_save);
   }
 }
 // Save any variables that requested by to_save
 static void _save_variables(
-    const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     THPFunction* self,
     PyObject* outputs,
     int64_t num_outputs) {
-  if (tensors_to_save.empty())
+  if (!self->to_save) {
     return;
-  size_t num_saved = tensors_to_save.size();
+  }
+  THPFunction_assert(
+      PyTuple_Check(self->to_save),
+      "autograd internal "
+      "error: to_save attribute is expected to be a tuple but is ",
+      THPUtils_typename(self->to_save));
+
+  Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
+  if (num_saved == 0) {
+    Py_CLEAR(self->to_save);
+    return;
+  }
+
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
 
@@ -950,15 +956,25 @@ static void _save_variables(
     }
   }
 
-  for (const auto& opt_tensor : tensors_to_save) {
-    if (!opt_tensor.has_value()) {
+  for (const auto i : c10::irange(num_saved)) {
+    PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
+    if (Py_IsNone(obj)) {
       self->saved_variables.emplace_back();
+    } else if (THPVariable_Check(obj)) {
+      const auto& tensor = THPVariable_Unpack(obj);
+      self->saved_variables.emplace_back(
+          tensor, output_impls.count(tensor.unsafeGetTensorImpl()) > 0);
     } else {
-      bool is_output =
-          output_impls.count(opt_tensor.value().unsafeGetTensorImpl()) > 0;
-      self->saved_variables.emplace_back(opt_tensor.value(), is_output);
+      TORCH_CHECK_TYPE(
+          false,
+          fmt::format(
+              "save_for_backward can only save variables, but argument {} is of "
+              "type {}",
+              i,
+              Py_TYPE(obj)->tp_name));
     }
   }
+  Py_CLEAR(self->to_save);
 }
 
 // Mark requires_grad = 0 on non-differentiable variables (as per
@@ -1253,11 +1269,9 @@ PyObject* process_outputs(
   grad_fn->cdata->clear_input_metadata();
 
   std::unordered_set<at::TensorImpl*> to_save_if_setup_context{};
-  std::vector<std::optional<at::Tensor>> tensors_to_save{};
-  _get_tensors_to_save(
+  _prepare_tensors_to_save(
       grad_fn,
       to_save_if_setup_context,
-      tensors_to_save,
       overridden_setup_context,
       is_executable);
 
@@ -1276,7 +1290,7 @@ PyObject* process_outputs(
   // wrapping as the outputs must have their grad_fn/fw_grad properly set before
   // we save them.
   if (is_executable) {
-    _save_variables(tensors_to_save, grad_fn, outputs.get(), num_outputs);
+    _save_variables(grad_fn, outputs.get(), num_outputs);
   } else {
     // Remove unnecessary attributes
     Py_CLEAR(grad_fn->to_save);
