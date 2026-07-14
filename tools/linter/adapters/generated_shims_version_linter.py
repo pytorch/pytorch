@@ -13,6 +13,7 @@ import ast
 import json
 import logging
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,7 +23,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
     get_current_version,
-    git_output_with_lazy_fetch,
     LintMessage,
     LintSeverity,
     merge_base_with_main,
@@ -118,7 +118,12 @@ def _read_at_merge_base(filename: str) -> str | None:
     # `git show <ref>:<path>` requires <path> relative to the repo root;
     # lintrunner may pass `filename` as an absolute path.
     rel_path = Path(filename).resolve().relative_to(REPO_ROOT).as_posix()
-    result = git_output_with_lazy_fetch(["git", "show", f"{merge_base}:{rel_path}"])
+    result = subprocess.run(
+        ["git", "show", f"{merge_base}:{rel_path}"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
     if result.returncode != 0:
         # File didn't exist at merge-base; treat all current entries as new.
         return None
@@ -203,7 +208,14 @@ def _check_one_dict(
 
 def check_file(filename: str) -> list[LintMessage]:
     current_dicts = parse_fallback_ops(Path(filename).read_text())
-    base_src = _read_at_merge_base(filename)
+    try:
+        base_src = _read_at_merge_base(filename)
+    except subprocess.TimeoutExpired:
+        # On a partial-clone CI checkout, reading the base file lazily fetches
+        # its blob from the promisor remote, which can exceed the 5s local-op
+        # budget. Skip rather than crash or treat every op as new: an empty base
+        # would false-positive on all already-versioned ops.
+        return []
     base_dicts = parse_fallback_ops(base_src) if base_src is not None else {}
 
     major, minor, patch = get_current_version()

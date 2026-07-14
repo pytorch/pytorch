@@ -434,19 +434,6 @@ class PreprocessorTracker:
         return found if found is not None else []
 
 
-def git_output_with_lazy_fetch(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    """
-    Run a read-only git command whose objects may be missing from a partial
-    clone. 5s is plenty when the objects are already local; if that times out,
-    they are not local yet, so retry and allow the on-demand fetch from the
-    promisor remote to complete.
-    """
-    try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-    except subprocess.TimeoutExpired:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-
-
 @functools.cache
 def merge_base_with_main() -> str:
     """
