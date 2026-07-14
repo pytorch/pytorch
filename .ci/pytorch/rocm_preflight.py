@@ -138,6 +138,160 @@ def _diag() -> None:
         except Exception as e:  # noqa: BLE001
             print(f"[preflight-diag] amdsmi direct probe raised: {e!r}")
 
+        # WHY does amdsmi/rsmi enumerate 0 while HIP counts N? amdsmi's GPU
+        # count comes from rsmi_num_monitor_devices -> DiscoverAmdgpuDevices(),
+        # which walks /sys/class/kfd/kfd/topology/nodes/. Per node (bare metal),
+        # rsmi counts it iff ALL hold (rocm_smi_main.cc DiscoverAmdgpuDevices,
+        # release/therock-7.10):
+        #   - properties file exists & non-empty
+        #   - gpu_id file readable & numeric, value != 0
+        #   - properties has PARSEABLE (key present, not nonzero!) domain,
+        #     location_id, AND drm_render_minor
+        # On a VM guest (is_vm_guest) only gpu_id != 0 is required. HIP walks the
+        # same topology but is more tolerant. Dump every key rsmi keys on so a
+        # node HIP-accepts / rsmi-rejects divergence is legible in one run.
+        try:
+            import glob as _glob
+
+            # VM-guest detection: rsmi relaxes to gpu_id-only on VMs.
+            vm_guest = False
+            try:
+                cpuinfo = pathlib.Path("/proc/cpuinfo").read_text()
+                vm_guest = "hypervisor" in cpuinfo
+            except Exception:  # noqa: BLE001
+                pass
+            print(f"[preflight-diag] rsmi VM-guest path (relaxed): {vm_guest}")
+
+            kfd_root = "/sys/class/kfd/kfd/topology/nodes"
+            nodes = sorted(
+                _glob.glob(f"{kfd_root}/*"),
+                key=lambda p: int(os.path.basename(p)) if os.path.basename(p).isdigit() else -1,
+            )
+            print(f"[preflight-diag] KFD topology: {len(nodes)} node dir(s) under {kfd_root}")
+            print(
+                f"[preflight-diag] KFD nodes/ readable: "
+                f"{os.access(kfd_root, os.R_OK | os.X_OK)}"
+            )
+            # Divergence probe (case c): Python getdents vs librsmi getdents.
+            try:
+                print(f"[preflight-diag] KFD nodes/ os.listdir count: {len(os.listdir(kfd_root))}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[preflight-diag] KFD nodes/ os.listdir raised: {e!r}")
+
+            def _key(props, k):
+                # Return the value if the key is PRESENT & has a token (rsmi's
+                # gate is parseable, i.e. present, NOT nonzero), else "<absent>".
+                for ln in props.splitlines():
+                    if ln.startswith(k + " "):
+                        parts = ln.split()
+                        return parts[1] if len(parts) > 1 else "<empty>"
+                return "<absent>"
+
+            gpu_nodes = 0
+            rsmi_countable = 0
+            for nd in nodes:
+                name = os.path.basename(nd)
+                try:
+                    gpu_id = pathlib.Path(f"{nd}/gpu_id").read_text().strip()
+                except Exception as e:  # noqa: BLE001
+                    print(f"[preflight-diag] KFD node {name}: gpu_id UNREADABLE ({e!r})")
+                    continue
+                props_path = pathlib.Path(f"{nd}/properties")
+                props = props_path.read_text() if props_path.exists() else ""
+                props_ok = bool(props.strip())
+                rmin = _key(props, "drm_render_minor")
+                loc = _key(props, "location_id")
+                dom = _key(props, "domain")
+                simd = _key(props, "simd_count")
+                gfxv = _key(props, "gfx_target_version")
+                is_gpu = gpu_id != "0"
+                if is_gpu:
+                    gpu_nodes += 1
+                # Faithful rsmi predicate: keys must be PRESENT (parseable), not
+                # nonzero. On VM guest only gpu_id!=0 is required.
+                if vm_guest:
+                    rsmi_ok = props_ok and is_gpu
+                else:
+                    rsmi_ok = (
+                        props_ok
+                        and is_gpu
+                        and rmin != "<absent>"
+                        and loc != "<absent>"
+                        and dom != "<absent>"
+                    )
+                if rsmi_ok:
+                    rsmi_countable += 1
+                print(
+                    f"[preflight-diag] KFD node {name}: gpu_id={gpu_id} "
+                    f"props_nonempty={props_ok} drm_render_minor={rmin} "
+                    f"location_id={loc} domain={dom} simd_count={simd} "
+                    f"gfx_target_version={gfxv} is_gpu={is_gpu} "
+                    f"rsmi_would_count={rsmi_ok}"
+                )
+            print(
+                f"[preflight-diag] KFD GPU-node count (gpu_id!=0): {gpu_nodes}; "
+                f"rsmi-countable: {rsmi_countable}"
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] KFD topology probe raised: {e!r}")
+
+        # The DRM sysfs rsmi reads for card metadata (secondary; does not cause
+        # 0, but records container sysfs completeness).
+        try:
+            import glob as _glob
+
+            drm = sorted(_glob.glob("/sys/class/drm/*"))
+            print(f"[preflight-diag] /sys/class/drm entries: {[os.path.basename(d) for d in drm]}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] /sys/class/drm probe raised: {e!r}")
+
+        # rocm-smi / amd-smi CLI cross-check + rsmi env knobs.
+        for var in ("ROCM_PATH", "RSMI_LOGGING", "ROCP_METRICS", "HSA_ENABLE_SDMA"):
+            print(f"[preflight-diag] env {var}={os.environ.get(var, '<unset>')}")
+        for cli in (["amd-smi", "list"], ["rocm-smi", "--showid"]):
+            try:
+                # Merge stderr into stdout: SMI failures often go only to stderr.
+                r = subprocess.run(
+                    cli,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=60,
+                )
+                out = (r.stdout or "").strip().splitlines()
+                print(f"[preflight-diag] `{' '.join(cli)}` rc={r.returncode}, first 12 lines:")
+                for ln in out[:12]:
+                    print(f"[preflight-diag-cli] {ln}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[preflight-diag] `{' '.join(cli)}` raised: {e!r}")
+
+        # Case (c) discriminator: if Python reads the KFD nodes fine but rsmi
+        # still counts 0, the divergence is a syscall the library makes that
+        # Python's read path does not (getdents/openat blocked by seccomp for
+        # librsmi, an ioctl on /dev/kfd, etc). strace amd-smi to name it.
+        try:
+            r = subprocess.run(
+                ["strace", "-f", "-e", "trace=openat,getdents64,ioctl",
+                 "amd-smi", "list"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=90,
+            )
+            lines = (r.stdout or "").strip().splitlines()
+            hits = [
+                ln for ln in lines
+                if ("kfd" in ln or "dri" in ln or "= -1" in ln or "EPERM" in ln
+                    or "EACCES" in ln or "ENOENT" in ln)
+            ]
+            print(f"[preflight-diag] strace amd-smi: {len(lines)} lines, {len(hits)} relevant:")
+            for ln in hits[:40]:
+                print(f"[preflight-diag-strace] {ln}")
+        except FileNotFoundError:
+            print("[preflight-diag] strace not installed (skip case-c syscall probe)")
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] strace probe raised: {e!r}")
+
         # NOTE on reading the wheel's bundled arches off disk: PyTorch's device
         # code lives in the .hip_fatbin section, which is NOBITS (allocated at
         # runtime, zero bytes on disk), so clang-offload-bundler --list /
