@@ -4485,10 +4485,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
                 xfail("as_strided", "partial_views"),
-                # RuntimeError: output with shape [4, 4] doesn't match the broadcast shape [1, 4, 4]
-                xfail("addcdiv"),
-                xfail("addcmul"),
-                xfail("clamp"),
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
