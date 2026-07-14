@@ -20,14 +20,11 @@ from torch.testing._internal.common_utils import (
 class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
-        self._old = torch._dynamo.config.enable_faithful_generator_behavior
-        torch._dynamo.config.enable_faithful_generator_behavior = True
         self._unittest_old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
         super().tearDown()
-        torch._dynamo.config.enable_faithful_generator_behavior = self._old
         torch._dynamo.config.enable_trace_unittest = self._unittest_old
 
     def _compile_check(self, fn, args=None, fullgraph=True):
