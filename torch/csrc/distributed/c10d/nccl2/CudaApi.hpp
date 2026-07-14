@@ -2,6 +2,8 @@
 
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <c10/util/Logging.h>
 #include <cuda_runtime.h>
 
@@ -247,3 +249,5 @@ class DefaultCudaApi : public CudaApi {
 };
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL

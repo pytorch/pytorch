@@ -2,6 +2,8 @@
 
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -86,3 +88,5 @@ void populateNcclConfigFromHints(
     const std::string& name);
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
