@@ -57,7 +57,6 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
-    skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
@@ -621,7 +620,8 @@ class Transformer(nn.Module):
 
 def skip_unless_torch_gpu(method: T) -> T:
     """
-    Test decorator which skips the test unless there's a GPU available to torch.
+    Test decorator which skips the test unless there are enough accelerator
+    devices available to torch.
 
     >>> # xdoctest: +SKIP
     >>> @skip_unless_torch_gpu
@@ -629,7 +629,21 @@ def skip_unless_torch_gpu(method: T) -> T:
     >>>   ...
     """
     # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
-    return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
+    # Keep the historical name for compatibility, but use torch.accelerator so
+    # PrivateUse1 and other accelerator backends are handled consistently.
+    @wraps(method)
+    def wrapper(*args, **kwargs):
+        if torch.accelerator.device_count() >= NUM_DEVICES:
+            return method(*args, **kwargs)
+        test_skip = TEST_SKIPS[f"multi-gpu-{NUM_DEVICES}"]
+        if len(args) > 0:
+            _handle_test_skip = getattr(args[0], "_handle_test_skip", None)
+            if _handle_test_skip is not None:
+                _handle_test_skip(test_skip.message)
+                return None
+        sys.exit(test_skip.exit_code)
+
+    return cast(T, wrapper)
 
 
 class DTensorTestMixin:
@@ -798,42 +812,41 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
         if backend is None:
             backend = self.backend
 
-        requires_gpu = any(
-            gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
+        requires_accelerator = any(
+            accelerator_backend in backend
+            for accelerator_backend in ACCELERATOR_DIST_BACKENDS
         )
-        if requires_gpu and torch.accelerator.device_count() < self.world_size:
+        if requires_accelerator and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
-
-        if backend not in [
-            "nccl",
+        supported_backends = {
             "gloo",
             "mpi",
+            "fake",
             f"cpu:gloo,{self.device_type}:{curr_backend}",
             "cpu:gloo,cuda:ncclx",
             "cuda:ncclx",
-            "hccl",
-            "xccl",
-            "fake",
             "cpu:gloo,xpu:xccl",
-        ]:
+            *ACCELERATOR_DIST_BACKENDS,
+        }
+
+        if backend not in supported_backends:
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
-        if "nccl" in backend or "xccl" in backend:
-            # set device for nccl pg for collectives
+        if requires_accelerator:
+            # set device for accelerator pg for collectives
             # TODO: if users want to enable testing across hosts, we may need
             # to change this part.
             torch.accelerator.set_device_index(self.rank)
-            # we only need to set device_id for nccl backend with eager init
+            # we only need to set device_id for accelerator backend with eager init
             device_id = (
                 torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
             )
 
-        # For nccl backend, bind the device to the process if device_id is not None
-        # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
-        # for form subgroup to avoid unnecessary overhead.
+        # For accelerator backends, bind the device to the process if device_id
+        # is not None so the communicator can be eagerly formed when supported.
         dist.init_process_group(
             backend=backend,
             world_size=self.world_size,
