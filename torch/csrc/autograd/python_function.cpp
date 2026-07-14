@@ -982,15 +982,6 @@ struct InputFlags {
 };
 
 namespace {
-edge_list collect_next_edges(at::ArrayRef<const Variable*> input_vars) {
-  edge_list next_edges;
-  next_edges.reserve(input_vars.size());
-  for (const auto* input_var : input_vars) {
-    next_edges.emplace_back(torch::autograd::impl::gradient_edge(*input_var));
-  }
-  return next_edges;
-}
-
 std::pair<UnpackedInput, InputFlags> unpack_input(
     PyObject* args,
     bool fill_record_function_inputs) {
@@ -1002,6 +993,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
   flags.needs_input_grad.reserve(num_args);
   unpacked.input_vars.reserve(num_args);
   flags.is_variable_input.reserve(num_args);
+  const bool grad_mode_enabled = GradMode::is_enabled();
   bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
       torch::autograd::profiler::getProfilerConfig().report_input_shapes;
   bool any_requires_grad = false;
@@ -1029,6 +1021,18 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
       unpacked.input_vars.push_back(&tensor);
       const bool requires_grad = tensor.requires_grad();
       any_requires_grad |= requires_grad;
+      if (grad_mode_enabled && (!flags.next_edges.empty() || requires_grad)) {
+        if (flags.next_edges.empty()) {
+          flags.next_edges.reserve(num_args);
+          flags.next_edges.resize(unpacked.input_vars.size() - 1);
+        }
+        if (requires_grad) {
+          flags.next_edges.emplace_back(
+              torch::autograd::impl::gradient_edge(tensor));
+        } else {
+          flags.next_edges.emplace_back();
+        }
+      }
       flags.needs_input_grad.push_back(requires_grad);
       // tensor -> IValue conversion is expensive, only do it if we need it.
       if (fill_record_function_inputs) {
@@ -1039,10 +1043,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
     PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
   }
 
-  flags.is_executable = GradMode::is_enabled() && any_requires_grad;
-  flags.next_edges = flags.is_executable
-      ? collect_next_edges(unpacked.input_vars)
-      : edge_list();
+  flags.is_executable = grad_mode_enabled && any_requires_grad;
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
