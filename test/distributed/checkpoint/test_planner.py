@@ -251,6 +251,48 @@ class TestSavePlan(TestCase):
                         item_md.chunks[new_item.index.index], old_item.tensor_data.chunk
                     )
 
+    def test_checkpointable_tensor_global_plan(self):
+        world_size = 4
+        shard_size = 4
+
+        def create_data(rank):
+            with with_dist(rank=rank, world_size=world_size):
+                tensor = (
+                    torch.arange(shard_size, dtype=torch.float32) + rank * shard_size
+                )
+                tensor.global_shape = (world_size * shard_size,)
+                tensor.global_offsets = ((rank * shard_size,),)
+                tensor.local_offsets = ((0,),)
+                tensor.local_sizes = ((shard_size,),)
+                return create_default_local_save_plan({"proto": tensor}, rank == 0)
+
+        all_plans = [create_data(rank) for rank in range(world_size)]
+        deduped_plans = dedup_save_plans(all_plans)
+        final_plans, metadata = create_default_global_save_plan(deduped_plans)
+
+        tensor_metadata = metadata.state_dict_metadata["proto"]
+        self.assertIsInstance(tensor_metadata, TensorStorageMetadata)
+        self.assertEqual(torch.Size([world_size * shard_size]), tensor_metadata.size)
+        self.assertEqual(
+            [
+                ChunkStorageMetadata(
+                    offsets=torch.Size([rank * shard_size]),
+                    sizes=torch.Size([shard_size]),
+                )
+                for rank in range(world_size)
+            ],
+            tensor_metadata.chunks,
+        )
+
+        for rank, plan in enumerate(final_plans):
+            self.assertEqual(1, len(plan.items))
+            item = plan.items[0]
+            self.assertEqual(WriteItemType.SHARD, item.type)
+            self.assertEqual(
+                MetadataIndex("proto", [rank * shard_size], rank), item.index
+            )
+            self.assertEqual(tensor_metadata.chunks[rank], item.tensor_data.chunk)
+
     def test_dedup_plans(self):
         def create_data(rank):
             with with_dist(rank=rank, world_size=4):

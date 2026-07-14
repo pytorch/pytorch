@@ -35,6 +35,7 @@ from torch.distributed.checkpoint._hf_utils import (
     DCP_VERSION_KEY,
     FORMAT_KEY,
     FORMAT_VALUE,
+    GLOBAL_SHAPE_KEY,
     HF_DCP_VERSION,
     LOGICAL_FQN_KEY,
     SAVED_OFFSETS_KEY,
@@ -480,7 +481,8 @@ def _write_files_from_queue(
                     tensor_dict[tensor_storage_key] = tensor  # type: ignore[attr-defined]
                     metadata_dict[tensor_storage_key] = {  # type: ignore[attr-defined]
                         LOGICAL_FQN_KEY: write_item.index.fqn,
-                        SAVED_OFFSETS_KEY: chunk_offsets,
+                        GLOBAL_SHAPE_KEY: list(write_item.tensor_data.size),
+                        SAVED_OFFSETS_KEY: list(chunk_offsets),
                     }
 
                 if serialization_format == SerializationFormat.SAFETENSORS:

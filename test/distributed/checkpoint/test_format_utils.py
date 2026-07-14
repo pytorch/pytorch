@@ -78,7 +78,7 @@ class TestFormatUtils(DTensorTestBase):
 
         self.assertEqual({"model": model.state_dict()}, sd)
 
-    def test_dynamic_meta_load_planner_checkpointable_tensor(self) -> None:
+    def test_broadcasting_torch_save_reader_checkpointable_tensor(self) -> None:
         tensor = torch.full((8,), -1.0)
         tensor.global_shape = (16,)
         tensor.global_offsets = ((0,), (12,))
@@ -86,7 +86,8 @@ class TestFormatUtils(DTensorTestBase):
         tensor.local_sizes = ((4,), (4,))
 
         planner = DynamicMetaLoadPlanner()
-        planner.set_up_planner({"proto": tensor}, metadata=None, is_coordinator=True)
+        planner.set_up_planner({"proto": tensor}, metadata=None, is_coordinator=False)
+        plan = planner.create_local_plan()
 
         tensor_metadata = planner.metadata.state_dict_metadata["proto"]
         self.assertIsInstance(tensor_metadata, TensorStorageMetadata)
@@ -100,22 +101,9 @@ class TestFormatUtils(DTensorTestBase):
             ],
             tensor_metadata.chunks,
         )
-
-        plan = planner.create_local_plan()
         self.assertEqual(2, len(plan.items))
         self.assertEqual(torch.Size([0]), plan.items[0].storage_offsets)
         self.assertEqual(torch.Size([12]), plan.items[1].storage_offsets)
-
-    def test_broadcasting_torch_save_reader_checkpointable_tensor(self) -> None:
-        tensor = torch.full((8,), -1.0)
-        tensor.global_shape = (16,)
-        tensor.global_offsets = ((0,), (12,))
-        tensor.local_offsets = ((0,), (4,))
-        tensor.local_sizes = ((4,), (4,))
-
-        planner = DynamicMetaLoadPlanner()
-        planner.set_up_planner({"proto": tensor}, metadata=None, is_coordinator=False)
-        plan = planner.create_local_plan()
 
         reader = BroadcastingTorchSaveReader()
         reader.is_coordinator = False

@@ -21,6 +21,7 @@ from torch.distributed.checkpoint._hf_utils import (
     DATA_OFFSETS_KEY,
     DEFAULT_EXTRA_METADATA_KEY,
     DTYPE_KEY,
+    GLOBAL_SHAPE_KEY,
     LOGICAL_FQN_KEY,
     SAVED_OFFSETS_KEY,
     SHAPE_KEY,
@@ -116,12 +117,19 @@ def _parse_input_metadata(
             sizes = val[SHAPE_KEY]
             shard_info = dcp_sharding_info[storage_key]
             key = shard_info.get(LOGICAL_FQN_KEY, storage_key)
+            global_shape = shard_info.get(GLOBAL_SHAPE_KEY)
             offsets = shard_info[SAVED_OFFSETS_KEY]
 
             if key not in fqn_to_size_mapping:
                 # First time seeing this tensor - calculate its full size by adding offsets to dimensions
-                cur_size = [size + offset for size, offset in zip(sizes, offsets)]
+                cur_size = (
+                    list(global_shape)
+                    if global_shape is not None
+                    else [size + offset for size, offset in zip(sizes, offsets)]
+                )
                 fqn_to_size_mapping[key] = (cur_size, val[DTYPE_KEY])
+            elif global_shape is not None:
+                fqn_to_size_mapping[key] = (list(global_shape), val[DTYPE_KEY])
             else:
                 # We've seen this tensor before - update its size if this shard extends beyond current known dimensions
                 cur_size = fqn_to_size_mapping[key][0]

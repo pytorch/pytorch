@@ -16,6 +16,7 @@ from torch.distributed.checkpoint._hf_utils import (
     _HFStorageInfo,
     _metadata_fn,
     CUSTOM_METADATA_KEY,
+    GLOBAL_SHAPE_KEY,
     LOGICAL_FQN_KEY,
     SAVED_OFFSETS_KEY,
     SHARDED_DIR_NAME,
@@ -343,17 +344,24 @@ class HuggingFaceStorageReader(FileSystemReader):
                     if dcp_sharding_info is not None:
                         shard_info = dcp_sharding_info[storage_key]
                         key = shard_info.get(LOGICAL_FQN_KEY, storage_key)
+                        global_shape = shard_info.get(GLOBAL_SHAPE_KEY)
                         offset = shard_info[SAVED_OFFSETS_KEY]
                     else:
                         key = storage_key
+                        global_shape = None
                         offset = [0] * len(shape)
 
                     if key not in state_dict_metadata:
+                        tensor_size = (
+                            torch.Size(global_shape)
+                            if global_shape is not None
+                            else torch.Size(
+                                [saved + offset for saved, offset in zip(shape, offset)]
+                            )
+                        )
                         state_dict_metadata[key] = TensorStorageMetadata(
                             properties=TensorProperties(dtype=_getdtype(dtype)),
-                            size=torch.Size(
-                                [saved + offset for saved, offset in zip(shape, offset)]
-                            ),
+                            size=tensor_size,
                             chunks=[
                                 ChunkStorageMetadata(
                                     offsets=torch.Size(offset),
@@ -367,10 +375,13 @@ class HuggingFaceStorageReader(FileSystemReader):
                                 torch.Size(offset), sizes=torch.Size(shape)
                             )
                         )
-                        size = list(state_dict_metadata[key].size)
-                        for i in range(len(size)):
-                            size[i] = max(size[i], shape[i] + offset[i])
-                        state_dict_metadata[key].size = torch.Size(size)
+                        if global_shape is not None:
+                            state_dict_metadata[key].size = torch.Size(global_shape)
+                        else:
+                            size = list(state_dict_metadata[key].size)
+                            for i in range(len(size)):
+                                size[i] = max(size[i], shape[i] + offset[i])
+                            state_dict_metadata[key].size = torch.Size(size)
 
                     # construct storage data
                     if dcp_sharding_info is not None:

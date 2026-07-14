@@ -7,6 +7,7 @@ import os
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
+from torch.distributed.checkpoint.metadata import ChunkStorageMetadata
 from torch.distributed.checkpoint.quantized_hf_storage import (
     QuantizedHuggingFaceStorageReader,
 )
@@ -104,6 +105,75 @@ class TestSingleRankSaveLoad(TestCase):
         )
 
         self.assertEqual(expected, tensor)
+
+    @with_temp_dir
+    def test_checkpointable_tensor_tail_hole_metadata(self) -> None:
+        if importlib.util.find_spec("safetensors") is None:
+            print("safetensors not installed")
+            return
+
+        expected = torch.arange(4, dtype=torch.float32)
+        tensor = expected.clone()
+        tensor.global_shape = (16,)
+        tensor.global_offsets = ((0,),)
+        tensor.local_offsets = ((0,),)
+        tensor.local_sizes = ((4,),)
+        state_dict = {"proto": tensor}
+
+        dist_cp.save(
+            state_dict=state_dict,
+            storage_writer=dist_cp.HuggingFaceStorageWriter(path=self.temp_dir),
+            no_dist=True,
+        )
+
+        metadata = dist_cp.HuggingFaceStorageReader(path=self.temp_dir).read_metadata()
+        tensor_metadata = metadata.state_dict_metadata["proto"]
+        self.assertEqual(torch.Size([16]), tensor_metadata.size)
+        self.assertEqual(
+            [ChunkStorageMetadata(offsets=torch.Size([0]), sizes=torch.Size([4]))],
+            tensor_metadata.chunks,
+        )
+
+        tensor.fill_(-1)
+        dist_cp.load(
+            state_dict=state_dict,
+            storage_reader=dist_cp.HuggingFaceStorageReader(path=self.temp_dir),
+            no_dist=True,
+        )
+
+        self.assertEqual(expected, tensor)
+
+    @with_temp_dir
+    def test_checkpointable_tensor_tail_hole_consolidation(self) -> None:
+        if importlib.util.find_spec("safetensors") is None:
+            print("safetensors not installed")
+            return
+
+        from safetensors.torch import load_file
+
+        tensor = torch.arange(4, dtype=torch.float32)
+        tensor.global_shape = (16,)
+        tensor.global_offsets = ((0,),)
+        tensor.local_offsets = ((0,),)
+        tensor.local_sizes = ((4,),)
+
+        dist_cp.save(
+            state_dict={"proto": tensor},
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
+                path=self.temp_dir,
+                save_distributed=True,
+                enable_consolidation=True,
+            ),
+            no_dist=True,
+        )
+
+        loaded_dict = load_file(
+            os.path.join(self.temp_dir, "model-00001-of-00001.safetensors")
+        )
+        expected = torch.zeros(16, dtype=torch.float32)
+        expected[:4] = tensor
+        self.assertEqual(loaded_dict.keys(), {"proto"})
+        self.assertEqual(expected, loaded_dict["proto"])
 
     @with_temp_dir
     def test_load(self) -> None:
@@ -315,6 +385,55 @@ class TestSingleRankSaveLoad(TestCase):
 
 
 class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(2)
+    def test_checkpointable_tensor_consolidate_to_one_file(self) -> None:
+        if importlib.util.find_spec("safetensors") is None:
+            print("safetensors not installed")
+            return
+
+        from safetensors import safe_open
+        from safetensors.torch import load_file
+
+        shard_size = 4
+        global_tensor = torch.arange(
+            self.world_size * shard_size,
+            dtype=torch.float32,
+        )
+        start = self.rank * shard_size
+        local_tensor = (
+            global_tensor[start : start + shard_size].clone().to(self.device_type)
+        )
+        local_tensor.global_shape = tuple(global_tensor.size())
+        local_tensor.global_offsets = ((start,),)
+        local_tensor.local_offsets = ((0,),)
+        local_tensor.local_sizes = ((shard_size,),)
+
+        dist_cp.save(
+            state_dict={"proto": local_tensor},
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
+                path=self.temp_dir,
+                save_distributed=True,
+                enable_consolidation=True,
+            ),
+        )
+        dist.barrier()
+
+        if self.rank == 0:
+            file_path = os.path.join(self.temp_dir, "model-00001-of-00001.safetensors")
+            with safe_open(file_path, framework="pt") as f:
+                self.assertEqual(set(f.keys()), {"proto"})
+                self.assertEqual(
+                    list(global_tensor.size()), f.get_slice("proto").get_shape()
+                )
+
+            loaded_dict = load_file(file_path)
+            self.assertEqual(loaded_dict.keys(), {"proto"})
+            self.assertEqual(global_tensor, loaded_dict["proto"])
+
+        dist.barrier()
+
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
