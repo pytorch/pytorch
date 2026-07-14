@@ -219,7 +219,7 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
         )
 
     # cuSPARSELt lacks the A and B operand scaling support, so instead we use alpha to scale the result.
-    # Note that this limits us to per-tensor scalig only.
+    # Note that this limits us to per-tensor scaling only.
     sparse_result = torch._cslt_sparse_mm(
         A.packed,
         B,
