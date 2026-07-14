@@ -13,7 +13,7 @@ import time
 import typing_extensions
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, Literal, NoReturn, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -36,7 +36,7 @@ from torch._prims_common import (
     compute_required_storage_length,
     make_channels_last_strides_for,
 )
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -436,6 +436,9 @@ class GraphLowering(torch.fx.Interpreter):
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
         self.graph_input_storage_offsets: dict[str, Expr] = {}
+        self.symbolic_input_sources: dict[
+            sympy.Symbol, tuple[str, Literal["size", "stride"], int]
+        ] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
@@ -2546,7 +2549,7 @@ class GraphLowering(torch.fx.Interpreter):
                     elif isinstance(x, (torch.SymInt, torch.SymFloat)):
                         # Need concrete value to run dynamic shapes and tune the result
                         return not_none(x.hint)
-                    elif isinstance(x, FakeTensor):
+                    elif is_fake_tensor(x):
                         return defake(x)
                     else:
                         if not isinstance(x, torch.Tensor):
@@ -2839,7 +2842,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         def materialize_constant(name: str) -> torch.Tensor:
             constant = self.constants[name]
-            if isinstance(constant, FakeTensor):
+            if is_fake_tensor(constant):
                 constant = defake(constant)
             if not isinstance(constant, torch.Tensor):
                 raise AssertionError(f"Expected tensor constant for {name}")

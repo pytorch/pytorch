@@ -658,7 +658,9 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             self.assertEqual(len(chunks), num_chunks)
             for i, chunk in enumerate(chunks):
                 # Each chunk must be a DTensor with preserved placements
-                self.assertIsInstance(chunk, DTensor, f"chunk {i} is not a DTensor")
+                self.assertIsInstance(
+                    chunk, DTensor, lambda msg: f"{msg}\nchunk {i} is not a DTensor"
+                )
                 self.assertEqual(
                     chunk.placements,
                     tuple(placements),
@@ -777,7 +779,9 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                 self.assertEqual(len(chunks), n_microbatches)
                 total = 0
                 for i, chunk in enumerate(chunks):
-                    self.assertIsInstance(chunk, DTensor, f"chunk {i} not DTensor")
+                    self.assertIsInstance(
+                        chunk, DTensor, lambda msg: f"{msg}\nchunk {i} not DTensor"
+                    )
                     self.assertEqual(
                         chunk.placements,
                         tuple(placements),
