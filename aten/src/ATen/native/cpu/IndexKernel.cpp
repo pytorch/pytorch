@@ -37,7 +37,8 @@ void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef 
     kBComplex32,
     kHalf,
     kBool,
-    kBFloat16);
+    kBFloat16,
+    kFloat4_e2m1fn_x2);
 }
 
 // Given a linear index, returns the offset of the tensor.
@@ -163,6 +164,33 @@ void take_kernel(
     });
 }
 
+// This is a separate function template (rather than inlined in the dispatch
+// lambda below) so that `if constexpr` discards the `+=` branch for shell
+// dtypes without arithmetic support. Inside AT_DISPATCH, `scalar_t` is a
+// concrete type alias, not a template parameter, so an inline `if constexpr`
+// would still require every branch to compile for every dispatched type.
+template <typename scalar_t>
+void cpu_index_put_accumulate(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool is_deterministic) {
+  if constexpr (std::is_same_v<scalar_t, Float4_e2m1fn_x2>) {
+    // Float4_e2m1fn_x2 is a shell dtype without arithmetic support.
+    TORCH_CHECK(false, "index_put does not support accumulate=true for Float4_e2m1fn_x2");
+  } else {
+    bool use_parallel_for = (!is_deterministic) && (
+      (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
+    if (use_parallel_for && iter.dtype() == ScalarType::Float) {
+      cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
+        cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
+      });
+    } else {
+      // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
+      // this needs to be thread-safe.
+      cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
+        *(scalar_t*)(dst + offset) += c10::load(reinterpret_cast<scalar_t*>(src));
+      }, /*serial_execution=*/true);
+    }
+  }
+}
+
 void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   // NOTE: duplicate indices are only supported if accumulate is true.
   AT_DISPATCH_V2(
@@ -174,19 +202,7 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
       // must enable serial execution if deterministic algorithms are enabled.
       const bool is_deterministic = at::globalContext().deterministicAlgorithms();
       if (accumulate) {
-        bool use_parallel_for = (!is_deterministic) && (
-          (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
-        if (use_parallel_for && iter.dtype() == ScalarType::Float) {
-          cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-            cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
-          });
-        } else {
-          // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
-          // this needs to be thread-safe.
-          cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-            *(scalar_t*)(dst + offset) += c10::load(reinterpret_cast<scalar_t*>(src));
-          }, /*serial_execution=*/true);
-        }
+        cpu_index_put_accumulate<scalar_t>(iter, index_size, index_stride, is_deterministic);
       } else {
         cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
           *(scalar_t*)(dst + offset) = c10::load(reinterpret_cast<scalar_t*>(src));
@@ -205,7 +221,8 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     kBComplex32,
     kHalf,
     kBool,
-    kBFloat16);
+    kBFloat16,
+    kFloat4_e2m1fn_x2);
 }
 
 void index_fill_kernel(

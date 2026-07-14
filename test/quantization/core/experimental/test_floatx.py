@@ -428,6 +428,31 @@ class TestFloat4Dtype(TestCase):
         # can call contiguous on a dim1 slice (calls `copy_` under the hood)
         x1[:, 0:2048].contiguous()
 
+    def test_float4_e2m1fn_x2_index(self, device):
+        # advanced indexing read (`dst[idx]`) works, calls `index` under the hood
+        src = torch.randint(1, 255, (4, 4), dtype=torch.uint8, device=device).view(
+            torch.float4_e2m1fn_x2
+        )
+        idx = torch.tensor([0, 2], device=device)
+        out = src[idx]
+        self.assertEqual(
+            out.view(torch.uint8), src[0:4:2].view(torch.uint8), atol=0, rtol=0
+        )
+
+    def test_float4_e2m1fn_x2_index_put(self, device):
+        # `dst[idx] = src` works, calls `index_put` under the hood
+        dst = torch.zeros((4, 4), dtype=torch.uint8, device=device).view(
+            torch.float4_e2m1fn_x2
+        )
+        src = torch.randint(1, 255, (2, 4), dtype=torch.uint8, device=device).view(
+            torch.float4_e2m1fn_x2
+        )
+        idx = torch.tensor([0, 1], device=device)
+        dst[idx] = src
+        self.assertEqual(
+            dst[idx].view(torch.uint8), src.view(torch.uint8), atol=0, rtol=0
+        )
+
     def test_f4_save_load(self, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(
             torch.float4_e2m1fn_x2
