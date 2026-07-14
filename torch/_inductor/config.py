@@ -2170,6 +2170,11 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Enable BMG (Battlemage/Xe2) optimized persistent GEMM template.
+    # Uses block2D pointers with automatic software pipelining via num_stages.
+    enable_bmg_persistent_mm = (
+        os.environ.get("ENABLE_BMG_PERSISTENT_MM", "1") == "1"
+    )
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"

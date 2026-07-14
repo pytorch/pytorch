@@ -2338,6 +2338,39 @@ def use_triton_scaling_template(
 
 
 @functools.lru_cache(maxsize=1)
+def is_bmg_device() -> bool:
+    """Detect Intel BMG (Battlemage/Xe2) GPU — Arc B580/B570/Pro B60/B70."""
+    if not torch.xpu.is_available():
+        return False
+    props = torch.xpu.get_device_properties(torch.xpu.current_device())
+    device_name = props.name.lower()
+    # BMG device names contain "b580", "b570", "b60", "b70", or "battlemage"
+    bmg_keywords = ("b580", "b570", "b60", "b70", "battlemage", "bmg")
+    return any(kw in device_name for kw in bmg_keywords)
+
+
+def use_triton_bmg_template(
+    layout: Layout,
+    check_max_autotune: bool = True,
+) -> bool:
+    """Check if BMG-optimized Triton persistent template should be used.
+
+    Conditions:
+      1. XPU device is BMG (Battlemage/Xe2)
+      2. Triton template is generally enabled
+      3. config.triton.enable_bmg_persistent_mm is True (default: True)
+    """
+    if not is_bmg_device():
+        return False
+    # enable_int32=True is needed for int_mm (output dtype=int32)
+    if not use_triton_template(
+        layout, enable_int32=True, check_max_autotune=check_max_autotune
+    ):
+        return False
+    return getattr(config.triton, "enable_bmg_persistent_mm", True)
+
+
+@functools.lru_cache(maxsize=1)
 def ensure_cute_available() -> bool:
     """Check if CuTeDSL is importable; cache the result for reuse.
 

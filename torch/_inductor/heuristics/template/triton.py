@@ -21,6 +21,8 @@ from ... import config
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
+    bmg_tiled2d_mm_template,
+    bmg_persistent_mm_template,
     get_scaling_options,
     get_tile_size,
     mm_template,
@@ -3483,6 +3485,84 @@ class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuri
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
         self.exhaustive_configs = self.int8_mm_configs
+
+
+# ═══ BMG (Battlemage/Xe2) Template Heuristics ═══
+# BMG-optimized persistent template exploits:
+#   - Block2D hardware DMA (via tl.make_block_ptr)
+#   - Persistent dispatch with GROUP_M swizzle for LLC reuse
+#   - Triton num_stages for automatic software pipelining
+#   - NOTE: Manual UNROLL_K is harmful on XPU (7.4x code bloat via IGC)
+#   - NOTE: Manual PREFETCH_DIST redundant with num_stages
+
+
+@register_template_heuristic(bmg_persistent_mm_template.uid, "xpu", op_name="int_mm")
+class XPUBMGPersistentInt8MMTemplateConfigHeuristic(
+    INT8MMTemplateConfigMixin, XPUConfigHeuristic
+):
+    """BMG persistent MM template heuristic for XPU — INT8 GEMM"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Oracle-verified configs for INT8 on BMG (118 shapes tested)
+        # 7 configs cover all 66 winning shapes for bmg_persistent
+        self.mm_configs = [
+            # config_1: BM=256,BN=128,BK=64,NS=3,NW=16 (17 wins)
+            GemmConfig(256, 128, 64, 3, 16),
+            # config_4: BM=256,BN=256,BK=64,NS=2,NW=32 (16 wins)
+            GemmConfig(256, 256, 64, 2, 32),
+            # config_6: BM=128,BN=512,BK=64,NS=2,NW=32 (15 wins)
+            GemmConfig(128, 512, 64, 2, 32),
+            # config_7: BM=256,BN=256,BK=128,NS=2,NW=32 (8 wins)
+            GemmConfig(256, 256, 128, 2, 32),
+            # config_5: BM=32,BN=256,BK=32,NS=2,NW=8 (6 wins)
+            GemmConfig(32, 256, 32, 2, 8),
+            # config_3: BM=8,BN=512,BK=32,NS=2,NW=8 (3 wins)
+            GemmConfig(8, 512, 32, 2, 8),
+            # config_2: BM=8,BN=512,BK=32,NS=2,NW=16 (1 win)
+            GemmConfig(8, 512, 32, 2, 16),
+        ]
+        self.exhaustive_configs = self.mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        """Add BMG-specific template kwargs for INT8."""
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {
+                **template_kwargs,
+                "NUM_SMS": get_num_sms(),
+            }
+
+
+# ═══ BMG Tiled 2D Template Heuristics ═══
+# For M≤32 bandwidth-bound shapes: 2D grid, block_ptr loads, small BLOCK_M, large BLOCK_N
+
+
+@register_template_heuristic(bmg_tiled2d_mm_template.uid, "xpu", op_name="int_mm")
+class XPUBMGTiled2DInt8MMTemplateConfigHeuristic(
+    INT8MMTemplateConfigMixin, XPUConfigHeuristic
+):
+    """BMG tiled 2D MM template for XPU — INT8 GEMM (bandwidth-bound M≤32)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Oracle-verified configs for INT8 tiled2d on BMG (118 shapes tested)
+        # 3 configs cover all 52 winning shapes for bmg_tiled2d
+        self.mm_configs = [
+            # config_5: BM=32,BN=256,BK=32,NS=2,NW=8 (24 wins)
+            GemmConfig(32, 256, 32, 2, 8),
+            # config_3: BM=8,BN=512,BK=32,NS=2,NW=8 (19 wins)
+            GemmConfig(8, 512, 32, 2, 8),
+            # config_2: BM=8,BN=512,BK=32,NS=2,NW=16 (9 wins)
+            GemmConfig(8, 512, 32, 2, 16),
+        ]
+        self.exhaustive_configs = self.mm_configs
 
 
 @register_template_heuristic(mm_plus_mm_template.uid, "xpu")
