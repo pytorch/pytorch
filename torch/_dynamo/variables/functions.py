@@ -3274,7 +3274,7 @@ class PolyfilledFunctionVariable(VariableTracker):
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
-            except (TypeError, ValueError) as exc:
+            except Exception as exc:
                 raise_observed_exception(
                     type(exc),
                     tx,
