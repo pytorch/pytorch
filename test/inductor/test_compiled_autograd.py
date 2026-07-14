@@ -1096,7 +1096,6 @@ main()
         self.assertNotEqual(grads[1], None)
         self.assertNotEqual(grads[2], None)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180661")
     def test_inputs_aliasing_bytecode_attr_mutations(self):
         # Freeze compiled autograd graph
         compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
@@ -5678,6 +5677,8 @@ skipped_tests.add("test_custom_function_boxed_grads_none_grads")
 skipped_tests.add("test_custom_function_boxed_grads_materialize_grads")
 skipped_tests.add("test_custom_function_boxed_grads_direct_apply")
 skipped_tests.add("test_custom_function_boxed_grads_single_list_arg")
+
+skipped_tests.add("test_pyobject_dispatch_normalizes_tensor_list_output")
 
 # DTensor backward calls a skipped global-shape helper under compiled autograd.
 skipped_tests.add("test_compile_dtensor_local_tensor_act_backward_passthrough")
