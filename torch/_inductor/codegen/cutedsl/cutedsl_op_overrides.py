@@ -6,12 +6,14 @@ This module provides CuteDSL implementations of common operations used in
 template kernels, particularly for flex attention modifications.
 """
 
+import dataclasses
 import math
 
 import sympy
 
 import torch
 from torch._inductor.codegen.common import CSEVariable, OpOverrides
+from torch._inductor.ops_handler import ReductionType
 from torch._inductor.utils import get_bounds_index_expr
 from torch._inductor.virtualized import OpsValue, V
 from torch.utils._sympy.functions import Max, Min
@@ -35,6 +37,37 @@ class CuteDSLCSEVariable(CSEVariable):
 
 
 CuteDSLArg = CSEVariable | str | bool | float | int
+
+
+@dataclasses.dataclass(frozen=True)
+class TensorSSAReduction:
+    """Describe the CuTeDSL lowering for one TensorSSA value reduction."""
+
+    cute_op: str
+    init_val: str
+    combine_expr: str
+
+
+TENSORSSA_REDUCTIONS: dict[str, TensorSSAReduction] = {
+    "sum": TensorSSAReduction("cute.ReductionOp.ADD", "0.0", "lhs + rhs"),
+    "prod": TensorSSAReduction("cute.ReductionOp.MUL", "1.0", "lhs * rhs"),
+    "max": TensorSSAReduction(
+        "cute.ReductionOp.MAX", 'float("-inf")', "cutlass.max(lhs, rhs)"
+    ),
+    "min": TensorSSAReduction(
+        "cute.ReductionOp.MIN", 'float("inf")', "cutlass.min(lhs, rhs)"
+    ),
+}
+
+
+def tensorssa_reduction(reduction_type: ReductionType) -> TensorSSAReduction:
+    """Return the TensorSSA descriptor for reductions representable by CuTe."""
+    reduction = TENSORSSA_REDUCTIONS.get(reduction_type)
+    if reduction is None:
+        raise NotImplementedError(
+            f"{reduction_type} does not map to a CuTe TensorSSA reduction"
+        )
+    return reduction
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
