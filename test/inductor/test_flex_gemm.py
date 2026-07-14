@@ -1010,7 +1010,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             FlexGemmLocalReduceGeometry,
         )
         from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmLocalReduceContract,
+            FlexGemmEpilogueGraph,
+            FlexGemmLocalReduceAnalysis,
+            FlexGemmLocalReduceMatch,
+            FlexGemmLocalReduceStore,
             FlexGemmOutputLocalReducePlan,
             FlexGemmOutputPlan,
             tuple_output_plan,
@@ -1019,45 +1022,38 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         graph = torch.fx.Graph()
         node = graph.placeholder("x")
         aux = graph.placeholder("aux")
+        geometry = FlexGemmLocalReduceGeometry(8, 0)
+        match = FlexGemmLocalReduceMatch(aux, geometry)
+        analysis = FlexGemmLocalReduceAnalysis(FlexGemmEpilogueGraph({}))
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(object())
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(node, (object(),))
         with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
-            FlexGemmLocalReduceContract(object(), FlexGemmLocalReduceGeometry(8, 0))
-        with self.assertRaisesRegex(RuntimeError, "tensor nodes"):
-            FlexGemmOutputLocalReducePlan(FlexGemmLocalReduceGeometry(8, 0), object())
-        with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
-            tuple_output_plan(object(), ())
-        with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
-            tuple_output_plan(node, (object(),))
+            FlexGemmLocalReduceMatch(object(), geometry)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmOutputLocalReducePlan(
-                FlexGemmLocalReduceGeometry(8, 0), aux, store_node=aux
-            )
+            FlexGemmOutputLocalReducePlan(object())
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmOutputLocalReducePlan(
-                FlexGemmLocalReduceGeometry(8, 0),
-                aux,
-                store_node=aux,
-                aux_index=-1,
-            )
+            FlexGemmOutputLocalReducePlan(match)
+        with self.assertRaisesRegex(RuntimeError, "output plans"):
+            FlexGemmLocalReduceStore(object(), 0)
+        with self.assertRaisesRegex(RuntimeError, "output plans"):
+            FlexGemmLocalReduceStore(aux, -1)
+        with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
+            tuple_output_plan(object(), (), analysis)
+        with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
+            tuple_output_plan(node, (object(),), analysis)
         FlexGemmOutputPlan(
             node,
             (aux,),
             FlexGemmOutputLocalReducePlan(
-                FlexGemmLocalReduceGeometry(8, 0),
-                aux,
-                store_node=aux,
-                aux_index=0,
+                match, store=FlexGemmLocalReduceStore(aux, 0)
             ),
         )
         FlexGemmOutputPlan(
             node,
             (aux,),
-            FlexGemmOutputLocalReducePlan(
-                FlexGemmLocalReduceGeometry(8, 0), aux, feeds_main=True
-            ),
+            FlexGemmOutputLocalReducePlan(match, feeds_main=True),
         )
 
     def test_ordered_outputs_restore_local_reduce_position(self):
@@ -3775,7 +3771,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_local_m_reduce_feed_main_rejects_mixed_contracts(self):
+    def test_mm_local_m_reduce_feed_main_rejects_mixed_grouped_layouts(self):
         m = 128
         n = 64
 
@@ -3796,9 +3792,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.rand(m, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.rand(64, n, device="cuda", dtype=torch.bfloat16)
-        with self.assertRaisesRegex(
-            Exception, "mixing different local-reduce contracts"
-        ):
+        with self.assertRaisesRegex(Exception, "share one grouped layout"):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
