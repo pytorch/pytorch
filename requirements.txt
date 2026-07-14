@@ -4,7 +4,6 @@
 --requirement requirements-build.txt
 
 # Install / Development extra requirements
-auditwheel ; sys_platform == "linux"  # repackages manywheels with valid ZIP64 (>4GB); see .ci/manywheel/repair_wheel.py
 build[uv]  # for building sdist and wheel
 expecttest>=0.3.0
 filelock
