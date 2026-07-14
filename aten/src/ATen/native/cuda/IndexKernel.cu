@@ -228,7 +228,8 @@ static void index_kernel(
       kBComplex32,
       kHalf,
       kBool,
-      kBFloat16);
+      kBFloat16,
+      kFloat4_e2m1fn_x2);
 }
 
 static void index_fill_kernel(
@@ -281,7 +282,8 @@ static void index_put_kernel(TensorIterator& iter, const IntArrayRef index_size,
     kBComplex32,
     kHalf,
     kBool,
-    kBFloat16);
+    kBFloat16,
+    kFloat4_e2m1fn_x2);
 }
 
 void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const bool accumulate, const double scale, const int zero_point) {
