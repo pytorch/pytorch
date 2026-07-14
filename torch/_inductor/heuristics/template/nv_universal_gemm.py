@@ -218,9 +218,9 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (256, 128, 2, 1),
                     (256, 128, 2, 2),
                     # NVFP4 oracle-best configs (per-shape autotune winners over
-                    # the 83-shape LLM sweep) that nvMatmulHeuristics does not
-                    # propose; adding them lets autotune reach parity with
-                    # FlashInfer on 73/83 shapes. See task #12.
+                    # an 83-shape LLM sweep) that nvMatmulHeuristics does not
+                    # propose; adding them lets autotune reach the oracle-best
+                    # config on 73/83 of those shapes.
                     (128, 64, 1, 2),
                     (128, 128, 1, 1),
                     (128, 128, 1, 4),
