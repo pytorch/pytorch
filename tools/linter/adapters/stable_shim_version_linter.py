@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
     get_current_version,
+    git_output_with_lazy_fetch,
     LintMessage,
     LintSeverity,
     merge_base_with_main,
@@ -43,8 +44,6 @@ def get_added_lines(filename: str) -> set[int]:
     Returns:
         Set of line numbers (1-indexed) that are new additions.
     """
-    import subprocess
-
     added_lines = set()
 
     def parse_diff(diff_output: str) -> set[int]:
@@ -68,22 +67,14 @@ def get_added_lines(filename: str) -> set[int]:
 
     try:
         # Check uncommitted changes (working directory vs HEAD)
-        result = subprocess.run(
-            ["git", "diff", "HEAD", filename],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        result = git_output_with_lazy_fetch(["git", "diff", "HEAD", filename])
         if result.returncode == 0:
             added_lines.update(parse_diff(result.stdout))
 
         # Get merge-base with origin/main to check all PR commits
         merge_base = merge_base_with_main()
-        result = subprocess.run(
-            ["git", "diff", f"{merge_base}..HEAD", filename],
-            capture_output=True,
-            text=True,
-            timeout=5,
+        result = git_output_with_lazy_fetch(
+            ["git", "diff", f"{merge_base}..HEAD", filename]
         )
         if result.returncode != 0:
             raise RuntimeError(
