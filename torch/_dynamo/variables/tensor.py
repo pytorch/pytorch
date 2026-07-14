@@ -75,7 +75,7 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, GetSet, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import CustomClassObjectVariable
@@ -3081,17 +3081,46 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
+    # NB: ndim/itemsize are ALWAYS specialized constants (numpy exposes them via
+    # PyGetSetDef on ndarray), unlike size/shape which may carry free symbols.
+    def _get_ndim(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        example_value = self.as_proxy().node.meta["example_value"]
+        return VariableTracker.build(tx, tnp.ndarray(example_value).ndim)
+
+    def _get_itemsize(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        example_value = self.as_proxy().node.meta["example_value"]
+        return VariableTracker.build(tx, tnp.ndarray(example_value).itemsize)
+
+    def _get_numpy_attr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        from ..utils import numpy_attr_wrapper
+
+        proxy = tx.output.create_proxy(
+            "call_function", numpy_attr_wrapper, (self.as_proxy(), name), {}
+        )
+        return NumpyNdarrayVariable.create(tx, proxy)
+
+    tp_getset = {
+        "ndim": GetSet(_get_ndim, None),
+        "itemsize": GetSet(_get_itemsize, None),
+        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T")),
+        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real")),
+        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag")),
+        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat")),
+    }
+
     def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # NB: This INTENTIONALLY does not call super(), because there is
         # no intrinsic reason ndarray properties are related to Tensor
         # properties.  The inheritance here is for implementation sharing.
-
+        # tp_getset (ndim/itemsize/T/real/imag/flat) is resolved by
+        # generic_getattr before this method is reached, so it is not
+        # consulted here.
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy
-
-        result = None
 
         example_value = self.as_proxy().node.meta["example_value"]
         example_ndarray = tnp.ndarray(example_value)
@@ -3103,15 +3132,6 @@ class NumpyNdarrayVariable(TensorVariable):
                     "call_function", numpy_attr_wrapper, (self.as_proxy(), name), {}
                 ),
             )
-
-        if name in ["T", "real", "imag", "flat"]:
-            proxy = tx.output.create_proxy(
-                "call_function",
-                numpy_attr_wrapper,
-                (self.as_proxy(), name),
-                {},
-            )
-            result = NumpyNdarrayVariable.create(tx, proxy)
 
         # These are awkward to implement.  The standard playbook for torch._numpy
         # interop is to trace a call into the torch._numpy wrapper which works for
@@ -3126,9 +3146,7 @@ class NumpyNdarrayVariable(TensorVariable):
         #
         # NB: only ALWAYS specialized attributes can go here; notably,
         # size/shape not allowed!
-        elif name in ("ndim", "itemsize"):
-            return VariableTracker.build(tx, getattr(example_ndarray, name))
-        elif name in ("shape", "stride"):
+        if name in ("shape", "stride"):
             if not has_free_symbols(r := getattr(example_ndarray, name)):
                 return VariableTracker.build(tx, tuple(int(r) for r in r))
             return insert_into_graph()
@@ -3150,9 +3168,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
-        if result is None:
-            raise NotImplementedError
-        return result
+        raise NotImplementedError
 
     @staticmethod
     def patch_args(
