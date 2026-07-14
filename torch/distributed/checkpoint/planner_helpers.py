@@ -227,7 +227,8 @@ def _create_write_item_for_tensor(fqn: str, tensor: torch.Tensor) -> WriteItem:
 def _get_checkpointable_tensor_write_items(
     fqn: str, tensor: CheckpointableTensor
 ) -> list[WriteItem]:
-    properties = TensorProperties.create_from_tensor(cast(torch.Tensor, tensor))
+    assert isinstance(tensor, torch.Tensor)  # noqa: S101
+    properties = TensorProperties.create_from_tensor(tensor)
     return [
         WriteItem(
             index=MetadataIndex(fqn, chunk.offsets, idx),
