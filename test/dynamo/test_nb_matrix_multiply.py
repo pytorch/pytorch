@@ -61,7 +61,7 @@ class RightMatMulClass:
 
     def __matmul__(self, other):
         if isinstance(other, RightMatMulClass):
-            return RightMatMulClass(self.value + "*" + other.value)
+            return RightMatMulClass(self.value * other.value)
         return NotImplemented
 
     def __rmatmul__(self, other):
@@ -204,16 +204,19 @@ class TestNbMatrixMultiply(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, y), fn(x, y))
 
-    def test_compile_imatmul_tensor(self):
+    def test_compile_matmul_tensor2(self):
         def fn(x, y):
-            x = x.clone()
             x @= y
             return x
 
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
+        x_clone = x.clone()
+        expected = x_clone @ y
+
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(opt_fn(x, y), expected)
+        self.assertEqual(x, x_clone)
 
     def test_compile_matmul_dunder(self):
         def fn(x, y):
