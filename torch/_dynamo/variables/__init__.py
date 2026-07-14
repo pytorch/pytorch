@@ -63,6 +63,7 @@ from .dicts import (
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedItemsDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
@@ -259,6 +260,7 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "OrderedDictVariable",
+    "OrderedItemsDictVariable",
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
