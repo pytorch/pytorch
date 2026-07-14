@@ -1,4 +1,3 @@
-// @allow-raw-throw
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Lazy.h>
@@ -113,64 +112,6 @@ Error::Error(SourceLocation source_location, std::string msg)
     : Error(
           std::move(msg),
           std::make_shared<PyTorchStyleBacktrace>(source_location)) {}
-
-// Explicit constructor definitions for Error subclasses. Required because
-// clang-cl does not emit dllexport symbols for constructors inherited via
-// `using Base::Base;` (llvm/llvm-project#162640), which causes LNK2019 in
-// any DLL that links against c10 from outside (torch_hip.dll, inline C++
-// extensions, etc.). Each definition just delegates to the base class
-// constructor so behavior is unchanged.
-ErrorAlwaysShowCppStacktrace::ErrorAlwaysShowCppStacktrace(
-    SourceLocation loc,
-    std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-IndexError::IndexError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-ValueError::ValueError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-TypeError::TypeError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-NotImplementedError::NotImplementedError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-BufferError::BufferError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-EnforceFiniteError::EnforceFiniteError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-OnnxfiBackendSystemError::OnnxfiBackendSystemError(
-    SourceLocation loc,
-    std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-LinAlgError::LinAlgError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-OutOfMemoryError::OutOfMemoryError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-SyntaxError::SyntaxError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-DistError::DistError(SourceLocation loc, std::string msg)
-    : Error(loc, std::move(msg)) {}
-
-DistBackendError::DistBackendError(SourceLocation loc, std::string msg)
-    : DistError(loc, std::move(msg)) {}
-
-DistStoreError::DistStoreError(SourceLocation loc, std::string msg)
-    : DistError(loc, std::move(msg)) {}
-
-DistNetworkError::DistNetworkError(SourceLocation loc, std::string msg)
-    : DistError(loc, std::move(msg)) {}
-
-DistQueueEmptyError::DistQueueEmptyError(SourceLocation loc, std::string msg)
-    : DistStoreError(loc, std::move(msg)) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
 using APIUsageMetadataLoggerType = std::function<void(
@@ -515,7 +456,7 @@ MessageLogger::MessageLogger(
   time(&rawtime);
 
 #ifndef _WIN32
-  struct tm raw_timeinfo = {};
+  struct tm raw_timeinfo = {0};
   struct tm* timeinfo = &raw_timeinfo;
   localtime_r(&rawtime, timeinfo);
 #else
@@ -525,7 +466,7 @@ MessageLogger::MessageLogger(
 
 #ifndef _WIN32
   // Get the current nanoseconds since epoch
-  struct timespec ts = {};
+  struct timespec ts = {0};
   clock_gettime(CLOCK_MONOTONIC, &ts);
   long ns = ts.tv_nsec;
 #else
@@ -613,8 +554,10 @@ void setLogLevelFlagFromEnv() {
     return;
   }
 
-  std::ranges::transform(
-      level, level.begin(), [](unsigned char c) { return toupper(c); });
+  std::transform(
+      level.begin(), level.end(), level.begin(), [](unsigned char c) {
+        return toupper(c);
+      });
 
   if (level == "0" || level == "INFO") {
     FLAGS_caffe2_log_level = 0;

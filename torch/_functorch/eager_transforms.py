@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 import contextlib
-from functools import partial
-from typing import Any, overload, TYPE_CHECKING
+from functools import partial, wraps
+from typing import Any, Optional, overload, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -19,7 +19,10 @@ from torch._C._functorch import (
     _func_increment_nesting,  # type: ignore[attr-defined]
     _grad_decrement_nesting,
     _grad_increment_nesting,
+    _jvp_decrement_nesting,
+    _jvp_increment_nesting,
     _propagate_functional_input_mutation,  # type: ignore[attr-defined]
+    _unwrap_for_grad,
     _unwrap_functional_tensor,
     _wrap_for_grad,
     _wrap_functional_tensor,
@@ -27,11 +30,6 @@ from torch._C._functorch import (
     get_unwrapped,
     is_functorch_wrapped_tensor,
     set_inplace_requires_grad_allowed,
-)
-from torch._functorch.predispatch import (
-    _jvp_decrement_nesting,
-    _jvp_increment_nesting,
-    _unwrap_for_grad,
 )
 from torch._functorch.utils import argnums_t, exposed_in
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -47,7 +45,7 @@ from torch.utils._pytree import (
     treespec_pprint,
 )
 
-from .apis import _wraps_without_dynamo_attrs, vmap
+from .apis import vmap
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 
@@ -338,23 +336,6 @@ def vjp(
 
 
 @contextlib.contextmanager
-def _disable_inference_mode() -> Generator[None, None, None]:
-    # Disable inference_mode without clobbering grad_mode / fw_grad_mode.
-    # torch.inference_mode(False) unconditionally sets grad_mode=True and
-    # fw_grad_mode=True; we save and restore those to avoid that.
-    # No-op when inference_mode is already off.
-    if not torch.is_inference_mode_enabled():
-        yield
-        return
-    prev_grad = torch.is_grad_enabled()
-    prev_fw_grad = torch._C._is_fwd_grad_enabled()
-    with torch.inference_mode(False):
-        torch._C._set_grad_enabled(prev_grad)
-        torch._C._set_fwd_grad_enabled(prev_fw_grad)
-        yield
-
-
-@contextlib.contextmanager
 def grad_increment_nesting() -> Generator[int, None, None]:
     try:
         grad_level = _grad_increment_nesting()
@@ -388,12 +369,12 @@ def jvp_increment_nesting() -> Generator[int, None, None]:
 def _vjp_with_argnums(
     func: Callable[..., Any],
     *primals: Any,
-    argnums: argnums_t | None = None,
+    argnums: Optional[argnums_t] = None,
     has_aux: bool = False,
 ) -> tuple[Any, Callable[..., Any]] | tuple[Any, Callable[..., Any], Any]:
     # This is the same function as vjp but also accepts an argnums argument
     # All args are the same as vjp except for the added argument
-    # argnums (int or tuple[int,...] | None): Optional, specifies the argument(s) to compute gradients with respect to.
+    # argnums (Optional[int or tuple[int,...]]): Optional, specifies the argument(s) to compute gradients with respect to.
     #         If None, computes the gradients with respect to all inputs (used for vjp). Default: None
     #
     # WARN: Users should NOT call this function directly and should just be calling vjp.
@@ -457,23 +438,13 @@ def _vjp_with_argnums(
                     f"cotangents: {treespec_pprint(cotangents_spec)}, "
                     f"primal output: {treespec_pprint(primals_out_spec)}"
                 )
-            # This closure runs after grad_increment_nesting exits, so
-            # inference_mode may have been restored. Disable it for autograd.
-            # Skip under Dynamo — tracing through the generator CM emits
-            # spurious _enter_inference_mode nodes.
-            ctx = (
-                contextlib.nullcontext()
-                if torch.compiler.is_compiling()
-                else _disable_inference_mode()
+            result = _autograd_grad(
+                flat_primals_out,
+                flat_diff_primals,
+                flat_cotangents,
+                retain_graph=retain_graph,
+                create_graph=create_graph,
             )
-            with ctx:
-                result = _autograd_grad(
-                    flat_primals_out,
-                    flat_diff_primals,
-                    flat_cotangents,
-                    retain_graph=retain_graph,
-                    create_graph=create_graph,
-                )
             return tree_unflatten(result, primals_spec)
 
     if has_aux:
@@ -505,10 +476,10 @@ def error_if_complex(func_name: str, args: Any, is_input: bool) -> None:
 @exposed_in("torch.func")
 def jacrev(
     func: Callable[..., Any],
-    argnums: int | tuple[int, ...] = 0,
+    argnums: Union[int, tuple[int, ...]] = 0,
     *,
     has_aux: bool = False,
-    chunk_size: int | None = None,
+    chunk_size: Optional[int] = None,
     _preallocate_and_copy: bool = False,
 ) -> Callable[..., Any]:
     """
@@ -640,7 +611,7 @@ def jacrev(
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
-    @_wraps_without_dynamo_attrs(func)
+    @wraps(func)
     def wrapper_fn(*args: Any) -> Any:
         error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -778,7 +749,7 @@ def jacrev(
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
         flat_jacobians_per_input = [
-            torch.split(result, list(flat_output_numels), dim=0)
+            result.split(flat_output_numels, dim=0)
             for result in flat_jacobians_per_input
         ]
         flat_input_flat_output = [
@@ -897,11 +868,10 @@ def _chunked_standard_basis_for_(
         chunk_size = total_numel
         chunk_numels = [total_numel]
 
-    diag_start_indices = []
-    diag_start_idx = 0
-    for tensor_numel in tensor_numels:
-        diag_start_indices.append(diag_start_idx)
-        diag_start_idx -= tensor_numel
+    diag_start_indices = (
+        0,
+        *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind(),
+    )
 
     for chunk_idx, total_numel in enumerate(chunk_numels):
         chunks = tuple(
@@ -1158,7 +1128,7 @@ def _jvp_with_argnums(
     func: Callable[..., Any],
     primals: Any,
     tangents: Any,
-    argnums: argnums_t | None,
+    argnums: Optional[argnums_t],
     *,
     strict: bool = False,
     has_aux: bool,
@@ -1363,7 +1333,7 @@ def jacfwd(
 
     """
 
-    @_wraps_without_dynamo_attrs(func)
+    @wraps(func)
     def wrapper_fn(*args: Any) -> Any:
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
@@ -1406,9 +1376,7 @@ def jacfwd(
                 safe_unflatten(jac_out_in, -1, primal.shape)
                 for primal, jac_out_in in zip(
                     flat_primals,
-                    torch.split(
-                        jac_out.movedim(0, -1), list(flat_primals_numels), dim=-1
-                    ),
+                    jac_out.movedim(0, -1).split(flat_primals_numels, dim=-1),
                 )
             )
             for jac_out in jac_outs
@@ -1768,7 +1736,7 @@ def functionalize(
             " replaced with their non-aliasing counterparts, {view}_copy.\n"
         )
 
-    @_wraps_without_dynamo_attrs(func)
+    @wraps(func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         try:
             func_level = _func_increment_nesting(reapply_views)

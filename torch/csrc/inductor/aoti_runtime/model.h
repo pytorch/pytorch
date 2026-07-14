@@ -6,8 +6,6 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/model_base.h>
 
-struct AOTInductorArrayRefTensor;
-
 namespace torch::aot_inductor {
 
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
@@ -42,12 +40,6 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   template <typename Inputs, typename Outputs>
   Outputs run_impl_minimal_arrayref_interface(
       const Inputs& inputs,
-      DeviceStreamType stream,
-      AOTIProxyExecutorHandle proxy_executor);
-
-  void run_impl_minimal_arrayref_interface_v2_raw(
-      const AOTInductorArrayRefTensor* c_inputs,
-      AOTInductorArrayRefTensor* c_outputs,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor);
 

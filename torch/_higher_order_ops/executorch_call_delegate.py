@@ -14,8 +14,8 @@ from typing import Any, cast
 
 import torch
 import torch.utils._pytree as pytree
-from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     get_proxy_slot,
@@ -130,10 +130,11 @@ def call_delegate_proxy_torch_dispatch_mode(mode, lowered_module, *args):
     return res
 
 
-@register_fake(executorch_call_delegate, skip_cache=True)
+@executorch_call_delegate.py_impl(FakeTensorMode)
 # pyre-ignore
-def call_delegate_fake_tensor_mode(lowered_module, *args):
-    return call_delegate_cpu(lowered_module, *args)
+def call_delegate_fake_tensor_mode(mode, lowered_module, *args):
+    with mode:
+        return call_delegate_cpu(lowered_module, *args)
 
 
 @executorch_call_delegate.py_functionalize_impl

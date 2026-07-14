@@ -8,7 +8,6 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Unfold2d.h>
 #include <c10/util/irange.h>
-#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -730,8 +729,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
       grad_weight,
       grad_bias);
 
-  return std::make_tuple(
-      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
+  return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
 Tensor & thnn_conv2d_out(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding, Tensor & output) {

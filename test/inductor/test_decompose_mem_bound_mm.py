@@ -12,7 +12,6 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     is_navi3_arch,
     parametrize,
     patch_test_members,
@@ -50,7 +49,7 @@ class MyModule3(torch.nn.Module):
         return output
 
 
-class _TestDecomposeAddMM(torch.nn.Module):
+class TestDecomposeAddMM(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -87,8 +86,7 @@ class TestDecomposeMemMM(TestCase):
             return False
         for key1 in ref_dict:
             key2 = "_orig_mod." + key1
-            if key2 not in res_dict:
-                raise AssertionError(f"{key1} does not exist in traced module")
+            assert key2 in res_dict, f"{key1} does not exist in traced module"
             if not torch.allclose(
                 ref_dict[key1], res_dict[key2], rtol=self.rtol, atol=self.atol
             ):
@@ -389,8 +387,6 @@ class TestDecomposeMemMM(TestCase):
             )
             counters.clear()
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153736")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153735")
     @unittest.skip
     @parametrize("m,k,n, should_decompose", [(20480, 5, 2, True)])
     @parametrize("has_bias", [True, False])
@@ -484,7 +480,7 @@ class TestDecomposeMemMM(TestCase):
 
         counters.clear()
 
-        module = _TestDecomposeAddMM().to(GPU_TYPE)
+        module = TestDecomposeAddMM().to(GPU_TYPE)
         traced = torch.compile(module, dynamic=True)
         input = [bias, input, weight]
 

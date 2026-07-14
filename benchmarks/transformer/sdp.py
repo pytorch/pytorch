@@ -5,6 +5,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from pprint import pprint
+from typing import Optional
 
 import numpy as np
 from prettytable import PrettyTable
@@ -25,7 +26,7 @@ class ExperimentConfig:
     max_sequence_len: int
     embed_dimension: int
     dtype: torch.dtype
-    pad_percentage: float | None
+    pad_percentage: Optional[float]
     enable_math: bool
     enable_flash: bool
     enable_mem_efficient: bool
@@ -64,9 +65,9 @@ class ExperimentConfig:
 @dataclass(frozen=True)
 class ExperimentResults:
     nn_mha_time: float
-    compiled_nn_mha_time: float | None
+    compiled_nn_mha_time: Optional[float]
     composite_mha_time: float
-    compiled_composite_mha_time: float | None
+    compiled_composite_mha_time: Optional[float]
 
     def get_entries(self) -> list:
         return [
@@ -305,7 +306,7 @@ def generate_experiments(
     return configs
 
 
-def main(save_path: Path | None):
+def main(save_path: Optional[Path]):
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)

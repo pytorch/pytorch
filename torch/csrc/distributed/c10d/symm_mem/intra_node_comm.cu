@@ -1,8 +1,9 @@
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 
-namespace c10d::intra_node_comm {
+namespace c10d {
+namespace intra_node_comm {
 
 static constexpr size_t kOneShotThreshBytes = 256 * 1024;
 static constexpr size_t kTwoShotThreshBytes = 10 * 1024 * 1024;
@@ -22,7 +23,7 @@ static void checkInput(const at::Tensor& input, int deviceIdx) {
 }
 
 bool isIntraNodeCommSupported() {
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   return false;
 #else
   return true;
@@ -45,7 +46,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 
   symmMemTensor.copy_(input);
-  op.call(symmMemTensor, "sum", groupName_, input);
+  op.call(symmMemTensor, "sum", "", input);
   return input;
 }
 
@@ -64,7 +65,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 
   symmMemTensor.copy_(input);
-  op.call(symmMemTensor, "sum", groupName_);
+  op.call(symmMemTensor, "sum", "");
   input.copy_(symmMemTensor);
   return input;
 }
@@ -119,4 +120,5 @@ int64_t getIntraNodeCommUsageCounter() {
   return usageCounter;
 }
 
-} // namespace c10d::intra_node_comm
+} // namespace intra_node_comm
+} // namespace c10d

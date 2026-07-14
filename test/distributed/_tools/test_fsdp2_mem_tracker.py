@@ -1,6 +1,7 @@
 # Owner(s): ["module: fsdp"]
 import functools
 import gc
+from typing import Union
 
 import torch
 import torch.nn as nn
@@ -19,7 +20,7 @@ from torch.distributed.fsdp import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -47,7 +48,6 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     def world_size(self) -> int:
         return min(4, torch.accelerator.device_count())
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/129390")
     @skip_if_lt_x_gpu(2)
     def test_tracker_multi_group_eager(self):
         """
@@ -73,7 +73,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
 
     def _test_tracker_multi_group(
         self,
-        reshard_after_forward: bool | int,
+        reshard_after_forward: Union[bool, int],
         offload_policy: OffloadPolicy,
         mp_policy: MixedPrecisionPolicy,
     ):
@@ -124,7 +124,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
             accuracy,
             1.0,
             delta=0.1,
-            msg=lambda msg: f"{msg}\nTracker Max:{tracker_max} Accelerator Max:{acc_max}",
+            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del model
         del inp
@@ -174,7 +174,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
             accuracy,
             1.0,
             delta=0.1,
-            msg=lambda msg: f"{msg}\nTracker Max:{tracker_max} Accelerator Max:{acc_max}",
+            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del inp
         del model
@@ -241,12 +241,9 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
         )
 
     def _test_tracker_with_activation_checkpointing(
-        self, reshard_after_forward: bool | int, checkpoint_impl: str
+        self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
     ):
-        if checkpoint_impl not in ("composable", "wrapper"):
-            raise AssertionError(
-                f"Expected checkpoint_impl in ('composable', 'wrapper'), got {checkpoint_impl}"
-            )
+        assert checkpoint_impl in ("composable", "wrapper")
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
         _init_cublas_workspace(dev)
@@ -313,7 +310,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
             accuracy,
             1.0,
             delta=0.1,
-            msg=lambda msg: f"{msg}\nTracker Max:{tracker_max} Accelerator Max:{acc_max}",
+            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del inp
         del model

@@ -207,6 +207,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._lobpcg",
             "torch._logging",
             "torch._meta_registrations",
+            "torch._namedtensor_internals",
             "torch._numpy",
             "torch._sources",
             "torch._subclasses",
@@ -335,23 +336,10 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             else:
                 self.assertTrue(
                     isinstance(mod, types.ModuleType),
-                    lambda msg: f"{msg}\n{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
+                    f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
                     "is not a python module, please check and correct it.",
                 )
 
-    def test_cuda_manual_seed_functions_graph_break(self):
-        for name in (
-            "torch.cuda.manual_seed",
-            "torch.cuda.manual_seed_all",
-            "torch.cuda.random.manual_seed",
-            "torch.cuda.random.manual_seed_all",
-        ):
-            self.assertIs(
-                torch._dynamo.trace_rules.lookup(load_object(name)),
-                SkipFunctionVariable,
-            )
-
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/114831")
     @unittest.skip(
         "This test keeps getting broken and our disable infra is not handling well. see #120627"
     )
@@ -486,8 +474,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_assert",  # No global state (constant)
             "handle_nested_tensor",  # No global state
             "handle_current_stream",  # Safely implemented
-            "handle_synchronize",  # Device type from function identity or arg
-            "handle_functorch_autograd_grad",  # Only inspects placeholder metadata
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):
@@ -499,7 +485,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(
                 fn_name in torch_non_c_binding_in_graph_functions,
                 (
-                    lambda msg: f"{msg}\ntorch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
+                    f"torch function {fn_name} has a special handler {handlers[fn].__name__}.\n"
                     "We expected all functions in `torch_non_c_binding_in_graph_functions` to be safe to cache.\n"
                     "Functions with special handlers may not be safe to cache, since they can close over global state.\n"
                     "If your handler/function is safe to cache, please add it to the list of safe handlers above.\n"
@@ -508,7 +494,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             )
 
     def test_almost_impossible_missing_name(self):
-        class weird:
+        class weird:  # noqa: UP004
             def __getattribute__(self, name):
                 if name == "__name__":
                     raise AttributeError("test")

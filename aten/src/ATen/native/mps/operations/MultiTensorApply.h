@@ -26,20 +26,9 @@ struct FusedAdamEncodingFunctor {
                   const double beta2,
                   const double weight_decay,
                   const double eps,
-                  const bool maximize,
-                  const std::optional<at::Tensor>& grad_scale,
-                  const std::optional<at::Tensor>& found_inf) const {
-    mtl_setArgs(computeEncoder,
-                tensorArgumentBuffer,
-                metadata_arguments,
-                lr,
-                beta1,
-                beta2,
-                weight_decay,
-                eps,
-                maximize,
-                grad_scale,
-                found_inf);
+                  const bool maximize) const {
+    mtl_setArgs(
+        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -50,20 +39,9 @@ struct FusedAdamEncodingFunctor {
                   const double beta2,
                   const double weight_decay,
                   const double eps,
-                  const bool maximize,
-                  const std::optional<at::Tensor>& grad_scale,
-                  const std::optional<at::Tensor>& found_inf) const {
-    mtl_setArgs(computeEncoder,
-                tensorArgumentBuffer,
-                metadata_arguments,
-                lr,
-                beta1,
-                beta2,
-                weight_decay,
-                eps,
-                maximize,
-                grad_scale,
-                found_inf);
+                  const bool maximize) const {
+    mtl_setArgs(
+        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize);
   }
 };
 
@@ -81,9 +59,7 @@ struct FusedSgdEncodingFunctor<true> {
                   const double dampening,
                   const bool nesterov,
                   const bool maximize,
-                  const bool is_first_step,
-                  const std::optional<at::Tensor>& grad_scale,
-                  const std::optional<at::Tensor>& found_inf) const {
+                  const bool is_first_step) const {
     mtl_setArgs(computeEncoder,
                 tensorArgumentBuffer,
                 metadata_arguments,
@@ -93,9 +69,7 @@ struct FusedSgdEncodingFunctor<true> {
                 dampening,
                 nesterov,
                 maximize,
-                is_first_step,
-                grad_scale,
-                found_inf);
+                is_first_step);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -107,9 +81,7 @@ struct FusedSgdEncodingFunctor<true> {
                   const double dampening,
                   const bool nesterov,
                   const bool maximize,
-                  const bool is_first_step,
-                  const std::optional<at::Tensor>& grad_scale,
-                  const std::optional<at::Tensor>& found_inf) const {
+                  const bool is_first_step) const {
     mtl_setArgs(computeEncoder,
                 tensorArgumentBuffer,
                 metadata_arguments,
@@ -119,9 +91,7 @@ struct FusedSgdEncodingFunctor<true> {
                 dampening,
                 nesterov,
                 maximize,
-                is_first_step,
-                grad_scale,
-                found_inf);
+                is_first_step);
   }
 };
 
@@ -132,11 +102,8 @@ struct FusedSgdEncodingFunctor<false> {
                   const MetadataArguments& metadata_arguments,
                   const double weight_decay,
                   const double lr,
-                  const bool maximize,
-                  const std::optional<at::Tensor>& grad_scale,
-                  const std::optional<at::Tensor>& found_inf) const {
-    mtl_setArgs(
-        computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize, grad_scale, found_inf);
+                  const bool maximize) const {
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -144,11 +111,8 @@ struct FusedSgdEncodingFunctor<false> {
                   const MetadataArguments& metadata_arguments,
                   const double weight_decay,
                   const at::Tensor& lr,
-                  const bool maximize,
-                  const std::optional<at::Tensor>& grad_scale,
-                  const std::optional<at::Tensor>& found_inf) const {
-    mtl_setArgs(
-        computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize, grad_scale, found_inf);
+                  const bool maximize) const {
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize);
   }
 };
 

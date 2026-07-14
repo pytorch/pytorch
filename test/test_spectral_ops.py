@@ -11,15 +11,16 @@ import doctest
 import inspect
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM,
      make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
 
+from typing import Optional
 from packaging import version
 
 
@@ -221,11 +222,8 @@ class TestFFT(TestCase):
                 }
 
                 y = backward(forward(x, **kwargs), **kwargs)
-                if (
-                    (x.dtype is torch.half and y.dtype is torch.complex32) or
-                    (x.dtype is torch.bfloat16 and y.dtype is torch.bcomplex32)
-                ):
-                    # Since type promotion currently doesn't work with [b]complex32
+                if x.dtype is torch.half and y.dtype is torch.complex32:
+                    # Since type promotion currently doesn't work with complex32
                     # manually promote `x` to complex32
                     x = x.to(torch.complex32)
                 # For real input, ifft(fft(x)) will convert to complex
@@ -314,27 +312,17 @@ class TestFFT(TestCase):
                 torch.half: torch.complex32,
                 torch.float: torch.complex64,
                 torch.double: torch.complex128,
-                # bfloat16 is promoted to float32 on CUDA/XPU, yielding complex64
-                torch.bfloat16: torch.complex64,
             }
-            device_type = torch.device(device).type
-            if dtype is torch.bfloat16 and device_type not in ('cuda', 'xpu'):
-                pass  # bfloat16 FFT only supported on CUDA/XPU, skip on CPU
-            elif dtype in PROMOTION_MAP_R2C:
-                C = torch.fft.rfft(t)
-                self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
+            C = torch.fft.rfft(t)
+            self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
 
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.half, torch.bfloat16])
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
-        # bfloat16 is supported on CUDA/XPU via promotion to float32, so
-        # only expect an error on other device types (e.g. CPU, ROCm).
-        device_type = torch.device(device).type
-        if dtype is torch.bfloat16 and device_type in ('cuda', 'xpu') and not TEST_WITH_ROCM:
-            return
         sample = first_sample(self, op.sample_inputs(device, dtype))
+        device_type = torch.device(device).type
         default_msg = "Unsupported dtype"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
@@ -342,24 +330,6 @@ class TestFFT(TestCase):
             err_msg = default_msg
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
-
-    @onlyOn(["cuda", "xpu"])
-    @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
-         allowed_dtypes=[torch.bfloat16])
-    def test_fft_bfloat16_promoted_on_cuda(self, device, dtype, op):
-        # bfloat16 inputs should be silently promoted to float32 on CUDA/XPU,
-        # producing complex64 output without raising an error.
-        # ROCm/hipFFT does not support bfloat16, so skip this test on ROCm.
-        # See: promote_type_fft() in SpectralOps.cpp
-        if TEST_WITH_ROCM:
-            self.skipTest("bfloat16 FFT not supported on ROCm")
-        sample = first_sample(self, op.sample_inputs(device, dtype))
-        result = op(sample.input, *sample.args, **sample.kwargs)
-        # Output must be complex64 (bfloat16 -> float32 -> complex64)
-        self.assertTrue(
-            result.dtype in (torch.complex64, torch.float32),
-            f"Expected complex64 or float32 output for bfloat16 input, got {result.dtype}"
-        )
 
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
@@ -474,6 +444,7 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
+        # FIXME: https://github.com/pytorch/pytorch/issues/108205
         errMsg = "dims must be unique"
         with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(0, 1, 0))
@@ -628,7 +599,7 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: list[int] | None, dim: list[int] = (-2, -1), norm: str | None = None):
+                def fn(t: torch.Tensor, s: Optional[list[int]], dim: list[int] = (-2, -1), norm: Optional[str] = None):
                     return torch_fn(t, s, dim, norm)
 
                 torch_fns = (torch_fn, torch.jit.script(fn))
@@ -1607,7 +1578,7 @@ class TestFFT(TestCase):
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
 
     @onlyCUDA
-    @requires_mkl
+    @skipIf(not TEST_MKL, "Test requires MKL")
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input
         x = torch.randn(1000, dtype=torch.complex64)

@@ -23,19 +23,12 @@ from torch.testing._internal.common_utils import (
 from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
-    Max as TorchSymMax,
-    Min as TorchSymMin,
-    LShift,
-    Mod,
     OpaqueUnaryFn_cos,
-    PythonMod,
-    RShift,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
 )
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
-from torch.utils._sympy.printers import CppPrinter
 from torch.utils._sympy.reference import (
     PythonReferenceAnalysis,
     ReferenceAnalysis,
@@ -43,7 +36,7 @@ from torch.utils._sympy.reference import (
 )
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges
 from torch._inductor.bounds import ValueRangeAnalysis
 from torch._inductor.index_propagation import TypedExpr
 
@@ -227,38 +220,6 @@ class TestNumbers(TestCase):
         self.assertIs(max(int_oo, sympy.oo), sympy.oo)
         self.assertTrue(-int_oo > -sympy.oo)
         self.assertIs(min(-int_oo, -sympy.oo), -sympy.oo)
-
-
-class TestCppPrinter(TestCase):
-    def test_min_max_preserve_float_expressions(self):
-        s0 = sympy.Symbol("s0")
-        expr = TorchSymMin(
-            sympy.Float(4.0), sympy.Float(0.5) + sympy.Float(1.5) * s0
-        )
-        printed = CppPrinter().doprint(expr)
-
-        self.assertIn("std::min", printed)
-        self.assertIn("static_cast<double>", printed)
-        self.assertNotIn("static_cast<int64_t>", printed)
-
-        expr = TorchSymMax(
-            sympy.Float(4.0), sympy.Float(0.5) + sympy.Float(1.5) * s0
-        )
-        printed = CppPrinter().doprint(expr)
-
-        self.assertIn("std::max", printed)
-        self.assertIn("static_cast<double>", printed)
-        self.assertNotIn("static_cast<int64_t>", printed)
-
-    def test_min_max_preserve_integer_expressions(self):
-        s0 = sympy.Symbol("s0", integer=True)
-        printed = CppPrinter().doprint(TorchSymMin(sympy.Integer(4), s0))
-        self.assertIn("std::min", printed)
-        self.assertIn("static_cast<int64_t>", printed)
-
-        printed = CppPrinter().doprint(TorchSymMax(sympy.Integer(4), s0))
-        self.assertIn("std::max", printed)
-        self.assertIn("static_cast<int64_t>", printed)
 
 
 class TestValueRanges(TestCase):
@@ -502,51 +463,7 @@ class TestValueRanges(TestCase):
                 result = x % y
                 y_range = ValueRanges(y, y)
                 r = ValueRangeAnalysis.python_mod(ValueRanges(x, x), y_range)
-                self.assertIn(result, r, lambda msg: f"{msg}\nx={x}, y={y}, result={result}, range={r}")
-
-    def test_bound_sympy_mod_subtraction(self):
-        s0 = sympy.Symbol("s0", integer=True)
-        s1 = sympy.Symbol("s1", integer=True)
-        ranges = {s0: ValueRanges(2, int_oo), s1: ValueRanges(1, int_oo)}
-
-        for mod in (Mod, PythonMod, sympy.Mod):
-            with self.subTest(mod=mod.__name__):
-                self.assertEqual(
-                    bound_sympy(s0 - mod(s0, 8), ranges), ValueRanges(0, int_oo)
-                )
-                self.assertEqual(
-                    bound_sympy(1 + s0 - mod(s0, 8), ranges),
-                    ValueRanges(1, int_oo),
-                )
-                self.assertEqual(
-                    bound_sympy(2 * s0 - 2 * mod(s0, 8), ranges),
-                    ValueRanges(0, int_oo),
-                )
-                self.assertEqual(
-                    bound_sympy(s0 - mod(s0, s1), ranges), ValueRanges(0, int_oo)
-                )
-                self.assertEqual(
-                    bound_sympy(
-                        (2 * s0 + 1) - mod(2 * s0 + 1, 8),
-                        ranges,
-                    ),
-                    ValueRanges(0, int_oo),
-                )
-                self.assertEqual(
-                    bound_sympy(mod(s0, 8) - s0, ranges), ValueRanges(-int_oo, 0)
-                )
-
-    def test_bound_sympy_python_mod_subtraction_negative_base(self):
-        s0 = sympy.Symbol("s0", integer=True)
-        ranges = {s0: ValueRanges(-2, int_oo)}
-
-        self.assertEqual(
-            bound_sympy(s0 - PythonMod(s0, 8), ranges), ValueRanges(-8, int_oo)
-        )
-        self.assertEqual(
-            bound_sympy(1 + s0 - PythonMod(s0, 8), ranges),
-            ValueRanges(-7, int_oo),
-        )
+                self.assertIn(result, r, f"x={x}, y={y}, result={result}, range={r}")
 
 
 class TestSympyInterp(TestCase):
@@ -737,7 +654,7 @@ class TestSympyInterp(TestCase):
                         torch.allclose(
                             direct_result, interp_result, rtol=1e-5, atol=1e-8
                         ),
-                        lambda msg: f"{msg}\nMismatch for {fn}{args}: direct={direct_result}, interp={interp_result}",
+                        f"Mismatch for {fn}{args}: direct={direct_result}, interp={interp_result}",
                     )
 
                     if fn in UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS:
@@ -898,8 +815,7 @@ class TestSympySolve(TestCase):
             (op(a * -5, b - 5), -(b - 5) / 5),
         ]
         mirror_op = mirror_rel_op(op)
-        if mirror_op is None:
-            raise AssertionError("mirror_op should not be None")
+        assert mirror_op is not None
 
         self._test_cases(cases, a, op)
         self._test_cases(mirror_cases, a, mirror_op)
@@ -1031,15 +947,6 @@ class TestSympySolve(TestCase):
 
 
 class TestSympyFunctions(TestCase):
-    def test_shift_edges(self):
-        x = sympy.Symbol("x", integer=True)
-        self.assertEqual(LShift(x, 0), x)
-        self.assertEqual(RShift(x, 0), x)
-        with self.assertRaisesRegex(ValueError, "negative shift count"):
-            LShift(x, -1)
-        with self.assertRaisesRegex(ValueError, "negative shift count"):
-            RShift(x, -1)
-
     def test_pickle(self):
         x = OpaqueUnaryFn_cos(sympy.Symbol("a"))
         r = pickle.loads(pickle.dumps(x))
@@ -1048,19 +955,6 @@ class TestSympyFunctions(TestCase):
         x = BitwiseFn_bitwise_and(sympy.Symbol("a"), sympy.Symbol("b"))
         r = pickle.loads(pickle.dumps(x))
         self.assertEqual(x, r)
-
-    def test_min_max_scaled_known_sign_term(self):
-        s = sympy.Symbol("s", positive=True, integer=True)
-        self.assertEqual(TorchSymMin(128 * s, 512 * s), 128 * s)
-        self.assertEqual(TorchSymMax(128 * s, 512 * s), 512 * s)
-
-        z = sympy.Symbol("z", nonpositive=True, integer=True)
-        self.assertEqual(TorchSymMin(128 * z, 512 * z), 512 * z)
-        self.assertEqual(TorchSymMax(128 * z, 512 * z), 128 * z)
-
-        x = sympy.Symbol("x", integer=True)
-        self.assertIsInstance(TorchSymMin(128 * x, 512 * x), TorchSymMin)
-        self.assertIsInstance(TorchSymMax(128 * x, 512 * x), TorchSymMax)
 
 
 class TestSingletonInt(TestCase):
@@ -1183,55 +1077,6 @@ class TestTypedExpr(TestCase):
         I = Identity(1)
         typed_I = TypedExpr(I, torch.int32)
         self.assertEqual(typed_I.expr, 1)
-
-
-class TestCCodePrinting(TestCase):
-    """Test _ccode methods on sympy function classes."""
-
-    def test_floor_to_int_ccode(self):
-        from torch.utils._sympy.functions import FloorToInt
-
-        x = sympy.Symbol("x")
-        expr = FloorToInt(x)
-        self.assertEqual(sympy.ccode(expr), "(int64_t)(floor(x))")
-
-    def test_floor_to_int_ccode_compound(self):
-        from torch.utils._sympy.functions import FloorToInt
-
-        x, y = sympy.symbols("x y")
-        expr = FloorToInt(x + y)
-        self.assertEqual(sympy.ccode(expr), "(int64_t)(floor(x + y))")
-
-    def test_ceil_to_int_ccode(self):
-        from torch.utils._sympy.functions import CeilToInt
-
-        x = sympy.Symbol("x")
-        expr = CeilToInt(x)
-        self.assertEqual(sympy.ccode(expr), "(int64_t)(ceil(x))")
-
-    def test_trunc_to_int_ccode(self):
-        from torch.utils._sympy.functions import TruncToInt
-
-        x = sympy.Symbol("x")
-        expr = TruncToInt(x)
-        self.assertEqual(sympy.ccode(expr), "(int64_t)(trunc(x))")
-
-    def test_to_float_ccode(self):
-        from torch.utils._sympy.functions import ToFloat
-
-        x = sympy.Symbol("x", integer=True)
-        expr = ToFloat(x)
-        self.assertEqual(sympy.ccode(expr), "(double)(x)")
-
-    def test_ccode_in_compound_expr(self):
-        from torch.utils._sympy.functions import FloorToInt, ToFloat
-
-        x = sympy.Symbol("x")
-        expr = FloorToInt(ToFloat(x) + 1)
-        result = sympy.ccode(expr)
-        self.assertIn("int64_t", result)
-        self.assertIn("floor", result)
-        self.assertIn("double", result)
 
 
 instantiate_parametrized_tests(TestValueRanges)

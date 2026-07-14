@@ -1,13 +1,11 @@
-import contextlib
 import dataclasses
 import importlib
 import io
 import itertools
 import pickle
-import weakref
 from abc import abstractmethod
-from collections.abc import Callable, Generator
-from typing import Any, NewType, TypeVar
+from collections.abc import Callable
+from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
 from torch.utils._import_utils import import_dill
@@ -15,19 +13,13 @@ from torch.utils._import_utils import import_dill
 
 dill = import_dill()
 if dill is not None:
-    pickle = dill
+    pickle = dill  # noqa: F811
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
 from torch._inductor.standalone_compile import AOTCompiledArtifact
-from torch._library.fake_class_registry import FakeScriptObject
-from torch._subclasses.fake_tensor import (
-    FakeTensor,
-    FakeTensorMode,
-    is_fake_tensor,
-    Tensor,
-)
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
 from torch._subclasses.meta_utils import (
     MetaConverter,
     MetaTensorDesc,
@@ -67,41 +59,10 @@ def _node_metadata_key_filter_safe(key: str) -> bool:
 class Options:
     # A filter for which ops will cause the pickler to raise a
     # BypassFxGraphCache exception. If None then all ops are allowed.
-    ops_filter: Callable[[str], bool] | None = _ops_filter_safe
-    node_metadata_key_filter: Callable[[str], bool] | None = (
+    ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
+    node_metadata_key_filter: Optional[Callable[[str], bool]] = (
         _node_metadata_key_filter_safe
     )
-    # If True, raw torch.fx.Node objects encountered during pickling will be
-    # silently replaced with None instead of raising an AssertionError.
-    ignore_raw_node: bool = False
-
-
-def _unpickle_as_none() -> None:
-    return None
-
-
-def _unpickle_as_weakref(referent: object) -> weakref.ref[object]:
-    return weakref.ref(referent)
-
-
-def _unpickle_as_dead_weakref() -> Callable[[], None]:
-    return lambda: None
-
-
-@contextlib.contextmanager
-def patch_pytree_map_over_slice() -> Generator[None]:
-    if slice in pytree.SUPPORTED_NODES:
-        yield
-        return
-
-    pytree._private_register_pytree_node(
-        slice, lambda x: ([x.start, x.stop, x.step], None), lambda x, c: slice(*x)
-    )
-
-    try:
-        yield
-    finally:
-        pytree._deregister_pytree_node(slice)
 
 
 # pyrefly: ignore [invalid-inheritance]
@@ -111,7 +72,7 @@ class GraphPickler(pickle.Pickler):
     GraphModule.
     """
 
-    def __init__(self, file: io.BytesIO, options: Options | None = None) -> None:
+    def __init__(self, file: io.BytesIO, options: Optional[Options] = None) -> None:
         if dill is not None:
             super().__init__(file, byref=True)
         else:
@@ -127,8 +88,6 @@ class GraphPickler(pickle.Pickler):
         # This is used to describe tensors. It needs to be common across the
         # pickle so that duplicates and views are properly handled.
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
-
-    _PASSTHROUGH_TYPES = frozenset({int, float, str, bytes, bool, type(None)})
 
     @override
     # pyrefly: ignore [bad-override]
@@ -152,10 +111,7 @@ class GraphPickler(pickle.Pickler):
 
         # These are the types that need special handling. See the individual
         # *PickleData classes for details on pickling that particular type.
-        if type(obj) in self._PASSTHROUGH_TYPES:
-            return NotImplemented
-
-        if is_fake_tensor(obj):
+        if isinstance(obj, FakeTensor):
             return _TensorPickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch.fx.GraphModule):
             return _GraphModulePickleData.reduce_helper(self, obj)
@@ -167,29 +123,9 @@ class GraphPickler(pickle.Pickler):
             return _SymNodePickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
-        elif isinstance(obj, FakeScriptObject):
-            from torch._library.opaque_object import is_opaque_constant_type
-
-            real_obj = object.__getattribute__(obj, "real_obj")
-            if real_obj is not None and is_opaque_constant_type(type(real_obj)):
-                # Use default pickling; value-type opaques are picklable.
-                return NotImplemented
-            # Reference-type FakeScriptObjects can't be default-pickled.
-            return (_unpickle_as_none, ())
-        elif isinstance(obj, weakref.ref):
-            # Serialize weakrefs properly: if the referent is alive,
-            # serialize it and reconstruct the weakref on unpickle.
-            # If the referent is dead, unpickle as a dead-weakref-like callable.
-            referent = obj()
-            if referent is not None:
-                return (_unpickle_as_weakref, (referent,))
-            else:
-                return (_unpickle_as_dead_weakref, ())
         else:
             # We should never get a raw Node!
             if isinstance(obj, torch.fx.Node):
-                if self.options.ignore_raw_node:
-                    return (_unpickle_as_none, ())
                 raise AssertionError("Unexpected raw Node during pickling")
             if reduce := _TorchNumpyPickleData.reduce_helper(self, obj):
                 return reduce
@@ -200,18 +136,18 @@ class GraphPickler(pickle.Pickler):
 
     @override
     # pyrefly: ignore [bad-override]
-    def persistent_id(self, obj: object) -> str | None:
+    def persistent_id(self, obj: object) -> Optional[str]:
         if obj is self._unpickle_state:
             return "unpickle_state"
         else:
             return None
 
     @classmethod
-    def dumps(cls, obj: object, options: Options | None = None) -> bytes:
+    def dumps(cls, obj: object, options: Optional[Options] = None) -> bytes:
         """
         Pickle an object.
         """
-        with patch_pytree_map_over_slice(), io.BytesIO() as stream:
+        with io.BytesIO() as stream:
             pickler = cls(stream, options)
             pickler.dump(obj)
             return stream.getvalue()
@@ -221,13 +157,10 @@ class GraphPickler(pickle.Pickler):
         """
         Unpickle an object.
         """
-        from torch._dynamo.utils import dynamo_timed
-
-        with patch_pytree_map_over_slice(), dynamo_timed("GraphPickler.loads"):
-            state = _UnpickleState(fake_mode)
-            with io.BytesIO(data) as stream:
-                unpickler = _GraphUnpickler(stream, state)
-                return unpickler.load()
+        state = _UnpickleState(fake_mode)
+        with io.BytesIO(data) as stream:
+            unpickler = _GraphUnpickler(stream, state)
+            return unpickler.load()
 
     @classmethod
     def debug_dumps(
@@ -238,7 +171,7 @@ class GraphPickler(pickle.Pickler):
         max_depth: int = 80,
         max_iter_items: int = 50,
         verbose: bool = True,
-    ) -> str | None:
+    ) -> Optional[str]:
         """
         Find the first leaf that GraphPickler.dumps cannot serialize and return its path.
 
@@ -268,14 +201,14 @@ class GraphPickler(pickle.Pickler):
             if verbose:
                 print(msg)
 
-        def fail_exc(o: Any) -> BaseException | None:
+        def fail_exc(o: Any) -> Optional[BaseException]:
             try:
                 cls.dumps(o, options)
                 return None
             except Exception as e:
                 return e
 
-        def walk(o: Any, path: str, depth: int) -> str | None:
+        def walk(o: Any, path: str, depth: int) -> Optional[str]:
             if depth > max_depth:
                 log(f"{'  ' * depth}Depth limit at {path} ({type(o)})")
                 return path + " (depth_limit)"
@@ -514,7 +447,7 @@ class _TensorPickleData:
 
     @classmethod
     def reduce_helper(
-        cls, pickler: GraphPickler, obj: Tensor
+        cls, pickler: GraphPickler, obj: FakeTensor
     ) -> tuple[
         Callable[[Self, _UnpickleState], FakeTensor], tuple[Self, _UnpickleStateToken]
     ]:
@@ -564,7 +497,7 @@ class _TensorPickleData:
             metadata = dataclasses.replace(metadata, base=new_base)
 
         def with_fake(
-            make_meta_t: Callable[[], torch.Tensor], device: torch.device | str
+            make_meta_t: Callable[[], torch.Tensor], device: Union[torch.device, str]
         ) -> FakeTensor:
             with no_dispatch():
                 return FakeTensor(
@@ -587,12 +520,11 @@ class _TorchNumpyPickleData:
     @classmethod
     def reduce_helper(
         cls, pickler: GraphPickler, obj: object
-    ) -> (
+    ) -> Optional[
         tuple[
             Callable[[Self, _UnpickleState], object], tuple[Self, _UnpickleStateToken]
         ]
-        | None
-    ):
+    ]:
         if data := cls.from_object(obj):
             return (cls.unpickle, (data, pickler._unpickle_state))
         else:
@@ -607,7 +539,7 @@ class _TorchNumpyPickleData:
         return torch._dynamo.variables.misc.get_np_to_tnp_map()[np]
 
     @classmethod
-    def from_object(cls, tnp: object) -> Self | None:
+    def from_object(cls, tnp: object) -> Optional[Self]:
         if not callable(tnp):
             return None
 
@@ -753,13 +685,15 @@ class _OpPickleData:
     @staticmethod
     def _pickle_op(
         name: str,
-        datacls: type["_OpOverloadPickleData"] | type["_OpOverloadPacketPickleData"],
+        datacls: Union[
+            type["_OpOverloadPickleData"], type["_OpOverloadPacketPickleData"]
+        ],
         options: Options,
     ) -> "_OpPickleData":
         if (ops_filter := options.ops_filter) and not ops_filter(name):
-            from torch._inductor.codecache import CacheabilityValidator
+            from torch._inductor.codecache import BypassFxGraphCache
 
-            CacheabilityValidator.bypass(f"Unable to pickle non-standard op: {name}")
+            raise BypassFxGraphCache(f"Unable to pickle non-standard op: {name}")
         return datacls(name)
 
     @abstractmethod

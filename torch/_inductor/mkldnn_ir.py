@@ -38,8 +38,8 @@ def _prepare_convolution_fusion_create(
     dilation: Sequence[int],
     groups: int,
     transposed: bool = False,
-    output_padding: Sequence[int] | None = None,
-    quantize_args: list["TensorBox"] | None = None,
+    output_padding: Optional[Sequence[int]] = None,
+    quantize_args: Optional[list["TensorBox"]] = None,
     other: Optional["TensorBox"] = None,
 ):
     """
@@ -54,11 +54,9 @@ def _prepare_convolution_fusion_create(
     def _conv_input_size(
         output_size, weight_size, padding, output_padding, stride, dilation, groups
     ):
-        if len(output_size) != len(weight_size):
-            raise AssertionError("Expect input dim == weight dim")
+        assert len(output_size) == len(weight_size), "Expect input dim == weight dim"
         dim = len(output_size)
-        if dim <= 2:
-            raise AssertionError("Expect input dim > 2")
+        assert dim > 2, "Expect input dim > 2"
 
         BATCH_DIM = 0
         WEIGHT_INPUT_CHANNELS_DIM = 1
@@ -103,8 +101,7 @@ def _prepare_convolution_fusion_create(
     ):
         prepacked_weight_size = prepacked_weight.size()
         dim = len(prepacked_weight_size)
-        if dim <= 2:
-            raise AssertionError("Expect weight dim > 2")
+        assert dim > 2, "Expect weight dim > 2"
         if groups > 1:
             weight_size = []
             weight_size.append(prepacked_weight_size[1] * groups)
@@ -120,26 +117,21 @@ def _prepare_convolution_fusion_create(
         bias.realize()
     with V.graph.fake_mode:
         # TODO <Leslie> cleaned up the fake_tensor trace as Linear implementation
-        x_fake = ir_node_to_tensor(x)
-        weight_fake = ir_node_to_tensor(weight)
+        x_fake = ir_node_to_tensor(x, guard_shape=True)
+        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
         dims = len(x_fake.size()) - 2
-        if not (0 < len(padding) <= dims):
-            raise AssertionError(f"expected 0 < len(padding) <= {dims}")
-        if not (0 < len(dilation) <= dims):
-            raise AssertionError(f"expected 0 < len(dilation) <= {dims}")
-        if not (0 < len(stride) <= dims):
-            raise AssertionError(f"expected 0 < len(stride) <= {dims}")
+        assert 0 < len(padding) <= dims
+        assert 0 < len(dilation) <= dims
+        assert 0 < len(stride) <= dims
         padding = pad_listlike(padding, dims)
         dilation = pad_listlike(dilation, dims)
         stride = pad_listlike(stride, dims)
         if output_padding is None:
             output_padding = pad_listlike([0], dims)
         else:
-            if not (0 < len(output_padding) <= dims):
-                raise AssertionError(f"expected 0 < len(output_padding) <= {dims}")
+            assert 0 < len(output_padding) <= dims
             output_padding = pad_listlike(output_padding, dims)
-        if not isinstance(groups, (int, sympy.core.numbers.Integer)):
-            raise AssertionError(f"expected groups to be int, got {type(groups)}")
+        assert isinstance(groups, (int, sympy.core.numbers.Integer))
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such
@@ -159,11 +151,7 @@ def _prepare_convolution_fusion_create(
             x_shape = list(x_fake.shape)
             weight_shape = list(weight_fake.shape)
             if len(x_shape) != len(weight_shape):
-                if not (len(x_shape) == 3 and len(weight_shape) == 4):
-                    raise AssertionError(
-                        f"expected len(x_shape) == 3 and len(weight_shape) == 4, "
-                        f"got {len(x_shape)} and {len(weight_shape)}"
-                    )
+                assert len(x_shape) == 3 and len(weight_shape) == 4
                 weight_shape.pop(2)
             output_size = _conv_output_size(
                 x_shape,
@@ -201,13 +189,8 @@ def _prepare_convolution_fusion_create(
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
-    if get_device_type(x) != get_device_type(weight):
-        raise AssertionError(
-            f"expected x and weight on same device, got "
-            f"{get_device_type(x)} and {get_device_type(weight)}"
-        )
-    if get_device_type(x) not in SUPPORTED_MKLDNN_DEVICES:
-        raise AssertionError(f"unsupported mkldnn device {get_device_type(x)}")
+    assert get_device_type(x) == get_device_type(weight)
+    assert get_device_type(x) in SUPPORTED_MKLDNN_DEVICES
     inputs = [x]
 
     if quantize_args is not None:
@@ -222,8 +205,7 @@ def _prepare_convolution_fusion_create(
 
     if other is not None:
         other = cls.require_stride_order(other, req_stride_order)
-        if not isinstance(other, TensorBox):
-            raise AssertionError(f"expected other to be TensorBox, got {type(other)}")
+        assert isinstance(other, TensorBox)
         inputs += [other]
 
     kernel_layout = FixedLayout(
@@ -248,7 +230,7 @@ def _prepare_linear_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    quantize_args: list["TensorBox"] | None = None,
+    quantize_args: Optional[list["TensorBox"]] = None,
     other: Optional["TensorBox"] = None,
     binary_sum: bool = False,
 ):
@@ -271,13 +253,8 @@ def _prepare_linear_fusion_create(
     req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
-    if get_device_type(x) != get_device_type(weight):
-        raise AssertionError(
-            f"expected x and weight on same device, got "
-            f"{get_device_type(x)} and {get_device_type(weight)}"
-        )
-    if get_device_type(x) not in SUPPORTED_MKLDNN_DEVICES:
-        raise AssertionError(f"unsupported mkldnn device {get_device_type(x)}")
+    assert get_device_type(x) == get_device_type(weight)
+    assert get_device_type(x) in SUPPORTED_MKLDNN_DEVICES
     inputs = [x]
 
     if quantize_args is not None:
@@ -356,7 +333,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         dilation_: list[int],
         groups: int,
         attr,
-        scalars: list[Any] | None,
+        scalars: Optional[list[Any]],
         algorithm,
     ):
         (
@@ -418,10 +395,10 @@ class ConvolutionBinary(ExternKernelAlloc):
         dilation_: list[int],
         groups: int,
         binary_attr: str,
-        binary_alpha: float | None,
-        unary_attr: str | None,
-        unary_scalars: list[Any] | None,
-        unary_algorithm: str | None,
+        binary_alpha: Optional[float],
+        unary_attr: Optional[str],
+        unary_scalars: Optional[list[Any]],
+        unary_algorithm: Optional[str],
     ):
         (
             inputs,
@@ -496,10 +473,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         dilation_: list[int],
         groups: int,
         binary_attr: str,
-        binary_alpha: float | None,
-        unary_attr: str | None,
-        unary_scalars: list[Any] | None,
-        unary_algorithm: str | None,
+        binary_alpha: Optional[float],
+        unary_attr: Optional[str],
+        unary_scalars: Optional[list[Any]],
+        unary_algorithm: Optional[str],
     ):
         (
             inputs,
@@ -566,7 +543,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         dilation_: list[int],
         groups_: int,
         attr,
-        scalars: list[Any] | None,
+        scalars: Optional[list[Any]],
         algorithm,
     ):
         transposed = True
@@ -694,8 +671,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             algorithm,
         ]
 
-        if output_dtype is None:
-            raise AssertionError("expected output_dtype to be not None")
+        assert output_dtype is not None
         if output_dtype in [torch.float32, torch.bfloat16]:
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set output_dtype is not None, the output buf should be output_dtype instead of uint8.
@@ -822,10 +798,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             unary_algorithm,
         ]
 
-        if binary_attr != "sum":
-            raise AssertionError(
-                "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
-            )
+        assert binary_attr == "sum", (
+            "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        )
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
@@ -873,8 +848,7 @@ class MKLPackedLinear(ExternKernelAlloc):
             constant_args.insert(0, None)
 
         device = x.get_device()
-        if device is None:
-            raise AssertionError("expected x to have a device")
+        assert device is not None
         return MKLPackedLinear(
             layout=FixedLayout(device, x.get_dtype(), output_size, output_stride),
             inputs=inputs,
@@ -922,8 +896,7 @@ class LinearUnary(ExternKernelAlloc):
             constant_args.insert(0, None)
 
         device = x.get_device()
-        if device is None:
-            raise AssertionError("expected x to have a device")
+        assert device is not None
 
         packed = LinearUnary(
             layout=FixedLayout(
@@ -983,8 +956,7 @@ class LinearBinary(ExternKernelAlloc):
             constant_args.insert(0, B)
 
         device = x.get_device()
-        if device is None:
-            raise AssertionError("expected x to have a device")
+        assert device is not None
         packed = LinearBinary(
             layout=FixedLayout(
                 device=device,
@@ -1074,8 +1046,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             post_op_algorithm,
         ]
 
-        if output_dtype is None:
-            raise AssertionError("expected output_dtype to be not None")
+        assert output_dtype is not None
         if output_dtype in [torch.float32, torch.bfloat16]:
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
@@ -1131,8 +1102,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         binary_post_op = self.constant_args[-5]
         if binary_post_op == "sum":
             input = self.inputs[self.idx_for_inplace_sum]
-            if not isinstance(input, IRNode):
-                raise AssertionError(f"expected input to be IRNode, got {type(input)}")
+            assert isinstance(input, IRNode)
             return [input.get_name()]
         else:
             return []
@@ -1199,8 +1169,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             # Return other since it has been inplace changed.
             return packed.inputs[packed.idx_for_inplace_sum]
 
-        if output_dtype is None:
-            raise AssertionError("expected output_dtype to be not None")
+        assert output_dtype is not None
         if output_dtype in [torch.float32, torch.bfloat16]:
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
@@ -1270,8 +1239,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         cx.freeze_layout()
 
         input_size = x.get_size()
-        if len(input_size) != 3:
-            raise AssertionError("Expect lstm input to be 3D")
+        assert len(input_size) == 3, "Expect lstm input to be 3D"
         # batch_first is handled in the lstm OP. When entering
         # rnn_layer here, we'll always have batch_first = False
         seq_length, mini_batch, input_size = input_size
@@ -1294,8 +1262,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         ]
 
         device = x.get_device()
-        if device is None:
-            raise AssertionError("expected x to have a device")
+        assert device is not None
         packed = MkldnnRnnLayer(
             MultiOutputLayout(device=device),
             inputs=inputs,
@@ -1303,8 +1270,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         )
 
         def get_strides_of_lstm_output(output_shape, batch_first):
-            if len(output_shape) != 3:
-                raise AssertionError("Expect output_shape to be 3D")
+            assert len(output_shape) == 3, "Expect output_shape to be 3D"
             return FlexibleLayout.contiguous_strides(output_shape)
 
         # C shim call requires all the outputs to be passed in, and thus the last
@@ -1352,10 +1318,8 @@ class WeightInt4PackMatmul(ExternKernelAlloc):
         inputs = [x, w, qGroupSize, qScalesAndZeros]
         constant_args = ()
         """
-        if len(inputs) != 4:
-            raise AssertionError(f"expected 4 inputs, got {len(inputs)}")
-        if len(constant_args) != 0:
-            raise AssertionError(f"expected 0 constant_args, got {len(constant_args)}")
+        assert len(inputs) == 4
+        assert len(constant_args) == 0
         super().__init__(
             layout,
             inputs,

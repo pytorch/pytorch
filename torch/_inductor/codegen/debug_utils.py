@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import dtype as torch_dtype
@@ -30,20 +30,17 @@ def _print_debugging_tensor_value_info(msg, arg):
     if not isinstance(arg, torch.Tensor):
         print("Value: ", arg)
         return
-    numel = arg.numel()
+    numel = arg.float().numel()
     # print the debug printing stats
     if numel <= max_numel_to_print:
         print(arg)
     print("Number of elements: ", numel)
-    print("Size: ", arg.size())
-    print("Dtype: ", arg.dtype)
-    arg_f = arg.float()
-    std, mean = torch.std_mean(arg_f)
-    amin, amax = torch.aminmax(arg_f)
-    print("Mean: ", mean.item())
-    print("Min: ", amin.item())
-    print("Max: ", amax.item())
-    print("Std: ", std.item())
+    print("Size: ", arg.float().size())
+    print("Dtype: ", arg.float().mean().item())
+    print("Mean: ", arg.float().mean().item())
+    print("Min: ", arg.float().min().item())
+    print("Max: ", arg.float().max().item())
+    print("Std: ", arg.float().std().item())
 
 
 # AOTI debug printing related configs
@@ -55,7 +52,7 @@ class IntermediateValueDebuggingLevel(Enum):
     # LEVEL 2: Print all intermediate tensor values by default to the console. No debug saving will be performed.
     PRINT_ONLY = "2"
     # LEVEL 3: Print all kernel names to the console only. No debug saving/printing for input tensor value info will be performed.
-    # This mode can be helpful in cases when you just want to pinpoint what kernel is running into a CUDA IMA issue, etc.
+    # This mode can be helpful in cases when you just want to pinpointing what kernel is running into a CUDA IMA issue, etc.
     PRINT_KERNEL_NAMES_ONLY = "3"
 
 
@@ -64,11 +61,11 @@ class DebugPrinterManager:
         self,
         debug_printer_level,
         use_array_ref: bool,
-        writeline: Callable[..., None] | None = None,
-        args_to_print_or_save: list[str] | None = None,
+        writeline: Optional[Callable[..., None]] = None,
+        args_to_print_or_save: Optional[list[str]] = None,
         kernel_name: str = "",
         kernel=None,
-        arg_signatures: list[type] | None = None,
+        arg_signatures: Optional[list[type]] = None,
         kernel_type=None,
     ):
         self.debug_printer_level = IntermediateValueDebuggingLevel(debug_printer_level)
@@ -77,7 +74,7 @@ class DebugPrinterManager:
             args_to_print_or_save = []
         self.args_to_print_or_save = args_to_print_or_save
         self.kernel_name = kernel_name
-        self.arg_signatures: list[type] | None = None
+        self.arg_signatures: Optional[list[type]] = None
         self.kernel = kernel
         self.filtered_kernel_names_to_print = self._get_debug_filtered_kernel_names()
         self.kernel_type = None
@@ -103,7 +100,7 @@ class DebugPrinterManager:
         args_to_print_or_save,
         kernel_name,
         before_launch,
-        arg_signatures: list[type] | None = None,
+        arg_signatures: Optional[list[type]] = None,
     ):
         if self.debug_printer_level == IntermediateValueDebuggingLevel.OFF:
             return
@@ -147,7 +144,7 @@ class DebugPrinterManager:
         self,
         args_to_print_or_save: list[str],
         kernel_name: str,
-        arg_signatures: list[type] | None,
+        arg_signatures: Optional[list[type]],
         kernel,
         kernel_type=None,
     ):
@@ -199,7 +196,7 @@ class DebugPrinterManager:
         args_to_save,
         kernel_name,
         before_launch=True,
-        arg_signatures: list[type] | None = None,
+        arg_signatures: Optional[list[type]] = None,
     ) -> None:
         for i, arg in enumerate(args_to_save):
             if arg_signatures is not None and not isinstance(
@@ -236,7 +233,7 @@ class DebugPrinterManager:
         args_to_print,
         kernel_name,
         before_launch=True,
-        arg_signatures: list[type] | None = None,
+        arg_signatures: Optional[list[type]] = None,
     ) -> None:
         launch_prefix = "before_launch" if before_launch else "after_launch"
 

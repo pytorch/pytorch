@@ -71,7 +71,7 @@ void initScriptDictBindings(PyObject* module) {
             std::stringstream ss;
             ss << "Unable to infer type of dictionary: "
                << inferred_type.reason();
-            throw JITException(std::move(ss).str());
+            throw JITException(ss.str());
           }
 
           type = inferred_type.type();

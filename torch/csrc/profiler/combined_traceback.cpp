@@ -13,19 +13,9 @@ std::shared_ptr<CapturedTraceback> CapturedTraceback::gather(
   if (python) {
     auto p = python_support_.load();
     while (p && r->frames_.empty()) {
-      // Check if it's safe to gather Python frames from current thread
-      if (p->canGather()) {
-        r->frames_ = p->gather();
-        r->python_ = p;
-      }
+      r->frames_ = p->gather();
+      r->python_ = p;
       p = p->next_;
-    }
-    // Try to gather forward traceback from current autograd node
-    if (r->python_) {
-      auto forward_tb = r->python_->gatherForwardTraceback();
-      if (!forward_tb.empty()) {
-        r->forward_traceback_ = std::move(forward_tb);
-      }
     }
   }
   if (script) {

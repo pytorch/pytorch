@@ -19,7 +19,7 @@ import sys
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -501,7 +501,7 @@ def _check_trace(
             if len(nondeterm_ops) > 0:
                 nondeterministic_ops_warning = "Trace had nondeterministic nodes. "
                 nondeterministic_ops_warning += (
-                    "Did you forget to call .eval() on your model? Nodes:\n"
+                    "Did you forget call .eval() on your model? Nodes:\n"
                 )
                 nondeterministic_ops_warning += "\n".join(
                     [indent(str(op)) for op in nondeterm_ops][:20]
@@ -610,7 +610,7 @@ class TracerWarning(Warning):
         warnings.filterwarnings("ignore", "torch::jit::fuser::cuda")
 
 
-# We ignore the tracer warnings coming from inside the library, because all our shape
+# We ignore the tracer warnings coming form inside the library, because all our shape
 # checks in nn will trigger them.
 TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()
@@ -661,7 +661,7 @@ def analyze_ts_result_with_export_result(export, trace):
         if type(orig) is not type(loaded):
             return False
 
-        if torch._subclasses.fake_tensor.is_fake_tensor(orig):
+        if isinstance(orig, torch._subclasses.FakeTensor):
             # Skip for FakeTensor.
             return True
         elif isinstance(orig, torch.Tensor):
@@ -1037,7 +1037,7 @@ def trace(
     return traced_func
 
 
-_trace_module_map: dict[Any, Any] | None = None
+_trace_module_map: Optional[dict[Any, Any]] = None
 
 
 def trace_module(

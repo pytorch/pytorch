@@ -28,7 +28,9 @@ if [[ -z "${TRITON_ROCM_DIR}" ]]; then
     export TRITON_ROCM_DIR=third_party/amd/backend
 fi
 
-# Remove packaged libs
+# Remove packaged libs and headers
+rm -rf $TRITON_ROCM_DIR/include/*
+
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
 LIBELF_PATH="/usr/lib64/libelf.so.1"
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`

@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <filesystem>
-
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
@@ -55,9 +53,10 @@ TEST(ModuleAPITest, MethodRunAsync) {
   //     r2 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
   //     return r1.wait() + r2.wait()
   // )");
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
   // borrow model file from TEST(GraphExecutorTest, runAsync_executor)
-  auto testModelFile =
-      resolveTestDataFile(__FILE__, "test_interpreter_async.pt");
+  testModelFile.append("test_interpreter_async.pt");
   auto m = load(testModelFile);
 
   auto counter = 0;

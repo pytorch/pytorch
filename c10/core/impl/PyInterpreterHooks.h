@@ -21,10 +21,12 @@ struct C10_API PyInterpreterHooksInterface {
   }
 };
 
-// Deprecated: no longer used internally, kept for ABI compatibility.
 struct C10_API PyInterpreterHooksArgs{};
 
-C10_DECLARE_REGISTRY(PyInterpreterHooksRegistry, PyInterpreterHooksInterface);
+C10_DECLARE_REGISTRY(
+    PyInterpreterHooksRegistry,
+    PyInterpreterHooksInterface,
+    PyInterpreterHooksArgs);
 
 #define REGISTER_PYTHON_HOOKS(clsname) \
   C10_REGISTER_CLASS(PyInterpreterHooksRegistry, clsname, clsname)

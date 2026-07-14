@@ -4,5 +4,4 @@
 #include <torch/csrc/python_headers.h>
 
 bool StaticCudaLauncher_init(PyObject* module);
-bool FastCudaLauncher_init(PyObject* module);
 #endif

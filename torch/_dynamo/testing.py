@@ -24,7 +24,7 @@ import sys
 import types
 import unittest
 from collections.abc import Callable, Generator, Sequence
-from typing import Any, overload, TypeVar
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -45,7 +45,7 @@ from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
 from .utils import CompileCounterInt, same
 
 
-np: types.ModuleType | None = None
+np: Optional[types.ModuleType] = None
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -60,7 +60,7 @@ log = logging.getLogger(__name__)
 _P = ParamSpec("_P")
 
 
-def clone_me(x: torch.Tensor | None) -> torch.Tensor | None:
+def clone_me(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
     if x is None:
         return None
     return x.detach().clone().requires_grad_(x.requires_grad)
@@ -151,11 +151,11 @@ def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor: ...
 
 @overload
 def reduce_to_scalar_loss(
-    out: list[Any] | tuple[Any, ...] | dict[Any, Any],
+    out: Union[list[Any], tuple[Any, ...], dict[Any, Any]],
 ) -> float: ...
 
 
-def reduce_to_scalar_loss(out: Any) -> torch.Tensor | float:
+def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
     """Reduce the output of a model to get scalar loss"""
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
@@ -208,8 +208,7 @@ def debug_insert_nops(
         debug_checks(frame.f_code)
         code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
-            # The nop-insertion path does not inspect code object attributes.
-            code_options={},  # type: ignore[arg-type]
+            code_options={},
             compiler_fn=None,
             root_tx=None,  # type: ignore[arg-type]
             export=False,
@@ -234,7 +233,7 @@ def debug_insert_nops(
 
 class CompileCounter:
     def __init__(self) -> None:
-        self.frame_count: int | CompileCounterInt = 0
+        self.frame_count: Union[int, CompileCounterInt] = 0
         self.clear()
 
     def __call__(
@@ -256,7 +255,7 @@ class CompileCounter:
 
 class CompileCounterWithBackend:
     def __init__(self, backend: str) -> None:
-        self.frame_count: int | CompileCounterInt = 0
+        self.frame_count: Union[int, CompileCounterInt] = 0
         self.backend = backend
         self.graphs: list[torch.fx.GraphModule] = []
         self.clear()
@@ -389,8 +388,8 @@ def standard_test(
     self: Any,
     fn: Callable[..., Any],
     nargs: int,
-    expected_ops: int | None = None,
-    expected_ops_dynamic: int | None = None,
+    expected_ops: Optional[int] = None,
+    expected_ops_dynamic: Optional[int] = None,
     expected_frame_count: int = 1,
 ) -> None:
     if not config.assume_static_by_default and expected_ops_dynamic is not None:
@@ -441,7 +440,7 @@ def rand_strided(
     size: Sequence[int],
     stride: Sequence[int],
     dtype: torch.dtype = torch.float32,
-    device: str | torch.device = "cpu",
+    device: Union[str, torch.device] = "cpu",
     extra_size: int = 0,
 ) -> torch.Tensor:
     needed_size = extra_size
@@ -451,11 +450,7 @@ def rand_strided(
             sum((shape - 1) * stride for shape, stride in zip(size, stride)) + 1
         )
     if dtype.is_floating_point:
-        if dtype == torch.float4_e2m1fn_x2:
-            buffer = torch.randint(
-                0, 256, (needed_size,), dtype=torch.uint8, device=device
-            ).view(torch.float4_e2m1fn_x2)
-        elif dtype.itemsize == 1:
+        if dtype.itemsize == 1:
             """
             normal distribution kernel is not implemented for fp8..
             Workaround that by creating a fp16 tensor and then cast.
@@ -495,7 +490,7 @@ def make_test_cls_with_patches(
     cls_prefix: str,
     fn_suffix: str,
     *patches: Any,
-    xfail_prop: str | None = None,
+    xfail_prop: Optional[str] = None,
     decorator: Callable[[Callable[..., Any]], Callable[..., Any]] = lambda x: x,
 ) -> type:
     DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
@@ -605,7 +600,6 @@ def _testing_capture_invoke_subgraph_inductor_compile_gms() -> Generator[
         # captured_gms will contain the list of captured graph modules
     """
     global _testing_invoke_subgraph_inductor_compile_captured_gms
-    # pyrefly: ignore [implicit-any]
     _testing_invoke_subgraph_inductor_compile_captured_gms = []
     try:
         yield _testing_invoke_subgraph_inductor_compile_captured_gms

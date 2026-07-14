@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import os
 import re
 from re import Pattern
+from typing import Optional
 
 
 BOT_COMMANDS_WIKI = "https://github.com/pytorch/pytorch/wiki/Bot-commands"
@@ -48,7 +47,9 @@ class TryMergeExplainer:
 
     def _get_flag_msg(
         self,
-        ignore_current_checks: list[tuple[str, str | None, int | None]] | None = None,
+        ignore_current_checks: Optional[
+            list[tuple[str, Optional[str], Optional[int]]]
+        ] = None,
     ) -> str:
         if self.force:
             return (
@@ -67,7 +68,9 @@ class TryMergeExplainer:
 
     def get_merge_message(
         self,
-        ignore_current_checks: list[tuple[str, str | None, int | None]] | None = None,
+        ignore_current_checks: Optional[
+            list[tuple[str, Optional[str], Optional[int]]]
+        ] = None,
     ) -> str:
         title = "### Merge started"
         main_message = self._get_flag_msg(ignore_current_checks)

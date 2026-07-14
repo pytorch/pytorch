@@ -19,7 +19,7 @@ import heapq
 import logging
 import time
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias
 from typing_extensions import Self
 
 
@@ -54,7 +54,7 @@ class TopN:
 
 
 OnExitType: TypeAlias = Callable[
-    [int, int, dict[str, Any], type[BaseException] | None, BaseException | None],
+    [int, int, dict[str, Any], Optional[type[BaseException]], Optional[BaseException]],
     None,
 ]
 
@@ -87,16 +87,15 @@ class MetricsContext:
 
     def __exit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
+        exc_type: Optional[type[BaseException]],
+        exc_value: Optional[BaseException],
         _traceback: Any,
     ) -> None:
         """
         At exit, call the provided on_exit function.
         """
         self._level -= 1
-        if self._level < 0:
-            raise AssertionError("MetricsContext level cannot become negative")
+        assert self._level >= 0
         if self._level == 0:
             try:
                 end_time_ns = time.time_ns()
@@ -219,7 +218,7 @@ class RuntimeMetricsContext:
         self._start_time_ns: int = 0
 
     def increment(
-        self, metric: str, value: int, extra: dict[str, Any] | None = None
+        self, metric: str, value: int, extra: Optional[dict[str, Any]] = None
     ) -> None:
         """
         Increment a metric by a given amount.

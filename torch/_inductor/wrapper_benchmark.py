@@ -4,7 +4,7 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
 from types import ModuleType
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
 import torch
 from torch.autograd import DeviceType
@@ -68,15 +68,12 @@ def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
         for k, v in mod.__dict__.items()
         if k.startswith("triton_") and isinstance(v, CachingAutotuner)
     ]
-    if len(cand_list) != 1:
-        raise AssertionError(
-            f"expected exactly one triton kernel, got {len(cand_list)}"
-        )
+    assert len(cand_list) == 1
     return cand_list[0]
 
 
 def benchmark_all_kernels(
-    benchmark_name: str, benchmark_all_configs: dict[Any, Any] | None
+    benchmark_name: str, benchmark_all_configs: Optional[dict[Any, Any]]
 ) -> None:
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -112,9 +109,9 @@ def benchmark_all_kernels(
 
         def get_info_str(
             ms: float,
-            n_regs: Any | None,
-            n_spills: Any | None,
-            shared: Any | None,
+            n_regs: Optional[Any],
+            n_spills: Optional[Any],
+            shared: Optional[Any],
             prefix: str = "",
         ) -> str:
             if not any(x is None for x in [n_regs, n_spills, shared]):
@@ -133,8 +130,7 @@ def benchmark_all_kernels(
             f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
         )
         if benchmark_all_configs:
-            if not hasattr(kernel_mod, "benchmark_all_configs"):
-                raise AssertionError("kernel_mod is missing benchmark_all_configs")
+            assert hasattr(kernel_mod, "benchmark_all_configs")
             bench_result = kernel_mod.benchmark_all_configs(args)
             print(kernel_desc)
             for launcher, ms in bench_result.items():
@@ -147,8 +143,9 @@ def benchmark_all_kernels(
                 device=device_type,
                 rep=40,
             )
-            if len(triton_kernel.launchers) != 1:
-                raise AssertionError("Autotuner should have selected the best config")
+            assert len(triton_kernel.launchers) == 1, (
+                "Autotuner should have selected the best config"
+            )
             launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
@@ -211,8 +208,7 @@ def parse_profile_event_list(
         all_events[category].append(profile_ev)
 
     for ev in event_list:
-        if ev.is_legacy:
-            raise AssertionError("Don't support the legacy profiler")
+        assert not ev.is_legacy, "Don't support the legacy profiler"
         if ev.device_type == DeviceType.CPU:
             # ignore the event on CPU side
             continue
@@ -269,8 +265,9 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        if not OrderedSet(all_events.keys()).issubset(OrderedSet(category_list)):
-            raise AssertionError(f"{list(all_events.keys())}")
+        assert OrderedSet(all_events.keys()).issubset(OrderedSet(category_list)), (
+            f"{list(all_events.keys())}"
+        )
 
         per_category_wall_time = {}
         total_device_ms = 0.0
@@ -403,8 +400,7 @@ def ncu_analyzer(
 def collect_memory_snapshot(
     benchmark_compiled_module_fn: BenchmarkCallableType,
 ) -> None:
-    if not torch.cuda.is_available():
-        raise AssertionError("CUDA is not available")
+    assert torch.cuda.is_available()
 
     torch.cuda.memory._record_memory_history(max_entries=100000)
     benchmark_compiled_module_fn(times=10, repeat=1)  # run 10 times

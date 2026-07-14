@@ -24,7 +24,6 @@ from pathlib import Path
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 from torch.utils.cpp_extension import (
     CUDA_HOME,
-    get_cxx_compiler,
     include_paths as torch_include_paths,
     ROCM_HOME,
 )
@@ -84,9 +83,9 @@ if not IS_WINDOWS:
             torch_version_2_9 = "0x0209000000000000"
 
             cmd = [
-                get_cxx_compiler(),
+                "g++",
                 "-c",
-                "-std=c++20",
+                "-std=c++17",
                 f"-DTORCH_TARGET_VERSION={torch_version_2_9}",
                 f"-I{source_file.parent}",  # For includes in same directory
                 *self.pytorch_includes,
@@ -120,14 +119,13 @@ if not IS_WINDOWS:
             cmd = [
                 os.path.join(GPU_HOME, "bin", "nvcc" if CUDA_HOME else "hipcc"),
                 "-c",
-                "-std=c++20",
+                "-std=c++17",
                 f"-DTORCH_TARGET_VERSION={torch_version_2_9}",
                 f"-I{source_file.parent}",  # For includes in same directory
                 *self.pytorch_includes,
                 *self.cuda_includes,
             ]
 
-            cmd.extend(["-DUSE_CUDA"])
             if ROCM_HOME:
                 cmd.extend(["-DUSE_ROCM=1"])
 
@@ -165,7 +163,7 @@ if not IS_WINDOWS:
 
             self.assertFalse(
                 success,
-                lambda msg: f"{msg}\nFunction {func_name} compiled successfully with TORCH_TARGET_VERSION=2.9.0. "
+                f"Function {func_name} compiled successfully with TORCH_TARGET_VERSION=2.9.0. "
                 f"This could mean two things.\n\t1. It should run with 2.9.0 and should be "
                 "moved to libtorch_agn_2_9_extension\n\t2. The function(s) it tests do not use the "
                 "proper TORCH_FEATURE_VERSION guards\n\nThe libtorch_agnostic_targetting CI workflow will "
@@ -207,13 +205,13 @@ if not IS_WINDOWS:
 
             self.assertTrue(
                 success,
-                lambda msg: f"{msg}\nmv_tensor_accessor_cpu.cpp failed to compile with TORCH_TARGET_VERSION=2.9.0. "
+                f"mv_tensor_accessor_cpu.cpp failed to compile with TORCH_TARGET_VERSION=2.9.0. "
                 f"This file is expected to work with 2.9.0 since it doesn't use 2.10+ features. "
                 f"Error: {error_msg}",
             )
 
-        def test_cuda_kernel_works_with_2_9(self):
-            """Test that cuda_kernel.cu compiles successfully with 2.9.0.
+        def test_mv_tensor_accessor_cuda_works_with_2_9(self):
+            """Test that mv_tensor_accessor_cuda.cu compiles successfully with 2.9.0.
 
             This is a negative test - it ensures that a .cu file we expect to work with 2.9.0
             actually does compile. This validates that our test infrastructure correctly
@@ -221,13 +219,15 @@ if not IS_WINDOWS:
             that don't.
             """
             if not self.cuda_available:
-                self.skipTest("CUDA not available, skipping cuda_kernel.cu test")
+                self.skipTest(
+                    "CUDA not available, skipping mv_tensor_accessor_cuda.cu test"
+                )
 
             cu_file = (
                 Path(self.csrc_dir).parent
                 / "libtorch_agn_2_9_extension"
                 / "csrc"
-                / "cuda_kernel.cu"
+                / "mv_tensor_accessor_cuda.cu"
             )
 
             if not cu_file.exists():
@@ -242,13 +242,15 @@ if not IS_WINDOWS:
             if not success:
                 relevant_errors = self._extract_relevant_errors(error_msg)
                 if relevant_errors:
-                    print("\n  Unexpected compilation errors for cuda_kernel.cu:")
+                    print(
+                        "\n  Unexpected compilation errors for mv_tensor_accessor_cuda.cu:"
+                    )
                     for err in relevant_errors:
                         print(f"{err}")
 
             self.assertTrue(
                 success,
-                lambda msg: f"{msg}\ncuda_kernel.cu failed to compile with TORCH_TARGET_VERSION=2.9.0. "
+                f"mv_tensor_accessor_cuda.cu failed to compile with TORCH_TARGET_VERSION=2.9.0. "
                 f"This file is expected to work with 2.9.0 since it doesn't use 2.10+ features. "
                 f"Error: {error_msg}",
             )
@@ -297,7 +299,7 @@ if not IS_WINDOWS:
     # already defined above
     _source_files = sorted(
         [f for f in _csrc_dir.rglob("*.cpp") if f.name != "mv_tensor_accessor_cpu.cpp"]
-        + list(_csrc_dir.rglob("*.cu"))
+        + [f for f in _csrc_dir.rglob("*.cu") if f.name != "mv_tensor_accessor_cuda.cu"]
     )
 
     for _source_file in _source_files:

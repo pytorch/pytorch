@@ -1,4 +1,3 @@
-# Owner(s): ["module: ci"]
 # A workflow that implements similar logic to actions/stale.
 #
 # Compared to actions/stale, it is implemented to make API requests proportional
@@ -22,7 +21,7 @@ on:
 jobs:
   stale:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-24.04
+    runs-on: linux.large
     permissions:
       contents: read
       pull-requests: write

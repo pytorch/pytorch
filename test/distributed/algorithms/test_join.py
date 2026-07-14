@@ -3,7 +3,7 @@
 import contextlib
 import os
 import sys
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.distributed as dist
@@ -130,8 +130,7 @@ class AllReducer(Joinable):
         common_rank = torch.tensor([rank if to_consider else -1], device=self.device)
         dist.all_reduce(common_rank, op=dist.ReduceOp.MAX, group=self.process_group)
         common_rank = common_rank.item()
-        if not (common_rank >= 0):
-            raise AssertionError(f"Expected common_rank >= 0, got {common_rank}")
+        assert common_rank >= 0
         return common_rank
 
 
@@ -208,7 +207,7 @@ class TestJoin(MultiProcessTestCase):
         throw_on_early_termination: bool,
         num_allreduces: int,
         run_post_hooks: bool,
-        expected_total: int | None = None,
+        expected_total: Optional[int] = None,
     ):
         r"""
         Skeleton for all :class:`Join` tests.

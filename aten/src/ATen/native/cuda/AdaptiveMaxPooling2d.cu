@@ -393,7 +393,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cuda)
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           } else {
             // run updateGradInput kernel
-            adaptivemaxgradinput<<<
+            atomicadaptivemaxgradinput<<<
                 blocks,
                 threads,
                 0,

@@ -33,38 +33,15 @@ class MicrobatchTests(TestCase):
 
         # Default chunking: dim 0
         arg_chunks, kwarg_chunks = split_args_kwargs_into_chunks(args, kwargs, 2)
-        if len(arg_chunks) != 2:
-            raise AssertionError(f"Expected 2 arg_chunks, got {len(arg_chunks)}")
-        if len(kwarg_chunks) != 2:
-            raise AssertionError(f"Expected 2 kwarg_chunks, got {len(kwarg_chunks)}")
-        if arg_chunks[0][0].shape != torch.Size([64, d_hid]):
-            raise AssertionError(
-                f"Expected arg_chunks[0][0].shape == [64, {d_hid}], got {arg_chunks[0][0].shape}"
-            )
-        if arg_chunks[1][0].shape != torch.Size([64, d_hid]):
-            raise AssertionError(
-                f"Expected arg_chunks[1][0].shape == [64, {d_hid}], got {arg_chunks[1][0].shape}"
-            )
-        if arg_chunks[0][1].shape != torch.Size([128, d_hid]):
-            raise AssertionError(
-                f"Expected arg_chunks[0][1].shape == [128, {d_hid}], got {arg_chunks[0][1].shape}"
-            )
-        if arg_chunks[0][2].shape != torch.Size([256, d_hid]):
-            raise AssertionError(
-                f"Expected arg_chunks[0][2].shape == [256, {d_hid}], got {arg_chunks[0][2].shape}"
-            )
-        if kwarg_chunks[0]["x0"].shape != torch.Size([64, d_hid]):
-            raise AssertionError(
-                f"Expected kwarg_chunks[0]['x0'].shape == [64, {d_hid}], got {kwarg_chunks[0]['x0'].shape}"
-            )
-        if kwarg_chunks[0]["x1"].shape != torch.Size([128, d_hid]):
-            raise AssertionError(
-                f"Expected kwarg_chunks[0]['x1'].shape == [128, {d_hid}], got {kwarg_chunks[0]['x1'].shape}"
-            )
-        if kwarg_chunks[1]["x2"].shape != torch.Size([256, d_hid]):
-            raise AssertionError(
-                f"Expected kwarg_chunks[1]['x2'].shape == [256, {d_hid}], got {kwarg_chunks[1]['x2'].shape}"
-            )
+        assert len(arg_chunks) == 2
+        assert len(kwarg_chunks) == 2
+        assert arg_chunks[0][0].shape == torch.Size([64, d_hid])
+        assert arg_chunks[1][0].shape == torch.Size([64, d_hid])
+        assert arg_chunks[0][1].shape == torch.Size([128, d_hid])
+        assert arg_chunks[0][2].shape == torch.Size([256, d_hid])
+        assert kwarg_chunks[0]["x0"].shape == torch.Size([64, d_hid])
+        assert kwarg_chunks[0]["x1"].shape == torch.Size([128, d_hid])
+        assert kwarg_chunks[1]["x2"].shape == torch.Size([256, d_hid])
 
         # Merge chunks back together
         merged_args = merge_chunks(
@@ -156,8 +133,7 @@ class MicrobatchTests(TestCase):
             args_chunk_spec=None,
             kwargs_chunk_spec=None,
         )
-        if len(arg_split) != 4:
-            raise AssertionError(f"Expected 4 arg_split, got {len(arg_split)}")
+        assert len(arg_split) == 4
 
         q_total_chunks = []
         dq_total_chunks = []
@@ -261,8 +237,7 @@ class MicrobatchTests(TestCase):
             kwargs_chunk_spec=None,
         )
 
-        if len(arg_split) != 4:
-            raise AssertionError(f"Expected 4 arg_split, got {len(arg_split)}")
+        assert len(arg_split) == 4
 
         out_total_chunks = []
         for i in range(len(arg_split)):
@@ -290,8 +265,7 @@ class MicrobatchTests(TestCase):
             kwargs_chunk_spec=None,
         )
 
-        if len(arg_split) != 4:
-            raise AssertionError(f"Expected 4 arg_split, got {len(arg_split)}")
+        assert len(arg_split) == 4
 
         for i in range(len(arg_split)):
             self.assertIsNone(arg_split[i][3])

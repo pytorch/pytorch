@@ -50,12 +50,12 @@ class PyProcessGroup : public ProcessGroup {
         pybind11::get_override(static_cast<const cname*>(this), #name); \
     if (override) {                                                     \
       auto o = override(__VA_ARGS__);                                   \
-      return c10::make_intrusive<PyWorkHolder>(std::move(o));           \
+      return c10::make_intrusive<PyWorkHolder>(o);                      \
     }                                                                   \
     return cname::name(__VA_ARGS__);                                    \
   } while (false)
 
-  // This class is used to wrap a PyWork trampoline with its corresponding
+  // This class is used to wrap a PyWork trampoline with it's corresponding
   // Python object to prevent the Python object from being garbage collected.
   class PyWorkHolder : public Work {
    public:
@@ -156,8 +156,7 @@ class PyProcessGroup : public ProcessGroup {
       const std::optional<std::chrono::milliseconds>& timeout,
       const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
       const std::optional<std::string>& group_name,
-      const std::optional<std::string>& group_desc,
-      const std::optional<std::vector<c10::Device>>& devices) override {
+      const std::optional<std::string>& group_desc) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup>, /* Return type */
         ProcessGroup, /* Parent class */
@@ -166,8 +165,7 @@ class PyProcessGroup : public ProcessGroup {
         timeout,
         opts,
         group_name,
-        group_desc,
-        devices);
+        group_desc);
   }
 
   c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
@@ -195,39 +193,16 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> all_gather_single(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const AllgatherOptions& opts = AllgatherOptions()) override {
-    WORK_OVERRIDE(
-        ProcessGroup, /* Parent class */
-        all_gather_single, /* Name of function in C++ */
-        outputBuffer,
-        inputBuffer,
-        opts);
-  }
-
-  c10::intrusive_ptr<Work> all_gather_single_coalesced(
+  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override {
-    pybind11::gil_scoped_acquire gil;
-    // Prefer the new name; fall back to the deprecated
-    // `allgather_into_tensor_coalesced` for backward compatibility with
-    // existing Python ProcessGroup subclasses.
-    pybind11::function override = pybind11::get_override(
-        static_cast<const ProcessGroup*>(this), "all_gather_single_coalesced");
-    if (!override) {
-      override = pybind11::get_override(
-          static_cast<const ProcessGroup*>(this),
-          "allgather_into_tensor_coalesced");
-    }
-    if (override) {
-      auto o = override(outputTensors, inputTensors, opts);
-      return c10::make_intrusive<PyWorkHolder>(o);
-    }
-    return ProcessGroup::all_gather_single_coalesced(
-        outputTensors, inputTensors, opts);
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        allgather_into_tensor_coalesced, /* Name of function in C++ */
+        outputTensors,
+        inputTensors,
+        opts);
   }
 
   c10::intrusive_ptr<Work> allreduce(
@@ -252,50 +227,20 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> reduce(
-      std::vector<at::Tensor>& tensors,
-      const ReduceOptions& opts = ReduceOptions()) override {
-    WORK_OVERRIDE(
-        ProcessGroup, /* Parent class */
-        reduce, /* Name of function in C++ */
-        tensors,
-        opts);
-  }
-
-  c10::intrusive_ptr<Work> alltoall(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const AllToAllOptions& opts = AllToAllOptions()) override {
-    WORK_OVERRIDE(
-        ProcessGroup, /* Parent class */
-        alltoall, /* Name of function in C++ */
-        outputTensors,
-        inputTensors,
-        opts);
-  }
-
-  c10::intrusive_ptr<Work> all_to_all_single(
+  c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) override {
-    pybind11::gil_scoped_acquire gil;
-    // Prefer the new name; fall back to the deprecated `alltoall_base` for
-    // backward compatibility with existing Python ProcessGroup subclasses.
-    pybind11::function override = pybind11::get_override(
-        static_cast<const ProcessGroup*>(this), "all_to_all_single");
-    if (!override) {
-      override = pybind11::get_override(
-          static_cast<const ProcessGroup*>(this), "alltoall_base");
-    }
-    if (override) {
-      auto o = override(
-          outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
-      return c10::make_intrusive<PyWorkHolder>(o);
-    }
-    return ProcessGroup::all_to_all_single(
-        outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        alltoall_base, /* Name of function in C++ */
+        outputBuffer,
+        inputBuffer,
+        outputSplitSizes,
+        inputSplitSizes,
+        opts);
   }
 
   c10::intrusive_ptr<Work> barrier(
@@ -316,30 +261,6 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> gather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const GatherOptions& opts = GatherOptions()) override {
-    WORK_OVERRIDE(
-        ProcessGroup, /* Parent class */
-        gather, /* Name of function in C++ */
-        outputTensors,
-        inputTensors,
-        opts);
-  }
-
-  c10::intrusive_ptr<Work> scatter(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ScatterOptions& opts = ScatterOptions()) override {
-    WORK_OVERRIDE(
-        ProcessGroup, /* Parent class */
-        scatter, /* Name of function in C++ */
-        outputTensors,
-        inputTensors,
-        opts);
-  }
-
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
@@ -352,40 +273,16 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> reduce_scatter_single(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
-    WORK_OVERRIDE(
-        ProcessGroup, /* Parent class */
-        reduce_scatter_single, /* Name of function in C++ */
-        outputBuffer,
-        inputBuffer,
-        opts);
-  }
-
-  c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
+  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
-    pybind11::gil_scoped_acquire gil;
-    // Prefer the new name; fall back to the deprecated
-    // `reduce_scatter_tensor_coalesced` for backward compatibility with
-    // existing Python ProcessGroup subclasses.
-    pybind11::function override = pybind11::get_override(
-        static_cast<const ProcessGroup*>(this),
-        "reduce_scatter_single_coalesced");
-    if (!override) {
-      override = pybind11::get_override(
-          static_cast<const ProcessGroup*>(this),
-          "reduce_scatter_tensor_coalesced");
-    }
-    if (override) {
-      auto o = override(outputTensors, inputTensors, opts);
-      return c10::make_intrusive<PyWorkHolder>(o);
-    }
-    return ProcessGroup::reduce_scatter_single_coalesced(
-        outputTensors, inputTensors, opts);
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        reduce_scatter_tensor_coalesced, /* Name of function in C++ */
+        outputTensors,
+        inputTensors,
+        opts);
   }
 
   c10::intrusive_ptr<Work> send(
@@ -410,45 +307,6 @@ class PyProcessGroup : public ProcessGroup {
         tensors,
         srcRank,
         tag);
-  }
-
-  c10::intrusive_ptr<Work> recvAnysource(
-      std::vector<at::Tensor>& tensors,
-      int tag) override {
-    WORK_OVERRIDE(
-        ProcessGroup, /* Parent class */
-        recvAnysource, /* Name of function in C++ */
-        tensors,
-        tag);
-  }
-
-  // startCoalescing/endCoalescing dispatch into the Python ProcessGroup so a
-  // C++ caller (e.g. functional collectives in Functional.cpp) and the Python
-  // _start_coalescing/_end_coalescing bindings both reach the Python
-  // start_coalescing/end_coalescing overrides; without them the base
-  // ProcessGroup routes through getBackend(), which a backend-less Python PG
-  // does not have. The override is passed a c10::Device (torch.device) rather
-  // than the bare DeviceType, matching the device the bindings accept.
-  void startCoalescing(c10::DeviceType deviceType) override {
-    pybind11::gil_scoped_acquire gil;
-    pybind11::function override = pybind11::get_override(
-        static_cast<const ProcessGroup*>(this), "start_coalescing");
-    if (override) {
-      override(c10::Device(deviceType));
-      return;
-    }
-    return ProcessGroup::startCoalescing(deviceType);
-  }
-
-  c10::intrusive_ptr<Work> endCoalescing(c10::DeviceType deviceType) override {
-    pybind11::gil_scoped_acquire gil;
-    pybind11::function override = pybind11::get_override(
-        static_cast<const ProcessGroup*>(this), "end_coalescing");
-    if (override) {
-      auto o = override(c10::Device(deviceType));
-      return c10::make_intrusive<PyWorkHolder>(o);
-    }
-    return ProcessGroup::endCoalescing(deviceType);
   }
 };
 

@@ -32,7 +32,7 @@
     if (status != ZE_RESULT_SUCCESS) {                                    \
       std::stringstream ss;                                               \
       ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
-      throw std::runtime_error(std::move(ss).str());                      \
+      throw std::runtime_error(ss.str());                                 \
     }                                                                     \
   }
 
@@ -61,7 +61,7 @@ syclDevicePtr_t getPointer(
 
     return data_ptr;
   }
-  if (Py_IsNone(obj)) {
+  if (obj == Py_None) {
     // valid nullptr
     return data_ptr;
   }
@@ -96,9 +96,9 @@ syclDevicePtr_t getPointer(
           static_cast<int>(res)));
 
   TORCH_CHECK(
-      prop.type != ZE_MEMORY_TYPE_UNKNOWN,
+      prop.type == ZE_MEMORY_TYPE_DEVICE,
       fmt::format(
-          "Pointer argument references unknown type of memory at {}-th argument, err={}",
+          "Pointer argument doesn't reference XPU device memory at {}-th argument, err={}",
           idx,
           static_cast<int>(res)));
 
@@ -267,7 +267,7 @@ sycl::kernel* loadKernel(
   std::ifstream IFS(filePath, std::ios::binary);
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
-  std::string data(std::move(OSS).str());
+  std::string data(OSS.str());
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
@@ -292,7 +292,7 @@ void launchKernel(
   std::string kernelName =
       kernelPtr->get_info<sycl::info::kernel::function_name>();
   uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();
-  size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
+  size_t globalRangeX = gridX * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
   size_t globalRangeZ = gridZ;
   size_t localRangeX = numWarps * threadsPerWarp;
@@ -573,7 +573,11 @@ bool StaticXpuLauncher_init(PyObject* module) {
     }
     Py_DECREF(static_method);
   }
-  if (PyModule_AddType(module, &StaticXpuLauncherType) < 0) {
+  Py_INCREF(&StaticXpuLauncherType);
+  if (PyModule_AddObject(
+          module, "_StaticXpuLauncher", (PyObject*)&StaticXpuLauncherType) <
+      0) {
+    Py_DECREF(&StaticXpuLauncherType);
     return false;
   }
   return true;

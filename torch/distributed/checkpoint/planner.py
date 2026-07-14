@@ -118,22 +118,6 @@ class LoadPlan:
     planner_data: Any = None
 
 
-# These are transmitted between ranks via the c10d object collectives (which
-# deserialize with weights_only=True by default) during save/load plan exchange.
-torch.serialization.add_safe_globals(
-    [
-        WriteItemType,
-        LoadItemType,
-        BytesIOWriteData,
-        TensorWriteData,
-        WriteItem,
-        ReadItem,
-        SavePlan,
-        LoadPlan,
-    ]
-)
-
-
 class SavePlanner(abc.ABC):
     """
     Abstract class defining the protocol used by save_state_dict to plan the save process.
@@ -166,7 +150,7 @@ class SavePlanner(abc.ABC):
     There are 3 usual patterns of extension:
 
     Rewriting state_dict. This is the simplest way to extend the save process as it
-    doesn't require understanding the intricacies of how SavePlan works:
+    doesn't requite understanding the intrincacies of how SavePlan works:
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultSavePlanner):
@@ -262,7 +246,7 @@ class SavePlanner(abc.ABC):
         """
         Initialize this planner to save ``state_dict``.
 
-        Implementations should save those values as they won't be provided later in the save process.
+        Implementations should save those values as they won't be provided lated in the save process.
 
         This is called on all ranks.
         """
@@ -349,7 +333,7 @@ class LoadPlanner:
     There are two usual patterns of extension:
 
     Rewriting state_dict. This is the simplest way to extend the load process as it
-    doesn't require understanding the intricacies of how LoadPlan works. We need
+    doesn't requite understanding the intrincacies of how LoadPlan works. We need
     to keep a reference to the original state_dict as load happens in place so
     we need to be able to perform it in place
 

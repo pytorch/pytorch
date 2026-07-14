@@ -51,12 +51,12 @@ logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 try:
-    from tabulate import tabulate as _tabulate
+    from tabulate import tabulate
 except ModuleNotFoundError:
     logger.warning("tabulate is not installed. Proceeding without it.")
 
     # Define a no-op tabulate function
-    def _tabulate(data: Any, headers: Any = None) -> Any:  # type: ignore[misc]
+    def tabulate(data: Any, headers: Any = None) -> Any:  # type: ignore[misc]
         return data
 
 
@@ -126,15 +126,12 @@ def build_groups_memberships(
                 _memberships[pg_guid] = set(ranks)
             else:
                 # validation across ranks
-                if _groups[pg_guid].desc != desc:
-                    raise AssertionError(
-                        f"mismatch in desc {_groups[pg_guid].desc} vs {desc} for group {pg_guid}"
-                    )
-                if _memberships[pg_guid] != set(ranks):
-                    raise AssertionError(
-                        f"mismatch in membership for group {pg_guid}"
-                        f" {_memberships[pg_guid]} vs {set(ranks)}"
-                    )
+                assert _groups[pg_guid].desc == desc, (
+                    f"mismatch in desc {_groups[pg_guid].desc} vs {desc} for group {pg_guid}"
+                )
+                assert _memberships[pg_guid] == set(ranks), (
+                    f"mismatch in membership for group {pg_guid} {_memberships[pg_guid]} vs {set(ranks)}"
+                )
     return groups, _groups, memberships, _memberships, _pg_guids
 
 
@@ -251,16 +248,14 @@ def build_collectives(
                     op = Op(entry, _memberships, pg_name)
                     peer = None
                     if op.type == "send":
-                        if op._src_g != curr:
-                            raise AssertionError(
-                                f"Send src error: {curr} expected but {op._src_g} is set"
-                            )
+                        assert op._src_g == curr, (
+                            f"Send src error: {curr} expected but {op._src_g} is set"
+                        )
                         peer = op._dst_g
                     elif op.type == "recv":
-                        if op._dst_g != curr:
-                            raise AssertionError(
-                                f"Recv dst error: {curr} expected but {op._dst_g} is set"
-                            )
+                        assert op._dst_g == curr, (
+                            f"Recv dst error: {curr} expected but {op._dst_g} is set"
+                        )
                         peer = op._src_g
                     if peer and peer not in done_ranks:
                         candidate_ranks.add(peer)
@@ -311,12 +306,7 @@ def build_collectives(
                 # This extra cleanup is needed because we need to pop all collectives within a coalesced collective.
                 for i, k in idx_map.items():
                     for _ in range(1, num_coalesced_entries):
-                        try:
-                            all_entries[i].pop(k)
-                        except IndexError:
-                            # In the case of a missing rank symptom that a rank didn't schedule the coalesced collective,
-                            # we should not fail the analysis script here.
-                            pass
+                        all_entries[i].pop(k)
         else:
             # Iterate through all the ranks and check if there is a mismatch for the current entry.
             check_current_entry_match(
@@ -360,7 +350,7 @@ def build_collectives(
 
             # 2. we found a partial match but some ranks are missing
             # 3. we found no match
-            #  -> since it's not a complete collective, no entry goes into collectives but we still record a nccl call
+            #  -> since its not a complete collective, no entry goes into collectives but we still record a nccl call
             #     TODO should there be a way to mark 'mismatches'?
             else:
                 logger.debug("appending a non-matching collective")
@@ -450,13 +440,13 @@ def build_db(
     logger.debug("built collectives, nccl_calls")
     if args.verbose:
         logger.debug("Groups")
-        logger.debug(_tabulate(groups, headers=Group._fields))
+        logger.debug(tabulate(groups, headers=Group._fields))
         logger.debug("Memberships")
-        logger.debug(_tabulate(memberships, headers=Membership._fields))
+        logger.debug(tabulate(memberships, headers=Membership._fields))
         logger.debug("Collectives")
-        logger.debug(_tabulate(collectives, headers=Collective._fields))
+        logger.debug(tabulate(collectives, headers=Collective._fields))
         logger.debug("NCCLCalls")
-        logger.debug(_tabulate(nccl_calls, headers=NCCLCall._fields))
+        logger.debug(tabulate(nccl_calls, headers=NCCLCall._fields))
     db = Database(
         tracebacks=tracebacks,
         collectives=collectives,

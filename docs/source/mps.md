@@ -13,7 +13,6 @@
     :toctree: generated
     :nosignatures:
 
-    is_available
     device_count
     synchronize
     get_rng_state
@@ -26,7 +25,6 @@
     driver_allocated_memory
     recommended_max_memory
     compile_shader
-    load_metallib
 ```
 
 ## MPS Profiler

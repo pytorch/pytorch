@@ -92,8 +92,7 @@ def _flatten_tensor_size(size) -> torch.Size:
 
 def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
     if is_local:
-        if not isinstance(ranks, int):
-            raise AssertionError
+        assert isinstance(ranks, int)
         if expected != actual:
             raise ValueError(
                 f"Local shards' tensor {prop_name} property need to be the same on rank:{ranks}! "
@@ -102,8 +101,7 @@ def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
             )
     else:
         # compare failure check across ranks, ranks list should have two rank
-        if len(ranks) != 2:
-            raise AssertionError
+        assert len(ranks) == 2
         if expected != actual:
             raise ValueError(
                 f"ShardedTensor {prop_name} property does not match from different ranks! "
@@ -118,8 +116,7 @@ def build_metadata_from_local_shards(
     current_rank: int,
     pg: c10d.ProcessGroup,
 ) -> ShardedTensorMetadata:
-    if len(local_shards) <= 0:
-        raise AssertionError("must have local shards!")
+    assert len(local_shards) > 0, "must have local shards!"
     local_shard_metadatas: list[ShardMetadata] = []
 
     first_shard_dtype = local_shards[0].tensor.dtype
@@ -127,7 +124,7 @@ def build_metadata_from_local_shards(
     first_shard_requires_grad = local_shards[0].tensor.requires_grad
     first_shard_is_pinned = local_shards[0].tensor.is_pinned()
 
-    # 1). Validate local tensors and associated metadata
+    # 1). Validate local tensors and associated metadatas
     for local_shard in local_shards:
         local_shard_tensor = local_shard.tensor
         local_shard_meta = local_shard.metadata

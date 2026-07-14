@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 from torch._logging import trace_structured
 
@@ -26,7 +26,7 @@ def _debug_iterative_memory_recompute(
     snodes_allocfree: dict[BaseSchedulerNode, SNodeMemory],
     tlparse_name: str,
     gn_to_bufs_last_use: dict[
-        BaseSchedulerNode, list[FreeableInputBuffer | SchedulerBuffer]
+        BaseSchedulerNode, list[Union[FreeableInputBuffer, SchedulerBuffer]]
     ],
 ) -> bool:
     iterative_recompute_error = False

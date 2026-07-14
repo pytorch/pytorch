@@ -14,7 +14,7 @@ from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from .. import config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
-from ..utils import load_template, triton_type
+from ..utils import load_template
 
 
 log = logging.getLogger(__name__)
@@ -47,9 +47,7 @@ def persistent_grouped_mm_grid(*args):
 def acc_type(dtype):
     if dtype in (torch.float16, torch.bfloat16):
         return "tl.float32"
-    if dtype.is_floating_point and dtype.itemsize == 1:  # fp8 dtypes
-        return "tl.float32"
-    return triton_type(dtype)
+    return f"tl.{dtype}".replace("torch.", "")
 
 
 def mm_args(
@@ -86,8 +84,7 @@ def mm_args(
             [*b, m, n],
         )
     else:
-        if out_dtype is not None:
-            raise AssertionError("out_dtype is ignored if layout is specified.")
+        assert out_dtype is None, "out_dtype is ignored if layout is specified."
     from ..lowering import expand
 
     others = [realize_inputs(expand(x, layout.size)) for x in others]
@@ -255,8 +252,7 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
     sizes = [mat1.get_size(), mat2.get_size(), layout.size]
     strides = [mat1.get_stride(), mat2.get_stride(), layout.stride]
     for size, stride in zip(sizes, strides):
-        if not (len(size) == len(stride) == 3):
-            raise AssertionError("Expect 3D tensors")
+        assert len(size) == len(stride) == 3, "Expect 3D tensors"
         if stride[0] != 0 and stride[0] != sympy_product(size[1:]):
             return False
 
@@ -265,3 +261,6 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
 
 _KERNEL_TEMPLATE_DIR = Path(__file__).parent / "templates"
 load_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_DIR)
+
+_KERNEL_TEMPLATE_FB_DIR = Path(__file__).parent.parent / "fb" / "tlx_templates"
+load_fb_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_FB_DIR)

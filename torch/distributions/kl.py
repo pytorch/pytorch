@@ -262,7 +262,7 @@ def _kl_continuous_bernoulli_continuous_bernoulli(p, q):
 
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
-    # From https://statproofbook.github.io/P/dir-kl.html
+    # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
     sum_p_concentration = p.concentration.sum(-1)
     sum_q_concentration = q.concentration.sum(-1)
     t1 = sum_p_concentration.lgamma() - sum_q_concentration.lgamma()
@@ -970,5 +970,4 @@ def _add_kl_info():
         )
     kl_info = "\n\t".join(rows)
     if kl_divergence.__doc__:
-        # pyrefly: ignore [missing-attribute]
         kl_divergence.__doc__ += kl_info

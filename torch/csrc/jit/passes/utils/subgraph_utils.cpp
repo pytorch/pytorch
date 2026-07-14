@@ -516,6 +516,7 @@ void unmergeNode(Node* n, Node* subgraphNode) {
         false,
         "all inputs should've been mapped. Couldn't map %",
         v->debugName());
+    return v;
   };
 
   for (auto i : c10::irange(subgraph->outputs().size())) {
@@ -611,7 +612,7 @@ static std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
   std::stringstream truncated;
   truncated << s.substr(0, trunc_len);
   truncated << '_' << hash_str;
-  return std::move(truncated).str();
+  return truncated.str();
 }
 
 std::string generateNameForGraph(
@@ -626,7 +627,7 @@ std::string generateNameForGraph(
     }
     graph_name << '_' << node->kind().toUnqualString();
   }
-  return truncateStrWithHash(std::move(graph_name).str(), maxlen);
+  return truncateStrWithHash(graph_name.str(), maxlen);
 }
 
 } // namespace torch::jit::SubgraphUtils

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 import sympy
 
@@ -6,7 +6,6 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 
 from ..ir import GraphPartitionSignature
-from ..runtime.hints import TritonMeta
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .cpp_wrapper_gpu import CppWrapperGpu
@@ -26,9 +25,9 @@ class CppWrapperMps(CppWrapperGpu):
     @staticmethod
     def create(
         is_subgraph: bool,
-        subgraph_name: str | None,
-        parent_wrapper: PythonWrapperCodegen | None,
-        partition_signatures: GraphPartitionSignature | None = None,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
+        partition_signatures: Optional[GraphPartitionSignature] = None,
     ) -> "CppWrapperMps":
         return CppWrapperMps()
 
@@ -37,16 +36,14 @@ class CppWrapperMps(CppWrapperGpu):
         kernel_name: str,
         call_args: list[str],
         *,
-        device: torch.device | None = None,
+        device: Optional[torch.device] = None,
         triton: bool = True,
-        arg_types: tuple[Any, ...] | None = None,
-        raw_keys: tuple[Any, ...] | None = None,
-        raw_args: tuple[Any, ...] | None = None,
-        triton_meta: TritonMeta | None = None,
-        inductor_meta: dict[str, Any] | None = None,
+        arg_types: Optional[tuple[Any, ...]] = None,
+        raw_keys: Optional[tuple[Any, ...]] = None,
+        raw_args: Optional[tuple[Any, ...]] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
         graph_name: str = "",
-        original_fxnode_name: str | None = None,
-        current_stream_idx: int | None = None,
+        original_fxnode_name: Optional[str] = None,
     ) -> None:
         """
         Generates MPS kernel call code. It should look something like:
@@ -76,14 +73,11 @@ class CppWrapperMps(CppWrapperGpu):
                 raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
             )
 
-        if device.type != "mps":
-            raise AssertionError(f"expected device.type == 'mps', got {device.type}")
+        assert device.type == "mps"
 
-        if arg_types is None:
-            raise AssertionError("expected arg_types to not be None")
+        assert arg_types is not None
 
         new_args = []
         for idx, (arg, arg_type) in enumerate(zip(call_args[:-2], arg_types[:-2])):
@@ -222,7 +216,8 @@ class CppWrapperMps(CppWrapperGpu):
         )
 
     @staticmethod
-    def get_device_include_path_aot(device: str) -> str:
+    def get_device_include_path(device: str) -> str:
+        assert V.graph.aot_mode
         return (
             "#include <torch/csrc/inductor/aoti_include/mps.h>\n"
             "#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>"

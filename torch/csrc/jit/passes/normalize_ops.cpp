@@ -5,7 +5,7 @@ namespace torch::jit {
 namespace {
 
 // having multiple ops in our IR that do the same thing makes the IR more
-// difficult to consume for downstream user of the IR, such as our own
+// difficult to consumer for downstream user of the IR, such as our own
 // optimization passes here, we convert op aliases into a standard form
 bool normalizeOpAliases(graph_node_list_iterator& iter) {
   auto alias = getOperatorAliasMap().find(iter->kind());

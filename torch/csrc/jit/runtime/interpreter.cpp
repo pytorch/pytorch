@@ -62,7 +62,7 @@ using CodeImpl = interpreter::CodeImpl;
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
 // In particular we:
-// *  Computes whether an input to a node is the last use, so we can issue MOVE
+// *  Computes whether a input to a node is the last use, so we can issue MOVE
 //    rather than LOAD instructions.
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
@@ -771,8 +771,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
-                pop(stack, static_cast<size_t>(inst.N)),
+                Stack(stack.end() - inst.N, stack.end()),
                 getDistAutogradContextId());
+            drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
           }
@@ -792,7 +793,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
               out_type = TupleType::create(out_types);
             }
-            auto args = pop(stack, static_cast<size_t>(inst.N));
+            auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
             auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
             aw->setArgs(std::move(args));
             aw->setFn(
@@ -813,6 +814,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   }
                   return c10::ivalue::Tuple::create(jit::last(s, n_out));
                 });
+            drop(stack, inst.N);
             push(stack, std::move(aw));
           }
             INST_NEXT;
@@ -934,7 +936,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (get_cpp_stacktraces_enabled()) {
         ss << e.what() << '\n';
       }
-      throw std::runtime_error(std::move(ss).str());
+      throw std::runtime_error(ss.str());
     }
   }
 

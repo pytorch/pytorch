@@ -83,35 +83,27 @@ class TestComplexTensor(TestCase):
             actual = torch.eq(a, b)
             expected = torch.tensor([False], device=device, dtype=torch.bool)
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\neq\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\neq\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.eq(a, a)
             expected = torch.tensor([True], device=device, dtype=torch.bool)
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\neq\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\neq\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.full_like(b, complex(2, 2))
             torch.eq(a, b, out=actual)
             expected = torch.tensor([complex(0)], device=device, dtype=dtype)
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\neq(out)\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\neq(out)\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.full_like(b, complex(2, 2))
             torch.eq(a, a, out=actual)
             expected = torch.tensor([complex(1)], device=device, dtype=dtype)
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\neq(out)\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\neq(out)\nactual {actual}\nexpected {expected}"
             )
 
         # Vectorized operations
@@ -175,9 +167,7 @@ class TestComplexTensor(TestCase):
                 dtype=torch.bool,
             )
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\neq\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\neq\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.eq(a, a)
@@ -200,9 +190,7 @@ class TestComplexTensor(TestCase):
                 dtype=torch.bool,
             )
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\neq\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\neq\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -226,9 +214,7 @@ class TestComplexTensor(TestCase):
                 dtype=dtype,
             )
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\neq(out)\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\neq(out)\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -252,9 +238,7 @@ class TestComplexTensor(TestCase):
                 dtype=dtype,
             )
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\neq(out)\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\neq(out)\nactual {actual}\nexpected {expected}"
             )
 
     @onlyCPU
@@ -280,35 +264,27 @@ class TestComplexTensor(TestCase):
             actual = torch.ne(a, b)
             expected = torch.tensor([True], device=device, dtype=torch.bool)
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\nne\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\nne\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.ne(a, a)
             expected = torch.tensor([False], device=device, dtype=torch.bool)
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\nne\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\nne\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.full_like(b, complex(2, 2))
             torch.ne(a, b, out=actual)
             expected = torch.tensor([complex(1)], device=device, dtype=dtype)
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\nne(out)\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\nne(out)\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.full_like(b, complex(2, 2))
             torch.ne(a, a, out=actual)
             expected = torch.tensor([complex(0)], device=device, dtype=dtype)
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\nne(out)\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\nne(out)\nactual {actual}\nexpected {expected}"
             )
 
         # Vectorized operations
@@ -372,9 +348,7 @@ class TestComplexTensor(TestCase):
                 dtype=torch.bool,
             )
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\nne\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\nne\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.ne(a, a)
@@ -397,9 +371,7 @@ class TestComplexTensor(TestCase):
                 dtype=torch.bool,
             )
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\nne\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\nne\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -423,9 +395,7 @@ class TestComplexTensor(TestCase):
                 dtype=dtype,
             )
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\nne(out)\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\nne(out)\nactual {actual}\nexpected {expected}"
             )
 
             actual = torch.full_like(b, complex(2, 2))
@@ -449,9 +419,7 @@ class TestComplexTensor(TestCase):
                 dtype=dtype,
             )
             self.assertEqual(
-                actual,
-                expected,
-                msg=lambda msg: f"{msg}\nne(out)\nactual {actual}\nexpected {expected}",
+                actual, expected, msg=f"\nne(out)\nactual {actual}\nexpected {expected}"
             )
 
 

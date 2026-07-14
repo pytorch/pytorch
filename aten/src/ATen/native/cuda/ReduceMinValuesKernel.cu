@@ -11,7 +11,10 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/NumericUtils.h>
 
-#include <thrust/pair.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NumericUtils.h>
+#include <ATen/cuda/NumericLimits.cuh>
+
 
 namespace at::native {
 

@@ -120,6 +120,7 @@ def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
         evaluated_context = []
         for value in kw.value.values:
             if isinstance(value, ast.FormattedValue):
+                # pyrefly: ignore [bad-argument-type]
                 evaluated_context.append(f"{{{ast.unparse(value.value)}}}")
             elif isinstance(value, ast.Constant):
                 # pyrefly: ignore [bad-argument-type]
@@ -171,6 +172,7 @@ def find_unimplemented_calls(
 
                         for kw in node.keywords:
                             if kw.arg in info:
+                                # pyrefly: ignore [unsupported-operation]
                                 info[kw.arg] = extract_info_from_keyword(source, kw)
 
                         if info["gb_type"] is None:

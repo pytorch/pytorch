@@ -275,7 +275,7 @@ off_t refresh(
     while (size > pos) {
       file.read(tmpKey);
       file.read(tmpValue);
-      if (tmpKey.starts_with(deletePrefix)) {
+      if (tmpKey.compare(0, deletePrefix.size(), deletePrefix) == 0) {
         cache.erase(tmpKey.substr(deletePrefix.size()));
       } else {
         cache[tmpKey] = std::move(tmpValue);

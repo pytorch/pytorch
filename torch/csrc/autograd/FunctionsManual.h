@@ -138,14 +138,11 @@ at::Tensor pow_backward_exponent(
     const at::Tensor& result);
 at::Tensor angle_backward(const at::Tensor& grad, const at::Tensor& self);
 template <typename T>
-at::Tensor mul_tensor_backward(
-    const Tensor& grad,
-    const T& other,
-    ScalarType self_st);
+at::Tensor mul_tensor_backward(const Tensor& grad, T other, ScalarType self_st);
 template <typename T>
 at::Tensor div_tensor_self_backward(
     const Tensor& grad,
-    const T& other,
+    T other,
     ScalarType self_st,
     const std::optional<std::string_view>& rounding_mode = std::nullopt);
 at::Tensor div_tensor_other_backward(
@@ -725,7 +722,6 @@ Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
     bool adjoint);
-Tensor linalg_matrix_sqrth_differential(const Tensor& self, const Tensor& grad);
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor& input,
     const std::optional<Tensor>& gamma,
@@ -740,46 +736,11 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const std::optional<Tensor>& save_mean,
     const std::optional<Tensor>& save_invstd,
     std::array<bool, 3> output_mask);
-std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
-    const Tensor& ggI,
-    const Tensor& ggGrid,
-    const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& grid,
-    int64_t interpolation_mode,
-    int64_t padding_mode,
-    bool align_corners,
-    std::array<bool, 3> output_mask);
-std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
-    const Tensor& ggI,
-    const Tensor& ggGrid,
-    const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& grid,
-    int64_t interpolation_mode,
-    int64_t padding_mode,
-    bool align_corners,
-    std::array<bool, 3> output_mask);
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,
     const Tensor& x2,
     const Tensor& res);
-std::tuple<Tensor, Tensor, Tensor, Tensor> _cdist_backward_backward(
-    const Tensor& grad,
-    const Tensor& grad_output,
-    const Tensor& x1,
-    const Tensor& x2,
-    double p,
-    const Tensor& cdist,
-    std::array<bool, 4> output_mask);
-std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
-    const Tensor& grad,
-    const Tensor& grad_output,
-    const Tensor& self,
-    double p,
-    const Tensor& pdist,
-    std::array<bool, 3> output_mask);
 Tensor fft_backward(
     const Tensor& self,
     const Tensor& grad,
@@ -824,9 +785,9 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const std::optional<Tensor>& gamma,
-    const c10::SymInt& N,
+    c10::SymInt N,
     const c10::SymInt& C,
-    const c10::SymInt& HxW,
+    c10::SymInt HxW,
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask);
@@ -858,20 +819,6 @@ Tensor amaxamin_jvp(
     const Tensor& dx,
     const Tensor& result,
     IntArrayRef dim,
-    bool keepdim);
-Tensor aminmax_backward(
-    const at::Tensor& self,
-    std::optional<int64_t> dim,
-    bool keepdim,
-    const at::Tensor& grad_min,
-    const at::Tensor& grad_max,
-    const at::Tensor& min,
-    const at::Tensor& max);
-Tensor aminmax_jvp(
-    const Tensor& self_p,
-    const Tensor& self_t,
-    const Tensor& result,
-    std::optional<int64_t> dim,
     bool keepdim);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input,

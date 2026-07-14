@@ -21,10 +21,7 @@ from torch._inductor.debug import (
     create_kernel_information_json,
     create_mapping_pre_post_grad_nodes,
     create_node_mapping_kernel_to_post_grad,
-    get_kernel_information_jsons,
     reset_inductor_kernel_provenance_debug_handle,
-    reset_provenance_globals,
-    set_kernel_post_grad_provenance_tracing,
 )
 from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
@@ -32,7 +29,10 @@ from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 
 
 try:
@@ -98,12 +98,6 @@ class Model4(torch.nn.Module):
         return x, z
 
 
-def _bias_like_addmm_input(device):
-    # These provenance tests exercise the GPU addmm-unfusion path. Keep the
-    # input bias-like so they do not depend on full-size accumulator unfusion.
-    return torch.randn(30, device=device)
-
-
 @config.patch("trace.enabled", True)
 @config.patch("trace.provenance_tracking_level", 1)
 class TestProvenanceTracingArtifact(TestCase):
@@ -132,10 +126,7 @@ class TestProvenanceTracingArtifact(TestCase):
     def _test_triton_kernel_to_post_grad_tracing(self, device):
         a = torch.randn(10, 20, device=device)
         b = torch.randn(20, 30, device=device)
-        if device == "cpu":
-            c = torch.randn(10, 30, device=device)
-        else:
-            c = _bias_like_addmm_input(device)
+        c = torch.randn(10, 30, device=device)
         example_inputs = (a, b, c)
 
         model = Model().to(device)
@@ -165,22 +156,6 @@ class TestProvenanceTracingArtifact(TestCase):
                     self.assertTrue(m)
                     filepath = Path(m.group(1))
                     if device == "cuda" or device == "xpu":
-                        # aot_inductor uses export (no canonicalization),
-                        # so pre-graph names stay as original.
-                        # inductor uses torch.compile (canonicalization runs),
-                        # so pre-graph names become canonical.
-                        if backend == "aot_inductor":
-                            pre_mul, pre_addmm, pre_gelu = (
-                                "mul",
-                                "addmm",
-                                "gelu",
-                            )
-                        else:
-                            pre_mul, pre_addmm, pre_gelu = (
-                                "mul_tensor",
-                                "addmm_default",
-                                "gelu_default",
-                            )
                         expected_mapping = [
                             (
                                 "cppCodeToPost",
@@ -211,31 +186,22 @@ class TestProvenanceTracingArtifact(TestCase):
                             (
                                 "postToPre",
                                 {
-                                    "mul": [pre_mul],
-                                    "mm_default": [pre_addmm],
-                                    "add_tensor": [pre_addmm],
-                                    "mul_1": [pre_gelu],
-                                    "mul_2": [pre_gelu],
-                                    "erf": [pre_gelu],
-                                    "add": [pre_gelu],
-                                    "mul_3": [pre_gelu],
+                                    "mul": ["mul"],
+                                    "mm_default": ["addmm"],
+                                    "add_tensor": ["addmm"],
+                                    "mul_1": ["gelu"],
+                                    "mul_2": ["gelu"],
+                                    "erf": ["gelu"],
+                                    "add": ["gelu"],
+                                    "mul_3": ["gelu"],
                                 },
                             ),
                             (
                                 "preToPost",
                                 {
-                                    pre_mul: ["mul"],
-                                    pre_addmm: [
-                                        "mm_default",
-                                        "add_tensor",
-                                    ],
-                                    pre_gelu: [
-                                        "mul_1",
-                                        "mul_2",
-                                        "erf",
-                                        "add",
-                                        "mul_3",
-                                    ],
+                                    "mul": ["mul"],
+                                    "addmm": ["mm_default", "add_tensor"],
+                                    "gelu": ["mul_1", "mul_2", "erf", "add", "mul_3"],
                                 },
                             ),
                         ]
@@ -264,8 +230,7 @@ class TestProvenanceTracingArtifact(TestCase):
                             filepath, expected_mapping
                         )
                     else:
-                        if device != "cpu":
-                            raise AssertionError
+                        assert device == "cpu"
                         # check the inductor kernel to post grad nodes mapping is expected for cpu
                         if backend == "aot_inductor":
                             expected_data = {
@@ -588,66 +553,9 @@ class TestProvenanceTracingStackTraces(TestCase):
         finally:
             trace_log.removeHandler(payload_handler)
 
-    def extract_code_line(self, s):
-        # Extract the source code line from a stack trace entry.
-        # Filter out empty lines, "File ..." lines, and caret annotation
-        # lines (e.g. "~~^~~~~~") added in Python 3.13+.
-        lines = s.split("\n")
-        for line in reversed(lines):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped.startswith("File "):
-                continue
-            if all(c in " ~^" for c in stripped):
-                continue
-            return stripped
-        return lines[-2].strip()
-
-    @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
-    def test_tlparse_kernel_stack_traces_cpu(self):
-        model = Model4()
-        example_inputs = (
-            torch.randn(8, 10),
-            torch.randn(10, 20),
-            torch.randn(20, 30),
-            torch.randn(10, 30),
-        )
-
-        expected = {
-            "cpp_fused_mul_0:2": [
-                "d = a * 3.14",
-            ],
-            "cpp_fused_gelu_relu_sigmoid_threshold_backward_1:4": [
-                "z = torch.nn.functional.gelu(y)",
-                "x = self.relu(x)",
-                "x = self.sigmoid(x)",
-            ],
-            "extern_kernels.addmm:1": [
-                "x = self.fc1(x)",
-            ],
-            "extern_kernels.addmm:3": [
-                "y = torch.addmm(c, d, b)",
-            ],
-        }
-
-        compiled = torch.compile(model)
-        for _ in range(2):
-            torch._dynamo.reset()
-            reset_inductor_kernel_provenance_debug_handle()
-            with self._setup_provenance_capture() as payload_buffer:
-                compiled = torch.compile(model)
-                compiled(*example_inputs)
-                payload_content = payload_buffer.getvalue().strip()
-                data = json.loads(payload_content)
-                self.assertEqual(set(data.keys()), set(expected.keys()))
-                for key, expected_lines in expected.items():
-                    actual_lines = [self.extract_code_line(s) for s in data[key]]
-                    self.assertEqual(
-                        sorted(actual_lines),
-                        sorted(expected_lines),
-                        lambda msg: f"{msg}\nMismatch for key: {key}",
-                    )
+    def extract_code_line(self, s, i=-2):
+        # Extract ith line
+        return s.split("\n")[i].strip()
 
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
     @requires_gpu_and_triton
@@ -657,27 +565,27 @@ class TestProvenanceTracingStackTraces(TestCase):
         x = torch.randn(8, 10).to(device)
         a = torch.randn(10, 20).to(device)
         b = torch.randn(20, 30).to(device)
-        c = _bias_like_addmm_input(device)
+        c = torch.randn(10, 30).to(device)
         example_inputs = (x, a, b, c)
 
         expected = {
-            "triton_poi_fused_addmm_relu_sigmoid_threshold_backward_2:5": [
+            "triton_poi_fused_addmm_relu_sigmoid_threshold_backward_0:2": [
                 "x = self.sigmoid(x)",
                 "x = self.fc1(x)",
                 "x = self.relu(x)",
             ],
-            "triton_poi_fused_mul_0:2": [
+            "triton_poi_fused_mul_1:3": [
                 "d = a * 3.14",
             ],
-            "triton_poi_fused_addmm_gelu_1:4": [
+            "triton_poi_fused_addmm_gelu_2:5": [
                 "z = torch.nn.functional.gelu(y)",
-                "y = torch.addmm(c, d, b)",
-            ],
-            "extern_kernels.mm:3": [
                 "y = torch.addmm(c, d, b)",
             ],
             "extern_kernels.mm:1": [
                 "x = self.fc1(x)",
+            ],
+            "extern_kernels.mm:4": [
+                "y = torch.addmm(c, d, b)",
             ],
         }
 
@@ -698,13 +606,13 @@ class TestProvenanceTracingStackTraces(TestCase):
                     self.assertEqual(
                         sorted(actual_lines),
                         sorted(expected_lines),
-                        lambda msg: f"{msg}\nMismatch for key: {key}",
+                        f"Mismatch for key: {key}",
                     )
 
     @torch._inductor.config.patch(
         {"trace.provenance_tracking_level": 2, "max_autotune_gemm_backends": "ATEN"}
     )
-    @requires_gpu_and_triton
+    @requires_cuda_and_triton
     def test_deferred_triton_kernels(self):
         def foo(m, inp):
             a = m(inp)
@@ -712,8 +620,8 @@ class TestProvenanceTracingStackTraces(TestCase):
 
         foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
 
-        m = torch.nn.Linear(512, 512, bias=True).half().to(GPU_TYPE)
-        inp = torch.rand([1, 512]).half().to(GPU_TYPE)
+        m = torch.nn.Linear(512, 512, bias=True).half().cuda()
+        inp = torch.rand([1, 512]).half().cuda()
 
         with self._setup_provenance_capture() as payload_buffer:
             with torch.no_grad():
@@ -723,7 +631,7 @@ class TestProvenanceTracingStackTraces(TestCase):
             self.assertTrue("a = m(inp)" in str(data))
 
             # Check that debug handle is in the output code
-            FileCheck().check("Topologically Sorted Source Nodes: [linear]").check(
+            FileCheck().check("Topologically Sorted Source Nodes: [a]").check(
                 "[Provenance debug handles]"
             ).run(out_code[0])
 
@@ -735,7 +643,7 @@ class TestProvenanceTracingStackTraces(TestCase):
             self.assertIn(
                 expected,
                 kernel_info,
-                lambda msg: f"{msg}\nExpected kernel {expected} not found in {list(kernel_info)}",
+                f"Expected kernel {expected} not found in {list(kernel_info)}",
             )
 
         for data in kernel_info.values():
@@ -745,7 +653,6 @@ class TestProvenanceTracingStackTraces(TestCase):
                 self.assertIsInstance(data[field], list)
                 for item in data[field]:
                     self.assertIsInstance(item, str)
-            self.assertIsInstance(data["extern_semantic_key"], (str, type(None)))
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
@@ -756,7 +663,7 @@ class TestProvenanceTracingStackTraces(TestCase):
         x = torch.randn(8, 10, device=GPU_TYPE)
         a = torch.randn(10, 20, device=GPU_TYPE)
         b = torch.randn(20, 30, device=GPU_TYPE)
-        c = _bias_like_addmm_input(GPU_TYPE)
+        c = torch.randn(10, 30, device=GPU_TYPE)
         inputs = (x, a, b, c)
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -779,7 +686,7 @@ class TestProvenanceTracingStackTraces(TestCase):
             )
             self.assertTrue(
                 os.path.exists(json_path),
-                lambda msg: f"{msg}\nkernel_information.json not found in extracted package at {json_path}",
+                f"kernel_information.json not found in extracted package at {json_path}",
             )
 
             with open(json_path) as f:
@@ -844,37 +751,14 @@ class TestProvenanceTracingStackTraces(TestCase):
                 self.assertEqual(
                     sorted(kernel_info[key]["pre_grad_nodes"]),
                     sorted(data["pre_grad_nodes"]),
-                    lambda msg: f"{msg}\nMismatch for key: {key}",
+                    f"Mismatch for key: {key}",
                 )
 
                 self.assertEqual(
                     sorted(kernel_info[key]["post_grad_nodes"]),
                     sorted(data["post_grad_nodes"]),
-                    lambda msg: f"{msg}\nMismatch for key: {key}",
+                    f"Mismatch for key: {key}",
                 )
-
-            # extern_semantic_key + shape metadata for extern kernels
-            triton_poi_0 = kernel_info["triton_poi_fused_addmm_relu_sigmoid_0:2"]
-            self.assertIsNone(triton_poi_0["extern_semantic_key"])
-
-            mm_out_1 = kernel_info[f"aoti_torch_{GPU_TYPE}_mm_out:1"]
-            # Single pre_grad_node "linear" → extern_semantic_key fallback
-            self.assertEqual(mm_out_1["extern_semantic_key"], "linear")
-            self.assertEqual(mm_out_1["input_shapes"], [[8, 10], [10, 16]])
-            self.assertEqual(
-                mm_out_1["input_dtypes"], ["torch.float32", "torch.float32"]
-            )
-            self.assertEqual(mm_out_1["output_shape"], [8, 16])
-            self.assertEqual(mm_out_1["output_dtype"], "torch.float32")
-
-            mm_out_4 = kernel_info[f"aoti_torch_{GPU_TYPE}_mm_out:4"]
-            self.assertEqual(mm_out_4["extern_semantic_key"], "addmm")
-            self.assertEqual(mm_out_4["input_shapes"], [[10, 20], [20, 30]])
-            self.assertEqual(
-                mm_out_4["input_dtypes"], ["torch.float32", "torch.float32"]
-            )
-            self.assertEqual(mm_out_4["output_shape"], [10, 30])
-            self.assertEqual(mm_out_4["output_dtype"], "torch.float32")
 
     @torch._inductor.config.patch("trace.provenance_tracking_level", 0)
     def test_no_kernel_information_without_provenance_tracking(self):
@@ -912,20 +796,6 @@ class TestProvenanceTracingStackTraces(TestCase):
         self.assertIsInstance(result, dict)
         self.assertEqual(len(result), 0)  # Should be empty with no provenance data
 
-    def test_reset_provenance_globals_preserves_kernel_information_jsons(self):
-        kernel_information_jsons = get_kernel_information_jsons()
-        previous = dict(kernel_information_jsons)
-        kernel_information_jsons.clear()
-        kernel_information_jsons["outer"] = {}
-        try:
-            with reset_provenance_globals():
-                self.assertEqual(get_kernel_information_jsons(), {"outer": {}})
-                get_kernel_information_jsons()["inner"] = {}
-            self.assertEqual(get_kernel_information_jsons(), {"outer": {}, "inner": {}})
-        finally:
-            get_kernel_information_jsons().clear()
-            get_kernel_information_jsons().update(previous)
-
     @unittest.skipIf(
         IS_MACOS,
         "MacOS generates different debug handles",
@@ -952,209 +822,6 @@ class TestProvenanceTracingStackTraces(TestCase):
             keys = [k.split(":")[0] for k in data]
             self.assertTrue("aoti_torch_cpu_convolution" in keys)
 
-    def test_create_kernel_information_json_with_synthetic_data(self):
-        """Test create_kernel_information_json with synthetic globals."""
-        import torch._inductor.debug as debug_mod
-
-        with (
-            config.patch("trace.provenance_tracking_level", 1),
-            reset_provenance_globals(),
-        ):
-            # Populate globals with known data
-            debug_mod._inductor_triton_kernel_to_post_grad_node_info = {
-                "triton_poi_fused_add_mul_0:1": ["add", "mul"],
-                "aoti_torch_cuda_mm_out:2": ["mm_default"],
-                "extern_kernels.addmm:3": ["addmm_default"],
-                "custom_backend.mm:4": ["custom_mm_default"],
-                "aoti_torch_cuda_add_out:5": ["add_default"],
-            }
-            debug_mod._inductor_kernel_stack_trace = {
-                "triton_poi_fused_add_mul_0:1": ["File test.py, line 10"],
-                "aoti_torch_cuda_mm_out:2": ["File test.py, line 20"],
-                "extern_kernels.addmm:3": ["File test.py, line 30"],
-                "custom_backend.mm:4": ["File test.py, line 40"],
-                "aoti_torch_cuda_add_out:5": ["File test.py, line 50"],
-            }
-            debug_mod._inductor_post_to_pre_grad_nodes = {
-                "postToPre": {
-                    "add": ["add_1"],
-                    "mul": ["mul_1"],
-                    "mm_default": ["linear"],
-                    "addmm_default": ["addmm"],
-                    "custom_mm_default": ["custom_linear"],
-                    "add_default": ["prefix_only_add"],
-                }
-            }
-            # Consolidated per-kernel extern info: is_extern flag, explicit
-            # semantic key (simulates FP8 bridge), and shape metadata.
-            debug_mod._inductor_kernel_extern_info = {
-                "aoti_torch_cuda_mm_out:2": debug_mod._KernelExternInfo(
-                    is_extern=True,
-                    semantic_key="linear_42",
-                    shapes={
-                        "input_shapes": [[8, 10], [10, 16]],
-                        "input_dtypes": ["torch.float32", "torch.float32"],
-                        "output_shape": [8, 16],
-                        "output_dtype": "torch.float32",
-                    },
-                ),
-                "extern_kernels.addmm:3": debug_mod._KernelExternInfo(is_extern=True),
-                "custom_backend.mm:4": debug_mod._KernelExternInfo(is_extern=True),
-            }
-
-            result = create_kernel_information_json()
-
-            # Triton pointwise kernel: no extern_semantic_key, no shape metadata.
-            k1 = result["triton_poi_fused_add_mul_0:1"]
-            self.assertIsNone(k1["extern_semantic_key"])
-            self.assertNotIn("input_shapes", k1)
-
-            # Extern kernel with explicit semantic key (FP8 bridge precedence)
-            # and merged shape metadata.
-            k2 = result["aoti_torch_cuda_mm_out:2"]
-            self.assertEqual(k2["extern_semantic_key"], "linear_42")
-            self.assertEqual(k2["input_shapes"], [[8, 10], [10, 16]])
-            self.assertEqual(k2["output_shape"], [8, 16])
-            self.assertEqual(k2["output_dtype"], "torch.float32")
-
-            # Extern kernel with single pre_grad_node fallback semantic key.
-            k3 = result["extern_kernels.addmm:3"]
-            self.assertEqual(k3["extern_semantic_key"], "addmm")
-            self.assertNotIn("input_shapes", k3)
-
-            # Extern fallback comes from explicit tracking, not kernel-name prefixes.
-            k4 = result["custom_backend.mm:4"]
-            self.assertEqual(k4["extern_semantic_key"], "custom_linear")
-
-            k5 = result["aoti_torch_cuda_add_out:5"]
-            self.assertIsNone(k5["extern_semantic_key"])
-
-    def test_extern_semantic_key_extracted_from_origin_node_meta(self):
-        """extern_semantic_key stamped on origin_node.meta (e.g. by the FP8
-        lowering pass) is extracted into the provenance globals and JSON."""
-        import torch._inductor.debug as debug_mod
-        import torch._inductor.ir as ir_mod
-
-        class FakeOriginNode:
-            def __init__(self, name, meta) -> None:
-                self.name = name
-                self.meta = meta
-
-        class FakeExternKernel(ir_mod.ExternKernel):
-            def __init__(self, origin_node) -> None:
-                self.inputs = []
-                self.origin_node = origin_node
-                self.origins = []
-
-            def has_tensor_output(self):
-                return False
-
-            def get_stack_traces(self):
-                return []
-
-        with (
-            config.patch("trace.provenance_tracking_level", 1),
-            reset_provenance_globals(),
-        ):
-            extern = FakeExternKernel(
-                FakeOriginNode("linear", {"extern_semantic_key": "my_fp8_key"})
-            )
-            handle = set_kernel_post_grad_provenance_tracing(
-                extern, "aoti_torch_cuda_mm_out", is_extern=True
-            )
-            kernel_name = f"aoti_torch_cuda_mm_out:{handle}"
-            info = debug_mod._inductor_kernel_extern_info[kernel_name]
-            self.assertTrue(info.is_extern)
-            self.assertEqual(info.semantic_key, "my_fp8_key")
-
-            result = create_kernel_information_json()
-            self.assertEqual(result[kernel_name]["extern_semantic_key"], "my_fp8_key")
-
-    def test_extern_kernel_metadata_accepts_tensor_like_ir_inputs(self):
-        import torch._inductor.ir as ir_mod
-
-        class FakeTensorIRNode(ir_mod.IRNode):
-            def __init__(self, size, dtype) -> None:
-                self._size = size
-                self._dtype = dtype
-
-            def has_tensor_output(self):
-                return True
-
-            def maybe_get_size(self):
-                return self._size
-
-            def maybe_get_dtype(self):
-                return self._dtype
-
-        class FakeNonTensorIRNode(ir_mod.IRNode):
-            def has_tensor_output(self):
-                return False
-
-        class FakeExternKernel(ir_mod.ExternKernel):
-            def __init__(self, inputs, output_size=None, output_dtype=None) -> None:
-                self.inputs = inputs
-                self.origin_node = None
-                self.origins = []
-                self._output_size = output_size
-                self._output_dtype = output_dtype
-
-            def has_tensor_output(self):
-                return self._output_size is not None
-
-            def maybe_get_size(self):
-                return self._output_size
-
-            def maybe_get_dtype(self):
-                return self._output_dtype
-
-            def get_stack_traces(self):
-                return ["File fake.py, line 1"]
-
-        with (
-            config.patch("trace.provenance_tracking_level", 1),
-            reset_provenance_globals(),
-        ):
-            extern = FakeExternKernel(
-                [
-                    FakeTensorIRNode([2, 4], torch.float32),
-                    [FakeTensorIRNode([3, "s0"], torch.bfloat16)],
-                    FakeNonTensorIRNode(),
-                ],
-                output_size=[2, "s0"],
-                output_dtype=torch.float16,
-            )
-            handle = set_kernel_post_grad_provenance_tracing(
-                extern, "custom_backend.mm", is_extern=True
-            )
-            self.assertEqual(handle, 1)
-
-            non_tensor_output = FakeExternKernel(
-                [FakeTensorIRNode([7], torch.int64)],
-            )
-            handle = set_kernel_post_grad_provenance_tracing(
-                non_tensor_output, "custom_backend.multi", is_extern=True
-            )
-            self.assertEqual(handle, 2)
-
-            result = create_kernel_information_json()
-
-            metadata = result["custom_backend.mm:1"]
-            self.assertEqual(metadata["input_shapes"], [[2, 4], [3, "s0"]])
-            self.assertEqual(
-                metadata["input_dtypes"], ["torch.float32", "torch.bfloat16"]
-            )
-            self.assertEqual(metadata["output_shape"], [2, "s0"])
-            self.assertEqual(metadata["output_dtype"], "torch.float16")
-
-            non_tensor_output_metadata = result["custom_backend.multi:2"]
-            self.assertEqual(non_tensor_output_metadata["input_shapes"], [[7]])
-            self.assertEqual(
-                non_tensor_output_metadata["input_dtypes"], ["torch.int64"]
-            )
-            self.assertNotIn("output_shape", non_tensor_output_metadata)
-            self.assertNotIn("output_dtype", non_tensor_output_metadata)
-
 
 class ProvenanceTracingKernelContextTemplate:
     def test_jit_inductor_with_flag(self):
@@ -1178,10 +845,7 @@ class ProvenanceTracingKernelContextTemplate:
         x = torch.randn(8, 10).to(self.device)
         a = torch.randn(10, 20).to(self.device)
         b = torch.randn(20, 30).to(self.device)
-        if self.device == "cpu":
-            c = torch.randn(10, 30).to(self.device)
-        else:
-            c = _bias_like_addmm_input(self.device)
+        c = torch.randn(10, 30).to(self.device)
         example_inputs = (x, a, b, c)
 
         with config.patch(
@@ -1212,10 +876,7 @@ class ProvenanceTracingKernelContextTemplate:
         x = torch.randn(8, 10).to(self.device)
         a = torch.randn(10, 20).to(self.device)
         b = torch.randn(20, 30).to(self.device)
-        if self.device == "cpu":
-            c = torch.randn(10, 30).to(self.device)
-        else:
-            c = _bias_like_addmm_input(self.device)
+        c = torch.randn(10, 30).to(self.device)
         example_inputs = (x, a, b, c)
         model = Model().to(self.device)
 
@@ -1223,38 +884,11 @@ class ProvenanceTracingKernelContextTemplate:
         _, code = run_and_get_cpp_code(torch._inductor.aoti_compile_and_package, ep)
 
         self.assertTrue("KernelContextGuard" not in code)
-        FileCheck().check_not(
-            "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
-        ).check_not("thread_local KernelContext* tls_kernel_context = nullptr;").run(
-            code
-        )
 
         with config.patch(
             {
                 "trace.provenance_tracking_level": 1,
                 "cpp.enable_kernel_profile": True,
-                "cpp.enable_kernel_context_guard": False,
-            }
-        ):
-            package_path, code = run_and_get_cpp_code(
-                torch._inductor.aoti_compile_and_package, ep
-            )
-
-            FileCheck().check_not(
-                "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
-            ).check_not(
-                "thread_local KernelContext* tls_kernel_context = nullptr;"
-            ).check_not("KernelContextGuard").run(code)
-
-            compiled_model = torch._inductor.aoti_load_package(package_path)
-            result = compiled_model(*example_inputs)
-            self.assertEqual(result, model(*example_inputs))
-
-        with config.patch(
-            {
-                "trace.provenance_tracking_level": 1,
-                "cpp.enable_kernel_profile": True,
-                "cpp.enable_kernel_context_guard": True,
             }
         ):
             package_path, code = run_and_get_cpp_code(
@@ -1267,21 +901,16 @@ class ProvenanceTracingKernelContextTemplate:
                 code
             )
 
-            if self.device == "cuda" or self.device == "xpu":
-                device_type = torch.accelerator.current_accelerator().type
+            if self.device == "cuda":
                 FileCheck().check(
-                    f"""KernelContextGuard _ctx("aoti_torch_{device_type}_mm_out", R"("""
-                ).check(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_{device_type}_mm_out("
-                ).check(
+                    """KernelContextGuard _ctx("aoti_torch_cuda_mm_out", R"("""
+                ).check("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_mm_out(").check(
                     """KernelContextGuard _ctx("triton_poi_fused_addmm_relu_sigmoid_0", R"("""
                 ).check("call_triton_poi_fused_addmm_relu_sigmoid_0(").check(
                     """KernelContextGuard _ctx("triton_poi_fused_mul_1", R"("""
                 ).check("call_triton_poi_fused_mul_1(").check(
-                    f"""KernelContextGuard _ctx("aoti_torch_{device_type}_mm_out", R"""
-                ).check(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_{device_type}_mm_out("
-                ).check(
+                    """KernelContextGuard _ctx("aoti_torch_cuda_mm_out", R"("""
+                ).check("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_mm_out(").check(
                     """ KernelContextGuard _ctx("triton_poi_fused_addmm_gelu_2", R"("""
                 ).check("call_triton_poi_fused_addmm_gelu_2(").run(code)
             else:
@@ -1312,17 +941,15 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-@unittest.skipIf(
-    not torch.cuda.is_available() and not torch.xpu.is_available(), "No CUDA and no XPU"
-)
+@unittest.skipIf(not torch.cuda.is_available(), "No CUDA")
 class TestProvenanceTracingKernelContextGpu(TestCase):
-    device = GPU_TYPE
+    device = "cuda"
 
 
 copy_tests(
     ProvenanceTracingKernelContextTemplate,
     TestProvenanceTracingKernelContextGpu,
-    GPU_TYPE,
+    "cuda",
 )
 
 

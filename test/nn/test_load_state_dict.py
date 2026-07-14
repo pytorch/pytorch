@@ -205,7 +205,6 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/180632")
     @swap([True, False])
     def test_load_state_dict_child(self):
         base_module = nn.Linear(1, 1)

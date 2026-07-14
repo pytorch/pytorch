@@ -3,22 +3,23 @@ import dataclasses
 import unittest.mock
 
 import torch
+import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import TestCase
 
 
 try:
     from transformers import modeling_outputs
     from transformers.configuration_utils import PretrainedConfig
+    from transformers.file_utils import ModelOutput
     from transformers.modeling_outputs import (
         BaseModelOutput,
         BaseModelOutputWithPastAndCrossAttentions,
         BaseModelOutputWithPoolingAndCrossAttentions,
         CausalLMOutputWithPast,
     )
-    from transformers.utils import ModelOutput
 except ImportError:
     modeling_outputs = None
 
@@ -29,18 +30,18 @@ def maybe_skip(fn):
     return fn
 
 
-class TestHFPretrained(TestCase):
+class TestHFPretrained(torch._dynamo.test_case.TestCase):
     @maybe_skip
     def test_pretrained(self):
         def fn(a, tmp):
             if hasattr(tmp, "somekey"):
                 a = a + 1
             if tmp.return_dict:
-                return a + torch.ones(2) * tmp.chunk_size_feed_forward
+                return a + torch.ones(2) * tmp.max_length
             return a
 
         x = torch.randn(2)
-        tmp = PretrainedConfig(return_dict=True, chunk_size_feed_forward=20)
+        tmp = PretrainedConfig(return_dict=True, max_length=20)
         ref = fn(x, tmp)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, tmp)
@@ -49,7 +50,7 @@ class TestHFPretrained(TestCase):
     @maybe_skip
     def test_pretrained_non_const_attr(self):
         def fn(a, tmp):
-            if tmp.attribute_map:
+            if tmp.pruned_heads:
                 return a + 1
             else:
                 return a - 1
@@ -62,7 +63,7 @@ class TestHFPretrained(TestCase):
         self.assertTrue(same(ref, res))
 
 
-class TestModelOutput(TestCase):
+class TestModelOutput(torch._dynamo.test_case.TestCase):
     @maybe_skip
     def test_mo_create(self):
         def fn(a, b):
@@ -165,12 +166,12 @@ class TestModelOutput(TestCase):
 
         def fn(obj):
             class_fields = dataclasses.fields(obj)
-            assert len(class_fields)  # noqa: S101
-            assert all(field.default is None for field in class_fields[1:])  # noqa: S101
+            assert len(class_fields)
+            assert all(field.default is None for field in class_fields[1:])
             other_fields_are_none = all(
                 getattr(obj, field.name) is None for field in class_fields[1:]
             )
-            assert not other_fields_are_none  # noqa: S101
+            assert not other_fields_are_none
 
             total = getattr(obj, class_fields[0].name)
             for field in class_fields[1:]:
@@ -358,7 +359,13 @@ class TestModelOutputBert(TestCase):
         )
 
 
-instantiate_device_type_tests(TestModelOutputBert, globals(), allow_xpu=True)
+devices = ["cpu", "cuda", "xpu", "hpu"]
+
+instantiate_device_type_tests(
+    TestModelOutputBert, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
     run_tests()

@@ -7,7 +7,7 @@ from datetime import timedelta
 import torch
 from torch._C import ScriptObject
 from torch._C._distributed_c10d import FakeWork, PythonCallbackWork
-from torch.distributed._mesh_layout import _FlatLayout
+from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
     _check_op,
     _get_default_group,
@@ -27,7 +27,7 @@ from torch.distributed.distributed_c10d import (
 # modern collectives like _allgather_base_ got rid of the unnecessary list.
 # When in doubt, consult the code that dispatches to the collective on the PG
 # in distributed_c10d.py e.g., work = group.allgather([tensor_list], [tensor],
-# opts) indicates it's always a list.
+# opts) indicates its always a list.
 
 
 def _gcd_list(numbers: Sequence[int]) -> int:
@@ -44,9 +44,10 @@ def _indices_to_layout(indices: list[int]) -> tuple[tuple[int, ...], tuple[int, 
     diffs = [indices[i] - indices[i - 1] for i in range(1, len(indices))]
     last_stride = _gcd_list(diffs)
 
-    # This case should not be reached if indices are unique and sorted.
-    if last_stride == 0:
-        raise AssertionError("Cannot determine stride; indices may not be unique.")
+    assert last_stride != 0, (
+        # This case should not be reached if indices are unique and sorted.
+        "Cannot determine stride; indices may not be unique."
+    )
 
     # Identify the starting index of each "row" in the last dimension.
     # An index starts a new row if the preceding index (index - stride) is not present.
@@ -57,11 +58,10 @@ def _indices_to_layout(indices: list[int]) -> tuple[tuple[int, ...], tuple[int, 
             higher_dim_indices.append(index)
 
     # From the number of rows, we can deduce the shape of the last dimension.
-    if len(indices) % len(higher_dim_indices) != 0:
-        raise AssertionError(
-            "Indices do not form a regular grid. "
-            f"Found {len(higher_dim_indices)} subgroups for {len(indices)} total elements."
-        )
+    assert len(indices) % len(higher_dim_indices) == 0, (
+        "Indices do not form a regular grid. "
+        f"Found {len(higher_dim_indices)} subgroups for {len(indices)} total elements."
+    )
     last_shape = len(indices) // len(higher_dim_indices)
 
     # Recurse on the higher-dimensional indices (the start of each row).
@@ -74,23 +74,6 @@ def _indices_to_layout(indices: list[int]) -> tuple[tuple[int, ...], tuple[int, 
     return final_shapes, final_strides
 
 
-def _resolve_pg_or_name(
-    group: ScriptObject | ProcessGroup | str | GroupName,
-) -> ScriptObject | ProcessGroup:
-    """Accept any of the group reps that may reach a functional collective.
-
-    Under ``compile_on_one_rank=True`` the functional collective ops receive
-    the live ``ProcessGroup`` instead of a string group name, so we cannot
-    unconditionally call ``_resolve_process_group``.
-    """
-    if isinstance(group, (ProcessGroup, ScriptObject)):
-        return group
-    # ``GroupName`` is ``NewType("GroupName", str)``, so wrapping ``group`` here
-    # is a runtime no-op. The cast exists purely so pyrefly accepts the
-    # narrowed ``str | GroupName`` argument against the declared parameter type.
-    return _resolve_process_group(GroupName(group))
-
-
 def _prepare_collective_groups(
     process_group_so: ScriptObject | ProcessGroup,
 ) -> tuple[list[int], list[int], int]:
@@ -101,17 +84,15 @@ def _prepare_collective_groups(
     )
 
     ranks = torch.distributed.get_process_group_ranks(process_group)
-    if not ranks:
-        raise AssertionError
+    assert ranks
     # TODO: We can handle permutations but the layout inference algorithm will
     # lose the permutation so we will have to reapply it
-    if ranks != sorted(ranks):
-        raise AssertionError(ranks)
+    assert ranks == sorted(ranks), ranks
     offset = ranks[0]
     ranks = [r - offset for r in ranks]
 
     shape, strides = _indices_to_layout(ranks)
-    layout = _FlatLayout(shape, strides)
+    layout = _MeshLayout(shape, strides)
 
     global_pg = _get_default_group()
     group_offsets = layout.complement(global_pg.size()).all_ranks_from_zero()
@@ -124,19 +105,16 @@ def _prepare_collective_groups(
 # work object). Functional collectives expect the implementation to allocate outputs, accept
 # process group name that must be resolved and do not support async ops (return output).
 def _local_functional_all_gather_into_tensor(
-    tensor: torch.Tensor,
-    group_size: int,
-    group_name: GroupName | ProcessGroup,
+    tensor: torch.Tensor, group_size: int, group_name: GroupName
 ) -> torch.Tensor:
     # "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
     from . import LocalTensor
 
     ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_pg_or_name(group_name)
+        _resolve_process_group(group_name)
     )
 
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
     output_local_tensors: dict[int, torch.Tensor] = {}
 
     for group_offset in group_offsets:
@@ -161,20 +139,16 @@ def _local_functional_all_gather_into_tensor(
 
 
 def _local_functional_reduce_scatter_tensor(
-    tensor: torch.Tensor,
-    reduce_op: str,
-    group_size: int,
-    group_name: GroupName | ProcessGroup,
+    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: GroupName
 ) -> torch.Tensor:
     #  "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
 
     ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_pg_or_name(group_name)
+        _resolve_process_group(group_name)
     )
 
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
     output_local_tensors: dict[int, torch.Tensor] = {}
 
     for group_offset in group_offsets:
@@ -208,20 +182,16 @@ def _local_functional_reduce_scatter_tensor(
 
 
 def _local_functional_shard_dim_alltoall(
-    tensor: torch.Tensor,
-    gather_dim: int,
-    shard_dim: int,
-    group_name: GroupName | ProcessGroup,
+    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: GroupName
 ) -> torch.Tensor:
     # "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
 
     ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_pg_or_name(group_name)
+        _resolve_process_group(group_name)
     )
 
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
     output_local_tensors: dict[int, torch.Tensor] = {}
 
     for group_offset in group_offsets:
@@ -260,17 +230,16 @@ def _local_functional_all_to_all_single(
     tensor: torch.Tensor,
     output_split_sizes: list[torch.SymInt],
     input_split_sizes: list[torch.SymInt],
-    group_name: GroupName | ProcessGroup,
+    group_name: GroupName,
 ) -> torch.Tensor:
     # "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
     from . import LocalIntNode, LocalTensor
 
     ranks, group_offsets, offset = _prepare_collective_groups(
-        _resolve_pg_or_name(group_name)
+        _resolve_process_group(group_name)
     )
 
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
 
     split_local_sizes: dict[int, list[int]] = {}
     for input_split_size in input_split_sizes:
@@ -324,10 +293,8 @@ def _local_broadcast_(
     # "int root_rank, int root_tensor, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)"
     from . import LocalTensor
 
-    if len(tensors) != 1:
-        raise AssertionError
-    if root_tensor != 0:
-        raise AssertionError
+    assert len(tensors) == 1
+    assert root_tensor == 0
     tensor = tensors[0]
 
     ranks, group_offsets, offset = _prepare_collective_groups(process_group_so)
@@ -336,8 +303,7 @@ def _local_broadcast_(
     # the same relative to others
     relative_root_rank = root_rank - offset
 
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -387,8 +353,7 @@ def _local_reduce(
     if reduce_op == ReduceOp.AVG or reduce_op == "avg":
         return functools.reduce(operator.add, tensors) / len(tensors)
     else:
-        if op is None:
-            raise AssertionError
+        assert op is not None
         return functools.reduce(op, tensors)
 
 
@@ -405,15 +370,13 @@ def _local_all_reduce_(
     # "int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
     from . import LocalTensor
 
-    if len(tensors) != 1:
-        raise AssertionError
+    assert len(tensors) == 1
     tensor = tensors[0]
     reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
 
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -460,8 +423,7 @@ def _local_allreduce_coalesced_(
 
         # For each tensor, perform the reduction operation
         for tensor in tensors:
-            if not isinstance(tensor, LocalTensor):
-                raise AssertionError("Input tensor must be a LocalTensor")
+            assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
             if not all(rank in tensor._local_tensors for rank in group_ranks):
                 continue
             # Collect tensors from the specified ranks in this group
@@ -506,10 +468,12 @@ def _local_reduce_scatter_tensor_coalesced_(
 
         # For each tensor, perform the reduction operation
         for input_tensor, output_tensor in zip(input_tensors, output_tensors):
-            if not isinstance(input_tensor, LocalTensor):
-                raise AssertionError("Input tensor must be a LocalTensor")
-            if not isinstance(output_tensor, LocalTensor):
-                raise AssertionError("Output tensor must be a LocalTensor")
+            assert isinstance(input_tensor, LocalTensor), (
+                "Input tensor must be a LocalTensor"
+            )
+            assert isinstance(output_tensor, LocalTensor), (
+                "Output tensor must be a LocalTensor"
+            )
             if not all(rank in input_tensor._local_tensors for rank in group_ranks):
                 continue
             if not all(rank in output_tensor._local_tensors for rank in group_ranks):
@@ -549,10 +513,8 @@ def _local_allgather_base_(
 
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
-    if not isinstance(output_tensor, LocalTensor):
-        raise AssertionError("Output tensor must be a LocalTensor")
-    if not isinstance(input_tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
+    assert isinstance(output_tensor, LocalTensor), "Output tensor must be a LocalTensor"
+    assert isinstance(input_tensor, LocalTensor), "Input tensor must be a LocalTensor"
 
     for group_offset in group_offsets:
         group_ranks = [group_offset + r for r in ranks]
@@ -593,10 +555,8 @@ def _local_reduce_scatter_base_(  # type: ignore[no-untyped-def]
     reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
-    if not isinstance(output_tensor, LocalTensor):
-        raise AssertionError("Output tensor must be a LocalTensor")
-    if not isinstance(input_tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
+    assert isinstance(output_tensor, LocalTensor), "Output tensor must be a LocalTensor"
+    assert isinstance(input_tensor, LocalTensor), "Input tensor must be a LocalTensor"
 
     for group_offset in group_offsets:
         group_ranks = [group_offset + r for r in ranks]
@@ -638,10 +598,8 @@ def _local_all_gather_(
 
     from . import LocalTensor
 
-    if len(output_tensors) != 1:
-        raise AssertionError
-    if len(input_tensors) != 1:
-        raise AssertionError
+    assert len(output_tensors) == 1
+    assert len(input_tensors) == 1
 
     input_tensor = input_tensors[0]
     # pyrefly: ignore [bad-assignment]
@@ -650,8 +608,9 @@ def _local_all_gather_(
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
     for i in range(len(output_tensors)):
-        if not isinstance(output_tensors[i], LocalTensor):
-            raise AssertionError("Output tensor must be a LocalTensor")
+        assert isinstance(output_tensors[i], LocalTensor), (
+            "Output tensor must be a LocalTensor"
+        )
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -688,11 +647,9 @@ def _local_allgather_into_tensor_coalesced_(
 
     # Each output tensor should be sized to hold all gathered inputs
     # outputs[i] will contain all inputs[i] from all ranks
-    if len(output_tensors) != len(input_tensors):
-        raise AssertionError(
-            f"Number of outputs ({len(output_tensors)}) must match "
-            f"number of inputs ({len(input_tensors)})"
-        )
+    assert len(output_tensors) == len(input_tensors), (
+        f"Number of outputs ({len(output_tensors)}) must match number of inputs ({len(input_tensors)})"
+    )
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -701,10 +658,12 @@ def _local_allgather_into_tensor_coalesced_(
 
         # For each input/output pair
         for input_tensor, output_tensor in zip(input_tensors, output_tensors):
-            if not isinstance(input_tensor, LocalTensor):
-                raise AssertionError("Input tensor must be a LocalTensor")
-            if not isinstance(output_tensor, LocalTensor):
-                raise AssertionError("Output tensor must be a LocalTensor")
+            assert isinstance(input_tensor, LocalTensor), (
+                "Input tensor must be a LocalTensor"
+            )
+            assert isinstance(output_tensor, LocalTensor), (
+                "Output tensor must be a LocalTensor"
+            )
 
             if not all(rank in input_tensor._local_tensors for rank in group_ranks):
                 continue
@@ -759,10 +718,8 @@ def _local_scatter_(
 
     from . import LocalTensor
 
-    if len(output_tensors) != 1:
-        raise AssertionError
-    if len(input_tensors) != 1:
-        raise AssertionError
+    assert len(output_tensors) == 1
+    assert len(input_tensors) == 1
     output_tensor = output_tensors[0]
     # pyrefly: ignore [bad-assignment]
     input_tensors = input_tensors[0]
@@ -773,10 +730,8 @@ def _local_scatter_(
     # the same relative to others
     relative_root_rank = root_rank - offset
 
-    if not isinstance(output_tensor, LocalTensor):
-        raise AssertionError("Output tensor must be a LocalTensor")
-    if len(ranks) != len(input_tensors):
-        raise AssertionError((ranks, input_tensors))
+    assert isinstance(output_tensor, LocalTensor), "Output tensor must be a LocalTensor"
+    assert len(ranks) == len(input_tensors), (ranks, input_tensors)
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -788,8 +743,7 @@ def _local_scatter_(
         # Root rank scatters its input tensors to all ranks in this group
         for i, rank in enumerate(group_ranks):
             input_tensor = input_tensors[i]
-            if not isinstance(input_tensor, LocalTensor):
-                raise AssertionError
+            assert isinstance(input_tensor, LocalTensor)
             # Each rank i gets the i-th input tensor from the root
             source_tensor = input_tensor._local_tensors[
                 group_offset + relative_root_rank
@@ -816,11 +770,10 @@ def _local_alltoall_(
 
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
-    if not (len(input_tensors) == len(output_tensors) == len(ranks)):
-        raise AssertionError(
-            f"Number of input tensors ({len(input_tensors)}), "
-            f"output tensors ({len(output_tensors)}), and ranks ({len(ranks)}) must match"
-        )
+    assert len(input_tensors) == len(output_tensors) == len(ranks), (
+        f"Number of input tensors ({len(input_tensors)}), "
+        f"output tensors ({len(output_tensors)}), and ranks ({len(ranks)}) must match"
+    )
 
     for group_offset in group_offsets:
         # For the tensors in this group [group_offset + r for r in ranks]
@@ -830,16 +783,18 @@ def _local_alltoall_(
         # In alltoall, rank i sends input_tensors[j] to rank j and receives into output_tensors[i] from rank j
         for i, rank_i in enumerate(group_ranks):
             output_tensor = output_tensors[i]
-            if not isinstance(output_tensor, LocalTensor):
-                raise AssertionError("Output tensor must be a LocalTensor")
+            assert isinstance(output_tensor, LocalTensor), (
+                "Output tensor must be a LocalTensor"
+            )
 
             if not all(rank in output_tensor._local_tensors for rank in group_ranks):
                 continue
 
             for j, rank_j in enumerate(group_ranks):
                 input_tensor = input_tensors[j]
-                if not isinstance(input_tensor, LocalTensor):
-                    raise AssertionError("Input tensor must be a LocalTensor")
+                assert isinstance(input_tensor, LocalTensor), (
+                    "Input tensor must be a LocalTensor"
+                )
 
                 if not all(rank in input_tensor._local_tensors for rank in group_ranks):
                     continue
@@ -869,10 +824,8 @@ def _local_alltoall_base_(
 
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
-    if not isinstance(input_tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a LocalTensor")
-    if not isinstance(output_tensor, LocalTensor):
-        raise AssertionError("Output tensor must be a LocalTensor")
+    assert isinstance(input_tensor, LocalTensor), "Input tensor must be a LocalTensor"
+    assert isinstance(output_tensor, LocalTensor), "Output tensor must be a LocalTensor"
     # Convert split sizes to lists if they aren't already
     if output_split_sizes is not None:
         output_split_sizes = list(output_split_sizes)
@@ -956,8 +909,7 @@ def _local_barrier(
     # Barrier is a synchronization primitive - in local simulation,
     # we don't need to do any actual work since all "ranks" are in the same process
     # Just validate that the tensor is a LocalTensor
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError
+    assert isinstance(tensor, LocalTensor)
 
     # In a real distributed setting, barrier would synchronize all processes
     # In local simulation, this is essentially a no-op since all ranks are local
@@ -981,8 +933,7 @@ def _local_monitored_barrier_(
     # Monitored barrier is a synchronization primitive with monitoring - in local simulation,
     # we don't need to do any actual work since all "ranks" are in the same process
     # Just validate that the tensor is a LocalTensor
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError
+    assert isinstance(tensor, LocalTensor)
 
     # In a real distributed setting, monitored barrier would synchronize all processes
     # and provide monitoring capabilities. In local simulation, this is essentially a no-op
@@ -1001,12 +952,10 @@ def _local_send(
 
     from . import LocalRunnerMode, LocalTensor
 
-    if len(tensors) != 1:
-        raise AssertionError
+    assert len(tensors) == 1
     tensor = tensors[0]
 
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a Tensor")
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
     src = int(tensor.__src_rank__)
 
     LocalRunnerMode.current()._signal_send(src, dst, tensor._local_tensors[src])
@@ -1026,20 +975,16 @@ def _local_recv_(
     # "int src, int tag) -> __torch__.torch.classes.c10d.Work";
     from . import LocalRunnerMode, LocalTensor
 
-    if len(tensors) != 1:
-        raise AssertionError
+    assert len(tensors) == 1
     tensor = tensors[0]
 
-    if not isinstance(tensor, LocalTensor):
-        raise AssertionError("Input tensor must be a Tensor")
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
     dst = int(tensor.__src_rank__)
 
     def _recv_and_store(timeout: timedelta) -> bool:
         def _wait_and_store(obj: object) -> None:
-            if not isinstance(obj, torch.Tensor):
-                raise AssertionError("Expected to receive a Tensor")
-            if not isinstance(tensor, LocalTensor):
-                raise AssertionError("Input tensor must be a Tensor")
+            assert isinstance(obj, torch.Tensor), "Expected to receive a Tensor"
+            assert isinstance(tensor, LocalTensor), "Input tensor must be a Tensor"
             tensor._local_tensors[dst] = obj
 
         LocalRunnerMode.current()._wait_recv(src, dst, _wait_and_store)
@@ -1085,11 +1030,9 @@ def local_p2p_op(
 
     from . import LocalIntNode
 
-    if not isinstance(dst.node, LocalIntNode):
-        raise AssertionError(
-            "Expected 'dst' to be a LocalIntNode where the value is the "
-            "destination rank and key is the source rank"
-        )
+    assert isinstance(dst.node, LocalIntNode), (
+        "Expected 'dst' to be a LocalIntNode where the value is the destination rank and key is the source rank"
+    )
 
     w = []
     for s, d in dst.node._local_ints.items():

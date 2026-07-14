@@ -177,11 +177,11 @@ class QuantizedGraphModule(GraphModule):
         for attr_name in state_dict:
             if attr_name.startswith("_packed_weight") and isinstance(
                 state_dict[attr_name], torch._C.ScriptObject
-            ):  # type: ignore[attr-defined]
+            ):  # type: ignore[attr-defined] # noqa: B950
                 setattr(self, attr_name, state_dict[attr_name])
                 attrs_to_pop.append(attr_name)
 
-        # pop the packed param attributes
+        # pop the packed param attributesn
         for attr_name in attrs_to_pop:
             state_dict.pop(attr_name)
 

@@ -35,6 +35,8 @@
 
 #pragma once
 
+#include <cuda_fp16.h>
+
 #include <cutlass/array.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/epilogue/thread/activation.h>
@@ -68,21 +70,26 @@ struct ArrayExponential {
   }
 };
 
-template <int N>
-struct dependent_false : std::false_type {};
-
 template <int ElementsPerAccess>
 struct ArrayExponential<half_t, ElementsPerAccess> {
-  static_assert(
-      dependent_false<ElementsPerAccess>::value,
-      "ArrayExponential is not implemented for half_t");
-};
+  CUTLASS_DEVICE
+  Array<half_t, ElementsPerAccess> operator()(
+      Array<half_t, ElementsPerAccess> const& input) const {
+    Array<half_t, ElementsPerAccess> result;
 
-template <int ElementsPerAccess>
-struct ArrayExponential<bfloat16_t, ElementsPerAccess> {
-  static_assert(
-      dependent_false<ElementsPerAccess>::value,
-      "ArrayExponential is not implemented for bfloat16_t");
+    int const kVectorCount = ElementsPerAccess / 2;
+
+    __half2 const* input_ptr =
+        reinterpret_cast<__half2 const*>(input.raw_data());
+    __half2* res_ptr = reinterpret_cast<__half2*>(result.raw_data());
+
+    CUTLASS_PRAGMA_UNROLL
+    for (int i = 0; i < kVectorCount; ++i) {
+      res_ptr[i] = h2exp(input_ptr[i]);
+    }
+
+    return result;
+  }
 };
 } // namespace detail
 

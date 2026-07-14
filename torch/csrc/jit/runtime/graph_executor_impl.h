@@ -79,11 +79,6 @@ struct GraphExecutorImplBase {
   virtual const ExecutionPlan& getPlanFor(
       Stack& stack,
       std::optional<size_t> remaining_bailout_depth = std::nullopt) = 0;
-  // Returns an optimized execution plan without requiring input arguments.
-  // Runs input-independent optimization passes (e.g. inlining, constant
-  // propagation, peephole, CSE) but skips profiling-based specializations
-  // that require runtime type/shape information.
-  virtual const ExecutionPlan& getInputIndependentPlan() = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
 

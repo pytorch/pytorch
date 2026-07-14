@@ -814,9 +814,9 @@ struct SymbolicShapeGraphAnalyzer {
 
     auto stitched_shape_compute_graph = std::make_shared<Graph>();
     // We want to build up a computational graph which computes all shapes
-    // we don't know statically - that is, all symbolic shapes within
+    // we dont know statically - that is, all symbolic shapes within
     // the region [beg, end). it must be executable before beg.
-    // TODO: don't require dimensions of tensors to be set AOT ?
+    // TODO: dont require dimensions of tensors to be set AOT ?
 
     for (auto it = beg_->iterator(); it != end_->iterator(); it++) {
       auto curr = *it;
@@ -849,7 +849,7 @@ struct SymbolicShapeGraphAnalyzer {
           return std::nullopt;
         }
         auto symbolic_sizes = tt->symbolic_sizes();
-        // TODO: don't require # of dimensions of tensors set ?
+        // TODO: dont require # of dimensions of tensors set ?
         if (!symbolic_sizes.rank()) {
           GRAPH_DEBUG("No rank on output ", getHeader(curr));
           return std::nullopt;
@@ -964,7 +964,7 @@ struct SymbolicShapeGraphAnalyzer {
     // When we add a new tensor node, we do two things:
     // 1: record a mapping from the tensor node output to its shape in the
     // partial eval graph 2: add each symbolic shape dimension that we have
-    // not already added as an output to the large shape compute graph
+    // not already added as a output to the large shape compute graph
 
     // Once we are done stitching together all partial eval'd graphs, we can
     // cleanup the graph and remove the unneeded complete shapes as outputs,

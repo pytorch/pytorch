@@ -2,7 +2,7 @@
 
 import unittest
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -19,16 +19,9 @@ from torch.testing._internal.torchbind_impls import (
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
-# prepacked linear requires XNNPACK support.
-requires_prepacked_linear = unittest.skipIf(
-    not hasattr(torch.ops.prepacked, "linear_clamp_prepack"),
-    "requires XNNPACK (prepacked linear ops)",
-)
-
 
 class TestConverter(TestCase):
     def setUp(self):
-        super().setUp()
         init_torchbind_implementations()
 
         self.torch_bind_ops = [
@@ -44,10 +37,10 @@ class TestConverter(TestCase):
         self,
         M,
         tracing_inputs,
-        option: list[str] | None = None,
+        option: Optional[list[str]] = None,
         check_persistent=False,
         lifted_tensor_constants=None,
-        runtime_inputs: list[Any] | None = None,
+        runtime_inputs: Optional[list[Any]] = None,
     ) -> list[ExportedProgram]:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
@@ -1373,12 +1366,12 @@ class TestConverter(TestCase):
                     x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
             return x, x_list
 
-        def func2(x):
+        def func2(x):  # noqa: F841
             for i in range(x.size(0)):
                 x = x * x * i
             return x
 
-        def func3(x):
+        def func3(x):  # noqa: F841
             while x.sum() < 10:
                 x += x.sin()
             return x
@@ -1461,7 +1454,6 @@ class TestConverter(TestCase):
     # and
     # torch.ops.prepacked.linear_clamp_run
     @xfailIfS390X
-    @requires_prepacked_linear
     def test_ts2ep_convert_quantized_model_with_opcontext(self):
         class M(torch.nn.Module):
             def __init__(self, linear_op):
@@ -1485,7 +1477,6 @@ class TestConverter(TestCase):
     # and
     # torch.ops.prepacked.linear_clamp_run
     @xfailIfS390X
-    @requires_prepacked_linear
     def test_ts2ep_convert_quantized_model_with_opcontext_and_constant(self):
         class M(torch.nn.Module):
             def __init__(self, linear_op):

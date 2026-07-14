@@ -48,8 +48,7 @@ class TransformerTests(TestCase):
             (x,),
             split_spec=split_spec,
         )
-        if pipe.num_stages != num_stages:
-            raise AssertionError(f"{pipe.num_stages=}, expect {num_stages}")
+        assert pipe.num_stages == num_stages, f"{pipe.num_stages=}, expect {num_stages}"
 
         def get_layers(module):
             layers = [name for name, _ in module.layers.named_children()]
@@ -63,8 +62,7 @@ class TransformerTests(TestCase):
 
         # Check layer completeness
         orig_layers = get_layers(transformer)
-        if sorted(layers) != sorted(orig_layers):
-            raise AssertionError(f"{layers} != {orig_layers}")
+        assert sorted(layers) == sorted(orig_layers), f"{layers} != {orig_layers}"
         print("Layers matched!")
 
         # Check equivalence

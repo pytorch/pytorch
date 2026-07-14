@@ -3,6 +3,7 @@
 import sys
 import textwrap
 import traceback
+from typing import Optional
 
 import torch
 import torch.cuda._sanitizer as csan
@@ -13,7 +14,7 @@ from torch.testing._internal.two_tensor import TwoTensor
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest
+    TestCase = NoTest  # noqa: F811
 
 
 class TestArgumentHandler(TestCase):
@@ -148,8 +149,8 @@ class TestEventHandler(TestCase):
     def kernel_launch(
         self,
         stream: StreamId,
-        read_only: list[DataPtr] | None = None,
-        read_write: list[DataPtr] | None = None,
+        read_only: Optional[list[DataPtr]] = None,
+        read_write: Optional[list[DataPtr]] = None,
     ) -> list[csan.SynchronizationError]:
         if read_only is None:
             read_only = []
@@ -167,8 +168,8 @@ class TestEventHandler(TestCase):
     def assert_good_kernel_launch(
         self,
         stream: StreamId,
-        read_only: list[DataPtr] | None = None,
-        read_write: list[DataPtr] | None = None,
+        read_only: Optional[list[DataPtr]] = None,
+        read_write: Optional[list[DataPtr]] = None,
     ) -> None:
         self.assertEqual(self.kernel_launch(stream, read_only, read_write), [])
 
@@ -176,8 +177,8 @@ class TestEventHandler(TestCase):
         self,
         number_of_errors: int,
         stream: StreamId,
-        read_only: list[DataPtr] | None = None,
-        read_write: list[DataPtr] | None = None,
+        read_only: Optional[list[DataPtr]] = None,
+        read_write: Optional[list[DataPtr]] = None,
     ) -> None:
         errors = self.kernel_launch(stream, read_only, read_write)
         self.assertEqual(len(errors), number_of_errors)

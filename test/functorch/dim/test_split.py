@@ -14,7 +14,7 @@ class TestSplit(TestCase):
     """Comprehensive tests for first-class dimension split operations."""
 
     def setUp(self):
-        super().setUp()
+        """Set up common test fixtures."""
         self.batch, self.height, self.width = dims(3)
 
     def test_dim_object_split_all_bound(self):

@@ -1,4 +1,3 @@
-// @allow-raw-throw
 #pragma once
 
 #include <exception>
@@ -7,6 +6,7 @@
 #include <system_error>
 
 #include <ATen/detail/FunctionTraits.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <pybind11/pybind11.h>

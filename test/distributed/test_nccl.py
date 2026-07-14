@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
 import sys
 
 import torch
@@ -19,11 +18,9 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     IS_WINDOWS,
     load_tests,
     NoTest,
-    parametrize,
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -39,7 +36,7 @@ load_tests = load_tests  # noqa: PLW0127
 nGPUs = torch.cuda.device_count()
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest
+    TestCase = NoTest  # noqa: F811
 
 
 datatypes = [torch.float]
@@ -83,20 +80,6 @@ class TestNCCL(TestCase):
 
         nccl.broadcast(tuple(tensors))
         for i in range(torch.cuda.device_count()):
-            self.assertEqual(tensors[i], expected)
-
-        # Test with a non-zero root (regression test for #179908)
-        root = nGPUs - 1
-        expected = torch.zeros(128).uniform_().to(dtype=dtype)
-        tensors = [
-            expected.cuda(device)
-            if device == root
-            else torch.zeros(128, dtype=dtype, device=device)
-            for device in range(nGPUs)
-        ]
-
-        nccl.broadcast(tensors, root=root)
-        for i in range(nGPUs):
             self.assertEqual(tensors[i], expected)
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
@@ -237,32 +220,11 @@ class TestNCCL(TestCase):
             self.assertEqual(outputs[i], expected[i])
 
 
-@instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @property
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
-
-    @classmethod
-    def _init_pg(cls, rank, world_size, rdvz_file):
-        # Eager NCCL communicator init via device_id, so symm_mem rendezvous
-        # does not require a separate warm-up collective.
-        if rdvz_file is None:
-            raise AssertionError("Expected rdvz_file to not be None")
-        os.environ["LOCAL_RANK"] = str(rank)
-        device = torch.device("cuda", rank)
-        torch.cuda.set_device(device)
-        store = c10d.FileStore(rdvz_file, world_size)
-        c10d.init_process_group(
-            backend="nccl",
-            world_size=world_size,
-            rank=rank,
-            store=store,
-            timeout=cls.timeout,
-            device_id=device,
-        )
-        cls.pg = c10d.distributed_c10d._get_default_group()
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
@@ -288,102 +250,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
         out = symm_mem.empty(numel, dtype=dtype, device=self.device)
         symm_mem.rendezvous(out, group=group_name)
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
-    @skip_if_lt_x_gpu(2)
-    def test_nccl_symmem_rendezvous_many_allocations(self):
-        symm_mem.set_backend("NCCL")
-        torch.cuda.set_device(self.rank)
-        c10d.all_reduce(torch.ones(1, device=self.device))
-        group_name = c10d.group.WORLD.group_name
-
-        tensors = [
-            symm_mem.empty(1, dtype=torch.float, device=self.device) for _ in range(256)
-        ]
-
-        # Rendezvous a subset twice so the repeated lookup path is covered
-        # while many allocations are still live.
-        sampled_tensors = tensors[::16]
-        for tensor in sampled_tensors:
-            handle = symm_mem.rendezvous(tensor, group=group_name)
-            self.assertEqual(handle.rank, self.rank)
-            self.assertEqual(handle.world_size, self.world_size)
-        for tensor in sampled_tensors:
-            symm_mem.rendezvous(tensor, group=group_name)
-
-        result = torch.ops.symm_mem.one_shot_all_reduce(
-            tensors[-1].fill_(self.rank), "sum", group_name
-        )
-        self.assertEqual(
-            result, torch.full_like(result, (self.world_size - 1) * self.world_size / 2)
-        )
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @skip_if_lt_x_gpu(2)
-    def test_nccl_symmem_rendezvous_world(self):
-        symm_mem.set_backend("NCCL")
-        group_name = c10d.group.WORLD.group_name
-
-        t = symm_mem.empty(64, device=self.device)
-        handle = symm_mem.rendezvous(t, group=group_name)
-
-        self.assertEqual(handle.world_size, self.world_size)
-        self.assertEqual(handle.rank, self.rank)
-
-        t.fill_(self.rank)
-        c10d.barrier()
-
-        peer_rank = (self.rank + 1) % self.world_size
-        buf = handle.get_buffer(peer_rank, (64,), torch.float32)
-        self.assertTrue(buf.eq(peer_rank).all())
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
-    @skip_if_lt_x_gpu(2)
-    def test_nccl_symmem_barrier(self):
-        symm_mem.set_backend("NCCL")
-        torch.cuda.set_device(self.rank)
-        c10d.all_reduce(torch.ones(1, device=self.device))
-        group_name = c10d.group.WORLD.group_name
-
-        numel = 64
-        t = symm_mem.empty(numel, dtype=torch.float32, device=self.device).fill_(
-            self.rank
-        )
-        handle = symm_mem.rendezvous(t, group=group_name)
-        self.assertEqual(handle.rank, self.rank)
-        self.assertEqual(handle.world_size, self.world_size)
-
-        handle.barrier()
-        for peer in range(self.world_size):
-            buf = handle.get_buffer(peer, (numel,), torch.float32)
-            self.assertTrue(buf.eq(peer).all())
-        handle.barrier()
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @skip_if_lt_x_gpu(2)
-    def test_nccl_symmem_rendezvous_subgroup(self):
-        symm_mem.set_backend("NCCL")
-
-        subgroup = c10d.new_group(list(range(self.world_size)))
-
-        t = symm_mem.empty(64, device=self.device)
-        handle = symm_mem.rendezvous(t, group=subgroup)
-
-        self.assertEqual(handle.world_size, self.world_size)
-        self.assertEqual(handle.rank, self.rank)
-
-        t.fill_(self.rank)
-        c10d.barrier(group=subgroup)
-
-        peer_rank = (self.rank + 1) % self.world_size
-        buf = handle.get_buffer(peer_rank, (64,), torch.float32)
-        self.assertTrue(buf.eq(peer_rank).all())
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
@@ -415,56 +281,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(inp, group=group_name)
         res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
         self.assertEqual(out, res)
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
-    )
-    @skip_if_lt_x_gpu(2)
-    def test_nccl_symmem_collective_cuda_graph(self):
-        symm_mem.set_backend("NCCL")
-        torch.cuda.set_device(self.rank)
-        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
-        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
-        # initialize NCCL communicator.
-        c10d.all_reduce(torch.ones(1, device=self.device))
-        group_name = c10d.group.WORLD.group_name
-
-        dtype = torch.float
-        numel = 1024
-
-        out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
-        symm_mem.rendezvous(out, group=group_name)
-        graph_all_reduce = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph_all_reduce):
-            c10d.all_reduce(out)
-        graph_all_reduce.replay()
-        torch.cuda.synchronize()
-        self.assertEqual(
-            out, torch.full_like(out, (self.world_size - 1) * self.world_size / 2)
-        )
-
-        inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
-        symm_mem.rendezvous(inp, group=group_name)
-        graph_one_shot_all_reduce = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph_one_shot_all_reduce):
-            res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
-        graph_one_shot_all_reduce.replay()
-        self.assertEqual(out, res)
-
-        for repeat in range(3):
-            offset = 13 + repeat
-            inp.fill_(self.rank + offset)
-            out.fill_(self.rank + offset)
-            res.fill_(0.0)
-            expected_sum = float(
-                self.world_size * offset + self.world_size * (self.world_size - 1) / 2
-            )
-            graph_all_reduce.replay()
-            graph_one_shot_all_reduce.replay()
-            self.assertEqual(out, torch.full_like(out, expected_sum))
-            self.assertEqual(res, out)
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
@@ -582,336 +398,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory device API support from nccl 2.28"
-    )
-    @skip_if_lt_x_gpu(2)
-    def test_get(self):
-        symm_mem.set_backend("NCCL")
-        torch.cuda.set_device(self.rank)
-        c10d.all_reduce(torch.ones(1, device=self.device))
-        group_name = c10d.group.WORLD.group_name
-
-        dtype = torch.float
-        numel = 1024
-
-        # Full-buffer get from a peer's allocation.
-        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
-        hdl = symm_mem.rendezvous(src, group=group_name)
-        c10d.barrier()
-
-        if self.rank == 0:
-            dst = torch.empty_like(src)
-            symm_mem.get(dst, hdl, peer=1)
-            torch.testing.assert_close(dst, torch.ones_like(dst))
-
-        c10d.barrier()
-
-        # Offset get: copy a sub-region of the peer's allocation.
-        src_base = symm_mem.empty(2 * numel, dtype=dtype, device=self.device)
-        src_base.copy_(
-            torch.arange(2 * numel, dtype=dtype, device=self.device)
-            + self.rank * 2 * numel
-        )
-        hdl = symm_mem.rendezvous(src_base, group=group_name)
-        c10d.barrier()
-
-        if self.rank == 0:
-            offset = numel // 2
-            dst = torch.empty(numel, dtype=dtype, device=self.device)
-            symm_mem.get(dst, hdl, peer=1, offset=offset)
-            expected = (
-                torch.arange(offset, offset + numel, dtype=dtype, device=self.device)
-                + 2 * numel
-            )
-            torch.testing.assert_close(dst, expected)
-
-            # Filling a sub-region: pass a view; the rest of dst is untouched.
-            larger_dst = torch.full((numel + 1,), -1, dtype=dtype, device=self.device)
-            symm_mem.get(larger_dst[:numel], hdl, peer=1, offset=offset)
-            self.assertEqual(larger_dst[:numel], expected)
-            self.assertEqual(larger_dst[numel], -1)
-
-            noncontig_dst = torch.empty(2 * numel, dtype=dtype, device=self.device)[::2]
-            with self.assertRaisesRegex(ValueError, "contiguous"):
-                symm_mem.get(noncontig_dst, hdl, peer=1)
-
-            with self.assertRaisesRegex(ValueError, "non-negative"):
-                symm_mem.get(
-                    torch.empty(numel, dtype=dtype, device=self.device),
-                    hdl,
-                    peer=1,
-                    offset=-1,
-                )
-
-            with self.assertRaisesRegex(ValueError, "exceeds"):
-                symm_mem.get(
-                    torch.empty(1, dtype=dtype, device=self.device),
-                    hdl,
-                    peer=1,
-                    offset=hdl.buffer_size // dst.element_size(),
-                )
-
-            with self.assertRaisesRegex(ValueError, "invalid peer"):
-                symm_mem.get(
-                    torch.empty(numel, dtype=dtype, device=self.device),
-                    hdl,
-                    peer=hdl.world_size,
-                )
-
-        c10d.barrier()
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
-    )
-    @skip_if_lt_x_gpu(2)
-    @parametrize("experts_per_rank", [1, 2])
-    @parametrize("dim", [0, 1])
-    def test_reduce_scatter_offset(self, experts_per_rank: int, dim: int):
-        """reduce_scatter_offset: each expert gradient is reduced to its
-        destination rank and written to a separate contiguous tensor; the source
-        Grouped GEMM buffer is left unmodified."""
-        symm_mem.set_backend("NCCL")
-        torch.cuda.set_device(self.rank)
-        c10d.all_reduce(torch.ones(1, device=self.device))
-        group_name = c10d.group.WORLD.group_name
-
-        rows, cols = 64, 32
-        n_experts = experts_per_rank * self.world_size
-
-        # dim=1: experts laid out as column blocks [rows, n_experts * cols]
-        # dim=0: experts laid out as row blocks    [n_experts * rows, cols]
-        if dim == 1:
-            buf = symm_mem.empty(
-                rows, n_experts * cols, dtype=torch.float, device=self.device
-            )
-            for i in range(n_experts):
-                buf[:, i * cols : (i + 1) * cols] = float((self.rank + 1) * (i + 1))
-        else:
-            buf = symm_mem.empty(
-                n_experts * rows, cols, dtype=torch.float, device=self.device
-            )
-            for i in range(n_experts):
-                buf[i * rows : (i + 1) * rows, :] = float((self.rank + 1) * (i + 1))
-        symm_mem.rendezvous(buf, group=group_name)
-
-        # Round-robin: expert i is reduced to rank i % world_size.
-        dst_ranks = [i % self.world_size for i in range(n_experts)]
-        n_owned = sum(r == self.rank for r in dst_ranks)
-        out = [
-            torch.zeros(rows, cols, dtype=torch.float, device=self.device)
-            for _ in range(n_owned)
-        ]
-        block_size = cols if dim == 1 else rows
-        offsets = [i * block_size for i in range(1, n_experts + 1)]
-
-        symm_mem.reduce_scatter_offset(
-            buf, out, group_name, dim=dim, offsets=offsets, dst_ranks=dst_ranks
-        )
-        torch.cuda.synchronize()
-
-        # out[j] corresponds to expert (rank + j * world_size); expected value is
-        # (expert_idx + 1) * sum(r + 1 for r in range(world_size)).
-        rank_sum = float(sum(r + 1 for r in range(self.world_size)))
-        for j in range(n_owned):
-            expert_idx = self.rank + j * self.world_size
-            expected = float(expert_idx + 1) * rank_sum
-            self.assertEqual(
-                out[j],
-                torch.full_like(out[j], expected),
-                msg=lambda msg: f"{msg}\nrank {self.rank}: out[{j}] should contain the reduced sum",
-            )
-        # Source buffer must be unmodified.
-        for i in range(n_experts):
-            if dim == 1:
-                src_slice = buf[:, i * cols : (i + 1) * cols]
-            else:
-                src_slice = buf[i * rows : (i + 1) * rows, :]
-            self.assertEqual(
-                src_slice,
-                torch.full(
-                    (rows, cols),
-                    float((self.rank + 1) * (i + 1)),
-                    dtype=torch.float,
-                    device=self.device,
-                ),
-                msg=lambda msg: f"{msg}\nrank {self.rank}: source buffer block {i} should be unchanged",
-            )
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
-    )
-    @skip_if_lt_x_gpu(2)
-    @parametrize("dim", [0, 1])
-    def test_reduce_scatter_offset_uneven(self, dim: int):
-        """reduce_scatter_offset with uneven block sizes: j=0 and j=1 own blocks
-        of different sizes, verifying that out[j] shapes differ across j."""
-        symm_mem.set_backend("NCCL")
-        torch.cuda.set_device(self.rank)
-        c10d.all_reduce(torch.ones(1, device=self.device))
-        group_name = c10d.group.WORLD.group_name
-
-        rows, cols = 64, 32
-        # j=0 blocks have size_0 along dim; j=1 blocks have size_1 along dim.
-        # Arrange blocks as [size_0] * world_size + [size_1] * world_size so
-        # that round-robin assigns each rank exactly one block of each size.
-        size_0, size_1 = 16, 48
-        block_sizes = [size_0] * self.world_size + [size_1] * self.world_size
-        offsets = []
-        total = 0
-        for sz in block_sizes:
-            total += sz
-            offsets.append(total)
-
-        n_experts = 2 * self.world_size
-        if dim == 1:
-            buf = symm_mem.empty(rows, total, dtype=torch.float, device=self.device)
-            pos = 0
-            for i, sz in enumerate(block_sizes):
-                buf[:, pos : pos + sz] = float((self.rank + 1) * (i + 1))
-                pos += sz
-        else:
-            buf = symm_mem.empty(total, cols, dtype=torch.float, device=self.device)
-            pos = 0
-            for i, sz in enumerate(block_sizes):
-                buf[pos : pos + sz, :] = float((self.rank + 1) * (i + 1))
-                pos += sz
-        symm_mem.rendezvous(buf, group=group_name)
-
-        dst_ranks = [i % self.world_size for i in range(n_experts)]
-        if dim == 1:
-            out = [
-                torch.zeros(rows, size_0, dtype=torch.float, device=self.device),
-                torch.zeros(rows, size_1, dtype=torch.float, device=self.device),
-            ]
-        else:
-            out = [
-                torch.zeros(size_0, cols, dtype=torch.float, device=self.device),
-                torch.zeros(size_1, cols, dtype=torch.float, device=self.device),
-            ]
-
-        symm_mem.reduce_scatter_offset(
-            buf, out, group_name, dim=dim, offsets=offsets, dst_ranks=dst_ranks
-        )
-        torch.cuda.synchronize()
-
-        rank_sum = float(sum(r + 1 for r in range(self.world_size)))
-        for j in range(2):
-            expert_idx = self.rank + j * self.world_size
-            expected = float(expert_idx + 1) * rank_sum
-            self.assertEqual(
-                out[j],
-                torch.full_like(out[j], expected),
-                msg=lambda msg: f"{msg}\nrank {self.rank}: out[{j}] should contain the reduced sum",
-            )
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version((2, 28, 0), "nccl_all_to_all_nd requires nccl 2.28")
-    @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "scatter_gather,out_2d,input_3d",
-        [
-            ((1, 0), False, False),
-            ((1, 0), True, False),
-            ((1, 0), False, True),
-            ((1, 0), True, True),
-            ((0, 1), False, False),
-            ((0, 1), True, False),
-            ((0, 1), False, True),
-            ((0, 1), True, True),
-        ],
-    )
-    def test_all_to_all_nd(self, scatter_gather, out_2d, input_3d):
-        """all_to_all_nd: (1,0)/(0,1); 3-D input [rows,G,loc] or [G,loc,cols] where supported."""
-        scatter_dim, gather_dim = scatter_gather
-        symm_mem.set_backend("NCCL")
-        torch.cuda.set_device(self.rank)
-        c10d.all_reduce(torch.ones(1, device=self.device))
-        group_name = c10d.group.WORLD.group_name
-
-        p = self.world_size
-        dtype = torch.float
-
-        if scatter_dim == 1 and gather_dim == 0:
-            local_cols = 4
-            rows = 8
-            if input_3d:
-                buf = symm_mem.empty(
-                    rows, p, local_cols, dtype=dtype, device=self.device
-                ).fill_(float(self.rank))
-            else:
-                buf = symm_mem.empty(
-                    rows, p * local_cols, dtype=dtype, device=self.device
-                ).fill_(float(self.rank))
-            symm_mem.rendezvous(buf, group=group_name)
-            if out_2d:
-                out = torch.empty(p * rows, local_cols, dtype=dtype, device=self.device)
-            else:
-                out = torch.empty(p, rows, local_cols, dtype=dtype, device=self.device)
-            symm_mem.all_to_all_nd(
-                buf,
-                out,
-                scatter_dim=scatter_dim,
-                gather_dim=gather_dim,
-                group=group_name,
-            )
-            torch.cuda.synchronize()
-            out_view = out.view(p, rows, local_cols) if out_2d else out
-            for j in range(p):
-                self.assertEqual(
-                    out_view[j],
-                    torch.full(
-                        (rows, local_cols),
-                        float(j),
-                        dtype=dtype,
-                        device=self.device,
-                    ),
-                    msg=f"rank {self.rank}: out[{j}] should be peer {j}'s column block",
-                )
-        else:
-            local_rows = 4
-            cols = 4
-            if input_3d:
-                buf = symm_mem.empty(
-                    p, local_rows, cols, dtype=dtype, device=self.device
-                ).fill_(float(self.rank))
-            else:
-                buf = symm_mem.empty(
-                    p * local_rows, cols, dtype=dtype, device=self.device
-                ).fill_(float(self.rank))
-            symm_mem.rendezvous(buf, group=group_name)
-            if out_2d:
-                out = torch.empty(local_rows, p * cols, dtype=dtype, device=self.device)
-            else:
-                out = torch.empty(local_rows, p, cols, dtype=dtype, device=self.device)
-            symm_mem.all_to_all_nd(
-                buf,
-                out,
-                scatter_dim=scatter_dim,
-                gather_dim=gather_dim,
-                group=group_name,
-            )
-            torch.cuda.synchronize()
-            out_view = out.view(local_rows, p, cols) if out_2d else out
-            for j in range(p):
-                self.assertEqual(
-                    out_view[:, j, :],
-                    torch.full(
-                        (local_rows, cols),
-                        float(j),
-                        dtype=dtype,
-                        device=self.device,
-                    ),
-                    msg=f"rank {self.rank}: out[:, {j}, :] should be peer {j}'s row block",
-                )
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
     @skip_if_lt_x_gpu(2)
     def test_put_wait_signal(self):
@@ -996,10 +482,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @skip_but_pass_in_sandcastle_if(
-        os.environ.get("NCCL_NVLS_ENABLE", "1") == "0",
-        "NCCL_NVLS_ENABLE=0",
-    )
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version(
         (2, 29), "NCCL Symmetric Memory multicast support from nccl 2.29"

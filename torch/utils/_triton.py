@@ -1,36 +1,6 @@
 import functools
 import hashlib
-import os
 from typing import Any
-
-
-_FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT = "failed to map segment from shared object"
-
-
-def _triton_cache_dir_for_error_message() -> str | None:
-    if triton_cache_dir := os.environ.get("TRITON_CACHE_DIR"):
-        return triton_cache_dir
-
-    try:
-        from triton.runtime.cache import knobs
-
-        return knobs.cache.dir
-    except (AttributeError, ImportError):
-        return None
-
-
-def _raise_triton_cache_load_error(exc: BaseException) -> None:
-    cache_dir = _triton_cache_dir_for_error_message()
-    if "TRITON_CACHE_DIR" in os.environ:
-        cache_dir_msg = f" (TRITON_CACHE_DIR={cache_dir})"
-    else:
-        cache_dir_msg = f" ({cache_dir})" if cache_dir else ""
-    raise ImportError(
-        f"{exc}. This usually means Triton's cache directory{cache_dir_msg} is on "
-        "a filesystem mounted with noexec, so the dynamic loader cannot map "
-        "generated shared objects. Set TRITON_CACHE_DIR to a directory on an "
-        "executable filesystem."
-    ) from exc
 
 
 @functools.cache
@@ -55,30 +25,20 @@ def get_triton_version(fallback: tuple[int, int] = (0, 0)) -> tuple[int, int]:
 
 
 @functools.cache
-def _device_supports_tensor_descriptor() -> bool:
+def _device_supports_tma() -> bool:
     import torch
 
     return (
         torch.cuda.is_available()
         and torch.cuda.get_device_capability() >= (9, 0)
         and not torch.version.hip
-    ) or has_triton_cpu_backend()
-
-
-@functools.cache
-def has_triton_cpu_backend() -> bool:
-    if has_triton_package():
-        import triton
-
-        return "cpu" in triton.backends.backends
-
-    return False
+    )
 
 
 @functools.cache
 def has_triton_experimental_host_tma() -> bool:
     if has_triton_package():
-        if _device_supports_tensor_descriptor():
+        if _device_supports_tma():
             try:
                 from triton.tools.experimental_descriptor import (  # noqa: F401
                     create_1d_tma_descriptor,
@@ -100,7 +60,7 @@ def has_triton_experimental_host_tma() -> bool:
 @functools.cache
 def has_triton_tensor_descriptor_host_tma() -> bool:
     if has_triton_package():
-        if _device_supports_tensor_descriptor():
+        if _device_supports_tma():
             try:
                 from triton.tools.tensor_descriptor import (  # noqa: F401
                     TensorDescriptor,
@@ -124,14 +84,10 @@ def has_triton_tma_device() -> bool:
         import torch
 
         if (
-            (
-                torch.cuda.is_available()
-                and torch.cuda.get_device_capability() >= (9, 0)
-                and not torch.version.hip
-            )
-            or torch.xpu.is_available()
-            or has_triton_cpu_backend()
-        ):
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability() >= (9, 0)
+            and not torch.version.hip
+        ) or torch.xpu.is_available():
             # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
@@ -175,14 +131,10 @@ def has_triton_stable_tma_api() -> bool:
         import torch
 
         if (
-            (
-                torch.cuda.is_available()
-                and torch.cuda.get_device_capability() >= (9, 0)
-                and not torch.version.hip
-            )
-            or torch.xpu.is_available()
-            or has_triton_cpu_backend()
-        ):
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability() >= (9, 0)
+            and not torch.version.hip
+        ) or torch.xpu.is_available():
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
 
@@ -237,31 +189,8 @@ def triton_backend() -> Any:
     from triton.compiler.compiler import make_backend
     from triton.runtime.driver import driver
 
-    try:
-        target = driver.active.get_current_target()
-        return make_backend(target)
-    except (ImportError, OSError) as e:
-        if _FAILED_TO_MAP_SEGMENT_FROM_SHARED_OBJECT in str(e):
-            _raise_triton_cache_load_error(e)
-        raise
-
-
-def _extern_libs_key(backend: Any) -> str:
-    """Return a cache key fragment for extern libs (e.g. libdevice.10.bc).
-
-    These files affect codegen but are not covered by triton_key() (Python
-    sources only) or backend.hash() (ptxas version and arch only).
-    """
-    opts = backend.parse_options({})
-    extern_libs = getattr(opts, "extern_libs", None)
-    if not extern_libs:
-        return ""
-    parts = []
-    for name, path in sorted(extern_libs):
-        if os.path.isfile(path):
-            with open(path, "rb") as f:
-                parts.append(f"{name}-{hashlib.sha256(f.read()).hexdigest()}")
-    return "-".join(parts)
+    target = driver.active.get_current_target()
+    return make_backend(target)
 
 
 @functools.cache

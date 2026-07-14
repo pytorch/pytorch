@@ -1,4 +1,3 @@
-# Owner(s): ["module: xpu"]
 name: xpu
 
 on:
@@ -14,11 +13,6 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
-
-permissions:
-  id-token: write
-  contents: read
-  actions: read
 
 jobs:
 
@@ -38,11 +32,10 @@ jobs:
     needs: get-label-type
     with:
       sync-tag: linux-xpu-n-1-build
-      runner_prefix: "mt-"
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-n-1-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
-      runner: l-x86iavx512-48-384
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
@@ -60,11 +53,10 @@ jobs:
     needs: get-label-type
     with:
       sync-tag: linux-xpu-n-build
-      runner_prefix: "mt-"
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
-      runner: l-x86iavx512-48-384
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 12, runner: "linux.idc.xpu" },
@@ -86,37 +78,13 @@ jobs:
     name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_xpu-test.yml
     needs: linux-noble-xpu-n-py3_10-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.test-matrix }}
-    secrets: inherit
-
-  linux-noble-xpu-n-py3_10-client-build:
-    name: linux-noble-xpu-n-py3.10-client
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      sync-tag: linux-xpu-n-client-build
-      runner_prefix: "mt-"
-      build-environment: linux-noble-xpu-n-py3.10-client
-      docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3-client
-      runner: l-x86iavx512-48-384
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      test-matrix: |
-        { include: [
-          { config: "smoke_xpu", shard: 1, num_shards: 1, runner: "linux.client.xpu" },
-        ]}
-    secrets: inherit
-
-  linux-noble-xpu-n-py3_10-client-test:
-    name: linux-noble-xpu-n-py3.10-client
-    uses: ./.github/workflows/_xpu-test.yml
-    needs: linux-noble-xpu-n-py3_10-client-build
-    with:
-      build-environment: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-client-build.outputs.test-matrix }}
     secrets: inherit
 
   windows-xpu-n-1-build:
@@ -127,7 +95,7 @@ jobs:
       build-environment: win-vs2022-xpu-n-1-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.3'
+      xpu-version: '2025.2'
       vc-year: '2022'
     secrets: inherit
 
@@ -139,6 +107,6 @@ jobs:
       build-environment: win-vs2022-xpu-n-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2026.0'
+      xpu-version: '2025.3'
       vc-year: '2022'
     secrets: inherit

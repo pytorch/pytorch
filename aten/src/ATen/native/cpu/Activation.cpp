@@ -533,7 +533,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [&](scalar_t self_val) -> scalar_t {
-          return std::clamp(float(self_val) + three, zero, six) / six;
+          return std::min(std::max(float(self_val) + three, zero), six) / six;
         },
         [&](vec::Vectorized<scalar_t> self_val) -> vec::Vectorized<scalar_t> {
           auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
@@ -560,7 +560,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
     cpu_kernel_vec(
         iter,
         [&](scalar_t self_val) {
-          return std::clamp(self_val + three, zero, six) / six;
+          return std::min(std::max(self_val + three, zero), six) / six;
         },
         [&](Vec self_val) {
           return vec::minimum(
@@ -642,7 +642,7 @@ void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.common_dtype(), "softshrink_cpu", [&]() {
-    auto lambd_val = static_cast<float>(lambd.to<scalar_t>());
+    auto lambd_val = lambd.to<float>();
     auto lambdVec = Vectorized<float>(lambd_val);
     cpu_kernel_vec(
       iter,
@@ -743,7 +743,7 @@ void hardswish_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
       iter,
       [&](scalar_t x) -> scalar_t {
-        return float(x) * std::clamp(float(x) + three, zero, six) / six;
+        return float(x) * std::min(std::max(float(x) + three, zero), six) / six;
       },
       [&](vec::Vectorized<scalar_t> x_vec) {
         auto [x_vec0, x_vec1] = convert_to_float<scalar_t>(x_vec);
@@ -770,7 +770,7 @@ void hardswish_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
       iter,
       [&](scalar_t x) {
-        return x * std::clamp(x + three, zero, six) / six;
+        return x * std::min(std::max(x + three, zero), six) / six;
       },
       [&](Vec x_vec) {
         return x_vec * vec::minimum(

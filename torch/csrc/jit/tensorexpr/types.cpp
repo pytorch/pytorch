@@ -115,6 +115,7 @@ std::string Dtype::ToCppString() const {
     default:
       throw unsupported_dtype();
   }
+  return "invalid";
 }
 
 } // namespace torch::jit::tensorexpr
@@ -124,13 +125,13 @@ namespace std {
 std::string to_string(const Dtype& dtype) {
   std::ostringstream oss;
   oss << dtype;
-  return std::move(oss).str();
+  return oss.str();
 }
 
 std::string to_string(const ScalarType& type) {
   std::ostringstream oss;
   oss << type;
-  return std::move(oss).str();
+  return oss.str();
 }
 
 } // namespace std

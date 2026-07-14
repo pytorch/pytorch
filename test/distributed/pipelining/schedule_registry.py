@@ -3,6 +3,7 @@
 # This file is a Schedule zoo for testing torch.distributed.pipelining.
 # It includes schedules designed purely for testing purposes
 from collections.abc import Callable
+from typing import Optional
 
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -34,7 +35,7 @@ class ScheduleVShaped(PipelineScheduleMulti):
         self,
         stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Callable | None = None,
+        loss_fn: Optional[Callable] = None,
         scale_grads: bool = True,
     ):
         super().__init__(
@@ -83,7 +84,7 @@ class ScheduleUnbalanced(PipelineScheduleMulti):
         self,
         stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Callable | None = None,
+        loss_fn: Optional[Callable] = None,
         scale_grads: bool = True,
     ):
         super().__init__(
@@ -134,7 +135,7 @@ class ScheduleWithW(PipelineScheduleMulti):
         self,
         stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Callable | None = None,
+        loss_fn: Optional[Callable] = None,
         enable_zero_bubble: bool = True,
         scale_grads: bool = True,
     ):
@@ -196,7 +197,7 @@ class ScheduleWithReorderedB(_PipelineScheduleRuntime):
         self,
         stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Callable | None = None,
+        loss_fn: Optional[Callable] = None,
         scale_grads: bool = True,
     ):
         super().__init__(

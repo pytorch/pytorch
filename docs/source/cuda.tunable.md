@@ -53,14 +53,6 @@
 ```
 
 ```{eval-rst}
-.. autofunction:: set_cublaslt_requested_algo_count
-```
-
-```{eval-rst}
-.. autofunction:: get_cublaslt_requested_algo_count
-```
-
-```{eval-rst}
 .. autofunction:: set_filename
 ```
 

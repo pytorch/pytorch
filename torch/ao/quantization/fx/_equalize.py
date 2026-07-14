@@ -3,7 +3,6 @@ import operator
 import warnings
 from collections import namedtuple
 from typing import Any
-from typing_extensions import TypeIs
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -328,9 +327,7 @@ def node_supports_equalization(node: Node, modules) -> bool:
     return False
 
 
-def is_equalization_observer(
-    observer: nn.Module,
-) -> TypeIs[_InputEqualizationObserver | _WeightEqualizationObserver]:
+def is_equalization_observer(observer: nn.Module) -> bool:
     return isinstance(
         observer, (_InputEqualizationObserver, _WeightEqualizationObserver)
     )
@@ -805,7 +802,7 @@ def convert_eq_obs(
     modified.
 
     Having the equalization observer before the quantization observer would also
-    cause some inconsistencies between the ordering of the quantization and
+    cause some inconsistences between the ordering of the quantization and
     equalization observers.
     For example, a single linear layer would look like:
         x -> InpEqObs1 -> InpQuantObs1 -> linear1 -> OutQuantObs1

@@ -1,7 +1,6 @@
 # Helper to get the id of the currently running job in a GitHub Actions
 # workflow. GitHub does not provide this information to workflow runs, so we
 # need to figure it out based on what they *do* provide.
-from __future__ import annotations
 
 import argparse
 import json
@@ -12,12 +11,9 @@ import sys
 import time
 import urllib
 import urllib.parse
-from typing import Any, TYPE_CHECKING
+from collections.abc import Callable
+from typing import Any, Optional
 from urllib.request import Request, urlopen
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 def parse_json_and_links(conn: Any) -> tuple[Any, dict[str, dict[str, str]]]:
@@ -47,9 +43,9 @@ def parse_json_and_links(conn: Any) -> tuple[Any, dict[str, dict[str, str]]]:
 def fetch_url(
     url: str,
     *,
-    headers: dict[str, str] | None = None,
+    headers: Optional[dict[str, str]] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
-    retries: int | None = 3,
+    retries: Optional[int] = 3,
     backoff_timeout: float = 0.5,
 ) -> Any:
     if headers is None:

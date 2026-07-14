@@ -1,10 +1,8 @@
 #pragma once
 
-#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
-
 #include <iostream>
-#include <optional>
+#include <utility>
 
 // CUDA Graphs utils used by c10 and aten.
 // aten/cuda/CUDAGraphsUtils.cuh adds utils used by aten only.
@@ -69,41 +67,10 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
 
 // Use this version where you're sure a CUDA context exists already.
 inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
-  cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
+  cudaStreamCaptureStatus is_capturing{cudaStreamCaptureStatusNone};
   C10_CUDA_CHECK(
-      cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(), &status));
-  return CaptureStatus(status);
-}
-
-inline CaptureStatus captureStatusMayInitCtx(cudaStream_t stream) {
-  cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
-  C10_CUDA_CHECK(cudaStreamIsCapturing(stream, &status));
-  return CaptureStatus(status);
-}
-
-inline bool isStreamCapturingMayInitCtx(cudaStream_t stream) {
-  return captureStatusMayInitCtx(stream) == CaptureStatus::Active;
-}
-
-inline std::optional<CaptureId_t> currentStreamCaptureIdMayInitCtx() {
-  cudaStreamCaptureStatus status{};
-  CaptureId_t capture_id = 0;
-  C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
-      c10::cuda::getCurrentCUDAStream(), &status, &capture_id));
-  if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) {
-    return capture_id;
-  }
-  return std::nullopt;
-}
-
-inline std::optional<CaptureId_t> captureIdMayInitCtx(cudaStream_t stream) {
-  cudaStreamCaptureStatus status{};
-  CaptureId_t capture_id = 0;
-  C10_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id));
-  if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) {
-    return capture_id;
-  }
-  return std::nullopt;
+      cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(), &is_capturing));
+  return CaptureStatus(is_capturing);
 }
 
 } // namespace c10::cuda

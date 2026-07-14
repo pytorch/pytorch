@@ -5,10 +5,8 @@ import operator
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, cast, TypeVar
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
-
-import sympy
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -16,7 +14,7 @@ from torch.utils._ordered_set import OrderedSet
 from . import ir
 from .exc import SubgraphLoweringException
 from .graph import GraphLowering
-from .ops_handler import OpsHandler, SimpleCSEHandler
+from .ops_handler import SimpleCSEHandler
 from .virtualized import ops, V, WrapperHandler
 
 
@@ -24,8 +22,8 @@ T = TypeVar("T")
 _P = ParamSpec("_P")
 
 OpOverload = torch._ops.OpOverload
-LoweringDict = dict[OpOverload | str, Callable[..., Any]]
-TargetType = Callable[..., Any] | str
+LoweringDict = dict[Union[OpOverload, str], Callable[..., Any]]
+TargetType = Union[Callable[..., Any], str]
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
@@ -34,12 +32,12 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     lowering object. Errors if buffers are created unexpectedly
     """
 
-    graph_outputs: list[ir.IRNode] | None
+    graph_outputs: Optional[list[ir.IRNode]]
     root_graph: GraphLowering
-    _current_op: TargetType | None
+    _current_op: Optional[TargetType]
     # For backwards of buffer_grads with scatters we allow mutations
-    allowed_mutations: OrderedSet[OpOverload] | None
-    additional_lowerings: LoweringDict | None
+    allowed_mutations: Optional[OrderedSet[OpOverload]]
+    additional_lowerings: Optional[LoweringDict]
     buffers: list[ir.Buffer]
     mutated_buffers: OrderedSet[str]
 
@@ -47,8 +45,8 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self,
         gm: torch.fx.GraphModule,
         root_graph_lowering: GraphLowering,
-        allowed_mutations: OrderedSet[OpOverload] | None = None,
-        additional_lowerings: LoweringDict | None = None,
+        allowed_mutations: Optional[OrderedSet[OpOverload]] = None,
+        additional_lowerings: Optional[LoweringDict] = None,
     ) -> None:
         super().__init__(gm)
         self.graph_outputs = None
@@ -116,10 +114,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
             # These takes precedence over the main lowerings
             if self.additional_lowerings is not None:
                 if target in self.additional_lowerings:
-                    if not isinstance(target, OpOverload):
-                        raise AssertionError(
-                            f"expected target to be an OpOverload, got {type(target)}"
-                        )
+                    assert isinstance(target, OpOverload)
                     return self.additional_lowerings[target](*args, **kwargs)
 
             if target not in lowerings:
@@ -129,8 +124,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
             return lowerings[target](*args, **kwargs)
 
     def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]
-        if len(args) != 1:
-            raise AssertionError(f"expected exactly one output arg, got {len(args)}")
+        assert len(args) == 1
         self.graph_outputs = args[0]
 
 
@@ -140,13 +134,10 @@ class InputDescriptor:
     device: torch.device
 
 
-SubgraphInput = InputDescriptor | int | sympy.Basic
-
-
 class TracingOpsHandler(WrapperHandler):
     def __init__(self, tracer: torch.fx.Tracer, num_inputs: int) -> None:
         parent = tracer.create_proxy("placeholder", "ops", (), {})
-        super().__init__(cast(OpsHandler[Any], parent))
+        super().__init__(parent)
         self.tracer = tracer
 
         self.placeholders = [
@@ -164,25 +155,23 @@ class TracingOpsHandler(WrapperHandler):
 
 
 def lower_pointwise_subgraph(
-    subgraph: ir.Subgraph, inputs: list[SubgraphInput]
+    subgraph: ir.Subgraph, inputs: list[InputDescriptor]
 ) -> Callable[_P, Any]:
     # Lower subgraph to ir.Pointwise nodes
-    def fake_inner_fn(loop_idx: int, input_idx: int) -> ir.Expr | ir.TensorBox | None:
+    def fake_inner_fn(
+        loop_idx: int, input_idx: int
+    ) -> Union[ir.Expr, ir.TensorBox, None]:
         return ops.placeholder(input_idx)
 
-    graph_inputs = []
-    for i, desc in enumerate(inputs):
-        if isinstance(desc, InputDescriptor):
-            graph_inputs.append(
-                ir.Pointwise.create(
-                    device=desc.device,
-                    dtype=desc.dtype,
-                    inner_fn=functools.partial(fake_inner_fn, input_idx=i),
-                    ranges=[],
-                )
-            )
-        else:
-            graph_inputs.append(desc)
+    graph_inputs = [
+        ir.Pointwise.create(
+            device=desc.device,
+            dtype=desc.dtype,
+            inner_fn=functools.partial(fake_inner_fn, input_idx=i),
+            ranges=[],
+        )
+        for i, desc in enumerate(inputs)
+    ]
     gm = subgraph.graph_module
     pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
@@ -193,27 +182,16 @@ def lower_pointwise_subgraph(
     tracer = torch.fx.Tracer()
     tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
     trace_ops = SimpleCSEHandler(TracingOpsHandler(tracer, len(inputs)))
-    if pw_subgraph.graph_outputs is None:
-        raise AssertionError("expected pw_subgraph.graph_outputs to be set")
+    assert pw_subgraph.graph_outputs is not None
 
     with V.set_ops_handler(trace_ops):
         output_irs = []
 
         for out_var in pw_subgraph.graph_outputs:
-            if not isinstance(out_var, ir.TensorBox):
-                raise AssertionError(type(out_var))
-            if out_var.get_size() != []:
-                raise AssertionError(
-                    f"expected scalar output (empty size), got {out_var.get_size()}"
-                )
-            if not isinstance(out_var.data, ir.StorageBox):
-                raise AssertionError(
-                    f"expected out_var.data to be a StorageBox, got {type(out_var.data)}"
-                )
-            if not isinstance(out_var.data.data, ir.Pointwise):
-                raise AssertionError(
-                    f"expected out_var.data.data to be a Pointwise, got {type(out_var.data.data)}"
-                )
+            assert isinstance(out_var, ir.TensorBox), type(out_var)
+            assert out_var.get_size() == []
+            assert isinstance(out_var.data, ir.StorageBox)
+            assert isinstance(out_var.data.data, ir.Pointwise)
 
             idx = ()
             ir_out = out_var.data.data.inner_fn(idx)

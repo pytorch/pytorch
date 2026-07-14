@@ -11,7 +11,7 @@ from collections.abc import Callable, KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
-from typing import Any, get_args, get_origin, Literal, TypeVar, Union
+from typing import Any, get_args, get_origin, Literal, Optional, TypeVar, Union
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -62,7 +62,7 @@ class DummyPass(CustomGraphPass):
     def __call__(self, graph: torch.fx.graph.Graph) -> None:
         return None
 
-    def uuid(self) -> Any | None:
+    def uuid(self) -> Optional[Any]:
         return None
 
 
@@ -76,7 +76,7 @@ class DummyPartitionerFn(CustomPartitionerFn):
     ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
         return min_cut_rematerialization_partition(gm, joint_inputs, **kwargs)
 
-    def uuid(self) -> Any | None:
+    def uuid(self) -> Optional[Any]:
         return None
 
 
@@ -96,7 +96,7 @@ class TypeExemplars:
     }
 
     @staticmethod
-    def example(t: type[T]) -> T | None:
+    def example(t: type[T]) -> Optional[T]:
         """
         Return an example of a class.
         """
@@ -179,18 +179,8 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
             "group_linear": {"require_fbgemm": True},
         },
     ],
-    "autoheuristic_collect": [
-        {"pad_mm": True, "mixed_mm": True},
-        {"pad_mm": True, "mixed_mm": False},
-        {"pad_mm": False, "mixed_mm": True},
-        {"pad_mm": False, "mixed_mm": False},
-    ],
-    "autoheuristic_use": [
-        {"pad_mm": True, "mixed_mm": True},
-        {"pad_mm": True, "mixed_mm": False},
-        {"pad_mm": False, "mixed_mm": True},
-        {"pad_mm": False, "mixed_mm": False},
-    ],
+    "autoheuristic_collect": ["pad_mm", "mixed_mm"],
+    "autoheuristic_use": ["pad_mm", "mixed_mm"],
     "traceable_tensor_subclasses": [OrderedSet()],
     "nontraceable_tensor_subclasses": [OrderedSet()],
 }
@@ -235,9 +225,10 @@ class SamplingMethod(Enum):
                 random.choice(characters) for _ in range(random.randint(1, 20))
             )
         elif is_type(type_hint, list):
-            elem_type = (
-                get_args(type_hint)
-                or ([type(default[0])] if default and len(default) else [type(None)])
+            elem_type = getattr(
+                type_hint,
+                "__args__",
+                [type(default[0])] if default and len(default) else [type(None)],
             )[0]
             new_default = default[0] if default and len(default) > 0 else None
             return [
@@ -248,9 +239,10 @@ class SamplingMethod(Enum):
             ]
         elif is_type(type_hint, set):  # noqa: set_linter
             indexable = list(default)
-            elem_type = (
-                get_args(type_hint)
-                or ([type(indexable[0])] if default and len(default) else [type(None)])
+            elem_type = getattr(
+                type_hint,
+                "__args__",
+                [type(indexable[0])] if default and len(default) else [type(None)],
             )[0]
             new_default = indexable[0] if default and len(default) > 0 else None
             return {  # noqa: set_linter
@@ -261,9 +253,10 @@ class SamplingMethod(Enum):
             }
         elif is_type(type_hint, OrderedSet):
             indexable = list(default)
-            elem_type = (
-                get_args(type_hint)
-                or ([type(indexable[0])] if default and len(default) else [type(None)])
+            elem_type = getattr(
+                type_hint,
+                "__args__",
+                [type(indexable[0])] if default and len(default) else [type(None)],
             )[0]
             new_default = indexable[0] if default and len(default) > 0 else None
             return OrderedSet(
@@ -275,10 +268,12 @@ class SamplingMethod(Enum):
                 ]
             )
         elif is_type(type_hint, dict):
-            key_type, value_type = get_args(type_hint) or (
-                tuple(map(type, next(iter(default.items()))))
+            key_type, value_type = getattr(
+                type_hint,
+                "__args__",
+                map(type, next(iter(default.items())))
                 if (default is not None and len(default))
-                else (type(None), type(None))
+                else (type(None), type(None)),
             )
             if default is not None and len(default.items()) > 0:
                 default_key, default_val = next(iter(default.items()))
@@ -294,14 +289,15 @@ class SamplingMethod(Enum):
             }
         elif is_type(type_hint, Union) or is_type(type_hint, types.UnionType):
             # do whatever is not the type of default
-            union_args = get_args(type_hint)
-            if len(union_args) <= 1:
-                raise ValueError("Union type with no args")
+            try:
+                assert len(type_hint.__args__) > 1
+            except AttributeError as err:
+                raise ValueError("Union type with no args") from err
             if random_sample:
-                new_type = random.choice(union_args)
+                new_type = random.choice(type_hint.__args__)
             else:
                 new_type = random.choice(
-                    [t for t in union_args if t is not type(default)]
+                    [t for t in type_hint.__args__ if t is not type(default)]
                 )
             try:
                 new_default = new_type()
@@ -313,7 +309,11 @@ class SamplingMethod(Enum):
                 random_sample, field_name, new_type, new_default
             )
         elif is_type(type_hint, tuple):
-            args = get_args(type_hint) or tuple(map(type, default))
+            args = getattr(
+                type_hint,
+                "__args__",
+                tuple(map(type, default)),
+            )
             zipped = zip(args, default)
             return tuple(
                 map(  # noqa: C417
@@ -324,22 +324,22 @@ class SamplingMethod(Enum):
                 )
             )
         elif is_type(type_hint, Literal):
-            literal_args = get_args(type_hint)
-            if not literal_args:
-                raise ValueError("Literal type with no args")
-            if random_sample:
-                return random.choice(literal_args)
-            else:
-                choices = [t for t in literal_args if t != default]
-                if choices:
-                    return random.choice(choices)
+            try:
+                if random_sample:
+                    return random.choice(type_hint.__args__)
                 else:
-                    return default
+                    choices = [t for t in type_hint.__args__ if t != default]
+                    if choices:
+                        return random.choice(choices)
+                    else:
+                        return default
+            except AttributeError as err:
+                raise ValueError("Literal type with no args") from err
         elif is_optional_type(type_hint):
-            optional_args = get_args(type_hint)
-            if not optional_args:
-                raise ValueError("Optional type with no args")
-            elem_type = optional_args[0]
+            try:
+                elem_type = type_hint.__args__[0]
+            except AttributeError as err:
+                raise ValueError("Optional type with no args") from err
             if random_sample:
                 return random.choice(
                     [
@@ -359,10 +359,10 @@ class SamplingMethod(Enum):
         elif type_hint is type(None):
             return None
         elif is_callable_type(type_hint):
-            callable_args = get_args(type_hint)
-            if not callable_args:
-                raise ValueError("Callable type with no args")
-            return_type = callable_args[-1]
+            try:
+                return_type = list(type_hint.__args__)[-1]
+            except AttributeError as err:
+                raise ValueError("Callable type with no args") from err
 
             @wraps(lambda *args, **kwargs: None)
             def dummy_function(*args, **kwargs):  # type: ignore[no-untyped-def]
@@ -435,7 +435,7 @@ class ResultType:
         combo = tuple(sorted(combo))
         self._vals[combo] = status
 
-    def lookup(self, combo: ComboType) -> Status | None:
+    def lookup(self, combo: ComboType) -> Optional[Status]:
         combo = tuple(sorted(combo))
         return self._vals.get(combo, None)
 
@@ -491,6 +491,8 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
         "reorder_for_compute_comm_overlap": DEFAULT,  # FSDP
         "enabled_metric_tables": DEFAULT,  # Typing
+        "triton.debug_sync_graph": DEFAULT,  # Known Failure
+        "triton.debug_sync_kernel": DEFAULT,  # Known Failure
         "profile_bandwidth_regex": DEFAULT,  # Known Failure
         "disable_cpp_codegen": DEFAULT,  # Known Failure
         "trace.save_real_tensors": DEFAULT,  # Known Failure
@@ -507,7 +509,6 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "pre_grad_custom_pass": DEFAULT,  # Typing
         "custom_partitioner_fn": DEFAULT,  # Typing
         "inductor_choices_class": DEFAULT,  # Typing
-        "cudagraph_policy": DEFAULT,  # Typing
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
@@ -573,6 +574,8 @@ class ConfigFuzzer:
     ```
 
     The list of known failures on inductor config are:
+    cpp_wrapper, triton_debug_sync_graph
+    cpp_wrapper, triton_debug_sync_kernel
     cpp_wrapper, disable_cpp_codegen
     combo_kernels, benchmark_combo_kernel, profile_bandwidth, profile_bandwidth_regex
     trace.enabled, trace.save_real_tensors
@@ -586,7 +589,7 @@ class ConfigFuzzer:
         config_module: ConfigModule,
         test_model_fn_factory: FactoryType,
         seed: int,
-        default: ConfigType | None = None,
+        default: Optional[ConfigType] = None,
         sm: SamplingMethod = SamplingMethod.TOGGLE,
         test_timeout: int = 3600,
     ):
@@ -596,7 +599,7 @@ class ConfigFuzzer:
             test_model_fn_factory: Function that returns a test model, which runs and returns True if successful, or
               the outputs if they should be compared with eager
             seed: Randomness seed.
-            default: Default values for the config. Inductor has preset based on known failures.
+            default: Default values for the config. Inductor has preset based on know failures.
             sm: How type value samples are generated, default TOGGLE.
             test_timeout: max time a test can take.
         """
@@ -619,7 +622,7 @@ class ConfigFuzzer:
     def __repr__(self) -> str:
         return (
             f"ConfigFuzzer(config_module={self.config_module}, "
-            f"test_model_fn_factory={self.test_model_fn_factory}, seed={self.seed}, default={self.default})"
+            f"test_model_fn_factor={self.test_model_fn_factory}, seed={self.seed}, default={self.default})"
         )
 
     def _set_config(self, field_name: str, value: Any) -> None:
@@ -716,7 +719,7 @@ class ConfigFuzzer:
             self.results = state["results"]
             self.detailed_results = state.get("detailed_results", {})
 
-    def timeout_handler(self, signum: int, frame: FrameType | None) -> None:
+    def timeout_handler(self, signum: int, frame: Optional[FrameType]) -> None:
         raise TimeoutError("Test execution timed out")
 
     def test_config(self, results: ResultType, config: ConfigType) -> Status:
@@ -746,7 +749,7 @@ class ConfigFuzzer:
             message: str,
             return_status: Status,
             print_traceback: bool,
-            exc: Exception | None,
+            exc: Optional[Exception],
         ) -> Status:
             signal.signal(signal.SIGALRM, original_handler)
             print(f"{message} with config combination:")
@@ -840,12 +843,12 @@ class ConfigFuzzer:
 
     def _bisect_failing_config(
         self, results: ResultType, failing_config: ConfigType
-    ) -> ConfigType | None:
+    ) -> Optional[ConfigType]:
         return self._bisect_failing_config_helper(results, list(failing_config.items()))
 
     def _bisect_failing_config_helper(
         self, results: ResultType, failing_config: list[tuple[str, Any]]
-    ) -> ConfigType | None:
+    ) -> Optional[ConfigType]:
         """
         Bisect a failing configuration to find minimal set of configs that cause failure.
 
@@ -905,10 +908,8 @@ def visualize_results(
     Creates an HTML document representing the results of running the fuzzer with fuzz_n_tuple, with n = 2.
     """
     # TODO support more dimensions
-    if n != 2:
-        raise AssertionError(f"expected n == 2, got {n}")
-    if len(results) <= 0:
-        raise AssertionError("expected non-empty results")
+    assert n == 2
+    assert len(results) > 0
 
     input_set: OrderedSet[str] = OrderedSet({})
     for key in results.keys():  # noqa: SIM118

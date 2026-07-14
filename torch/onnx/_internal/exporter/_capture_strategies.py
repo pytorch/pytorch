@@ -57,25 +57,6 @@ def _patch_dynamo_unsupported_functions():
         torch.jit.isinstance = jit_isinstance
 
 
-@contextlib.contextmanager
-def _patch_dynamic_shape_rnn_decompositions(dynamic_shapes):
-    if not dynamic_shapes:
-        yield
-        return
-
-    # Import lazily to avoid loading decomposition registrations on torch.onnx import.
-    from torch.export._patches import (
-        register_gru_while_loop_decomposition,
-        register_lstm_while_loop_decomposition,
-    )
-
-    with (
-        register_lstm_while_loop_decomposition(),
-        register_gru_while_loop_decomposition(),
-    ):
-        yield
-
-
 @dataclasses.dataclass
 class Result:
     exported_program: torch.export.ExportedProgram | None
@@ -176,7 +157,6 @@ class TorchExportStrictStrategy(CaptureStrategy):
     ) -> torch.export.ExportedProgram:
         with (
             _patch_dynamo_unsupported_functions(),
-            _patch_dynamic_shape_rnn_decompositions(dynamic_shapes),
             # Support the dynamism with 0/1 input dim
             torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
         ):
@@ -232,7 +212,6 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
         with (
-            _patch_dynamic_shape_rnn_decompositions(dynamic_shapes),
             # Support the dynamism with 0/1 input dim
             torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
         ):

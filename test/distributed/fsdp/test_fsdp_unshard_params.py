@@ -3,8 +3,7 @@ import contextlib
 import itertools
 import math
 import sys
-import unittest
-from typing import Any
+from typing import Any, Optional, Union
 
 import torch
 import torch.distributed.fsdp._traversal_utils as traversal_utils
@@ -30,11 +29,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
 device_type = torch.device(get_devtype())
@@ -72,8 +67,8 @@ class TestUnshardParamsBase(FSDPTestContinuous):
         offloading_params = model.cpu_offload.offload_params
 
         # Assumes depth-first `.parameters()`
-        outer_param: FlatParameter | nn.Parameter = next(model.parameters())
-        inner_param: FlatParameter | nn.Parameter = next(model[0].parameters())
+        outer_param: Union[FlatParameter, nn.Parameter] = next(model.parameters())
+        inner_param: Union[FlatParameter, nn.Parameter] = next(model[0].parameters())
         param_to_check = outer_param if check_outer else inner_param
 
         # Write a known value to all elements of the *sharded* parameter or
@@ -123,7 +118,7 @@ class TestUnshardParamsBase(FSDPTestContinuous):
         rank0_only: bool,
         offload_to_cpu: bool,
         cpu_offload: CPUOffload,
-        mixed_precision: MixedPrecision | None,
+        mixed_precision: Optional[MixedPrecision],
         use_orig_params: bool,
     ):
         local_model = NestedWrappedModule.init(
@@ -260,7 +255,6 @@ class TestUnshardParams(TestUnshardParamsBase):
         else:  # wrote to padding
             self.assertEqual(self.rank + 2, flat_param[0])
 
-    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/159348")
     @skip_if_lt_x_gpu(2)
     def test_unshard_params_respects_reshard(self):
         """
@@ -286,7 +280,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         self,
         rank0_only: bool,
         offload_to_cpu: bool,
-        mixed_precision: MixedPrecision | None,
+        mixed_precision: Optional[MixedPrecision],
         use_orig_params: bool,
     ):
         """NOTE: This method depends on FSDP internals."""
@@ -375,7 +369,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         self,
         recurse: bool,
         unshard_outer: bool,
-        mixed_precision: MixedPrecision | None,
+        mixed_precision: Optional[MixedPrecision],
         use_orig_params: bool,
     ):
         """NOTE: This method depends on FSDP internals."""
@@ -499,7 +493,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         def _check_grads(
             ddp_model: DDP,
             fsdp_model: FSDP,
-            old_fsdp_grads: list[torch.Tensor] | None,
+            old_fsdp_grads: Optional[list[torch.Tensor]],
         ):
             """
             Checks that writes to the FSDP parameters' gradients persist or do
@@ -519,13 +513,11 @@ class TestUnshardParams(TestUnshardParamsBase):
                     fsdp_model.named_parameters(),
                 ):
                     self.assertEqual(n1, clean_tensor_name(n2))
-                    if p1.grad is None:
-                        raise AssertionError("Expected p1.grad to not be None")
+                    assert p1.grad is not None
                     torch.testing.assert_close(p1.grad, p2.grad)
                     # Ensure that the tensor is not all zeros, which would
                     # mean that the multiplication is vacuous
-                    if not (torch.count_nonzero(p2.grad) > 0):
-                        raise AssertionError("Expected nonzero gradient")
+                    assert torch.count_nonzero(p2.grad) > 0
                     p2.grad *= WRITEBACK_FACTOR
             new_fsdp_grads = [
                 param.grad
@@ -582,8 +574,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         )
         with FSDP.summon_full_params(fsdp_model):
             for p1, p2 in zip(ddp_model.module.parameters(), fsdp_model.parameters()):
-                if not torch.all(torch.isclose(p1, p2)):
-                    raise AssertionError("Expected all parameters to be close")
+                assert torch.all(torch.isclose(p1, p2))
 
         # Check calling after backward
         inp = fsdp_model.get_input(torch.device(device_type))
@@ -634,8 +625,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         )
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
             if fsdp_module._handle:
-                if fsdp_module._handle.flat_param.grad is not None:
-                    raise AssertionError("Expected flat_param.grad to be None")
+                assert fsdp_module._handle.flat_param.grad is None
         with FSDP.summon_full_params(fsdp_model, with_grads=True):
             for param in fsdp_model.parameters():
                 self.assertTrue(param.grad is None)

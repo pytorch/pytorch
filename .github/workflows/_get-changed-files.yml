@@ -1,4 +1,3 @@
-# Owner(s): ["module: ci"]
 name: Get Changed Files
 
 on:
@@ -16,7 +15,7 @@ on:
 
 jobs:
   get-changed-files:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       changed-files: ${{ steps.get-files.outputs.changed-files }}
 
@@ -26,7 +25,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -eo pipefail
           # Check if we're in a pull request context
           if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "pull_request_target" ]; then
             echo "Running in PR context"
@@ -39,15 +37,8 @@ jobs:
               echo "all_files input is true, returning all files"
               echo "changed-files=*" >> "$GITHUB_OUTPUT"
             else
-              # Use gh CLI to get changed files in the PR with explicit repo.
-              # pipefail ensures that if gh fails (e.g. 403 rate limit), the
-              # error propagates through the pipe instead of being silently
-              # captured as the file list and injected into downstream lint jobs.
-              if ! CHANGED_FILES=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER/files --paginate --jq '.[] | select(.status != "removed") | .filename' | tr '\n' ' ' | sed 's/ $//'); then
-                echo "Failed to get changed files from GitHub API, falling back to all files"
-                echo "changed-files=*" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
+              # Use gh CLI to get changed files in the PR with explicit repo
+              CHANGED_FILES=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER/files --paginate --jq '.[] | select(.status != "removed") | .filename' | tr '\n' ' ' | sed 's/ $//')
 
               # See https://github.com/pytorch/pytorch/pull/134215#issuecomment-2332128790
               PYI_FILES_TO_ADD=""

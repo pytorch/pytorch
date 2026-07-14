@@ -1,5 +1,7 @@
 import functools
 
+from torch.utils._triton import has_triton
+
 
 @functools.cache
 def has_helion_package() -> bool:
@@ -12,4 +14,4 @@ def has_helion_package() -> bool:
 
 @functools.cache
 def has_helion() -> bool:
-    return has_helion_package()
+    return has_helion_package() and has_triton()

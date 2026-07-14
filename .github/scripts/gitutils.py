@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-from __future__ import annotations
-
 import os
 import re
 import tempfile
@@ -9,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from functools import wraps
-from typing import Any, cast, TypeVar
+from typing import Any, cast, Optional, TypeVar, Union
 
 
 T = TypeVar("T")
@@ -62,7 +60,7 @@ class GitCommit:
     body: str
     author: str
     author_date: datetime
-    commit_date: datetime | None
+    commit_date: Optional[datetime]
 
     def __init__(
         self,
@@ -71,7 +69,7 @@ class GitCommit:
         author_date: datetime,
         title: str,
         body: str,
-        commit_date: datetime | None = None,
+        commit_date: Optional[datetime] = None,
     ) -> None:
         self.commit_hash = commit_hash
         self.author = author
@@ -87,7 +85,7 @@ class GitCommit:
         return item in self.body or item in self.title
 
 
-def parse_fuller_format(lines: str | list[str]) -> GitCommit:
+def parse_fuller_format(lines: Union[str, list[str]]) -> GitCommit:
     """
     Expect commit message generated using `--format=fuller --date=unix` format, i.e.:
         commit <sha1>
@@ -165,7 +163,7 @@ class GitRepo:
         )
         return [x.strip() for x in rc.split("\n") if x.strip()] if len(rc) > 0 else []
 
-    def current_branch(self) -> str | None:
+    def current_branch(self) -> Optional[str]:
         try:
             return self._run_git("symbolic-ref", "--short", "HEAD").strip()
         except RuntimeError:
@@ -178,7 +176,7 @@ class GitRepo:
     def create_branch_and_checkout(self, branch: str) -> None:
         self._run_git("checkout", "-b", branch)
 
-    def fetch(self, ref: str | None = None, branch: str | None = None) -> None:
+    def fetch(self, ref: Optional[str] = None, branch: Optional[str] = None) -> None:
         if branch is None and ref is None:
             self._run_git("fetch", self.remote)
         elif branch is None:
@@ -198,7 +196,7 @@ class GitRepo:
     def get_merge_base(self, from_ref: str, to_ref: str) -> str:
         return self._run_git("merge-base", from_ref, to_ref).strip()
 
-    def patch_id(self, ref: str | list[str]) -> list[tuple[str, str]]:
+    def patch_id(self, ref: Union[str, list[str]]) -> list[tuple[str, str]]:
         is_list = isinstance(ref, list)
         if is_list:
             if len(ref) == 0:
@@ -336,7 +334,7 @@ class GitRepo:
     def amend_commit_message(self, msg: str) -> None:
         self._run_git("commit", "--amend", "-m", msg)
 
-    def diff(self, from_ref: str, to_ref: str | None = None) -> str:
+    def diff(self, from_ref: str, to_ref: Optional[str] = None) -> str:
         if to_ref is None:
             return self._run_git("diff", f"{from_ref}^!")
         return self._run_git("diff", f"{from_ref}..{to_ref}")
@@ -360,12 +358,12 @@ class PeekableIterator(Iterator[str]):
         self._val = val
         self._idx = -1
 
-    def peek(self) -> str | None:
+    def peek(self) -> Optional[str]:
         if self._idx + 1 >= len(self._val):
             return None
         return self._val[self._idx + 1]
 
-    def __iter__(self) -> PeekableIterator:
+    def __iter__(self) -> "PeekableIterator":
         return self
 
     def __next__(self) -> str:
@@ -429,7 +427,7 @@ def is_commit_hash(ref: str) -> bool:
 
 
 def are_ghstack_branches_in_sync(
-    repo: GitRepo, head_ref: str, base_ref: str | None = None
+    repo: GitRepo, head_ref: str, base_ref: Optional[str] = None
 ) -> bool:
     """Checks that diff between base and head is the same as diff between orig and its parent"""
     orig_ref = re.sub(r"/head$", "/orig", head_ref)

@@ -3,8 +3,6 @@ Cli Argparser Utility helpers for CLI tasks.
 
 """
 
-from __future__ import annotations
-
 import argparse
 from abc import ABC, abstractmethod
 
@@ -13,7 +11,7 @@ try:
     from collections.abc import Callable  # Python 3.11+
     from typing import Any, Required, TypedDict
 except ImportError:
-    from collections.abc import Callable  # noqa: TC003
+    from collections.abc import Callable
     from typing import Any, TypedDict
 
     from typing_extensions import Required  # Fallback for Python <3.11

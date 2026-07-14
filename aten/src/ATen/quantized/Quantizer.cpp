@@ -108,12 +108,6 @@ inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer) {
-  TORCH_WARN_ONCE(
-      "torch.quantize_per_tensor, torch.quantize_per_channel and other quantized "
-      "tensor creation functions that produce tensors with dtype torch.quint8, "
-      "torch.qint8, and torch.qint32 are deprecated and will be removed in a "
-      "future PyTorch release. Please see "
-      "https://github.com/pytorch/pytorch/issues/184982 for more information.");
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   auto device = options.device();
   at::Allocator* allocator = nullptr;

@@ -415,10 +415,6 @@ class ndarray:
     def imag(self, value):
         self.tensor.imag = asarray(value).tensor
 
-    @property
-    def flat(self):
-        return self.ravel()
-
     # ctors
     def astype(self, dtype, order="K", casting="unsafe", subok=True, copy=True):
         if order != "K":

@@ -27,7 +27,6 @@ here.
     is_initialized
     memory_stats
     get_device_capability
-    get_device_properties
     empty_cache
     record_memory_history
     snapshot

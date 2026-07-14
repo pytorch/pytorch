@@ -4,7 +4,7 @@ import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import torch
 from torch._inductor.analysis.device_info import DeviceInfo, lookup_device_info
@@ -44,7 +44,7 @@ def parse_list(lst: str) -> list[int]:
 
 
 def register_adapter(
-    aten: str | list[str],
+    aten: Union[str, list[str]],
 ) -> Callable[
     [AdapterType],
     AdapterType,
@@ -144,7 +144,7 @@ def mm_adapter(
     return shapes, {}
 
 
-def _parse_kernel_name(name: str) -> str | None:
+def _parse_kernel_name(name: str) -> Optional[str]:
     """
     parse the name of the kernel from the event name.
     """
@@ -250,20 +250,14 @@ def _estimate_gb(event: dict[str, Any]) -> float:
         add_type_size = _get_size_from_string(event["args"]["Input type"][0])
         M = input_shapes[1][0]
         N = input_shapes[1][1]
-        if input_shapes[1][1] != input_shapes[2][0]:
-            raise AssertionError(
-                f"Shape mismatch for addmm: {input_shapes[1][1]} != {input_shapes[2][0]}"
-            )
+        assert input_shapes[1][1] == input_shapes[2][0]
         K = input_shapes[2][1]
         mul_type_size = _get_size_from_string(event["args"]["Input type"][1])
         return (mm_formula(M, N, K, mul_type_size) + add_in_size * add_type_size) / 1e9
     elif op_name == "mm":
         M = input_shapes[0][0]
         N = input_shapes[0][1]
-        if input_shapes[0][1] != input_shapes[1][0]:
-            raise AssertionError(
-                f"Shape mismatch for mm: {input_shapes[0][1]} != {input_shapes[1][0]}"
-            )
+        assert input_shapes[0][1] == input_shapes[1][0]
         K = input_shapes[1][1]
         type_size = _get_size_from_string(event["args"]["Input type"][0])
         return mm_formula(M, N, K, type_size) / 1e9
@@ -360,26 +354,18 @@ def _augment_trace_helper(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-_dtype_map: dict[str, torch.dtype] = {
+_dtype_map = {
     "float": torch.float,
     "float32": torch.float,
-    "double": torch.double,
-    "float64": torch.double,
     "int": torch.int,
     "int8": torch.int8,
     "int16": torch.int16,
     "int32": torch.int,
     "long": torch.long,
     "long int": torch.long,
-    "signed char": torch.int8,
-    "unsigned char": torch.uint8,
-    "bool": torch.bool,
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
-    "c10::BFloat16": torch.bfloat16,
-    "c10::Half": torch.float16,
-    "c10::complex<float>": torch.complex64,
-    "c10::complex<double>": torch.complex128,
+    "float64": torch.double,
 }
 
 
@@ -399,7 +385,7 @@ KernelNameMap = defaultdict[str, OrderedSet[KernelStats]]
 class Device:
     name: str
     index: int
-    info: DeviceInfo | None
+    info: Optional[DeviceInfo]
     stats: KernelNameMap
 
     def __repr__(self) -> str:
@@ -416,8 +402,8 @@ class JsonProfile:
     def __init__(
         self,
         path: str,
-        benchmark_name: str | None = None,
-        dtype: torch.dtype | str | None = None,
+        benchmark_name: Optional[str] = None,
+        dtype: Optional[Union[torch.dtype, str]] = None,
     ):
         """
         Convenience class for running common operations on chrome/perfetto json traces.
@@ -437,7 +423,7 @@ class JsonProfile:
             self.dtype = _dtype_map.get(dtype)
         self._create_devices()
 
-    def convert_dtype(self, event: dict[str, Any]) -> torch.dtype | None:
+    def convert_dtype(self, event: dict[str, Any]) -> Optional[torch.dtype]:
         """
         Each op has a list of dtypes for each input arg. We need to convert these into a single dtype for flop estimation.
         Issues:
@@ -460,16 +446,8 @@ class JsonProfile:
         input_sizes = event["args"]["Input Dims"]
         input_types = event["args"]["Input type"]
         concrete_inputs = event["args"]["Concrete Inputs"]
-        if len(input_sizes) != len(input_types):
-            raise AssertionError(
-                f"input_sizes and input_types length mismatch: "
-                f"{len(input_sizes)} != {len(input_types)}"
-            )
-        if len(input_types) != len(concrete_inputs):
-            raise AssertionError(
-                f"input_types and concrete_inputs length mismatch: "
-                f"{len(input_types)} != {len(concrete_inputs)}"
-            )
+        assert len(input_sizes) == len(input_types)
+        assert len(input_types) == len(concrete_inputs)
 
         if len(input_sizes) == 0:
             raise RuntimeError("Empty input_sizes and input_types")
@@ -528,20 +506,14 @@ class JsonProfile:
 
             dur = event["dur"]  # us
             if "kernel_flop" in event["args"]:
-                if dur == 0:
-                    raise AssertionError(
-                        "Event duration is 0 for kernel_flop calculation"
-                    )
+                assert dur != 0
                 # 1,000,000us/s * flop / us
                 op_flops = event["args"]["kernel_flop"] / (dur / 1e6)
             else:
                 op_flops = 0
 
             if "kernel_num_gb" in event["args"]:
-                if dur == 0:
-                    raise AssertionError(
-                        "Event duration is 0 for kernel_num_gb calculation"
-                    )
+                assert dur != 0
                 # 1,000,000us/s * gb  = gb/s
                 op_gbps = event["args"]["kernel_num_gb"] / (dur / 1e6)
             else:
@@ -609,8 +581,7 @@ class JsonProfile:
                     bw_count += 1
                 latency += stats.latency
                 ker_count += 1
-            if ker_count == 0:
-                raise AssertionError("ker_count is 0 when computing kernel stats")
+            assert ker_count != 0
             rows[kernel_name] = [
                 str(ker_count),
                 safe_div_format(flops, flops_count),
@@ -643,10 +614,8 @@ class JsonProfile:
             d1_default=["Empty"] * t1_length,
             d2_default=["Empty"] * t2_length,
         ):
-            if row1 is None:
-                raise AssertionError("row1 must not be None in table combination")
-            if row2 is None:
-                raise AssertionError("row2 must not be None in table combination")
+            assert row1 is not None
+            assert row2 is not None
             new_rows[key] = row1 + row2
         return new_headers, new_rows
 
@@ -677,17 +646,12 @@ class JsonProfile:
             )
 
             ret = []
-            if self._devices.keys() != other._devices.keys():
-                raise AssertionError(
-                    f"Device key mismatch: {self._devices.keys()} != {other._devices.keys()}"
-                )
+            assert self._devices.keys() == other._devices.keys()
             for device_idx, t1, t2 in zip_dicts(
                 self_tables, other_tables, d1_default=None, d2_default=None
             ):
-                if t1 is None:
-                    raise AssertionError("t1 must not be None for device comparison")
-                if t2 is None:
-                    raise AssertionError("t2 must not be None for device comparison")
+                assert t1 is not None
+                assert t2 is not None
                 table_headers, table_rows = self._combine_tables(
                     t1, self_name, t2, other_name
                 )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from ..common import (
     DeviceOpOverrides,
     register_device_op_overrides,
@@ -19,9 +21,6 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
 
     def device_guard(self, device_idx: int) -> str:
         return f"torch.xpu._DeviceGuard({device_idx})"
-
-    def current_stream(self) -> str:
-        return "torch.xpu.current_stream()"
 
     def cpp_device_guard(self) -> str:
         return "at::DeviceGuard"
@@ -60,8 +59,8 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
         return "void *"
 
     def cpp_scratch(
-        self, idx: int, workspace: TritonScratchWorkspace, prefix: str | None = None
-    ) -> tuple[list[str], str] | None:
+        self, idx: int, workspace: TritonScratchWorkspace, prefix: Optional[str] = None
+    ) -> Optional[tuple[list[str], str]]:
         return [f"void *global_scratch_{idx} = 0;"], f"global_scratch_{idx}"
 
 

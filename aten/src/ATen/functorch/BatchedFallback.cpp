@@ -16,28 +16,26 @@
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/irange.h>
 
-#include <atomic>
-
 namespace at::functorch {
 
-static constinit std::atomic<bool> kVmapFallbackWarningEnabled{true};
+static bool kVmapFallbackWarningEnabled = true;
 
 bool isVmapFallbackWarningEnabled() {
-  return kVmapFallbackWarningEnabled.load(std::memory_order_relaxed);
+  return kVmapFallbackWarningEnabled;
 }
 
 void setVmapFallbackWarningEnabled(bool enabled) {
-  kVmapFallbackWarningEnabled.store(enabled, std::memory_order_relaxed);
+  kVmapFallbackWarningEnabled = enabled;
 }
 
-static constinit std::atomic<bool> kVmapFallbackEnabled{true};
+static bool kVmapFallbackEnabled = true;
 
 bool isVmapFallbackEnabled() {
-  return kVmapFallbackEnabled.load(std::memory_order_relaxed);
+  return kVmapFallbackEnabled;
 }
 
 void setVmapFallbackEnabled(bool enabled) {
-  kVmapFallbackEnabled.store(enabled, std::memory_order_relaxed);
+  kVmapFallbackEnabled = enabled;
 }
 
 // Given a linear index, return the actual index.
@@ -414,8 +412,10 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
     return;
   }
 
-  TORCH_INTERNAL_ASSERT(!isInplaceOp(schema), "vmap fallback not supported for in-place ops on nested tensors");
-
+  if (isInplaceOp(schema)) {
+    TORCH_INTERNAL_ASSERT(false, "vmap fallback not supported for in-place ops on nested tensors");
+    return;
+  }
   TORCH_CHECK(!schema.is_mutable() && !schema.hasAnyAliasInfo(),
               "Nested batching rule not implemented for ", schema.operator_name(), "; ",
               "the fallback path doesn't work on out= or view ops.");

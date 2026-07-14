@@ -304,15 +304,13 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
             betas=BETAS,
             eps=EPS,
         )
-        if not (len(o.param_groups) == 2):
-            raise AssertionError(
-                f"Expected 2 ZeRO param groups, but got {len(o.param_groups)}"
-            )
-        if not (len(o.optim.param_groups) == 2):
-            raise AssertionError(
-                "Expected 2 local optimizer param groups, but got "
-                f"{len(o.optim.param_groups)}"
-            )
+        assert len(o.param_groups) == 2, (
+            f"Expected 2 ZeRO param groups, but got {len(o.param_groups)}"
+        )
+        assert len(o.optim.param_groups) == 2, (
+            "Expected 2 local optimizer param groups, but got "
+            f"{len(o.optim.param_groups)}"
+        )
 
     def test_same_dense_param_type(self):
         """Check that ZeroRedundancyOptimizer raises an exception if the input
@@ -724,8 +722,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         LR = 1e-3
         MOMENTUM = 0.99
         REFERENCE_RANK = 0
-        if REFERENCE_RANK not in subgroup_ranks:
-            raise AssertionError("Reference rank must be in the new process group")
+        assert REFERENCE_RANK in subgroup_ranks, (
+            "Reference rank must be in the new process group"
+        )
         loss_fn = torch.nn.L1Loss().to(device)
 
         def check(optimizer):
@@ -813,7 +812,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         elif optimizer_class_str == "SGD":
             optimizer_class = torch.optim.SGD
         else:
-            raise AssertionError(f"Unsupported optimizer class: {optimizer_class_str}")
+            assert 0, f"Unsupported optimizer class: {optimizer_class_str}"
 
         with self.context:
             # Define a base model with a different buffer for each rank
@@ -1034,10 +1033,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 super().__init__()
 
             def join_hook(self, **kwargs):
-                if "zero_optim" not in kwargs:
-                    raise AssertionError("Expected 'zero_optim' in kwargs")
-                if "grads" not in kwargs:
-                    raise AssertionError("Expected 'grads' in kwargs")
+                assert "zero_optim" in kwargs
+                assert "grads" in kwargs
                 zero_optim = kwargs["zero_optim"]
                 grads = kwargs["grads"]
                 return _SetGradsJoinHook(zero_optim, grads)
@@ -1098,8 +1095,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
     def _test_zero_model_parallel(self, parameters_as_bucket_view: bool, device: str):
         # Use two processes each with two GPUs
-        if not (self.rank < 2):
-            raise AssertionError(f"Expected rank < 2, got {self.rank}")
+        assert self.rank < 2
         NUM_EPOCHS = 2
         NUM_INPUTS = 4
         LR = 0.01

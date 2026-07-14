@@ -8,7 +8,7 @@ from collections.abc import Callable
 from enum import Enum
 from inspect import Parameter, Signature, signature
 from types import MethodType
-from typing import Any
+from typing import Any, Union
 
 import torch
 import torch.fx as fx
@@ -232,27 +232,6 @@ def _insert_stage_symbolic_backward(
     return g
 
 
-def _move_placeholders_to_front(graph: fx.Graph):
-    """Ensure all placeholder nodes form a contiguous prefix of the graph.
-    split_module can interleave get_attr nodes with placeholders."""
-    last_ph = None
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            last_ph = node
-    if last_ph is None:
-        return
-    nodes_to_move = []
-    for node in graph.nodes:
-        if node is last_ph:
-            break
-        if node.op != "placeholder":
-            nodes_to_move.append(node)
-    insert_point = last_ph
-    for node in nodes_to_move:
-        insert_point.append(node)
-        insert_point = node
-
-
 class PipeSequential(torch.nn.Sequential):
     @staticmethod
     def from_sequential(sequential_instance: torch.nn.Sequential):
@@ -347,7 +326,7 @@ def _pipe_split():
 
 
 @torch.library.register_fake("pippy::_pipe_split")  # type: ignore[no-redef]
-def _pipe_split():
+def _pipe_split():  # noqa: F811
     return None
 
 
@@ -385,7 +364,7 @@ class MultiUseParameterConfig(Enum):
     REPLICATE = 2
 
 
-MultiUseParamSpec = MultiUseParameterConfig | dict[str, MultiUseParameterConfig]
+MultiUseParamSpec = Union[MultiUseParameterConfig, dict[str, MultiUseParameterConfig]]
 
 
 class DetachExecutor(fx.Interpreter):
@@ -603,7 +582,7 @@ class Pipe(torch.nn.Module):
 
         self.replicated_params: list[dict[str, str]] = [
             use_mapping
-            for use_mapping in params_to_users.values()
+            for _, use_mapping in params_to_users.items()
             if len(use_mapping) > 1
         ]
 
@@ -785,7 +764,6 @@ class Pipe(torch.nn.Module):
 
         for name, submodule in split.named_children():
             if isinstance(submodule, fx.GraphModule):
-                _move_placeholders_to_front(submodule.graph)
                 new_submod = _outline_submodules(submodule.graph)
                 # Replace old submod
                 split.register_module(name, new_submod)

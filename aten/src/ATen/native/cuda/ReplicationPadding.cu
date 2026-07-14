@@ -242,25 +242,19 @@ void replication_pad2d_backward_out_cuda_template(
   const auto padR = paddingSize[1];
   const auto padT = paddingSize[2];
   const auto padB = paddingSize[3];
-  int dimc = 0;
   int dimh = 1;
   int dimw = 2;
 
   int numInputDims = input.dim();
   if (numInputDims == 4) {
-    dimc++;
     dimh++;
     dimw++;
   }
-  const auto ichannel = input.size(dimc);
   const auto iheight = input.size(dimh);
   const auto iwidth = input.size(dimw);
   const auto oheight = iheight + padT + padB;
   const auto owidth  = iwidth + padL + padR;
 
-  TORCH_CHECK(ichannel == gradOutput.size(dimc),
-      "gradOutput channel unexpected. Expected: ", ichannel, ", Got: ",
-      gradOutput.size(dimc));
   TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput.size(dimw));
@@ -429,8 +423,15 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
       "replication_pad1d only supports input tensors with less than 2^63 - 1 elements");
 
   int64_t padL = paddingSize[0];
+  int64_t padR = paddingSize[1];
+  constexpr int64_t planeDim = -2;
+  constexpr int64_t dimw = -1;
 
   int numInputDims = input.ndimension();
+
+  int64_t numPlanes = input.size(planeDim);
+  int64_t inputW = input.size(dimw);
+  int64_t outputW  = output.size(dimw);
 
   if (input.numel() == 0) {
     return;
@@ -485,8 +486,13 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
       "replication_pad1d only supports output tensors with less than 2^63 - 1 elements");
 
   const int64_t padL = paddingSize[0];
+  int64_t dimw = 1;
 
   int64_t numInputDims = input.ndimension();
+  if (numInputDims == 3) {
+    dimw++;
+  }
+  int64_t iwidth = input.size(dimw);
 
   if (gradInput.numel() == 0) {
     return;
@@ -603,7 +609,27 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
   const auto pfront = paddingSize[4];
   // const auto pback = paddingSize[5]; // Ignored here
 
+  int planeDim = 0;
+  int dimd = 1;
+  int dimh = 2;
+  int dimw = 3;
+
   int numInputDims = input.dim();
+
+  if (numInputDims == 5) {
+    planeDim++;
+    dimd++;
+    dimh++;
+    dimw++;
+  }
+
+  const auto numPlanes = input.size(planeDim);
+  const auto inputD = input.size(dimd);
+  const auto inputH = input.size(dimh);
+  const auto inputW = input.size(dimw);
+  const auto outputD = output.size(dimd);
+  const auto outputH = output.size(dimh);
+  const auto outputW = output.size(dimw);
 
   if (input.numel() == 0) {
     return;

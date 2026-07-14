@@ -15,6 +15,6 @@ int main(int argc, char* argv[]) {
   buffer << ifs.rdbuf();
   torch::jit::Module m("TestModule");
 
-  m.define(std::move(buffer).str());
+  m.define(buffer.str());
   m.save(output_file_path);
 }

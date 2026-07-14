@@ -4,8 +4,6 @@
 
 #include <ATen/core/ATen_fwd.h>
 #include <c10/core/Allocator.h>
-#include <c10/core/CachingDeviceAllocator.h>
-#include <c10/core/Storage.h>
 #include <c10/util/Registry.h>
 
 #define MB(x) (x * 1048576UL)
@@ -14,9 +12,10 @@ namespace at::mps {
 
 // this is a public interface to access MPSAllocator.
 // Do not declare methods that would depend on MPS or Metal frameworks.
-class IMPSAllocator : public c10::DeviceAllocator {
+class IMPSAllocator : public c10::Allocator {
  public:
   // see the comments in MPSAllocator.h for the description of these methods.
+  virtual void emptyCache() const = 0;
   virtual void freeInactiveBuffers() const = 0;
   virtual ssize_t getUnalignedBufferSize(const void* ptr) const = 0;
   virtual IntArrayRef getBufferShape(const void* ptr) const = 0;
@@ -24,6 +23,7 @@ class IMPSAllocator : public c10::DeviceAllocator {
   virtual void setBufferShape(const void* ptr, const IntArrayRef& shape)
       const = 0;
   virtual bool isSharedBuffer(const void* ptr) const = 0;
+  virtual bool isSharedStorageSupported() const = 0;
   virtual c10::DataPtr allocScalarBufferWithValue(void* value, size_t size)
       const = 0;
   virtual std::string formatSize(size_t size) const = 0;
@@ -38,14 +38,6 @@ class IMPSAllocator : public c10::DeviceAllocator {
   virtual size_t getRecommendedMaxMemory() const = 0;
   virtual std::pair<const void*, uint32_t> getSharedBufferPtr(
       const void* ptr) const = 0;
-  // Returns a CPU-device c10::Storage that aliases the host-visible contents
-  // of the MTLBuffer backing `mps_storage`. The returned storage retains the
-  // source MPS storage for its lifetime, so the host pointer remains valid
-  // even after the originating tensor is freed. Raises if `mps_storage` was
-  // not allocated by the MPSAllocator, or if its MTLBuffer is private rather
-  // than shared (unified-memory) storage.
-  virtual c10::Storage getHostAliasStorage(
-      const c10::Storage& mps_storage) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
 };
@@ -69,13 +61,7 @@ TORCH_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 #define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
   C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__)
 
-IMPSAllocator* getIMPSAllocator();
-
-// Returns an allocator suitable for backing CPU `pin_memory=True` storages.
-// Allocations are unified-memory MTLBuffers from the MPS allocator, but the
-// returned DataPtrs are tagged with the CPU device and point at the host-
-// visible alias of the buffer.
-c10::Allocator* getMPSPinnedAllocator();
+IMPSAllocator* getIMPSAllocator(bool sharedAllocator = false);
 
 bool isMPSPinnedPtr(const void* data);
 

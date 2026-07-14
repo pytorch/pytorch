@@ -6,7 +6,7 @@ import typing
 import warnings
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Optional, Union
 
 import torch
 import torch.export._trace
@@ -72,8 +72,8 @@ def _trace_and_get_graph_from_model(model, args):
 
 
 def _create_jit_graph(
-    model: torch.nn.Module | torch.jit.ScriptFunction, args: Sequence[Any]
-) -> tuple[torch.Graph, list["_C.IValue"], Any, torch.ScriptModule | None]:
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
+) -> tuple[torch.Graph, list["_C.IValue"], Any, Optional[torch.ScriptModule]]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         torch_out = None
@@ -226,7 +226,7 @@ def get_dtype_as_int(tensor):
     return _TORCH_DTYPE_TO_ENUM[dtype]
 
 
-# Those operators will be automatically populated to an instance method
+# Those operators will be automatically populated to a instance method
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
 kind_to_standard_operators: dict[str, Callable[..., Any]] = {
@@ -393,7 +393,7 @@ def get_op_overload(node: torch._C.Node):
 class TS2FXGraphConverter:
     def __init__(
         self,
-        ts_graph: torch._C.Graph | torch._C.Block,
+        ts_graph: Union[torch._C.Graph, torch._C.Block],
         name_to_param: dict[str, torch.Tensor],
         name_to_buffer: dict[str, torch.Tensor],
         blocks_to_lifted_attrs: dict[torch._C.Block, set[str]],
@@ -413,7 +413,7 @@ class TS2FXGraphConverter:
 
         # Mapping of TS node name to converted FX node
         self.name_to_node: dict[
-            str, torch.fx.Node | list[torch.fx.Node] | dict[Any, torch.fx.Node]
+            str, Union[torch.fx.Node, list[torch.fx.Node], dict[Any, torch.fx.Node]]
         ] = {}
         # Mapping of TS node name to constant value (int, str, TorchBind obj,
         # tensor constants ...)
@@ -663,7 +663,7 @@ class TS2FXGraphConverter:
         def to_float_tensor(t):
             return t.to(dtype=torch.float).item()
 
-        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]
+        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]  # noqa: C416
         fx_node = self.fx_graph.call_function(
             to_float_tensor,
             tuple(inp_list),
@@ -702,11 +702,11 @@ class TS2FXGraphConverter:
         # special handle python list append: "aten::append.t(t[](a!) self, t(c -> *) el) -> t[](a!)"
 
         # inplace append to the list!! This is kinda crazy, as we are inplace mutating the list
-        # This makes the converter "non-functional", and the result depends on the order of the nodes being converted
-        # In a sense, the converter now becomes a stateful interpreter
+        # This makes the converter "non-functional", and the result depends on the order of the nodes being converter
+        # In a sense, the converter now becomes an stateful interpreter
         warnings.warn(
-            "Converting aten::append.t, which is an inplace mutation of the list. "
-            "This makes the converter non-functional: the result depends on the order of the append nodes being converted!",
+            "Converting aten::append.t, which is a inplace mutation of the list. "
+            "This makes the converter non-functional: the result depends on the order of the append nodes being converter!",
             stacklevel=2,
         )
 
@@ -750,7 +750,7 @@ class TS2FXGraphConverter:
         self.name_to_constant[name] = value
 
     def convert_prim_CallMethod(self, node: torch._C.Node):
-        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]
+        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]  # noqa: C416
         fx_node = self.fx_graph.call_method(
             node.s("name"),
             tuple(inp_list),
@@ -1338,7 +1338,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
 
     def __init__(
         self,
-        ts_graph: torch._C.Graph | torch._C.Block,
+        ts_graph: Union[torch._C.Graph, torch._C.Block],
         name_to_param: dict[str, torch.Tensor],
         name_to_buffer: dict[str, torch.Tensor],
         blocks_to_lifted_attrs: dict[torch._C.Block, set[str]],
@@ -1400,9 +1400,9 @@ class TS2EPConverter:
     # TorchScript model to ExportedProgram converter
     def __init__(
         self,
-        ts_model: torch.jit.ScriptModule | torch.jit.ScriptFunction,
+        ts_model: Union[torch.jit.ScriptModule, torch.jit.ScriptFunction],
         sample_args: tuple[Any, ...],
-        sample_kwargs: dict[str, Any] | None = None,
+        sample_kwargs: Optional[dict[str, Any]] = None,
     ):
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)

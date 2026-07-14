@@ -49,7 +49,6 @@ from torch.testing._internal.distributed.checkpoint_utils import (
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -82,12 +81,12 @@ def assert_state_dict_equal(
             ):
                 self.assertTrue(
                     torch.equal(local_shard_1.tensor, local_shard_2.tensor),
-                    lambda msg: f"{msg}\nKey {key}'s shard does not match",
+                    f"Key {key}'s shard does not match",
                 )
         elif isinstance(value_1, torch.Tensor):
             self.assertTrue(
                 torch.equal(value_1, value_2),
-                lambda msg: f"{msg}\nKey {key}'s tensor does not match",
+                f"Key {key}'s tensor does not match",
             )
 
     return True
@@ -171,7 +170,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     @parametrize("extensions", [None, [Rot13Example()], [ZStandard()]])
@@ -242,7 +241,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         tensor.gather(out=res)
         return res
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_load_with_different_shard_plan(self) -> None:
@@ -354,10 +353,10 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 if dist.get_rank() == 0:
                     self.assertTrue(
                         torch.allclose(store_tensor, load_tensor),
-                        msg=lambda msg: f"{msg}\n{s0} vs {s1}",
+                        msg=f"{s0} vs {s1}",
                     )
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_load_rowwise_to_colwise(self) -> None:
@@ -408,7 +407,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         if dist.get_rank() == 0:
             self.assertTrue(torch.allclose(store_tensor, load_tensor))
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_save_load_bytes(self) -> None:
@@ -427,7 +426,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         self.assertEqual([1], state_dict_to_load["bytes0"])
         self.assertEqual("string", state_dict_to_load["bytes1"])
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_switch_between_sharded_tensor_to_tensor(self) -> None:
@@ -506,11 +505,11 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 if dist.get_rank() == 0:
                     self.assertTrue(
                         torch.allclose(save_dict_sharded, load_dict["sharded"]),
-                        lambda msg: f"{msg}\nsave-spec {save_spec} load-spec {load_spec}",
+                        f"save-spec {save_spec} load-spec {load_spec}",
                     )
                     self.assertTrue(
                         torch.allclose(save_dict["replicated"], load_dict_replicated),
-                        lambda msg: f"{msg}\nsave-spec {save_spec} load-spec {load_spec}",
+                        f"save-spec {save_spec} load-spec {load_spec}",
                     )
 
 
@@ -519,7 +518,7 @@ class TestDistributedStateDictSaveLoadWithCaching(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     @with_temp_dir

@@ -41,7 +41,7 @@ static PyObject* THPVariable_pynew(
           &name))
     return nullptr;
 
-  if (Py_IsNone(grad_fn))
+  if (grad_fn == Py_None)
     grad_fn = nullptr;
 
   if (is_volatile) {
@@ -64,7 +64,7 @@ static PyObject* THPVariable_pynew(
         Py_TYPE(grad_fn)->tp_name);
   }
   Variable var;
-  if (!data || Py_IsNone(data)) {
+  if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
     auto dispatch_key = torch::tensors::get_default_dispatch_key();
@@ -101,7 +101,7 @@ static PyObject* THPVariable_pynew(
     impl::set_name(var, name);
   }
 
-  if (jit::tracer::isTracing() && data && !Py_IsNone(data) &&
+  if (jit::tracer::isTracing() && data && data != Py_None &&
       THPVariable_Check(data)) {
     if (auto* v = jit::tracer::getValueTrace(THPVariable_Unpack(data))) {
       jit::tracer::setValueTrace(var, v);
@@ -155,7 +155,12 @@ static PyTypeObject THPLegacyVariableType = {
 };
 
 void init_legacy_variable(PyObject* module) {
-  if (PyModule_AddType(module, &THPLegacyVariableType) < 0) {
+  if (PyType_Ready(&THPLegacyVariableType) < 0) {
+    throw python_error();
+  }
+  auto obj = (PyObject*)&THPLegacyVariableType;
+  Py_INCREF(obj);
+  if (PyModule_AddObject(module, "_LegacyVariableBase", obj) < 0) {
     throw python_error();
   }
 }

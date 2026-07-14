@@ -4,7 +4,7 @@ import io
 import math
 import weakref
 from collections.abc import Callable, Mapping, MutableMapping
-from typing import Any, cast, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING, Union
 
 import torch
 import torch.cuda._pin_memory_utils as pin_memory_utils
@@ -61,7 +61,7 @@ def _all_gather_sharded_tensor(
         dtype=local_tensor.dtype,
         device=pg_device,
     )
-    dist.all_gather_single(tensor, local_tensor, group=pg)
+    dist.all_gather_into_tensor(tensor, local_tensor, group=pg)
 
     tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
     return tensor
@@ -494,7 +494,7 @@ def _check_state_dict_similarity(
     """
     Given two state_dicts, check if the structures are the same. And
     if a [key, tensor] pair exist in one state_dict there must be
-    a corresponding pair, [key, other_tensor], in the other state_dict,
+    the a corresponding pait, [key, other_tensor], in the other state_dict,
     where tensor and other_tensor have the same size and dtype.
 
     Return the check result.
@@ -532,9 +532,6 @@ def _check_state_dict_similarity(
 class _TensorInfo(NamedTuple):
     size: torch.Size
     dtype: torch.dtype
-
-
-torch.serialization.add_safe_globals([_TensorInfo])
 
 
 def _broadcast_tensors(
@@ -662,7 +659,7 @@ def _broadcast_state_dict(
                 ret[key] = _TensorInfo(value.size(), value.dtype)
 
     broadcast_list = [ret]
-    dist.broadcast_object_list(broadcast_list, src=0, group=pg, weights_only=True)
+    dist.broadcast_object_list(broadcast_list, src=0, group=pg)
     ret = broadcast_list[0]
     # Gather values
     keys = []
@@ -734,7 +731,7 @@ def _distribute_state_dict(
 # These APIs are from torch.distributed.checkpoint.
 # TODO: We should consolidate the code here as some not all modules can depend on
 # DCP.
-PATH_ITEM = str | int
+PATH_ITEM = Union[str, int]
 OBJ_PATH = tuple[PATH_ITEM, ...]
 FLATTEN_MAPPING = dict[str, OBJ_PATH]
 STATE_DICT_TYPE = dict[str, Any]

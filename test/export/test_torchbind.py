@@ -59,7 +59,6 @@ def _assertEqualScriptObject(
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
     def setUp(self):
-        super().setUp()
         init_torchbind_implementations()
 
         test = self
@@ -199,7 +198,7 @@ def forward(self, token, obj_attr, x, n):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
-    return (getitem, add)""",
+    return (getitem, add)""",  # noqa: B950
         )
 
     def test_method_schema(self):
@@ -247,7 +246,7 @@ def forward(self, token, obj_attr, x):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
-    return (getitem, add)""",
+    return (getitem, add)""",  # noqa: B950
         )
 
     @parametrize("pre_dispatch", [True, False])
@@ -282,7 +281,7 @@ def forward(self, token, obj_attr, x):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
-    return (getitem, add)""",
+    return (getitem, add)""",  # noqa: B950
         )
 
     @parametrize("pre_dispatch", [True, False])
@@ -317,7 +316,7 @@ def forward(self, token, x, cc):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
-    return (getitem, add)""",
+    return (getitem, add)""",  # noqa: B950
         )
         # aot_export_function runs the program twice
         # in run_functionalized_fw_and_collect_metadata and create_aot_dispatcher_function
@@ -380,7 +379,7 @@ def forward(self, token, x, cc):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
-    return (getitem, add)""",
+    return (getitem, add)""",  # noqa: B950
         )
 
     @parametrize("pre_dispatch", [True, False])
@@ -465,7 +464,7 @@ def forward(self, x):
     takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
     takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default);  attr = takes_foo_default = None
     add = torch.ops.aten.add.Tensor(x, takes_foo_default_1);  x = takes_foo_default_1 = None
-    return pytree.tree_unflatten((add,), self._out_spec)""",
+    return pytree.tree_unflatten((add,), self._out_spec)""",  # noqa: B950
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
@@ -478,7 +477,7 @@ def forward(self, token, obj_attr, x):
     getitem_2 = with_effects_1[0]
     getitem_3 = with_effects_1[1];  with_effects_1 = None
     add = torch.ops.aten.add.Tensor(x, getitem_3);  x = getitem_3 = None
-    return (getitem_2, add)""",
+    return (getitem_2, add)""",  # noqa: B950
         )
 
     @parametrize("pre_dispatch", [True, False])
@@ -531,7 +530,7 @@ def forward(self, token, obj_attr, x):
     getitem_5 = with_effects_1[0]
     getitem_6 = with_effects_1[1];  with_effects_1 = None
     add_2 = torch.ops.aten.add.Tensor(x, getitem_6);  x = getitem_6 = None
-    return (getitem_5, add_2)""",
+    return (getitem_5, add_2)""",  # noqa: B950
         )
 
     @parametrize("pre_dispatch", [True, False])
@@ -579,7 +578,7 @@ def forward(self, token, obj_attr, x):
     getitem_3 = with_effects_1[0]
     getitem_4 = with_effects_1[1];  with_effects_1 = None
     add_1 = torch.ops.aten.add.Tensor(x, getitem_4);  x = getitem_4 = None
-    return (getitem_3, add_1)""",
+    return (getitem_3, add_1)""",  # noqa: B950
         )
 
     @parametrize("pre_dispatch", [True, False])
@@ -778,7 +777,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
     getitem_8 = with_effects_4[0];  with_effects_4 = None
     add_2 = torch.ops.aten.add.Tensor(getitem_7, 0);  getitem_7 = None
     add_3 = torch.ops.aten.add.Tensor(add_2, x);  add_2 = x = None
-    return (getitem_8, add_3, add_1, tq)""",
+    return (getitem_8, add_3, add_1, tq)""",  # noqa: B950
         )
         self.assertEqual(tq.size(), 2)
         self.assertTrue(tq.pop() is a)
@@ -819,7 +818,7 @@ def forward(self, token, safe_obj):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     sin = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
-    return (getitem, sin)""",
+    return (getitem, sin)""",  # noqa: B950
             )
 
     def test_identifying_torchbind_ops(self):
@@ -1051,7 +1050,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     with_effects_5 = torch.ops.higher_order.with_effects(getitem_8, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_8 = None
     getitem_10 = with_effects_5[0];  with_effects_5 = None
     add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
-    return (getitem_10, sub, add, arg1_1)""",
+    return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
         )
 
     def test_export_inplace_custom_op(self):
@@ -1082,7 +1081,7 @@ def forward(self, tq, x):
 def forward(self, token, tq, x):
     with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.queue_push.default, tq, x);  token = x = None
     getitem = with_effects[0];  with_effects = None
-    return (getitem, tq)""",
+    return (getitem, tq)""",  # noqa: B950
         )
         self.assertExpectedInline(
             str(ep.graph_module.graph).strip(),
@@ -1093,7 +1092,7 @@ graph():
     %x : [num_users=1] = placeholder[target=x]
     %with_effects : [num_users=1] = call_function[target=torch.ops.higher_order.with_effects](args = (%token, _TorchScriptTesting.queue_push.default, %tq, %x), kwargs = {})
     %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%with_effects, 0), kwargs = {})
-    return (getitem, tq)""",
+    return (getitem, tq)""",  # noqa: B950
         )
 
     def test_deepcopy(self):
@@ -1123,7 +1122,6 @@ graph():
 
 class TestCompileTorchbind(TestCase):
     def setUp(self):
-        super().setUp()
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
@@ -1423,7 +1421,7 @@ def forward(self, token, obj, x):
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.call_torchbind, obj, 'get');  getitem = obj = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     add_1 = torch.ops.aten.add.Tensor(add, 3);  add = None
-    return (getitem_2, add_1)""",
+    return (getitem_2, add_1)""",  # noqa: B950
         )
         self.assertEqual(eager_out, compiled_out)
         self.assertEqual(eager_out, ep.module()(test_obj, x))
@@ -1605,7 +1603,6 @@ def forward(self, token, obj, x):
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestRegisterFakeClass(TestCase):
     def setUp(self):
-        super().setUp()
         init_torchbind_implementations()
 
     def tearDown(self):
@@ -1637,7 +1634,7 @@ class TestRegisterFakeClass(TestCase):
                     self.x = x
                     self.y = y
 
-                def __obj_unflatten__(cls, flattend_foo):
+                def __obj_unflatten__(cls, flattend_foo):  # noqa: B902
                     return cls(**dict(flattend_foo))
 
     def test_register_fake_class_valid(self):

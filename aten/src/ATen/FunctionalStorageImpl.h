@@ -2,8 +2,6 @@
 
 #include <ATen/Tensor.h>
 
-#include <tuple>
-#include <type_traits>
 #include <utility>
 
 namespace at::functionalization {
@@ -28,22 +26,8 @@ enum class InverseReturnMode {
     return #TYPE;                             \
   }
 
-template <class T>
-struct tuple_elements_are_owning;
-
-template <class... Ts>
-struct tuple_elements_are_owning<std::tuple<Ts...>>
-    : std::bool_constant<(std::is_same_v<std::decay_t<Ts>, Ts> && ...)> {};
-
-#define FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(...)                \
-  using SerializableTuple = std::tuple<__VA_ARGS__>;                      \
-  static_assert(                                                          \
-      ::at::functionalization::tuple_elements_are_owning<                 \
-          SerializableTuple>::value,                                      \
-      "FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE elements must be "   \
-      "owning value types (no references or cv-qualifiers); a reference " \
-      "element would dangle in to_serializable_tuple() and in the data "  \
-      "member it initializes.")
+#define FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(...) \
+  using SerializableTuple = std::tuple<__VA_ARGS__>
 
 // ViewMeta is a class used by the functionalization pass to navigate between
 // a base tensor and a view tensor.
@@ -55,7 +39,7 @@ struct tuple_elements_are_owning<std::tuple<Ts...>>
 //   FUNCTIONALIZATION_VIEWMETA_NAME(view1_ViewMeta);
 //   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
 //       bool /* reapply_views */,
-//       std::vector<int64_t>);
+//       const std::vector<int64_t>&);
 //
 //   view1_ViewMeta(const SerializableTuple& tpl)
 //       : view1_ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}

@@ -18,7 +18,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ class SpecialArgName(Enum):
     possibly_redundant_memory_format = auto()
 
 
-ArgName = str | SpecialArgName
+ArgName = Union[str, SpecialArgName]
 
 
 # This class shouldn't be created directly; instead, use/create one of the singletons below.

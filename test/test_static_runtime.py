@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import unittest
+from typing import Optional
 
 import numpy as np
 import torch
@@ -11,7 +12,7 @@ from torch.testing._internal.static_module import StaticModule
 
 
 def linear_shim(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor] = None
 ) -> torch.Tensor:
     output = input.matmul(weight.t())
     if bias is not None:
@@ -26,8 +27,7 @@ torch.nn.functional.linear = linear_shim
 class MultiHeadAttentionLayer(nn.Module):
     def __init__(self, hid_dim, n_heads, dropout, device):
         super().__init__()
-        if hid_dim % n_heads != 0:
-            raise AssertionError(f"hid_dim ({hid_dim}) must be divisible by n_heads ({n_heads})")
+        assert hid_dim % n_heads == 0
         self.hid_dim = hid_dim
         self.n_heads = n_heads
         self.head_dim = hid_dim // n_heads
@@ -505,8 +505,7 @@ class TestStaticModule(TestCase):
         tg = torch.jit.script(trivial_graph)
         o_ref = tg(s, s, s)
         torch._C._fuse_to_static_module(tg.graph)
-        if "StaticSubgraph" not in str(tg.graph):
-            raise AssertionError("StaticSubgraph not found in graph")
+        assert "StaticSubgraph" in str(tg.graph)
         o_test = tg(s, s, s)
         torch.testing.assert_close(o_ref, o_test)
 
@@ -543,8 +542,7 @@ class TestStaticModule(TestCase):
         lg = torch.jit.script(loop_graph)
         o_ref = lg(a, b, c)
         torch._C._fuse_to_static_module(lg.graph)
-        if "StaticSubgraph" not in str(lg.graph):
-            raise AssertionError("StaticSubgraph not found in graph")
+        assert "StaticSubgraph" in str(lg.graph)
         o_test = lg(a, b, c)
         torch.testing.assert_close(o_ref, o_test)
 
@@ -556,14 +554,13 @@ class TestStaticModule(TestCase):
         og = torch.jit.script(output_graph)
         o_ref = og(a, b, b, c)
         torch._C._fuse_to_static_module(og.graph)
-        if "StaticSubgraph" not in str(og.graph):
-            raise AssertionError("StaticSubgraph not found in graph")
+        assert "StaticSubgraph" in str(og.graph)
         o_test = og(a, b, b, c)
         for i in o_ref:
             torch.testing.assert_close(o_ref[i], o_test[i])
 
     def test_create_object(self):
-        class Foo:
+        class Foo:  # noqa: B903
             def __init__(self, x: torch.Tensor) -> None:
                 self.x = x
 

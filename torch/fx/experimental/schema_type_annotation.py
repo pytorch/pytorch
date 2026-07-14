@@ -1,17 +1,13 @@
+# mypy: allow-untyped-defs
 import inspect
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.fx
 from torch._jit_internal import boolean_dispatched
 from torch.fx import Transformer
-from torch.fx.graph_module import GraphModule
 from torch.fx.node import Argument, Target
 from torch.fx.operator_schemas import _torchscript_type_to_python_type
-from torch.fx.proxy import Proxy
-
-
-__all__ = ["AnnotateTypesWithSchema"]
 
 
 class AnnotateTypesWithSchema(Transformer):
@@ -35,11 +31,11 @@ class AnnotateTypesWithSchema(Transformer):
 
     def __init__(
         self,
-        module: GraphModule,
+        module: torch.nn.Module,
         annotate_functionals: bool = True,
         annotate_modules: bool = True,
         annotate_get_attrs: bool = True,
-    ) -> None:
+    ):
         super().__init__(module)
         self.annotate_functionals = annotate_functionals
         self.annotate_modules = annotate_modules
@@ -47,7 +43,7 @@ class AnnotateTypesWithSchema(Transformer):
 
     def call_function(
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
-    ) -> Proxy:
+    ):
         python_ret_type = None
         if self.annotate_functionals and target.__module__ == "torch.nn.functional":
             target_for_analysis = target
@@ -79,7 +75,7 @@ class AnnotateTypesWithSchema(Transformer):
 
     def call_module(
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
-    ) -> Proxy:
+    ):
         python_ret_type = None
         if not isinstance(target, str):
             raise AssertionError(f"Expected str target, got {type(target)}")
@@ -96,10 +92,10 @@ class AnnotateTypesWithSchema(Transformer):
 
     def get_attr(
         self,
-        target: Target,
+        target: torch.fx.node.Target,
         args: tuple[Argument, ...],
         kwargs: dict[str, Any],
-    ) -> Proxy:
+    ):
         attr_proxy = super().get_attr(target, args, kwargs)
 
         if self.annotate_get_attrs:
@@ -125,7 +121,7 @@ class AnnotateTypesWithSchema(Transformer):
 
         return attr_proxy
 
-    def _extract_python_return_type(self, target: Target) -> Any | None:
+    def _extract_python_return_type(self, target: Target) -> Optional[Any]:
         """
         Given a Python call target, try to extract the Python return annotation
         if it is available, otherwise return None

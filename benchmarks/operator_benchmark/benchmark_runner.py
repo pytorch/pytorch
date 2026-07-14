@@ -16,7 +16,6 @@ parser = argparse.ArgumentParser(
     description="Run microbenchmarks.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     conflict_handler="resolve",
-    allow_abbrev=False,
 )
 
 

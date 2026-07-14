@@ -3,6 +3,7 @@
 import copy
 import functools
 from contextlib import nullcontext
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -46,7 +47,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         )
         if 16 % self.world_size == 0:
             # TODO: remove this evenness check when FSDP2 supports uneven sharding
-            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361
+            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361  # noqa: B950
             self.run_subtests(
                 {
                     "mlp_dim": [16],
@@ -81,7 +82,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             MLP(mlp_dim),
         )
 
-        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
+        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
             largest_dim = largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
@@ -131,8 +132,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
         # call .state_dict() once and use `sd` directly to reduce cpu overhead
         sd = model.state_dict()
-        if not isinstance(model.weight, DTensor):
-            raise AssertionError(f"Expected DTensor, got {type(model.weight)}")
+        assert isinstance(model.weight, DTensor)
 
         if not mutate_after_state_dict:
             self.assertTrue(
@@ -334,7 +334,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             self.assertIsInstance(
                 param,
                 DTensor,
-                lambda msg: f"{msg}\nExpects parameters to be sharded as DTensors but got {param_name} "
+                f"Expects parameters to be sharded as DTensors but got {param_name} "
                 f"as {type(param)}: {param}",
             )
         old_fill_value = 1

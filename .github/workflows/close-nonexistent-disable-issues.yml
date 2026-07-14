@@ -1,4 +1,3 @@
-# Owner(s): ["module: ci"]
 name: Close nonexistent disable issues
 
 on:
@@ -11,7 +10,7 @@ jobs:
     permissions:
       issues: write
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main

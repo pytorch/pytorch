@@ -105,6 +105,7 @@ class TailLog:
         n = len(log_files)
         self._threadpool = None
         if n > 0:
+            # pyrefly: ignore [bad-assignment]
             self._threadpool = ThreadPoolExecutor(
                 max_workers=n,
                 thread_name_prefix=f"{self.__class__.__qualname__}_{name}",
@@ -152,7 +153,7 @@ class TailLog:
                 f.result()
             except Exception as e:
                 logger.exception(
-                    "error in log tailer for %s%s. %s",
+                    "error in log tailor for %s%s. %s",
                     self._name,
                     local_rank,
                     e.__class__.__qualname__,

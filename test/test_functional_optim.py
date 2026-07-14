@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
+from typing import Optional
 
 import torch
 import torch.distributed
@@ -55,14 +56,14 @@ class MyDummyFnOptimizer:
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
-    def step_param(self, param: Tensor, grad: Tensor | None):
+    def step_param(self, param: Tensor, grad: Optional[Tensor]):
         # call the custom optimizer step_param implementation
         with torch.no_grad():
             raise RuntimeError(
                 "MyDummyFnOptimizer does not support step_param() as of now"
             )
 
-    def step(self, gradients: list[Tensor | None]):
+    def step(self, gradients: list[Optional[Tensor]]):
         # call the custom optimizer step implementation
         with torch.no_grad():
             raise RuntimeError("MyDummyFnOptimizer does not support step() as of now")

@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import os
-import pathlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Union
 
 import torch
 from torch.distributed.checkpoint.stateful import StatefulT
@@ -123,7 +122,7 @@ class BytesStorageMetadata:
     pass
 
 
-STORAGE_TYPES = TensorStorageMetadata | BytesStorageMetadata
+STORAGE_TYPES = Union[TensorStorageMetadata, BytesStorageMetadata]
 STATE_DICT_TYPE = dict[str, StatefulT | Any]
 
 
@@ -184,26 +183,3 @@ class MetadataIndex:
         object.__setattr__(self, "index", index)
         if offset is not None:
             object.__setattr__(self, "offset", torch.Size(offset))
-
-
-# These are transmitted between ranks via the c10d object collectives (which
-# deserialize with weights_only=True by default) during save/load plan exchange.
-# The pathlib types can appear as StorageMeta.checkpoint_id.
-torch.serialization.add_safe_globals(
-    [
-        ChunkStorageMetadata,
-        _MEM_FORMAT_ENCODING,
-        TensorProperties,
-        TensorStorageMetadata,
-        BytesStorageMetadata,
-        StorageMeta,
-        Metadata,
-        MetadataIndex,
-        pathlib.PurePath,
-        pathlib.PurePosixPath,
-        pathlib.PureWindowsPath,
-        pathlib.Path,
-        pathlib.PosixPath,
-        pathlib.WindowsPath,
-    ]
-)

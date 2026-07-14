@@ -14,6 +14,7 @@ from torchgen.api.types import (
     boolT,
     ConstRefCType,
     CType,
+    dimnameListT,
     intArrayRefT,
     iTensorListRefT,
     ListCType,
@@ -128,7 +129,7 @@ def valuetype_type(
 
 # Translation of types occurring in JIT arguments to a C++ argument type.
 # If remove_non_owning_ref_types is set, we'll guarantee that the output CType is not a non-owning reference type.
-# For example, we'll return std::vector<int> instead of IntArrayRef, and at::Tensor instead of const at::Tensor&.
+# For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
 def argumenttype_type(
     t: Type,
@@ -152,13 +153,9 @@ def argumenttype_type(
         if t.name == BaseTy.Tensor:
             if mutable and not local.use_const_ref_for_mutable_tensors():
                 return NamedCType(binds, MutRefCType(BaseCType(tensorT)))
-            elif remove_non_owning_ref_types:
-                return NamedCType(binds, BaseCType(tensorT))
             else:
                 return NamedCType(binds, ConstRefCType(BaseCType(tensorT)))
         elif t.name == BaseTy.Scalar:
-            if remove_non_owning_ref_types:
-                return NamedCType(binds, BaseCType(scalarT))
             return NamedCType(binds, ConstRefCType(BaseCType(scalarT)))
         else:
             raise AssertionError(f"base type should have been value type {t}")
@@ -168,15 +165,11 @@ def argumenttype_type(
                 return NamedCType(
                     binds, MutRefCType(BaseCType(tensorT))
                 )  # TODO: fix this discrepancy
-            elif remove_non_owning_ref_types:
-                return NamedCType(binds, OptionalCType(BaseCType(tensorT)))
             else:
                 return NamedCType(
                     binds, ConstRefCType(OptionalCType(BaseCType(tensorT)))
                 )
         elif str(t.elem) == "Scalar":
-            if remove_non_owning_ref_types:
-                return NamedCType(binds, OptionalCType(BaseCType(scalarT)))
             return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
         elif isinstance(t.elem, ListType) and str(t.elem.elem) == "int":
             return NamedCType(binds, BaseCType(optionalIntArrayRefT))
@@ -212,6 +205,8 @@ def argumenttype_type(
                 return NamedCType(binds, BaseCType(tensorListT))
         elif str(t.elem) == "Scalar":
             return NamedCType(binds, ArrayRefCType(BaseCType(scalarT)))
+        elif str(t.elem) == "Dimname":
+            return NamedCType(binds, BaseCType(dimnameListT))
         elif str(t.elem) == "Tensor?":
             return NamedCType(
                 binds, ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT))))

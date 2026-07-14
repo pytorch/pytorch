@@ -26,7 +26,7 @@ class RoutedDecoderIterDataPipe(IterDataPipe[tuple[str, Any]]):
     Args:
         datapipe: Iterable datapipe that provides pathname and binary stream in tuples
         handlers: Optional user defined decoder handlers. If ``None``, basic and image decoder
-            handlers will be set as default. If multiple handlers are provided, the priority
+            handlers will be set as default. If multiple handles are provided, the priority
             order follows the order of handlers (the first handler has the top priority)
         key_fn: Function for decoder to extract key from pathname to dispatch handlers.
             Default is set to extract file extension from pathname

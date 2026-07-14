@@ -297,7 +297,7 @@ class TestJointOps(TestCase):
                 self.s.z = ["z"]
             p = pickle.dumps(self.s, i)
             dup = pickle.loads(p)
-            self.assertEqual(self.s, dup, lambda msg: f"{msg}\n{self.s} != {dup}")
+            self.assertEqual(self.s, dup, "%s != %s" % (self.s, dup))  # noqa: UP031
             if type(self.s) not in (OrderedSet, frozenset):
                 self.assertEqual(self.s.x, dup.x)
                 self.assertEqual(self.s.z, dup.z)
@@ -837,7 +837,7 @@ class TestBasicOps(TestCase):
             self.assertEqual(
                 self.OrderedSet,
                 copy,
-                lambda msg: f"{msg}\n{self.OrderedSet} != {copy}",
+                "%s != %s" % (self.OrderedSet, copy),  # noqa: UP031
             )
 
     def test_issue_37219(self):

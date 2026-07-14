@@ -54,9 +54,13 @@ class C10_API SymInt {
   // the negative value is -1; i.e., not user controlled)
   SymInt(Unchecked /*unused*/, int64_t d) : data_(d) {}
 
-  SymInt(const SymInt& s) : data_(s.data_) {
+  // TODO: these implementations are not optimal because they allocate a
+  // temporary and then use the move constructor/assignment
+  SymInt(const SymInt& s) : data_(0) {
     if (s.is_heap_allocated()) {
-      c10::raw::intrusive_ptr::incref(s.toSymNodeImplUnowned());
+      *this = SymInt(s.toSymNode());
+    } else {
+      data_ = s.data_;
     }
   }
   SymInt(SymInt&& s) noexcept : data_(s.data_) {
@@ -65,10 +69,10 @@ class C10_API SymInt {
 
   SymInt& operator=(const SymInt& s) {
     if (this != &s) {
-      release_();
-      data_ = s.data_;
       if (s.is_heap_allocated()) {
-        c10::raw::intrusive_ptr::incref(s.toSymNodeImplUnowned());
+        *this = SymInt(s.toSymNode());
+      } else {
+        data_ = s.data_;
       }
     }
     return *this;

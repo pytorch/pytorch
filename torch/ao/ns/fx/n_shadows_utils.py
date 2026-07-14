@@ -97,6 +97,7 @@ class OutputProp:
                 # pyrefly: ignore [unbound-name]
                 node.traced_result = result
 
+            # pyrefly: ignore [unsupported-operation]
             # pyrefly: ignore [unbound-name]
             env[node.name] = result
 
@@ -403,9 +404,10 @@ def create_submodule_from_subgraph(
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)
                         new_arg_placeholder = gm.placeholder(mod_name)  # type: ignore[operator]
+                        # pyrefly: ignore [missing-attribute]
                         cur_args_copy.append(new_arg_placeholder)
                     elif isinstance(arg, (float, int, torch.dtype)):
-                        # pyrefly: ignore [bad-argument-type]
+                        # pyrefly: ignore [missing-attribute]
                         cur_args_copy.append(arg)
                     else:
                         raise AssertionError(f"arg of type {type(arg)} not handled yet")
@@ -1392,7 +1394,8 @@ def print_n_shadows_summary(
     results = []
     for subgraph_data in results_comparison.values():
         mean_all_candidates = [
-            candidate["cmp_mean"] for candidate in subgraph_data["candidates"].values()
+            candidate["cmp_mean"]
+            for candidate_name, candidate in subgraph_data["candidates"].items()
         ]
 
         data_row = [

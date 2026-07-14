@@ -2,22 +2,19 @@
 
 import torch
 import torch.distributed.tensor._ops  # force import all built-in dtensor ops
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh  # noqa: F401
 from torch.distributed.tensor._api import (
     distribute_module,
     distribute_tensor,
     DTensor,
     empty,
     full,
-    linspace,
-    logspace,
     ones,
     rand,
     randn,
     zeros,
 )
 from torch.distributed.tensor.placement_types import (
-    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -43,8 +40,6 @@ __all__ = [
     "ones",
     "empty",
     "full",
-    "linspace",
-    "logspace",
     "rand",
     "randn",
     "zeros",
@@ -68,7 +63,6 @@ torch.serialization.add_safe_globals(
         Partial,
         Replicate,
         Shard,
-        _StridedShard,
     ]
 )
 
@@ -89,14 +83,6 @@ distribute_module.__module__ = "torch.distributed.tensor"
 ones.__module__ = "torch.distributed.tensor"
 empty.__module__ = "torch.distributed.tensor"
 full.__module__ = "torch.distributed.tensor"
-linspace.__module__ = "torch.distributed.tensor"
-logspace.__module__ = "torch.distributed.tensor"
 rand.__module__ = "torch.distributed.tensor"
 randn.__module__ = "torch.distributed.tensor"
 zeros.__module__ = "torch.distributed.tensor"
-
-# Register DTensor dispatch for higher order operators
-from torch._higher_order_ops.print import _register_dtensor_impl
-
-
-_register_dtensor_impl()

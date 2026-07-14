@@ -1,4 +1,3 @@
-# Owner(s): ["oncall: releng"]
 name: Test check_binary
 
 on:

@@ -150,6 +150,8 @@ blocklist = [
     "einsum",
     # Somehow, these are defined in both _C and in functional. Ick!
     "broadcast_tensors",
+    # Manually define named tensor type stubs in __init__.pyi.in
+    "align_tensors",
     "meshgrid",
     "cartesian_prod",
     "block_diag",
@@ -254,12 +256,9 @@ def sig_for_ops(opname: str) -> list[str]:
         ]
     elif name in arithmetic_ops:
         if name.startswith("i"):
-            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`.
-            # `__idiv__` is not a real Python 3 in-place dunder (Python 3 uses `__itruediv__` /
-            # `__ifloordiv__`), so ruff's PYI034 doesn't fire on it and the noqa would be unused.
-            suffix = "" if name == "idiv" else "  # noqa: PYI034"
+            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`
             return [
-                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...{suffix}"
+                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # noqa: PYI034"
             ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in logic_ops:
@@ -273,9 +272,7 @@ def sig_for_ops(opname: str) -> list[str]:
             f"def {opname}(self, other: object) -> _bool: ...",
         ]
     elif name in asymmetric_comparison_ops:
-        return [
-            f"def {opname}(self, other: Tensor | Number | PySymType | _complex) -> Tensor: ..."
-        ]
+        return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     if name in to_py_type_ops:
@@ -999,7 +996,7 @@ def add_docstr_to_hint(docstr: str, hint: str) -> str:
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
-        # pyrefly: ignore [bad-argument-type]
+        # pyrefly: ignore [no-matching-overload]
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
     # attribute or property
@@ -1075,7 +1072,7 @@ def gen_pyi(
                         "dtype: _dtype | None = None",
                         "device: DeviceLikeType | None = None",
                         "copy: _bool | None = None",
-                        "requires_grad: _bool | None = None",
+                        "requires_grad: _bool = False",
                     ],
                     "Tensor",
                 )
@@ -1706,6 +1703,7 @@ def gen_pyi(
                     "Tensor",
                 )
             ],
+            "has_names": [defs("has_names", ["self"], "_bool")],
             "is_contiguous": [
                 defs(
                     "is_contiguous",
@@ -2004,7 +2002,6 @@ def gen_pyi(
             "cfloat",
             "complex128",
             "cdouble",
-            "bcomplex32",
             "quint8",
             "qint8",
             "qint32",

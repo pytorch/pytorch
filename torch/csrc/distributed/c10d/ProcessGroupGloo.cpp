@@ -5,11 +5,10 @@
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
+#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/gloo/GlooDeviceFactory.hpp>
-#include <torch/csrc/distributed/c10d/gloo/ProcessGroupGlooDetail.hpp>
-#include <algorithm>
 #include <chrono>
 #include <exception>
 
@@ -273,7 +272,6 @@ void returnFutureWithOutput(
 }
 } // namespace
 
-// NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
 inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
     const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputTensors) {
@@ -303,7 +301,6 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
     recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
   }
 }
-// NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 ProcessGroupGloo::AsyncWork::AsyncWork(
     std::shared_ptr<gloo::Context> context,
@@ -596,16 +593,54 @@ ProcessGroupGloo::ProcessGroupGloo(
     : Backend(rank, size),
       store_(new GlooStore(store)),
       options_(std::move(options)),
-      c10dStore_(store),
+
       local_id_(process_group_id++) {
   auto& devices = options_->devices;
   if (devices.empty()) {
     TORCH_CHECK(false, "No device(s) specified");
   }
 
-  if (!options_->enable_reconfigure) {
-    connectContexts(rank_, size_, c10dStore_);
-    initialized_ = true;
+  // Create and connect a context for every device.
+  //
+  // Note that the same device can be specified multiple times, either
+  // the same object, or the same logical device as different objects.
+  // Either mode is fine and only has performance implications.
+  //
+  // Using the same object multiple times means all contexts share a
+  // single I/O thread. If you use different objects for the same
+  // logical device they will have independent I/O threads. The latter
+  // option is needed if you have a fast NIC that cannot be saturated
+  // by a single I/O thread.
+  //
+  contexts_.reserve(options_->devices.size());
+  for (const auto i : c10::irange(options_->devices.size())) {
+    auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
+
+#ifdef GLOO_SHARED_STORE
+    auto underlyingStore = store_;
+#else
+    auto& underlyingStore = *store_;
+#endif
+
+    auto store = std::make_shared<::gloo::rendezvous::PrefixStore>(
+        std::to_string(i), underlyingStore);
+
+#ifdef GLOO_SHARED_STORE
+    auto connectStore = store;
+#else
+    auto& connectStore = *store;
+#endif
+
+    context->setTimeout(options_->timeout);
+    try {
+      context->connectFullMesh(connectStore, options_->devices[i]);
+    } catch (const std::runtime_error& e) {
+      auto err = e.what();
+      // TORCH_CHECK to print the cpp stacktrace.
+      auto msg = c10::str("Gloo connectFullMesh failed with ", err);
+      logAndThrow(msg, msg);
+    }
+    contexts_.push_back(std::move(context));
   }
 
   // Every worker thread stores the AsyncWork object it's currently
@@ -646,75 +681,11 @@ ProcessGroupGloo::~ProcessGroupGloo() {
   }
 }
 
-void ProcessGroupGloo::checkInitialized() const {
-  TORCH_CHECK(
-      initialized_ && !contexts_.empty(),
-      "ProcessGroupGloo has not been initialized. "
-      "Call reconfigure() before issuing collectives when "
-      "enable_reconfigure=True.");
-}
-
-void ProcessGroupGloo::connectContexts(
-    int rank,
-    int size,
-    const c10::intrusive_ptr<Store>& store) {
-  std::shared_ptr<::gloo::rendezvous::Store> glooStore =
-      std::make_shared<GlooStore>(store);
-  std::vector<std::shared_ptr<::gloo::Context>> contexts;
-
-  // Create and connect a context for every device.
-  //
-  // Note that the same device can be specified multiple times, either
-  // the same object, or the same logical device as different objects.
-  // Either mode is fine and only has performance implications.
-  //
-  // Using the same object multiple times means all contexts share a
-  // single I/O thread. If you use different objects for the same
-  // logical device they will have independent I/O threads. The latter
-  // option is needed if you have a fast NIC that cannot be saturated
-  // by a single I/O thread.
-  contexts.reserve(options_->devices.size());
-  for (const auto i : c10::irange(options_->devices.size())) {
-    auto context = std::make_shared<::gloo::rendezvous::Context>(rank, size);
-
-#ifdef GLOO_SHARED_STORE
-    auto underlyingStore = glooStore;
-#else
-    auto& underlyingStore = *glooStore;
-#endif
-
-    auto prefixedStore = std::make_shared<::gloo::rendezvous::PrefixStore>(
-        std::to_string(i), underlyingStore);
-
-#ifdef GLOO_SHARED_STORE
-    const auto& connectStore = prefixedStore;
-#else
-    auto& connectStore = *prefixedStore;
-#endif
-
-    context->setTimeout(options_->timeout);
-    try {
-      context->connectFullMesh(connectStore, options_->devices[i]);
-    } catch (const std::runtime_error& e) {
-      auto err = e.what();
-      // TORCH_CHECK to print the cpp stacktrace.
-      auto msg = c10::str("Gloo connectFullMesh failed with ", err);
-      logAndThrow(msg, msg);
-    }
-    contexts.push_back(std::move(context));
-  }
-
-  store_ = std::move(glooStore);
-  contexts_ = std::move(contexts);
-}
-
 uint32_t ProcessGroupGloo::nextTag() {
-  checkInitialized();
   return collectiveCounter_++;
 }
 
 std::shared_ptr<::gloo::Context> ProcessGroupGloo::getContext(uint32_t tag) {
-  checkInitialized();
   return contexts_[tag % contexts_.size()];
 }
 
@@ -754,11 +725,9 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 
 const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
   if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
-    if (defaultRanks_.size() != static_cast<size_t>(size_)) {
-      defaultRanks_.resize(size_);
-      std::iota(defaultRanks_.begin(), defaultRanks_.end(), 0);
-    }
-    return defaultRanks_;
+    static std::vector<uint64_t> globalRanks(size_);
+    std::iota(globalRanks.begin(), globalRanks.end(), 0);
+    return globalRanks;
   }
   return options_->global_ranks_in_group;
 }
@@ -767,11 +736,13 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
     const c10::intrusive_ptr<Store>& store,
     const std::vector<int>& ranks,
     const c10::intrusive_ptr<Backend::Options>& opts) {
-  auto it = std::ranges::find(ranks, rank_);
+  auto it = std::find(ranks.begin(), ranks.end(), rank_);
+  int groupRank;
   if (it == ranks.end()) {
     return nullptr;
+  } else {
+    groupRank = std::distance(ranks.begin(), it);
   }
-  auto groupRank = static_cast<int>(std::distance(ranks.begin(), it));
 
   auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
   if (glooOpts == nullptr) {
@@ -783,7 +754,6 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
 
   // TODO: we need to get rid of globalRanksInGroup eventually.
   std::vector<uint64_t> globalRanksInGroup;
-  globalRanksInGroup.reserve(ranks.size());
   for (auto rank : ranks) {
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
@@ -1071,7 +1041,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce(
 static c10::intrusive_ptr<ProcessGroupGloo::AsyncWork> makeAllreduceCPUWork(
     std::shared_ptr<gloo::Context> context,
     std::vector<at::Tensor>& inputs,
-    ReduceOp reduceOp, // NOLINT(performance-unnecessary-value-param)
+    ReduceOp reduceOp,
     uint32_t tag,
     uint64_t seq,
     std::chrono::milliseconds timeout) {
@@ -1110,7 +1080,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_sparse(
     const AllreduceOptions& opts) {
   // all reduce sparse calls into default allreduce which
   // implemented with all_gathering indices and values
-  // we do this because we do not have a native cuda implementation
+  // we do this we do not have a native cuda implementation
   return allreduce(inputs, opts);
 }
 
@@ -1126,13 +1096,11 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_coalesced(
   // input
   // tensors must have the same device, layout and type.
   assertLayoutMatch(invalidArgument, tensors);
-  // NOLINTNEXTLINE(modernize-use-ranges)
   if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
         return t.options().type_equal(tensors[0].options());
       })) {
     invalidArgument("tensors must all have the same type");
   }
-  // NOLINTNEXTLINE(modernize-use-ranges)
   if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
         return t.device() == tensors[0].device();
       })) {
@@ -1248,7 +1216,6 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
 
  protected:
   template <typename T>
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   void getFunction(gloo::ReduceOptions::Func& fn, const ReduceOp op) {
     fn = toFunction<T>(op);
   }
@@ -1542,24 +1509,23 @@ class LambdaWork : public Work {
 
 } // namespace
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single(
+c10::intrusive_ptr<Work> ProcessGroupGloo::_reduce_scatter_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
   std::vector<at::Tensor> outputTensors = {outputTensor};
   std::vector<at::Tensor> inputTensors = {inputTensor};
-  return reduce_scatter_single_coalesced(outputTensors, inputTensors, opts);
+  return reduce_scatter_tensor_coalesced(outputTensors, inputTensors, opts);
 }
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ReduceScatterOptions& opts) {
-  static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, msg);
-  };
-  assertInputOutputTensorListsSameSize(
-      invalidArgument, outputTensors.size(), inputTensors.size());
+  if (outputTensors.size() != inputTensors.size()) {
+    TORCH_CHECK(
+        false, "requires input/output tensor lists to have the same length");
+  }
   const auto rank = getRank();
   const auto worldSize = getSize();
   std::vector<at::Tensor> buffers;
@@ -1590,7 +1556,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
       });
 }
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::all_gather_single(
+c10::intrusive_ptr<Work> ProcessGroupGloo::_allgather_base(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& opts) {
@@ -1757,15 +1723,25 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
     TORCH_CHECK(false, "ProcessGroupGloo::allgather_coalesced: " + msg);
   };
 
-  assertNonEmptyInputTensorList(invalidArgument, input_list.size());
-  assertAllgatherCoalescedOutputTensorLists(
-      invalidArgument, output_lists, input_list.size(), getSize());
+  if (input_list.empty()) {
+    invalidArgument("requires non-empty input tensor list");
+  }
+
+  if (output_lists.size() != static_cast<size_t>(getSize())) {
+    invalidArgument("output lists should be equal to world size");
+  }
 
   assertSameDevice(invalidArgument, input_list);
 
   // Expect i'th tensor of each list from 'output_lists' match i'th tensor
   // from 'input_list' in type and size.
   for (const auto& output_list : output_lists) {
+    if (output_list.size() != input_list.size()) {
+      invalidArgument(
+          "invalid output size: (expected length " +
+          std::to_string(input_list.size()) + ", got " +
+          std::to_string(output_list.size()) + ")");
+    }
     for (const auto i : c10::irange(output_list.size())) {
       const auto expected = input_list[i].sizes();
       const auto actual = output_list[i].sizes();
@@ -1795,7 +1771,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
   return work;
 }
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::all_gather_single_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_into_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
@@ -1977,13 +1953,26 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
   assertDense(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
-    assertGatherOutputTensorList(invalidArgument, outputs, getSize());
+    if (outputs.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element output list containing a list with "
+         << getSize() << " tensors.";
+      invalidArgument(ss.str());
+    } else if (outputs[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect output list size " << outputs[0].size()
+         << ". Output list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
+    }
 
     const auto& options = inputs[0].options();
     const auto& sizes = inputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, outputs[0], options, sizes);
   } else {
-    assertEmptyOutputTensorList(invalidArgument, outputs);
+    if (!outputs.empty()) {
+      invalidArgument("requires empty output on non-root");
+    }
   }
 
   const auto& device = inputs[0].device();
@@ -2177,12 +2166,25 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::scatter(
   assertDense(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
-    assertScatterInputTensorList(invalidArgument, inputs, getSize());
+    if (inputs.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element input list containing a list with "
+         << getSize() << " tensors";
+      invalidArgument(ss.str());
+    } else if (inputs[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect input list size " << inputs[0].size()
+         << ". Input list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
+    }
     const auto& options = outputs[0].options();
     const auto& sizes = outputs[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, inputs[0], options, sizes);
   } else {
-    assertEmptyInputTensorList(invalidArgument, inputs);
+    if (!inputs.empty()) {
+      invalidArgument("requires empty input on non-root");
+    }
   }
 
   const auto& device = outputs[0].device();
@@ -2232,15 +2234,14 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
     const ReduceScatterOptions& opts) {
   const auto rank = getRank();
   const auto worldSize = getSize();
-  static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, msg);
-  };
 
   TORCH_CHECK(outputs.size() == 1, "reduce_scatter only supports 1 output");
-  assertInputOutputTensorListsSameSize(
-      invalidArgument, outputs.size(), inputs.size());
-  assertInputTensorListSizeEqualsWorldSize(
-      invalidArgument, inputs[0].size(), worldSize);
+  TORCH_CHECK(
+      outputs.size() == inputs.size(),
+      "requires input/output tensor lists to have the same length");
+  TORCH_CHECK(
+      static_cast<int>(inputs[0].size()) == worldSize,
+      "invalid input tensor list size, must be world size");
 
   std::vector<at::Tensor> buffers;
   for (const auto i : c10::irange(worldSize)) {
@@ -2414,7 +2415,7 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
 
 } // namespace
 
-c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
+c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputCounts,
@@ -2463,233 +2464,6 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::all_to_all_single(
   } else {
     invalidArgument(c10::str("unsupported device type ", device.type()));
   }
-  enqueue(work);
-  return work;
-}
-
-namespace {
-
-class AsyncAlltoallListWork : public ProcessGroupGloo::AsyncWork {
- public:
-  AsyncAlltoallListWork(
-      std::shared_ptr<gloo::Context> context,
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      uint32_t tag,
-      uint64_t seq,
-      std::chrono::milliseconds timeout)
-      : ProcessGroupGloo::AsyncWork(
-            std::move(context),
-            {outputTensors},
-            OpType::ALLTOALL,
-            seq,
-            timeout,
-            "gloo:all_to_all",
-            inputTensors),
-        outputTensors(outputTensors),
-        inputTensors(inputTensors),
-        tag(tag) {}
-
-  std::vector<at::Tensor> outputTensors;
-  std::vector<at::Tensor> inputTensors;
-  const uint32_t tag;
-
-  void alltoall(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<at::Tensor>& inputTensors) {
-    const auto scalarType = inputTensors[0].scalar_type();
-    gloo::AlltoallOptions opts(context_);
-    opts.setTag(tag);
-    opts.setTimeout(getTimeout());
-
-    // Flatten input tensors into a single buffer
-    at::Tensor flatInputTensor = flattenDenseTensors(inputTensors);
-    GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
-
-    // Allocate flat output tensor with same total size
-    at::Tensor flatOutputTensor = newLikeFlat(outputTensors);
-    GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
-
-    // Perform the all-to-all operation
-    gloo::alltoall(opts);
-
-    // Unflatten output into individual tensors
-    for (const auto i : c10::irange(outputTensors.size())) {
-      outputTensors[i].copy_(flatOutputTensor[static_cast<int64_t>(i)]);
-    }
-  }
-
-  const std::vector<at::Tensor> getInputTensors() override {
-    return inputTensors;
-  }
-
-  const std::vector<at::Tensor> getOutputTensors() override {
-    return outputTensors;
-  }
-
-  void run() override {
-    alltoall(outputTensors, inputTensors);
-  }
-};
-
-class AsyncAlltoallListCUDAWork : public AsyncAlltoallListWork {
- public:
-  AsyncAlltoallListCUDAWork(
-      const std::shared_ptr<gloo::Context>& context,
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      uint32_t tag,
-      uint64_t seq,
-      std::chrono::milliseconds timeout)
-      : AsyncAlltoallListWork(
-            context,
-            outputTensors,
-            inputTensors,
-            tag,
-            seq,
-            timeout) {
-    initializeStreamsEvents(inputTensors, inputStreams, inputEvents);
-    initializeStreamsEvents(outputTensors, outputStreams, outputEvents);
-
-    // Kick off copy from CUDA tensors to pinned CPU tensors.
-    tmpInputs.reserve(inputTensors.size());
-    c10::OptionalStreamGuard guard;
-    for (const auto i : c10::irange(inputTensors.size())) {
-      guard.reset_stream(inputStreams[i]);
-      tmpInputs.push_back(
-          pinnedLike(inputTensors[i]).copy_(inputTensors[i], true));
-    }
-
-    tmpOutputs.reserve(outputTensors.size());
-    for (const auto i : c10::irange(outputTensors.size())) {
-      guard.reset_stream(outputStreams[i]);
-      tmpOutputs.push_back(pinnedLike(outputTensors[i]));
-    }
-  }
-
-  void run() override {
-    // Synchronize with copy operations.
-    for (const auto i : c10::irange(inputTensors.size())) {
-      inputStreams[i].synchronize();
-    }
-    for (const auto i : c10::irange(outputTensors.size())) {
-      outputStreams[i].synchronize();
-    }
-
-    // Run alltoall on host side tensors.
-    alltoall(tmpOutputs, tmpInputs);
-
-    // Kick off copy back to the CUDA tensors.
-    c10::OptionalStreamGuard guard;
-    for (const auto i : c10::irange(outputTensors.size())) {
-      guard.reset_stream(outputStreams[i]);
-      outputTensors[i].copy_(tmpOutputs[i], /* non_blocking */ true);
-      outputEvents[i].record(outputStreams[i]);
-    }
-  }
-
-  void synchronize() override {
-    // Synchronize with the copy back to CUDA tensors.
-    for (const auto i : c10::irange(outputTensors.size())) {
-      c10::Device device = outputTensors[i].device();
-      outputEvents[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
-    }
-  }
-
-  std::vector<at::Tensor> tmpInputs;
-  std::vector<c10::Stream> inputStreams;
-  std::vector<c10::Event> inputEvents;
-
-  std::vector<at::Tensor> tmpOutputs;
-  std::vector<c10::Stream> outputStreams;
-  std::vector<c10::Event> outputEvents;
-};
-
-} // namespace
-
-c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
-    const AllToAllOptions& opts) {
-  static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::alltoall: " + msg);
-  };
-
-  // Validate input and output tensor lists
-  assertAllToAllTensorListSizes(
-      invalidArgument, outputTensors.size(), inputTensors.size(), getSize());
-
-  assertDense(invalidArgument, inputTensors);
-  assertDense(invalidArgument, outputTensors);
-
-  // Check that all tensors are on the same device
-  assertSameDevice(invalidArgument, inputTensors);
-  assertSameDevice(invalidArgument, outputTensors);
-
-  // Check that all input tensors have the same type and size
-  const auto& options = inputTensors[0].options();
-  const auto& sizes = inputTensors[0].sizes();
-  assertTypeAndSizesMatch(invalidArgument, inputTensors, options, sizes);
-
-  // Check that all output tensors have the same type and size
-  const auto& outputOptions = outputTensors[0].options();
-  const auto& outputSizes = outputTensors[0].sizes();
-  assertTypeAndSizesMatch(
-      invalidArgument, outputTensors, outputOptions, outputSizes);
-
-  // Check input and output tensors have compatible types
-  if (!options.type_equal(outputOptions)) {
-    invalidArgument("input and output tensors must have the same type");
-  }
-
-  // Check input and output tensors have compatible sizes
-  if (sizes != outputSizes) {
-    invalidArgument("input and output tensors must have the same size");
-  }
-
-  // Check device type
-  const auto& device = inputTensors[0].device();
-  TORCH_CHECK(
-      outputTensors[0].device() == device,
-      "input and output tensors must be on the same device");
-
-  switch (device.type()) {
-    case at::kCPU:
-      break;
-    case at::kCUDA:
-      // If the user gave us a CUDA tensor then CUDA must be loaded.
-      TORCH_INTERNAL_ASSERT(at::hasCUDA());
-      break;
-    default:
-      invalidArgument(c10::str("unsupported device type ", device.type()));
-  }
-
-  c10::intrusive_ptr<AsyncAlltoallListWork> work;
-  auto tag = nextTag();
-  auto context = getContext(tag);
-  ++seq_;
-
-  if (device.type() == at::kCPU) {
-    work = c10::make_intrusive<AsyncAlltoallListWork>(
-        std::move(context),
-        outputTensors,
-        inputTensors,
-        tag,
-        seq_,
-        opts.timeout);
-  } else if (device.type() == at::kCUDA) {
-    work = c10::make_intrusive<AsyncAlltoallListCUDAWork>(
-        std::move(context),
-        outputTensors,
-        inputTensors,
-        tag,
-        seq_,
-        opts.timeout);
-  } else {
-    TORCH_CHECK(false, "Invalid backend");
-  }
-
   enqueue(work);
   return work;
 }
@@ -2771,7 +2545,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::recvAnysource(
   // bindings we don't differentiate between ranks and can receive
   // from any other process in the group.
   std::vector<int> srcRanks;
-  srcRanks.reserve(size_);
+  srcRanks.resize(size_);
   for (const auto i : c10::irange(size_)) {
     srcRanks.push_back(i);
   }
@@ -2950,7 +2724,6 @@ void ProcessGroupGloo::monitoredBarrier(
     if (waitAllRanks && rankFailure) {
       std::vector<int> failedRanks;
       for (const auto i : c10::irange(1, size_)) {
-        // NOLINTNEXTLINE(modernize-use-ranges)
         if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
             processedRanks.end()) {
           failedRanks.push_back(i);
@@ -2981,6 +2754,9 @@ void ProcessGroupGloo::monitoredBarrier(
 
   waitLoop(sendWorkMap);
 }
+
+void ProcessGroupGloo::setSequenceNumberForGroup() {
+} // Gloo just starts sequence numbers at 0.
 
 uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
   return seq_;

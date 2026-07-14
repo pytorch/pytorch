@@ -1,14 +1,15 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
 import collections
 import dataclasses
 import enum
 import itertools as it
 import logging
-from typing import Any, cast, Literal, TYPE_CHECKING
+from collections.abc import Iterator
+from typing import Any, cast, Literal, Optional
 
 import torch
+from torch._C import FunctionSchema
+from torch._C._autograd import _ProfilerResult
 from torch._C._profiler import (
     _EventType,
     _ExtraFields_Allocation,
@@ -19,13 +20,6 @@ from torch._C._profiler import (
 )
 from torch._utils import _element_size
 from torch.profiler import _utils
-
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-    from torch._C import FunctionSchema
-    from torch._C._autograd import _ProfilerResult
 
 
 KeyAndID = tuple["Key", int]
@@ -111,7 +105,7 @@ class TensorKey(Key):
     def __repr__(self) -> str:
         return f"id={self.id}: {repr(self.storage):<24} ({self.device})"
 
-    def __lt__(self, other: TensorKey) -> bool:
+    def __lt__(self, other: "TensorKey") -> bool:
         return self._as_sortable < other._as_sortable
 
     @staticmethod
@@ -120,7 +114,7 @@ class TensorKey(Key):
         storage_ptr: int | None,
         allocation_id: int | None,
         device: torch.device,
-    ) -> TensorKey | None:
+    ) -> Optional["TensorKey"]:
         if (
             tensor_id is not None
             and storage_ptr is not None
@@ -130,11 +124,11 @@ class TensorKey(Key):
         return None
 
     @classmethod
-    def from_allocation(cls, alloc: _ExtraFields_Allocation) -> TensorKey | None:
+    def from_allocation(cls, alloc: _ExtraFields_Allocation) -> Optional["TensorKey"]:
         return cls._make(alloc.id, alloc.ptr, alloc.allocation_id, alloc.device)
 
     @classmethod
-    def from_tensor(cls, t: _TensorMetadata | None) -> TensorKey | None:
+    def from_tensor(cls, t: _TensorMetadata | None) -> Optional["TensorKey"]:
         if t is not None:
             return cls._make(t.id, t.storage_data_ptr, t.allocation_id, t.device)
         return None
@@ -426,7 +420,7 @@ class DataFlowEdge:
 
 
 class DataFlowNode:
-    def __init__(self, event: _ProfilerEvent, graph: DataFlowGraph) -> None:
+    def __init__(self, event: _ProfilerEvent, graph: "DataFlowGraph") -> None:
         self._event = event
         self._graph = graph
         self._edges: dict[TensorKey, DataFlowEdge] = self._determine_edges()
@@ -927,7 +921,7 @@ class MemoryProfile:
         snapshot = self._category_snapshot()
 
         # Determine which Tensors might be parameters based on forward pass
-        # data flow. Note that these are only candidates; we filter nodes that
+        # data flow. Note this these are only candidates; we filter nodes that
         # we know are part of the backward pass but that doesn't guarantee that
         # they are part of the forward pass.
         candidate_parameters: set[TensorAndID] = set()
@@ -1216,7 +1210,7 @@ class MemoryProfileTimeline:
         axes.set_title(title)
 
         # Embed the memory timeline image into the HTML file
-        with NamedTemporaryFile("w+b", suffix=".png") as tmpfile:
+        with NamedTemporaryFile("wb", suffix=".png") as tmpfile:
             fig.savefig(tmpfile, format="png")
 
             tmpfile.seek(0, 0)

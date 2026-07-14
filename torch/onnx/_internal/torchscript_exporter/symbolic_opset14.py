@@ -167,7 +167,7 @@ def scaled_dot_product_attention(
     # NOTE: onnx-script has different logic here, because the attribute perms in
     # transpose needs list of ints
     key_shape_builtin = symbolic_helper._get_tensor_rank(key)
-    # pyrefly: ignore [bad-argument-type, no-matching-overload]
+    # pyrefly: ignore [no-matching-overload]
     key_transposed_axes = list(range(key_shape_builtin))
     key_transposed_axes[-1], key_transposed_axes[-2] = (
         key_transposed_axes[-2],

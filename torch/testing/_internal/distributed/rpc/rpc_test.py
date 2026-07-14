@@ -8,7 +8,6 @@ import os
 import sys
 import threading
 import time
-import unittest
 from collections import namedtuple
 from functools import partial
 from threading import Event, Lock
@@ -41,7 +40,6 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
-    IS_LINUX,
     IS_MACOS,
     load_tests,
     skip_but_pass_in_sandcastle_if,
@@ -80,7 +78,7 @@ def udf_with_torch_ops(device=-1, use_record_function=False):
         t = t.sigmoid()
 
 
-# Events (operator invocations) that are expected to be run as part of the above
+# Events (operator invocations) that are expected to be ran as part of the above
 # function.
 EXPECTED_REMOTE_EVENTS = [
     "aten::ones",
@@ -861,7 +859,7 @@ class RpcTestCommon:
         self._run_uneven_workload(f, x)
 
         # worker0 calls this at the end after waiting for RPC responses.
-        # worker1/2 calls this immediately and has some work after it.
+        # worker1/2 calls this immediately and has some works after it.
         # worker3 calls this immediately and has no more work.
         rpc.api._wait_all_workers()
 
@@ -883,7 +881,7 @@ class RpcTestCommon:
         self._run_uneven_workload(f, x)
 
         # worker0 calls this at the end after waiting for RPC responses.
-        # worker1/2 calls this immediately and has some work after it.
+        # worker1/2 calls this immediately and has some works after it.
         # worker3 calls this immediately and has no more work.
         rpc.api._wait_all_workers()
         rpc.api._wait_all_workers()
@@ -1638,7 +1636,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @dist_init
     def test_rpc_barrier_multithreaded(self):
-        # This test validates the implementation of barrier when multiple threads call into it
+        # This tests validates the implementation of barrier when multiple threads call into it
         # We only need to check that it does not hang in this case
         info = rpc.get_worker_info()
         all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
@@ -1811,7 +1809,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                     )
                     self.assertTrue(event_exists)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/125365")
     @dist_init
     def test_profiler_rpc_key_names(self):
         # tests that remote events are properly prefixed with the RPC profiling key.
@@ -3552,7 +3549,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 print(f"Got msg {msg}")
                 self.assertTrue("Original exception on remote side was" in msg)
                 self.assertTrue("CustomException" in msg)
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 raise RuntimeError(f"Failure - expected RuntimeError, got {e}") from e
             finally:
                 self.assertTrue(exc_caught)
@@ -4493,7 +4490,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
 
 class CudaRpcTest(RpcAgentTestFixture):
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/154587")
     @skip_if_lt_x_gpu(2)
     @dist_init
     def test_profiler_remote_cuda(self):
@@ -4599,7 +4595,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     # FIXME Merge this test with the corresponding one in RpcTest.
-    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70546")
     @dist_init(setup_rpc=False)
     def test_tensorpipe_set_default_timeout(self):
         # Set a high timeout since it doesn't affect test runtime and ensures
@@ -4705,7 +4700,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
         # specified timeout.
         with self.assertRaisesRegex(RuntimeError, expected_error):
             result = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
-            # rpc_async returns immediately and surfaces a timeout through wait()
+            # rpc_async returns immediately and surface a timeout through wait()
             if rref_api == slow_rref.rpc_async:
                 result.wait()
 
@@ -6020,12 +6015,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @staticmethod
     def _return_tensor_view(i):
-        with torch.cuda.stream(torch.cuda.current_stream(0)):
-            x = torch.ones(1000, 200).cuda(0) * i
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
-            # serialization of the return value will create a new tensor from the
-            # view, which is done outside of the user function.
-            return x.split(100)[0]
+        x = torch.ones(1000, 200).cuda(0) * i
+        torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+        # serialization of the return value will create a new tensor from the
+        # view, which is done outside of the user function.
+        return x.split(100)[0]
 
     @skip_if_lt_x_gpu(1)
     def test_tensor_view_as_return_value(self):

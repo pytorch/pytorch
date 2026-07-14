@@ -12,7 +12,6 @@ import torch
 
 from . import (
     aot_compile,
-    bytecode_debugger,
     config,
     convert_frame,
     eval_frame,
@@ -24,7 +23,6 @@ from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
-    allow_c_slot,
     allow_in_graph,
     assume_constant_result,
     disable,
@@ -40,8 +38,6 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     nonstrict_trace,
-    override_cudagraphs,
-    override_optimization_hint,
     patch_dynamo_config,
     run,
     set_stance,
@@ -77,14 +73,12 @@ from .utils import (
 
 
 # Register polyfill functions
-from .polyfills import loader as _  # usort: skip
+from .polyfills import loader as _  # usort: skip # noqa: F401
 
 
 __all__ = [
-    "allow_c_slot",
     "allow_in_graph",
     "assume_constant_result",
-    "bytecode_debugger",
     "config",
     "disable",
     "disable_nested_graph_breaks",
@@ -103,7 +97,6 @@ __all__ = [
     "mark_static",
     "mark_static_address",
     "nonstrict_trace",
-    "override_optimization_hint",
     "optimize",
     "optimize_assert",
     "OptimizedModule",
@@ -113,7 +106,6 @@ __all__ = [
     "reset",
     "reset_recompile_user_contexts",
     "run",
-    "override_cudagraphs",
     "error_on_graph_break",
     "set_recursion_limit",
     "set_stance",
@@ -172,12 +164,6 @@ def reset() -> None:
 
         # Reset cudagraph trees unconditionally since they are global state
         # not tied to a specific backend instance
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
-        from torch._higher_order_ops.wrap import inductor_code_side_table
-
-        kernel_side_table.reset_table()
-        inductor_code_side_table.reset_table()
-
         if torch.cuda.is_available():
             from torch._inductor.cudagraph_trees import reset_cudagraph_trees
 
