@@ -709,11 +709,18 @@ def convolution(
                     num_warps=num_warps,
                     **cfg.kwargs,
                 )
+    # The Triton conv2d backward-input kernels miscompile on CUDA (wrong results
+    # on sm90, ptxas illegal memory access on sm100) with no perf win, so keep
+    # them on ROCm and fall back to ATEN on CUDA. Same rationale as the
+    # convolution_backward lowering. See
+    # https://github.com/pytorch/pytorch/issues/187081.
+    disable_triton_conv_bwd = device_type == "cuda" and not torch.version.hip
     if (
         torch._inductor.utils._use_conv_autotune_backend("TRITON")
         and use_triton_template(layout)
         and transposed
         and ndim == 2
+        and not disable_triton_conv_bwd
     ):
         # ConvTranspose2d is mathematically identical to conv_backward_input:
         # the input plays the role of grad_output and the same weight layout
