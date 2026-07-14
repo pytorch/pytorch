@@ -29,7 +29,13 @@ inline bool symIntArrayRefElementIsHeapAllocated(
       &raw_data,
       reinterpret_cast<const char*>(ar.data()) + index * sizeof(raw_data),
       sizeof(raw_data));
-  return !SymInt::check_range(raw_data);
+  // This is equivalent to !SymInt::check_range(raw_data), but only the
+  // representation bits participate in the branch.  A signed range comparison
+  // can make Valgrind treat unrelated payload bits as control-flow inputs.
+  const auto raw_bits = static_cast<uint64_t>(raw_data);
+  constexpr uint64_t sign_bit = uint64_t{1} << 63;
+  constexpr uint64_t small_negative_bit = uint64_t{1} << 62;
+  return (raw_bits & sign_bit) != 0 && (raw_bits & small_negative_bit) == 0;
 #endif
 }
 

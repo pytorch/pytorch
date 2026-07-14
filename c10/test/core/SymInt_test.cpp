@@ -25,11 +25,14 @@ TEST(SymIntTest, ConcreteInts) {
 }
 
 TEST(SymIntTest, CheckRange) {
+  EXPECT_TRUE(SymInt::check_range(SymInt::min_representable_int()));
+  EXPECT_FALSE(SymInt::check_range(SymInt::min_representable_int() - 1));
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }
 
 TEST(SymIntTest, SymIntArrayRefErrorDistinguishesHeapAllocatedConcrete) {
-  const std::vector<SymInt> values{SymInt(INT64_MIN), SymInt(5)};
+  const std::vector<SymInt> values{
+      SymInt(SymInt::min_representable_int() - 1), SymInt(5)};
 
   try {
     (void)c10::asIntArrayRefSlow(values, __FILE__, __LINE__);
