@@ -21,6 +21,7 @@ parameter access, hooks, and other nn.Module behaviors while maintaining proper 
 of module state.
 """
 
+import collections
 import functools
 import inspect
 import itertools
@@ -1409,7 +1410,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    return variables.ConstDictVariable({}, user_cls=type(hooks_dict))
+                    hooks_vt_cls = (
+                        variables.OrderedItemsDictVariable
+                        if isinstance(hooks_dict, collections.OrderedDict)
+                        else variables.ConstDictVariable
+                    )
+                    return hooks_vt_cls({})
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
@@ -1450,9 +1456,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 for i, k, v in enumerate_items_with_dict_position(hooks_dict)
             )
 
-            return variables.NNModuleHooksDictVariable(
-                result, type(hooks_dict), source=hooks_dict_source
-            )
+            return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
         return super().getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(
