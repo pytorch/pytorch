@@ -1,4 +1,11 @@
 # mypy: allow-untyped-defs
+"""Lower FlexGEMM HOP bodies and connect epilogue analysis to backend templates.
+
+``flex_gemm_lowering`` is the main entry point. Non-QUACK
+requests execute the captured body through ordinary Inductor lowering. Although this
+is stale and will fix up later on. See ``lower_quack_flex_gemm`` for the flow.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -233,7 +240,35 @@ def flex_gemm_config_keys_for_local_reduce(
 
 
 def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
-    """Lower FlexGEMM through the generated QUACK CuTeDSL template."""
+    """Lower FlexGEMM through the generated QUACK CuTeDSL template.
+
+    The current pipeline is:
+
+    ::
+
+        FlexGEMM HOP body (FX GraphModule)
+                         |
+                         v
+          find GEMM operands and captured epilogue args
+                         |
+                         v
+             analyze_flex_gemm_epilogue()
+                         |
+                         +--> output plan + buffer ABI
+                         |        `--> derive layout + allocate aux
+                         |
+                         +--> grouped/reduction geometry
+                         |        `--> filter QuACK configurations
+                         |
+                         `--> materialize_flex_gemm_epilogue()
+                                  `--> CuTeDSL epilogue + callbacks
+                         |
+                         v
+             combine into template choices -> autotune
+                         |
+                         v
+              restore captured output order
+    """
     if gemm_op not in FLEX_GEMM_OP_SPECS:
         raise NotImplementedError(
             f"FlexGEMM QUACK backend currently supports only aten.{_SUPPORTED_FLEX_GEMM_OP_NAMES}"
@@ -290,6 +325,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     beta = gemm_fx_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
+    # This is where we figure out what the fx-graph body is doing
     epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
     outputs = epilogue_analysis.outputs
     output_meta = outputs.output.meta.get("val")

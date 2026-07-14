@@ -10,6 +10,12 @@ M-axis groups currently always use QuACK's physical row-lane/warp combine path,
 even when the group is small enough to fit in one fragment. Inductor owns the
 FX pattern matching and output contracts; these helpers describe the supported
 TensorSSA shapes and generated combine/finalize expressions QuACK needs.
+
+The main caller is ``materialize_flex_gemm_epilogue`` in ``epilogue.py``.
+FlexGEMM lowering first calls ``analyze_flex_gemm_epilogue``, which uses this
+module's layout and reduction-recognition helpers. Materialization then routes
+FX nodes through ``lower_view_or_reshape``, ``lower_prepare_softmax_online``,
+and ``lower_tensorssa_reduce`` to emit CuTeDSL source.
 """
 
 import dataclasses

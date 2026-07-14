@@ -1,9 +1,19 @@
 # mypy: allow-untyped-defs
 """Analyze FlexGEMM epilogue FX graphs and materialize CuTeDSL source.
 
-The flow is: build one dependency index, analyze grouped TensorSSA and
-local-reduce contracts, plan main/aux/reduction consumers, then materialize that
-shared plan into generated CuTeDSL and physical reduction callbacks.
+``analyze_flex_gemm_epilogue`` is the analysis entry point. It builds one
+transitive dependency index, tracks grouped TensorSSA provenance and reduction
+contracts, and plans the main, auxiliary, and local-reduction consumers.
+
+``materialize_flex_gemm_epilogue`` is the code-generation entry point called by
+FlexGEMM lowering. It constructs ``FlexGemmEpilogueEmitter``, whose single
+topological traversal owns the mutable FX environment, compressed-store state,
+and generated physical reduction callbacks before rendering CuTeDSL source.
+
+``FlexGemmLocalReduceAnalysis`` owns the reduction-pattern traversal and all
+queries over its shared dependency/provenance state. Traversal-dependent code
+generation belongs to the emitter, so neither phase rebuilds graph state or
+threads an analysis object through parallel helper functions.
 """
 
 import dataclasses
@@ -222,6 +232,34 @@ class FlexGemmLocalReduceContract:
             feeds_main=feeds_main,
         )
 
+    @classmethod
+    def common(
+        cls,
+        contracts: list["FlexGemmLocalReduceContract"],
+        mixed_contract_error: str,
+    ) -> "FlexGemmLocalReduceContract | None":
+        """Merge contracts that share one grouped reduction layout."""
+        if not contracts:
+            return None
+        contract = contracts[0]
+        if any(item.geometry != contract.geometry for item in contracts):
+            raise NotImplementedError(mixed_contract_error)
+        return contract
+
+    @classmethod
+    def common_value(
+        cls,
+        contracts: list["FlexGemmLocalReduceContract"],
+        mixed_contract_error: str,
+    ) -> "FlexGemmLocalReduceContract | None":
+        """Merge contracts that share one physical reduction value."""
+        contract = cls.common(contracts, mixed_contract_error)
+        if contract is None:
+            return None
+        if any(item.value_node is not contract.value_node for item in contracts):
+            raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
+        return contract
+
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueGraph:
@@ -253,7 +291,12 @@ class FlexGemmEpilogueGraph:
 
 @dataclasses.dataclass
 class FlexGemmLocalReduceAnalysis:
-    """Track graph dependencies, grouped provenance, and reduction contracts."""
+    """Own the one-pass grouped-reduction analysis for a FlexGEMM FX graph.
+
+    ``from_graph_module`` is the construction entry point. It builds one shared
+    dependency index and visits each FX node once, recording grouped TensorSSA
+    provenance and reduction contracts for all later planning queries.
+    """
 
     graph: FlexGemmEpilogueGraph
     grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout] = dataclasses.field(
@@ -262,6 +305,53 @@ class FlexGemmLocalReduceAnalysis:
     contracts: dict[torch.fx.Node, FlexGemmLocalReduceContract] = dataclasses.field(
         default_factory=dict
     )
+
+    @classmethod
+    def from_graph_module(
+        cls, graph_module: torch.fx.GraphModule
+    ) -> "FlexGemmLocalReduceAnalysis":
+        """Build shared dependency and reduction state in one topological pass."""
+        analysis = cls(FlexGemmEpilogueGraph.from_graph_module(graph_module))
+        for node in graph_module.graph.nodes:
+            if node.op == "output":
+                break
+            analysis.visit_node(node)
+        return analysis
+
+    def visit_node(self, node: torch.fx.Node) -> None:
+        """Update grouped provenance and contracts for one topological FX node."""
+        if node.op != "call_function":
+            return
+        view_args = view_or_reshape_args(node)
+        if view_args is not None:
+            source_node, shape = view_args
+            if self.copy_contract(node, source_node):
+                return
+            if self.bind_grouped_layout(node, shape, source_node):
+                return
+        reduction = reduction_from_node(node)
+        if reduction is not None:
+            input_node, dim, _, dtype, _ = reduction
+            if self.bind_grouped_reduction(node, input_node, dim, dtype):
+                return
+        if node.target is inductor_prims.prepare_softmax_online:
+            input_node = node.args[0]
+            dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+            if self.bind_grouped_reduction(
+                node, input_node, dim, raise_invalid_dims=False
+            ):
+                return
+        unsupported_reduction = unsupported_reduction_from_node(node)
+        if unsupported_reduction is not None:
+            input_node = node.args[0]
+            if self.has_grouped_tensor(input_node):
+                raise local_reduce_unsupported_tensorssa_error(unsupported_reduction)
+        if self.copy_contract(node, squeeze_source_node(node)):
+            return
+        if node.target is operator.getitem and self.copy_contract(node, node.args[0]):
+            return
+        if is_shape_preserving_pointwise_node(node):
+            self.bind_pointwise_contract(node, LOCAL_REDUCE_MIXED_CONTRACT_ERROR)
 
     def bind_grouped_layout(self, node: torch.fx.Node, shape: Any, source: Any) -> bool:
         """Record reshapes that introduce grouped TensorSSA provenance."""
@@ -305,11 +395,10 @@ class FlexGemmLocalReduceAnalysis:
         """Match reductions against grouped TensorSSA provenance and bind them."""
         return self.bind_contract(
             node,
-            local_reduce_contract_from_grouped_input(
+            self.contract_from_grouped_input(
                 node,
                 input_node,
                 dim,
-                self.grouped_tensors,
                 dtype,
                 raise_invalid_dims=raise_invalid_dims,
             ),
@@ -359,7 +448,7 @@ class FlexGemmLocalReduceAnalysis:
         grouped_layout = propagate_grouped_tensorssa_layout(node, self.grouped_tensors)
         if grouped_layout is not None:
             self.grouped_tensors[node] = grouped_layout
-        contract = common_local_reduce_contract(
+        contract = FlexGemmLocalReduceContract.common(
             self.contracts_from_inputs(node.args, node.kwargs), mixed_contract_error
         )
         if contract is None:
@@ -367,448 +456,351 @@ class FlexGemmLocalReduceAnalysis:
         self.contracts[node] = dataclasses.replace(contract, value_node=node)
         return True
 
-
-def common_local_reduce_contract(
-    contracts: list[FlexGemmLocalReduceContract],
-    mixed_contract_error: str,
-) -> FlexGemmLocalReduceContract | None:
-    """Merge contracts that share one grouped reduction layout."""
-    if not contracts:
-        return None
-    contract = contracts[0]
-    if any(item.geometry != contract.geometry for item in contracts):
-        raise NotImplementedError(mixed_contract_error)
-    return contract
-
-
-def common_local_reduce_value_contract(
-    contracts: list[FlexGemmLocalReduceContract],
-    mixed_contract_error: str,
-) -> FlexGemmLocalReduceContract | None:
-    """Merge contracts for one reusable physical reduction value."""
-    contract = common_local_reduce_contract(contracts, mixed_contract_error)
-    if contract is None:
-        return None
-    if any(item.value_node is not contract.value_node for item in contracts):
-        raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
-    return contract
-
-
-def local_reduce_feed_value_contract(
-    analysis: FlexGemmLocalReduceAnalysis,
-    value: Any,
-    grouped_source: torch.fx.Node,
-    layout,
-) -> FlexGemmLocalReduceContract | None:
-    """Find the single grouped reduction that produces a broadcast value."""
-    if not isinstance(value, torch.fx.Node):
-        return None
-    reduction = reduction_from_node(value)
-    if reduction is not None:
-        input_node, dim, keepdim, dtype, _ = reduction
-        if input_node is not grouped_source:
-            if analysis.graph.depends_on(input_node, grouped_source):
-                raise NotImplementedError(LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR)
-            raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
-        if dtype is not None or not keepdim or not layout.matches_reduction_dim(dim):
-            raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
+    def contract_from_grouped_input(
+        self,
+        node: torch.fx.Node,
+        input_node: Any,
+        dim: Any,
+        dtype: Any = None,
+        *,
+        raise_invalid_dims: bool = True,
+    ) -> FlexGemmLocalReduceContract | None:
+        """Build a reduction contract when the input has grouped TensorSSA provenance."""
+        if not isinstance(input_node, torch.fx.Node):
+            return None
+        layout = self.grouped_tensors.get(input_node)
+        if layout is None:
+            return None
+        if dtype is not None:
+            raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
+        validate_local_reduce_tensorssa_group_size(layout.axis, layout.group_size)
+        if not layout.matches_reduction_dim(dim):
+            if not raise_invalid_dims:
+                return None
+            raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
         return FlexGemmLocalReduceContract(
-            value, FlexGemmLocalReduceGeometry(layout.group_size, layout.axis)
+            node, FlexGemmLocalReduceGeometry(layout.group_size, layout.axis)
         )
-    if not is_shape_preserving_pointwise_node(value):
-        return None
-    contracts = [
-        contract
-        for arg in iter_fx_node_inputs((value.args, value.kwargs))
-        for contract in (
-            local_reduce_feed_value_contract(analysis, arg, grouped_source, layout),
-        )
-        if contract is not None
-    ]
-    return common_local_reduce_value_contract(
-        contracts, LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR
-    )
 
-
-def local_reduce_contract_grouped_source(
-    contract: FlexGemmLocalReduceContract,
-) -> torch.fx.Node | None:
-    """Return the grouped source that produced a physical feed-main contract."""
-    reduction = reduction_from_node(contract.value_node)
-    if reduction is None:
-        return None
-    input_node = reduction[0]
-    return input_node if isinstance(input_node, torch.fx.Node) else None
-
-
-def validate_hidden_feed_main_reduction_input(
-    analysis: FlexGemmLocalReduceAnalysis,
-    input_node: Any,
-    grouped_source: torch.fx.Node,
-) -> None:
-    """Reject reduction inputs that would need another physical feed-main value."""
-    if input_node is grouped_source:
-        raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
-    if not isinstance(input_node, torch.fx.Node):
-        return
-    if analysis.graph.depends_on(input_node, grouped_source):
-        raise NotImplementedError(LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR)
-    if analysis.has_physical_grouped_input(input_node):
-        raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
-
-
-def validate_feed_main_source_reductions(
-    analysis: FlexGemmLocalReduceAnalysis,
-    value: Any,
-    grouped_source: torch.fx.Node,
-    selected_reduction: torch.fx.Node,
-    seen: OrderedSet[torch.fx.Node] | None = None,
-) -> None:
-    """Reject hidden physical reductions outside the selected feed-main value."""
-    if not isinstance(value, torch.fx.Node):
-        for arg in iter_fx_node_inputs(value):
-            validate_feed_main_source_reductions(
-                analysis, arg, grouped_source, selected_reduction, seen
+    def feed_value_contract(
+        self,
+        value: Any,
+        grouped_source: torch.fx.Node,
+        layout,
+    ) -> FlexGemmLocalReduceContract | None:
+        """Find the single grouped reduction that produces a broadcast value."""
+        if not isinstance(value, torch.fx.Node):
+            return None
+        reduction = reduction_from_node(value)
+        if reduction is not None:
+            input_node, dim, keepdim, dtype, _ = reduction
+            if input_node is not grouped_source:
+                if self.graph.depends_on(input_node, grouped_source):
+                    raise NotImplementedError(LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR)
+                raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
+            if (
+                dtype is not None
+                or not keepdim
+                or not layout.matches_reduction_dim(dim)
+            ):
+                raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
+            return FlexGemmLocalReduceContract(
+                value, FlexGemmLocalReduceGeometry(layout.group_size, layout.axis)
             )
-        return
-    if value is selected_reduction:
-        return
-    if seen is None:
-        seen = OrderedSet()
-    if value in seen:
-        return
-    seen.add(value)
-    reduction = reduction_from_node(value)
-    if reduction is not None:
-        validate_hidden_feed_main_reduction_input(
-            analysis, reduction[0], grouped_source
-        )
-    for arg in iter_fx_node_inputs((value.args, value.kwargs)):
-        validate_feed_main_source_reductions(
-            analysis, arg, grouped_source, selected_reduction, seen
+        if not is_shape_preserving_pointwise_node(value):
+            return None
+        contracts = [
+            contract
+            for arg in iter_fx_node_inputs((value.args, value.kwargs))
+            for contract in (self.feed_value_contract(arg, grouped_source, layout),)
+            if contract is not None
+        ]
+        return FlexGemmLocalReduceContract.common_value(
+            contracts, LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR
         )
 
+    @staticmethod
+    def contract_grouped_source(
+        contract: FlexGemmLocalReduceContract,
+    ) -> torch.fx.Node | None:
+        """Return the grouped source that produced a physical feed-main contract."""
+        reduction = reduction_from_node(contract.value_node)
+        if reduction is None:
+            return None
+        input_node = reduction[0]
+        return input_node if isinstance(input_node, torch.fx.Node) else None
 
-def validate_feed_main_source_contract(
-    analysis: FlexGemmLocalReduceAnalysis,
-    source: torch.fx.Node,
-    contract: FlexGemmLocalReduceContract | None,
-) -> FlexGemmLocalReduceContract | None:
-    """Preserve the one-physical-value ABI across recursive source matching."""
-    if contract is None:
-        return None
-    grouped_source = local_reduce_contract_grouped_source(contract)
-    if grouped_source is not None:
-        validate_feed_main_source_reductions(
-            analysis, source, grouped_source, contract.value_node
-        )
-    return contract
+    def validate_hidden_feed_main_reduction_input(
+        self,
+        input_node: Any,
+        grouped_source: torch.fx.Node,
+    ) -> None:
+        """Reject reduction inputs that would need another physical feed-main value."""
+        if input_node is grouped_source:
+            raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
+        if not isinstance(input_node, torch.fx.Node):
+            return
+        if self.graph.depends_on(input_node, grouped_source):
+            raise NotImplementedError(LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR)
+        if self.has_physical_grouped_input(input_node):
+            raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
 
-
-def is_local_reduce_feed_main_binary_source(source: torch.fx.Node) -> bool:
-    """Identify binary expressions whose operands may bind one feed-main value."""
-    return source.op == "call_function" and source.target in (
-        torch.ops.aten.add.Tensor,
-        torch.ops.aten.add.Scalar,
-        torch.ops.aten.div.Tensor,
-        torch.ops.aten.mul.Tensor,
-        torch.ops.aten.mul.Scalar,
-        torch.ops.aten.sub.Tensor,
-        torch.ops.aten.sub.Scalar,
-    )
-
-
-def local_reduce_feed_main_binary_candidates(
-    source: torch.fx.Node,
-) -> tuple[tuple[Any, Any], ...]:
-    """Return current feed-main binary source/value candidates."""
-    if len(source.args) < 2 or not is_local_reduce_feed_main_binary_source(source):
-        return ()
-    lhs, rhs = source.args[:2]
-    return ((lhs, rhs), (rhs, lhs))
-
-
-def local_reduce_feed_main_grouped_reduction(
-    analysis: FlexGemmLocalReduceAnalysis,
-    value: Any,
-    grouped_source: torch.fx.Node,
-    layout: Any,
-) -> bool:
-    """Detect a grouped feed-main reduction without binding a value contract."""
-    if not isinstance(value, torch.fx.Node):
-        return False
-    reduction = reduction_from_node(value)
-    if reduction is not None:
-        input_node, dim, keepdim, dtype, _ = reduction
-        return (
-            dtype is None
-            and bool(keepdim)
-            and layout.matches_reduction_dim(dim)
-            and (
-                input_node is grouped_source
-                or analysis.graph.depends_on(input_node, grouped_source)
+    def validate_feed_main_source_reductions(
+        self,
+        value: Any,
+        grouped_source: torch.fx.Node,
+        selected_reduction: torch.fx.Node,
+        seen: OrderedSet[torch.fx.Node] | None = None,
+    ) -> None:
+        """Reject hidden physical reductions outside the selected feed-main value."""
+        if not isinstance(value, torch.fx.Node):
+            for arg in iter_fx_node_inputs(value):
+                self.validate_feed_main_source_reductions(
+                    arg, grouped_source, selected_reduction, seen
+                )
+            return
+        if value is selected_reduction:
+            return
+        if seen is None:
+            seen = OrderedSet()
+        if value in seen:
+            return
+        seen.add(value)
+        reduction = reduction_from_node(value)
+        if reduction is not None:
+            self.validate_hidden_feed_main_reduction_input(reduction[0], grouped_source)
+        for arg in iter_fx_node_inputs((value.args, value.kwargs)):
+            self.validate_feed_main_source_reductions(
+                arg, grouped_source, selected_reduction, seen
             )
+
+    def validate_feed_main_source_contract(
+        self,
+        source: torch.fx.Node,
+        contract: FlexGemmLocalReduceContract | None,
+    ) -> FlexGemmLocalReduceContract | None:
+        """Preserve the one-physical-value ABI across recursive source matching."""
+        if contract is None:
+            return None
+        grouped_source = self.contract_grouped_source(contract)
+        if grouped_source is not None:
+            self.validate_feed_main_source_reductions(
+                source, grouped_source, contract.value_node
+            )
+        return contract
+
+    @staticmethod
+    def is_feed_main_binary_source(source: torch.fx.Node) -> bool:
+        """Identify binary expressions whose operands may bind one feed-main value."""
+        return source.op == "call_function" and source.target in (
+            torch.ops.aten.add.Tensor,
+            torch.ops.aten.add.Scalar,
+            torch.ops.aten.div.Tensor,
+            torch.ops.aten.mul.Tensor,
+            torch.ops.aten.mul.Scalar,
+            torch.ops.aten.sub.Tensor,
+            torch.ops.aten.sub.Scalar,
         )
-    if not is_shape_preserving_pointwise_node(value):
-        return False
-    return any(
-        local_reduce_feed_main_grouped_reduction(analysis, arg, grouped_source, layout)
-        for arg in iter_fx_node_inputs((value.args, value.kwargs))
-    )
 
+    @classmethod
+    def feed_main_binary_candidates(
+        cls,
+        source: torch.fx.Node,
+    ) -> tuple[tuple[Any, Any], ...]:
+        """Return current feed-main binary source/value candidates."""
+        if len(source.args) < 2 or not cls.is_feed_main_binary_source(source):
+            return ()
+        lhs, rhs = source.args[:2]
+        return ((lhs, rhs), (rhs, lhs))
 
-def local_reduce_feed_main_candidate_contract(
-    analysis: FlexGemmLocalReduceAnalysis,
-    grouped_source: Any,
-    value: Any,
-    output_meta: Any,
-) -> FlexGemmLocalReduceContract | None:
-    """Validate the grouped source before matching its physical reduce value."""
-    if not isinstance(grouped_source, torch.fx.Node) or not isinstance(
-        value, torch.fx.Node
-    ):
-        return None
-    view_args = view_or_reshape_args(grouped_source)
-    if view_args is None:
-        return None
-    source_node, input_shape = view_args
-    if not isinstance(source_node, torch.fx.Node):
-        return None
-    layout = grouped_tensor_layout(input_shape, tensor_meta_shape(source_node))
-    if layout is None:
-        return None
-    if layout.axis != 0:
-        if not local_reduce_feed_main_grouped_reduction(
-            analysis, value, grouped_source, layout
+    def feed_main_grouped_reduction(
+        self,
+        value: Any,
+        grouped_source: torch.fx.Node,
+        layout: Any,
+    ) -> bool:
+        """Detect a grouped feed-main reduction without binding a value contract."""
+        if not isinstance(value, torch.fx.Node):
+            return False
+        reduction = reduction_from_node(value)
+        if reduction is not None:
+            input_node, dim, keepdim, dtype, _ = reduction
+            return (
+                dtype is None
+                and bool(keepdim)
+                and layout.matches_reduction_dim(dim)
+                and (
+                    input_node is grouped_source
+                    or self.graph.depends_on(input_node, grouped_source)
+                )
+            )
+        if not is_shape_preserving_pointwise_node(value):
+            return False
+        return any(
+            self.feed_main_grouped_reduction(arg, grouped_source, layout)
+            for arg in iter_fx_node_inputs((value.args, value.kwargs))
+        )
+
+    def feed_main_candidate_contract(
+        self,
+        grouped_source: Any,
+        value: Any,
+        output_meta: Any,
+    ) -> FlexGemmLocalReduceContract | None:
+        """Validate the grouped source before matching its physical reduce value."""
+        if not isinstance(grouped_source, torch.fx.Node) or not isinstance(
+            value, torch.fx.Node
         ):
             return None
-        if (
-            layout.group_size
-            <= MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS
-        ):
-            # Intentional fallthrough: axis-1 feeds within one TensorSSA
-            # fragment lower as plain generated TensorSSA without a feed plan.
+        view_args = view_or_reshape_args(grouped_source)
+        if view_args is None:
             return None
-        raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR)
-    validate_local_reduce_feed_main_capability(layout.axis, layout.group_size)
-    source_meta = source_node.meta.get("val")
-    if output_meta is not None and source_meta is not None:
-        if not statically_known_shape_equal(output_meta.shape, source_meta.shape):
+        source_node, input_shape = view_args
+        if not isinstance(source_node, torch.fx.Node):
             return None
-    return local_reduce_feed_value_contract(analysis, value, grouped_source, layout)
+        layout = grouped_tensor_layout(input_shape, tensor_meta_shape(source_node))
+        if layout is None:
+            return None
+        if layout.axis != 0:
+            if not self.feed_main_grouped_reduction(value, grouped_source, layout):
+                return None
+            if (
+                layout.group_size
+                <= MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS
+            ):
+                # Intentional fallthrough: axis-1 feeds within one TensorSSA
+                # fragment lower as plain generated TensorSSA without a feed plan.
+                return None
+            raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR)
+        validate_local_reduce_feed_main_capability(layout.axis, layout.group_size)
+        source_meta = source_node.meta.get("val")
+        if output_meta is not None and source_meta is not None:
+            if not statically_known_shape_equal(output_meta.shape, source_meta.shape):
+                return None
+        return self.feed_value_contract(value, grouped_source, layout)
 
-
-def local_reduce_feed_main_source_contract(
-    analysis: FlexGemmLocalReduceAnalysis,
-    source: torch.fx.Node,
-    output_meta: Any,
-) -> FlexGemmLocalReduceContract | None:
-    """Find one physical feed-main value inside a shape-preserving expression."""
-    contracts = [
-        contract
-        for grouped_source, value in local_reduce_feed_main_binary_candidates(source)
-        for contract in (
-            local_reduce_feed_main_candidate_contract(
-                analysis, grouped_source, value, output_meta
-            ),
-        )
-        if contract is not None
-    ]
-    if contracts:
-        return validate_feed_main_source_contract(
-            analysis,
+    def feed_main_source_contract(
+        self,
+        source: torch.fx.Node,
+        output_meta: Any,
+    ) -> FlexGemmLocalReduceContract | None:
+        """Find one physical feed-main value inside a shape-preserving expression."""
+        contracts = [
+            contract
+            for grouped_source, value in self.feed_main_binary_candidates(source)
+            for contract in (
+                self.feed_main_candidate_contract(grouped_source, value, output_meta),
+            )
+            if contract is not None
+        ]
+        if contracts:
+            return self.validate_feed_main_source_contract(
+                source,
+                FlexGemmLocalReduceContract.common_value(
+                    contracts, LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR
+                ),
+            )
+        if not is_shape_preserving_pointwise_node(source):
+            return None
+        contracts = [
+            contract
+            for arg in iter_fx_node_inputs((source.args, source.kwargs))
+            if isinstance(arg, torch.fx.Node)
+            for contract in (self.feed_main_source_contract(arg, output_meta),)
+            if contract is not None
+        ]
+        return self.validate_feed_main_source_contract(
             source,
-            common_local_reduce_value_contract(
+            FlexGemmLocalReduceContract.common_value(
                 contracts, LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR
             ),
         )
-    if not is_shape_preserving_pointwise_node(source):
-        return None
-    contracts = [
-        contract
-        for arg in iter_fx_node_inputs((source.args, source.kwargs))
-        if isinstance(arg, torch.fx.Node)
-        for contract in (
-            local_reduce_feed_main_source_contract(analysis, arg, output_meta),
-        )
-        if contract is not None
-    ]
-    return validate_feed_main_source_contract(
-        analysis,
-        source,
-        common_local_reduce_value_contract(
-            contracts, LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR
-        ),
-    )
 
-
-def local_reduce_feed_main_plan(
-    analysis: FlexGemmLocalReduceAnalysis,
-    output: torch.fx.Node,
-) -> FlexGemmLocalReduceContract | None:
-    """Match grouped reductions fed back into the output, recursing through
-    trailing shape-preserving pointwise nodes to the un-grouping view."""
-    view_args = view_or_reshape_args(output)
-    if view_args is not None:
-        source, _ = view_args
-        if not isinstance(source, torch.fx.Node):
-            return None
-        return local_reduce_feed_main_source_contract(
-            analysis, source, output.meta.get("val")
-        )
-    if not is_shape_preserving_pointwise_node(output):
-        return None
-    contracts = [
-        contract
-        for arg in iter_fx_node_inputs((output.args, output.kwargs))
-        for contract in (local_reduce_feed_main_plan(analysis, arg),)
-        if contract is not None
-    ]
-    return validate_feed_main_source_contract(
-        analysis,
-        output,
-        common_local_reduce_value_contract(
-            contracts, LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR
-        ),
-    )
-
-
-def common_local_reduce_feed_main_contract(
-    analysis: FlexGemmLocalReduceAnalysis,
-    candidates: tuple[Any, ...],
-) -> FlexGemmLocalReduceContract | None:
-    """Merge feed-main candidates that share the same physical reduction value."""
-    feed_contracts = [
-        contract
-        for candidate in candidates
-        if isinstance(candidate, torch.fx.Node)
-        for contract in (local_reduce_feed_main_plan(analysis, candidate),)
-        if contract is not None
-    ]
-    return common_local_reduce_value_contract(
-        feed_contracts, LOCAL_REDUCE_FEED_MAIN_MIXED_CONTRACT_ERROR
-    )
-
-
-def local_reduce_contract_from_grouped_input(
-    node: torch.fx.Node,
-    input_node: Any,
-    dim: Any,
-    grouped_tensors: dict[torch.fx.Node, GroupedTensorSSALayout],
-    dtype: Any = None,
-    *,
-    raise_invalid_dims: bool = True,
-) -> FlexGemmLocalReduceContract | None:
-    """Build a reduction contract when the input has grouped TensorSSA provenance."""
-    if not isinstance(input_node, torch.fx.Node):
-        return None
-    layout = grouped_tensors.get(input_node)
-    if layout is None:
-        return None
-    if dtype is not None:
-        raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
-    validate_local_reduce_tensorssa_group_size(layout.axis, layout.group_size)
-    if not layout.matches_reduction_dim(dim):
-        if not raise_invalid_dims:
-            return None
-        raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
-    return FlexGemmLocalReduceContract(
-        node, FlexGemmLocalReduceGeometry(layout.group_size, layout.axis)
-    )
-
-
-def local_reduce_analysis(
-    graph_module: torch.fx.GraphModule,
-) -> FlexGemmLocalReduceAnalysis:
-    """Analyze grouped TensorSSA provenance and local-reduce contracts in one pass."""
-    analysis = FlexGemmLocalReduceAnalysis(
-        FlexGemmEpilogueGraph.from_graph_module(graph_module)
-    )
-    for node in graph_module.graph.nodes:
-        if node.op == "output":
-            break
-        if node.op != "call_function":
-            continue
-        view_args = view_or_reshape_args(node)
+    def feed_main_plan(
+        self,
+        output: torch.fx.Node,
+    ) -> FlexGemmLocalReduceContract | None:
+        """Match grouped reductions fed back into the output, recursing through
+        trailing shape-preserving pointwise nodes to the un-grouping view."""
+        view_args = view_or_reshape_args(output)
         if view_args is not None:
-            source_node, shape = view_args
-            if analysis.copy_contract(node, source_node):
-                continue
-            if analysis.bind_grouped_layout(node, shape, source_node):
-                continue
-        reduction = reduction_from_node(node)
-        if reduction is not None:
-            input_node, dim, _, dtype, _ = reduction
-            if analysis.bind_grouped_reduction(node, input_node, dim, dtype):
-                continue
-        if (
-            node.op == "call_function"
-            and node.target is inductor_prims.prepare_softmax_online
-        ):
-            input_node = node.args[0]
-            dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
-            if analysis.bind_grouped_reduction(
-                node, input_node, dim, raise_invalid_dims=False
-            ):
-                continue
-        unsupported_reduction = unsupported_reduction_from_node(node)
-        if unsupported_reduction is not None:
-            input_node = node.args[0]
-            if analysis.has_grouped_tensor(input_node):
-                raise local_reduce_unsupported_tensorssa_error(unsupported_reduction)
-        if analysis.copy_contract(node, squeeze_source_node(node)):
-            continue
-        if node.op == "call_function" and node.target is operator.getitem:
-            if analysis.copy_contract(node, node.args[0]):
-                continue
-        if is_shape_preserving_pointwise_node(node):
-            analysis.bind_pointwise_contract(node, LOCAL_REDUCE_MIXED_CONTRACT_ERROR)
-    return analysis
+            source, _ = view_args
+            if not isinstance(source, torch.fx.Node):
+                return None
+            return self.feed_main_source_contract(source, output.meta.get("val"))
+        if not is_shape_preserving_pointwise_node(output):
+            return None
+        contracts = [
+            contract
+            for arg in iter_fx_node_inputs((output.args, output.kwargs))
+            for contract in (self.feed_main_plan(arg),)
+            if contract is not None
+        ]
+        return self.validate_feed_main_source_contract(
+            output,
+            FlexGemmLocalReduceContract.common_value(
+                contracts, LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR
+            ),
+        )
 
+    def common_feed_main_contract(
+        self,
+        candidates: tuple[Any, ...],
+    ) -> FlexGemmLocalReduceContract | None:
+        """Merge feed-main candidates that share the same physical reduction value."""
+        feed_contracts = [
+            contract
+            for candidate in candidates
+            if isinstance(candidate, torch.fx.Node)
+            for contract in (self.feed_main_plan(candidate),)
+            if contract is not None
+        ]
+        return FlexGemmLocalReduceContract.common_value(
+            feed_contracts, LOCAL_REDUCE_FEED_MAIN_MIXED_CONTRACT_ERROR
+        )
 
-def local_reduce_compressed_aux_plan(
-    analysis: FlexGemmLocalReduceAnalysis,
-    output: Any,
-    aux: torch.fx.Node,
-    aux_index: int,
-) -> FlexGemmOutputLocalReducePlan | None:
-    """Classify compressed local-reduce aux outputs by analyzed contract and shape."""
-    contract = analysis.contract_for(aux)
-    output_meta = output.meta.get("val") if isinstance(output, torch.fx.Node) else None
-    aux_meta = aux.meta.get("val")
-    if contract is None or aux_meta is None or output_meta is None:
-        return None
-    expected_aux_shape = local_reduce_compressed_shape(
-        output_meta.shape, contract.geometry.group, contract.geometry.axis
-    )
-    if not statically_known_shape_equal(expected_aux_shape, aux_meta.shape):
-        return None
-    return contract.to_plan(store_node=aux, aux_index=aux_index, feeds_main=False)
+    def compressed_aux_plan(
+        self,
+        output: Any,
+        aux: torch.fx.Node,
+        aux_index: int,
+    ) -> FlexGemmOutputLocalReducePlan | None:
+        """Classify compressed local-reduce aux outputs by analyzed contract and shape."""
+        contract = self.contract_for(aux)
+        output_meta = (
+            output.meta.get("val") if isinstance(output, torch.fx.Node) else None
+        )
+        aux_meta = aux.meta.get("val")
+        if contract is None or aux_meta is None or output_meta is None:
+            return None
+        expected_aux_shape = local_reduce_compressed_shape(
+            output_meta.shape, contract.geometry.group, contract.geometry.axis
+        )
+        if not statically_known_shape_equal(expected_aux_shape, aux_meta.shape):
+            return None
+        return contract.to_plan(store_node=aux, aux_index=aux_index, feeds_main=False)
 
-
-def local_reduce_feed_main_output_plan(
-    analysis: FlexGemmLocalReduceAnalysis,
-    output: torch.fx.Node,
-    aux_outputs: tuple[torch.fx.Node, ...] = (),
-) -> FlexGemmOutputPlan | None:
-    """Bind one shared physical reduction value to main-output consumers."""
-    feed_contract = common_local_reduce_feed_main_contract(
-        analysis, (output, *aux_outputs)
-    )
-    if feed_contract is None:
-        return None
-    return FlexGemmOutputPlan(
-        output,
-        aux_outputs,
-        feed_contract.to_plan(store_node=None, feeds_main=True),
-    )
+    def feed_main_output_plan(
+        self,
+        output: torch.fx.Node,
+        aux_outputs: tuple[torch.fx.Node, ...] = (),
+    ) -> FlexGemmOutputPlan | None:
+        """Bind one shared physical reduction value to main-output consumers."""
+        feed_contract = self.common_feed_main_contract((output, *aux_outputs))
+        if feed_contract is None:
+            return None
+        return FlexGemmOutputPlan(
+            output,
+            aux_outputs,
+            feed_contract.to_plan(store_node=None, feeds_main=True),
+        )
 
 
 def single_output_plan(
     output: torch.fx.Node, analysis: FlexGemmLocalReduceAnalysis
 ) -> FlexGemmOutputPlan:
     """Classify a single-output epilogue after checking feed-main consumers."""
-    feed_main_plan = local_reduce_feed_main_output_plan(analysis, output)
+    feed_main_plan = analysis.feed_main_output_plan(output)
     if feed_main_plan is not None:
         return feed_main_plan
     return FlexGemmOutputPlan(output)
@@ -825,7 +817,7 @@ def tuple_output_plan(
     ):
         raise NotImplementedError(FLEX_GEMM_OUTPUT_TENSOR_ERROR)
     feed_contract = (
-        common_local_reduce_feed_main_contract(analysis, (output, *aux_outputs))
+        analysis.common_feed_main_contract((output, *aux_outputs))
         if analysis is not None
         else None
     )
@@ -834,11 +826,7 @@ def tuple_output_plan(
             (index, contract, plan)
             for index, aux_output in enumerate(aux_outputs)
             if (contract := analysis.contract_for(aux_output)) is not None
-            if (
-                plan := local_reduce_compressed_aux_plan(
-                    analysis, output, aux_output, index
-                )
-            )
+            if (plan := analysis.compressed_aux_plan(output, aux_output, index))
             is not None
         )
         if len(compressed_aux_plans) > 1:
@@ -865,7 +853,7 @@ def tuple_output_plan(
                 local_reduce=compressed_aux_plan,
             )
     feed_main_plan = (
-        local_reduce_feed_main_output_plan(analysis, output, aux_outputs)
+        analysis.feed_main_output_plan(output, aux_outputs)
         if analysis is not None
         else None
     )
@@ -880,7 +868,7 @@ def output_plan(
 ) -> FlexGemmOutputPlan:
     """Classify output consumers from one shared local-reduce analysis."""
     if local_reduce is None:
-        local_reduce = local_reduce_analysis(graph_module)
+        local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
     output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
     if len(output_nodes) != 1:
         raise NotImplementedError("FlexGEMM expects one output node")
@@ -903,6 +891,14 @@ class FlexGemmEpilogueAnalysis:
     outputs: FlexGemmOutputPlan
     local_reduce: FlexGemmLocalReduceAnalysis
 
+    @classmethod
+    def from_graph_module(
+        cls, graph_module: torch.fx.GraphModule
+    ) -> "FlexGemmEpilogueAnalysis":
+        """Run the one-pass local-reduction analysis and classify graph outputs."""
+        local_reduce = FlexGemmLocalReduceAnalysis.from_graph_module(graph_module)
+        return cls(output_plan(graph_module, local_reduce), local_reduce)
+
     @property
     def required_geometries(self) -> tuple[FlexGemmLocalReduceGeometry, ...]:
         """Return every grouped geometry that constrains kernel configuration."""
@@ -917,11 +913,20 @@ class FlexGemmEpilogueAnalysis:
 def analyze_flex_gemm_epilogue(
     graph_module: torch.fx.GraphModule,
 ) -> FlexGemmEpilogueAnalysis:
-    """Analyze a FlexGEMM body once for planning, codegen, and config gating."""
-    local_reduce = local_reduce_analysis(graph_module)
-    return FlexGemmEpilogueAnalysis(
-        output_plan(graph_module, local_reduce), local_reduce
-    )
+    """Analyze FlexGEMM body for output planning and epilogue code generation.
+
+    This is the analysis entry point called by FlexGEMM lowering. It builds a
+    dependency index, performs topological local-reduction analysis, and
+    returns the shared immutable plan consumed by config selection and
+    ``materialize_flex_gemm_epilogue``.
+
+    Args:
+        graph_module: FlexGEMM body graph containing GEMM and epilogue nodes.
+
+    Returns:
+        Output and local-reduction analysis shared by later lowering phases.
+    """
+    return FlexGemmEpilogueAnalysis.from_graph_module(graph_module)
 
 
 def gemm_node(
@@ -938,7 +943,40 @@ def gemm_node(
 
 
 class FlexGemmEpilogueEmitter:
-    """Materialize one analyzed FlexGEMM epilogue into CuTeDSL source."""
+    """Visit an analyzed FlexGEMM FX graph and emit its CuTeDSL epilogue.
+
+    The analysis dataclasses flow into each other as follows:
+
+    ::
+
+        FlexGemmEpilogueGraph
+          `--> FlexGemmLocalReduceAnalysis
+                 +--> grouped_tensors
+                 `--> contracts
+                        `--> FlexGemmLocalReduceContract
+                               `--> optional FlexGemmOutputLocalReducePlan
+
+        FlexGemmLocalReduceAnalysis
+          +--> optional FlexGemmOutputLocalReducePlan
+          `--> output_plan()
+                 `--> FlexGemmOutputPlan
+
+        FlexGemmLocalReduceAnalysis + FlexGemmOutputPlan
+          `--> FlexGemmEpilogueAnalysis
+                 `--> FlexGemmEpilogueEmitter
+
+    At emitter construction, ``analysis.outputs`` becomes ``self.outputs``;
+    its local-reduce plan determines ``self.local_reduce``, ``self.feed_main``,
+    and ``self.aux``. ``analysis.local_reduce.grouped_tensors`` is copied into
+    mutable emission state, while ``analysis.required_geometries`` determines
+    the active grouped layouts.
+
+    The emitter owns all mutable code-generation state: FX values lowered so far,
+    grouped TensorSSA provenance, compressed-store expressions, and physical
+    reduction callbacks. ``lower_graph`` performs a topological traversal and
+    delegates each ``call_function`` node to ordered handlers; ``render`` turns
+    the resulting state into the generated epilogue and callback source.
+    """
 
     def __init__(
         self,
@@ -1289,7 +1327,23 @@ def materialize_flex_gemm_epilogue(
     analysis: FlexGemmEpilogueAnalysis,
     epilogue_arg_placeholders: tuple[torch.fx.Node, ...] = (),
 ) -> tuple[str, str]:
-    """Build CuTeDSL source from the shared FlexGEMM epilogue analysis."""
+    """Materialize an analyzed FlexGEMM body as generated CuTeDSL source.
+
+    This is the code-generation entry point called by FlexGEMM lowering after
+    ``analyze_flex_gemm_epilogue`` has classified outputs and local-reduction
+    contracts. The emitter visits the FX graph once in topological order while
+    owning the environment and reduction state needed across nodes.
+
+    Args:
+        graph_module: FlexGEMM body graph containing the GEMM and epilogue nodes.
+        gemm_op: GEMM overload expected to occur exactly once in the body.
+        analysis: Shared output and local-reduction analysis for the graph.
+        epilogue_arg_placeholders: Captured tensor placeholders exposed as
+            generated epilogue parameters.
+
+    Returns:
+        The generated epilogue function name and complete CuTeDSL source.
+    """
     return FlexGemmEpilogueEmitter(
         graph_module, gemm_op, analysis, epilogue_arg_placeholders
     ).materialize()
