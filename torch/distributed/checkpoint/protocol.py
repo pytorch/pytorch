@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast, Protocol, runtime_checkable, TypeGuard
+from typing import Protocol, runtime_checkable, TypeGuard
 
 import torch
 
@@ -101,10 +101,10 @@ def _get_checkpointable_tensor_shard(
 
     local_offset = tensor.local_offsets[shard_idx]
     local_size = tensor.local_sizes[shard_idx]
-    local_tensor = cast(torch.Tensor, tensor)
+    assert isinstance(tensor, torch.Tensor)  # noqa: S101
     if not local_offset:
-        return local_tensor
-    return local_tensor[
+        return tensor
+    return tensor[
         tuple(
             slice(offset, offset + size)
             for offset, size in zip(local_offset, local_size, strict=True)
@@ -120,7 +120,8 @@ def _validate_checkpointable_tensor_metadata(tensor: CheckpointableTensor) -> No
         raise ValueError("global_offsets and local_sizes must have the same length")
 
     global_shape = tensor.global_shape
-    tensor_shape = tuple(cast(torch.Tensor, tensor).size())
+    assert isinstance(tensor, torch.Tensor)  # noqa: S101
+    tensor_shape = tuple(tensor.size())
     for idx, (global_offset, local_offset, local_size) in enumerate(
         zip(
             tensor.global_offsets,
