@@ -108,10 +108,10 @@ runs:
         echo "${GITHUB_WORKSPACE}"
         if [ -z "${NO_SUDO}" ]; then
           retry sudo rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
         else
-          retry rm -rf "${GITHUB_WORKSPACE}"
+          retry find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
         fi
-        mkdir "${GITHUB_WORKSPACE}"
 
     - name: Checkout PyTorch (try again)
       uses: pytorch/test-infra/.github/actions/checkout@main
