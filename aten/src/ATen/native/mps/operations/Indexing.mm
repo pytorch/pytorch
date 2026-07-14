@@ -380,7 +380,7 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
                         "nonzero: step 1 and step 3 threadgroup sizes must match");
 
   uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
-  uint64_t num_blocks = (static_cast<uint64_t>(numel) + threads_per_group - 1) / threads_per_group;
+  uint64_t num_blocks = at::ceil_div(static_cast<uint64_t>(numel), static_cast<uint64_t>(threads_per_group));
   uint32_t num_blocks_u32 = static_cast<uint32_t>(num_blocks);
 
   // Storage for the four helper buffers is a single int32-typed tensor (same

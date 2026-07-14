@@ -10195,27 +10195,13 @@ class TestMPS(TestCaseMPS):
         r_cpu = emb_cpu(torch.tensor([1, 2, 3]), torch.tensor([0]))
         self.assertEqual(r_mps.cpu(), r_cpu)
     # https://github.com/pytorch/pytorch/issues/149325
-    def test_nonzero_baseline_small(self):
-        x = torch.tensor([[0, 1, 0], [2, 0, 3]], device="mps")
-        self.assertEqual(x.nonzero(), x.cpu().nonzero())
-
-    def test_nonzero_empty_input(self):
-        x = torch.zeros(0, 3, device="mps")
-        self.assertEqual(x.nonzero(), x.cpu().nonzero())
-
-    def test_nonzero_dtypes(self):
-        for dtype in (torch.bool, torch.int8, torch.int32, torch.int64, torch.float32, torch.float16):
-            x = torch.tensor([[0, 1, 0], [2, 0, 3], [0, 4, 0]], device="mps").to(dtype)
-            self.assertEqual(x.nonzero(), x.cpu().nonzero(), msg=f"dtype={dtype}")
-
-    def test_nonzero_3d(self):
-        x = (torch.randn(4, 5, 6, device="mps") > 0).to(torch.int)
-        self.assertEqual(x.nonzero(), x.cpu().nonzero())
-
-    # ~10 GiB unified memory needed: the input bool tensor is ~2.2 GiB and the
+    # Generic nonzero correctness (baseline, empty, dtypes, N-D) is covered by
+    # the nonzero OpInfo; only the >INT_MAX path is MPS-specific and can't be
+    # reached through OpInfo, so it lives here.
+    # ~11 GiB unified memory needed: the input bool tensor is ~2.2 GiB and the
     # int32 prefix-sum temporary buffer is ~8 GiB (numel * 4 bytes).
-    @unittest.skipIf(torch.mps.recommended_max_memory() < 12 * 1024**3,
-                     "needs at least 12 GiB unified memory for the input plus the int32 prefix buffer")
+    @serialTest()
+    @largeTensorTest("11GB", device="mps")
     def test_nonzero_large_64bit(self):
         # >INT_MAX elements: previously raised; now must succeed and match CPU on a sparse pattern.
         # Use ~2.2B bool elements (~2.2 GiB) with ~6 nonzero set positions so the comparison is fast.
@@ -10225,16 +10211,6 @@ class TestMPS(TestCaseMPS):
         x[positions] = True
         out = x.nonzero().squeeze(-1)
         self.assertEqual(out, positions.sort().values.to(torch.int64))
-
-    def test_nonzero_scatter_multidim_decomposition(self):
-        # Smoke test for the linear-index -> multi-dim coordinate decomposition
-        # in scatter_nonzero_indices. Small enough to run on any machine; this
-        # does NOT exercise the >INT_MAX path (that is test_nonzero_large_64bit,
-        # which is memory-gated because it needs a multi-GiB allocation).
-        x = torch.zeros(1 << 20, dtype=torch.bool, device="mps")
-        x[(1 << 20) - 1] = True
-        out = x.nonzero().squeeze(-1)
-        self.assertEqual(out, torch.tensor([(1 << 20) - 1], device="mps"))
 
 
 # Conformance suite for the MPS binary TensorIterator dispatcher: two
