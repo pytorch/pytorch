@@ -386,7 +386,7 @@ class FunctionalTensor(torch.Tensor):
             return self.to(dtype=dtype) if dtype is not None else self
 
         inner = torch._from_functional_tensor(self.elem)
-        if not isinstance(inner, torch._subclasses.FakeTensor):
+        if not torch._subclasses.fake_tensor.is_fake_tensor(inner):
             out = self.elem.to_dense(dtype=dtype, masked_grad=masked_grad)
             if isinstance(out, torch.Tensor) and torch._is_functional_tensor(out):
                 functional_mode = _detect_infra_mode(
@@ -662,7 +662,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         ):
             input_unwrapped = torch._from_functional_tensor(args[0].elem)
             if (
-                isinstance(input_unwrapped, torch._subclasses.FakeTensor)
+                isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                    input_unwrapped, torch._subclasses.FakeTensor
+                )
                 and input_unwrapped.dispatch_keys is not None
             ):
                 input_dispatch_keys = input_unwrapped.dispatch_keys
@@ -670,7 +672,9 @@ class FunctionalTensorMode(TorchDispatchMode):
                 def preserve_dispatch_keys(out: object) -> None:
                     if isinstance(out, FunctionalTensor):
                         unwrapped = torch._from_functional_tensor(out.elem)
-                        if isinstance(unwrapped, torch._subclasses.FakeTensor):
+                        if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                            unwrapped, torch._subclasses.FakeTensor
+                        ):
                             unwrapped.dispatch_keys = input_dispatch_keys
 
                 pytree.tree_map_(preserve_dispatch_keys, outs_wrapped)
