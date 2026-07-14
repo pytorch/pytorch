@@ -12,6 +12,22 @@ inputs:
   custom-tag-prefix:
     description: Custom tag prefix for the docker image
     required: false
+  use-remote-buildkit:
+    description: |
+      Build on a remote BuildKit builder (OSDC/ARC, which has no host docker
+      daemon) and push straight to docker.io, instead of building on a local
+      docker daemon. The referenced <docker-build-dir>/build.sh must honor the
+      REMOTE_BUILDKIT env var (see .ci/docker/build.sh).
+    required: false
+    default: 'false'
+  buildkit-addr:
+    description: Address of the remote BuildKit builder (used when use-remote-buildkit is true).
+    required: false
+    default: 'tcp://buildkitd-amd64.buildkit:1234'
+  docker-repository:
+    description: Target registry/repository for the published image.
+    required: false
+    default: 'docker.io/pytorch'
   DOCKER_TOKEN:
     description: Docker token for authentication
     required: true
@@ -25,8 +41,70 @@ runs:
     - name: Checkout PyTorch
       uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
+    # ── Remote BuildKit path (OSDC/ARC, no host docker daemon) ──────────
+    - name: Set up Docker Buildx (remote, no bootstrap)
+      if: ${{ inputs.use-remote-buildkit == 'true' }}
+      shell: bash
+      run: |
+        set -ex
+        docker buildx create \
+          --name remote-buildkit \
+          --driver remote \
+          --use \
+          "${{ inputs.buildkit-addr }}"
+
+    - name: Build (and, on push, publish) via remote BuildKit
+      if: ${{ inputs.use-remote-buildkit == 'true' }}
+      env:
+        REMOTE_BUILDKIT: "1"
+        DOCKER_TOKEN: ${{ inputs.DOCKER_TOKEN }}
+        DOCKER_ID: ${{ inputs.DOCKER_ID }}
+        DOCKER_IMAGE_NAME: ${{ inputs.docker-image-name }}
+        DOCKER_IMAGE_PREFIX: ${{ inputs.custom-tag-prefix }}
+        DOCKER_BUILD_DIR: ${{ inputs.docker-build-dir }}
+        DOCKER_REPOSITORY: ${{ inputs.docker-repository }}
+      shell: bash
+      run: |
+        set -euxo pipefail
+
+        # checkout-pytorch may leave the tree owned by a different uid than the
+        # step user on ARC; avoid git's "dubious ownership" error for rev-parse.
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+        GITHUB_REF=${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}
+        GIT_BRANCH_NAME=${GITHUB_REF##*/}
+        GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
+        CI_FOLDER_SHA=$(git rev-parse HEAD:.ci/docker)
+
+        # Same tag set the local-daemon path publishes: branch / commit /
+        # .ci/docker-hash tags are always produced; the floating ${prefix} tag is
+        # only published from main so a release-branch rebuild can't clobber the
+        # image main CI consumes.
+        PREFIX="${DOCKER_REPOSITORY}/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
+        TAGS=(
+          -t "${PREFIX}-${GIT_BRANCH_NAME}"
+          -t "${PREFIX}-${GIT_COMMIT_SHA}"
+          -t "${PREFIX}-${CI_FOLDER_SHA}"
+        )
+        if [[ "${GIT_BRANCH_NAME}" == "main" ]]; then
+          TAGS+=(-t "${PREFIX}")
+        fi
+
+        # WITH_PUSH gates publishing (build.sh pushes when it is true; PRs just
+        # validate the build). Log in only when we are going to push.
+        set +x
+        if [[ "${WITH_PUSH:-false}" == "true" ]]; then
+          echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+        fi
+        set -x
+
+        # build.sh reads REMOTE_BUILDKIT and buildx-pushes the passed -t tags.
+        ".ci/docker/${DOCKER_BUILD_DIR}/build.sh" "${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}" "${TAGS[@]}"
+
+    # ── Local docker daemon path (EC2) ──────────────────────────────────
     - name: Calculate docker image
       id: calculate-docker-image
+      if: ${{ inputs.use-remote-buildkit != 'true' }}
       uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
       with:
         docker-image-name: ${{ inputs.docker-image-name }}
@@ -37,6 +115,7 @@ runs:
         push: true
 
     - name: Tag and (if WITH_PUSH) push docker image to docker.io
+      if: ${{ inputs.use-remote-buildkit != 'true' }}
       env:
         DOCKER_TOKEN: ${{ inputs.DOCKER_TOKEN }}
         DOCKER_ID: ${{ inputs.DOCKER_ID }}
