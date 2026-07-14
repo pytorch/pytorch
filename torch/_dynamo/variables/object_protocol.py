@@ -2191,7 +2191,7 @@ def generic_getattr(
 
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a getattro_impl override need not repeat the consult.
-    getset = obj.tp_getset.get(name) or obj.tp_members.get(name)
+    getset = obj.lookup_tp_getset_member(name)
     if getset is not None:
         result = getset.getter(obj, tx)
         if result is not None:

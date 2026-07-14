@@ -4,6 +4,7 @@
 
 #include <mutex>
 #include <string>
+#include <string_view>
 
 #include <nccl.h>
 
@@ -40,7 +41,7 @@ class NcclApi {
   virtual ~NcclApi() = default;
 
   // Error handling
-  virtual const char* getErrorString(ncclResult_t result) = 0;
+  virtual std::string_view getErrorString(ncclResult_t result) = 0;
   virtual std::string getLastError(ncclComm_t comm) = 0;
 
   // Unique ID generation
@@ -264,7 +265,7 @@ class DefaultNcclApi : public NcclApi {
   ~DefaultNcclApi() override = default;
 
   // Error handling
-  const char* getErrorString(ncclResult_t result) override;
+  std::string_view getErrorString(ncclResult_t result) override;
   std::string getLastError(ncclComm_t comm) override;
 
   // Unique ID generation
