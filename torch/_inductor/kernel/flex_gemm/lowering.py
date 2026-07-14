@@ -1,4 +1,11 @@
 # mypy: allow-untyped-defs
+"""Lower FlexGEMM HOP bodies and connect epilogue analysis to backend templates.
+
+``flex_gemm_lowering`` is the main entry point. Non-QUACK
+requests execute the captured body through ordinary Inductor lowering. Although this
+is stale and will fix up later on. See ``lower_quack_flex_gemm`` for the flow.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -186,13 +193,16 @@ def flex_gemm_config_keys_for_local_reduce(
     from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
         default_gemm_config_key,
+        gemm_config_from_key,
         gemm_config_key,
     )
 
     if not tuned:
         default_key = default_gemm_config_key(device, m, n)
         if local_reduce is None or validate_flex_gemm_local_reduce_config(
-            dict(default_key), local_reduce.geometry.group, local_reduce.geometry.axis
+            gemm_config_from_key(default_key),
+            local_reduce.geometry.group,
+            local_reduce.geometry.axis,
         ):
             return (default_key,)
 
