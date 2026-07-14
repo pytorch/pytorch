@@ -24,7 +24,6 @@ from typing import Any
 import torch
 import torch.fx as fx
 from torch import Tensor
-from torch._custom_class_base import CustomClassBase
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.graph_bytecode_inputs import index_to_external_object_weakref
@@ -37,7 +36,6 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-from torch._library.opaque_object import is_custom_class
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
@@ -2612,76 +2610,49 @@ class AOTDispatchAutogradCompileSpec:
     try_save_cache_entry: Callable[..., Any] | None
 
 
-@dataclass
-class _AutogradSavedState:
-    metadata: ViewAndMutationMeta
+def _build_save_from_forward_plan(
+    fw_metadata: ViewAndMutationMeta,
+) -> Any:
+    is_graph_input = fw_metadata.saved_tensor_is_graph_input
+    num_saved_tensors = len(is_graph_input)
+    num_no_vc = fw_metadata.num_tensors_saved_with_no_vc_check
+    num_symints = fw_metadata.num_symints_saved_for_bw
+    if num_no_vc is None:
+        raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
+    if num_symints is None:
+        raise AssertionError("num_symints_saved_for_bw must not be None")
+    num_opaque = fw_metadata.num_opaque_objects_saved_for_bw or 0
+    num_vc = num_saved_tensors - num_no_vc
+    if num_vc < 0:
+        raise AssertionError(
+            "expected at least num_tensors_saved_with_no_vc_check saved tensors, "
+            f"got {num_saved_tensors} < {num_no_vc}"
+        )
 
-    def save_from_forward(self, ctx: Any, fw_outs: Sequence[Any]) -> None:
-        tensors_saved_with_vc_check = fw_outs[
-            self.metadata.tensors_saved_for_backwards_with_vc_check_slice
-        ]
-        tensors_saved_no_vc_check = fw_outs[
-            self.metadata.tensors_saved_for_backwards_no_vc_check_slice
-        ]
-        if not all(isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check):
-            raise AssertionError(
-                "expected all tensors_saved_with_vc_check to be Tensors, "
-                f"got types: {[type(x) for x in tensors_saved_with_vc_check]}"
-            )
-        if not all(isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check):
-            raise AssertionError(
-                "expected all tensors_saved_no_vc_check to be Tensors, "
-                f"got types: {[type(x) for x in tensors_saved_no_vc_check]}"
-            )
+    vc_start = fw_metadata.num_forward
+    no_vc_start = vc_start + num_vc
+    opaque_start = no_vc_start + num_no_vc
+    symint_start = opaque_start + num_opaque
+    tensors_saved_with_vc_check_range = (vc_start, num_vc)
+    tensors_saved_no_vc_check_range = (no_vc_start, num_no_vc)
+    opaque_object_outs_range = (opaque_start, num_opaque)
+    symint_outs_range = (symint_start, num_symints)
+    dynamic_saved_tensor_specs = tuple(
+        (idx, tuple(sorted(dims)))
+        for idx, dims in sorted(fw_metadata.dynamic_saved_tensors_idxs.items())
+    )
 
-        # See Note [Detaching saved tensors in AOTAutograd]
-        num_vc_check = len(tensors_saved_with_vc_check)
-        is_graph_input = self.metadata.saved_tensor_is_graph_input
-        tensors_to_save = [
-            x if is_graph_input[i] or not x._is_view() else x.detach()
-            for i, x in enumerate(tensors_saved_with_vc_check)
-        ]
-        tensors_no_vc_check = [
-            x if is_graph_input[num_vc_check + i] or not x._is_view() else x.detach()
-            for i, x in enumerate(tensors_saved_no_vc_check)
-        ]
-
-        # dynamic_saved_tensors_idxs has indices relative to all saved tensors
-        # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
-        for idx, dims in self.metadata.dynamic_saved_tensors_idxs.items():
-            if idx < num_vc_check:
-                mark_dynamo_propagated_dynamic_indices(tensors_to_save[idx], dims)
-            else:
-                mark_dynamo_propagated_dynamic_indices(
-                    tensors_no_vc_check[idx - num_vc_check], dims
-                )
-
-        ctx.save_for_backward(*tensors_to_save)
-        ctx._tensors_no_vc_check = tensors_no_vc_check
-
-        symint_outs = fw_outs[self.metadata.symints_saved_for_backwards_slice]
-        if not all(
-            isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
-            for x in symint_outs
-        ):
-            raise AssertionError(
-                "expected all symint_outs to be int/float/SymInt/SymFloat, "
-                f"got types: {[type(x) for x in symint_outs]}"
-            )
-        ctx.symints = symint_outs
-
-        opaque_object_outs = fw_outs[
-            self.metadata.opaque_objects_saved_for_backwards_slice
-        ]
-        if not all(
-            is_custom_class(type(obj)) or isinstance(obj, CustomClassBase)
-            for obj in opaque_object_outs
-        ):
-            raise AssertionError(
-                "expected all opaque_object_outs to be opaque types, "
-                f"got types: {[type(obj) for obj in opaque_object_outs]}"
-            )
-        ctx.opaque_objects = opaque_object_outs
+    # The C++ helper plan is built once at compile time. Ranges are
+    # (start, length) in fw_outs. dynamic_saved_tensor_specs is only for saved
+    # tensors: each entry is (saved_tensor_index, indices_of_dynamic_dims).
+    return torch._C._AOTAutogradSavePlan(
+        tensors_saved_with_vc_check_range,
+        tensors_saved_no_vc_check_range,
+        opaque_object_outs_range,
+        symint_outs_range,
+        tuple(is_graph_input),
+        dynamic_saved_tensor_specs,
+    )
 
 
 @dataclass
@@ -3218,6 +3189,7 @@ def _codegen_compiled_forward(
     backward_state_indices: list[int],
     disable_amp: bool,
     num_rng: int,
+    save_plan: Any,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
@@ -3226,7 +3198,7 @@ def _codegen_compiled_forward(
         args="ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_",
         artifact_name="compiled_function_forward",
     )
-    buf.bind(torch=torch, BackwardState=BackwardState)
+    buf.bind(torch=torch, BackwardState=BackwardState, _save_plan_=save_plan)
 
     with buf.indent():
         if backward_state_indices:
@@ -3253,7 +3225,7 @@ def _codegen_compiled_forward(
             buf.writeline("fw_outs = _compiled_fw_(list(args))")
             _codegen_normalize_as_list(buf.lines, "fw_outs", indent_level=1)
 
-        buf.writeline("_save_(ctx, fw_outs)")
+        buf.writeline("_save_(ctx, fw_outs, _save_plan_)")
         buf.writeline("return _finalize_(ctx, fw_outs)")
 
     return buf.build()
@@ -3341,7 +3313,6 @@ class _AOTDispatchAutogradFunctionFactory:
         compile_id_str = str(compile_id) if compile_id is not None else None
         self.spec.fw_metadata.compile_id_str = compile_id_str
 
-        saved_state = _AutogradSavedState(self.spec.fw_metadata)
         forward_epilogue = _AutogradForwardEpilogue(self.spec.fw_metadata)
         rng_state = _AutogradRngStateTracker(
             num_rng=self.spec.fw_metadata.num_graphsafe_rng_states,
@@ -3389,13 +3360,15 @@ class _AOTDispatchAutogradFunctionFactory:
             _codegen_bw_wrap_fn,
         )
 
+        _save_from_forward = torch._C._aot_autograd_save_from_forward
+        _save_from_forward_plan = _build_save_from_forward_plan(fw_metadata)
         _codegen_fwd = _codegen_compiled_forward(
             fw_metadata,
             backward_state_indices,
             disable_amp,
             rng_state.num_rng,
+            _save_from_forward_plan,
         )
-
         _codegen_bwd = _codegen_compiled_backward(
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
@@ -3522,7 +3495,7 @@ class _AOTDispatchAutogradFunctionFactory:
                     ctx,
                     deduped_flat_tensor_args,
                     rng_state.add_forward_args,
-                    saved_state.save_from_forward,
+                    _save_from_forward,
                     forward_epilogue.finalize,
                     CompiledFunction.compiled_fw,
                 )

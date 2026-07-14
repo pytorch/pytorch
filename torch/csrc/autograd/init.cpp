@@ -19,6 +19,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
+#include <torch/csrc/autograd/python_aot_autograd.h>
 #include <torch/csrc/autograd/python_autograd.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
@@ -40,10 +41,12 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <set>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 using torch::impl::py_context_manager;
 using torch::impl::py_context_manager_DEPRECATED;
@@ -135,6 +138,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
   if (!torch_C_module)
     return nullptr;
+  if (PyModule_AddType(
+          torch_C_module, torch::autograd::getAOTAutogradSavePlanType()) < 0) {
+    return nullptr;
+  }
   auto _C_m = py::handle(torch_C_module).cast<py::module>();
   auto m = _C_m.def_submodule("_autograd", "autograd bindings");
 
@@ -1768,6 +1775,11 @@ static PyMethodDef methods[] = {
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
     {"_increment_version", THPModule_increment_version, METH_O, nullptr},
+    {"_aot_autograd_save_from_forward",
+     reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)()>(
+         THPModule_aot_autograd_save_from_forward)),
+     METH_FASTCALL,
+     nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,
