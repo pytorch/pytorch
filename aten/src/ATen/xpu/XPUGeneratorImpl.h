@@ -17,8 +17,10 @@ struct XPUGeneratorState : public c10::intrusive_ptr_target {
   uint32_t offset_intragraph_;
   bool capturing_{};
   std::unordered_set<xpu::XPUGraphImpl*> registered_graphs_;
-  at::TensorBase seed_extragraph_{};
-  at::TensorBase offset_extragraph_{};
+  at::TensorBase
+      seed_extragraph_{}; // NOLINT(readability-redundant-member-init)
+  at::TensorBase
+      offset_extragraph_{}; // NOLINT(readability-redundant-member-init)
 
   XPUGeneratorState(
       uint64_t seed = default_rng_seed_val,
@@ -70,7 +72,8 @@ struct TORCH_XPU_API XPUGeneratorImpl : public GeneratorImpl {
 
  private:
   XPUGeneratorImpl* clone_impl() const override;
-  c10::intrusive_ptr<XPUGeneratorState> state_;
+  c10::intrusive_ptr<XPUGeneratorState>
+      state_{}; // NOLINT(readability-redundant-member-init)
 };
 
 namespace xpu::detail {

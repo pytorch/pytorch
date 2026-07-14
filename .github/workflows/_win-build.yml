@@ -168,6 +168,7 @@ jobs:
           TORCH_CUDA_ARCH_LIST: "8.6"
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           USE_XPU: ${{ inputs.use-xpu == true && '1' || '0' }}
+          USE_SCCACHE: ${{ inputs.use-xpu == true && '0' || '1' }}
           XPU_VERSION: "${{ inputs.xpu-version }}"
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |

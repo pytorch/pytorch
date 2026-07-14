@@ -101,14 +101,24 @@ set PATH=%TMP_DIR_WIN%\bin;C:\Program Files\CMake\bin;%PATH%
 :: The latest Windows CUDA test is running on AWS G5 runner with A10G GPU
 if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=8.6
 
-:: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
-set SCCACHE_IDLE_TIMEOUT=0
-set SCCACHE_IGNORE_SERVER_IO_ERROR=1
-sccache --stop-server
-sccache --start-server
-sccache --zero-stats
-set CMAKE_C_COMPILER_LAUNCHER=sccache
-set CMAKE_CXX_COMPILER_LAUNCHER=sccache
+if "%USE_SCCACHE%"=="" set USE_SCCACHE=1
+
+:: The binary Windows XPU path already disables sccache; mirror that here so
+:: XPU CI can bypass Windows-specific sccache instability in the general helper.
+if "%USE_SCCACHE%"=="0" (
+  set CMAKE_C_COMPILER_LAUNCHER=
+  set CMAKE_CXX_COMPILER_LAUNCHER=
+  set CMAKE_CUDA_COMPILER_LAUNCHER=
+) else (
+  :: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
+  set SCCACHE_IDLE_TIMEOUT=0
+  set SCCACHE_IGNORE_SERVER_IO_ERROR=1
+  sccache --stop-server
+  sccache --start-server
+  sccache --zero-stats
+  set CMAKE_C_COMPILER_LAUNCHER=sccache
+  set CMAKE_CXX_COMPILER_LAUNCHER=sccache
+)
 
 set CMAKE_GENERATOR=Ninja
 
@@ -126,7 +136,7 @@ if "%USE_CUDA%"=="1" (
   cat %TMP_DIR%/bin/nvcc.bat
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR%/bin/nvcc.bat
   for /F "usebackq delims=" %%n in (`cygpath -m "%CUDA_PATH%\bin\nvcc.exe"`) do set CMAKE_CUDA_COMPILER=%%n
-  set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
+  if not "%USE_SCCACHE%"=="0" set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
 )
 
 :: Print all existing environment variable for debugging
@@ -135,7 +145,7 @@ set
 python -m build --wheel --no-isolation
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
-sccache --show-stats
+if not "%USE_SCCACHE%"=="0" sccache --show-stats
 python -c "import os, glob; os.system('python -mpip install --no-index --no-deps ' + glob.glob('dist/*.whl')[0])"
 (
   if "%BUILD_ENVIRONMENT%"=="" (

@@ -552,6 +552,7 @@ jobs:
       runner: linux.c7i.8xlarge
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
+      container-image: ${{ format('ghcr.io/pytorch/ci-image:pytorch-linux-noble-xpu-n-py3{0}', needs.get-label-type.outputs.ci-docker-hash && format('-{0}', needs.get-label-type.outputs.ci-docker-hash) || '') }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [

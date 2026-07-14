@@ -41,6 +41,7 @@ jobs:
       runner_prefix: "mt-"
       build-environment: linux-jammy-xpu-n-1-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
+      container-image: ${{ format('ghcr.io/pytorch/ci-image:pytorch-linux-jammy-xpu-n-1-py3{0}', needs.get-label-type.outputs.ci-docker-hash && format('-{0}', needs.get-label-type.outputs.ci-docker-hash) || '') }}
       runner: l-x86iavx512-48-384
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
@@ -63,6 +64,7 @@ jobs:
       runner_prefix: "mt-"
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
+      container-image: ${{ format('ghcr.io/pytorch/ci-image:pytorch-linux-noble-xpu-n-py3{0}', needs.get-label-type.outputs.ci-docker-hash && format('-{0}', needs.get-label-type.outputs.ci-docker-hash) || '') }}
       runner: l-x86iavx512-48-384
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
@@ -101,6 +103,7 @@ jobs:
       runner_prefix: "mt-"
       build-environment: linux-noble-xpu-n-py3.10-client
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3-client
+      container-image: ${{ format('ghcr.io/pytorch/ci-image:pytorch-linux-noble-xpu-n-py3-client{0}', needs.get-label-type.outputs.ci-docker-hash && format('-{0}', needs.get-label-type.outputs.ci-docker-hash) || '') }}
       runner: l-x86iavx512-48-384
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
