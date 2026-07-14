@@ -350,6 +350,8 @@ def datasheet_tops(
     If ``device_name`` is given, the datasheet is looked up for that named
     device instead of querying the current device. This lets callers pin a
     device spec for deterministic, hardware-independent estimates.
+
+    If ``device`` is given, the name of that specific torch device is used.
     """
     if device_name is not None:
         name: str | None = device_name
