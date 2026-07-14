@@ -729,7 +729,7 @@ class SerializationMixin:
         msg = 'filelike serialization with {}'
 
         b = torch.load(data)
-        self.assertTrue(torch.equal(tensor, b), msg.format(desc))
+        self.assertTrue(torch.equal(tensor, b), lambda _m: f"{_m}\n" + (msg.format(desc)))
 
     def test_serialization_filelike_missing_attrs(self):
         # Test edge cases where filelike objects are missing attributes.
@@ -923,7 +923,7 @@ class TestBothSerialization(TestCase):
         with AlwaysWarnTypedStorageRemoval(True), warnings.catch_warnings(record=True) as w:
             with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
                 test(f_new, f_old)
-            self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
+            self.assertTrue(len(w) == 0, msg=lambda msg: f"{msg}\nExpected no warnings but got {[str(x) for x in w]}")
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -1072,21 +1072,34 @@ class TestSerialization(TestCase, SerializationMixin):
         gc.collect()
         big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
 
-        with BytesIOContext() as f:
+        with contextlib.closing(BytesIOContext()) as f:
             torch.save(big_model.state_dict(), f)
+            del big_model
             f.seek(0)
             state = torch.load(f)
 
-
-        gc.collect()
+        # Release the large serialized buffer (closed on block exit) and the
+        # loaded state before allocating the filesystem tensor below.
+        del state
         if IS_FILESYSTEM_UTF8_ENCODING:
             with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
                 with TemporaryFileName(dir=dname) as fname:
                     # https://github.com/pytorch/pytorch/issues/185098
-                    data = torch.rand(200, 2048, 2048, dtype=torch.float32)  # ~3.13 GiB storage
+                    tensor_size = 2 * 1024 * 1024 * 1024 + 1024
+                    boundary = 2 * 1024 * 1024 * 1024
+                    data = torch.zeros(tensor_size, dtype=torch.uint8)  # >2 GiB storage
+                    expected = torch.arange(8, dtype=torch.uint8)
+                    data[:8] = expected
+                    data[boundary - 4:boundary + 4] = expected
+                    data[-8:] = expected
                     torch.save(data, fname)
+                    del data
                     loaded_data = torch.load(fname)
-                    self.assertEqual(loaded_data, data)
+                    self.assertEqual(loaded_data.shape, (tensor_size,))
+                    self.assertEqual(loaded_data.dtype, torch.uint8)
+                    self.assertEqual(loaded_data[:8], expected)
+                    self.assertEqual(loaded_data[boundary - 4:boundary + 4], expected)
+                    self.assertEqual(loaded_data[-8:], expected)
 
     @serialTest()
     def test_serialization_4gb_file(self):
