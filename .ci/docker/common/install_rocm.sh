@@ -26,10 +26,6 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    # sqlite3 CLI is used below to fix up MIOpen kdb files. It used to be pulled
-    # in via conda; now that the image is conda-free, install it explicitly.
-    apt-get install -y sqlite3
-
     # When ROCM_VERSION=nightly, install ROCm from TheRock nightly tarballs
     # Mirrors: https://github.com/ROCm/TheRock/blob/main/dockerfiles/install_rocm_tarball.sh
     if [[ "${ROCM_VERSION}" == "nightly" ]]; then
@@ -207,6 +203,10 @@ EOF
       fi
     fi
 
+    # sqlite3 CLI is used just below to fix up the MIOpen kdb files (previously
+    # pulled in via conda). Only this non-nightly path runs that fixup.
+    apt-get install -y sqlite3
+
     # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
     for kdb in /opt/rocm/share/miopen/db/*.kdb
     do
@@ -227,8 +227,9 @@ EOF
             HIP_TAG=rocm-6.4.0
             CLR_HASH=600f5b0d2baed94d5121e2174a9de0851b040b0c  # branch release/rocm-rel-6.4-statco-hotfix
         fi
-        # clr build needs CppHeaderParser; install it into the active Python env
-        python -m pip install CppHeaderParser
+        # clr build needs CppHeaderParser; install it via pip_install so it lands
+        # in the active env as jenkins (keeps venv files jenkins-owned)
+        pip_install CppHeaderParser
         git clone https://github.com/ROCm/HIP -b $HIP_TAG
         HIP_COMMON_DIR=$(readlink -f HIP)
         git clone https://github.com/jeffdaily/clr

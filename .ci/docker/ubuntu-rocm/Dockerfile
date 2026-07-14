@@ -27,7 +27,6 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 # Install python (via deadsnakes) into a venv and the CI requirements
 ARG PYTHON_VERSION
 ARG PYTHON_FREETHREADED
-ARG BUILD_ENVIRONMENT
 ENV PYTHON_VERSION=$PYTHON_VERSION
 ENV PYTHON_FREETHREADED=$PYTHON_FREETHREADED
 ENV VENV_PATH=/opt/python-${PYTHON_VERSION}-venv
@@ -35,8 +34,7 @@ ENV VIRTUAL_ENV=${VENV_PATH}
 ENV PATH=${VENV_PATH}/bin:$PATH
 COPY requirements-ci.txt /opt/requirements-ci.txt
 COPY ./common/install_python.sh install_python.sh
-COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_python.sh && rm install_python.sh common_utils.sh /opt/requirements-ci.txt
+RUN bash ./install_python.sh && rm install_python.sh /opt/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -51,6 +49,9 @@ RUN bash ./install_clang.sh && rm install_clang.sh
 # Install rocm
 ARG ROCM_VERSION
 ENV ROCM_VERSION=${ROCM_VERSION}
+# install_rocm.sh reads BUILD_ENVIRONMENT (nightly gfx950 family detection)
+ARG BUILD_ENVIRONMENT
+ENV BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
 RUN mkdir ci_commit_pins
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
@@ -88,6 +89,9 @@ ENV LC_ALL C.UTF-8
 # Install amdsmi
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
+# install_amdsmi.sh runs `pip install` as root, which can leave venv files
+# root-owned; hand the venv back to jenkins (mirrors ubuntu/Dockerfile).
+RUN chown -R jenkins:jenkins ${VENV_PATH}
 RUN rm install_amdsmi.sh
 
 ARG INDUCTOR_BENCHMARKS
@@ -132,9 +136,6 @@ RUN rm install_openmpi.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/rocm-origami.txt rocm-origami.txt
 RUN bash -c 'source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
-
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 USER jenkins
 CMD ["bash"]
