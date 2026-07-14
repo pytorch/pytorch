@@ -1225,7 +1225,11 @@ def device_count() -> int:
             nvml_count = _device_count_amdsmi()
         else:
             nvml_count = _device_count_nvml()
-        r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+        # Fall back to the HIP/CUDA runtime count when the smi path reports no
+        # devices (<= 0). On some ROCm containers amdsmi initializes but
+        # enumerates 0 processors while the HIP runtime counts the GPUs
+        # correctly; a spurious smi 0 must not override the runtime count.
+        r = torch._C._cuda_getDeviceCount() if nvml_count <= 0 else nvml_count
     # NB: Do not cache the device count prior to CUDA initialization, because
     # the number of devices can change due to changes to CUDA_VISIBLE_DEVICES
     # setting prior to CUDA initialization.
