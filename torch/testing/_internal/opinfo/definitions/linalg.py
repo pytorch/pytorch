@@ -12,7 +12,11 @@ from numpy import inf
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_magma_version, ROCM_VERSION, with_tf32_off
+from torch.testing._internal.common_cuda import (
+    _get_magma_version,
+    ROCM_VERSION,
+    with_tf32_off,
+)
 from torch.testing._internal.common_device_type import (
     has_cusolver,
     skipCPUIfNoLapack,
