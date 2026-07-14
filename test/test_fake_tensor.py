@@ -2139,7 +2139,7 @@ def forward(self, x_1):
 
             self.assertTrue(
                 fake_out.is_contiguous(),
-                f"FakeTensor upsample output should be contiguous, got strides {fake_out.stride()}",
+                lambda msg: f"{msg}\nFakeTensor upsample output should be contiguous, got strides {fake_out.stride()}",
             )
 
     def test_export_numpy(self):
@@ -4087,7 +4087,6 @@ class FakeTensorDispatchCache(TestCase):
                 self.assertHitsMisses(2, 3)
 
                 self.assertEqual(len(ref), len(res))
-                self.assertEqual(len(ref), len(res))
                 for a, b in zip(ref, res):
                     self.assertEqual(
                         extract_tensor_metadata(a),
@@ -4150,7 +4149,6 @@ class FakeTensorDispatchCache(TestCase):
             # The hits are from the ops inside fn and not the subgraph
             self.assertHitsMisses(2, 3)
 
-            self.assertEqual(len(ref), len(res))
             self.assertEqual(len(ref), len(res))
             for a, b in zip(ref, res):
                 self.assertEqual(
