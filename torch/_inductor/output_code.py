@@ -30,6 +30,7 @@ from functools import partial
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 import torch
+from torch._custom_class_base import CustomClassBase
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
@@ -52,10 +53,10 @@ from torch._inductor.utils import (
     CUDAGraphWrapperMetadata,
     GraphPartitionMap,
     InputType,
+    is_gpu,
     output_node,
     set_tracing_context_output_strides,
 )
-from torch._opaque_base import OpaqueBase
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
@@ -296,7 +297,7 @@ def cudagraph_post_compile(
         BoxedBool.disable(cudagraphs)
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
 
-        if "cuda" in compiled_graph.device_types:
+        if any(is_gpu(device) for device in compiled_graph.device_types):
             # prefer better disable_cudagraphs_reason bc stack trace
             # TODO: migrate all disable reasons to stack trace, refactor
             if compiled_graph.disabled_cudagraphs_reason:
@@ -631,7 +632,7 @@ class CompiledFxGraph(OutputCode):
         if cudagraphs:
             # check cudagraph disabling reasons from inductor lowering
             if self.disabled_cudagraphs_reason:
-                if "cuda" in self.device_types:
+                if any(is_gpu(device) for device in self.device_types):
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
                     )
@@ -682,7 +683,7 @@ class CompiledFxGraph(OutputCode):
                                     torch.Tensor,
                                     torch.SymInt,
                                     torch.Generator,
-                                    OpaqueBase,
+                                    CustomClassBase,
                                 ),
                             )
                             for t in example_inputs
@@ -874,7 +875,7 @@ class CompiledFxGraph(OutputCode):
             # during a previous compilation we're loading from the cache.
             # If so, we need to disable it on this new process too.
             if self.disabled_cudagraphs_reason:
-                if "cuda" in self.device_types:
+                if any(is_gpu(device) for device in self.device_types):
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
                     )
