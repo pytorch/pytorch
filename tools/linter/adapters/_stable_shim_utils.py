@@ -488,7 +488,7 @@ def merge_base_with_main() -> str:
         ["git", "merge-base", "HEAD", main_sha],
         capture_output=True,
         text=True,
-        timeout=5,
+        timeout=60,
     )
     if result.returncode != 0:
         raise RuntimeError(

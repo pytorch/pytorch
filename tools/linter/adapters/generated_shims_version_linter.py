@@ -122,7 +122,7 @@ def _read_at_merge_base(filename: str) -> str | None:
         ["git", "show", f"{merge_base}:{rel_path}"],
         capture_output=True,
         text=True,
-        timeout=5,
+        timeout=60,
     )
     if result.returncode != 0:
         # File didn't exist at merge-base; treat all current entries as new.

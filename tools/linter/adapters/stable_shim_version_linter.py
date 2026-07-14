@@ -72,7 +72,7 @@ def get_added_lines(filename: str) -> set[int]:
             ["git", "diff", "HEAD", filename],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=60,
         )
         if result.returncode == 0:
             added_lines.update(parse_diff(result.stdout))
@@ -83,7 +83,7 @@ def get_added_lines(filename: str) -> set[int]:
             ["git", "diff", f"{merge_base}..HEAD", filename],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=60,
         )
         if result.returncode != 0:
             raise RuntimeError(
