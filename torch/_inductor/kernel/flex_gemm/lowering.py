@@ -1,4 +1,11 @@
 # mypy: allow-untyped-defs
+"""Lower FlexGEMM HOP bodies and connect epilogue analysis to backend templates.
+
+``flex_gemm_lowering`` is the main entry point. Non-QUACK
+requests execute the captured body through ordinary Inductor lowering. Although this
+is stale and will fix up later on. See ``lower_quack_flex_gemm`` for the flow.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -15,6 +22,15 @@ from torch.utils._ordered_set import OrderedSet
 from ... import ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
+from .constraints import (
+    flex_gemm_local_reduce_config_error,
+    is_flex_gemm_partial_reduction_shape,
+    LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
+    LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR,
+    LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
+    statically_known_shape_equal,
+    validate_flex_gemm_local_reduce_config,
+)
 
 
 def flex_gemm_tensor_placeholders(
@@ -66,11 +82,11 @@ def infer_flex_gemm_epilogue_arg_kinds(
     epilogue_arg_kinds = []
     for epilogue_arg in epilogue_args:
         epilogue_arg_size = epilogue_arg.get_size()
-        if epilogue_arg_size == output_size:
+        if statically_known_shape_equal(epilogue_arg_size, output_size):
             epilogue_arg_kinds.append("tile")
-        elif epilogue_arg_size == [1, n]:
+        elif statically_known_shape_equal(epilogue_arg_size, [1, n]):
             epilogue_arg_kinds.append("row")
-        elif epilogue_arg_size == [m, 1]:
+        elif statically_known_shape_equal(epilogue_arg_size, [m, 1]):
             epilogue_arg_kinds.append("col")
         else:
             raise NotImplementedError(
@@ -88,10 +104,6 @@ def validate_flex_gemm_aux_outputs(
     """Validate QUACK aux-output support and return fake tensor metadata."""
     if not aux_outputs:
         return ()
-    if len(aux_outputs) > 1:
-        raise NotImplementedError(
-            "FlexGEMM QUACK backend currently supports at most one aux output"
-        )
     if gemm_op is not torch.ops.aten.mm.default:
         raise NotImplementedError(
             "FlexGEMM generic aux tuple epilogues currently support only aten.mm"
@@ -104,11 +116,10 @@ def validate_flex_gemm_aux_outputs(
                 "FlexGEMM generic aux tuple epilogues require aux output metadata"
             )
         aux_size = ir.convert_shape_to_inductor(aux_meta.shape)
-        if aux_size != output_size:
-            raise NotImplementedError(
-                "FlexGEMM generic aux tuple epilogues currently require aux "
-                "output shapes to match the GEMM output shape"
-            )
+        if not statically_known_shape_equal(aux_size, output_size):
+            if is_flex_gemm_partial_reduction_shape(aux_size, output_size):
+                raise NotImplementedError(LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR)
+            raise NotImplementedError(LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR)
         aux_metas.append(aux_meta)
     return tuple(aux_metas)
 
@@ -128,6 +139,88 @@ def allocate_flex_gemm_aux_outs(
     )
 
 
+def flex_gemm_ordered_outputs(result, aux_outs, local_reduce_outs, local_reduce_index):
+    """Return generated outputs in the user-visible tuple order."""
+    match local_reduce_outs, local_reduce_index:
+        case (), _:
+            return (result, *aux_outs)
+        case (local_reduce_out,), None:
+            return (result, *aux_outs, local_reduce_out)
+        case (local_reduce_out,), index:
+            return (
+                result,
+                *aux_outs[:index],
+                local_reduce_out,
+                *aux_outs[index:],
+            )
+        case _:
+            raise AssertionError("FlexGEMM expects at most one local-reduce output")
+
+
+def flex_gemm_local_reduce_metas(
+    gemm_op: torch._ops.OpOverload,
+    local_reduce,
+) -> tuple[Any, ...]:
+    """Return local-reduce output metadata after validating its GEMM scope."""
+    if local_reduce is None:
+        return ()
+    if gemm_op is not torch.ops.aten.mm.default:
+        raise NotImplementedError(LOCAL_REDUCE_DENSE_MM_SCOPE_ERROR)
+    if local_reduce.store is None:
+        return ()
+    return (local_reduce.store.node.meta["val"],)
+
+
+def flex_gemm_config_keys_for_local_reduce(
+    device,
+    m: int,
+    n: int,
+    local_reduce,
+    tuned: bool,
+) -> tuple[tuple[Any, ...], ...]:
+    """Select QuACK config keys after applying local-reduce layout constraints."""
+    from torch._inductor.heuristics.template.flex_gemm import (
+        candidate_gemm_configs_for_device,
+        default_gemm_config_key,
+        gemm_config_from_key,
+        gemm_config_key,
+    )
+
+    if not tuned:
+        default_key = default_gemm_config_key(device, m, n)
+        if local_reduce is None or validate_flex_gemm_local_reduce_config(
+            gemm_config_from_key(default_key),
+            local_reduce.match.geometry.group,
+            local_reduce.match.geometry.axis,
+        ):
+            return (default_key,)
+
+    candidate_configs = candidate_gemm_configs_for_device(device)
+    if local_reduce is None:
+        return tuple(gemm_config_key(config) for config in candidate_configs)
+
+    local_reduce_configs = tuple(
+        config
+        for config in candidate_configs
+        if validate_flex_gemm_local_reduce_config(
+            config,
+            local_reduce.match.geometry.group,
+            local_reduce.match.geometry.axis,
+        )
+    )
+    if not local_reduce_configs:
+        raise NotImplementedError(
+            flex_gemm_local_reduce_config_error(
+                candidate_configs,
+                local_reduce.match.geometry.group,
+                local_reduce.match.geometry.axis,
+            )
+        )
+    if tuned:
+        return tuple(gemm_config_key(config) for config in local_reduce_configs)
+    return (gemm_config_key(local_reduce_configs[0]),)
+
+
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
 def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     """Lower FlexGEMM to the regular subgraph path or the QUACK template."""
@@ -145,13 +238,14 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
+        analyze_flex_gemm_epilogue,
         gemm_node as flex_gemm_node,
         materialize_flex_gemm_epilogue,
-        output_plan as flex_gemm_output_plan,
     )
     from torch._inductor.kernel.flex_gemm.template import (
         flex_gemm_epilogue_template,
         FlexGemmEpilogueConfig,
+        FlexGemmEpilogueLocalReduceConfig,
     )
     from torch._inductor.select_algorithm import autotune_select_algorithm
 
@@ -188,7 +282,11 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     beta = gemm_fx_node.kwargs.get("beta", gemm_kwargs.get("beta", 1.0))
     if not isinstance(alpha, (int, float)) or not isinstance(beta, (int, float)):
         raise NotImplementedError("FlexGEMM alpha/beta must be static scalars")
-    outputs = flex_gemm_output_plan(subgraph.graph_module)
+    epilogue_analysis = analyze_flex_gemm_epilogue(subgraph.graph_module)
+    outputs = epilogue_analysis.outputs
+    local_reduce_store = (
+        None if outputs.local_reduce is None else outputs.local_reduce.store
+    )
     output_meta = outputs.output.meta.get("val")
     if output_meta is None:
         raise NotImplementedError(
@@ -198,6 +296,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     aux_metas = validate_flex_gemm_aux_outputs(
         gemm_op, outputs.aux_outputs, output_size
     )
+    local_reduce_metas = flex_gemm_local_reduce_metas(gemm_op, outputs.local_reduce)
     layout = ir.FixedLayout(
         gemm_args[mat1_index].get_device_or_error(),
         output_meta.dtype,
@@ -211,41 +310,44 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         ir.TemplateBuffer.realize_template_input(arg) for arg in epilogue_args
     ]
     aux_outs = allocate_flex_gemm_aux_outs(aux_metas, gemm_args[mat1_index])
+    local_reduce_outs = allocate_flex_gemm_aux_outs(
+        local_reduce_metas, gemm_args[mat1_index]
+    )
     aux_input_nodes = [
         ir.TemplateBuffer.realize_template_input(aux_out) for aux_out in aux_outs
     ]
-    input_nodes = [*gemm_input_nodes, *epilogue_input_nodes, *aux_input_nodes]
-    aux_out_index = (
-        len(gemm_input_nodes) + len(epilogue_input_nodes) if aux_input_nodes else None
+    local_reduce_input_nodes = [
+        ir.TemplateBuffer.realize_template_input(local_reduce_out)
+        for local_reduce_out in local_reduce_outs
+    ]
+    input_nodes = [
+        *gemm_input_nodes,
+        *epilogue_input_nodes,
+        *aux_input_nodes,
+        *local_reduce_input_nodes,
+    ]
+    mutated_input_nodes = aux_input_nodes + local_reduce_input_nodes
+    aux_out_start = len(gemm_input_nodes) + len(epilogue_input_nodes)
+    aux_out_indices = tuple(range(aux_out_start, aux_out_start + len(aux_input_nodes)))
+    local_reduce_out_index = (
+        aux_out_start + len(aux_input_nodes) if local_reduce_input_nodes else None
     )
     epilogue_arg_kinds = infer_flex_gemm_epilogue_arg_kinds(
         gemm_op, epilogue_input_nodes, output_size
     )
-    epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
-        subgraph.graph_module, gemm_op, epilogue_arg_placeholders
+    template_local_reduce = FlexGemmEpilogueLocalReduceConfig.from_output_plan(
+        outputs.local_reduce, local_reduce_out_index
     )
-    if tuned:
-        from torch._inductor.heuristics.template.flex_gemm import (
-            candidate_gemm_configs_for_device,
-            gemm_config_key,
-        )
-
-        quack_config_keys = tuple(
-            gemm_config_key(config)
-            for config in candidate_gemm_configs_for_device(layout.device)
-        )
-    else:
-        from torch._inductor.heuristics.template.flex_gemm import (
-            default_gemm_config_key,
-        )
-
-        quack_config_keys = (
-            default_gemm_config_key(
-                layout.device,
-                gemm_args[mat1_index].get_size()[-2],
-                gemm_args[mat2_index].get_size()[-1],
-            ),
-        )
+    epilogue_name, epilogue_source = materialize_flex_gemm_epilogue(
+        subgraph.graph_module, gemm_op, epilogue_analysis, epilogue_arg_placeholders
+    )
+    quack_config_keys = flex_gemm_config_keys_for_local_reduce(
+        layout.device,
+        gemm_args[mat1_index].get_size()[-2],
+        gemm_args[mat2_index].get_size()[-1],
+        outputs.local_reduce,
+        tuned,
+    )
     epilogue_arg_indices = tuple(
         range(
             len(gemm_input_nodes),
@@ -258,7 +360,7 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             choices,
             input_nodes=input_nodes,
             layout=layout,
-            mutated_inputs=aux_input_nodes or None,
+            mutated_inputs=mutated_input_nodes or None,
             config=FlexGemmEpilogueConfig(
                 epilogue_name=epilogue_name,
                 epilogue_source=epilogue_source,
@@ -269,7 +371,8 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 quack_config_key=quack_config_key,
                 epilogue_arg_indices=epilogue_arg_indices,
                 epilogue_arg_kinds=epilogue_arg_kinds,
-                aux_out_index=aux_out_index,
+                aux_out_indices=aux_out_indices,
+                local_reduce=template_local_reduce,
             ),
         )
         if error is not None:
@@ -277,6 +380,9 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue", choices, input_nodes, layout
     )
-    if aux_outs:
-        return (result, *aux_outs)
-    return (result,)
+    return flex_gemm_ordered_outputs(
+        result,
+        aux_outs,
+        local_reduce_outs,
+        None if local_reduce_store is None else local_reduce_store.aux_index,
+    )
