@@ -4,10 +4,9 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import os
-from typing import Any, TypeAlias
+from typing import Any, TYPE_CHECKING
 
 import torch
-import torch._vendor.quack.gemm_config as quack_gemm_config
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceCallbacks,
     FlexGemmLocalReduceGeometry,
@@ -27,7 +26,9 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._prims_common import is_expandable_to
 
 
-GemmConfigKey: TypeAlias = tuple[tuple[str, Any], ...]
+if TYPE_CHECKING:
+    from torch._inductor.heuristics.template.flex_gemm import GemmConfigKey
+
 
 # swap_ab transposes the dispatched GEMM, so a row broadcast becomes a col
 # broadcast (and vice versa) while tile broadcasts only transpose their data.
@@ -537,6 +538,7 @@ def gemm_epilogue(
     )
     from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
+        gemm_config_from_key,
     )
     from torch._vendor.quack.cache import cache_dir_override
 
@@ -562,7 +564,7 @@ def gemm_epilogue(
             alpha,
             beta,
             config=(
-                quack_gemm_config.GemmConfig(**dict(config_key))
+                gemm_config_from_key(config_key)
                 if config_key is not None
                 else candidate_gemm_configs_for_device(a.device)[0]
             ),
