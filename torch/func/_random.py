@@ -10,7 +10,7 @@ import torch
 
 
 def key(
-    seed: int, impl: str = "philox4x32-10", device: torch.device | None = None
+    seed: int, *, device: torch.device | None = None, impl: str = "philox4x32-10"
 ) -> torch.Tensor:
     r"""Create a PRNG key from a seed.
 
@@ -21,10 +21,10 @@ def key(
 
     Args:
         seed (int): The seed value for the PRNG.
-        impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
-            supported.
         device (:class:`torch.device`, optional): The desired device for the
             returned key. Default: ``cpu``.
+        impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
+            supported.
 
     Returns:
         A tensor representing the PRNG key.
