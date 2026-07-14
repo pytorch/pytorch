@@ -106,7 +106,7 @@ def _get_kernel_cache() -> dict[str, Any]:
 
 
 def _operand_sig(operand: Any) -> tuple | None:
-    """Hashable (dtype, shape, stride, scale-sig) signature of an operand."""
+    """Hashable (dtype, shape, stride, scale-sig, mode, swizzle) signature."""
     if operand is None:
         return None
     w = getattr(operand, "tensor", operand)
@@ -117,7 +117,14 @@ def _operand_sig(operand: Any) -> tuple | None:
         return None
     scale = getattr(operand, "scale", None)
     scale_sig = _operand_sig(scale) if scale is not None else None
-    return (dtype, tuple(shape), tuple(stride), scale_sig)
+    # ScaledOperand.mode/.swizzle are distinct from the scale tensor's layout
+    # and are not folded into it, yet supports(args) depends on them -- two
+    # scaled GEMMs with identical operand/scale layouts but different scale or
+    # swizzle modes must not collide. Read from __dict__ (only ScaledOperand
+    # sets these) so a dense operand's torch.Tensor.mode method isn't captured.
+    d = getattr(operand, "__dict__", {})
+    mode, swizzle = d.get("mode"), d.get("swizzle")
+    return (dtype, tuple(shape), tuple(stride), scale_sig, mode, swizzle)
 
 
 def _partition_sig(args: Any) -> tuple | None:
@@ -128,7 +135,7 @@ def _partition_sig(args: Any) -> tuple | None:
     o = _operand_sig(getattr(args, "out", None))
     if a is None or b is None or o is None:
         return None
-    return (a, b, o)
+    return (a, b, o, getattr(args, "accumulator_type", None))
 
 
 # Memoizes partition results. `partition_compatible_kernels` is called once per
