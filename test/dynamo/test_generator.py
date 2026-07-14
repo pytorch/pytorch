@@ -795,7 +795,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(eager.graphs), 0)
 
     @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
-    @unittest.expectedFailure
     def test_cleanup_throw(self):
         def nested_generator():
             try:
@@ -825,6 +824,93 @@ class GraphModule(torch.nn.Module):
         i, y = self._compile_check(fn, args=(t,))
         self.assertEqual(i, 3)
         self.assertEqual(y, t.sin())
+
+    @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
+    def test_cleanup_throw_custom_StopIteration(self):
+        class MyStopIteration(StopIteration):
+            pass
+
+        def nested_generator():
+            try:
+                yield 1
+                yield 2
+            except StopIteration:
+                return 123  # noqa: B901
+
+        def outer_generator():
+            yield from nested_generator()
+            yield 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = outer_generator()
+            next(gen)  # Start the outer generator and enter the nested generato
+
+            i = 0
+            try:
+                # Force an exception while the generator is running
+                i = gen.throw(MyStopIteration("stop"))
+            except RuntimeError:
+                pass
+            return (i, t.sin())
+
+        t = torch.randn(2)
+        i, y = self._compile_check(fn, args=(t,))
+        self.assertEqual(i, 3)
+        self.assertEqual(y, t.sin())
+
+    @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
+    @unittest.expectedFailure
+    def test_cleanup_throw_subgen_return_value(self):
+        # CLEANUP_THROW must resume the delegating generator with the
+        # subgenerator's return value (StopIteration.value). When the
+        # subgenerator catches the thrown StopIteration and returns, the
+        # yield-from expression must evaluate to that returned value. Dynamo
+        # currently extracts the value of the *thrown* exception instead.
+        def nested_generator():
+            try:
+                yield 1
+                yield 2
+            except StopIteration:
+                return 123  # noqa: B901
+
+        def outer_generator():
+            r = yield from nested_generator()
+            yield r
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = outer_generator()
+            next(gen)
+            i = gen.throw(StopIteration("stop"))
+            return (i, t.sin())
+
+        t = torch.randn(2)
+        i, y = fn(t)
+        self.assertEqual(i, 123)
+        self.assertEqual(y, t.sin())
+
+    @unittest.skipIf(sys.version_info < (3, 12), "Test CLEANUP_THROW")
+    @unittest.expectedFailure
+    def test_cleanup_throw_empty_stopiteration(self):
+        def nested_generator():
+            yield 1
+            yield 2
+
+        def outer_generator():
+            yield from nested_generator()
+            yield 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = outer_generator()
+            next(gen)
+            gen.throw(StopIteration())
+            return t.sin()
+
+        t = torch.randn(2)
+        with self.assertRaises(RuntimeError):
+            fn(t)
 
     def test_iter(self):
         def whoo():
