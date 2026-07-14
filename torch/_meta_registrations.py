@@ -2250,8 +2250,8 @@ def _pad2d_common(input, padding, *, is_reflection):
     torch._check(
         sym_and(output_w >= 1, output_h >= 1),
         lambda: (
-            f"input (H: {input_h}, W: {input_w}) is too small. "
-            f"Calculated output H: {output_h} W: {output_w}"
+            f"Calculated output H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input H: {input_h}, W: {input_w})"
         ),
     )
 
@@ -2386,8 +2386,8 @@ def _pad3d_common(input, padding, *, is_reflection):
     torch._check(
         sym_and(output_w >= 1, output_h >= 1, output_d >= 1),
         lambda: (
-            f"input (D: {input_d}, H: {input_h}, W: {input_w}) is too small. "
-            f"Calculated output D: {output_d} H: {output_h} W: {output_w}"
+            f"Calculated output D: {output_d} H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input D: {input_d}, H: {input_h}, W: {input_w})"
         ),
     )
 
