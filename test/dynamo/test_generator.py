@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import itertools
 import sys
+import types
 import unittest
 from collections import OrderedDict
 
@@ -22,6 +23,8 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
         super().setUp()
         self._old = torch._dynamo.config.enable_faithful_generator_behavior
         torch._dynamo.config.enable_faithful_generator_behavior = True
+        self._prev = torch._dynamo.config.enable_trace_load_build_class
+        torch._dynamo.config.enable_trace_load_build_class = True
         self._unittest_old = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
 
@@ -29,6 +32,7 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
         super().tearDown()
         torch._dynamo.config.enable_faithful_generator_behavior = self._old
         torch._dynamo.config.enable_trace_unittest = self._unittest_old
+        torch._dynamo.config.enable_trace_load_build_class = self._prev
 
     def _compile_check(self, fn, args=None, fullgraph=True):
         eager = EagerAndRecordGraphs()
@@ -1946,6 +1950,325 @@ class TestGeneratorThrow(GeneratorTestsBase):
             return t.sin()
 
         self._compile_check(fn)
+
+
+class TestGeneratorPEP(GeneratorTestsBase):
+    # Ported from CPython Lib/test/test_generators.py `pep_tests` doctest block.
+
+    @make_dynamo_test
+    def test_resume_running_generator(self):
+        # A generator cannot be resumed while it is actively running.
+        def g():
+            i = next(me)
+            yield i
+
+        me = g()
+        self.assertRaisesRegex(ValueError, "generator already executing", next, me)
+
+    @make_dynamo_test
+    def test_return_is_not_stopiteration(self):
+        # return simply exits; it is not caught by a bare except.
+        def f1():
+            try:
+                return
+            except:  # noqa: E722
+                yield 1
+
+        self.assertEqual(list(f1()), [])
+
+        # a raised StopIteration is caught by a bare except, like any exception.
+        def f2():
+            try:
+                raise StopIteration
+            except:  # noqa: E722
+                yield 42
+
+        self.assertEqual(list(f2()), [42])
+
+    @make_dynamo_test
+    def test_exception_propagation(self):
+        def f():
+            return 1 // 0
+
+        def g():
+            yield f()  # the zero division exception propagates
+            yield 42  # and we'll never get here
+
+        k = g()
+        self.assertRaises(ZeroDivisionError, next, k)
+        self.assertRaises(StopIteration, next, k)  # cannot be resumed
+
+    @make_dynamo_test
+    def test_try_except_finally(self):
+        def f():
+            try:
+                yield 1
+                try:
+                    yield 2
+                    1 // 0
+                    yield 3  # never get here
+                except ZeroDivisionError:
+                    yield 4
+                    yield 5
+                    raise
+                except:  # noqa: E722
+                    yield 6
+                yield 7  # the "raise" above stops this
+            except:  # noqa: E722
+                yield 8
+            yield 9
+            try:
+                x = 12  # noqa: F841
+            finally:
+                yield 10
+            yield 11
+
+        self.assertEqual(list(f()), [1, 2, 4, 5, 8, 9, 10, 11])
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_recursive_inorder_tree(self):
+        class Tree:
+            def __init__(self, label, left=None, right=None):
+                self.label = label
+                self.left = left
+                self.right = right
+
+            def __iter__(self):
+                return inorder(self)
+
+        def tree(lst):
+            n = len(lst)
+            if n == 0:
+                return []
+            i = n // 2
+            return Tree(lst[i], tree(lst[:i]), tree(lst[i + 1 :]))
+
+        def inorder(t):
+            if t:
+                for x in inorder(t.left):
+                    yield x
+                yield t.label
+                for x in inorder(t.right):
+                    yield x
+
+        t = tree("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        self.assertEqual("".join(t), "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+class TestGeneratorCoroutine(GeneratorTestsBase):
+    # Ported from CPython Lib/test/test_generators.py `coroutine_tests` doctest
+    # block. Cases relying on stdout capture were rewritten to record into a
+    # list and assert; cases relying on gc finalization, traceback-level or
+    # gi_frame introspection, and the deprecated 3-arg throw() were omitted.
+
+    @make_dynamo_test
+    def test_send_into_started_generator(self):
+        sent = []
+
+        def f():
+            sent.append((yield 1))
+            yield 2
+
+        g = f()
+        self.assertEqual(next(g), 1)
+        self.assertEqual(g.send(42), 2)
+        self.assertEqual(sent, [42])
+
+    @make_dynamo_test
+    def test_send_non_none_to_just_started(self):
+        def f():
+            yield 1
+            yield 2
+
+        self.assertRaisesRegex(
+            TypeError,
+            "can't send non-None value to a just-started generator",
+            f().send,
+            "foo",
+        )
+
+    @make_dynamo_test
+    def test_bare_yield_yields_none(self):
+        def f():
+            yield
+
+        self.assertEqual(list(f()), [None])
+
+    @make_dynamo_test
+    def test_yield_in_generator_expression(self):
+        def f():
+            list(i for i in [(yield 26)])  # noqa: C400
+
+        self.assertIsInstance(f(), types.GeneratorType)
+
+    @make_dynamo_test
+    def test_augmented_assignment_coroutine(self):
+        def coroutine(seq):
+            count = 0
+            while count < 200:
+                count += yield
+                seq.append(count)
+
+        seq = []
+        c = coroutine(seq)
+        next(c)
+        self.assertEqual(seq, [])
+        c.send(10)
+        self.assertEqual(seq, [10])
+        c.send(10)
+        self.assertEqual(seq, [10, 20])
+        c.send(10)
+        self.assertEqual(seq, [10, 20, 30])
+
+    @make_dynamo_test
+    def test_throw_caught_in_loop(self):
+        caught = []
+
+        def f():
+            while True:
+                try:
+                    yield
+                except ValueError as v:
+                    caught.append(str(v))
+
+        g = f()
+        next(g)
+        g.throw(ValueError)
+        self.assertEqual(caught, [""])
+        g.throw(ValueError("xyz"))
+        self.assertEqual(caught, ["", "xyz"])
+
+    # gen.throw() of a non-exception should raise a catchable TypeError, but
+    # Dynamo surfaces it as an uncatchable InternalTorchDynamoError.
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_throw_non_exception_is_type_error(self):
+        def f():
+            while True:
+                try:
+                    yield
+                except ValueError:
+                    pass
+
+        g = f()
+        next(g)
+        self.assertRaises(TypeError, g.throw, "abc")
+        self.assertRaises(TypeError, g.throw, 0)
+        self.assertRaises(TypeError, g.throw, list)
+
+    @make_dynamo_test
+    def test_throw_terminates_generator(self):
+        caught = []
+
+        def f():
+            while True:
+                try:
+                    yield
+                except ValueError as v:
+                    caught.append(str(v))
+
+        g = f()
+        next(g)
+        self.assertRaises(TypeError, g.throw, TypeError)
+        self.assertRaises(StopIteration, g.send, 2)
+
+    @make_dynamo_test
+    def test_throw_on_just_opened_generator(self):
+        def f():
+            yield 1
+
+        self.assertRaisesRegex(ValueError, "7", f().throw, ValueError(7))
+
+    @make_dynamo_test
+    def test_close_catches_generator_exit(self):
+        log = []
+
+        def f():
+            try:
+                yield
+            except GeneratorExit:
+                log.append("exiting")
+
+        g = f()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["exiting"])
+        g.close()  # should be a no-op now
+        self.assertEqual(log, ["exiting"])
+
+    @make_dynamo_test
+    def test_close_on_various_states(self):
+        def f():
+            yield
+
+        f().close()  # close before opening
+        g = f()
+        next(g)
+        g.close()  # close normally
+
+    @make_dynamo_test
+    def test_generator_exit_not_caught_by_except_exception(self):
+        log = []
+
+        def f():
+            try:
+                yield
+            except Exception:
+                log.append("except")
+            finally:
+                log.append("finally")
+
+        g = f()
+        next(g)
+        g.close()
+        self.assertEqual(log, ["finally"])
+
+    @make_dynamo_test
+    def test_generator_ignored_generator_exit(self):
+        def f():
+            try:
+                yield
+            except GeneratorExit:
+                yield "foo!"
+
+        g = f()
+        next(g)
+        self.assertRaisesRegex(RuntimeError, "generator ignored GeneratorExit", g.close)
+        g.close()
+
+    @make_dynamo_test
+    def test_error_during_close_propagates(self):
+        def f():
+            try:
+                yield
+            except GeneratorExit:
+                raise TypeError("fie!") from None
+
+        g = f()
+        next(g)
+        self.assertRaisesRegex(TypeError, "fie!", g.close)
+
+    @make_dynamo_test
+    def test_yield_expression_makes_generator(self):
+        def f():
+            x = yield  # noqa: F841
+
+        self.assertIsInstance(f(), types.GeneratorType)
+
+    @make_dynamo_test
+    def test_send_to_subscript_targets(self):
+        def f(d):
+            d[(yield "a")] = d[(yield "b")] = 27
+
+        data = [1, 2]
+        g = f(data)
+        self.assertEqual(g.send(None), "a")
+        self.assertEqual(data, [1, 2])
+        self.assertEqual(g.send(0), "b")
+        self.assertEqual(data, [27, 2])
+        self.assertRaises(StopIteration, g.send, 1)
+        self.assertEqual(data, [27, 27])
 
 
 instantiate_parametrized_tests(GeneratorTests)
