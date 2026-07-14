@@ -2559,12 +2559,8 @@ class ContextVarVariable(VariableTracker):
         except LookupError:
             raise_observed_exception(LookupError, tx, args=[f"{self.cv_obj!r}"])
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker":
-        if name == "name":
-            return ConstantVariable.create(self.cv_obj.name)
-        return super().getattro_impl(tx, name)
+    # contextvars.ContextVar.name is a read-only member.
+    tp_members = {"name": Member(build(lambda s: s.cv_obj.name))}
 
 
 class RandomClassVariable(VariableTracker):
