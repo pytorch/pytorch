@@ -31,6 +31,7 @@ from .planner import (
     WriteItemType,
 )
 from .protocol import (
+    _copy_checkpointable_tensor_metadata,
     _get_checkpointable_tensor_chunks,
     _is_checkpointable_tensor,
     CheckpointableTensor,
@@ -533,6 +534,8 @@ def _init_state_dict(state_dict: dict[str, Any]) -> Any:
                 torch.device, _get_device_module(device_type).current_device()
             )
             tensor = torch.empty_like(value, device=device)
+            if _is_checkpointable_tensor(value):
+                _copy_checkpointable_tensor_metadata(value, tensor)
             return tensor
         else:
             return value

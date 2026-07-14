@@ -42,6 +42,15 @@ def _is_checkpointable_tensor(obj: object) -> TypeGuard[CheckpointableTensor]:
     return isinstance(obj, torch.Tensor) and isinstance(obj, CheckpointableTensor)
 
 
+def _copy_checkpointable_tensor_metadata(
+    src: CheckpointableTensor, dst: torch.Tensor
+) -> None:
+    setattr(dst, "global_shape", src.global_shape)  # noqa: B010
+    setattr(dst, "global_offsets", src.global_offsets)  # noqa: B010
+    setattr(dst, "local_offsets", src.local_offsets)  # noqa: B010
+    setattr(dst, "local_sizes", src.local_sizes)  # noqa: B010
+
+
 def _get_checkpointable_tensor_chunks(
     tensor: CheckpointableTensor,
 ) -> list[ChunkStorageMetadata]:

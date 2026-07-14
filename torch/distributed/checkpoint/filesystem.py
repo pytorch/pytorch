@@ -36,6 +36,8 @@ from torch.distributed.checkpoint._hf_utils import (
     FORMAT_KEY,
     FORMAT_VALUE,
     HF_DCP_VERSION,
+    LOGICAL_FQN_KEY,
+    SAVED_OFFSETS_KEY,
 )
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE, StorageMeta
 from torch.distributed.checkpoint.planner import (
@@ -418,6 +420,28 @@ def _write_files_from_queue(
 
             bytes_w = [wi for wi in write_items if wi.type == WriteItemType.BYTE_IO]
             write_results = []
+            fqn_counts = collections.Counter(wi.index.fqn for wi in tensor_w)
+            fqn_seen: collections.defaultdict[str, int] = collections.defaultdict(int)
+            used_storage_keys: set[str] = set()
+
+            def _safetensors_storage_key(write_item: WriteItem) -> str:
+                logical_fqn = write_item.index.fqn
+                ordinal = fqn_seen[logical_fqn]
+                fqn_seen[logical_fqn] += 1
+
+                if (
+                    fqn_counts[logical_fqn] == 1
+                    and logical_fqn not in used_storage_keys
+                ):
+                    used_storage_keys.add(logical_fqn)
+                    return logical_fqn
+
+                physical_key = f"{logical_fqn}.__dcp_shard_{ordinal}"
+                while physical_key in used_storage_keys:
+                    ordinal += 1
+                    physical_key = f"{logical_fqn}.__dcp_shard_{ordinal}"
+                used_storage_keys.add(physical_key)
+                return physical_key
 
             with create_stream(file_name, "wb") as stream:
                 for write_item in bytes_w:
@@ -435,7 +459,8 @@ def _write_files_from_queue(
 
                 tensor_dict = {}
                 metadata_dict = {}
-                for tensor, write_item in loader.values():
+                for tensor, item in loader.values():
+                    write_item = cast(WriteItem, item)
                     if not tensor.is_cpu:
                         raise AssertionError("Tensor must be on CPU")
                     write_results.append(
@@ -448,9 +473,14 @@ def _write_files_from_queue(
                             serialization_format,
                         )
                     )
-                    tensor_dict[write_item.index.fqn] = tensor  # type: ignore[attr-defined]
-                    metadata_dict[write_item.index.fqn] = {  # type: ignore[attr-defined]
-                        "saved_offsets": write_item.tensor_data.chunk.offsets  # type: ignore[attr-defined]
+                    if write_item.tensor_data is None:
+                        raise AssertionError("Tensor write item must have tensor data")
+                    tensor_storage_key = _safetensors_storage_key(write_item)
+                    chunk_offsets = write_item.tensor_data.chunk.offsets
+                    tensor_dict[tensor_storage_key] = tensor  # type: ignore[attr-defined]
+                    metadata_dict[tensor_storage_key] = {  # type: ignore[attr-defined]
+                        LOGICAL_FQN_KEY: write_item.index.fqn,
+                        SAVED_OFFSETS_KEY: chunk_offsets,
                     }
 
                 if serialization_format == SerializationFormat.SAFETENSORS:

@@ -489,6 +489,46 @@ class TestSavePlan(TestCase):
         self.assertEqual(bytes_item.type, LoadItemType.BYTE_IO)
         self.assertEqual(bytes_item.dest_index, MetadataIndex("value"))
 
+    def test_checkpointable_meta_tensor_load_plan(self):
+        tensor = torch.empty(8, device="meta")
+        tensor.global_shape = (16,)
+        tensor.global_offsets = ((0,), (12,))
+        tensor.local_offsets = ((0,), (4,))
+        tensor.local_sizes = ((4,), (4,))
+
+        metadata = Metadata(
+            state_dict_metadata={
+                "proto": TensorStorageMetadata(
+                    properties=TensorProperties.create_from_tensor(torch.empty(16)),
+                    size=torch.Size([16]),
+                    chunks=[
+                        ChunkStorageMetadata(
+                            offsets=torch.Size([0]),
+                            sizes=torch.Size([16]),
+                        )
+                    ],
+                )
+            }
+        )
+
+        state_dict = {"proto": tensor}
+        planner = DefaultLoadPlanner()
+        with patch(
+            "torch.distributed.distributed_c10d._get_pg_default_device",
+            return_value=torch.device("cpu"),
+        ):
+            planner.set_up_planner(state_dict, metadata, is_coordinator=True)
+
+        materialized = planner.state_dict["proto"]
+        self.assertEqual(torch.Size([8]), materialized.size())
+        self.assertIsInstance(materialized, CheckpointableTensor)
+        self.assertEqual((16,), materialized.global_shape)
+
+        load_plan = planner.create_local_plan()
+        self.assertEqual(2, len(load_plan.items))
+        self.assertEqual(torch.Size([0]), load_plan.items[0].storage_offsets)
+        self.assertEqual(torch.Size([12]), load_plan.items[1].storage_offsets)
+
     def test_load_with_resharding(self):
         def create_state_dict(rank, world_size):
             with with_dist(rank=rank, world_size=world_size):

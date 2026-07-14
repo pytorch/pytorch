@@ -16,6 +16,7 @@ from torch.distributed.checkpoint._hf_utils import (
     _HFStorageInfo,
     _metadata_fn,
     CUSTOM_METADATA_KEY,
+    LOGICAL_FQN_KEY,
     SAVED_OFFSETS_KEY,
     SHARDED_DIR_NAME,
     SUFFIX,
@@ -88,8 +89,8 @@ class HuggingFaceStorageWriter(FileSystemWriter):
         self.enable_consolidation: bool = enable_consolidation
         self.consolidated_output_path: str | None = None
         if self.enable_consolidation:
-            self.consolidated_output_path = str(self.path)
-            self.path = self.fs.concat_path(self.path, SHARDED_DIR_NAME)
+            self.consolidated_output_path = path
+            self.path = self.fs.concat_path(path, SHARDED_DIR_NAME)
         self.thread_count_consolidation = thread_count_consolidation
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
@@ -223,7 +224,9 @@ class HuggingFaceStorageReader(FileSystemReader):
             slice(offset, offset + length)
             for offset, length in zip(req.storage_offsets, req.lengths)
         )
-        tensor = f.get_slice(req.storage_index.fqn)[slices]
+        item_md: _HFStorageInfo = self.storage_data[req.storage_index]
+        storage_key = item_md.storage_key or req.storage_index.fqn
+        tensor = f.get_slice(storage_key)[slices]
         target_tensor = planner.resolve_tensor(req).detach()
 
         if target_tensor.size() != tensor.size():
@@ -333,13 +336,16 @@ class HuggingFaceStorageReader(FileSystemReader):
                         extra_metadata.get(CUSTOM_METADATA_KEY)
                     )
 
-                for key in keys:
-                    shape = f.get_slice(key).get_shape()
-                    dtype = f.get_slice(key).get_dtype()
+                for storage_key in keys:
+                    shape = f.get_slice(storage_key).get_shape()
+                    dtype = f.get_slice(storage_key).get_dtype()
                     # construct state_dict_metadata
                     if dcp_sharding_info is not None:
-                        offset = dcp_sharding_info[key][SAVED_OFFSETS_KEY]
+                        shard_info = dcp_sharding_info[storage_key]
+                        key = shard_info.get(LOGICAL_FQN_KEY, storage_key)
+                        offset = shard_info[SAVED_OFFSETS_KEY]
                     else:
+                        key = storage_key
                         offset = [0] * len(shape)
 
                     if key not in state_dict_metadata:
@@ -368,15 +374,15 @@ class HuggingFaceStorageReader(FileSystemReader):
 
                     # construct storage data
                     if dcp_sharding_info is not None:
-                        metadata_index = MetadataIndex(
-                            fqn=key, offset=dcp_sharding_info[key][SAVED_OFFSETS_KEY]
-                        )
+                        metadata_index = MetadataIndex(fqn=key, offset=offset)
                     else:
                         metadata_index = MetadataIndex(fqn=key, offset=[0] * len(shape))
+                    physical_key = storage_key if storage_key != key else None
                     storage_data[metadata_index] = _HFStorageInfo(
                         relative_path=safetensor_file,
                         shape=torch.Size(shape),
                         dtype=_getdtype(dtype),
+                        storage_key=physical_key,
                     )
 
         metadata = Metadata(

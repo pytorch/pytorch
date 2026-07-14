@@ -66,6 +66,46 @@ class TestSingleRankSaveLoad(TestCase):
             )
 
     @with_temp_dir
+    def test_save_load_checkpointable_tensor_multiple_shards(self) -> None:
+        if importlib.util.find_spec("safetensors") is None:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+
+        expected = torch.arange(8, dtype=torch.float32)
+        tensor = expected.clone()
+        tensor.global_shape = (16,)
+        tensor.global_offsets = ((0,), (12,))
+        tensor.local_offsets = ((0,), (4,))
+        tensor.local_sizes = ((4,), (4,))
+        state_dict = {"proto": tensor}
+
+        dist_cp.save(
+            state_dict=state_dict,
+            storage_writer=dist_cp.HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
+            no_dist=True,
+        )
+
+        metadata = dist_cp.HuggingFaceStorageReader(path=CHECKPOINT_DIR).read_metadata()
+        tensor_metadata = metadata.state_dict_metadata["proto"]
+        chunks = sorted(tensor_metadata.chunks, key=lambda chunk: tuple(chunk.offsets))
+        self.assertEqual(torch.Size([16]), tensor_metadata.size)
+        self.assertEqual(torch.Size([0]), chunks[0].offsets)
+        self.assertEqual(torch.Size([4]), chunks[0].sizes)
+        self.assertEqual(torch.Size([12]), chunks[1].offsets)
+        self.assertEqual(torch.Size([4]), chunks[1].sizes)
+
+        tensor.fill_(-1)
+        dist_cp.load(
+            state_dict=state_dict,
+            storage_reader=dist_cp.HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+            no_dist=True,
+        )
+
+        self.assertEqual(expected, tensor)
+
+    @with_temp_dir
     def test_load(self) -> None:
         try:
             from safetensors.torch import save_file

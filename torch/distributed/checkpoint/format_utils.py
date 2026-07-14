@@ -111,9 +111,14 @@ class BroadcastingTorchSaveReader(StorageReader):
             else:
                 target = planner.state_dict[req.storage_index.fqn]
                 if _is_checkpointable_tensor(target):
-                    tensor = cast(torch.Tensor, target).new_empty(
-                        torch.Size(target.global_shape)
-                    )
+                    if planner.metadata is None:
+                        raise AssertionError(
+                            "planner metadata must be set before reading data"
+                        )
+                    md = planner.metadata.state_dict_metadata[req.storage_index.fqn]
+                    if not isinstance(md, TensorStorageMetadata):
+                        raise AssertionError("expected TensorStorageMetadata")
+                    tensor = cast(torch.Tensor, target).new_empty(md.size)
                 else:
                     tensor = torch.empty_like(target)
 

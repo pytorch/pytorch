@@ -21,6 +21,7 @@ from torch.distributed.checkpoint._hf_utils import (
     DATA_OFFSETS_KEY,
     DEFAULT_EXTRA_METADATA_KEY,
     DTYPE_KEY,
+    LOGICAL_FQN_KEY,
     SAVED_OFFSETS_KEY,
     SHAPE_KEY,
     SUFFIX,
@@ -107,13 +108,15 @@ def _parse_input_metadata(
                 "No DCP custom metadata found in safetensors file. The file must be saved with DCP to be consolidated."
             )
 
-        for key, val in safetensors_metadata.items():
-            if key == DEFAULT_EXTRA_METADATA_KEY:
+        for storage_key, val in safetensors_metadata.items():
+            if storage_key == DEFAULT_EXTRA_METADATA_KEY:
                 continue
 
             # Get the shape of this tensor shard and its offset in the full tensor
             sizes = val[SHAPE_KEY]
-            offsets = dcp_sharding_info[key][SAVED_OFFSETS_KEY]
+            shard_info = dcp_sharding_info[storage_key]
+            key = shard_info.get(LOGICAL_FQN_KEY, storage_key)
+            offsets = shard_info[SAVED_OFFSETS_KEY]
 
             if key not in fqn_to_size_mapping:
                 # First time seeing this tensor - calculate its full size by adding offsets to dimensions
@@ -199,7 +202,7 @@ def _write_metadata(
 
 
 def _read_tensor_data(
-    f,
+    f: Any,
     start_offset: int,
     end_offset: int,
     metadata_size: int,
@@ -245,8 +248,21 @@ def _process_output_file(
 
     file_handles = {}
     dcp_metadata = {}
+    storage_keys_by_logical_fqn: dict[str, dict[str, list[str]]] = {}
     for safetensors_file, file_data in input_files_data.items():
-        dcp_metadata[safetensors_file] = _get_dcp_custom_metadata(file_data.metadata)
+        file_dcp_metadata = _get_dcp_custom_metadata(file_data.metadata)
+        dcp_metadata[safetensors_file] = file_dcp_metadata
+
+        logical_fqn_to_storage_keys: dict[str, list[str]] = {}
+        for storage_key in file_data.metadata:
+            if storage_key == DEFAULT_EXTRA_METADATA_KEY:
+                continue
+
+            # pyrefly: ignore [unsupported-operation]
+            fqn_custom_metadata = file_dcp_metadata[storage_key]  # type: ignore[index]
+            logical_fqn = fqn_custom_metadata.get(LOGICAL_FQN_KEY, storage_key)
+            logical_fqn_to_storage_keys.setdefault(logical_fqn, []).append(storage_key)
+        storage_keys_by_logical_fqn[safetensors_file] = logical_fqn_to_storage_keys
 
     try:
         # Open all input files for reading
@@ -271,37 +287,37 @@ def _process_output_file(
                         safetensors_file
                     ].metadata_size
 
-                    if tensor_fqn not in file_metadata:
-                        continue
+                    file_dcp_metadata = dcp_metadata[safetensors_file]
+                    for storage_key in storage_keys_by_logical_fqn[
+                        safetensors_file
+                    ].get(tensor_fqn, []):
+                        metadata = file_metadata[storage_key]
+                        # pyrefly: ignore [unsupported-operation]
+                        fqn_custom_metadata = file_dcp_metadata[storage_key]  # type: ignore[index]
 
-                    metadata = file_metadata[tensor_fqn]
+                        data_offsets = metadata[DATA_OFFSETS_KEY]
 
-                    data_offsets = metadata[DATA_OFFSETS_KEY]
+                        # Use explicit reads to fetch tensor data efficiently
+                        data_to_write = _read_tensor_data(
+                            file_handles[safetensors_file],
+                            data_offsets[0],
+                            data_offsets[1],
+                            input_metadata_size,
+                        )
 
-                    # Use explicit reads to fetch tensor data efficiently
-                    data_to_write = _read_tensor_data(
-                        file_handles[safetensors_file],
-                        data_offsets[0],
-                        data_offsets[1],
-                        input_metadata_size,
-                    )
+                        offsets_of_tensor_being_read = fqn_custom_metadata[
+                            SAVED_OFFSETS_KEY
+                        ]  # type: ignore[index]
 
-                    # Get the offsets of this tensor shard within the full tensor
-                    # pyrefly: ignore [unsupported-operation]
-                    fqn_custom_metadata = dcp_metadata[safetensors_file][tensor_fqn]  # type: ignore[index]
-                    offsets_of_tensor_being_read = fqn_custom_metadata[
-                        SAVED_OFFSETS_KEY
-                    ]  # type: ignore[index]
-
-                    # Write this tensor shard to the appropriate position in the output file
-                    _write_sub_tensor_to_file_optimized(
-                        full_tensor_mv,
-                        data_to_write,
-                        tensor_fqn_data.dtype_size,  # Size of each element in bytes
-                        tensor_fqn_data.shape_in_file,  # Full tensor shape
-                        offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
-                        metadata[SHAPE_KEY],  # Shape of this shard
-                    )
+                        # Write this tensor shard to the appropriate position in the output file
+                        _write_sub_tensor_to_file_optimized(
+                            full_tensor_mv,
+                            data_to_write,
+                            tensor_fqn_data.dtype_size,  # Size of each element in bytes
+                            tensor_fqn_data.shape_in_file,  # Full tensor shape
+                            offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
+                            metadata[SHAPE_KEY],  # Shape of this shard
+                        )
 
                 output_stream.write(full_tensor_mv)
 
