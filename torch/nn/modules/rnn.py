@@ -240,6 +240,9 @@ class RNNBase(Module):
         Right now, this works only if the module is on the GPU and cuDNN is enabled.
         Otherwise, it's a no-op.
         """
+        if torch.compiler.is_compiling():
+            return
+
         # Short-circuits if _flat_weights is only partially instantiated
         if len(self._flat_weights) != len(self._flat_weights_names):
             return
