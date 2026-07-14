@@ -1454,9 +1454,11 @@ NCCLException::NCCLException(
     const std::string& message,
     ncclResult_t result,
     ncclComm_t comm)
-    : message_(
-          message + ": " + nccl_api.getErrorString(result) +
-          " \nNCCL Last Error: " + nccl_api.getLastError(comm)),
+    : message_(fmt::format(
+          "{}: {} \nNCCL Last Error: {}",
+          message,
+          nccl_api.getErrorString(result),
+          nccl_api.getLastError(comm))),
       result_(result) {}
 
 const char* NCCLException::what() const noexcept {
