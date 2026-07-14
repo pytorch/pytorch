@@ -1295,7 +1295,9 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         base = VariableTracker.sq_item_impl
         for cls in (BaseListVariable, RangeVariable, ConstantVariable, DequeVariable):
             self.assertIsNot(
-                cls.sq_item_impl, base, f"{cls.__name__} must override sq_item_impl"
+                cls.sq_item_impl,
+                base,
+                lambda msg: f"{msg}\n{cls.__name__} must override sq_item_impl",
             )
 
 

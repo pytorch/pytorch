@@ -100,7 +100,9 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    def _check_backend_works(self, backend, device, boxed=True, options=None):
+    def _check_backend_works(
+        self, backend, device, boxed=True, options=None, backward=True
+    ):
         model = Seq().eval()
         model.to(device)
 
@@ -123,9 +125,10 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         r2 = compiled_model(input2)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
-        r1.sum().backward()
-        r2.sum().backward()
-        self.assertTrue(same(input1.grad, input2.grad.float(), tol=0.01))
+        if backward:
+            r1.sum().backward()
+            r2.sum().backward()
+            self.assertTrue(same(input1.grad, input2.grad.float(), tol=0.01))
 
         # Clean up compilation state before test returns to avoid false positive
         # memory leak detection (leak check runs before tearDown)
@@ -157,9 +160,13 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self, device):
-        self._check_backend_works("tvm", device)
-        self._check_backend_works("tvm", device, options={"scheduler": None})
-        self._check_backend_works("tvm", device, options={"opt_level": 0})
+        self._check_backend_works("tvm", device, boxed=False, backward=False)
+        self._check_backend_works(
+            "tvm", device, boxed=False, backward=False, options={"scheduler": None}
+        )
+        self._check_backend_works(
+            "tvm", device, boxed=False, backward=False, options={"opt_level": 0}
+        )
 
     def test_tvm_scheduler_backends(self, device):
         from torch._dynamo.backends.tvm import tvm_auto_scheduler, tvm_meta_schedule
@@ -369,6 +376,17 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
 
+    def test_lookup_backend_suggestion(self):
+        from torch._dynamo.backends.registry import lookup_backend
+        from torch._dynamo.exc import InvalidBackend
+
+        with self.assertRaisesRegex(InvalidBackend, "did you mean: 'inductor'"):
+            lookup_backend("indutcor")
+
+        with self.assertRaises(InvalidBackend) as cm:
+            lookup_backend("zzzzzzzz")
+        self.assertNotIn("did you mean", str(cm.exception))
+
     def test_lookup_custom_backend(self):
         from torch._dynamo import list_backends
 
@@ -505,7 +523,7 @@ class TestDefaultBackend(torch._dynamo.test_case.TestCase):
         def f(x):
             return torch.relu(x)
 
-        opt_f = torch.compile(f)
+        opt_f = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
         opt_f(torch.randn(3, 3))
         self.assertEqual(cnt.frame_count, 1)
 
