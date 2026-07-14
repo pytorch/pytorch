@@ -135,7 +135,8 @@ class TestCaseBase(TestCase):
             ref = ref["loss"]
             act = act["loss"]
         self.assertTrue(
-            torch.allclose(ref, act, atol=tol, rtol=tol), f"ref:\n{ref}\nact:\n{act}"
+            torch.allclose(ref, act, atol=tol, rtol=tol),
+            lambda msg: f"{msg}\nref:\n{ref}\nact:\n{act}",
         )
 
     def common_numeric_check(self, f, *args, tol=1e-3, **kwargs):
@@ -502,7 +503,7 @@ class PaddingTest(TestCaseBase):
         # make sure the load for softmax is aligned
         self.assertTrue(
             "tl.load(in_ptr0 + (r0_1 + 30528*x0)" in forward_wrapper,
-            f"forward_wrapper: {forward_wrapper}",
+            lambda msg: f"{msg}\nforward_wrapper: {forward_wrapper}",
         )
 
         if DO_PERF_TEST:
