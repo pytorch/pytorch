@@ -1101,6 +1101,10 @@ class TestCuptiMonitorProfiler(TestCase):
 
     def setUp(self):
         # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
+        # The class also hosts CUPTI-free config-validation tests, so the monitor module
+        # (which needs cupti-python) may be unimportable; there is nothing to reset then.
+        if not TEST_CUPTI_PYTHON:
+            return
         from torch.profiler._cupti import monitor as _cupti_monitor
 
         _cupti_monitor._reset_for_test()
