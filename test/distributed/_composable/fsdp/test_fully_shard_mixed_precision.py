@@ -254,6 +254,53 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
 
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_dtype_after_frozen_first_forward(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16))
+                self.non_float = nn.Parameter(
+                    torch.ones(16, dtype=torch.int64), requires_grad=False
+                )
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return self.layers(inp)
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+        )
+        model = Model().to(device_type)
+        fully_shard(model, mp_policy=mp_policy)
+        model.requires_grad_(False)
+
+        inp = torch.randn((4, 16), device=device_type.type)
+        with torch.no_grad():
+            model(inp)
+
+        fsdp_param_group = fully_shard.state(model)._fsdp_param_group
+        if fsdp_param_group is None:
+            raise AssertionError("Expected root FSDP parameter group")
+        self.assertEqual(fsdp_param_group._orig_dtype, torch.float32)
+        self.assertEqual(fsdp_param_group._reduce_dtype, torch.float32)
+
+        model.layers.requires_grad_(True)
+        orig_reduce_scatter = dist.reduce_scatter_single
+
+        def assert_fn(output: torch.Tensor):
+            self.assertEqual(output.dtype, torch.float32)
+
+        reduce_scatter = functools.partial(
+            reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
+        )
+        with patch_reduce_scatter(reduce_scatter):
+            model(inp).sum().backward()
+        for param in model.parameters():
+            if param.grad is not None:
+                self.assertEqual(param.grad.dtype, torch.float32)
+
     def _test_reduce_dtype_bf16_reduce(
         self, reshard_after_forward: bool | int, use_shard_placement_fn: bool
     ):
@@ -290,10 +337,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 # Use reduce-scatter -> all-gather to implement all-reduce
                 # since for world size >2, bf16 all-reduce and reduce-scatter
                 # have numeric differences
-                sharded_grad = funcol.reduce_scatter_tensor(
+                sharded_grad = funcol.reduce_scatter_single(
                     param_grad, scatter_dim=0, reduceOp="avg", group=group
                 )  # bf16 reduction
-                param.grad = funcol.all_gather_tensor(
+                param.grad = funcol.all_gather_single(
                     sharded_grad, gather_dim=0, group=group
                 ).to(param.dtype)  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step

@@ -41,10 +41,6 @@ ExperimentalConfig::ExperimentalConfig(
       adjust_timestamps{adjust_timestamps},
       trace_only{trace_only} {}
 
-/*explicit*/ ExperimentalConfig::operator bool() const {
-  return !profiler_metrics.empty();
-}
-
 ProfilerConfig::ProfilerConfig(
     ProfilerState state,
     bool report_input_shapes,
@@ -104,7 +100,7 @@ ProfilerConfig ProfilerConfig::fromIValue(
       c10::str(
           "Expected exactly ",
           NUM_PROFILER_CFG_IVALUE_IDX,
-          " ivalues to resconstruct ProfilerConfig."));
+          " ivalues to reconstruct ProfilerConfig."));
   return ProfilerConfig(
       static_cast<ProfilerState>(ivalues.get(ProfilerIValueIdx::STATE).toInt()),
       ivalues.get(ProfilerIValueIdx::REPORT_INPUT_SHAPES).toBool(),
@@ -125,13 +121,18 @@ ProfilerStateBase::~ProfilerStateBase() {
   }
 }
 
-/*static*/ ProfilerStateBase* ProfilerStateBase::get(bool global) {
-  auto* out = global
-      ? GlobalManager::get()
-      : static_cast<ProfilerStateBase*>(
-            c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
+/*static*/ std::shared_ptr<ProfilerStateBase> ProfilerStateBase::getGlobal() {
+  auto out = GlobalManager::get();
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      !out || out->config().pushGlobalCallbacks() == global);
+      out == nullptr || out->config().pushGlobalCallbacks());
+  return out;
+}
+
+/*static*/ ProfilerStateBase* ProfilerStateBase::getTLS() {
+  auto* out = static_cast<ProfilerStateBase*>(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      out == nullptr || !out->config().pushGlobalCallbacks());
   return out;
 }
 
@@ -161,7 +162,8 @@ std::shared_ptr<ProfilerStateBase> popTLS() {
 /*static*/ std::shared_ptr<ProfilerStateBase> ProfilerStateBase::pop(
     bool global) {
   auto out = global ? GlobalManager::pop() : popTLS();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!out || out->config().global() == global);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !out || out->config().pushGlobalCallbacks() == global);
   return out;
 }
 
@@ -185,18 +187,18 @@ void ProfilerStateBase::removeCallback() {
 }
 
 bool profilerEnabled() {
-  auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
+  ProfilerStateBase* state_ptr = ProfilerStateBase::getTLS();
   return state_ptr && !state_ptr->config().disabled();
 }
 
 TORCH_API ActiveProfilerType profilerType() {
-  auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
+  ProfilerStateBase* state_ptr = ProfilerStateBase::getTLS();
   return state_ptr == nullptr ? ActiveProfilerType::NONE
                               : state_ptr->profilerType();
 }
 
 torch::profiler::impl::ProfilerConfig getProfilerConfig() {
-  auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
+  ProfilerStateBase* state_ptr = ProfilerStateBase::getTLS();
   TORCH_CHECK(
       state_ptr,
       "Tried to access profiler config, but profiler is not enabled!");

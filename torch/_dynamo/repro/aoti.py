@@ -127,7 +127,7 @@ def get_module_string(gm: torch.fx.GraphModule) -> str:
         s = first + "\n" + s
         return s
 
-    module_string = NNModuleToString.convert(gm)
+    module_string = NNModuleToString.convert(gm, allow_unsafe_repr=True)
     return _convert_to_comment(module_string)
 
 

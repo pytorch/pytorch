@@ -126,7 +126,7 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
 
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
-#Pinned versions: 1.26.2
+#Pinned versions: 1.26.4
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
@@ -137,7 +137,7 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
 numpy==1.23.2; python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==1.26.4; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
 numpy==2.3.4; python_version >= "3.14"
 
@@ -287,7 +287,8 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #test that import:
 
 #lintrunner is supported on aarch64-linux only from 0.12.4 version
-lintrunner==0.12.11
+#lintrunner is supported on riscv64-linux only from 0.13.0 version
+lintrunner==0.13.0
 #Description: all about linters!
 #Pinned versions: 0.12.11
 #test that import:
@@ -403,9 +404,13 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
-cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
-#Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. Note "Any fix in the latest bindings would be backported to the prior major version" means that only the newest version of cuda-bindings will get fixes. Depending on the latest version of 12.x is okay because all 12.y versions will be supported via "CUDA minor version compatibility". Pytorch builds against 13.z versions of cuda toolkit work with 12.x versions of cuda-bindings as well because newer drivers work with old toolkits.
+cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
+#Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. PyTorch CI CUDA builds use CUDA 13, so depend on the matching cuda-bindings major while allowing minor updates within that major.
 #test that import: test_cuda.py
+
+cupti-python>13.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64") and python_version < "3.14"
+#Description: required for the experimental CUPTI monitor (torch.profiler._cupti_monitor). >13.0 to match CUDA 13.x toolkits. cupti-python only ships Linux x86_64/aarch64 CPython wheels (no 3.14/free-threaded yet), so guard to those.
+#test that import: test_profiler.py
 
 setuptools-git-versioning==2.1.0
 scikit-build==0.18.1
@@ -417,7 +422,7 @@ tqdm>=4.66.0
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
-aiohttp==3.13.4
+aiohttp==3.14.1
 #Description: required for torch.distributed.debug
 
 spin==0.17

@@ -11,7 +11,7 @@ from functools import partial
 import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
-from torch._inductor import metrics
+from torch._inductor import config, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
@@ -63,8 +63,6 @@ test_failures = {
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
-    # Bool argmax/argmin fix is Triton-only (see #174069), skip on CPU
-    "test_max_min_bool_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # With tensorify enabled, SymInt div no longer graph-breaks; the full
     # model compiles but Inductor hangs on the complex dynamic-shape graph.
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
@@ -74,9 +72,6 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
-    "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
-    "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
@@ -107,6 +102,26 @@ def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
 
 
 DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
+
+
+class DynamicShapesTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._triton_assert_stack = contextlib.ExitStack()
+        cls._triton_assert_stack.enter_context(
+            config.patch(
+                {
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._triton_assert_stack.close()
+        super().tearDownClass()
 
 
 if HAS_CPU:
@@ -147,7 +162,7 @@ if HAS_CPU:
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
-    class DynamicShapesGPUTests(TestCase):
+    class DynamicShapesGPUTests(DynamicShapesTestCase):
         common = check_model_gpu
         device = GPU_TYPE
 
@@ -165,8 +180,18 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
             )
         )
 
+    if HAS_GPU and hasattr(
+        DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes_cuda"
+    ):
+        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
+        DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda = (
+            skipIfRocmArch(MI350_ARCH)(
+                DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda
+            )
+        )
 
-class TestInductorDynamic(TestCase):
+
+class TestInductorDynamic(DynamicShapesTestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
@@ -662,6 +687,7 @@ class TestInductorDynamic(TestCase):
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
 
+    @onlyOn(GPU_TYPE)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -672,6 +698,7 @@ class TestInductorDynamic(TestCase):
         On CUDA: uses num_blocks only (not num_blocks * num_warps * warp_size).
         On ROCm: uses num_blocks * num_warps * warp_size (total threads limit).
         """
+        from torch._inductor.runtime.hints import get_warp_size
         from torch._inductor.runtime.triton_heuristics import (
             _check_max_grid_x,
             _num_warps,
@@ -679,13 +706,15 @@ class TestInductorDynamic(TestCase):
 
         size_hints = {"x": 600_000_000}
         x = 64
-        num_warps = _num_warps(8)
+        warp_size = get_warp_size(torch.device(device))
+        num_warps = _num_warps(8, warp_size=warp_size)
 
-        result_x, result_num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+        result_x, result_num_blocks = _check_max_grid_x(
+            size_hints, x, num_warps, warp_size=warp_size
+        )
 
         max_grid_x = 2147483647
         if torch.version.hip:
-            warp_size = 64  # TODO: query warp size once #129663 is merged
             # ROCm limits total threads (num_blocks * num_warps * warp_size)
             self.assertLessEqual(
                 result_num_blocks * num_warps * warp_size,
@@ -695,7 +724,11 @@ class TestInductorDynamic(TestCase):
         else:
             # CUDA limits number of blocks only — 600M/64 ≈ 9.4M blocks,
             # well within 2^31-1, so no scaling should occur
-            self.assertEqual(result_x, 64, f"XBLOCK should remain 64 (got {result_x})")
+            self.assertEqual(
+                result_x,
+                64,
+                lambda msg: f"{msg}\nXBLOCK should remain 64 (got {result_x})",
+            )
             self.assertLessEqual(result_num_blocks, max_grid_x)
 
     @torch._dynamo.config.patch(

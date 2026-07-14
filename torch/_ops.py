@@ -5,9 +5,9 @@ import ctypes
 import importlib
 import inspect
 import sys
-import threading
 import types
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, ClassVar, Concatenate, final, Generic, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
@@ -15,7 +15,11 @@ from typing_extensions import ParamSpec, TypeVar
 import torch
 import torch.utils._pytree as pytree
 from torch import _utils_internal
-from torch._C import _dispatch_is_included_in_alias as is_included_in_alias, DispatchKey
+from torch._C import (
+    _dispatch_is_included_in_alias as is_included_in_alias,
+    DispatchKey,
+    DispatchKeySet,
+)
 from torch._functorch.pyfunctorch import dispatch_functorch, TransformType
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -32,30 +36,6 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T", default=Any)
 _P = ParamSpec("_P", default=...)
-
-
-# TLS holding the active redispatch chain entry: [op, chain, idx]
-# where op is the target OpOverload, chain is a tuple of callables
-# (autograd_impl, [adinplaceorview_impl,] backend_dispatch), and idx
-# is the next position to dispatch.
-_redispatch_chain_tls = threading.local()
-_fast_redispatch_count: int = 0
-
-
-def _set_fast_redispatch(op: "OpOverload", chain: tuple):
-    """Set up fast redispatch chain. Returns previous entry for restore.
-
-    Split into set/unset instead of a context manager to avoid __enter__/__exit__
-    overhead on the custom_op fast path.
-    """
-    prev = getattr(_redispatch_chain_tls, "entry", None)
-    _redispatch_chain_tls.entry = [op, chain, 0]
-    return prev
-
-
-def _unset_fast_redispatch(prev):
-    """Restore previous redispatch chain entry."""
-    _redispatch_chain_tls.entry = prev
 
 
 # Query `hasattr` only once.
@@ -563,6 +543,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return torch.overrides.handle_torch_function(
                 self, flat_args, *args, **kwargs
             )
+        del flat_args
 
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
@@ -826,6 +807,31 @@ def get_cached_ops():
     return cached_ops
 
 
+@dataclass
+class _PyObjectDispatcher(Generic[_P, _T]):
+    # [NOTE: PyObject Dispatcher aka pyobj_dispatcher]
+    #
+    # Custom operators whose kernels are implemented in Python currently need
+    # to make 1+ roundtrips into the C++ PyTorch dispatcher. These roundtrips
+    # are expensive; the main expensive thing is converting a PyObject
+    # to an IValue requires copying the at::Tensor, incurring at::Tensor
+    # and PyObject (at::Tensor owns a PyObject) refcount bumps.
+    #
+    # Instead, we introduce a new type of dispatching, "PyObject Dispatching".
+    # When dispatching an operator, we avoid converting PyObject into IValues,
+    # instead doing the dispatch key computation in a reimplementation in the
+    # Python-C API. This dispatch is implemented faithfully compared to the
+    # C++ dispatcher and shares helper functions.
+    #
+    # After we have computed a DispatchKey to dispatch on, we query the C++
+    # Dispatcher for the kernel to be dispatched on. If the kernel is a Python
+    # kernel, then we directly pass the PyObject args to the Python kernel.
+    # if the kernel is a C++ kernel, then we perform a C++ Dispatcher redispatch
+    # (which ends up doing the expensive at::Tensor copies).
+    dispatch: Callable[_P, _T]
+    redispatch: Callable[Concatenate[DispatchKeySet, _P], _T]
+
+
 # Each OpOverload object contains pointer to a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload(OperatorBase, Generic[_P, _T]):
@@ -839,8 +845,12 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     ) -> None:
         super().__init__()
         self._op = op
+        # _op may be swapped to the PyObject dispatch callable. Keep the C++
+        # dispatcher handle separately for code that must bypass that fast path.
+        self._cpp_dispatch_handle = op
         self._op_dk = op_dk
         self._schema = schema
+        self._pyobj_dispatcher: _PyObjectDispatcher[_P, _T] | None = None
         self._overloadpacket = overloadpacket
         self._tags = tags
         self._overloadname = (
@@ -883,6 +893,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
     @cached_property
     def _handle(self) -> torch._C._DispatchOperatorHandle:
+        # Handle to the C++ dispatcher operator entry, used for boxed dispatch.
         return torch._C._dispatch_find_schema_or_throw(
             self._schema.name, self._schema.overload_name
         )
@@ -897,6 +908,11 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
     def __call__(self, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if (
+            self._pyobj_dispatcher is not None
+            and torch._C._peek_should_skip_torch_function()
+        ):
+            return self._cpp_dispatch_handle(*args, **kwargs)
         return self._op(*args, **kwargs)
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
@@ -904,18 +920,13 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     def redispatch(
         self, /, keyset: torch._C.DispatchKeySet, *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
-        global _fast_redispatch_count
-        entry = getattr(_redispatch_chain_tls, "entry", None)
-        if entry is not None:
-            target_op, chain, idx = entry
-            if target_op is self and idx < len(chain):
-                entry[2] += 1
-                _fast_redispatch_count += 1
-                return chain[idx](keyset, *args, **kwargs)
+        pyobj_dispatcher = self._pyobj_dispatcher
+        if pyobj_dispatcher is not None:
+            return pyobj_dispatcher.redispatch(keyset, *args, **kwargs)
         return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
 
     def __hash__(self):
-        return hash(self._op)
+        return hash(self._cpp_dispatch_handle)
 
     # `my_namespace.my_op_name.overload_name`
     def __str__(self):
@@ -964,6 +975,33 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     # particular input 'key'.
     def _uncache_dispatch(self, key: DispatchKey) -> None:
         self._dispatch_cache.pop(key, None)
+
+    def _is_pyobj_dispatcher_enabled(self) -> bool:
+        return self._pyobj_dispatcher is not None
+
+    def _can_enable_pyobj_dispatch(self) -> bool:
+        # TODO(#187974): Support non-Tensor returns by normalizing Python kernel
+        # returns against the operator schema in the PyObject fast path.
+        return all(
+            isinstance(ret.type, torch.TensorType) for ret in self._schema.returns
+        )
+
+    def _enable_pyobj_dispatch(self, enabled: bool = True) -> None:
+        if self._is_pyobj_dispatcher_enabled() == enabled:
+            return
+        if not enabled:
+            self._pyobj_dispatcher = None
+            self._op = self._cpp_dispatch_handle
+            return
+        if not self._can_enable_pyobj_dispatch():
+            return
+        dispatch, redispatch = torch._C._dispatch_make_pyobj_dispatch_fns(
+            self._handle,
+            self._cpp_dispatch_handle,
+            self._handle.redispatch_boxed,
+        )
+        self._pyobj_dispatcher = _PyObjectDispatcher(dispatch, redispatch)
+        self._op = dispatch
 
     # This implements the pre-computation logic for the Python dispatcher.
     def _get_dispatch(self, key: DispatchKey) -> DispatchKey | Callable[_P, _T]:
@@ -1315,6 +1353,9 @@ class OpOverloadPacket(Generic[_P, _T]):
     def overloads(self):
         return [n if n else "default" for n in self._overload_names]
 
+    def op_overloads(self):
+        return [getattr(self, n) for n in self.overloads()]
+
 
 # Note - this mirrors the logic of the cpp_function defined in jit/python/init.cpp
 # _jit_get_operations, which calls _get_operation_for_overload_or_packet.
@@ -1330,7 +1371,7 @@ def _call_overload_packet_from_python(
         return ret
 
     # The following mirrors getOpWithStack.
-    # In cpp, we do a schema matching for the arguments, and call ToIValue to
+    # In cpp, we do a schema matching for the arguments, and call ToIValue
     # to check whether the arguments are valid. But need to do similar things here
     # and check the schema whether the FakeScriptObject is the corresponding fake class
     # of the actual class used in schema.
