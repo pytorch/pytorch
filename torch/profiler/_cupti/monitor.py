@@ -4,11 +4,10 @@ from __future__ import annotations
 import ctypes
 import json
 import logging
-import os
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 import numpy as np
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
@@ -37,6 +36,9 @@ _PY_PROFILER = torch._C._profiler
 # The native CUPTI buffer-pool / layout-capture module (C++ side of the monitor).
 _cupti_monitor_native = _PY_PROFILER._cupti_monitor
 
+if TYPE_CHECKING:
+    from typing_extensions import Self
+
 logger = logging.getLogger(__name__)
 
 # Buffers are a recycling pool bounded by peak concurrent demand, so the count
@@ -44,9 +46,6 @@ logger = logging.getLogger(__name__)
 # CUPTI fills them. Warn once past this many outstanding buffers (1GB at the
 # default 4MB size) as a sign of that backpressure.
 _OUTSTANDING_WARN_THRESHOLD = 256
-
-_DEFAULT_BUFFER_SIZE = 4 * 1024 * 1024
-_DEFAULT_FLUSH_PERIOD_S = 1.0
 
 # flush(sync=True) fences at a SYNC point: it enables SYNCHRONIZATION, captures
 # CUPTI's clock, device-syncs (which produces a SYNCHRONIZATION record at a
@@ -249,14 +248,43 @@ class _SynchronizedClock:
 
 
 class CuptiMonitor:
-    def __init__(
-        self,
-        *,
-        buffer_size: int | None = None,
-        background_flush_period_s: float | None = None,
-        background_drain_period_s: float | None = None,
-        use_approx_timestamps: bool = False,
-    ) -> None:
+    """Process-wide CUPTI monitor / multiplexer singleton. Like PmSampler, ``CuptiMonitor()``
+    returns the one instance (constructed on first call); its settings are snapshotted from
+    the class config -- set via ``cupti_monitor.configure()`` before first use -- not from
+    constructor args."""
+
+    _instance: CuptiMonitor | None = None
+    _instance_lock = threading.Lock()
+    # Process-wide settings the singleton snapshots when first constructed; set via
+    # configure() (first-come-first-serve, no env var), defaults otherwise. Both cadences
+    # default to -1 (no background flush / drain -- the caller drives flush()).
+    #
+    # use_approx_timestamps defaults OFF. The per-subscriber timestamp callback re-times HOST
+    # records but cannot re-time DEVICE records: when a CUDA context already exists,
+    # cuptiSubscribe latches the device-record (GPU->CPU) correlation base immediately, on the
+    # clock active at subscribe time. Our callback is a per-subscriber attribute that can only
+    # be set after subscribe, so device records are already pinned to the default clock and end
+    # up ~1e4x off the host approx clock, then get dropped by windowing. It is only safe when
+    # the monitor subscribes before any CUDA context exists (standalone, first CUPTI consumer),
+    # so it stays opt-in via configure(use_approx_timestamps=True).
+    _buffer_size: int = 4 * 1024 * 1024
+    _background_flush_period_s: float = -1.0
+    _background_drain_period_s: float = -1.0
+    _use_approx_timestamps: bool = False
+    _configured: bool = False
+
+    def __new__(cls) -> Self:
+        with cls._instance_lock:
+            if cls._instance is None:
+                inst = super().__new__(cls)
+                inst._init()
+                cls._instance = inst
+                # the live monitor snapshotted the config; lock it
+                cls._configured = True
+            return cls._instance
+
+    def _init(self) -> None:
+        cls = type(self)
         # The monitor is the engine and the multiplexer: it owns the single CUPTI
         # subscription + buffer pool + native decode worker, which demuxes each
         # completed buffer into columns; the monitor drains those columns at flush
@@ -267,52 +295,32 @@ class CuptiMonitor:
         # selection, decoded columnar against a record layout computed from the
         # field-size spec (no captured layout needed). This requires libcupti >= 13.2.
         #
-        # Per-buffer pool size (bytes). An explicit arg wins; otherwise it comes from
-        # TORCH_CUPTI_MONITOR_BUFFER_SIZE (default 4 MiB). Bigger buffers complete less
-        # often (fewer worker wakeups, lower overhead) at the cost of more pinned host
-        # memory and coarser delivery.
-        if buffer_size is None:
-            buffer_size = int(
-                os.environ.get("TORCH_CUPTI_MONITOR_BUFFER_SIZE", _DEFAULT_BUFFER_SIZE)
-            )
-        self.buffer_size = buffer_size
-        # Two independent cadences (seconds), each an explicit arg else its env var.
-        # They control different things, so they are separate knobs.
+        # Per-buffer pool size (bytes), default 4 MiB. Bigger buffers complete less often
+        # (fewer worker wakeups, lower overhead) at the cost of more pinned host memory and
+        # coarser delivery. Set process-wide via cupti_monitor.configure().
+        self.buffer_size = cls._buffer_size
+        # Two independent cadences (seconds); they control different things, so they are
+        # separate knobs.
         #
-        # background_flush_period_s (TORCH_CUPTI_MONITOR_BACKGROUND_FLUSH_PERIOD_S, default 1.0) -- how often
-        # the native decode thread self-drives cuptiActivityFlushAll, handing CUPTI's
-        # completed buffers to the decoder. Sign-encoded:
+        # background_flush_period_s (default -1) -- how often the native decode thread
+        # self-drives cuptiActivityFlushAll, handing CUPTI's completed buffers to the
+        # decoder. Sign-encoded:
         #   >= 0 -> the decode thread self-flushes on this cadence (0 = continuously).
         #   <  0 -> NO self-flush; the caller must drive flush() itself (e.g. at end of
-        #           step). This is the escape hatch for a libcupti/libnvperf HES
-        #           thread-safety bug: cuptiActivityFlushAll drives CUPTI's HW-trace
+        #           step). This is the default, and the escape hatch for a libcupti/libnvperf
+        #           HES thread-safety bug: cuptiActivityFlushAll drives CUPTI's HW-trace
         #           processing against live collection state and can wild-write the host
         #           heap when it overlaps concurrent host activity (e.g. NCCL collective
         #           setup). The racy op is the flush, NOT the decode -- the decoder keeps
         #           decoding delivered buffers off-thread regardless. Driving flush() only
         #           from the quiescent foreground avoids the race.
         #
-        # background_drain_period_s (TORCH_CUPTI_MONITOR_BACKGROUND_DRAIN_PERIOD_S, default = background_flush_period_s) --
-        # how often the Python thread drains the decoded columns and dispatches them to
-        # observers (GIL work).
+        # background_drain_period_s (default -1) -- how often the Python thread drains the
+        # decoded columns and dispatches them to observers (GIL work). Same sign-encoding:
         #   >= 0 -> a background thread drains on this cadence (0 = continuously).
         #   <  0 -> NO background drain thread; the caller drives drain via flush().
-        if background_flush_period_s is None:
-            background_flush_period_s = float(
-                os.environ.get(
-                    "TORCH_CUPTI_MONITOR_BACKGROUND_FLUSH_PERIOD_S",
-                    _DEFAULT_FLUSH_PERIOD_S,
-                )
-            )
-        self.background_flush_period_s = background_flush_period_s
-        if background_drain_period_s is None:
-            background_drain_period_s = float(
-                os.environ.get(
-                    "TORCH_CUPTI_MONITOR_BACKGROUND_DRAIN_PERIOD_S",
-                    background_flush_period_s,
-                )
-            )
-        self.background_drain_period_s = background_drain_period_s
+        self.background_flush_period_s = cls._background_flush_period_s
+        self.background_drain_period_s = cls._background_drain_period_s
         self._cupti = cupti_python.pylibcupti()
         # The CUPTI subscriber handle.
         self._subscriber: int | None = None
@@ -359,10 +367,10 @@ class CuptiMonitor:
         self._chains_gc_ready: list[int] = []
         # Record-timestamp -> unix conversion lives in the clock; the monitor delegates
         # convert_time / now_record_ns to it and calibrates it in start(). Records normally
-        # arrive on the native (realtime) clock; pass use_approx_timestamps=True to try to put
-        # them directly on the approx clock via CUPTI's timestamp callback (opt-in,
-        # sole-subscriber only, and current libcupti rejects it).
-        self._timestamp_callback_enabled = use_approx_timestamps
+        # arrive on the native (realtime) clock; configure(use_approx_timestamps=True) puts
+        # them directly on the approx clock via CUPTI's per-subscriber timestamp callback
+        # (opt-in, sole-subscriber only).
+        self._timestamp_callback_enabled = cls._use_approx_timestamps
         self._clock = _SynchronizedClock()
         self._timestamp_callback_active = False
 
@@ -698,8 +706,8 @@ class CuptiMonitor:
 
     def _try_arm_approx_timestamp_callback(self, sub_handle: int) -> bool:
         """Best-effort: hand CUPTI the profiler's approx-clock timestamp callback so it
-        stamps activity records on kineto's exact timebase directly. Opt-in via the
-        use_approx_timestamps monitor arg (and only as the sole subscriber); returns False --
+        stamps activity records on kineto's exact timebase directly. Opt-in via
+        configure(use_approx_timestamps=True) (and only as the sole subscriber); returns False --
         leaving records on the CLOCK_REALTIME pass-through -- when disabled or when CUPTI
         rejects it. Set as a per-subscriber attribute (CUPTI_ACTIVITY_ATTR_TIMESTAMP_CALLBACK),
         which coexists with the user-defined-record path -- unlike the global
@@ -1250,10 +1258,6 @@ class CuptiMonitor:
 
 _hes_enabled = False
 
-_instance_lock = threading.Lock()
-# At most one monitor per process.
-_instance: CuptiMonitor | None = None
-
 
 def enable_hes_early() -> None:
     global _hes_enabled
@@ -1281,17 +1285,57 @@ def is_hes_enabled() -> bool:
     return _hes_enabled
 
 
-def get_monitor() -> CuptiMonitor | None:
-    """The process-wide monitor singleton if it has been constructed, else None."""
-    return _instance
+def configure(
+    *,
+    buffer_size: int | None = None,
+    background_flush_period_s: float | None = None,
+    background_drain_period_s: float | None = None,
+    use_approx_timestamps: bool | None = None,
+) -> None:
+    """Set the process-wide CUPTI monitor settings the singleton snapshots when first
+    constructed (via CuptiMonitor()). First-come-first-serve (like
+    PmSampler.configure): locked once this lands OR the singleton is built, so a later call
+    is ignored with a warning -- pass all settings in one call, before first use. An unset
+    (None) arg keeps its current value. The two cadences default to -1 (caller-driven; a
+    non-negative value opts into background flush/drain at that period)."""
+    with CuptiMonitor._instance_lock:
+        if CuptiMonitor._configured:
+            logger.warning(
+                "cupti_monitor.configure() ignored: already configured "
+                "(first-come-first-serve). Call it once before the first CuptiMonitor()."
+            )
+            return
+        if buffer_size is not None:
+            CuptiMonitor._buffer_size = buffer_size
+        if background_flush_period_s is not None:
+            CuptiMonitor._background_flush_period_s = background_flush_period_s
+        if background_drain_period_s is not None:
+            CuptiMonitor._background_drain_period_s = background_drain_period_s
+        if use_approx_timestamps is not None:
+            CuptiMonitor._use_approx_timestamps = use_approx_timestamps
+        CuptiMonitor._configured = True
 
 
-def instance() -> CuptiMonitor:
-    """The process-wide CUPTI monitor / multiplexer singleton, constructed on first
-    use. It uses CUPTI's v2 user-defined-record API (requires libcupti >= 13.2).
-    Observers register with it via register()."""
-    global _instance
-    with _instance_lock:
-        if _instance is None:
-            _instance = CuptiMonitor()
-        return _instance
+def get_config() -> dict[str, Any]:
+    """The process-wide config the singleton will snapshot (or snapshotted): buffer_size,
+    the two cadences, the approx-clock flag, and whether configure()/construction has pinned
+    it (first-come-first-serve)."""
+    return {
+        "buffer_size": CuptiMonitor._buffer_size,
+        "background_flush_period_s": CuptiMonitor._background_flush_period_s,
+        "background_drain_period_s": CuptiMonitor._background_drain_period_s,
+        "use_approx_timestamps": CuptiMonitor._use_approx_timestamps,
+        "configured": CuptiMonitor._configured,
+    }
+
+
+def _reset_for_test() -> None:
+    """Test-only: drop the singleton and reset the config to defaults so a test can build a
+    freshly-configured monitor. Callers must have torn down any live session first."""
+    with CuptiMonitor._instance_lock:
+        CuptiMonitor._instance = None
+        CuptiMonitor._buffer_size = 4 * 1024 * 1024
+        CuptiMonitor._background_flush_period_s = -1.0
+        CuptiMonitor._background_drain_period_s = -1.0
+        CuptiMonitor._use_approx_timestamps = False
+        CuptiMonitor._configured = False
