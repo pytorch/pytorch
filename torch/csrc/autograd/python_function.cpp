@@ -898,9 +898,6 @@ static void _prepare_tensors_to_save(
       "autograd internal "
       "error: to_save attribute is expected to be a tuple but is ",
       THPUtils_typename(self->to_save));
-  if (!overridden_setup_context) {
-    return;
-  }
 
   Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
   for (const auto i : c10::irange(num_saved)) {
@@ -908,8 +905,10 @@ static void _prepare_tensors_to_save(
     if (Py_IsNone(obj)) {
       continue;
     } else if (THPVariable_Check(obj)) {
-      const auto& tensor = THPVariable_Unpack(obj);
-      to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
+      if (overridden_setup_context) {
+        const auto& tensor = THPVariable_Unpack(obj);
+        to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
+      }
     } else if (is_executable) {
       // TODO: We should really just ALWAYS throw an error here, but
       // doing so will break some internal tests. We should fix those.
@@ -965,13 +964,9 @@ static void _save_variables(
       self->saved_variables.emplace_back(
           tensor, output_impls.count(tensor.unsafeGetTensorImpl()) > 0);
     } else {
-      TORCH_CHECK_TYPE(
+      TORCH_INTERNAL_ASSERT(
           false,
-          fmt::format(
-              "save_for_backward can only save variables, but argument {} is of "
-              "type {}",
-              i,
-              Py_TYPE(obj)->tp_name));
+          "save_for_backward entries should have been validated before saving variables");
     }
   }
   Py_CLEAR(self->to_save);
