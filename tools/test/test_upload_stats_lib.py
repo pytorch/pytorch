@@ -284,7 +284,9 @@ class TestUploadStats(unittest.TestCase):
             MockS3Object("pytorch/pytorch/111/2/artifact/logs-test-run_1234.zip"),
             MockS3Object("pytorch/pytorch/111/2/artifact/logs-test-run_456.zip"),
         ]
-        mock_resource.return_value.Bucket.return_value.objects.filter.return_value = objects
+        mock_resource.return_value.Bucket.return_value.objects.filter.return_value = (
+            objects
+        )
 
         old_cwd = Path.cwd()
         with tempfile.TemporaryDirectory() as temp_dir:
