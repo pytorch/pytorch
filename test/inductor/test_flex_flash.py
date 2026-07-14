@@ -2393,22 +2393,72 @@ class TestFlexFlash(InductorTestCase):
 
     @xfailIfSM120OrLater
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_backend_raises_on_grad_logsumexp(self, device, dtype):
-        from torch._dynamo.exc import BackendCompilerFailed
-
-        q, k, v = create_test_tensors(dtype=dtype, device=device, requires_grad=True)
-        lse_mask = torch.randn(2, 4, 512, device=device)
-
-        compiled_flex = torch.compile(flex_attention)
-        out, lse = compiled_flex(
-            q, k, v, return_lse=True, kernel_options={"BACKEND": "FLASH"}
+    def test_flash_backend_supports_grad_logsumexp(self, device, dtype):
+        torch.manual_seed(0)
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=128,
+            dim=32,
+            dtype=dtype,
+            device=device,
         )
-        loss = out.mean() + (lse * lse_mask).sum()
-        with self.assertRaisesRegex(
-            BackendCompilerFailed,
-            "FLASH backend backward does not support differentiating through logsumexp",
+        grad_out = torch.randn_like(q)
+        grad_lse = torch.randn(1, 1, 128, device=device, dtype=torch.float32) * 3
+
+        def run_backend(backend, q_in, k_in, v_in):
+            compiled_flex = torch.compile(
+                functools.partial(
+                    flex_attention,
+                    score_mod=_times_two,
+                    scale=1.0,
+                    return_lse=True,
+                    kernel_options={"BACKEND": backend},
+                )
+            )
+            out, lse = compiled_flex(q_in, k_in, v_in)
+            return torch.autograd.grad(
+                (out, lse), (q_in, k_in, v_in), (grad_out, grad_lse)
+            )
+
+        q_flash, k_flash, v_flash = [
+            t.detach().clone().requires_grad_() for t in (q, k, v)
+        ]
+        q_triton, k_triton, v_triton = [
+            t.detach().clone().requires_grad_() for t in (q, k, v)
+        ]
+        grads_flash = run_backend("FLASH", q_flash, k_flash, v_flash)
+        grads_triton = run_backend("TRITON", q_triton, k_triton, v_triton)
+
+        q_ref, k_ref, v_ref = [t.detach().float().requires_grad_() for t in (q, k, v)]
+        out_ref, lse_ref = flex_attention(
+            q_ref,
+            k_ref,
+            v_ref,
+            score_mod=_times_two,
+            scale=1.0,
+            return_lse=True,
+        )
+        grads_ref = torch.autograd.grad(
+            (out_ref, lse_ref),
+            (q_ref, k_ref, v_ref),
+            (grad_out.float(), grad_lse),
+        )
+
+        for grad_flash, grad_triton, grad_ref in zip(
+            grads_flash, grads_triton, grads_ref
         ):
-            loss.backward()
+            self.assertTrue(torch.isfinite(grad_flash).all())
+            self.assertTrue(torch.isfinite(grad_triton).all())
+            self.assertTrue(torch.isfinite(grad_ref).all())
+            atol = 2 * (grad_ref + 0.3 - 0.3 - grad_ref).abs().max().item()
+            triton_error = (
+                (grad_triton - grad_ref.to(grad_triton.dtype)).abs().max().item()
+            )
+            flash_error = (
+                (grad_flash - grad_ref.to(grad_flash.dtype)).abs().max().item()
+            )
+            self.assertLessEqual(flash_error, 2 * triton_error + atol)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_backend_raises_on_return_max_scores(self, device, dtype):
