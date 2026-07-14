@@ -1094,7 +1094,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         "schedule_class",
         [ScheduleVShaped, ScheduleUnbalanced],
     )
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_non_symmetric_stage_ids(self, schedule_class):
         n_stages = schedule_class.n_stages
         rank_stages = schedule_class.rank_stages
@@ -1144,7 +1144,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleWithReorderedB])
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_pipeline_schedule_runtime_custom_sched(self, ScheduleClass):
         n_stages = 2
         stages_per_rank = 1
@@ -1208,7 +1208,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleWithW])
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_schedule_with_native_zero_bubble(self, ScheduleClass):
         n_stages = ScheduleClass.n_stages
         num_microbatches = ScheduleClass.num_microbatches
