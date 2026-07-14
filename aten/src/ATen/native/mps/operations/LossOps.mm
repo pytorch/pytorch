@@ -8,9 +8,11 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_ctc_loss_backward_native.h>
 #include <ATen/ops/_ctc_loss_native.h>
 #include <ATen/ops/binary_cross_entropy_backward_native.h>
 #include <ATen/ops/binary_cross_entropy_native.h>
+#include <ATen/ops/full_like.h>
 #include <ATen/ops/huber_loss_backward_native.h>
 #include <ATen/ops/huber_loss_native.h>
 #include <ATen/ops/mse_loss_backward_native.h>
@@ -1297,7 +1299,18 @@ Tensor nll_loss2d_backward_mps(const Tensor& grad_output,
 }
 
 template <typename index_t>
-static void ctc_loss_mps_kernel(Tensor& loss,
+std::string_view get_index_type_str() {
+  if constexpr (std::is_same_v<index_t, int32_t>) {
+    return "int32_t";
+  } else if constexpr (std::is_same_v<index_t, int64_t>) {
+    return "int64_t";
+  } else {
+    static_assert(false);
+  }
+}
+
+template <typename index_t, bool beta = false>
+static void ctc_loss_mps_kernel(const std::optional<Tensor>& loss,
                                 Tensor& log_alpha,
                                 const Tensor& log_probs,
                                 const Tensor& targets,
@@ -1310,15 +1323,16 @@ static void ctc_loss_mps_kernel(Tensor& loss,
                                 int64_t batch_size,
                                 int64_t tg_target_stride) {
   using namespace mps;
-  constexpr std::string_view index_t_str = std::is_same_v<index_t, int32_t> ? "int32_t" : "int64_t";
-
   MPSStream* mpsStream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLComputePipelineState> pso = mps::lib.getPipelineStateForFunc(fmt::format(
-          "ctc_loss_{}_{}_{}", scalarToMetalTypeString(log_probs), scalarToMetalTypeString(targets), index_t_str));
+      id<MTLComputePipelineState> pso = mps::lib.getPipelineStateForFunc(fmt::format("ctc_loss{}_{}_{}_{}",
+                                                                                     beta ? "_backward_log_beta" : "",
+                                                                                     scalarToMetalTypeString(log_probs),
+                                                                                     scalarToMetalTypeString(targets),
+                                                                                     get_index_type_str<index_t>()));
       const uint32_t TG_SIZE = std::min<int64_t>([pso maxTotalThreadsPerThreadgroup], 2 * max_target_length + 1);
       [computeEncoder setComputePipelineState:pso];
 
@@ -1336,15 +1350,28 @@ static void ctc_loss_mps_kernel(Tensor& loss,
       params.log_alpha_time_stride = log_alpha.stride(1);
       params.log_alpha_target_stride = log_alpha.stride(2);
 
-      mtl_setArgs(computeEncoder,
-                  loss,
-                  log_alpha,
-                  log_probs,
-                  targets,
-                  input_lengths_t,
-                  target_lengths_t,
-                  target_batch_offsets_t,
-                  params);
+      if constexpr (beta) {
+        mtl_setArgs(computeEncoder,
+                    log_alpha,
+                    log_probs,
+                    targets,
+                    input_lengths_t,
+                    target_lengths_t,
+                    target_batch_offsets_t,
+                    params);
+
+      } else {
+        TORCH_INTERNAL_ASSERT(loss.has_value(), "loss tensor must have a value when beta=false");
+        mtl_setArgs(computeEncoder,
+                    *loss,
+                    log_alpha,
+                    log_probs,
+                    targets,
+                    input_lengths_t,
+                    target_lengths_t,
+                    target_batch_offsets_t,
+                    params);
+      }
       [computeEncoder dispatchThreadgroups:MTLSizeMake(batch_size, 1, 1)
                      threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
     }
@@ -1461,6 +1488,164 @@ std::tuple<Tensor, Tensor> ctc_loss_mps(const Tensor& log_probs,
   }
 
   return {std::move(loss), std::move(log_alpha)};
+}
+
+template <typename index_t>
+static void ctc_loss_backward_mps_kernel(Tensor& grad,
+                                         const Tensor& grad_out,
+                                         const Tensor& log_alpha,
+                                         const Tensor& log_probs,
+                                         const Tensor& targets,
+                                         const Tensor& input_lengths_t,
+                                         const Tensor& target_lengths_t,
+                                         const Tensor& loss,
+                                         const Tensor& target_batch_offsets_t,
+                                         int64_t BLANK,
+                                         int64_t max_input_length,
+                                         int64_t batch_size,
+                                         bool zero_infinity) {
+  using namespace mps;
+  // Derive max_target_length from log_alpha shape (same as CUDA backward).
+  int64_t max_target_length = log_alpha.size(2) / 2;
+  int64_t tg_target_stride = (targets.dim() == 1) ? targets.stride(0) : targets.stride(1);
+
+  Tensor log_beta = at::empty_like(log_alpha, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  ctc_loss_mps_kernel<index_t, /*beta=*/true>(/*loss=*/std::nullopt,
+                                              log_beta,
+                                              log_probs,
+                                              targets,
+                                              input_lengths_t,
+                                              target_lengths_t,
+                                              target_batch_offsets_t,
+                                              BLANK,
+                                              max_input_length,
+                                              max_target_length,
+                                              batch_size,
+                                              tg_target_stride);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      id<MTLComputePipelineState> pso =
+          mps::lib.getPipelineStateForFunc(fmt::format("ctc_loss_backward_collect_{}_{}_{}",
+                                                       scalarToMetalTypeString(log_probs),
+                                                       scalarToMetalTypeString(targets),
+                                                       get_index_type_str<index_t>()));
+      [computeEncoder setComputePipelineState:pso];
+
+      CTCLossBackwardCollectParams<index_t> params;
+      params.BLANK = BLANK;
+      params.max_input_length = max_input_length;
+      params.max_target_length = max_target_length;
+      params.num_labels = log_probs.size(2);
+      params.tg_target_stride = tg_target_stride;
+      params.log_probs_time_stride = log_probs.stride(0);
+      params.log_probs_batch_stride = log_probs.stride(1);
+      params.log_probs_token_stride = log_probs.stride(2);
+      params.log_alpha_beta_batch_stride = log_alpha.stride(0);
+      params.log_alpha_beta_time_stride = log_alpha.stride(1);
+      params.log_alpha_beta_target_stride = log_alpha.stride(2);
+      params.grad_time_stride = grad.stride(0);
+      params.grad_batch_stride = grad.stride(1);
+      params.grad_token_stride = grad.stride(2);
+      params.grad_out_batch_stride = grad_out.stride(0);
+      params.zero_infinity = zero_infinity;
+
+      mtl_setArgs(computeEncoder,
+                  grad,
+                  grad_out,
+                  log_alpha,
+                  log_beta,
+                  log_probs,
+                  targets,
+                  input_lengths_t,
+                  target_lengths_t,
+                  loss,
+                  target_batch_offsets_t,
+                  params);
+      [computeEncoder
+                dispatchThreads:MTLSizeMake(max_input_length, batch_size, 1)
+          threadsPerThreadgroup:MTLSizeMake(
+                                    std::min<int64_t>([pso maxTotalThreadsPerThreadgroup], max_input_length), 1, 1)];
+    }
+  });
+}
+
+Tensor ctc_loss_backward_mps(const Tensor& grad_out,
+                             const Tensor& log_probs,
+                             const Tensor& targets,
+                             IntArrayRef input_lengths,
+                             IntArrayRef target_lengths,
+                             const Tensor& loss,
+                             const Tensor& log_alpha,
+                             int64_t BLANK,
+                             bool zero_infinity) {
+  using namespace mps;
+
+  int64_t batch_size = log_probs.size(1);
+  int64_t max_input_length = log_probs.size(0);
+
+  std::vector<int64_t> target_batch_offsets(batch_size);
+
+  int64_t pos = 0;
+  int64_t tg_batch_stride = targets.stride(0);
+  for (int64_t i = 0; i < batch_size; i++) {
+    if (targets.dim() == 1) {
+      target_batch_offsets[i] = pos;
+      pos += target_lengths[i];
+    } else {
+      target_batch_offsets[i] = i * tg_batch_stride;
+    }
+  }
+
+  // grad initialized to neginf (log-domain zero) for the scatter-logsumexp in kernel 2.
+  Tensor grad = at::full_like(log_probs, -std::numeric_limits<double>::infinity(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  if (batch_size == 0 || max_input_length == 0) {
+    return grad;
+  }
+
+  bool can_use_32bit_index_math = at::native::canUse32BitIndexMath(log_probs) &&
+      at::native::canUse32BitIndexMath(targets) && at::native::canUse32BitIndexMath(log_alpha);
+  auto metadata_dtype = can_use_32bit_index_math ? kInt : kLong;
+
+  Tensor input_lengths_t = at::tensor(input_lengths, log_probs.options().dtype(metadata_dtype));
+  Tensor target_lengths_t = at::tensor(target_lengths, log_probs.options().dtype(metadata_dtype));
+  Tensor target_batch_offsets_t = at::tensor(target_batch_offsets, log_probs.options().dtype(metadata_dtype));
+
+  if (can_use_32bit_index_math) {
+    ctc_loss_backward_mps_kernel<int32_t>(grad,
+                                          grad_out,
+                                          log_alpha,
+                                          log_probs,
+                                          targets,
+                                          input_lengths_t,
+                                          target_lengths_t,
+                                          loss,
+                                          target_batch_offsets_t,
+                                          BLANK,
+                                          max_input_length,
+                                          batch_size,
+                                          zero_infinity);
+  } else {
+    ctc_loss_backward_mps_kernel<int64_t>(grad,
+                                          grad_out,
+                                          log_alpha,
+                                          log_probs,
+                                          targets,
+                                          input_lengths_t,
+                                          target_lengths_t,
+                                          loss,
+                                          target_batch_offsets_t,
+                                          BLANK,
+                                          max_input_length,
+                                          batch_size,
+                                          zero_infinity);
+  }
+
+  return grad;
 }
 
 } // namespace at::native

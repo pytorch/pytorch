@@ -155,8 +155,6 @@ class TestBasicGEMM(TestCase):
             f(t, m, v, alpha=alpha, beta=beta, out=res2, use_gelu=True)
         else:
             f(t, m, v, alpha=alpha, beta=beta, out=res2)
-        m.to(numpy_dtype).cpu().numpy()
-        v.to(numpy_dtype).cpu().numpy()
         res3 = alpha * (
             m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy()
         )
@@ -1257,13 +1255,15 @@ class TestBasicGEMM(TestCase):
                 self.assertEqual(
                     answer,
                     expected,
-                    msg=f"{x.shape} x {y.shape} = {answer.shape}",
+                    msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
                     atol=k * 5e-5,
                     rtol=1e-4,
                 )
             else:
                 self.assertEqual(
-                    answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}"
+                    answer,
+                    expected,
+                    msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
                 )
 
         # test x @ y
