@@ -524,6 +524,23 @@ print(t.is_pinned())
         with self.assertRaisesRegex(ValueError, "Invalid memory size"):
             torch.cuda.memory.caching_allocator_alloc(-1024)
 
+    def test_memory_metadata_supported(self):
+        # The native caching allocator records user metadata; cudaMallocAsync
+        # (and pluggable allocators) do not.
+        self.assertEqual(
+            torch._C._cuda_memoryMetadataSupported(), not TEST_CUDAMALLOCASYNC
+        )
+
+    def test_memory_metadata_unsupported_backend_is_noop(self):
+        if torch._C._cuda_memoryMetadataSupported():
+            self.skipTest("backend supports user metadata")
+        # On backends without metadata support, set is a best-effort no-op
+        # (warns once) and get always returns ""; neither raises.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            torch.cuda.memory._set_memory_metadata("metadata test")
+        self.assertEqual(torch.cuda.memory._get_memory_metadata(), "")
+
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()
@@ -2042,7 +2059,7 @@ if __name__ == '__main__':
         is_hip_assert = is_hip_assert or "HSA_STATUS_ERROR_EXCEPTION" in stderr
         self.assertTrue(
             is_cuda_assert or is_hip_assert,
-            f"Expected device assert error in stderr, got: {stderr}",
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
 
     @slowTest
@@ -5846,7 +5863,7 @@ class TestCudaAllocator(TestCase):
                     self.assertGreater(
                         len(device_trace),
                         0,
-                        f"Trace should not be empty for skip_actions={skip_actions}",
+                        lambda msg: f"{msg}\nTrace should not be empty for skip_actions={skip_actions}",
                     )
 
                     if skip_actions:
@@ -5857,14 +5874,14 @@ class TestCudaAllocator(TestCase):
                             self.assertNotIn(
                                 sa,
                                 all_actions,
-                                f"Action {sa} should be skipped with skip_actions={skip_actions}",
+                                lambda msg: f"{msg}\nAction {sa} should be skipped with skip_actions={skip_actions}",
                             )
                         # Check that we have actions that are NOT in the skip list
                         non_skipped_actions = all_actions - set(skip_actions)
                         self.assertGreater(
                             len(non_skipped_actions),
                             0,
-                            f"Should have non-skipped actions for skip_actions={skip_actions}",
+                            lambda msg: f"{msg}\nShould have non-skipped actions for skip_actions={skip_actions}",
                         )
 
                 finally:
@@ -7883,7 +7900,7 @@ class TestMemPool(TestCase):
         self.assertLess(
             blocks_no_split,
             blocks_split,
-            f"Expected no_split pool to have fewer blocks, "
+            lambda msg: f"{msg}\nExpected no_split pool to have fewer blocks, "
             f"but got {blocks_no_split} vs {blocks_split}",
         )
 
@@ -8784,7 +8801,7 @@ class TestMemPool(TestCase):
 
                 self.assertFalse(
                     oom,
-                    f"[{label}] OOM even though the default pool had "
+                    lambda msg: f"{msg}\n[{label}] OOM even though the default pool had "
                     f"{fill_size // MB} MiB of freeable cached blocks "
                     "-- release_cached_blocks was likely skipped",
                 )
