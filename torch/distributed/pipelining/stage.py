@@ -13,7 +13,7 @@ import torch.distributed as dist
 import torch.distributed.config as dist_config
 import torch.fx as fx
 import torch.nn as nn
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
 from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.distributed.pipelining._utils import (
@@ -1350,7 +1350,7 @@ class _PipelineStage(_PipelineStageBase):
         # do not support to() method. One needs to do an in-place tensor swap in
         # that case.
         has_meta_param = any(
-            isinstance(p, FakeTensor) or p.is_meta for p in self.submod.parameters()
+            is_fake_tensor(p) or p.is_meta for p in self.submod.parameters()
         )
         if has_meta_param:
             logger.debug("%s Found meta parameters!", self.log_prefix)
