@@ -66,6 +66,106 @@ def _diag() -> None:
         print(f"[preflight-diag] torch.cuda.device_count(): {torch.cuda.device_count()}")
         print(f"[preflight-diag] torch.version.hip: {torch.version.hip}")
 
+        # Provenance + arch-mismatch check. If the pod's device ISA is not in
+        # the wheel's compiled arch list, fat-binary registration fails and
+        # torch filters the device out -> device_count()==0 while raw HIP still
+        # counts it. Compare agent ISA names against the wheel's arch flags.
+        import socket
+
+        print(f"[preflight-diag] hostname: {socket.gethostname()}")
+        print(f"[preflight-diag] torch.__file__: {torch.__file__}")
+        try:
+            import importlib.metadata as _md
+
+            print(
+                f"[preflight-diag] _rocm_sdk_core version: "
+                f"{_md.version('rocm-sdk-core')}"
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] _rocm_sdk_core version raised: {e!r}")
+        # get_arch_list() is gated on is_available(), which is False in the very
+        # failure we are diagnosing -> it returns []. Use the ungated binding.
+        try:
+            print(
+                f"[preflight-diag] arch flags (ungated): "
+                f"{torch._C._cuda_getArchFlags()}"
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] _cuda_getArchFlags raised: {e!r}")
+        try:
+            print(f"[preflight-diag] get_arch_list (gated): {torch.cuda.get_arch_list()}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] get_arch_list raised: {e!r}")
+        agents = subprocess.run(["rocminfo"], capture_output=True, text=True)
+        for ln in agents.stdout.splitlines():
+            s = ln.strip()
+            if (s.startswith("Name:") and "gfx" in s) or "Marketing Name:" in s:
+                print(f"[preflight-diag] agent: {s}")
+
+        # Split torch's device-counting paths, cheapest-and-most-isolated first
+        # (before any amdsmi import, whose side effects could color results).
+        # Whichever returns 0 while raw HIP counts >0 is the culprit layer. The
+        # C++ path swallows init errors into a 0 return; _lazy_init re-raises the
+        # real message.
+        try:
+            print(
+                f"[preflight-diag] _C._cuda_getDeviceCount(): "
+                f"{torch._C._cuda_getDeviceCount()}"
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] _C._cuda_getDeviceCount raised: {e!r}")
+        try:
+            torch.cuda._lazy_init()
+            print("[preflight-diag] _lazy_init OK")
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] _lazy_init raised: {e!r}")
+        for name in ("_device_count_amdsmi", "_raw_device_count_amdsmi"):
+            try:
+                fn = getattr(torch.cuda, name, None)
+                print(f"[preflight-diag] torch.cuda.{name}(): {fn() if fn else '<absent>'}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[preflight-diag] torch.cuda.{name} raised: {e!r}")
+
+        # Probe amdsmi directly (not through torch's wrapper): if torch's
+        # amdsmi-based count zeroes out and short-circuits before HIP, the
+        # direct probe names why. Kept last -- its init can mutate state.
+        try:
+            import amdsmi
+
+            amdsmi.amdsmi_init()
+            handles = amdsmi.amdsmi_get_processor_handles()
+            print(f"[preflight-diag] amdsmi direct handle count: {len(handles)}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] amdsmi direct probe raised: {e!r}")
+
+        # NOTE on reading the wheel's bundled arches off disk: PyTorch's device
+        # code lives in the .hip_fatbin section, which is NOBITS (allocated at
+        # runtime, zero bytes on disk), so clang-offload-bundler --list /
+        # llvm-objdump --offloading / objcopy all return empty and a bare
+        # `strings | grep gfx` only matches metadata tokens (false positives).
+        # The authoritative bundled-vs-device ISA comparison is only visible at
+        # runtime in the comgr narration -- captured by the CLR child below,
+        # which now runs the full failing path (import torch; device_count()).
+        # Anchored full-triple grep kept as a best-effort signal only.
+        try:
+            import os as _os
+
+            _lib = _os.path.join(_os.path.dirname(torch.__file__), "lib", "libtorch_hip.so")
+            _r = subprocess.run(
+                f"grep -aoE 'amdgcn-amd-amdhsa--gfx[0-9a-z:+_-]+' {_lib} "
+                f"| sort | uniq -c | sort -rn | head -30",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            print(
+                f"[preflight-diag] offload triples in libtorch_hip.so "
+                f"(best-effort, may be empty):\n{_r.stdout.strip() or '<none found on disk>'}"
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[preflight-diag] offload-triple grep raised: {e!r}")
+
         # Driver-truth: the LOADED kernel driver, not image-baked dpkg metadata
         # (which is identical on every pod). This is the load-bearing fact for a
         # KMD/UMD-skew diagnosis.
@@ -107,44 +207,65 @@ def _diag() -> None:
             except Exception as e:  # noqa: BLE001
                 print(f"[preflight-diag] raw hipGetDeviceCount failed: {e}")
 
-        # CLR verbose init log: on failure HIP names why here (KFD version below
-        # minimum, ioctl EINVAL, queue-create failure, no usable device). The
-        # child imports torch first so libamdhip64 resolves via torch's RPATH,
-        # then re-reads the resolved path and calls hipGetDeviceCount raw.
+        # CLR/comgr verbose log of the ACTUAL FAILING PATH. A bare
+        # hipGetDeviceCount succeeds (last run: rc=0 count=4) and emits none of
+        # the flood -- the 682 fat-binary failures and the comgr ISA-match
+        # narration happen during torch's full device init. So the child must
+        # run `import torch; device_count()`, the path that actually fails, for
+        # the first-failure window below to have anything to bite on.
         try:
             clr = subprocess.run(
                 [
                     sys.executable,
                     "-c",
-                    "import torch, ctypes, re;"
-                    "p=[re.search(r'(/\\S*libamdhip64\\.so[.\\d]*)',l).group(1)"
-                    " for l in open('/proc/self/maps') if 'libamdhip64' in l][0];"
-                    "h=ctypes.CDLL(p); n=ctypes.c_int(-1);"
-                    "rc=h.hipGetDeviceCount(ctypes.byref(n));"
-                    "print('rc-count', rc, n.value)",
+                    "import torch; print('child device_count', torch.cuda.device_count())",
                 ],
-                env={**os.environ, "AMD_LOG_LEVEL": "4"},
+                env={
+                    **os.environ,
+                    "AMD_LOG_LEVEL": "4",
+                    # comgr unbundles fat binaries and matches ISAs -- the
+                    # component most likely failing 682x. It names ISA
+                    # mismatches explicitly when verbose.
+                    "AMD_COMGR_EMIT_VERBOSE_LOGS": "1",
+                    "AMD_COMGR_REDIRECT_LOGS": "stderr",
+                },
                 capture_output=True,
                 text=True,
                 timeout=120,
+                # cwd=/tmp so the child's `import torch` does not pick up the
+                # torch SOURCE tree in the CI workspace (which shadows the
+                # installed wheel -> ModuleNotFoundError: torch.version).
+                cwd="/tmp",
             )
             lines = (clr.stderr or "").strip().splitlines()
-            # On failure the reason can appear anywhere, drowned by per-device
-            # spam. Surface flagged lines first, then a bounded tail fallback.
+            print(f"[preflight-diag] raw child stdout: {clr.stdout.strip()!r}")
+
+            # The runtime explains itself in the narration BEFORE the first
+            # "register fat binary failed"; the 682-line flood after it is
+            # noise. Print the window around the first failure.
+            spam = "register fat binary failed"
+            idx = next((i for i, ln in enumerate(lines) if spam in ln), None)
+            if idx is not None:
+                print("[preflight-diag] --- context before FIRST fat-binary failure ---")
+                for line in lines[max(0, idx - 50) : idx + 3]:
+                    print(f"[preflight-diag-clr] {line}")
+
+            # Deduped flagged pass (excluding the flood string itself) catches
+            # anything outside that window.
             flagged = [
                 ln
                 for ln in lines
-                if any(
+                if spam not in ln
+                and any(
                     k in ln.lower()
                     for k in (
                         "error",
-                        "fail",
                         "einval",
                         "no device",
                         "no gpu",
                         "not supported",
                         "unsupported",
-                        "version",
+                        "mismatch",
                         "minimum",
                         "unable",
                         "abort",
@@ -153,14 +274,16 @@ def _diag() -> None:
                         "queue",
                         "hsakmt",
                         "topology",
+                        "isa",
+                        "comgr",
+                        "unbundle",
                     )
                 )
             ]
-            print(f"[preflight-diag] raw child stdout: {clr.stdout.strip()!r}")
-            print("[preflight-diag] --- CLR AMD_LOG_LEVEL=4 flagged lines ---")
+            print("[preflight-diag] --- CLR flagged lines (flood excluded) ---")
             for line in flagged[-60:]:
                 print(f"[preflight-diag-clr] {line}")
-            print("[preflight-diag] --- CLR AMD_LOG_LEVEL=4 tail (25 lines) ---")
+            print("[preflight-diag] --- CLR tail (25 lines) ---")
             for line in lines[-25:]:
                 print(f"[preflight-diag-clr] {line}")
         except Exception as e:  # noqa: BLE001
