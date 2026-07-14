@@ -52,14 +52,6 @@ _cache_lock = threading.Lock()
 # Global cache: kernel_name -> kernel object
 _kernel_by_name_cache: dict[str, Any] | None = None
 
-# Global index: (A dtype, B dtype) -> {"efc": [...], "non_efc": [...]}. The full
-# cache has ~294K kernels spanning all dtypes; a given GEMM only ever matches
-# kernels of its own operand dtypes, and an addmm (bias) needs an epilogue-fusion
-# (EFC) kernel. This lets partition_compatible_kernels scan only the relevant
-# few thousand kernels instead of calling the expensive supports() on all 294K.
-# Built lazily alongside the name cache.
-_kernel_by_dtype_cache: dict[tuple[str, str], dict[str, list[Any]]] | None = None
-
 
 def _is_efc_kernel(kernel: Any) -> bool:
     return "EFC" in kernel.metadata.operator_class.__name__
@@ -74,10 +66,8 @@ def _operand_dtype_str(operand: Any) -> str | None:
     return None if dtype is None else str(dtype)
 
 
-def _build_kernel_cache() -> tuple[
-    dict[str, Any], dict[tuple[str, str], dict[str, list[Any]]]
-]:
-    """Build the kernel name -> kernel cache and the (A,B) dtype/EFC index."""
+def _build_kernel_cache() -> dict[str, Any]:
+    """Build the kernel name -> kernel cache."""
     import cutlass.operators
 
     log.debug("Building NVGEMM kernel cache (this may take a few seconds)...")
@@ -91,35 +81,16 @@ def _build_kernel_cache() -> tuple[
 
     all_kernels = cutlass.operators.get_operators()
     cache = {k.metadata.operator_name: k for k in all_kernels}
-
-    by_dtype: dict[tuple[str, str], dict[str, list[Any]]] = {}
-    for k in all_kernels:
-        operands = k.metadata.operands
-        key = (
-            _operand_dtype_str(getattr(operands, "A", None)),
-            _operand_dtype_str(getattr(operands, "B", None)),
-        )
-        if key[0] is None or key[1] is None:
-            continue
-        sub = by_dtype.setdefault(key, {"efc": [], "non_efc": []})  # type: ignore[arg-type]
-        sub["efc" if _is_efc_kernel(k) else "non_efc"].append(k)
-
-    log.debug(
-        "NVGEMM kernel cache built: %d kernels, %d dtype buckets",
-        len(cache),
-        len(by_dtype),
-    )
-    return cache, by_dtype
+    log.debug("NVGEMM kernel cache built: %d kernels", len(cache))
+    return cache
 
 
 def _ensure_caches() -> None:
-    global _kernel_by_name_cache, _kernel_by_dtype_cache
+    global _kernel_by_name_cache
     if _kernel_by_name_cache is None:
         with _cache_lock:
             if _kernel_by_name_cache is None:
-                cache, by_dtype = _build_kernel_cache()
-                _kernel_by_dtype_cache = by_dtype
-                _kernel_by_name_cache = cache
+                _kernel_by_name_cache = _build_kernel_cache()
 
 
 def _get_kernel_cache() -> dict[str, Any]:
@@ -132,27 +103,6 @@ def _get_kernel_cache() -> dict[str, Any]:
     cache = _kernel_by_name_cache
     assert cache is not None  # noqa: S101
     return cache
-
-
-def _kernels_for_args(args: Any, efc_only: bool = False) -> list[Any] | None:
-    """Return the dtype-matched kernel subset for `args`, or None to full-scan.
-
-    Uses the (A dtype, B dtype) index so we don't call supports() on the ~250K
-    kernels that can't possibly match a bf16 GEMM. When `efc_only` is set (the
-    addmm/bias path, which requires an epilogue), returns only EFC kernels.
-    """
-    _ensure_caches()
-    by_dtype = _kernel_by_dtype_cache
-    if by_dtype is None:
-        return None
-    dtype_a = _operand_dtype_str(getattr(args, "A", None))
-    dtype_b = _operand_dtype_str(getattr(args, "B", None))
-    if dtype_a is None or dtype_b is None:
-        return None
-    sub = by_dtype.get((dtype_a, dtype_b))
-    if sub is None:
-        return None
-    return sub["efc"] if efc_only else sub["efc"] + sub["non_efc"]
 
 
 def _operand_sig(operand: Any) -> tuple | None:
@@ -184,8 +134,8 @@ def _partition_sig(args: Any) -> tuple | None:
 # Memoizes partition results. `partition_compatible_kernels` is called once per
 # GEMM node during choice generation, but FLUX has hundreds of nodes sharing a
 # handful of shapes (e.g. 114 nodes are all 4608x3072x3072). Re-scanning the
-# dtype-matched kernel subset per node dominated FLUX compile time (~169s over
-# 618 calls); memoizing collapses that to one scan per unique shape.
+# kernel cache per node dominated FLUX compile time (~169s over 618 calls);
+# memoizing collapses that to one scan per unique shape.
 _partition_cache: dict[tuple, list[list[Any]]] = {}
 
 
@@ -199,12 +149,10 @@ def partition_compatible_kernels(
     """Partition compatible kernels into N buckets in a single pass.
 
     `classifier(metadata)` returns a bucket index in [0, num_buckets-1] or
-    -1 to drop the kernel. Scans only the kernels whose operand dtypes match
-    `args` (via the dtype index), avoiding the expensive `supports()` call on
-    the ~294K-entry full cache for every shape. `efc_only` further restricts
-    the scan to epilogue-fusion-capable kernels (the addmm/bias path). Results
-    are memoized per (shape, cc, efc_only) -- the single call site uses a pure
-    metadata-only classifier, so identical shapes reuse the scan.
+    -1 to drop the kernel. `efc_only` restricts the scan to epilogue-fusion-
+    capable kernels (the addmm/bias path). Results are memoized per
+    (shape, cc, efc_only) -- the single call site uses a pure metadata-only
+    classifier, so identical shapes reuse the scan.
     """
     sig = _partition_sig(args)
     cache_key = (sig, cc, num_buckets, efc_only) if sig is not None else None
@@ -213,9 +161,9 @@ def partition_compatible_kernels(
         if cached is not None:
             return [list(b) for b in cached]
 
-    candidates = _kernels_for_args(args, efc_only=efc_only)
-    if candidates is None:
-        candidates = list(_get_kernel_cache().values())
+    candidates = list(_get_kernel_cache().values())
+    if efc_only:
+        candidates = [k for k in candidates if _is_efc_kernel(k)]
     buckets: list[list[Any]] = [[] for _ in range(num_buckets)]
     for kernel in candidates:
         if kernel.designed_for_min_cc > cc:
@@ -228,7 +176,7 @@ def partition_compatible_kernels(
             continue
         buckets[bucket].append(kernel)
     log.debug(
-        "Partitioned %s compatible kernels from %d dtype-matched candidates",
+        "Partitioned %s compatible kernels from %d candidates",
         [len(b) for b in buckets],
         len(candidates),
     )
@@ -252,10 +200,9 @@ _efc_epilogue_cache: dict[tuple[str, str, tuple], Any] = {}
 
 def clear_cache() -> None:
     """Clear all kernel caches."""
-    global _kernel_by_name_cache, _kernel_by_dtype_cache, _efc_epilogue_cache
+    global _kernel_by_name_cache, _efc_epilogue_cache
     with _cache_lock:
         _kernel_by_name_cache = None
-        _kernel_by_dtype_cache = None
         _efc_epilogue_cache = {}
         _partition_cache.clear()
 
