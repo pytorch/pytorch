@@ -101,10 +101,12 @@ def _get_checkpointable_tensor_shard(
 
     local_offset = tensor.local_offsets[shard_idx]
     local_size = tensor.local_sizes[shard_idx]
-    assert isinstance(tensor, torch.Tensor)  # noqa: S101
+    if not isinstance(tensor, torch.Tensor):
+        raise TypeError("CheckpointableTensor must also be a torch.Tensor")
+    local_tensor = tensor
     if not local_offset:
-        return tensor
-    return tensor[
+        return local_tensor
+    return local_tensor[
         tuple(
             slice(offset, offset + size)
             for offset, size in zip(local_offset, local_size, strict=True)
@@ -120,7 +122,8 @@ def _validate_checkpointable_tensor_metadata(tensor: CheckpointableTensor) -> No
         raise ValueError("global_offsets and local_sizes must have the same length")
 
     global_shape = tensor.global_shape
-    assert isinstance(tensor, torch.Tensor)  # noqa: S101
+    if not isinstance(tensor, torch.Tensor):
+        raise TypeError("CheckpointableTensor must also be a torch.Tensor")
     tensor_shape = tuple(tensor.size())
     for idx, (global_offset, local_offset, local_size) in enumerate(
         zip(
