@@ -80,7 +80,7 @@ class LazyValue {
  public:
   virtual ~LazyValue() = default;
 
-  virtual const T& get() const = 0;
+  [[nodiscard]] virtual const T& get() const = 0;
 };
 
 /**
@@ -90,7 +90,7 @@ class LazyValue {
 template <class T>
 class OptimisticLazyValue : public LazyValue<T> {
  public:
-  const T& get() const override {
+  [[nodiscard]] const T& get() const override {
     return value_.ensure([this] { return compute(); });
   }
 
@@ -109,7 +109,7 @@ class PrecomputedLazyValue : public LazyValue<T> {
  public:
   PrecomputedLazyValue(T value) : value_(std::move(value)) {}
 
-  const T& get() const override {
+  [[nodiscard]] const T& get() const override {
     return value_;
   }
 
