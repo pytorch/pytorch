@@ -206,8 +206,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             tcgen05.CtaGroup.TWO if self.use_2cta_instrs else tcgen05.CtaGroup.ONE
         )
 
-        # TMA-prefetch tactic (ported from FlashInfer/TRT-LLM): prefetch A/B/SF
-        # tiles ahead in the K-loop to hide latency; helps small-M large-K.
+        # TMA-prefetch tactic: prefetch A/B/SF tiles ahead in the K-loop to
+        # hide latency; helps small-M large-K.
         self.use_prefetch = use_prefetch
 
         self.occupancy = 1
@@ -347,7 +347,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             self.occupancy,
         )
 
-        # Prefetch depth = AB pipeline depth (matches FlashInfer/TRT-LLM).
+        # Prefetch depth = AB pipeline depth.
         self.prefetch_dist = self.num_ab_stage
 
         # Compute A/B/SFA/SFB/C shared memory layout
@@ -1055,8 +1055,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                 # ((atom_v, rest_v), RestK)
                 tBgSFB_slice = tBgSFB[(None, slice_n, None, mma_tile_coord_mnl[2])]
 
-                # TMA-prefetch tactic (ported from FlashInfer/TRT-LLM): issue
-                # prefetches for the first prefetch_dist K-tiles to hide latency.
+                # TMA-prefetch tactic: issue prefetches for the first
+                # prefetch_dist K-tiles to hide latency.
                 # Helps small-M large-K where the mainloop is load-bound.
                 if cutlass.const_expr(self.use_prefetch):
                     for pf_k_tile in cutlass.range(
@@ -1113,8 +1113,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         mcast_mask=sfb_full_mcast_mask,
                     )
 
-                    # Rolling prefetch (ported from FlashInfer/TRT-LLM): stay
-                    # prefetch_dist tiles ahead each iteration to hide TMA latency
+                    # Rolling prefetch: stay prefetch_dist tiles ahead each
+                    # iteration to hide TMA latency
                     # through the whole K-loop. This is the piece that helps
                     # small-M large-K (the initial pre-loop burst alone does not).
                     if cutlass.const_expr(self.use_prefetch):
@@ -1528,14 +1528,18 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     # Convert to C type
                     #
                     acc_vec = tiled_copy_r2s.retile(tTR_rAcc).load()
-                    acc_vec = epilogue_op(acc_vec.to(self.c_dtype))
                     # Fused global scale: multiply by runtime alpha[0] (a traced
                     # kernel-arg scalar) when provided. Closure capture cannot
                     # read a runtime tensor here, so alpha must be a kernel arg.
+                    # Apply in fp32 (acc_dtype) BEFORE the downcast to c_dtype so
+                    # low-range outputs (fp8/fp16) don't overflow/saturate on the
+                    # cast before alpha (typically < 1) restores range, and before
+                    # epilogue_op so the epilogue sees the true scaled value.
                     # const_expr makes this a compile-time branch (skipped when
                     # alpha_tensor is None) rather than device control flow.
                     if cutlass.const_expr(alpha_tensor is not None):
-                        acc_vec = acc_vec * alpha_tensor[0].to(self.c_dtype)
+                        acc_vec = acc_vec * alpha_tensor[0].to(self.acc_dtype)
+                    acc_vec = epilogue_op(acc_vec.to(self.c_dtype))
                     tRS_rC.store(acc_vec)
 
                     #
