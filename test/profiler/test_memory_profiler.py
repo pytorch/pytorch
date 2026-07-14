@@ -173,7 +173,7 @@ class TestIdentifyGradients(TestCase):
     def assertGradientDetected(self, name: str, *args, **kwargs) -> None:
         self.assertTrue(
             self.gradient_detected(*args, **kwargs),
-            f"Failed to identify gradient `{name}` from profile.",
+            lambda msg: f"{msg}\nFailed to identify gradient `{name}` from profile.",
         )
 
     def assertOnlyGradients(
@@ -186,7 +186,7 @@ class TestIdentifyGradients(TestCase):
             for _, p_grad_key in _memory_profiler.extract_gradients(node):
                 self.assertTrue(
                     p_grad_key.storage.ptr in allowed_set,
-                    f"Tensor wrongly marked as gradient: {node.name}: {p_grad_key}",
+                    lambda msg: f"{msg}\nTensor wrongly marked as gradient: {node.name}: {p_grad_key}",
                 )
 
     def test_extract_gradients_low_level(self, device) -> None:
@@ -1536,7 +1536,8 @@ class TestMemoryProfilerTimeline(TestCase):
             expected = expected[2:]
             for event in expected:
                 self.assertTrue(
-                    event in actual, f"event: {event} was not found in actual."
+                    event in actual,
+                    lambda msg: f"{msg}\nevent: {event} was not found in actual.",
                 )
         else:
             self.assertEqual(
