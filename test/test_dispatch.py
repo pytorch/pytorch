@@ -181,8 +181,11 @@ class TestDispatch(TestCase):
             refs = None
             self.assertTrue(
                 False,
-                "expected exception to be raised, but nothing was raised "
-                f"(after running ctors {ctor_order})",
+                lambda msg: f"{msg}\n"
+                + (
+                    "expected exception to be raised, but nothing was raised "
+                    f"(after running ctors {ctor_order})"
+                ),
             )
         # In the order specified by dtor_order, run deregistrations
         for i, op_ix in enumerate(dtor_order):
