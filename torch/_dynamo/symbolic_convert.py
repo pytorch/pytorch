@@ -102,6 +102,7 @@ from .exc import (
     collapse_resume_frames,
     format_frame_info,
     get_stack_above_dynamo,
+    raise_observed_exception,
     raise_value_error,
     ResumePrologueTracingError,
     StepUnsupported,
@@ -2513,13 +2514,13 @@ class InstructionTranslatorBase(
     @cache_method
     def load_builtin_from_argval(self, argval: Any) -> VariableTracker:
         if argval not in self.f_builtins:
-            unimplemented(
-                gb_type="failed to find name in frame builtins",
-                context="",
-                explanation=f"Failed to find name `{argval}` in frame's builtins.",
-                hints=[
-                    *graph_break_hints.DYNAMO_BUG,
-                ],
+            # Name is neither a global nor a builtin: matches CPython raising
+            # NameError with `name` set to the missing identifier.
+            raise_observed_exception(
+                NameError,
+                self,
+                args=[f"name '{argval}' is not defined"],
+                kwargs={"name": ConstantVariable.create(argval)},
             )
         val = self.f_builtins[argval]
 

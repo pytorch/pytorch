@@ -1154,6 +1154,12 @@ class BuiltinVariable(BaseBuiltinVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
+                if fn is StopIteration:
+                    return variables.StopIterationVariable(fn, args, kwargs)
+                elif fn is AttributeError:
+                    return variables.AttributeErrorVariable(fn, args, kwargs)
+                elif fn is NameError:
+                    return variables.NameErrorVariable(fn, args, kwargs)
                 return variables.ExceptionVariable(fn, args, kwargs)
 
             return create_exception_class_object
