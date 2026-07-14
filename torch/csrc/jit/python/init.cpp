@@ -1336,7 +1336,7 @@ void initJITBindings(PyObject* module) {
       .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;
         s << self;
-        return s.str();
+        return std::move(s).str();
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
@@ -1833,7 +1833,7 @@ void initJITBindings(PyObject* module) {
                     sortedOps, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
-              py::doc(docstring.str().c_str()));
+              py::doc(std::move(docstring).str().c_str()));
           return py::make_tuple(func, overload_names);
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
@@ -1901,7 +1901,7 @@ void initJITBindings(PyObject* module) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
     if (!type) {
-      throw std::runtime_error(s.str());
+      throw std::runtime_error(std::move(s).str());
     }
     return type.value();
   });
@@ -2019,7 +2019,7 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             std::ostringstream out;
             auto result = self.isForwardCompatibleWith(old_schema, out);
-            return std::make_pair(result, out.str());
+            return std::make_pair(result, std::move(out).str());
           })
       .def(
           "__eq__",
