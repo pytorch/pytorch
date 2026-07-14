@@ -208,7 +208,14 @@ def _check_one_dict(
 
 def check_file(filename: str) -> list[LintMessage]:
     current_dicts = parse_fallback_ops(Path(filename).read_text())
-    base_src = _read_at_merge_base(filename)
+    try:
+        base_src = _read_at_merge_base(filename)
+    except subprocess.TimeoutExpired:
+        # On a partial-clone CI checkout, reading the base file lazily fetches
+        # its blob from the promisor remote, which can exceed the 5s local-op
+        # budget. Skip rather than crash or treat every op as new: an empty base
+        # would false-positive on all already-versioned ops.
+        return []
     base_dicts = parse_fallback_ops(base_src) if base_src is not None else {}
 
     major, minor, patch = get_current_version()

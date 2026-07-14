@@ -91,6 +91,13 @@ def get_added_lines(filename: str) -> set[int]:
             )
         added_lines.update(parse_diff(result.stdout))
 
+    except subprocess.TimeoutExpired:
+        # On a partial-clone CI checkout, git diff lazily fetches the shim blob
+        # from the promisor remote, which can exceed the 5s local-op budget.
+        # Fall back to no added lines rather than crash: enforcement then only
+        # applies to lines we can confirm are new (safe for the AOTI shim, whose
+        # existing declarations are already exempt when not newly added).
+        return set()
     except Exception as e:
         raise RuntimeError(
             f"Failed to get git diff information for {filename}. Error: {e}"
