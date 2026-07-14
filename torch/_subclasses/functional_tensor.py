@@ -811,10 +811,16 @@ def dispatch_functionalize(
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
+        flat_inputs: list[Any] = []
+        flat_func_inputs: list[Any] = []
         with disable_above:
             with mode:
                 func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
                 func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
+                if propagate_input_mutations:
+                    # A boxed func clears its input list, so flatten before the call.
+                    flat_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+                    flat_func_inputs = pytree.arg_tree_leaves(*func_args, **func_kwargs)
                 func_outputs = func(*func_args, **func_kwargs)
                 outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
 
@@ -822,10 +828,7 @@ def dispatch_functionalize(
                 from torch._C._functorch import _propagate_functional_input_mutation
 
                 # Runs outside of mode so the copy_ mutates the caller's tensors.
-                for arg, func_arg in zip(
-                    pytree.arg_tree_leaves(*args, **kwargs),
-                    pytree.arg_tree_leaves(*func_args, **func_kwargs),
-                ):
+                for arg, func_arg in zip(flat_inputs, flat_func_inputs):
                     if isinstance(func_arg, FunctionalTensor):
                         _propagate_functional_input_mutation(arg, func_arg.elem)
 

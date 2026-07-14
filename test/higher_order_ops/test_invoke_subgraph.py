@@ -24,6 +24,7 @@ from torch._dynamo.testing import (
     InductorAndRecordGraphs,
     normalize_gm,
 )
+from torch._higher_order_ops.auto_functionalize import FunctionalCallableWithEpilogue
 from torch._higher_order_ops.schema import find_hop_schema
 from torch._inductor import config as inductor_config
 from torch._inductor.pattern_matcher import (
@@ -31,6 +32,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -1526,6 +1528,26 @@ class <lambda>(torch.nn.Module):
             return (mul,)""",
                 ignore_empty_lines=True,
             )
+
+    def test_input_mutation_boxed_subgraph(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, y):
+                x.add_(y)
+                return (torch.mul(x, y),)
+
+        gm = torch.fx.symbolic_trace(Mod())
+        gm.graph.set_codegen(_BoxedCodeGen())
+        gm.recompile()
+        self.assertTrue(gm._boxed_call)
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        x_clone = x.clone()
+        ref = Mod()(x_clone, y)
+
+        self.assertEqual(FunctionalCallableWithEpilogue(gm)([x, y]), ref)
+        self.assertEqual(x_clone, x)
 
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
