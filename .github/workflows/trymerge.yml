@@ -47,6 +47,13 @@ jobs:
           DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           HUD_API_TOKEN: ${{ secrets.HUD_API_TOKEN }}
+          # Shared secret used to verify RADAR approval-marker signatures. Must
+          # match the key the RADAR (bedrock) workflow signs with. When absent,
+          # trymerge treats every RADAR marker as invalid (fail closed). Only the
+          # HMAC secret is mirrored here: the score ceiling, tiers, and file
+          # allow/deny policy are hardcoded in radar.py (imported by trymerge), so
+          # they cannot drift from the RADAR signer workflow.
+          RADAR_HMAC_KEY: ${{ secrets.RADAR_HMAC_KEY }}
         run: |
           set -x
           if [ -n "${REBASE}" ]; then

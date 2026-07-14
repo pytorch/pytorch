@@ -35,6 +35,7 @@ from trymerge import (
     JobCheckState,
     main as trymerge_main,
     MandatoryChecksMissingError,
+    merge,
     MergeRule,
     MergeRuleFailedError,
     PostCommentError,
@@ -190,6 +191,23 @@ def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> list[MergeR
             patterns=["*"],
             approved_by=[],
             mandatory_checks_name=["Lint", "Facebook CLA Check", "nonexistent"],
+            ignore_flaky_failures=True,
+        ),
+    ]
+
+
+def mocked_read_merge_rules_approver_and_pending(
+    repo: Any, org: str, project: str
+) -> list[MergeRule]:
+    # Requires an approver (so radar_approved must bypass the approval gate) AND a
+    # check that never exists (so it stays pending). This makes radar_approved
+    # load-bearing for reaching the pending-check branch.
+    return [
+        MergeRule(
+            name="needs approver with pending check",
+            patterns=["*"],
+            approved_by=["1", "2"],
+            mandatory_checks_name=["nonexistent"],
             ignore_flaky_failures=True,
         ),
     ]
@@ -996,6 +1014,64 @@ class TestBypassFailures(TestCase):
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
+@mock.patch(
+    "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
+)
+@mock.patch.object(GitHubPR, "get_approved_by", return_value=[])
+class TestRadarMergeRuleBypass(TestCase):
+    # get_approved_by is stripped to [] so a valid radar_approved is the ONLY
+    # thing that can carry a PR past the human-approval gate; the mandatory-check
+    # logic is still exercised by the real recorded check state, proving RADAR
+    # bypasses ONLY the approval requirement, never mandatory CI.
+    @mock.patch(
+        "trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_approvers
+    )
+    def test_radar_bypasses_approver_gate_when_checks_green(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        repo = DummyGitRepo()
+        self.assertRaisesRegex(
+            MergeRuleFailedError,
+            "has not been reviewed yet",
+            lambda: find_matching_merge_rule(pr, repo, radar_approved=False),
+        )
+        self.assertIsNotNone(find_matching_merge_rule(pr, repo, radar_approved=True))
+
+    @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
+    def test_radar_still_enforces_failed_checks(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 105312)
+        repo = DummyGitRepo()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with self.assertRaises(MergeRuleFailedError) as cm:
+                find_matching_merge_rule(pr, repo, radar_approved=True)
+        self.assertIn("mandatory check(s) failed", str(cm.exception))
+        # A genuine failure, not the pending subclass.
+        self.assertNotIsInstance(cm.exception, MandatoryChecksMissingError)
+
+    @mock.patch(
+        "trymerge.read_merge_rules",
+        side_effect=mocked_read_merge_rules_approver_and_pending,
+    )
+    def test_radar_still_enforces_pending_checks(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 76118)
+        repo = DummyGitRepo()
+        # radar_approved is load-bearing here: the rule requires an approver, so
+        # without it the approval gate rejects first; with it we reach the
+        # pending-check branch, proving RADAR does not bypass mandatory checks.
+        self.assertRaisesRegex(
+            MergeRuleFailedError,
+            "has not been reviewed yet",
+            lambda: find_matching_merge_rule(pr, repo, radar_approved=False),
+        )
+        self.assertRaisesRegex(
+            MandatoryChecksMissingError,
+            "pending/not yet run",
+            lambda: find_matching_merge_rule(pr, repo, radar_approved=True),
+        )
+
+
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 @mock.patch("trymerge.get_drci_classifications", return_value={})
 class TestBypassFailuresOnSandCastle(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
@@ -1101,6 +1177,35 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "Approved by: https://github.com/ezyang, https://github.com/fegin\n"
             "ghstack dependencies: #106032, #106033, #106034\n",
         )
+
+    @mock.patch.object(GitHubPR, "get_approved_by", return_value=[])
+    def test_radar_approval_attribution_no_human(self, *args: Any) -> None:
+        # radar_approved with no human reviewer: the trailer is attributed to the
+        # greppable RADAR pseudo-login, not the real pytorch-bot account.
+        pr = GitHubPR("pytorch", "pytorch", 106068)
+        msg = pr.gen_commit_message(filter_ghstack=True, radar_approved=True)
+        self.assertIn("Approved by: https://github.com/pytorch-auto-radar", msg)
+        self.assertNotIn("pytorch-bot", msg)
+
+    def test_radar_attribution_when_nonqualifying_human_present(
+        self, *args: Any
+    ) -> None:
+        # The gap the fix closes: RADAR can authorize a merge even when a
+        # non-qualifying human review exists. get_approved_by is non-empty here,
+        # but because RADAR was the authorizing factor the trailer must still
+        # record pytorch-auto-radar (alongside the human) so the landing stays
+        # greppable as a RADAR auto-approval.
+        pr = GitHubPR("pytorch", "pytorch", 106068)
+        msg = pr.gen_commit_message(filter_ghstack=True, radar_approved=True)
+        self.assertIn("https://github.com/pytorch-auto-radar", msg)
+        self.assertIn("https://github.com/ezyang", msg)
+
+    @mock.patch.object(GitHubPR, "get_approved_by", return_value=[])
+    def test_no_radar_attribution_when_not_radar_approved(self, *args: Any) -> None:
+        # Without a RADAR authorization, RADAR must not appear in the trailer.
+        pr = GitHubPR("pytorch", "pytorch", 106068)
+        msg = pr.gen_commit_message(filter_ghstack=True, radar_approved=False)
+        self.assertNotIn("pytorch-auto-radar", msg)
 
     @skip(
         reason="This test is run against a mutable PR that has changed, so it no longer works. The test should be changed"
@@ -1238,6 +1343,188 @@ class TestGitHubPRGhstackDependencies(TestCase):
             top_pr.merge_ghstack_into(mock_repo, True)
 
         self.assertIn("#106034", str(cm.exception))
+
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.radar_merger_has_write", return_value=True)
+    @mock.patch("trymerge.has_valid_radar_approval")
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_radar_is_per_pr(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        mock_has_valid_radar_approval: mock.MagicMock,
+        _mock_merger_has_write: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """RADAR authorization must be evaluated per stacked PR, not computed once
+        for the top PR and reused: only the PR with its own valid marker may ride
+        RADAR. Guards against a regression to has_valid_radar_approval(self)."""
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+        # Only the top PR carries a valid RADAR marker.
+        mock_has_valid_radar_approval.side_effect = lambda pr: pr.pr_num == 106068
+
+        top_pr.merge_ghstack_into(mock_repo, True)
+
+        # The rule check runs only for the non-top stacked PR (the parent), and it
+        # must receive the PARENT's own radar decision (False), not the top's.
+        self.assertEqual(mock_find_matching_merge_rule.call_count, 1)
+        self.assertFalse(
+            mock_find_matching_merge_rule.call_args.kwargs["radar_approved"]
+        )
+        # Attribution follows the same per-PR decision: the top PR's message is
+        # RADAR-attributed, the parent's is not.
+        messages = [c.args[0] for c in mock_repo.amend_commit_message.call_args_list]
+        parent_msg = next(m for m in messages if "#106034" in m)
+        top_msg = next(m for m in messages if "#106068" in m)
+        self.assertNotIn("pytorch-auto-radar", parent_msg)
+        self.assertIn("pytorch-auto-radar", top_msg)
+
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.radar_merger_has_write", return_value=False)
+    @mock.patch("trymerge.has_valid_radar_approval", return_value=True)
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_read_only_commenter_gets_no_radar(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        _mock_has_valid_radar_approval: mock.MagicMock,
+        _mock_merger_has_write: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """The person half is load-bearing: even if EVERY stacked PR carries a
+        valid marker, a merge commenter without write access yields no RADAR
+        authorization on any PR (both the rule check and the attribution)."""
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+
+        top_pr.merge_ghstack_into(mock_repo, True)
+
+        self.assertEqual(mock_find_matching_merge_rule.call_count, 1)
+        self.assertFalse(
+            mock_find_matching_merge_rule.call_args.kwargs["radar_approved"]
+        )
+        messages = [c.args[0] for c in mock_repo.amend_commit_message.call_args_list]
+        self.assertTrue(all("pytorch-auto-radar" not in m for m in messages))
+
+    @mock.patch.object(GitHubPR, "is_ghstack_pr", return_value=False)
+    def test_single_pr_threads_radar_approved_to_commit_message(
+        self, _mock_is_ghstack: mock.MagicMock, *args: Any
+    ) -> None:
+        # The non-ghstack path must forward radar_approved from merge_into ->
+        # merge_changes_locally -> gen_commit_message. gen_commit_message is the
+        # first thing merge_changes_locally does for a single PR, so intercept it
+        # to assert the flag is threaded (guards against a refactor dropping it).
+        pr = GitHubPR("pytorch", "pytorch", 106068)
+        repo = mock.MagicMock()
+
+        class _Stop(Exception):
+            pass
+
+        with mock.patch.object(pr, "gen_commit_message", side_effect=_Stop) as mock_gen:
+            with self.assertRaises(_Stop):
+                pr.merge_changes_locally(repo, comment_id=1, radar_approved=True)
+        mock_gen.assert_called_once_with(radar_approved=True)
+
+    def test_merge_into_forwards_radar_approved(self, *args: Any) -> None:
+        # merge_into must pass radar_approved to BOTH find_matching_merge_rule
+        # (the gate) and merge_changes_locally (the commit-message attribution).
+        pr = GitHubPR("pytorch", "pytorch", 106068)
+        repo = mock.MagicMock()
+        rule = MergeRule(
+            "r", patterns=["*"], approved_by=[], mandatory_checks_name=None
+        )
+        with (
+            mock.patch(
+                "trymerge.find_matching_merge_rule",
+                return_value=(rule, [], [], {}),
+            ) as mock_fmmr,
+            mock.patch.object(pr, "merge_changes_locally", return_value=[]) as mock_mcl,
+            mock.patch("trymerge.can_skip_internal_checks", return_value=False),
+            mock.patch("trymerge.save_merge_record"),
+            mock.patch("trymerge.manually_close_merged_pr"),
+            mock.patch("trymerge.time.sleep"),
+        ):
+            pr.merge_into(repo, comment_id=1, dry_run=True, radar_approved=True)
+        self.assertTrue(mock_fmmr.call_args.kwargs["radar_approved"])
+        self.assertTrue(mock_mcl.call_args.kwargs["radar_approved"])
+
+
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
+@mock.patch(
+    "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
+)
+class TestRadarMergeLoop(TestCase):
+    # Exercises the real trymerge.merge() wait loop to prove RADAR authorization
+    # is RE-EVALUATED every iteration, so an approval withdrawn mid-merge (on an
+    # unchanged head SHA) aborts the merge instead of landing.
+    @mock.patch("trymerge.gh_add_labels")
+    @mock.patch("trymerge.post_starting_merge_comment")
+    @mock.patch("trymerge.has_required_labels", return_value=True)
+    @mock.patch("trymerge.check_for_sev")
+    @mock.patch.object(GitHubPR, "merge_into")
+    @mock.patch.object(GitHubPR, "is_ghstack_pr", return_value=False)
+    @mock.patch.object(GitHubPR, "get_labels", return_value=["merging"])
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.has_valid_radar_approval")
+    @mock.patch("trymerge.radar_merger_has_write", return_value=True)
+    def test_merge_aborts_when_radar_revoked_mid_wait(
+        self,
+        mock_merger_write: mock.MagicMock,
+        mock_has_approval: mock.MagicMock,
+        mock_fmmr: mock.MagicMock,
+        _mock_get_labels: mock.MagicMock,
+        _mock_is_ghstack: mock.MagicMock,
+        mock_merge_into: mock.MagicMock,
+        _mock_check_for_sev: mock.MagicMock,
+        _mock_has_required_labels: mock.MagicMock,
+        _mock_post_starting: mock.MagicMock,
+        _mock_add_labels: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        # Approval valid pre-loop then withdrawn (revoked) inside the loop on an
+        # unchanged SHA. The commenter write access is resolved ONCE; only the
+        # approval is re-read each iteration.
+        mock_has_approval.side_effect = [True, False]
+        rule = MergeRule(
+            "r", patterns=["*"], approved_by=[], mandatory_checks_name=None
+        )
+
+        def fmmr(pr: Any, repo: Any, **kwargs: Any) -> Any:
+            if not kwargs.get("radar_approved", False):
+                raise MergeRuleFailedError(f"PR #{pr.pr_num} has not been reviewed yet")
+            return (rule, [], [], {})
+
+        mock_fmmr.side_effect = fmmr
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        repo = DummyGitRepo()
+
+        with self.assertRaisesRegex(MergeRuleFailedError, "has not been reviewed yet"):
+            merge(pr, repo, comment_id=1, dry_run=True)
+
+        # The approval was re-read in the loop (2 calls) and once it went False the
+        # merge aborted; the commenter permission was fetched ONCE (not per
+        # iteration), so a transient permission blip cannot abort a valid merge.
+        self.assertEqual(mock_has_approval.call_count, 2)
+        self.assertEqual(mock_merger_write.call_count, 1)
+        mock_merge_into.assert_not_called()
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)

@@ -19,6 +19,7 @@ from warnings import warn
 import yaml
 from github_utils import (
     gh_close_pr,
+    gh_fetch_json_dict,
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
@@ -26,6 +27,7 @@ from github_utils import (
     gh_post_commit_comment,
     gh_post_pr_comment,
     gh_update_pr_state,
+    GITHUB_API_URL,
     GitHubComment,
 )
 from gitutils import (
@@ -41,6 +43,17 @@ from label_utils import (
     gh_remove_label,
     has_required_labels,
     LABEL_ERR_MSG,
+)
+from radar import (
+    files_allowlisted,
+    has_write_access,
+    is_low_risk,
+    is_trusted_radar_login,
+    iter_radar_markers,
+    iter_revoked_markers,
+    RADAR_APPROVAL_LOGIN,
+    verify_marker_sig,
+    verify_revoked_sig,
 )
 from trymerge_explainer import get_revert_message, TryMergeExplainer
 
@@ -1189,14 +1202,24 @@ class GitHubPR:
         ghstack_prs = get_ghstack_prs(
             repo, self, open_only=False
         )  # raises error if out of sync
+        # The merge command lives on the top PR, so establish the commenter's
+        # write access once and combine it with each stacked PR's own RADAR
+        # approval below.
+        merger_has_write = radar_merger_has_write(self, comment_id)
         pr_dependencies = []
         for pr, rev in ghstack_prs:
             if pr.is_closed():
                 pr_dependencies.append(pr)
                 continue
 
+            # Each stacked PR carries its own RADAR approval; combine it with the
+            # commenter's write access so both the rule check and the commit-message
+            # attribution reflect this PR's actual authorization.
+            pr_radar_approved = merger_has_write and has_valid_radar_approval(pr)
             commit_msg = pr.gen_commit_message(
-                filter_ghstack=True, ghstack_deps=pr_dependencies
+                filter_ghstack=True,
+                ghstack_deps=pr_dependencies,
+                radar_approved=pr_radar_approved,
             )
             if pr.pr_num != self.pr_num and not skip_all_rule_checks:
                 try:
@@ -1205,6 +1228,7 @@ class GitHubPR:
                         repo,
                         skip_mandatory_checks=skip_mandatory_checks,
                         skip_internal_checks=can_skip_internal_checks(self, comment_id),
+                        radar_approved=pr_radar_approved,
                     )
                 except MergeRuleFailedError as ex:
                     raise type(ex)(
@@ -1220,13 +1244,23 @@ class GitHubPR:
         self,
         filter_ghstack: bool = False,
         ghstack_deps: list[GitHubPR] | None = None,
+        radar_approved: bool = False,
     ) -> str:
         """Fetches title and body from PR description
         adds reviewed by, pull request resolved and optionally
         filters out ghstack info"""
         # Adding the url here makes it clickable within the Github UI
+        approvers = self.get_approved_by()
+        if radar_approved and RADAR_APPROVAL_LOGIN not in approvers:
+            # A valid RADAR approval was applied to this merge: record it (in
+            # addition to any human reviewers) so the landing stays greppable as a
+            # RADAR auto-approval. This intentionally over-reports -- it also tags
+            # the rare case where a qualifying human review was independently
+            # present -- which is the safe direction: it never omits a merge whose
+            # human-approval gate was actually satisfied by RADAR.
+            approvers = [*approvers, RADAR_APPROVAL_LOGIN]
         approved_by_urls = ", ".join(
-            prefix_with_github_url(login) for login in self.get_approved_by()
+            prefix_with_github_url(login) for login in approvers
         )
         # Remove "cc: " line from the message body
         msg_body = re.sub(RE_PR_CC_LINE, "", self.get_body())
@@ -1272,6 +1306,7 @@ class GitHubPR:
         dry_run: bool = False,
         comment_id: int,
         ignore_current_checks: list[str] | None = None,
+        radar_approved: bool = False,
     ) -> None:
         # Raises exception if matching rule is not found
         (
@@ -1285,9 +1320,10 @@ class GitHubPR:
             skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
             ignore_current_checks=ignore_current_checks,
+            radar_approved=radar_approved,
         )
         additional_merged_prs = self.merge_changes_locally(
-            repo, skip_mandatory_checks, comment_id
+            repo, skip_mandatory_checks, comment_id, radar_approved=radar_approved
         )
 
         repo.push(self.default_branch(), dry_run)
@@ -1343,6 +1379,7 @@ class GitHubPR:
         comment_id: int | None = None,
         branch: str | None = None,
         skip_all_rule_checks: bool = False,
+        radar_approved: bool = False,
     ) -> list[GitHubPR]:
         """
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
@@ -1352,7 +1389,9 @@ class GitHubPR:
             repo.checkout(branch_to_merge_into)
 
         # It's okay to skip the commit SHA check for ghstack PRs since
-        # authoring requires write access to the repo.
+        # authoring requires write access to the repo. The ghstack path computes
+        # each stacked PR's own RADAR attribution, so radar_approved (the top
+        # PR's decision) is only used for the single-PR commit message below.
         if self.is_ghstack_pr():
             return self.merge_ghstack_into(
                 repo,
@@ -1361,7 +1400,7 @@ class GitHubPR:
                 skip_all_rule_checks=skip_all_rule_checks,
             )
 
-        msg = self.gen_commit_message()
+        msg = self.gen_commit_message(radar_approved=radar_approved)
         pr_branch_name = f"__pull-request-{self.pr_num}__init__"
 
         # Determine which commit SHA to merge
@@ -1480,12 +1519,108 @@ def _find_non_matching_files(patterns: list[str], files: list[str]) -> list[str]
     ]
 
 
+def has_valid_radar_approval(pr: GitHubPR) -> bool:
+    """Return whether this PR carries a valid RADAR auto-approval.
+
+    A valid approval is a comment carrying a RADAR marker that (1) is authored
+    by a trusted RADAR bot login and unedited, (2) has a valid HMAC signature
+    over (repo, pr, head sha, score, tier), (3) matches the current head commit,
+    and (4) is still within the auto-approve risk threshold. The HMAC -- not the
+    login or the label -- is the trust anchor: it cannot be forged without the
+    shared secret, so reflected attacker text under a bot login does not
+    validate. The SHA binding prevents a stale approval from applying after a
+    new push.
+
+    The NEWEST trusted RADAR decision for the current head wins: a signed
+    revocation (RADAR-REVOKED) for the head SHA invalidates an older approval.
+    This makes withdrawal fail-closed even when deleting the prior approval
+    comment failed (deletion is best-effort), and forgery is impossible either
+    direction because both markers are HMAC-signed. A revocation is honored even
+    from an EDITED comment: it is deny-only, so trusting an edited revocation can
+    only fail closed (never grant), which closes the hole where editing the
+    revocation comment would otherwise resurrect a stale approval. An approval,
+    by contrast, must come from an unedited comment.
+
+    As defense in depth against a leaked key or a radar.py bug, this also
+    re-enforces the changed-files allowlist here, so RADAR can never substitute
+    for review on a file outside the allowlist (which keeps domain-specific
+    reviewer requirements in force for real source changes).
+    """
+    if not files_allowlisted(pr.get_changed_files()):
+        return False
+    head_sha = pr.last_commit_sha()
+    for comment in reversed(pr.get_comments()):
+        if not is_trusted_radar_login(comment.author_login):
+            continue
+        body = comment.body_text
+        # Revocation is checked BEFORE the edited-comment skip: it is HMAC-signed
+        # and deny-only, so honoring it even when edited stays fail-safe.
+        if any(
+            rev.sha == head_sha
+            and verify_revoked_sig(rev, pr.org, pr.project, pr.pr_num)
+            for rev in iter_revoked_markers(body)
+        ):
+            return False
+        # An approval, unlike a revocation, must come from an unedited comment.
+        if comment.editor_login is not None:
+            continue
+        # Scan every marker in the comment: a marker-shaped string in the
+        # AI-authored summary/reasoning must not shadow the genuine signed one.
+        for marker in iter_radar_markers(body):
+            if marker.sha != head_sha:
+                continue
+            if not verify_marker_sig(marker, pr.org, pr.project, pr.pr_num):
+                continue
+            if not is_low_risk(marker.tier, marker.score):
+                continue
+            return True
+    return False
+
+
+def _radar_commenter_repo_permission(pr: GitHubPR, login: str) -> str:
+    # The commenter's REAL repository permission (admin/write/read/none/...), the
+    # same source claude-radar.yml uses to gate the PR author, so the verifier's
+    # person-gate is exactly as strong as the signer's author-gate. Fails closed
+    # to "none" on any error (unknown collaborator 404s, API failure).
+    try:
+        resp = gh_fetch_json_dict(
+            f"{GITHUB_API_URL}/repos/{pr.org}/{pr.project}/collaborators/{login}/permission"
+        )
+    except Exception as e:
+        print(f"Could not fetch repo permission for {login} (treating as none): {e}")
+        return "none"
+    return str(resp.get("permission", "none"))
+
+
+def radar_merger_has_write(pr: GitHubPR, comment_id: int | None) -> bool:
+    """Return whether the `@pytorchbot merge` commenter has repo WRITE access.
+
+    This is the person half of RADAR authorization, kept separate from the
+    per-PR approval so it can be reused across a ghstack (the merge command
+    lives on the top PR, but each stacked PR needs its own RADAR approval).
+
+    It resolves the commenter's actual repository permission via the same
+    collaborators-permission API that claude-radar.yml uses to gate the PR
+    author, so the person-gate that substitutes for human review is exactly as
+    strong as the signer's author-gate -- not merely an org-membership/author
+    -association check (a MEMBER or COLLABORATOR can be read/triage-only). Fails
+    closed on a missing comment id, an edited comment, or a non-write permission.
+    """
+    if comment_id is None:
+        return False
+    comment = pr.get_comment_by_id(comment_id)
+    if comment.editor_login is not None:
+        return False
+    return has_write_access(_radar_commenter_repo_permission(pr, comment.author_login))
+
+
 def find_matching_merge_rule(
     pr: GitHubPR,
     repo: GitRepo | None = None,
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
     ignore_current_checks: list[str] | None = None,
+    radar_approved: bool = False,
 ) -> tuple[
     MergeRule,
     list[tuple[str, str | None, int | None]],
@@ -1554,8 +1689,10 @@ def find_matching_merge_rule(
                 )
             continue
 
-        # If rule needs approvers but PR has not been reviewed, skip it
-        if len(rule.approved_by) > 0 and len(approved_by) == 0:
+        # If rule needs approvers but PR has not been reviewed, skip it.
+        # A valid RADAR auto-approval substitutes for the human review here;
+        # mandatory checks below are still enforced.
+        if len(rule.approved_by) > 0 and len(approved_by) == 0 and not radar_approved:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
                 reject_reason = f"PR #{pr.pr_num} has not been reviewed yet"
@@ -1571,7 +1708,11 @@ def find_matching_merge_rule(
                 rule_approvers.add(approver)
         approvers_intersection = approved_by.intersection(rule_approvers)
         # If rule requires approvers but they aren't the ones that reviewed PR
-        if len(approvers_intersection) == 0 and len(rule_approvers) > 0:
+        if (
+            len(approvers_intersection) == 0
+            and len(rule_approvers) > 0
+            and not radar_approved
+        ):
             # Less than or equal is intentionally used here to gather all potential
             # approvers
             if reject_reason_score <= 10000:
@@ -2412,8 +2553,21 @@ def merge(
             comment_id=comment_id,
         )
 
+    # A valid RADAR auto-approval, combined with the merge command coming from a
+    # user with write access, lets a low-risk PR skip the human-approval gate. The
+    # commenter's write access does not change during the merge, so resolve it ONCE
+    # (a network call) and reuse it below; only the network-free RADAR approval is
+    # re-read each iteration, so a transient permission-API blip can never
+    # spuriously abort a valid RADAR merge with a misleading "not reviewed" reason.
+    radar_merger_write = radar_merger_has_write(pr, comment_id)
+    radar_approved = radar_merger_write and has_valid_radar_approval(pr)
+    if radar_approved:
+        print(f"RADAR auto-approval accepted for PR #{pr.pr_num}")
+
     # Check for approvals
-    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
+    find_matching_merge_rule(
+        pr, repo, skip_mandatory_checks=True, radar_approved=radar_approved
+    )
 
     if not has_required_labels(pr):
         raise RuntimeError(LABEL_ERR_MSG.lstrip(" #"))
@@ -2453,13 +2607,26 @@ def merge(
             raise RuntimeError(
                 "New commits were pushed while merging. Please rerun the merge command."
             )
+        # Re-read the RADAR approval on the refetched PR each iteration (reusing
+        # the once-resolved commenter write access), mirroring how human approvals
+        # are re-read inside find_matching_merge_rule. A RADAR approval can be
+        # withdrawn on an unchanged head SHA (a re-run of the RADAR workflow posts a
+        # signed RADAR-REVOKED marker, which has_valid_radar_approval honors as the
+        # newest decision), which the new-commits guard above would not catch;
+        # recomputing here stops an in-flight merge whose approval was withdrawn
+        # mid-wait. trymerge never reads the radar-approved label -- only the signed
+        # markers.
+        radar_approved = radar_merger_write and has_valid_radar_approval(pr)
         try:
             required_checks = []
             failed_rule_message = None
             ignore_flaky_failures = True
             try:
                 find_matching_merge_rule(
-                    pr, repo, ignore_current_checks=ignore_current_checks
+                    pr,
+                    repo,
+                    ignore_current_checks=ignore_current_checks,
+                    radar_approved=radar_approved,
                 )
             except MandatoryChecksMissingError as ex:
                 if ex.rule is not None:
@@ -2513,6 +2680,7 @@ def merge(
                 skip_mandatory_checks=skip_mandatory_checks,
                 comment_id=comment_id,
                 ignore_current_checks=ignore_current_checks,
+                radar_approved=radar_approved,
             )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)

@@ -1,0 +1,269 @@
+# Owner(s): ["module: ci"]
+name: Claude RADAR
+
+# RADAR runs an AI risk assessment on a PR. When the change is low-risk and the
+# author has write access, it posts an approval comment carrying a marker bound
+# to the head SHA (see .github/scripts/radar.py), which lets a maintainer land
+# the PR with `@pytorchbot merge` without a separate human review.
+#
+# This runs as pull_request_target so it can comment on fork PRs, but it never
+# checks out or executes head code: it only checks out the trusted base for
+# context and reasons over the PR diff passed as text. The AI is limited to
+# read-only tools (no Bash / no network) for that reason.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to assess"
+        required: true
+        type: string
+
+concurrency:
+  group: claude-radar-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  assess:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: bedrock
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Resolve PR metadata
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pass event data via env, never interpolated into the script, so a
+          # crafted workflow_dispatch input cannot inject shell.
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          DISPATCH_PR_NUMBER: ${{ github.event.inputs.pr_number }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_AUTHOR: ${{ github.event.pull_request.user.login }}
+          EVENT_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            PR_NUM="$DISPATCH_PR_NUMBER"
+            # Reject anything that is not a bare PR number before it reaches gh.
+            if ! [[ "$PR_NUM" =~ ^[0-9]+$ ]]; then
+              echo "Invalid pr_number input: $PR_NUM" >&2
+              exit 1
+            fi
+            META=$(gh pr view "$PR_NUM" --repo "$REPO" \
+              --json headRefOid,author,isDraft)
+            SHA=$(echo "$META" | jq -r '.headRefOid')
+            AUTHOR=$(echo "$META" | jq -r '.author.login')
+            DRAFT=$(echo "$META" | jq -r '.isDraft')
+          else
+            PR_NUM="$EVENT_PR_NUMBER"
+            SHA="$EVENT_SHA"
+            AUTHOR="$EVENT_AUTHOR"
+            DRAFT="$EVENT_DRAFT"
+          fi
+          {
+            echo "pr_num=$PR_NUM"
+            echo "sha=$SHA"
+            echo "author=$AUTHOR"
+            echo "draft=$DRAFT"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved PR #$PR_NUM sha=$SHA author=$AUTHOR draft=$DRAFT"
+
+      - name: Check author write access
+        id: perm
+        if: steps.pr.outputs.draft != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          AUTHOR: ${{ steps.pr.outputs.author }}
+        run: |
+          set -euo pipefail
+          # RADAR only assesses maintainer-authored PRs, which bounds AI cost and
+          # matches the "maintainers can land low-risk PRs" goal.
+          PERM=$(gh api \
+            "repos/${REPO}/collaborators/${AUTHOR}/permission" \
+            --jq '.permission' 2>/dev/null || echo "none")
+          echo "permission=$PERM" >> "$GITHUB_OUTPUT"
+          case "$PERM" in
+            admin|maintain|write) echo "has_write=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "has_write=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "Author ${AUTHOR} permission: $PERM"
+
+      - name: Checkout base for context
+        if: steps.perm.outputs.has_write == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          fetch-depth: 1
+
+      - name: Collect PR diff and metadata
+        id: collect
+        if: steps.perm.outputs.has_write == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ steps.pr.outputs.pr_num }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/radar
+          # changedFiles is the authoritative (never-truncated) file count; radar.py
+          # fails closed unless it matches the `files` list, which `gh pr view`
+          # caps at 100 entries. Without it a >100-file PR could hide a
+          # non-allowlisted file past the cap.
+          gh pr view "$PR_NUM" --repo "$REPO" \
+            --json title,body,files,changedFiles,additions,deletions,labels \
+            > /tmp/radar/meta.json
+          # Cap the diff so an enormous PR cannot blow the prompt budget. Write
+          # the full diff to a file first, then `head -c` the file (do NOT pipe gh
+          # into head: head closes the pipe early and gh dies with SIGPIPE). No
+          # `|| true` here: a real `gh pr diff` failure must abort the step so that
+          # (via the has_write step guard) the decision step is skipped, i.e. RADAR
+          # fails closed rather than scoring a diff the AI never saw. When the diff
+          # is truncated the AI is not seeing the whole change, so append a visible
+          # sentinel banner and mark truncated=true; radar.py independently refuses
+          # to approve a truncated diff via --diff-truncated, so correctness does
+          # not depend on the model heeding the banner.
+          CAP=200000
+          gh pr diff "$PR_NUM" --repo "$REPO" > /tmp/radar/diff.full
+          FULL_BYTES=$(wc -c < /tmp/radar/diff.full)
+          head -c "$CAP" /tmp/radar/diff.full > /tmp/radar/diff.patch
+          rm -f /tmp/radar/diff.full
+          # A change with reported line edits but an empty diff means the fetch
+          # produced nothing usable; treat that as truncated (fail closed) too.
+          CHANGED_LINES=$(jq -r '(.additions // 0) + (.deletions // 0)' /tmp/radar/meta.json)
+          if [ "$FULL_BYTES" -gt "$CAP" ] || { [ "$FULL_BYTES" -eq 0 ] && [ "$CHANGED_LINES" -gt 0 ]; }; then
+            {
+              printf '\n\n=== RADAR NOTICE: DIFF TRUNCATED OR UNAVAILABLE ===\n'
+              printf 'Only %s of %s bytes are shown. You are NOT seeing the whole\n' "$CAP" "$FULL_BYTES"
+              printf 'change; a change you cannot fully review is never trivial.\n'
+              printf 'Score it medium or higher.\n'
+              printf '=== END RADAR NOTICE ===\n'
+            } >> /tmp/radar/diff.patch
+            echo "truncated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "truncated=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Collected $(wc -c < /tmp/radar/diff.patch) bytes of diff (full=${FULL_BYTES}, cap=${CAP})"
+
+      - name: Configure AWS credentials via OIDC
+        if: steps.perm.outputs.has_write == 'true'
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+
+      - name: Run RADAR risk assessment
+        id: claude
+        if: steps.perm.outputs.has_write == 'true'
+        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        with:
+          use_bedrock: "true"
+          claude_args: |
+            --model global.anthropic.claude-opus-4-6-v1
+            --allowedTools "Read,Grep,Glob"
+            --json-schema '{"type":"object","required":["risk_score","risk_tier","summary","reasoning"],"properties":{"risk_score":{"type":"integer","minimum":0,"maximum":100,"description":"0 = trivially safe, 100 = extremely risky"},"risk_tier":{"type":"string","enum":["trivial","low","medium","high"]},"summary":{"type":"string","description":"1-2 sentence summary of the change and its risk"},"reasoning":{"type":"string","description":"Detailed risk reasoning: what could break, blast radius, test coverage"}}}'
+          settings: '{"alwaysThinkingEnabled": true}'
+          prompt: |
+            You are RADAR, a strict risk assessor for PyTorch pull requests. Your
+            job is to score how risky it would be to land this PR WITHOUT any
+            human review. Be conservative: when in doubt, score higher.
+
+            You may Read/Grep/Glob the checked-out base repository for context.
+            You do NOT have Bash or network access.
+
+            The PR metadata (title, body, changed files, line counts, labels) is
+            in /tmp/radar/meta.json and the full diff is in /tmp/radar/diff.patch.
+            Read both files first, then reason over them.
+
+            ## Scoring rubric
+
+            - **trivial (score 0-10)**: mechanical, self-contained, low blast
+              radius. Examples: typo/comment/docstring fixes, test-only changes,
+              adding a filter to a test, tightening a type annotation, a small
+              obviously-correct one-liner in a well-covered path. The change is
+              easy to fully understand from the diff alone and hard to get wrong.
+            - **low (11-30)**: small, localized logic change in a well-tested
+              area with clear intent.
+            - **medium (31-70)**: non-trivial logic, touches shared code paths,
+              public API, build/CI config, or has meaningful blast radius.
+            - **high (71-100)**: risky or wide-reaching: core dispatch, autograd,
+              memory/threading, security-sensitive code, codegen, ABI, anything
+              you cannot fully reason about from the diff, or anything lacking
+              test coverage for the changed behavior.
+
+            ## Rules
+
+            - Only assign **trivial** when you are confident the change is safe to
+              land unreviewed. Any uncertainty, missing test coverage for changed
+              behavior, or non-local blast radius means at least **medium**.
+            - Changes to core runtime (aten/, c10/, torch/csrc/, autograd,
+              dispatcher), build system, CI workflows, or anything touching
+              serialization/ABI/security should never be **trivial**.
+            - A large diff, or one you cannot fully understand from the patch, is
+              never **trivial**.
+            - The line counts in meta.json (`additions`, `deletions`) are
+              authoritative and never truncated. If their sum is more than a few
+              hundred lines, or /tmp/radar/diff.patch ends with a "RADAR NOTICE:
+              DIFF TRUNCATED" banner, you are NOT seeing the whole change and must
+              never score it trivial (medium or higher).
+            - Score the change on its own merits; do not consider who the author
+              is or what happens with your score.
+
+            Read /tmp/radar/meta.json and /tmp/radar/diff.patch, investigate the
+            base repo as needed, then return your structured verdict.
+
+      - name: Save verdict
+        id: verdict
+        if: steps.perm.outputs.has_write == 'true' && steps.claude.outputs.structured_output != ''
+        env:
+          VERDICT_JSON: ${{ steps.claude.outputs.structured_output }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$VERDICT_JSON" > /tmp/radar/verdict.json
+          cat /tmp/radar/verdict.json
+          echo "written=true" >> "$GITHUB_OUTPUT"
+
+      - name: Evaluate and post RADAR decision
+        if: steps.verdict.outputs.written == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Shared secret used to sign the approval marker; the same secret must
+          # be configured for the mergebot environment so trymerge can verify.
+          # When absent, radar.py refuses to approve (fail closed). The score
+          # ceiling, approved tiers, and the file allow/deny policy are hardcoded
+          # constants in radar.py (imported by trymerge), so nothing else needs
+          # mirroring between the signer and verifier.
+          RADAR_HMAC_KEY: ${{ secrets.RADAR_HMAC_KEY }}
+        run: |
+          set -euo pipefail
+          # Pass --diff-truncated via a bash array so the flag is cleanly absent
+          # (not an empty positional arg) when the diff was not truncated.
+          EXTRA=()
+          if [ "${{ steps.collect.outputs.truncated }}" = "true" ]; then
+            EXTRA+=(--diff-truncated)
+          fi
+          python3 .github/scripts/radar.py \
+            --pr-num "${{ steps.pr.outputs.pr_num }}" \
+            --sha "${{ steps.pr.outputs.sha }}" \
+            --org "${{ github.repository_owner }}" \
+            --project "${{ github.event.repository.name }}" \
+            --verdict-file /tmp/radar/verdict.json \
+            --meta-file /tmp/radar/meta.json \
+            --author-permission "${{ steps.perm.outputs.permission }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${EXTRA[@]}"
+
+      - name: Upload usage metrics
+        if: always()
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@main
