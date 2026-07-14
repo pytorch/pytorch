@@ -496,7 +496,7 @@ include(CheckCCompilerFlag)
 include(CheckLinkerFlag)
 
 ##############################################################################
-# CHeck if given flag is supported and append it to provided outputvar
+# Check if given flag is supported and append it to provided outputvar
 # Also define HAS_UPPER_CASE_FLAG_NAME variable
 # Usage:
 #   append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
@@ -543,9 +543,14 @@ function(target_compile_options_if_supported target flag)
 endfunction()
 
 # Check if a global link option is supported
+# Also defines HAS_LINKER_UPPER_CASE_FLAG_NAME
+# Usage:
+#   add_link_options_if_supported("--emit-relocs")
 function(add_link_options_if_supported flag)
-  check_linker_flag(C "LINKER:${flag}" _supported)
-  if("${_supported}")
+  string(TOUPPER "HAS_LINKER${flag}" _FLAG_NAME)
+  string(REGEX REPLACE "[=,-]" "_" _FLAG_NAME "${_FLAG_NAME}")
+  check_linker_flag(C "LINKER:${flag}" ${_FLAG_NAME})
+  if(${_FLAG_NAME})
     add_link_options("LINKER:${flag}")
   else()
     message(WARNING "Attempted to use unsupported link option : ${flag}.")
@@ -553,8 +558,10 @@ function(add_link_options_if_supported flag)
 endfunction()
 
 function(target_link_options_if_supported tgt flag)
-  check_linker_flag(C "LINKER:${flag}" _supported)
-  if("${_supported}")
+  string(TOUPPER "HAS_LINKER${flag}" _FLAG_NAME)
+  string(REGEX REPLACE "[=,-]" "_" _FLAG_NAME "${_FLAG_NAME}")
+  check_linker_flag(C "LINKER:${flag}" ${_FLAG_NAME})
+  if(${_FLAG_NAME})
     target_link_options("${tgt}" PRIVATE "LINKER:${flag}")
   else()
     message(WARNING "Attempted to use unsupported link option : ${flag}.")
