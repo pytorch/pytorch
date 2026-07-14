@@ -1193,6 +1193,19 @@ test_unbacked_parity_smoketest() {
   local MAX_RETRIES=3
   local MODELS="MobileBertForMaskedLM|DistilBertForMaskedLM|DistillGPT2|T5Small"
 
+  # Per-model regression threshold override (percent). Most models track backed
+  # vs unbacked to within +-0.5%, but MobileBertForMaskedLM has bimodal compiled
+  # timings (~101ms vs ~103ms) where backed and unbacked independently land in
+  # different modes, giving up to +-1.7% run-to-run jitter with no directional
+  # regression. Use a wider band for it so noise doesn't red the periodic job
+  # while still catching a genuine regression.
+  model_threshold() {
+    case "$1" in
+      MobileBertForMaskedLM) echo "3.0" ;;
+      *) echo "$THRESHOLD" ;;
+    esac
+  }
+
   # Issue 6: Write per-run output files for post-failure debugging
   run_comparison() {
     local run_num=$1
@@ -1216,8 +1229,10 @@ test_unbacked_parity_smoketest() {
         local model="${BASH_REMATCH[1]}"
         local diff="${BASH_REMATCH[4]}"
         # Nit: Use awk instead of bc -l to avoid dependency on bc
-        if awk "BEGIN{exit !($diff > $THRESHOLD)}"; then
-          regressions+=("$model:+${diff}%")
+        local model_thr
+        model_thr=$(model_threshold "$model")
+        if awk "BEGIN{exit !($diff > $model_thr)}"; then
+          regressions+=("$model:+${diff}% (threshold ${model_thr}%)")
         fi
       fi
     done < "$output_file"
