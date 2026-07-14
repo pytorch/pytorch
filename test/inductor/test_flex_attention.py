@@ -8066,6 +8066,38 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
     @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps
+    def test_block_mask_check_does_not_specialize_backed_dynamic_length(self, device):
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(mask_mod, None, None, 320, 320, device=device)
+        dtype = device_configs[device].dtypes_fast[0]
+
+        def create_inputs(S):
+            q, k, v = (
+                torch.randn(1, 1, S, 64, dtype=dtype, device=device) for _ in range(3)
+            )
+            for x in (q, k, v):
+                torch._dynamo.mark_dynamic(x, 2, min=128, max=1024)
+            return q, k, v
+
+        counter = CompileCounterWithBackend("eager")
+
+        @torch.compile(fullgraph=True, backend=counter)
+        def flex_attention_call(q, k, v):
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        with torch.no_grad():
+            for S in (320, 256):
+                self.assertEqual(
+                    flex_attention_call(*create_inputs(S)).shape, (1, 1, S, 64)
+                )
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @supported_platform
     @common_utils.parametrize("full_indices", [False, True])
     def test_from_kv_blocks_without_q_computation(self, device, full_indices: bool):
         (

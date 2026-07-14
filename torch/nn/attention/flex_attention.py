@@ -20,6 +20,10 @@ import torch
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
+from torch.fx.experimental.symbolic_shapes import (
+    has_free_unbacked_symbols,
+    statically_known_true,
+)
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import (
     GetAttrKey,
@@ -77,6 +81,47 @@ def _warn_once(
         if not torch.compiler.is_compiling():
             warnings.warn(message, category, stacklevel=2)
         _WARNINGS_SHOWN.add(warning_id)
+
+
+def _validate_block_mask_shape(
+    query: Tensor,
+    key: Tensor,
+    q_len: int | torch.SymInt,
+    kv_len: int | torch.SymInt,
+    block_mask_q_len: int | torch.SymInt,
+    block_mask_kv_len: int | torch.SymInt,
+) -> None:
+    """Preserve unbacked checks without specializing regular dynamic lengths."""
+    has_unbacked_input_lengths = has_free_unbacked_symbols(
+        query
+    ) or has_free_unbacked_symbols(key)
+    if not torch.compiler.is_dynamo_compiling():
+        lengths = (q_len, kv_len, block_mask_q_len, block_mask_kv_len)
+        has_unbacked_input_lengths = (
+            has_unbacked_input_lengths or has_free_unbacked_symbols(lengths)
+        )
+
+    # Case 1: unbacked lengths need symbolic checks that can become runtime assertions.
+    if has_unbacked_input_lengths:
+        torch._check(q_len <= block_mask_q_len, _BLOCK_MASK_TOO_SMALL_ERROR)
+        torch._check(kv_len <= block_mask_kv_len, _BLOCK_MASK_TOO_SMALL_ERROR)
+        torch._check(q_len >= block_mask_q_len, _BLOCK_MASK_TOO_LARGE_ERROR)
+        torch._check(kv_len >= block_mask_kv_len, _BLOCK_MASK_TOO_LARGE_ERROR)
+        return
+
+    # Case 2: Dynamo-backed lengths must not emit checks that force equality guards.
+    if torch.compiler.is_dynamo_compiling():
+        return
+
+    # Case 3: eager/non-Dynamo callers still validate statically known mismatches.
+    if statically_known_true(q_len > block_mask_q_len) or statically_known_true(
+        kv_len > block_mask_kv_len
+    ):
+        raise RuntimeError(_BLOCK_MASK_TOO_SMALL_ERROR)
+    if statically_known_true(q_len < block_mask_q_len) or statically_known_true(
+        kv_len < block_mask_kv_len
+    ):
+        raise RuntimeError(_BLOCK_MASK_TOO_LARGE_ERROR)
 
 
 __all__ = [
@@ -2457,23 +2502,8 @@ def flex_attention(
         block_mask_q_len = block_mask.shape[-2]
         block_mask_kv_len = block_mask.shape[-1]
 
-        # Keep these as separate checks: explicit sym_and/sym_or calls become
-        # trace-visible non-Tensor ops under Dynamo.
-        torch._check(
-            q_len <= block_mask_q_len,
-            _BLOCK_MASK_TOO_SMALL_ERROR,
-        )
-        torch._check(
-            kv_len <= block_mask_kv_len,
-            _BLOCK_MASK_TOO_SMALL_ERROR,
-        )
-        torch._check(
-            q_len >= block_mask_q_len,
-            _BLOCK_MASK_TOO_LARGE_ERROR,
-        )
-        torch._check(
-            kv_len >= block_mask_kv_len,
-            _BLOCK_MASK_TOO_LARGE_ERROR,
+        _validate_block_mask_shape(
+            query, key, q_len, kv_len, block_mask_q_len, block_mask_kv_len
         )
 
     if scale is None:
