@@ -21,6 +21,7 @@ parameter access, hooks, and other nn.Module behaviors while maintaining proper 
 of module state.
 """
 
+import collections
 import functools
 import inspect
 import itertools
@@ -81,7 +82,6 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .constant import ConstantVariable
-    from .dicts import DunderDictVariable
 
 
 def initialize_lazy_module(
@@ -107,7 +107,21 @@ def initialize_lazy_module(
             elif isinstance(x, (list, tuple, set)):
                 return type(x)(convert_to_fake(elem) for elem in x)
             elif isinstance(x, torch.fx.Proxy):
-                return get_fake_value(x.node, tx)
+                fake = get_fake_value(x.node, tx)
+                if isinstance(fake, torch.Tensor) and any(
+                    isinstance(s, torch.SymInt) for s in fake.shape
+                ):
+                    # _infer_parameters runs real ops on the module, so
+                    # symbolic shapes must be concretized to their hints.
+                    shape = [
+                        s.node.hint if isinstance(s, torch.SymInt) else s
+                        for s in fake.shape
+                    ]
+                    assert all(isinstance(s, int) for s in shape), shape  # noqa: S101
+                    return torch.empty(  # pyrefly: ignore[no-matching-overload]
+                        shape, dtype=fake.dtype, device=fake.device
+                    )
+                return fake
             else:
                 return x
 
@@ -268,11 +282,6 @@ class NNModuleVariable(VariableTracker):
         self.source: Source = self.source
         self.nn_module_stack_source = self.source
 
-    def get_dict_vt(self, tx: "InstructionTranslatorBase") -> "DunderDictVariable":
-        if not hasattr(self, "dict_vt"):
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
-        return self.dict_vt
-
     def get_nn_module_stack_source(self) -> Source:
         res = self.nn_module_stack_source or self.source
         if not res:
@@ -401,7 +410,7 @@ class NNModuleVariable(VariableTracker):
             except Unsupported:
                 unimplemented(
                     gb_type="Custom __getattribute__ in nn.Module attribute access",
-                    context=f"var_getattr {self} {name}",
+                    context=f"getattro_impl {self} {name}",
                     explanation="Dynamo could not trace through the custom "
                     "`__getattribute__` method on this `nn.Module`.",
                     hints=[
@@ -418,7 +427,7 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented(
                 gb_type="torch.nn.Module with a non-function custom __getattr__",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation=(
                     "Dynamo detected a nn.Module object with a custom "
                     "`__getattr__` method, but this method is not a standard "
@@ -440,7 +449,7 @@ class NNModuleVariable(VariableTracker):
             tx, [VariableTracker.build(tx, name)], {}
         )
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         source = self.source and AttrSource(self.source, name)
@@ -458,7 +467,7 @@ class NNModuleVariable(VariableTracker):
         if not self.source:
             unimplemented(
                 gb_type="getattr with no source",
-                context=f"var_getattr {self} {name}",
+                context=f"getattro_impl {self} {name}",
                 explanation="Dynamo does not know how to access an attribute "
                 "on an `nn.Module` instance that lacks a source. This is "
                 "usually an internal error in Dynamo.",
@@ -557,7 +566,7 @@ class NNModuleVariable(VariableTracker):
                     ],
                 )
 
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def call_function(
         self,
@@ -1193,7 +1202,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 globals_vt = tx.nn_modules_globals_vt
 
                 def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
-                    vt = obj.var_getattr(tx, attr)
+                    vt = obj.getattro_impl(tx, attr)
                     vt = vt.realize() if hasattr(vt, "realize") else vt
                     return vt.len()  # type: ignore[union-attr]
 
@@ -1348,16 +1357,38 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def getattr_helper(
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
-        dict_vt = self.var_getattr(tx, field)
+        dict_vt = self.getattro_impl(tx, field)
         if isinstance(dict_vt, variables.UserDefinedDictVariable):
             dict_vt = dict_vt._base_vt
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if (
+            tx.output.side_effects.is_attribute_mutation(self)
+            and name
+            in (
+                "named_parameters",
+                "parameters",
+                "named_buffers",
+                "buffers",
+                "named_modules",
+                "modules",
+            )
+            and self.is_state_mutated
+            and tx.output.side_effects.has_pending_mutation(self)
+        ):
+            unimplemented(
+                gb_type="getattr() on nn.Module with pending mutation",
+                context=f"getattr({self}, {name})",
+                explanation="Intentionally graph breaking on getattr() on a nn.Module "
+                "with a pending mutation",
+                hints=[],
+            )
+
         # Allow skipping of empty hook dict guards on inbuilt nn modules
         if name in (
             "_backward_hooks",
@@ -1379,7 +1410,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    return variables.ConstDictVariable({})
+                    hooks_vt_cls = (
+                        variables.OrderedItemsDictVariable
+                        if isinstance(hooks_dict, collections.OrderedDict)
+                        else variables.ConstDictVariable
+                    )
+                    return hooks_vt_cls({})
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
@@ -1420,10 +1456,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 for i, k, v in enumerate_items_with_dict_position(hooks_dict)
             )
 
-            return variables.NNModuleHooksDictVariable(
-                result, type(hooks_dict), source=hooks_dict_source
-            )
-        return super().var_getattr(tx, name)
+            return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
+        return super().getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(
         self, tx: "InstructionTranslatorBase", name: str

@@ -480,7 +480,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
+        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -506,7 +506,7 @@ class CommonDistributedDataParallelTest:
     ):
         self.assertTrue(
             len(devices) == 2 or len(devices) == 4,
-            f"unexpected devices for ddp tests {devices}",
+            lambda msg: f"{msg}\nunexpected devices for ddp tests {devices}",
         )
         if len(devices) == 2:
             model = DoubleGpuNet(devices)
@@ -1598,8 +1598,6 @@ class AbstractLargeCommTest:
             rank=self.rank,
             store=store,
         )
-        rank = dist.get_rank()
-
         # split the world in 2 PGs
         rank = dist.get_rank()
         pg_idx = rank // 2
@@ -1634,8 +1632,6 @@ class AbstractLargeCommTest:
             rank=self.rank,
             store=store,
         )
-        rank = dist.get_rank()
-
         # split the world in 2 PGs
         rank = dist.get_rank()
         pg_idx = rank // 2
@@ -1793,9 +1789,6 @@ class DummyProcessGroup(dist.ProcessGroup):
     def eager_connect_single_device(self, device=None):
         self._bound_device_id = device
 
-    def _set_sequence_number_for_group(self):
-        pass
-
     def _get_backend(self, device):
         return self
 
@@ -1873,6 +1866,46 @@ class DummyProcessGroup(dist.ProcessGroup):
 
         return DummyWork()
 
+    def reduce(self, tensor_list, opts=None):
+        self.collectives_called.add("reduce")
+        for tensor in tensor_list:
+            tensor.add_(3)
+
+        return DummyWork()
+
+    def gather(self, output_tensor_lists, input_tensor_list, opts=None):
+        self.collectives_called.add("gather")
+        for output_tensor_list, input_tensor in zip(
+            output_tensor_lists, input_tensor_list
+        ):
+            for output_tensor in output_tensor_list:
+                output_tensor.copy_(input_tensor)
+
+        return DummyWork()
+
+    def scatter(self, output_tensor_list, input_tensor_lists, opts=None):
+        self.collectives_called.add("scatter")
+        for output_tensor, input_tensor_list in zip(
+            output_tensor_list, input_tensor_lists
+        ):
+            output_tensor.copy_(input_tensor_list[self.rank()])
+
+        return DummyWork()
+
+    def alltoall(self, output_tensor_list, input_tensor_list, opts=None):
+        self.collectives_called.add("alltoall")
+        for output_tensor, input_tensor in zip(output_tensor_list, input_tensor_list):
+            output_tensor.copy_(input_tensor)
+
+        return DummyWork()
+
+    def recvAnysource(self, tensor_list, tag):
+        self.collectives_called.add("recvAnysource")
+        for tensor in tensor_list:
+            tensor.add_(4)
+
+        return DummyWork()
+
     def send(self, tensor_list, dst, tag=0):
         for tensor in tensor_list:
             tensor.add_(1)
@@ -1890,6 +1923,48 @@ class DummyProcessGroup(dist.ProcessGroup):
 
     def shutdown(self) -> None:
         self._shutdown = True
+
+
+class BackendRegistrationTest(TestCase):
+    def test_register_backend_with_single_device_string(self):
+        name = "_test_fake_backend"
+        device = "custom_device"
+        backend_attr = name.upper()
+        old_backend_attr = getattr(dist.Backend, backend_attr, None)
+        had_backend_attr = hasattr(dist.Backend, backend_attr)
+        old_backend_list = dist.Backend.backend_list.copy()
+        old_default_device_backend_map = dist.Backend.default_device_backend_map.copy()
+        old_backend_capability = dist.Backend.backend_capability.copy()
+        old_backend_type_map = dist.Backend.backend_type_map.copy()
+        old_plugins = dist.Backend._plugins.copy()
+
+        try:
+
+            def create_backend(*_args, **_kwargs):
+                return None
+
+            dist.Backend.register_backend(name, create_backend, devices=device)
+
+            self.assertEqual(dist.Backend.default_device_backend_map[device], name)
+            self.assertEqual(dist.Backend.backend_capability[name], [device])
+            self.assertEqual(
+                c10d._parse_backend_string(name, available_devices={device}),
+                {device: name},
+            )
+            for character in device:
+                self.assertNotEqual(
+                    dist.Backend.default_device_backend_map.get(character), name
+                )
+        finally:
+            if had_backend_attr:
+                setattr(dist.Backend, backend_attr, old_backend_attr)
+            elif hasattr(dist.Backend, backend_attr):
+                delattr(dist.Backend, backend_attr)
+            dist.Backend.backend_list = old_backend_list
+            dist.Backend.default_device_backend_map = old_default_device_backend_map
+            dist.Backend.backend_capability = old_backend_capability
+            dist.Backend.backend_type_map = old_backend_type_map
+            dist.Backend._plugins = old_plugins
 
 
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
@@ -2420,6 +2495,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 # Hide all GPUs
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["ONEAPI_DEVICE_SELECTOR"] = "!*:gpu"
 
 import torch
 from torch import distributed as dist
@@ -2501,7 +2577,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             store=store,
         )
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
         tensors = [torch.ones(10, 10, device=torch.device(device))]
         dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
         for tensor in tensors:
@@ -2762,7 +2838,7 @@ class ThreadLocalSafetyLintTest(TestCase):
         c10d_dir = self._c10d_src_dir()
         self.assertTrue(
             c10d_dir.is_dir(),
-            f"c10d source directory not found: {c10d_dir}",
+            lambda msg: f"{msg}\nc10d source directory not found: {c10d_dir}",
         )
 
         violations = []
