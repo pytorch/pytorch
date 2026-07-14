@@ -10,7 +10,6 @@ from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
-from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -106,8 +105,6 @@ class UnsupportedTests(TestCase):
 class ComputeBoundedTests(TestCase):
     device = DEVICE
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_conv1d(self):
         def f(x, y):
             return torch.nn.functional.conv1d(x, y)
@@ -115,8 +112,6 @@ class ComputeBoundedTests(TestCase):
         inp = (T(33, 16, 30), T(20, 16, 5))
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_conv2d(self):
         def f(x, y):
             return torch.nn.functional.conv2d(x, y, padding=1)
@@ -124,8 +119,6 @@ class ComputeBoundedTests(TestCase):
         inp = (T(8, 4, 3, 3), T(1, 4, 5, 5))
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_conv2d_transpose(self):
         def f(x, y):
             return torch.nn.functional.conv_transpose2d(x, y, padding=1)
@@ -133,8 +126,6 @@ class ComputeBoundedTests(TestCase):
         inp = (T(8, 1, 1, 1), T(1, 4, 5, 5))
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_conv3d(self):
         def f(x, y):
             return torch.nn.functional.conv3d(x, y)
@@ -142,8 +133,6 @@ class ComputeBoundedTests(TestCase):
         inp = (T(20, 16, 50, 10, 20), T(33, 16, 3, 3, 3))
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_mm(self):
         def f(a, b):
             return torch.mm(a, b)
@@ -154,8 +143,6 @@ class ComputeBoundedTests(TestCase):
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_addmm(self):
         def f(a, b, c):
             return torch.addmm(a, b, c)
@@ -167,8 +154,6 @@ class ComputeBoundedTests(TestCase):
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_bmm(self):
         def f(a, b):
             return torch.bmm(a, b)
@@ -183,8 +168,6 @@ class ComputeBoundedTests(TestCase):
 class MemoryBoundedTests(TestCase):
     device = DEVICE
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_relu(self):
         def f(a):
             return torch.nn.functional.relu(a)
@@ -192,8 +175,6 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10, 10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_horizontal_reduction_pointwise(self):
         def f(a):
             b = a.sum(dim=1)
@@ -203,8 +184,6 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10, 10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_pointwise(self):
         def f(x):
             return x.cos()
@@ -212,8 +191,6 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dynamic(self):
         def f(x):
