@@ -609,7 +609,6 @@ additional_op_db.extend(
             skips=(
                 # autograd tests don't handle operators that change dtype
                 DecorateInfo(unittest.expectedFailure, "TestFwdGradients"),
-                DecorateInfo(unittest.expectedFailure, "TestBwdGradients"),
                 DecorateInfo(
                     unittest.expectedFailure,
                     "TestNormalizeOperators",
@@ -717,7 +716,6 @@ additional_op_db.extend(
             skips=(
                 # autograd tests don't handle operators that change dtype
                 DecorateInfo(unittest.expectedFailure, "TestFwdGradients"),
-                DecorateInfo(unittest.expectedFailure, "TestBwdGradients"),
                 DecorateInfo(
                     unittest.expectedFailure,
                     "TestNormalizeOperators",
@@ -739,7 +737,6 @@ additional_op_db.extend(
             skips=(
                 # autograd tests don't handle operators that change dtype
                 DecorateInfo(unittest.expectedFailure, "TestFwdGradients"),
-                DecorateInfo(unittest.expectedFailure, "TestBwdGradients"),
                 DecorateInfo(
                     unittest.expectedFailure,
                     "TestNormalizeOperators",
