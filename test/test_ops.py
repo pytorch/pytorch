@@ -189,7 +189,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("nn.functional.softplus"),
     xfail("nn.functional.softshrink"),
     xfail("ormqr"),
-    xfail("qr"),
     xfail("renorm"),
     xfail("round"),
     xfail("round", "decimals_0"),
@@ -240,7 +239,6 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo works correctly on different CUDA devices
     @onlyAccelerator
-    @skipIfMPS
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
     def test_multiple_devices(self, devices, dtype, op):
@@ -412,7 +410,7 @@ class TestCommon(TestCase):
 
                         self.assertTrue(
                             torch.Tag.reduction in overload.tags,
-                            f"{overload} should have reduction tag",
+                            lambda msg: f"{msg}\n{overload} should have reduction tag",
                         )
 
     @ops([op for op in op_db if has_reduction_tag(op)], dtypes=OpDTypes.none)
@@ -512,8 +510,8 @@ class TestCommon(TestCase):
             device_results = sample.output_process_fn_grad(device_results)
             cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-            atol = None if device == "xpu" and torch.xpu.is_available() else 0
-            rtol = None if device == "xpu" and torch.xpu.is_available() else 0
+            atol = None if torch.xpu.is_available() else 0
+            rtol = None if torch.xpu.is_available() else 0
             if dtype.is_floating_point or dtype.is_complex:
                 atol, rtol = 1e-3, 1e-3
             self.assertEqual(device_results, cpu_results, atol=atol, rtol=rtol)
@@ -2062,7 +2060,7 @@ class TestCompositeCompliance(TestCase):
                 self.assertTrue(
                     torch._C._is_cow_tensor(arg_raw),
                     msg=(
-                        f"{arg_name} raw input should remain COW, but it "
+                        lambda msg: f"{msg}\n{arg_name} raw input should remain COW, but it "
                         "unexpectedly materialized."
                     ),
                 )
@@ -2074,7 +2072,7 @@ class TestCompositeCompliance(TestCase):
                     self.assertTrue(
                         is_cow,
                         msg=(
-                            f"{arg_name} unexpectedly materializes. "
+                            lambda msg: f"{msg}\n{arg_name} unexpectedly materializes. "
                             f"Either set `supports_cow_input_no_materialize_{backward_or_forward}=False` "
                             "in this operation's OpInfo, add the arg to the OpInfo's "
                             f"`allow_cow_input_materialize_{backward_or_forward}` list, or change the "
@@ -2086,7 +2084,7 @@ class TestCompositeCompliance(TestCase):
                     self.assertTrue(
                         torch.allclose(arg, arg_copy, rtol=0, atol=0, equal_nan=True),
                         msg=(
-                            f"{arg_name} avoided materialization, "
+                            lambda msg: f"{msg}\n{arg_name} avoided materialization, "
                             "but the operation mutated its data."
                         ),
                     )
@@ -2096,7 +2094,7 @@ class TestCompositeCompliance(TestCase):
                             arg_raw, arg_copy, rtol=0, atol=0, equal_nan=True
                         ),
                         msg=(
-                            f"{arg_name} materialized, which is allowed in this "
+                            lambda msg: f"{msg}\n{arg_name} materialized, which is allowed in this "
                             "case, but the COW input data was mutated, which is "
                             "not allowed."
                         ),
@@ -2703,12 +2701,15 @@ class TestRefsOpsInfo(TestCase):
             self.assertNotIn(
                 op,
                 self.ref_db_names,
-                msg=f"{op} is an in-place operation and should not have an OpInfo",
+                msg=lambda msg: f"{msg}\n{op} is an in-place operation and should not have an OpInfo",
             )
         else:
             # Intentionally don't use assertIn to avoid printing the
             # (very large) container
-            self.assertTrue(op in self.ref_db_names, msg=f"{op} not in ref_db_names")
+            self.assertTrue(
+                op in self.ref_db_names,
+                msg=lambda msg: f"{msg}\n{op} not in ref_db_names",
+            )
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):
@@ -2721,13 +2722,13 @@ class TestRefsOpsInfo(TestCase):
             self.assertNotIn(
                 op_impl,
                 torch._decomp.decomposition_table.values(),
-                f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()",
+                lambda msg: f"{msg}\nUnexpectedly found {op} in torch._decomp.decomposition_table.values()",
             )
         else:
             self.assertIn(
                 op_impl,
                 torch._decomp.decomposition_table.values(),
-                f"Did not find {op} in torch._decomp.decomposition_table.values()",
+                lambda msg: f"{msg}\nDid not find {op} in torch._decomp.decomposition_table.values()",
             )
 
 
