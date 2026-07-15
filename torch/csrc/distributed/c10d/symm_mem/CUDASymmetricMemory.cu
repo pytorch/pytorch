@@ -367,8 +367,16 @@ void* CUDASymmetricMemoryAllocator::alloc(
     prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
   }
 
-  size_t granularity;
   auto driver_api = c10::cuda::DriverAPI::get();
+  int rdma_flag = 0;
+  C10_CUDA_DRIVER_CHECK(driver_api->cuDeviceGetAttribute_(
+      &rdma_flag,
+      CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED,
+      device_idx));
+  if (rdma_flag)
+    prop.allocFlags.gpuDirectRDMACapable = 1;
+
+  size_t granularity;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemGetAllocationGranularity_(
       &granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
   block_size = at::round_up(block_size, granularity);
