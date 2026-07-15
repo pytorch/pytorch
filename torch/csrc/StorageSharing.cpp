@@ -996,8 +996,9 @@ class XpuIpcEvent {
     if (pool_) {
       if (opened_ipc_pool_) {
         ze.zeEventPoolCloseIpcHandle(pool_);
+      } else {
+        ze.zeEventPoolDestroy(pool_);
       }
-      ze.zeEventPoolDestroy(pool_);
     }
 #endif
   }
@@ -1231,12 +1232,12 @@ c10::intrusive_ptr<at::StorageImpl> createStorageImplFromXpuShared(
       +[](void* ctx_) {
         std::unique_ptr<XpuIpcDeleterContext> ctx(
             static_cast<XpuIpcDeleterContext*>(ctx_));
-        ctx->base_ptr.reset();
         if (ctx->device >= 0) {
           c10::xpu::syncStreamsOnDevice(ctx->device);
         }
         ReleaseXpuIPCRefCounter(
             ctx->ref_counter_handle, ctx->ref_counter_offset);
+        ctx->base_ptr.reset();
       },
       at::Device(at::DeviceType::XPU, args.device));
 
