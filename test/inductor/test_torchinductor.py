@@ -19453,7 +19453,7 @@ if RUN_GPU:
                 torch._inductor.aot_compile(traced, inputs)
 
         @skipCUDAIf(not SM90OrLater, "Requires sm90")
-        @requires_cuda_and_triton
+        @requires_gpu_and_triton
         @config.patch(implicit_fallbacks=True)
         @parametrize("backend", ["cublaslt", "cutlass"])
         def test_grouped_mm(self, backend):
@@ -19484,7 +19484,7 @@ if RUN_GPU:
                     a, b.transpose(-2, -1), offs=offs, out_dtype=out_dtype
                 )
 
-            device = "cuda"
+            device = GPU_TYPE
             dtype = torch.bfloat16
 
             m, n, k, n_groups = 16, 32, 16, 4
@@ -20671,7 +20671,11 @@ if RUN_GPU:
             ).run(code[0])
 
         @unittest.skipIf(
-            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)),
+            not (
+                IS_SM90
+                or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)
+                or (GPU_TYPE == "xpu")
+            ),
             "no scaled_grouped_mm support",
         )
         def test_respect_scaled_grouped_mm_layout_tag(self):

@@ -144,6 +144,8 @@ cutedsl_grouped_mm_template = CuteDSLTemplate(
 
 
 def has_grouped_mm_triton_support() -> bool:
+    if torch.xpu._is_compiled():
+        return True
     if not torch.cuda.is_available():
         return False
     if torch.version.hip:
