@@ -4,32 +4,20 @@
     f_c = torch.compiler.precompile.load(python_code, cache)
     out = f_c(model, *example_inputs)   # pass the model again at runtime
 
-precompile captures your computation with ``make_fx`` (the default tracer; a
-Dynamo-based tracer is planned), which is a NON-STRICT trace: it records the ATen ops
-that actually run when ``fn`` executes once on the example inputs. It does not analyze
-your Python. There is therefore a small, explicit contract -- the programming model --
-that the caller must follow: stay inside it and the artifact faithfully reproduces
-``fn``; step outside it and the trace silently bakes assumptions and you get an
-artifact that computes the wrong thing. This is by design: a precise contract.
+precompile captures your computation with ``make_fx`` -- a NON-STRICT trace of the ATen
+ops that run when ``fn`` executes once on the example inputs. It does not analyze your
+Python, so it comes with an explicit contract (the programming model): stay inside it
+and the artifact faithfully reproduces ``fn``; step outside it and you get an artifact
+that computes the wrong thing.
 
-This module implements the ``backend="eager"`` path: capture keeps the ATen graph and
-``precompile`` returns a self-contained, executable Python source string that inlines
-that graph -- it runs on its own. (An inductor backend that lowers the graph to kernels
-is added in a follow-up.) The companion binary ``cache`` is an integrity-tagged
-envelope; the eager backend has no kernels to accelerate, so it carries no compiled
-artifact (NO model weights -- you pass the model again at runtime). Reload with
+This module implements the ``backend="eager"`` path: ``precompile`` returns a
+self-contained, executable ``python_code`` string that inlines the captured graph, plus
+a companion integrity-tagged ``cache``. Reload with
 ``torch.compiler.precompile.load(python_code, cache)``.
 
-The full contract is in Note [precompile programming model] below; every public
-entry point and guard references it.
-
-``python_code`` is the single source of truth for the calling convention, and ``load``
-reads it back from there (parsing, not exec'ing). The cache envelope carries a
-``code_hash`` (``sha256`` of the ``python_code`` it accompanies) in addition to a
-format/version + backend tag; ``load`` recomputes the hash and raises
-``PrecompileError`` if a cache is paired with a different ``python_code``, so a
-mismatched (code, cache) pair fails loudly rather than silently running under foreign
-metadata.
+The full contract, the calling convention, and the cache / code_hash design all live in
+Note [precompile programming model] below; every public entry point and guard references
+it.
 """
 
 # Note [precompile programming model]
@@ -174,10 +162,11 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import cast, NewType, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
+from torch import Tensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -198,14 +187,16 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 
-# Integrity tag baked into the cache envelope and verified by load(), alongside a
-# code_hash (sha256 of the python_code the cache accelerates). The tag catches a
-# foreign / wrong-format / wrong-backend cache; the code_hash additionally binds the
-# cache to its python_code, so a (code, cache) pair from different precompile() calls
-# is rejected with a clear PrecompileError instead of a confusing reconstruction
-# failure or a silently-wrong result.
+# Integrity tag baked into the cache envelope and verified by load() (with the
+# code_hash) to reject a foreign / mismatched cache; see Note [precompile programming
+# model], invariant 7.
 _CACHE_FORMAT = "torch.compiler.precompile"
 _CACHE_VERSION = 1
+
+
+# Index into the caller's positional nn.Module arguments (0-based over the modules,
+# not over all args), used to qualify tied-across-modules param/buffer names as m<i>.<n>.
+_ModuleIndex = NewType("_ModuleIndex", int)
 
 
 class PrecompileError(RuntimeError):
@@ -218,7 +209,7 @@ class PrecompileError(RuntimeError):
     """
 
 
-def _dense_shape(t: Any) -> tuple[int, ...] | None:
+def _dense_shape(t: object) -> tuple[int, ...] | None:
     """Return the shape of a plain dense tensor, else ``None`` (non-tensor / subclass).
 
     Tensor subclasses (e.g. DTensor) carry an outer shape that is not a plain dense
@@ -229,7 +220,7 @@ def _dense_shape(t: Any) -> tuple[int, ...] | None:
     return None
 
 
-def _dense_dtype(t: Any) -> Any:
+def _dense_dtype(t: object) -> str | None:
     """Return the dtype of a plain dense tensor as a string, else ``None``.
 
     Recorded as a string (e.g. ``"torch.float32"``) so it serializes into the artifact
@@ -242,7 +233,7 @@ def _dense_dtype(t: Any) -> Any:
     return None
 
 
-def _dense_device(t: Any) -> Any:
+def _dense_device(t: object) -> str | None:
     """Return the device (as a string) of a plain dense tensor, else ``None``.
 
     Recorded as a string so it serializes into the artifact metadata as a literal and
@@ -252,6 +243,20 @@ def _dense_device(t: Any) -> Any:
     if isinstance(t, torch.Tensor) and not is_traceable_wrapper_subclass(t):
         return str(t.device)
     return None
+
+
+def _resolved_get_attrs(
+    gm: torch.fx.GraphModule,
+) -> list[tuple[str, object]]:
+    """Return ``(target, attr)`` for every ``get_attr`` node, resolving dotted
+    qualnames the same way for both capture guards below (missing attr -> None)."""
+    resolved = []
+    for node in gm.graph.find_nodes(op="get_attr"):
+        attr: object = gm
+        for part in node.target.split("."):
+            attr = getattr(attr, part, None)
+        resolved.append((node.target, attr))
+    return resolved
 
 
 def _check_no_constant_tensors(gm: torch.fx.GraphModule) -> None:
@@ -264,15 +269,11 @@ def _check_no_constant_tensors(gm: torch.fx.GraphModule) -> None:
     over (a global, captured local, or non-registered module attribute) and would
     be baked into the graph as a constant, which we forbid.
     """
-    offending = []
-    for node in gm.graph.nodes:
-        if node.op != "get_attr":
-            continue
-        attr = gm
-        for part in node.target.split("."):
-            attr = getattr(attr, part, None)
-        if isinstance(attr, torch.Tensor):
-            offending.append((node.target, tuple(attr.shape), str(attr.dtype)))
+    offending = [
+        (target, tuple(attr.shape), str(attr.dtype))
+        for target, attr in _resolved_get_attrs(gm)
+        if isinstance(attr, torch.Tensor)
+    ]
     if offending:
         raise PrecompileError(
             "precompile traced a tensor that is neither a graph input "
@@ -295,17 +296,11 @@ def _assert_no_control_flow_subgraphs(gm: torch.fx.GraphModule) -> None:
     not on the standalone ``_GraphSelf`` holder), so the artifact would crash at
     runtime. Fail at capture with a concrete reason instead, like ``_assert_supported``.
     """
-    # Resolve the target the same way as _check_no_constant_tensors (dotted walk), so a
-    # nested-qualname subgraph is not silently missed.
-    offending = []
-    for node in gm.graph.nodes:
-        if node.op != "get_attr":
-            continue
-        attr = gm
-        for part in node.target.split("."):
-            attr = getattr(attr, part, None)
-        if isinstance(attr, torch.fx.GraphModule):
-            offending.append(node.target)
+    offending = [
+        target
+        for target, attr in _resolved_get_attrs(gm)
+        if isinstance(attr, torch.fx.GraphModule)
+    ]
     if offending:
         raise PrecompileError(
             "precompile cannot lower a captured control-flow subgraph (e.g. from "
@@ -316,7 +311,9 @@ def _assert_no_control_flow_subgraphs(gm: torch.fx.GraphModule) -> None:
 
 def _intern_param_buffers(
     mods: list[torch.nn.Module],
-) -> tuple[list[Any], list[str], list[str], list[tuple[int, str, int]], int]:
+) -> tuple[
+    list[Tensor], list[str], list[str], list[tuple[_ModuleIndex, str, int]], int
+]:
     """Lift each module's parameters then buffers to a flat list, interning by
     tensor identity so a tied weight becomes a single entry (one optimizer step,
     accumulated gradient -- not one per name).
@@ -332,16 +329,20 @@ def _intern_param_buffers(
     ``_extract_param_buffers`` in _EAGER_DRIVER_SOURCE (the inlined eager load path), so
     the two must stay in sync.
     """
-    multi = len(mods) > 1
+    if len(mods) > 1:
 
-    def _name(mi: int, n: str) -> str:
-        return f"m{mi}.{n}" if multi else n
+        def _name(mi: _ModuleIndex, n: str) -> str:
+            return f"m{mi}.{n}"
+    else:
 
-    unique: list[Any] = []
+        def _name(mi: _ModuleIndex, n: str) -> str:
+            return n
+
+    unique: list[Tensor] = []
     id_to_uidx: dict[int, int] = {}
-    alias_entries: list[tuple[int, str, int]] = []
+    alias_entries: list[tuple[_ModuleIndex, str, int]] = []
 
-    def _intern(mi: int, n: str, t: Any, names_out: list[str]) -> None:
+    def _intern(mi: _ModuleIndex, n: str, t: Tensor, names_out: list[str]) -> None:
         uidx = id_to_uidx.get(id(t))
         if uidx is None:
             uidx = len(unique)
@@ -353,18 +354,18 @@ def _intern_param_buffers(
     param_names: list[str] = []
     for mi, m in enumerate(mods):
         for n, p in m.named_parameters(remove_duplicate=False):
-            _intern(mi, n, p, param_names)
+            _intern(_ModuleIndex(mi), n, p, param_names)
     num_params = len(unique)
     buffer_names: list[str] = []
     for mi, m in enumerate(mods):
         for n, b in m.named_buffers(remove_duplicate=False):
-            _intern(mi, n, b, buffer_names)
+            _intern(_ModuleIndex(mi), n, b, buffer_names)
     return unique, param_names, buffer_names, alias_entries, num_params
 
 
 def _capture(
-    fn: Callable[..., Any],
-    args: tuple[Any, ...],
+    fn: Callable[..., object],
+    args: tuple[object, ...],
     decompositions: dict | None = None,
 ) -> _Capture:
     """Trace the computation ``fn(*args)`` to an ATen graph.
@@ -391,7 +392,7 @@ def _capture(
     args = tuple(args)
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
     module_pos_set = set(module_positions)
-    mods = [args[i] for i in module_positions]
+    mods = [a for a in args if isinstance(a, torch.nn.Module)]
     user_inputs = tuple(a for i, a in enumerate(args) if i not in module_pos_set)
 
     # Lift the example modules' params/buffers for tracing only. Their VALUES are
@@ -419,7 +420,7 @@ def _capture(
     # The REAL example tensors (params/buffers and user inputs). The saved-grad
     # snapshot/clear/restore block below protects the real example model's .grad fields
     # (those are what the user owns and what a backward in fn populates).
-    real_flat = [*pb_flat, *user_flat]
+    real_flat = list(flat_args)
     # Record the example user inputs' dense shapes/dtypes/devices so the driver can
     # reject a shape (invariant 3) or dtype/device mismatch up front; see the inlined
     # _EAGER_DRIVER_SOURCE checks. Subclasses -> None.
@@ -446,10 +447,16 @@ def _capture(
         if isinstance(a, torch.Tensor):
             a.grad = None
 
-    out_spec_holder: dict[str, Any] = {}
+    # flat_fn (traced by make_fx) writes these back so _capture can thread the output
+    # structure and the harvested-grad param indices into the _Capture result.
+    captured_out_spec: pytree.TreeSpec | None = None
+    captured_grad_param_indices: list[int] = []
 
-    def flat_fn(flat: list[Any]) -> list[Any]:
-        pb = flat[:num_pb]
+    def flat_fn(flat: list[object]) -> list[object]:
+        nonlocal captured_out_spec, captured_grad_param_indices
+        # The pb region is entirely interned params/buffers (Tensors); the user region
+        # (flat[num_pb:]) is arbitrary pytree leaves.
+        pb = cast("list[Tensor]", flat[:num_pb])
         runtime_inputs = pytree.tree_unflatten(flat[num_pb:], in_spec)
         with contextlib.ExitStack() as stack:
             for mi, m in enumerate(mods):
@@ -459,7 +466,7 @@ def _capture(
                 )
             # Reconstruct fn's full positional args: reparametrized modules at
             # their original positions, runtime inputs at theirs.
-            full: list[Any] = []
+            full: list[object] = []
             ui = 0
             for i in range(len(args)):
                 if i in module_pos_set:
@@ -480,6 +487,17 @@ def _capture(
                     "requires_grad=True), but precompile only harvests gradients for "
                     "parameters. Register it as an nn.Parameter instead."
                 )
+            # User-input leaves are not harvested either (only params get scattered
+            # grads), so a requires_grad user input that received a gradient during the
+            # traced backward would be silently dropped. Reject it, mirroring the buffer
+            # case -- another cheaply-knowable invariant-5 violation.
+            if any(getattr(t, "grad", None) is not None for t in flat[num_pb:]):
+                raise PrecompileError(
+                    "precompile: a user input received a gradient; precompile only "
+                    "harvests gradients for parameters, so an input gradient would be "
+                    "silently dropped. Pass the tensor as a module parameter if its "
+                    "gradient is needed."
+                )
 
         # The result (fn's own return) and the harvested grads are kept as separate
         # output regions: the driver returns the result and scatters the grads onto
@@ -495,8 +513,8 @@ def _capture(
             if g is not None:
                 grad_flat.append(g)
                 grad_param_indices.append(i)
-        out_spec_holder["spec"] = result_spec
-        out_spec_holder["grad_param_indices"] = grad_param_indices
+        captured_out_spec = result_spec
+        captured_grad_param_indices = grad_param_indices
         return [*result_flat, *grad_flat]
 
     # Trace with grad enabled so any backward in ``fn`` is built as graph ops; the
@@ -518,6 +536,7 @@ def _capture(
     _assert_no_control_flow_subgraphs(gm)
     _assert_supported(gm)
 
+    # flat_fn always runs during the make_fx trace above, so captured_out_spec is set.
     return _Capture(
         gm=gm,
         flat_args=flat_args,
@@ -532,8 +551,8 @@ def _capture(
         param_devices=param_devices,
         buffer_devices=buffer_devices,
         in_spec=in_spec,
-        out_spec=out_spec_holder["spec"],
-        grad_param_indices=out_spec_holder["grad_param_indices"],
+        out_spec=cast("pytree.TreeSpec", captured_out_spec),
+        grad_param_indices=captured_grad_param_indices,
         user_input_shapes=user_input_shapes,
         user_input_dtypes=user_input_dtypes,
         user_input_devices=user_input_devices,
@@ -544,13 +563,13 @@ class _Capture:
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        flat_args: list[Any],
+        flat_args: list[object],
         module_positions: list[int],
         num_positional_args: int,
         param_names: list[str],
         buffer_names: list[str],
-        param_shapes: list[Any],
-        buffer_shapes: list[Any],
+        param_shapes: list[tuple[int, ...]],
+        buffer_shapes: list[tuple[int, ...]],
         param_dtypes: list[str],
         buffer_dtypes: list[str],
         param_devices: list[str],
@@ -558,9 +577,9 @@ class _Capture:
         in_spec: pytree.TreeSpec,
         out_spec: pytree.TreeSpec,
         grad_param_indices: list[int],
-        user_input_shapes: list[Any],
-        user_input_dtypes: list[Any],
-        user_input_devices: list[Any],
+        user_input_shapes: list[tuple[int, ...] | None],
+        user_input_dtypes: list[str | None],
+        user_input_devices: list[str | None],
     ) -> None:
         self.gm = gm
         self.flat_args = flat_args
@@ -629,39 +648,25 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
         f"NUM_POSITIONAL_ARGS = {compiled._num_positional_args}",
         f"PARAM_NAMES = {compiled._param_names!r}",
         f"BUFFER_NAMES = {compiled._buffer_names!r}",
-        # Per interned param / buffer example shape (a tuple) and dtype (a string),
-        # aligned to PARAM_NAMES / BUFFER_NAMES. The structural check (invariant 2) checks
-        # each runtime param/buffer's shape and dtype against these, so a same-named but
-        # differently shaped / typed runtime tensor is rejected up front rather than
-        # silently miscomputing (the eager backend has no assert_size_stride backstop).
+        # Per interned param / buffer example shape / dtype / device (aligned to
+        # PARAM_NAMES / BUFFER_NAMES); the driver checks each runtime param/buffer against
+        # these for the structural contract (invariant 2).
         f"PARAM_SHAPES = {compiled._param_shapes!r}",
         f"BUFFER_SHAPES = {compiled._buffer_shapes!r}",
         f"PARAM_DTYPES = {compiled._param_dtypes!r}",
         f"BUFFER_DTYPES = {compiled._buffer_dtypes!r}",
-        # Per interned param / buffer example device (a string, e.g. "cuda:0"), aligned to
-        # PARAM_NAMES / BUFFER_NAMES. Device is now part of the structural contract
-        # (invariant 2): a same-named runtime tensor on a different device than traced is
-        # rejected up front rather than failing deep in a kernel.
         f"PARAM_DEVICES = {compiled._param_devices!r}",
         f"BUFFER_DEVICES = {compiled._buffer_devices!r}",
-        # Which unique-param index each trailing grad output belongs to (its length is
-        # the number of grad outputs); the driver scatters grad k onto
-        # params/buffers[GRAD_PARAM_INDICES[k]] so frozen / non-contributing params
-        # keep .grad = None, exactly like eager.
+        # Which unique-param index each trailing grad output belongs to (see invariant 5);
+        # the driver scatters grad k onto params[GRAD_PARAM_INDICES[k]].
         f"GRAD_PARAM_INDICES = {compiled._grad_param_indices!r}",
-        # The pytree structure of the runtime inputs (the non-module args), or None if
-        # that spec was not serializable. When present the driver validates the runtime
-        # inputs against it (a different structure raises rather than silently
-        # flattening to the wrong leaves); when None the check is skipped.
+        # The pytree structure of the runtime inputs, or None if not serializable (the
+        # driver validates against it when present, else skips the structure check).
         f"IN_SPEC = {in_spec_str!r}",
         f"OUT_SPEC = {out_spec_str!r}",
-        # Per user-input-leaf example shape (None for a non-tensor / subclass leaf). The
-        # driver rejects a runtime input whose shape differs (invariant 3); see the
-        # inlined driver checks.
+        # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
+        # subclass leaf); the driver rejects a runtime mismatch (invariants 3 and 6).
         f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}",
-        # Per user-input-leaf example dtype (as a string, e.g. "torch.float32") and
-        # device (as a string), None for a subclass/non-tensor leaf. The driver rejects a
-        # dtype or device mismatch up front; see the inlined driver checks.
         f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}",
         f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}",
         "",
@@ -669,7 +674,7 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
     return parts
 
 
-def _parse_artifact_metadata(python_code: str) -> dict[str, Any]:
+def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     """Read the calling-convention constants back out of ``python_code`` WITHOUT
     executing it (exec'ing the inlined graph would run it, not just read metadata).
 
@@ -698,7 +703,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, Any]:
         "USER_INPUT_DTYPES",
         "USER_INPUT_DEVICES",
     }
-    found: dict[str, Any] = {}
+    found: dict[str, object] = {}
     try:
         tree = ast.parse(python_code)
     except SyntaxError as e:
@@ -724,26 +729,17 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, Any]:
 _EAGER_GENERATED_HEADER = """\
 # Generated by torch.compiler.precompile (backend="eager") -- do not edit.
 #
-# This is the EAGER backend: the captured ATen graph is NOT lowered through
-# Inductor. It is a SELF-CONTAINED, EXECUTABLE artifact: the graph is inlined below
-# and runs on its own, needing no companion cache. You provide the model(s) at
-# runtime, exactly as the original fn took them, e.g.:
+# Self-contained, executable artifact: the captured ATen graph is inlined below (both
+# the human-readable rendering and the executable code) and runs on its own. Provide
+# the model(s) at runtime, exactly as the original fn took them:
 #
 #     ns = {}
 #     exec(open("this_file.py").read(), ns)
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
-# The runtime model must be STRUCTURALLY IDENTICAL to the one precompile traced
-# (same parameter/buffer names, order, and weight tying); only the weight VALUES
-# may differ. This artifact was produced by a non-strict make_fx trace, so control
-# flow and shapes are specialized to the example inputs. See Note [precompile
-# programming model] in torch/_precompile.py.
-#
-# Section 1 below is the captured graph -- it is both the human-readable rendering
-# and the executable code. The eager backend has no kernels to accelerate, so the
-# companion ``cache`` returned by precompile carries no compiled artifact (artifact=None)
-# but is still a full integrity-tagged envelope; torch.compiler.precompile.load runs
-# this inlined graph, and this file is the whole artifact.
+# The runtime model must be structurally identical to the traced one (only weight
+# VALUES may differ), and control flow / shapes are specialized to the example inputs.
+# See Note [precompile programming model] in torch/_precompile.py for the full contract.
 """
 
 
@@ -990,7 +986,7 @@ class PrecompiledModule:
 
     def __init__(
         self,
-        fn: Callable[..., Any],
+        fn: Callable[..., object],
         *,
         backend: str = "eager",
         tracer: str = "make_fx",
@@ -1000,32 +996,21 @@ class PrecompiledModule:
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
         # step that computes a loss and torch.autograd.grad).
         self._fn = fn
-        # "eager" keeps the captured ATen graph and runs it as-is (see Note [precompile
-        # programming model], "backend"). The inductor backend is added in a follow-up.
         self._backend = backend
-        # "make_fx" (default) is the only implemented capture tracer; "dynamo" is
-        # planned (see Note [precompile programming model], "tracer"). _compile rejects
-        # any other tracer up front.
         self._tracer = tracer
         self._decompositions = decompositions
-        self._artifact: Any = None
+        self._artifact: object = None
         self._module_positions: list[int] = []
         self._num_positional_args: int = 0
+        # Interned param / buffer names and their example shape, dtype, and device
+        # (aligned lists); the driver checks each runtime param/buffer against these for
+        # the structural contract (invariant 2). Populated by _compile().
         self._param_names: list[str] = []
         self._buffer_names: list[str] = []
-        # Per interned param / buffer example shape and dtype (aligned to _param_names /
-        # _buffer_names). The structural check (invariant 2) compares each runtime
-        # param/buffer's shape and dtype against these, so a same-named but differently
-        # shaped/typed runtime tensor is rejected rather than silently miscomputing.
-        self._param_shapes: list[Any] = []
-        self._buffer_shapes: list[Any] = []
+        self._param_shapes: list[tuple[int, ...]] = []
+        self._buffer_shapes: list[tuple[int, ...]] = []
         self._param_dtypes: list[str] = []
         self._buffer_dtypes: list[str] = []
-        # Per interned param / buffer example device (a string, e.g. "cuda:0"), aligned
-        # to _param_names / _buffer_names. The structural check (invariant 2) now also
-        # compares device, so a same-named tensor on a different device than traced is
-        # rejected up front rather than failing deep in a kernel (a captured graph can
-        # bake a device literal via factory ops like torch.zeros(..., device=...)).
         self._param_devices: list[str] = []
         self._buffer_devices: list[str] = []
         self._in_spec: pytree.TreeSpec | None = None
@@ -1039,47 +1024,36 @@ class PrecompiledModule:
         # exactly the params that received one, leaving frozen / non-contributing
         # params' .grad as None.
         self._grad_param_indices: list[int] = []
-        # Per user-input-leaf example dense shape (None for a subclass/non-tensor leaf;
-        # size only -- the eager backend is layout-flexible, so stride / memory format is
-        # not recorded). The driver rejects a runtime shape mismatch (invariant 3) up
-        # front. Populated by _compile().
-        self._user_input_shapes: list[Any] = []
-        # Per user-input-leaf example dtype and device (string), None for a subclass/
-        # non-tensor leaf. The driver rejects a dtype/device mismatch (invariant 6) up
-        # front. Populated by _compile().
-        self._user_input_dtypes: list[Any] = []
-        self._user_input_devices: list[Any] = []
+        # Per user-input-leaf example shape, dtype, and device (None for a subclass /
+        # non-tensor leaf); the driver rejects a runtime mismatch (invariants 3 and 6).
+        # Populated by _compile().
+        self._user_input_shapes: list[tuple[int, ...] | None] = []
+        self._user_input_dtypes: list[str | None] = []
+        self._user_input_devices: list[str | None] = []
         # Set only on the load() path, where we wrap a reconstructed callable.
-        self._loaded_forward: Callable[..., Any] | None = None
+        self._loaded_forward: Callable[..., object] | None = None
 
     @classmethod
     def _from_loaded(
         cls,
-        forward: Callable[..., Any],
+        forward: Callable[..., object],
         *,
         backend: str,
-        module_positions: list[int],
-        num_positional_args: int,
-        out_spec: pytree.TreeSpec,
-        grad_param_indices: list[int],
     ) -> PrecompiledModule:
         """Build a runnable from load()'s reconstructed forward.
 
         load() does not re-run capture/_compile, so reuse ``__init__`` for all the
         defaults (the single definition of this object's state) and override only the
-        calling-convention fields recovered from python_code plus the reconstructed
-        forward. The capture-only fields (``_fn``, ``_gm``, ``_param_names``, ...)
-        stay at their ``__init__`` defaults; inspect the artifact via python_code.
+        reconstructed forward. All the calling-convention metadata lives in the inlined
+        driver (``forward``) itself, so the __init__ fields (``_fn``, ``_gm``,
+        ``_module_positions``, ``_out_spec``, ...) stay at their defaults; inspect the
+        artifact via python_code.
         """
         obj = cls(None, backend=backend)  # type: ignore[arg-type]
-        obj._module_positions = module_positions
-        obj._num_positional_args = num_positional_args
-        obj._out_spec = out_spec
-        obj._grad_param_indices = grad_param_indices
         obj._loaded_forward = forward
         return obj
 
-    def _compile(self, args: tuple[Any, ...]) -> None:
+    def _compile(self, args: tuple[object, ...]) -> None:
         # make_fx is the only implemented tracer; "dynamo" is a planned alternative
         # capture front-end. Reject it here (the single capture-dispatch point) before
         # running fn, so the failure is clear rather than a wrong default.
@@ -1111,7 +1085,7 @@ class PrecompiledModule:
         # inductor ``call`` to inline and no dense flatten/unflatten -- the graph runs
         # exactly as captured (see Note [precompile programming model]).
 
-    def __call__(self, *args: Any) -> Any:
+    def __call__(self, *args: object) -> object:
         # A PrecompiledModule is runnable only after load(); precompile() itself
         # returns (python_code, cache) rather than a runnable.
         if self._loaded_forward is None:
@@ -1143,28 +1117,17 @@ class PrecompiledModule:
     def to_cache_bytes(self, python_code: str | None = None) -> bytes:
         """Return the binary cache as bytes -- an ACCELERATION, not required to run.
 
-        ``python_code`` already runs standalone AND is the single source of truth for
-        the calling convention, so the cache holds ONLY the compiled artifact -- no
-        calling-convention metadata, no model weights. The eager backend has no kernels
-        to accelerate, so the eager cache carries no compiled artifact (artifact=None)
-        but is still a full integrity-tagged envelope, and load() runs the graph inlined
-        in python_code.
+        ``python_code`` is the single source of truth for the calling convention, so the
+        cache holds only the compiled artifact (None for the eager backend) plus the
+        integrity tag and code_hash. See Note [precompile programming model], invariant 7.
 
-        ``python_code`` is the exact string ``to_python_code()`` returned for this same
-        object; the caller (``__call__``) builds it ONCE and threads it in so code_hash
-        is sha256 of the bytes actually returned to the user and the whole metadata is
-        not rebuilt a second time here. It defaults to None only for direct callers, in
-        which case it is rebuilt.
+        ``python_code`` defaults to what ``to_python_code()`` would emit; ``__call__``
+        threads in the exact string it already built so code_hash matches the bytes
+        returned to the user and the metadata is not rebuilt.
         """
-        # The eager backend has no kernels to cache, so ``_artifact_bytes`` is always
-        # None; load() executes the self-contained python_code. The format/version/backend
-        # tag is a lightweight integrity check verified by load() (see _CACHE_FORMAT); all
-        # values are plain str/int/bytes so the envelope stays weights_only-safe.
-        #
-        # code_hash binds this cache to the EXACT python_code it accelerates: load()
-        # recomputes sha256(python_code) and rejects a cache paired with a different
-        # python_code (same backend), so a mismatched (code, cache) pair fails loudly
-        # instead of silently running the cache's graph under python_code's metadata.
+        # Eager has no kernels, so _artifact_bytes is always None; the envelope is a plain
+        # str/int/bytes dict (weights_only-safe) carrying the tag + code_hash that binds it
+        # to python_code (invariant 7).
         if self._loaded_forward is not None:
             raise PrecompileError(
                 "this object was produced by torch.compiler.precompile.load(); the cache "
@@ -1188,7 +1151,7 @@ class PrecompiledModule:
         return buf.getvalue()
 
 
-def _make_inlined_forward(python_code: str) -> Callable[..., Any]:
+def _make_inlined_forward(python_code: str) -> Callable[..., object]:
     """Execute the self-contained python string and hand back its ``forward``.
 
     ``python_code`` needs no cache -- the captured graph (eager) is inlined, so we just
@@ -1203,9 +1166,9 @@ def _make_inlined_forward(python_code: str) -> Callable[..., Any]:
         "you produced or otherwise trust (Note [precompile programming model], "
         "invariant 7)."
     )
-    module_ns: dict[str, Any] = {"__name__": "_precompiled_artifact"}
+    module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
-    return module_ns["forward"]
+    return cast("Callable[..., object]", module_ns["forward"])
 
 
 class _PrecompileApi:
@@ -1239,8 +1202,8 @@ class _PrecompileApi:
 
     def __call__(
         self,
-        fn: Callable[..., Any],
-        *example_inputs: Any,
+        fn: Callable[..., object],
+        *example_inputs: object,
         backend: str = "eager",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
@@ -1340,15 +1303,13 @@ class _PrecompileApi:
         python_code = compiled.to_python_code()
         return python_code, compiled.to_cache_bytes(python_code)
 
-    def load(self, python_code: str, cache: bytes) -> Callable[..., Any]:
+    def load(self, python_code: str, cache: bytes) -> Callable[..., object]:
         """Reconstruct a runnable from ``(python_code, cache)`` from precompile.
 
-        The driver runs from ``python_code`` -- the single source of truth -- which
-        ``_parse_artifact_metadata`` also AST-scrapes for the module-level calling
-        convention (backend, module positions, out_spec, grad indices). The eager
-        ``cache`` carries no compiled artifact (artifact=None) but is still a full
-        integrity-tagged envelope (no kernels to accelerate), so ``load`` runs the graph
-        inlined in ``python_code``.
+        The driver runs from ``python_code`` -- the single source of truth for the whole
+        calling convention. The eager ``cache`` carries no compiled artifact, so ``load``
+        only reads its ``BACKEND`` (to check the pairing) and runs the graph inlined in
+        ``python_code``.
 
         Call the result with the SAME argument structure ``fn`` took -- the
         model(s) in their original positions plus the runtime inputs. Per invariant
@@ -1363,26 +1324,19 @@ class _PrecompileApi:
         or different-build envelope) is NOT fatal: the cache is acceleration only, so
         ``load`` degrades rather than crashing.
         """
-        # Only the metadata that drives the loaded module is unpacked here; the input /
-        # param / buffer contract metadata (USER_INPUT_*, PARAM_*, BUFFER_*, IN_SPEC) is
-        # consumed by the driver INLINED in python_code (_EAGER_DRIVER_SOURCE), so load()
-        # does not re-derive those checks separately.
+        # The whole calling convention (MODULE_POSITIONS, NUM_POSITIONAL_ARGS, OUT_SPEC,
+        # GRAD_PARAM_INDICES, USER_INPUT_*, PARAM_*, BUFFER_*, IN_SPEC) is consumed by the
+        # driver INLINED in python_code (_EAGER_DRIVER_SOURCE), so the loaded object needs
+        # none of it. _parse_artifact_metadata still runs to validate python_code is a
+        # precompile artifact and to read BACKEND for the cache-pairing check below.
         meta = _parse_artifact_metadata(python_code)
-        backend = meta["BACKEND"]
-        module_positions = meta["MODULE_POSITIONS"]
-        num_positional_args = meta["NUM_POSITIONAL_ARGS"]
-        grad_param_indices = meta["GRAD_PARAM_INDICES"]
-        out_spec = pytree.treespec_loads(meta["OUT_SPEC"])
+        backend = cast(str, meta["BACKEND"])
 
-        # The envelope is a plain str/int/bytes dict, so weights_only=True is safe here.
-        # The eager cache carries no compiled artifact (artifact=None), so there is
-        # nothing to prime -- load() always runs the graph inlined in python_code. The
-        # cache is purely an integrity-tagged envelope, so a corrupt/truncated envelope
-        # must degrade to the plain path rather than crash. A FORMAT or VERSION mismatch
-        # is likewise treated as an unusable cache and degrades (a newer/older or foreign
-        # envelope must not crash a load that python_code alone can serve). A BACKEND or
-        # CODE_HASH mismatch is different: it signals a genuinely wrong (python_code,
-        # cache) PAIRING, so it hard-fails rather than running under foreign metadata.
+        # weights_only=True is safe (plain str/int/bytes dict). The cache is acceleration
+        # only, so an unreadable envelope or a FORMAT / VERSION mismatch degrades to
+        # running python_code alone rather than crashing. A BACKEND or CODE_HASH mismatch
+        # is different -- it signals a wrong (python_code, cache) pairing -- so it
+        # hard-fails rather than running under foreign metadata.
         try:
             blob = torch.load(io.BytesIO(cache), weights_only=True)
             if blob.get("format") != _CACHE_FORMAT or blob.get("version") != (
@@ -1405,11 +1359,8 @@ class _PrecompileApi:
                         f"python_code backend {backend!r}; the cache and python_code "
                         "came from different precompile() calls."
                     )
-                # Bind the cache to the EXACT python_code it accelerates: recompute
-                # sha256(python_code) and reject a cache whose code_hash differs. Without
-                # this, a mismatched (code, cache) pair with the same backend would
-                # silently run the cache's compiled graph under python_code's (foreign)
-                # metadata.
+                # Reject a cache whose code_hash does not match this python_code (a
+                # mismatched pairing); see Note [precompile programming model], invariant 7.
                 expected_code_hash = hashlib.sha256(python_code.encode()).hexdigest()
                 if blob.get("code_hash") != expected_code_hash:
                     raise PrecompileError(
@@ -1435,14 +1386,7 @@ class _PrecompileApi:
         # validation) and runs the inlined captured graph.
         forward = _make_inlined_forward(python_code)
 
-        return PrecompiledModule._from_loaded(
-            forward,
-            backend=backend,
-            module_positions=module_positions,
-            num_positional_args=num_positional_args,
-            out_spec=out_spec,
-            grad_param_indices=grad_param_indices,
-        )
+        return PrecompiledModule._from_loaded(forward, backend=backend)
 
 
 precompile = _PrecompileApi()
