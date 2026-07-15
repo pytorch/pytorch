@@ -2375,6 +2375,10 @@ class TestMaxAutotune(TestCase):
         }
     )
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
+    @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "mm Triton template yields no configs for dynamic shapes on ROCm",
+    )
     def test_triton_template_generated_code_caching(self):
         def reset_counters():
             torch._dynamo.utils.counters.clear()
