@@ -1,3 +1,4 @@
+# Owner(s): ["module: rocm"]
 # TODO: this looks sort of similar to _linux-test, but there are like a dozen
 # places where you would have to insert an if statement. Probably it's better to
 # just use a different workflow altogether
@@ -272,10 +273,19 @@ jobs:
           echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
           WORKSPACE_ORIGINAL_OWNER_ID=$(docker exec -t "${container_name}" stat -c '%u' /var/lib/jenkins/workspace | tr -d '\r')
           echo "WORKSPACE_ORIGINAL_OWNER_ID=${WORKSPACE_ORIGINAL_OWNER_ID}" >> "$GITHUB_ENV"
-          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${TEST_COMMAND}"
+          # ROCm/RCCL pre-flight for distributed shards: some gfx950 pods come up
+          # with a container that can't read the KFD topology ("Could not read
+          # node #N"), so every collective init fails and a later test hangs the
+          # whole shard until the 270-min job timeout. Host-side rocminfo still
+          # passes on these pods, so the GPU-count check misses it. Fail fast.
+          PREFLIGHT=""
+          if [[ "${TEST_CONFIG}" == *distributed* ]]; then
+            PREFLIGHT="timeout 180 python .ci/pytorch/rocm_preflight.py && "
+          fi
+          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${PREFLIGHT}${TEST_COMMAND}"
 
-      - name: Restore workspace owner (for gfx1100 only)
-        if: always() && contains(matrix.runner, 'gfx1100')
+      - name: Restore workspace owner
+        if: always()
         shell: bash
         run: |
           docker exec -t "${CONTAINER_NAME}" sh -c \
@@ -300,7 +310,11 @@ jobs:
         uses: ./.github/actions/upload-test-artifacts
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
-          use-gha: true
+          # ROCm runners are not on EC2 and have no IAM instance profile, so the
+          # only AWS identity available is the read-only ECR login role, which
+          # cannot write to the gha-artifacts bucket. Skip S3 and upload directly
+          # to GHA to avoid s3:PutObject "not authorized" errors.
+          skip-s3: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Collect backtraces from coredumps (if any)

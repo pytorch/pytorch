@@ -8,6 +8,7 @@ from typing_extensions import deprecated
 
 import torch
 
+from . import random
 from ._utils import _device_t, _get_device_index
 from .graphs import Graph
 from .memory import (
