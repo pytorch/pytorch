@@ -99,7 +99,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   std::ifstream IFS(filePath.c_str(), std::ios::binary);
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
-  std::string data(OSS.str());
+  std::string data(std::move(OSS).str());
 
   bool isSpirv = filePath.size() >= 4 &&
       filePath.compare(filePath.size() - 4, 4, ".spv") == 0;
@@ -144,7 +144,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   std::string kernelName =
       kernelPtr->get_info<sycl::info::kernel::function_name>();
   uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();
-  size_t globalRangeX = gridX * threadsPerWarp * numWarps;
+  size_t globalRangeX = static_cast<size_t>(gridX) * threadsPerWarp * numWarps;
   size_t globalRangeY = gridY;
   size_t globalRangeZ = gridZ;
   size_t localRangeX = numWarps * threadsPerWarp;

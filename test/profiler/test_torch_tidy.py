@@ -734,7 +734,9 @@ class TestTorchTidyProfiler(TestCase):
             p.profiler.kineto_results.experimental_event_tree()
         )
         self.assertEqual(
-            len(modules), 2, f"Expected two parameter list, but got {len(modules)}"
+            len(modules),
+            2,
+            lambda msg: f"{msg}\nExpected two parameter list, but got {len(modules)}",
         )
 
         params = [
@@ -750,7 +752,9 @@ class TestTorchTidyProfiler(TestCase):
             (name, val.storage().data_ptr(), val.grad.storage().data_ptr())
             for name, val in net.fc2._parameters.items()
         ]
-        self.assertEqual(expected, params, f"{expected} vs. {params}")
+        self.assertEqual(
+            expected, params, lambda msg: f"{msg}\n{expected} vs. {params}"
+        )
 
     def _flat_out_extrafields(self, nodes, out=None):
         if out is None:
@@ -769,11 +773,15 @@ class TestTorchTidyProfiler(TestCase):
         return out
 
     def _check_results(self, opt, opts, check_items=False):
-        self.assertEqual(len(opts), 1, f"Expected 1 optimizer: len(opts): {len(opts)}")
+        self.assertEqual(
+            len(opts),
+            1,
+            lambda msg: f"{msg}\nExpected 1 optimizer: len(opts): {len(opts)}",
+        )
         self.assertEqual(
             id(opt),
             opts[0].self_ptr,
-            f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self_ptr})",
+            lambda msg: f"{msg}\nOptimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self_ptr})",
         )
         if check_items:
             self.assertEqual(len(opt.param_groups), len(opts))
