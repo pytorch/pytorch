@@ -19,6 +19,8 @@ from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
 
 
+log = logging.getLogger(__name__)
+
 # Enable FX graph caching
 if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
     torch._inductor.config.fx_graph_cache = True
@@ -217,16 +219,23 @@ class TimmRunner(BenchmarkRunner):
 
     @download_retry_decorator
     def _download_model(self, model_name):
-        model = create_model(
-            model_name,
-            in_chans=3,
-            scriptable=False,
-            num_classes=None,
-            drop_rate=0.0,
-            drop_path_rate=None,
-            drop_block_rate=None,
-            pretrained=True,
-        )
+        kwargs = dict(in_chans=3, scriptable=False, num_classes=None, pretrained=True)
+        try:
+            model = create_model(
+                model_name,
+                **kwargs,
+                drop_rate=0.0,
+                drop_path_rate=None,
+                drop_block_rate=None,
+            )
+        except TypeError as e:
+            if "unexpected keyword argument" not in str(e):
+                raise
+            log.warning(
+                "Model %s does not support drop_rate kwargs, loading without them",
+                model_name,
+            )
+            model = create_model(model_name, **kwargs)
         return model
 
     def load_model(
@@ -301,10 +310,10 @@ class TimmRunner(BenchmarkRunner):
             self.compute_loss = self.scaled_compute_loss
 
         # See yaml note for emulate_precision_casts. This preserves the
-        # bf16 downcast-upcast pairs (fp16 untested) that inductor would
-        # otherwise elide when fusing across mixed-precision boundaries
-        # (e.g. bf16 conv-bias-add fused into an fp32 cat-prep store),
-        # which is what eager autocast actually does.
+        # autocast downcast-upcast pairs (bf16 and fp16; mobilenetv2_100 is
+        # the fp16 case) that inductor would otherwise elide when fusing
+        # across mixed-precision boundaries (e.g. bf16 conv-bias-add fused
+        # into an fp32 cat-prep store), which is what eager autocast does.
         #
         # Baseline is captured on the FIRST load_model call so that any
         # --inductor-config emulate_precision_casts=... CLI override (applied
