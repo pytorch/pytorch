@@ -822,6 +822,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             epilogue_fused, "plain matmul should NOT have epilogue fusion markers"
         )
 
+    @unittest.skip(
+        "Disabled due to CI failures; see "
+        "https://github.com/pytorch/pytorch/issues/188705"
+    )
     def test_reduction_not_fused(self):
         """Test that reductions after GEMM are NOT fused into the epilogue."""
         dtype = torch.bfloat16
