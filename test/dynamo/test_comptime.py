@@ -134,14 +134,6 @@ def forward(self, L_x_ : torch.Tensor):
 
             return y + 3
 
-        def munge_disas(s):
-            re.sub(
-                r"^(?: +\d+)?(?: +(-->)) \+\d+ ([A-Za-z0-9_]+)",
-                "\1 \3",
-                s,
-                flags=re.MULTILINE,
-            )
-
         f(torch.randn(2))
         self.assertEqual(cnt.frame_count, 1)
         out = FILE.getvalue()

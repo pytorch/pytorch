@@ -2637,21 +2637,21 @@ class TestBinaryUfuncsDevice(TestCase):
         for i in range(750):
             self.assertTrue(
                 torch.isnan(ma[i]),
-                f"max(a, b): {ma[i]}, a: {a[i]}, b: {b[i]}",
+                lambda msg: f"{msg}\nmax(a, b): {ma[i]}, a: {a[i]}, b: {b[i]}",
             )
             self.assertTrue(
                 torch.isnan(mi[i]),
-                f"min(a, b): {mi[i]}, a: {a[i]}, b: {b[i]}",
+                lambda msg: f"{msg}\nmin(a, b): {mi[i]}, a: {a[i]}, b: {b[i]}",
             )
 
         for i in range(750, 1000):
             self.assertFalse(
                 torch.isnan(ma[i]),
-                f"max(a, b): {ma[i]}, a: {a[i]}, b: {b[i]}",
+                lambda msg: f"{msg}\nmax(a, b): {ma[i]}, a: {a[i]}, b: {b[i]}",
             )
             self.assertFalse(
                 torch.isnan(mi[i]),
-                f"min(a, b): {mi[i]}, a: {a[i]}, b: {b[i]}",
+                lambda msg: f"{msg}\nmin(a, b): {mi[i]}, a: {a[i]}, b: {b[i]}",
             )
 
     @dtypes(
