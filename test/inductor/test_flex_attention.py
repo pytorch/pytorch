@@ -2053,6 +2053,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_xpu
     @expected_not_implemented_on_mps
     def test_bf16_score_mod_captured_grad_dtype(self, device):
         """

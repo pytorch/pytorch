@@ -269,8 +269,8 @@ class CudaReproTests(TestCase):
     # Mismatched elements: 23 / 33062912 (0.0%)
     # Greatest absolute difference: 0.07861328125 at index (14, 13, 1008, 36) (up to 1e-05 allowed)
     # Greatest relative difference: 2.90625 at index (14, 13, 1008, 36) (up to 0.016 allowed)
-    @skipIfXpu(msg="RuntimeError, not target, torch-xpu-ops: 2697")
     @skipIfRocmArch(MI350_ARCH)
+    @skipIfXpu(msg="RuntimeError, torch-xpu-ops: 2697")
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -2395,6 +2395,7 @@ class CudaReproTests(TestCase):
         idxs = remove_unaligned_input_idxs(inputs, [0, 2])
         self.assertEqual(idxs, [0])
 
+    @skipIfXpu(msg="cudagraph is not supported on xpu")
     @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_unused_cpu_input_cudagraphs(self):
