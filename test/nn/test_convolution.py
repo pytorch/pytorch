@@ -4091,9 +4091,7 @@ class TestConvolutionNNCUDA(NNTestCase):
 
         torch.manual_seed(0)
         conv = nn.Conv2d(256, 18, kernel_size=1).to(device)
-        x = torch.randn(
-            16, 256, 96, 96, device=device, requires_grad=True
-        )
+        x = torch.randn(16, 256, 96, 96, device=device, requires_grad=True)
 
         with cudnn.flags(enabled=True, benchmark=True):
             with torch.amp.autocast("cuda"):
