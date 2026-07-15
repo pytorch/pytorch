@@ -58,7 +58,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
     vec_iters = n // tile
     vec_tail_start = vec_iters * tile
     scalar_tail_iters = (n - vec_tail_start + block_threads - 1) // block_threads
-    num_stages = int(math.log2(k))
+    num_stages = (k - 1).bit_length()
 
     @flyc.kernel(known_block_size=[block_threads, 1, 1])
     def radix_select_topk_kernel(
@@ -405,11 +405,16 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
             fx.memref_store(smem_f32_to_ord(fx.memref_load(s_vals, sort_tid)), s_ords, tid)
         gpu.barrier()
 
+        # Support non-power-of-two K by ignoring compare partners outside K.
+        # The bitonic network builds ascending blocks first, then the final
+        # stage merges everything into descending order.
         for stage in range_constexpr(num_stages):
             for sub_rev in range_constexpr(stage + 1):
                 sub = stage - sub_rev
                 step_size = 1 << sub
-                partner = active.select(tid ^ fx.Int32(step_size), fx.Int32(0))
+                raw_partner = tid ^ fx.Int32(step_size)
+                partner_active = (raw_partner < fx.Int32(k))
+                partner = (active & partner_active).select(raw_partner, fx.Int32(0))
                 my_o = fx.memref_load(s_ords, sort_tid)
                 my_i = fx.memref_load(s_idxs, sort_tid)
                 p_o = fx.memref_load(s_ords, partner)
@@ -423,29 +428,53 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool):
                     self_lt_partner = (my_o < p_o) | ((my_o == p_o) & (my_i > p_i))
                     self_gt_partner = (my_o > p_o) | ((my_o == p_o) & (my_i < p_i))
                 block_dir = (tid >> fx.Int32(stage + 1)) & fx.Int32(1)
-                if active:
-                    if tid < partner:
-                        if block_dir == fx.Int32(0):
-                            if self_lt_partner:
-                                fx.memref_store(p_o, s_ords, tid)
-                                fx.memref_store(p_v, s_vals, tid)
-                                fx.memref_store(p_i, s_idxs, tid)
+                if active & partner_active:
+                    if stage < num_stages - 1:
+                        if tid < partner:
+                            if block_dir == fx.Int32(0):
+                                if self_gt_partner:
+                                    fx.memref_store(p_o, s_ords, tid)
+                                    fx.memref_store(p_v, s_vals, tid)
+                                    fx.memref_store(p_i, s_idxs, tid)
+                            else:
+                                if self_lt_partner:
+                                    fx.memref_store(p_o, s_ords, tid)
+                                    fx.memref_store(p_v, s_vals, tid)
+                                    fx.memref_store(p_i, s_idxs, tid)
                         else:
-                            if self_gt_partner:
-                                fx.memref_store(p_o, s_ords, tid)
-                                fx.memref_store(p_v, s_vals, tid)
-                                fx.memref_store(p_i, s_idxs, tid)
+                            if block_dir == fx.Int32(0):
+                                if self_lt_partner:
+                                    fx.memref_store(p_o, s_ords, tid)
+                                    fx.memref_store(p_v, s_vals, tid)
+                                    fx.memref_store(p_i, s_idxs, tid)
+                            else:
+                                if self_gt_partner:
+                                    fx.memref_store(p_o, s_ords, tid)
+                                    fx.memref_store(p_v, s_vals, tid)
+                                    fx.memref_store(p_i, s_idxs, tid)
                     else:
-                        if block_dir == fx.Int32(0):
-                            if self_gt_partner:
-                                fx.memref_store(p_o, s_ords, tid)
-                                fx.memref_store(p_v, s_vals, tid)
-                                fx.memref_store(p_i, s_idxs, tid)
+                        if tid < partner:
+                            if block_dir == fx.Int32(0):
+                                if self_lt_partner:
+                                    fx.memref_store(p_o, s_ords, tid)
+                                    fx.memref_store(p_v, s_vals, tid)
+                                    fx.memref_store(p_i, s_idxs, tid)
+                            else:
+                                if self_gt_partner:
+                                    fx.memref_store(p_o, s_ords, tid)
+                                    fx.memref_store(p_v, s_vals, tid)
+                                    fx.memref_store(p_i, s_idxs, tid)
                         else:
-                            if self_lt_partner:
-                                fx.memref_store(p_o, s_ords, tid)
-                                fx.memref_store(p_v, s_vals, tid)
-                                fx.memref_store(p_i, s_idxs, tid)
+                            if block_dir == fx.Int32(0):
+                                if self_gt_partner:
+                                    fx.memref_store(p_o, s_ords, tid)
+                                    fx.memref_store(p_v, s_vals, tid)
+                                    fx.memref_store(p_i, s_idxs, tid)
+                            else:
+                                if self_lt_partner:
+                                    fx.memref_store(p_o, s_ords, tid)
+                                    fx.memref_store(p_v, s_vals, tid)
+                                    fx.memref_store(p_i, s_idxs, tid)
                 gpu.barrier()
 
         # Phase 4: results to gmem.
