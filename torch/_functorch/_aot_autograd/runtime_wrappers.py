@@ -42,7 +42,7 @@ from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
-from torch._subclasses import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -2636,11 +2636,14 @@ class _AutogradSavedState:
 
         # See Note [Detaching saved tensors in AOTAutograd]
         num_vc_check = len(tensors_saved_with_vc_check)
+        is_graph_input = self.metadata.saved_tensor_is_graph_input
         tensors_to_save = [
-            x.detach() if x._is_view() else x for x in tensors_saved_with_vc_check
+            x if is_graph_input[i] or not x._is_view() else x.detach()
+            for i, x in enumerate(tensors_saved_with_vc_check)
         ]
         tensors_no_vc_check = [
-            x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+            x if is_graph_input[num_vc_check + i] or not x._is_view() else x.detach()
+            for i, x in enumerate(tensors_saved_no_vc_check)
         ]
 
         # dynamic_saved_tensors_idxs has indices relative to all saved tensors
@@ -3707,7 +3710,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         if not isinstance(x, torch.Tensor):
             return x, [x]
 
-        if isinstance(x, FakeTensor):
+        if is_fake_tensor(x):
             if not meta.memory_format:
                 raise AssertionError(
                     "meta.memory_format must not be None for FakeTensor"
