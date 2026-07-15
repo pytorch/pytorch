@@ -2682,43 +2682,35 @@ class TestMaxAutotune(TestCase):
         }
     )
     def test_bmm_template_cache_aliased_then_distinct_inputs(self):
-        """Cached template code generated for aliased bmm operands must not
-        be reused for distinct operands with identical layouts.
+        """A bmm whose operands alias one buffer must not share generated-code
+        cache entries with a bmm over distinct operands of identical layouts.
 
-        The first compilation caches bmm kernels whose operands alias one
-        buffer (codegen collapses them into a single kernel argument). The
-        second compilation autotunes bmm nodes with distinct operands of the
-        same layouts; before the aliasing-aware cache key those hit the
-        one-argument cached kernels and crashed during benchmarking.
+        def_kernel collapses aliased operands into a single kernel argument,
+        so before the aliasing-aware cache key the distinct-operand bmm
+        reused the one-argument cached kernels; the class-level
+        TritonTemplate.test_cache patch turns that reuse into a hard error.
         See https://github.com/pytorch/pytorch/issues/188069.
         """
 
-        def update(grad, m0, m1, beta):
-            outer0 = torch.einsum("...ab,...Ab->...aA", grad, grad)
-            m0.lerp_(outer0, 1 - beta)
-            outer1 = torch.einsum("...ab,...aB->...bB", grad, grad)
-            m1.lerp_(outer1, 1 - beta)
-
-        def project(grad, q0, q1):
-            return torch.einsum("...ab,...aA,...bB->...AB", grad, q0, q1)
+        def f(x, a, b):
+            return torch.bmm(x, x), torch.bmm(a, b)
 
         B, N = 2, 128
         with fresh_cache():
-            grad = torch.randn(B, N, N, device=GPU_TYPE)
-            m0 = torch.randn(B, N, N, device=GPU_TYPE)
-            m1 = torch.randn(B, N, N, device=GPU_TYPE)
-            q0 = torch.randn(B, N, N, device=GPU_TYPE)
-            q1 = torch.randn(B, N, N, device=GPU_TYPE)
+            x = torch.randn(B, N, N, device=GPU_TYPE)
+            a = torch.randn(B, N, N, device=GPU_TYPE)
+            b = torch.randn(B, N, N, device=GPU_TYPE)
 
-            compile_kwargs = {
-                "fullgraph": True,
-                "dynamic": False,
-                "mode": "max-autotune-no-cudagraphs",
-            }
-            torch.compile(update, **compile_kwargs)(grad, m0, m1, 0.999)
-            result = torch.compile(project, **compile_kwargs)(grad, q0, q1)
+            compiled = torch.compile(
+                f,
+                fullgraph=True,
+                dynamic=False,
+                mode="max-autotune-no-cudagraphs",
+            )
+            aliased, distinct = compiled(x, a, b)
 
-            self.assertEqual(result, project(grad, q0, q1), atol=0.5, rtol=0.05)
+            self.assertEqual(aliased, torch.bmm(x, x), atol=0.1, rtol=0.05)
+            self.assertEqual(distinct, torch.bmm(a, b), atol=0.1, rtol=0.05)
 
     @fresh_cache()
     @unittest.skipIf(

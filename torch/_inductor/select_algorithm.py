@@ -2833,6 +2833,13 @@ class GeneratedCodeCache:
         # with identical layouts can still generate different code depending
         # on which of them alias the same buffer, e.g. mm(x, x) (one kernel
         # arg) vs mm(a, b) (two). Key the aliasing structure name-insensitively.
+        #
+        # def_kernel also drops inputs found in V.graph.removed_buffers or in
+        # kernel.prologue_fused_inputs, but neither needs keying: the cache is
+        # only read and written while lowering generates autotune choices, and
+        # both sets are populated only later, during scheduling, whose template
+        # renders (SIMDScheduling.codegen_template via make_kernel_render)
+        # bypass this cache entirely.
         names = [node.get_name() for node in input_nodes]
         first_seen: dict[str, int] = {}
         input_aliasing = tuple(
