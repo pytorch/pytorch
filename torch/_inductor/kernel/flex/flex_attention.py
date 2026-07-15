@@ -129,11 +129,7 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
 
 def get_float32_precision():
     if (
-        (
-            torch.backends.cuda.matmul.fp32_precision == "ieee"
-            if torch.backends.cuda.matmul.fp32_precision != "none"
-            else torch.get_float32_matmul_precision() == "highest"
-        )
+        torch._C._get_fp32_precision_getter("cuda", "matmul") != "tf32"
         or torch.version.hip
         or torch.mtia.is_available()
     ):
