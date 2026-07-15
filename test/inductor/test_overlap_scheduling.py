@@ -2,6 +2,7 @@
 
 import operator
 from types import SimpleNamespace
+from unittest import skipUnless
 from unittest.mock import patch
 
 import torch
@@ -10,6 +11,12 @@ from torch._inductor.analysis import device_info
 from torch._inductor.fx_passes.overlap_scheduling import gather_node_runtime_estimations
 from torch._inductor.utils import get_device_tflops
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+_HAS_REDUCE_SCATTER_TENSOR = hasattr(
+    torch.ops._c10d_functional,
+    "reduce_scatter_tensor",
+)
 
 
 class TestOverlapSchedulingRuntimeEstimation(TestCase):
@@ -177,6 +184,10 @@ class TestOverlapSchedulingRuntimeEstimation(TestCase):
         self.assertNotIn(getitem, estimations)
         mock_estimate_roofline.assert_not_called()
 
+    @skipUnless(
+        _HAS_REDUCE_SCATTER_TENSOR,
+        "_c10d_functional.reduce_scatter_tensor is unavailable",
+    )
     def test_manual_overlap_scheduler_skips_runtime_estimations(self):
         from torch._inductor.fx_passes import overlap_manual_scheduling
 
