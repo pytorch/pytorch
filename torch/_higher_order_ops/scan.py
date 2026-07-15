@@ -136,7 +136,7 @@ def scan(
             May be ``None`` when ``length`` is provided, in which case ``combine_fn`` receives ``None`` as ``x``
             each step (counter-loop mode).
 
-    Kwargs:
+    Keyword Args:
         dim (int): the dimension to scan over, default 0.
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
         length (int or None): Optional number of scan iterations, default ``None``.
