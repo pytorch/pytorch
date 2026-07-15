@@ -208,7 +208,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
 
         seed = self.rank + 20231010
         torch.manual_seed(seed)
-        torch.get_device_module(device_type).manual_seed(seed)
+        torch.accelerator.random.manual_seed(seed)
 
         losses = []
         grads = []
@@ -218,7 +218,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
             for model, opt in ((fsdp_model, fsdp_opt), (ddp_model, ddp_opt)):
                 seed = self.rank + i
                 torch.manual_seed(seed)
-                torch.get_device_module(device_type).manual_seed(seed)
+                torch.accelerator.random.manual_seed(seed)
                 loss = model(x, y).sum()
                 losses.append(loss)
                 loss.backward()
@@ -257,7 +257,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
             for model, opt in ((fsdp_model, fsdp_opt), (ddp_model, ddp_opt)):
                 seed = self.rank + i
                 torch.manual_seed(seed)
-                torch.get_device_module(device_type).manual_seed(seed)
+                torch.accelerator.random.manual_seed(seed)
                 loss = model(x, y).sum()
                 losses.append(loss)
                 loss.backward()
@@ -990,7 +990,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 super().__init__()
                 # Seed via rank to make model different across ranks
                 torch.manual_seed(rank)
-                torch.get_device_module(device_type).manual_seed(rank)
+                torch.accelerator.random.manual_seed(rank)
                 self.lin = nn.Linear(10, 10, bias=False)
                 self.buffer = nn.Buffer(torch.ones(1) * rank)
 

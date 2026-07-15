@@ -35,12 +35,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils._typing_utils import not_none
 
 
-def get_generator_seed_for_device_type(device_type: str):
-    from torch.distributed._local_tensor import (
-        get_generator_seed_for_device_type as _get_seed,
-    )
+def get_accelerator_rng_seed():
+    from torch.distributed._local_tensor import get_accelerator_rng_seed as _get_seed
 
-    return _get_seed(device_type)
+    return _get_seed()
 
 
 class DistTensorRandomInitTest(DTensorTestBase):
@@ -165,7 +163,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         # The DTensor random ops will use the same generator as the default one on the device.
 
         # Note: this behavior changed, and now the guideline is to set the same RNG seed on all SPMD ranks.
-        torch.get_device_module(self.device_type).manual_seed(0)
+        torch.accelerator.random.manual_seed(0)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
@@ -401,9 +399,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
         # We do not maintain the copy of the seed in dtensor, but we do mutate the global rng state
         # since we now always pull it fresh from the local device generator
-        self.assertEqual(
-            seed_from_rank_0, get_generator_seed_for_device_type(self.device_type)
-        )
+        self.assertEqual(seed_from_rank_0, get_accelerator_rng_seed())
 
     @with_comms
     @skip_unless_torch_gpu
@@ -422,13 +418,11 @@ class DistTensorRandomOpTest(DTensorTestBase):
             manual_seed(self.rank, device_mesh)
             # RNG tracker should already be initialized
             self.assertTrue(random._rng_tracker is not None)
-            self.assertEqual(
-                self.rank, get_generator_seed_for_device_type(self.device_type)
-            )
+            self.assertEqual(self.rank, get_accelerator_rng_seed())
 
             # Test 2: set same seed on different ranks
             manual_seed(1234, device_mesh)
-            self.assertEqual(1234, get_generator_seed_for_device_type(self.device_type))
+            self.assertEqual(1234, get_accelerator_rng_seed())
 
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
@@ -466,9 +460,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # set the seed for each pipeline stage to 123 + pp_rank
         manual_seed(123 + pp_rank, spmd_mesh)
         # dtensor no longer stores a copy of the seed, but it mutates the device's generator so we can check that
-        self.assertEqual(
-            123 + pp_rank, get_generator_seed_for_device_type(self.device_type)
-        )
+        self.assertEqual(123 + pp_rank, get_accelerator_rng_seed())
 
         # mimic initializing a model weight sharded on the SPMD mesh
         spmd_dtensor = torch.distributed.tensor.ones(
