@@ -325,7 +325,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 self.assertEqual(
                     fwd_tid,
                     bwd_tid,
-                    f"bwd not running in the same thread a fwd for rank {rank.item()}",
+                    lambda msg: f"{msg}\nbwd not running in the same thread a fwd for rank {rank.item()}",
                 )
                 self.assertTrue(dist.is_initialized())
                 self.assertEqual(int(rank.item()), dist.get_rank())

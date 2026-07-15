@@ -25,6 +25,13 @@ set(XPU_HOST_CXX_FLAGS)
 # Find SYCL library.
 find_package(SYCLToolkit REQUIRED)
 if(NOT SYCL_FOUND)
+  if(_USE_XPU_EXPLICITLY_SET AND USE_XPU)
+    message(FATAL_ERROR
+      "PyTorch: XPU was explicitly requested (USE_XPU=1) but cannot be found. "
+      "Please check your oneAPI/SYCL installation and ensure SYCL_ROOT or "
+      "CMPLR_ROOT is set correctly. "
+      "If you want to build without XPU, please set USE_XPU=0.")
+  endif()
   set(PYTORCH_FOUND_XPU FALSE)
   # Exit early to avoid populating XPU_HOST_CXX_FLAGS.
   return()
