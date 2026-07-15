@@ -8,7 +8,6 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/Allocator.h>
-#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/macros/Macros.h>
 
 #include <torch/csrc/distributed/c10d/Hooks.hpp>
@@ -706,18 +705,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support getMemoryStats"));
   }
 
-  c10::impl::PyObjectSlot* pyobj_slot() {
-    return &pyobj_slot_;
-  }
-
-  const c10::impl::PyObjectSlot* pyobj_slot() const {
-    return &pyobj_slot_;
-  }
-
-  void incref_pyobject() const noexcept final;
-  void decref_pyobject() const noexcept final;
-  bool try_incref_pyobject() const noexcept final;
-
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -736,8 +723,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 
   bool use_pg_for_symm_mem_rendezvous_ = false;
-
-  c10::impl::PyObjectSlot pyobj_slot_;
 };
 
 } // namespace c10d
