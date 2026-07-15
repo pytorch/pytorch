@@ -1048,6 +1048,21 @@ class TestLinalg(TestCase):
                 torch.linalg.eigh(a, out=(out_w, out_v))
 
     @skipCPUIfNoLapack
+    @onlyCPU
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_eigh_large_matrix_error(self, device, dtype):
+        # n=33000 needs lwork = 2*33000^2 + 6*33000 + 1 > INT32_MAX for real,
+        # and similar large workspace size for complex.
+        # Use expand (zero-stride) to create a large logical shape without
+        # allocating O(n^2) memory.
+        small = torch.zeros(1, 1, device=device, dtype=dtype)
+        large = small.expand(33000, 33000)
+        with self.assertRaisesRegex(
+            RuntimeError, "exceeds the 32-bit LAPACK interface limit"
+        ):
+            torch.linalg.eigh(large)
+
+    @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
     def test_eigh_svd_illcondition_matrix_input_should_not_crash(self, device, dtype):
         # See https://github.com/pytorch/pytorch/issues/94772, https://github.com/pytorch/pytorch/issues/105359
