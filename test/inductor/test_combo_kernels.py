@@ -312,13 +312,9 @@ class _ComboAutotuneCountMixin:
     combo_kernel_per_subkernel_blocks = False
 
     def _expected_count(self, base, inflated, compile_time_autotune):
-        # Compile-time per-subkernel autotune benches each subkernel standalone, which adds
-        # kernels to the count -- but only when per-subkernel blocks are on (the path it tunes).
-        return (
-            inflated
-            if (compile_time_autotune and self.combo_kernel_per_subkernel_blocks)
-            else base
-        )
+        # Compile-time autotune's standalone benchmark codegen no longer counts toward
+        # generated_kernel_count, so the count matches base in all modes.
+        return base
 
     @contextlib.contextmanager
     def _autotune(self, compile_time_autotune):
@@ -1355,9 +1351,7 @@ class ComboKernelTests(_ComboAutotuneCountMixin, TestCase):
             out_compiled = torch.compile(m)(*inps)
         torch.testing.assert_close(out_eager, out_compiled, rtol=1e-4, atol=1e-4)
         # Very-large reductions split out instead of co-fused: 5 kernels (4 = the regression).
-        # This test forces per_subkernel_blocks=True, so inflation depends only on autotune.
-        expected = 7 if compile_time_autotune else 5
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_gpu_and_triton
     @parametrize("compile_time_autotune", [False, True])
@@ -1863,16 +1857,9 @@ class ComboKernelDynamicShapesTests(_ComboAutotuneCountMixin, TestCase):
             c2 = torch.add(a2, b2)
             return c0, c1, c2
 
-        # Autotune benches each subkernel standalone, raising the count to a
-        # fixed 8 (vs the 5-6 round-robin range without it).
-        inflated = compile_time_autotune and self.combo_kernel_per_subkernel_blocks
-
         def check_count():
             count = torch._inductor.metrics.generated_kernel_count
-            if inflated:
-                self.assertEqual(count, 8)
-            else:
-                self.assertTrue(5 <= count <= 6)
+            self.assertTrue(5 <= count <= 6)
 
         with self._autotune(compile_time_autotune):
             inps = (
@@ -1981,15 +1968,9 @@ class ComboKernelDynamicShapesTests(_ComboAutotuneCountMixin, TestCase):
                 result, code = run_and_get_code(fn_c, a, b)
                 self.assertEqual(result[0], a.sum())
                 self.assertEqual(result[1], b.sum())
-                # Compile-time per-subkernel autotune benches each subkernel
-                # standalone, inflating the count when per-subkernel blocks are on.
                 self.assertEqual(
                     torch._inductor.metrics.generated_kernel_count,
-                    self._expected_count(
-                        4 if benchmark else 1,
-                        6 if benchmark else 3,
-                        torch._inductor.config.combo_kernel_compile_time_autotune,
-                    ),
+                    4 if benchmark else 1,
                 )
                 FileCheck().check("R0_BLOCK_0: tl.constexpr = 32").check(
                     "R0_BLOCK_1: tl.constexpr = 32"
@@ -2067,11 +2048,14 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             + counters["inductor"]["combo_subkernel_autotune_cached"]
         )
         self.assertEqual(processed, 4)
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
         if mode == "cdt":
             self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_caching(self):
+        from torch._inductor.codecache import PyCodeCache
+
         def f(a, b, c, d):
             return a + b, c * d
 
@@ -2097,13 +2081,63 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             torch.compile(f)(*inps)  # cold: subkernels benchmarked
             cold = counters["inductor"]["combo_subkernel_autotune"]
             self.assertGreater(cold, 0)
+            self.assertEqual(
+                counters["inductor"]["combo_subkernel_autotune_fallback"], 0
+            )
 
+            # Simulate a new process: drop the in-memory module cache (which would
+            # otherwise serve the already-tuned autotuner object) but keep the on-disk
+            # caches, so the warm run genuinely re-imports and reads .best_config.
             torch._dynamo.reset()
+            PyCodeCache.cache_clear(purge=False)
             counters.clear()
             torch.compile(f)(*inps)  # warm: reuse .best_config, no re-benchmark
             self.assertEqual(counters["inductor"]["combo_subkernel_autotune"], 0)
             warm_cached = counters["inductor"]["combo_subkernel_autotune_cached"]
             self.assertEqual(warm_cached, cold)
+            self.assertEqual(
+                counters["inductor"]["combo_subkernel_autotune_fallback"], 0
+            )
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_looped_reduction(self):
+        # rnumel far above the persistent threshold -> looped reductions, whose winning
+        # configs carry R0_BLOCK; the combo must expose R0_BLOCK_i as constexpr args.
+        def f(a, b):
+            return a.sum(-1), b.amax(-1)
+
+        inps = [
+            torch.randn(64, 65536, device=GPU_TYPE),
+            torch.randn(64, 32768, device=GPU_TYPE),
+        ]
+        counters.clear()
+        with fresh_cache():
+            out, code = run_and_get_code(torch.compile(f), *inps)
+        # loose tolerance: summing 65536 fp32 elements is accumulation-order sensitive
+        self.assertEqual(out, f(*inps), atol=1e-3, rtol=1e-3)
+        src = " ".join(code)
+        FileCheck().check("R0_BLOCK_0").check("R0_BLOCK_1").run(src)
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_dynamic_shapes(self):
+        def f(a, b):
+            return a + 1.0, b * 2.0
+
+        a = torch.randn(4096, device=GPU_TYPE)
+        b = torch.randn(6144, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(a, 0)
+        torch._dynamo.mark_dynamic(b, 0)
+        counters.clear()
+        with fresh_cache():
+            fn_c = torch.compile(f, dynamic=True)
+            out = fn_c(a, b)
+        self.assertEqual(out, f(a, b))
+        # recompile-free on new dynamic sizes
+        a2 = torch.randn(5000, device=GPU_TYPE)
+        b2 = torch.randn(7000, device=GPU_TYPE)
+        self.assertEqual(fn_c(a2, b2), f(a2, b2))
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_excludes_indirect_indexing(self):
@@ -2328,13 +2362,7 @@ class ComboKernelPDLTests(TestCase):
         code = " ".join(code)
 
         self.assertEqual(out_eager, out_compiled)
-        # Compile-time autotune (default on) benches each subkernel standalone, which
-        # inflates the kernel count -- but only with per-subkernel blocks.
-        autotune = torch._inductor.config.combo_kernel_compile_time_autotune
-        self.assertEqual(
-            torch._inductor.metrics.generated_kernel_count,
-            4 if (autotune and per_subkernel_blocks) else 1,
-        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
         # Verify combo kernel structure with PDL - each sub-kernel should have
         # exactly one gdc_wait and one gdc_launch_dependents, no redundant waits.
@@ -2441,9 +2469,7 @@ class ComboKernelTestsMaxAutotune(_ComboAutotuneCountMixin, TestCase):
         out_eager = fn(*inps)
         out_compiled, code = self._run_combo_autotune(fn, inps, compile_time_autotune)
         self.assertEqual(out_eager, out_compiled)
-        # Compile-time autotune benches each of the 3 subkernels standalone.
-        expected = 4 if compile_time_autotune else 1
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
     @parametrize("compile_time_autotune", [False, True])
@@ -2459,8 +2485,7 @@ class ComboKernelTestsMaxAutotune(_ComboAutotuneCountMixin, TestCase):
         out_eager = fn(*inps)
         out_compiled, code = self._run_combo_autotune(fn, inps, compile_time_autotune)
         self.assertEqual(out_eager, out_compiled)
-        expected = 3 if compile_time_autotune else 1
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
     @parametrize("compile_time_autotune", [False, True])
@@ -2487,8 +2512,7 @@ class ComboKernelTestsMaxAutotune(_ComboAutotuneCountMixin, TestCase):
         out_eager = fn(*inps)
         out_compiled, code = self._run_combo_autotune(fn, inps, compile_time_autotune)
         self.assertEqual(out_eager, out_compiled)
-        expected = 7 if compile_time_autotune else 1
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
     def test_combo_kernel_per_subkernel_reduction_hint(self):

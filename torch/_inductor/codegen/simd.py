@@ -2455,7 +2455,11 @@ class SIMDScheduling(BaseScheduling):
 
     # pyrefly: ignore [bad-override]
     def benchmark_codegened_module(
-        self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
+        self,
+        mod,
+        n_spills_threshold=8,
+        node_names: OrderedSet[str] | None = None,
+        skip_perf_cache: bool = False,
     ) -> tuple[float, str]:
         raise NotImplementedError
 
@@ -3705,12 +3709,15 @@ class SIMDScheduling(BaseScheduling):
         The subkernels are then benchmarked in compile-completion order through the standard
         benchmark_codegened_module path (the same one benchmark_fused_nodes uses), so device
         benchmarking overlaps the remaining precompiles while retaining preserve_rng_state,
-        argument cloning, the n_spills guard and the perf cache. Subkernels with a single candidate
-        config (or an in-memory / on-disk autotune-cache hit) are taken directly with no benchmark.
+        argument cloning and the n_spills guard. Subkernels with a single candidate config (or an
+        in-memory / on-disk autotune-cache hit) are taken directly with no benchmark. A subkernel
+        whose compile or benchmark fails is marked register_bound so the caller carves it out to
+        run standalone instead of failing the compile.
         """
         from concurrent.futures import as_completed
 
         from ..async_compile import AsyncCompile
+        from ..codecache import CodeCacheFuture
 
         ratio = config.combo_kernel_register_pressure_ratio
         async_compile = AsyncCompile()
@@ -3719,10 +3726,20 @@ class SIMDScheduling(BaseScheduling):
         futures_by_autotuner: dict[int, Any] = {}
         seen_autotuners: OrderedSet[int] = OrderedSet()
 
+        # Benchmark codegen must not count toward generated_kernel_count: these kernels
+        # are never emitted into the wrapper (matches debug_triton_code's save/restore).
+        old_kernel_count = metrics.generated_kernel_count
         for pn in group:
             node_info = node_schedule_map[pn]
-            # Cooperative reductions are disabled to match how the combo emits its subkernels.
-            with config.patch({"triton.cooperative_reductions": False}):
+            # Cooperative reductions are disabled to match how the combo emits its
+            # subkernels; force_cooperative_reductions must be patched too since it
+            # short-circuits should_use_cooperative_reduction before the first flag.
+            with config.patch(
+                {
+                    "triton.cooperative_reductions": False,
+                    "triton.force_cooperative_reductions": False,
+                }
+            ):
                 src_code = self.generate_kernel_code_from_nodes(
                     pn.get_nodes(),
                     benchmark_kernel=True,
@@ -3750,7 +3767,12 @@ class SIMDScheduling(BaseScheduling):
                 and (not single or (ratio > 0 and node_info.features.is_reduction()))
             )
             if needs_precompile and use_process_pool:
-                future = async_compile.triton("triton_", src_code)
+                # triton() may compile synchronously and return a raw autotuner
+                # (e.g. TRITON_INTERPRET=1) despite use_process_pool being True.
+                maybe_future = async_compile.triton("triton_", src_code)
+                future = (
+                    maybe_future if isinstance(maybe_future, CodeCacheFuture) else None
+                )
                 futures_by_autotuner[autotuner_id] = future
             work.append(
                 (
@@ -3762,16 +3784,38 @@ class SIMDScheduling(BaseScheduling):
                     future,
                 )
             )
+        metrics.generated_kernel_count = old_kernel_count
 
         winners: list[SubkernelTune | None] = [None] * len(work)
+
+        def fallback(index: int, pn: Any) -> None:
+            # Compile/benchmark failed: mark register_bound so the caller carves this
+            # subkernel out to run standalone (the pre-combo form) instead of stitching
+            # an arbitrary config or failing the compile.
+            counters["inductor"]["combo_subkernel_autotune_fallback"] += 1
+            log.warning("combo compile-time autotune failed for %s; carving out", pn)
+            winners[index] = SubkernelTune(None, None, True)
 
         def benchmark(index: int) -> None:
             pn, node_info, mod, already_tuned, single, _ = work[index]
             autotuner = mod.triton_
             configs = autotuner.configs
+            benchmark_failed = False
             if not already_tuned and not single:
-                # Runs the autotuner (or loads the perf cache); the winner lands in launchers[0].
-                self.benchmark_codegened_module(mod)
+                # skip_perf_cache: a .kernel_perf hit returns before the autotuner runs,
+                # leaving no launchers and an untuned configs[0] as the "winner".
+                try:
+                    ms, _mod_path = self.benchmark_codegened_module(
+                        mod, skip_perf_cache=True
+                    )
+                except Exception:
+                    log.debug("combo subkernel benchmark raised", exc_info=True)
+                    ms = float("inf")
+                # inf means the benchmark failed or spilled; launchers != 1 means the
+                # autotune race never pruned to a winner.
+                benchmark_failed = (
+                    math.isinf(ms) and len(autotuner.launchers) != 1
+                ) or len(autotuner.launchers) > 1
             elif (
                 ratio > 0
                 and not autotuner.launchers
@@ -3789,11 +3833,14 @@ class SIMDScheduling(BaseScheduling):
                         pn,
                         exc_info=True,
                     )
+            if benchmark_failed:
+                fallback(index, pn)
+                return
             launchers = autotuner.launchers
             info = autotuner.autotune_cache_info or {}
-            # cached == no fresh benchmark ran: in-process reuse (launchers already set), or the
-            # benchmark was skipped / perf-cache short-circuited (no launchers), or a .best_config
-            # hit. (A skipped single-config kernel has no launchers, so it lands here too.)
+            # cached == no fresh benchmark ran: in-process reuse (launchers already set), or
+            # the benchmark was skipped (no launchers), or a .best_config hit. (A skipped
+            # single-config kernel has no launchers, so it lands here too.)
             cached = (
                 already_tuned
                 or not launchers
@@ -3806,10 +3853,12 @@ class SIMDScheduling(BaseScheduling):
             ] += 1
             if launchers:
                 win_config = launchers[0].config
-            else:
-                if configs is None:
-                    raise AssertionError("expected combo subkernel autotune configs")
+            elif configs:
                 win_config = configs[0]
+            else:
+                # configs is None after a precompile that failed to produce launchers.
+                fallback(index, pn)
+                return
             reg_occ = None
             if ratio > 0 and launchers:
                 reg_occ = _register_limited_occupancy(
@@ -3828,20 +3877,32 @@ class SIMDScheduling(BaseScheduling):
             else:
                 pending.setdefault(raw_future, []).append(index)
 
+        def resolve_and_benchmark(future: Any, indices: list[int]) -> None:
+            if future is not None:
+                try:
+                    # Waiting on the raw pool future (not the LambdaFuture wrapper)
+                    # surfaces worker exceptions without repeating the wrapper's
+                    # parent-side precompile of a kernel we discard: benchmark() uses
+                    # mod.triton_, whose own precompile hits the now-warm disk cache.
+                    future.result()
+                except Exception:
+                    for index in indices:
+                        fallback(index, work[index][0])
+                    return
+            for index in indices:
+                benchmark(index)
+
         resolved_futures: OrderedSet[int] = OrderedSet()
         for index in ready:
             future = work[index][-1]
-            if future is not None and id(future) not in resolved_futures:
-                future.result()
+            if future is not None and id(future) in resolved_futures:
+                future = None
+            elif future is not None:
                 resolved_futures.add(id(future))
-            benchmark(index)
+            resolve_and_benchmark(future, [index])
 
         for raw_future in as_completed(pending):
-            indices = pending[raw_future]
-            future = work[indices[0]][-1]
-            future.result()
-            for index in indices:
-                benchmark(index)
+            resolve_and_benchmark(raw_future, pending[raw_future])
 
         if any(winner is None for winner in winners):
             raise AssertionError("expected all combo subkernels to be autotuned")
