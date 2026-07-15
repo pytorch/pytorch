@@ -8116,8 +8116,12 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             dynamic_guard_code,
         )
 
-        stale_block_mask = create_block_mask(mask_mod, None, None, 320, 320, device=device)
-        with self.assertRaisesRegex(Exception, "block_mask was created for a smaller length"):
+        stale_block_mask = create_block_mask(
+            mask_mod, None, None, 320, 320, device=device
+        )
+        with self.assertRaisesRegex(
+            Exception, "block_mask was created for a smaller length"
+        ):
             flex_attention_call(*create_inputs(512)[:3], stale_block_mask)
 
     @supported_platform
