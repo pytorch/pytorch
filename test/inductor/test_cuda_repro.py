@@ -3158,6 +3158,10 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertNotEqual(eager_div, compiled_div)
         self.assertTrue("div_rn" not in code)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "fbcode Triton toolchain flushes subnormals to zero despite disable_ftz",
+    )
     @config.patch({"eager_numerics.disable_ftz": True})
     def test_disabling_ftz_yields_subnormals(self):
         from decimal import Decimal
