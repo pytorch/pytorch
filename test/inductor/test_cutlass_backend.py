@@ -647,6 +647,10 @@ class TestCutlassBackend(TestCase):
 
             torch.testing.assert_close(actual, expected)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "JIT cpp_wrapper CUTLASS kernel .so fails to dlopen in fbcode build env",
+    )
     @unittest.skipIf(torch.version.hip is not None, "ROCm not supported")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @skipXPUIf(not Xe2_Or_Later, "")
