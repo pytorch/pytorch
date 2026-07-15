@@ -51,6 +51,16 @@ if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
     pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
 
+    # Runtime equivalent of the ROCm image fix (#190013): cp315 has no numpy
+    # wheel, so numpy is built from source, and the ROCm image's system 3.6
+    # python3-devel (python3.pc) hijacks meson's Cython check. Remove the package
+    # so the source build resolves the interpreter being tested. Validates the
+    # image fix through a normal binary build; drop once #190013 lands. No-op on
+    # non-ROCm.
+    if [[ "${DESIRED_CUDA}" == *rocm* ]]; then
+      yum remove -y python3-devel || true
+    fi
+
     # numpy tests:
     # We test 1 version no numpy. 1 version with numpy 1.x and rest with numpy 2.x
     if [[ "\$python_nodot" = *311* ]]; then

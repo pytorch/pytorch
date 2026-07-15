@@ -18,10 +18,28 @@ from pathlib import Path
 # NumPy build-time pin selected by Python version.
 # Keep in sync with .ci/manywheel/build_common.sh.
 NUMPY_PINS: list[tuple[str, str]] = [
+    ("cp315", "2.5.1"),
     ("cp314", "2.3.4"),
     ("cp31", "2.1.0"),
 ]
 DEFAULT_NUMPY = "2.0.2"
+
+
+def remove_system_python3_devel() -> None:
+    """Runtime equivalent of the ROCm manylinux image fix (#190013).
+
+    cp315 has no numpy wheel, so numpy is built from source. The ROCm image's
+    base (rocm/dev-almalinux-8) ships the distro's system python3-devel (Python
+    3.6), whose python3.pc is on pkg-config's default search path and hijacks
+    numpy's meson Cython check ("Cython requires Python 3.8+"). We never install
+    it and never build against the system interpreter (wheels target
+    /opt/python/cp*), so remove the package -- exactly what #190013 does in the
+    image, applied here at runtime so it is validated through a normal binary
+    build. Once #190013 lands this can be dropped. No-op on non-ROCm images.
+    """
+    if "rocm" not in os.environ.get("DESIRED_CUDA", ""):
+        return
+    subprocess.run(["yum", "remove", "-y", "python3-devel"], check=False)
 
 
 def retry(cmd: list[str], delays: tuple[int, ...] = (1, 2, 4, 8)) -> None:
@@ -55,6 +73,7 @@ def main() -> None:
     args = parser.parse_args()
 
     os.chdir(args.package_dir)
+    remove_system_python3_devel()
     pip_install("-qU", "-r", "requirements-build.txt")
     # The CUPTI field-id codegen (tools/gen_cupti_stubs.py) parses cupti_activity.h with
     # libclang's python bindings. Install libclang only when a sufficiently-new CUPTI header
