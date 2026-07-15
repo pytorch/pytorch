@@ -36,6 +36,7 @@
 #define ROCM_HIPCUB(x) x
 #endif
 
+#ifndef USE_ROCM
 #if CUB_V3_4_PLUS()
 #include <cuda/iterator>
 #include <cuda/functional>
@@ -68,15 +69,22 @@ using cccl_counting_iterator = ::thrust::counting_iterator<T>;
 using cccl_discard_iterator  = ::thrust::discard_iterator<>;
 template<class Iter>
 auto cccl_make_reverse_iterator(Iter it) { return ::thrust::make_reverse_iterator(it); }
+#endif
 #else
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/reverse_iterator.h>
+#if CUB_V3_PLUS()
+#define ATEN_CUB_TRANSFORM_ITERATOR(ValueType, ...) ::thrust::transform_iterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) ::thrust::counting_iterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) ::thrust::constant_iterator<__VA_ARGS__>
+#else
 #define ATEN_CUB_TRANSFORM_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::TransformInputIterator<__VA_ARGS__>
 #define ATEN_CUB_COUNTING_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::CountingInputIterator<__VA_ARGS__>
 #define ATEN_CUB_CONSTANT_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<__VA_ARGS__>
+#endif
 #define ATEN_CUB_MAXIMUM() NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max()
 template<class T>
 using cccl_constant_iterator = ::thrust::constant_iterator<T>;
