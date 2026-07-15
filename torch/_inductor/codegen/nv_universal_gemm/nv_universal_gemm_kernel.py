@@ -489,7 +489,20 @@ def _nvgemm_run(
     epilogue_source: str = "",
     has_epilogue: bool = False,
     aux_tensors: tuple = (),
+    swap_ab: bool = False,
 ):
+    swap_ab_final_out = None
+    if swap_ab and len(input_tensors) >= 4:
+        a, b, sa, sb = input_tensors[:4]
+        input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+        # Kernel computes (N, M) but caller expects (M, N) in `out`.
+        # Use a contiguous (N, M) temp for the kernel, then transpose-copy.
+        import torch
+
+        swap_ab_final_out = out
+        out = torch.empty(
+            out.shape[1], out.shape[0], dtype=out.dtype, device=out.device
+        )
     from cutlass_api.artifact import CompiledArtifact
 
     from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
@@ -565,6 +578,9 @@ def _nvgemm_run(
         workspace=workspace,
         assume_supported_args=True,
     )
+
+    if swap_ab_final_out is not None:
+        swap_ab_final_out.copy_(out.t())
 
 
 _MAX_ACTIVE_CLUSTERS_MODULES = [
@@ -696,6 +712,7 @@ class NVUniversalGemmKernel(Kernel):
         epilogue_reads: list[str] | None = None,
         epilogue_writes: list[str] | None = None,
         epilogue_var_renames: dict[str, Any] | None = None,
+        swap_ab: bool = False,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
@@ -713,6 +730,7 @@ class NVUniversalGemmKernel(Kernel):
         self.epilogue_reads = epilogue_reads or []
         self.epilogue_writes = epilogue_writes or []
         self.epilogue_var_renames = epilogue_var_renames or {}
+        self.swap_ab = swap_ab
 
         self._template_input_args: list[tuple[str, Buffer]] = []
 
@@ -850,6 +868,8 @@ class NVUniversalGemmKernel(Kernel):
                 code.writeline(f"epilogue_source={epi_source_expr},")
                 code.writeline(f"has_epilogue={has_epilogue},")
                 code.writeline(f"aux_tensors={aux_tensors_expr},")
+                if self.swap_ab:
+                    code.writeline("swap_ab=True,")
             code.writeline(")")
 
         # -- Precompile hook --
