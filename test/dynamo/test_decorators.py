@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import base64
+import binascii
 import functools
 import os
 import re
@@ -1233,72 +1235,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         torch._dynamo.reset()
         counters.clear()
 
-        base46_map = [
-            "A",
-            "B",
-            "C",
-            "D",
-            "E",
-            "F",
-            "G",
-            "H",
-            "I",
-            "J",
-            "K",
-            "L",
-            "M",
-            "N",
-            "O",
-            "P",
-            "Q",
-            "R",
-            "S",
-            "T",
-            "U",
-            "V",
-            "W",
-            "X",
-            "Y",
-            "Z",
-            "a",
-            "b",
-            "c",
-            "d",
-            "e",
-            "f",
-            "g",
-            "h",
-            "i",
-            "j",
-            "k",
-            "l",
-            "m",
-            "n",
-            "o",
-            "p",
-            "q",
-            "r",
-            "s",
-            "t",
-            "u",
-            "v",
-            "w",
-            "x",
-            "y",
-            "z",
-            "0",
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-            "6",
-            "7",
-            "8",
-            "9",
-            "+",
-            "/",
-        ]
+        base46_map = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
         with self.assertRaisesRegex(TypeError, "Signature mismatch"):
 
@@ -1330,7 +1267,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 cipher.append(base46_map[int(buffer[0]) >> 2])
                 if len(buffer) == 1:
                     cipher.append(base46_map[(int(buffer[0]) & 0x03) << 4])
-                    cipher.append("=")
+                    cipher.append(b"=")
                 else:
                     cipher.append(
                         base46_map[
@@ -1340,8 +1277,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
                     cipher.append(base46_map[((int(buffer[1]) & 0x0F) << 2)])
                 cipher.append("=")
             if newline:
-                cipher.append(b"\n")
-            return b"".join(cipher)
+                cipher.append("\n")
+            return "".join(cipher).encode()
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = polyfill

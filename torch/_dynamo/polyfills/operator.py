@@ -15,17 +15,11 @@ from . import import_fresh_module
 
 # Import the pure Python operator module, blocking the C extension
 py_operator = import_fresh_module("operator", blocked=["_operator"])
-assert py_operator is not None
+if py_operator is None:
+    raise ImportError("operator module not found")
 
 
 if TYPE_CHECKING:
-<<<<<<< HEAD
-    from collections.abc import Callable, Iterable, Sequence
-
-
-# Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
-__all__ = ["attrgetter", "concat", "countOf", "iconcat", "itemgetter", "methodcaller"]
-=======
     from collections.abc import Callable, Container, Iterable, MutableSequence, Sequence
 
 
@@ -59,7 +53,6 @@ __all__ = [
     "truediv",
     "truth",
 ]
->>>>>>> db29d645a2b (Increase dynamo coverage of the `operator` module by adding polyfills.)
 
 
 _T = TypeVar("_T")
@@ -173,14 +166,6 @@ def methodcaller(name: str, /, *args: Any, **kwargs: Any) -> Callable[[Any], Any
         return getattr(obj, name)(*args, **kwargs)
 
     return caller
-<<<<<<< HEAD
-=======
-
-
-# Reference: https://docs.python.org/3/library/operator.html#operator.countOf
-@substitute_in_graph(operator.countOf, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
-def countOf(a: Iterable[_T], b: _T, /) -> int:
-    return sum(it is b or it == b for it in a)
 
 
 @substitute_in_graph(operator.add, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
@@ -229,11 +214,6 @@ if sys.version_info >= (3, 11):
 @substitute_in_graph(operator.getitem, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
 def getitem(a, b, /) -> Any:
     return py_operator.getitem(a, b)
-
-
-@substitute_in_graph(operator.concat, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
-def concat(a: Sequence[_T], b: Sequence[_T], /) -> Sequence[_T]:
-    return py_operator.concat(a, b)
 
 
 @substitute_in_graph(operator.indexOf, can_constant_fold_through=False)  # type: ignore[arg-type,misc]
@@ -304,4 +284,3 @@ def delitem(a: MutableSequence[_T], b: SupportsIndex, /) -> None:
 @substitute_in_graph(operator.index, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
 def index(a: SupportsIndex, /) -> int:
     return py_operator.index(a)
->>>>>>> db29d645a2b (Increase dynamo coverage of the `operator` module by adding polyfills.)
