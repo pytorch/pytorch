@@ -6482,7 +6482,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
     Buffer for NVIDIA Universal GEMM kernels.
 
     Unlike CuteDSL templates which use Jinja templates, this generates
-    simpler Python code that directly calls the cutlass_api library.
+    simpler Python code that directly calls the cutlass.operators library.
     """
 
     def __init__(
@@ -6515,8 +6515,8 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.swap_ab = swap_ab
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
-            "kernel_name": kernel.metadata.kernel_name,
-            "min_cc": kernel.metadata.min_cc,
+            "kernel_name": kernel.metadata.operator_name,
+            "min_cc": kernel.designed_for_min_cc,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
