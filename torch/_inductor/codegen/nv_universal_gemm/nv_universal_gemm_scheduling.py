@@ -589,7 +589,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
 
                 k = get_kernel_by_name(kernel_name)
                 if k is not None and hasattr(k, "impl"):
-                    from cutlass_api.providers.cutedsl.utils import (
+                    from cutlass.operators.providers.cutedsl.integration_utils.mma import (
                         get_max_active_clusters,
                     )
 
