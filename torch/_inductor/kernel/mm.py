@@ -738,6 +738,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             input_reorder=[2, 0, 1],
         )
 
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2):
+        from ..codegen.nv_universal_gemm import add_nv_universal_addmm_choices
+
+        # inp is the original (un-expanded) bias, so a 1D row vector routes to
+        # the row-broadcast epilogue impl.
+        add_nv_universal_addmm_choices(
+            choices, layout, kernel_inputs, inp, alpha=alpha, beta=beta
+        )
+
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
             choices,
