@@ -12,10 +12,6 @@ inputs:
   custom-tag-prefix:
     description: Custom tag prefix for the docker image
     required: false
-  docker-repository:
-    description: Target registry/repository for the published image.
-    required: false
-    default: 'docker.io/pytorch'
   DOCKER_TOKEN:
     description: Docker token for authentication
     required: true
@@ -54,7 +50,6 @@ runs:
         DOCKER_IMAGE_NAME: ${{ inputs.docker-image-name }}
         DOCKER_IMAGE_PREFIX: ${{ inputs.custom-tag-prefix }}
         DOCKER_BUILD_DIR: ${{ inputs.docker-build-dir }}
-        DOCKER_REPOSITORY: ${{ inputs.docker-repository }}
       shell: bash
       run: |
         set -euxo pipefail
@@ -72,7 +67,7 @@ runs:
         # .ci/docker-hash tags are always produced; the floating ${prefix} tag is
         # only published from main so a release-branch rebuild can't clobber the
         # image main CI consumes.
-        PREFIX="${DOCKER_REPOSITORY}/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
+        PREFIX="docker.io/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}"
         TAGS=(
           -t "${PREFIX}-${GIT_BRANCH_NAME}"
           -t "${PREFIX}-${GIT_COMMIT_SHA}"
