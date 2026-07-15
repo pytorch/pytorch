@@ -26,7 +26,6 @@
 #include <initializer_list>
 #include <iterator>
 #include <ostream>
-#include <ranges>
 #include <type_traits>
 #include <vector>
 
@@ -290,6 +289,8 @@ using IntList [[deprecated(
 
 } // namespace c10
 
+#if __cplusplus >= 202002L
+#include <ranges>
 // ArrayRef is a non-owning view; iterators remain valid after the ArrayRef
 // is destroyed (the underlying array outlives it). Opt in to the ranges
 // borrowed-range contract so that algorithms like std::ranges::find return
@@ -298,3 +299,4 @@ namespace std::ranges {
 template <typename T>
 inline constexpr bool enable_borrowed_range<c10::ArrayRef<T>> = true;
 } // namespace std::ranges
+#endif
