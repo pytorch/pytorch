@@ -89,11 +89,6 @@ class _StoragePrefix:
     prefix: str
 
 
-# Transmitted between ranks as SavePlan/WriteResult storage_data via the c10d
-# object collectives (which deserialize with weights_only=True by default).
-torch.serialization.add_safe_globals([_StorageInfo, _StoragePrefix])
-
-
 class SerializationFormat(Enum):
     TORCH_SAVE = "torch_save"
     SAFETENSORS = "safetensors"
