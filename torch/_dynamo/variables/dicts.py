@@ -1584,7 +1584,6 @@ class DunderDictVariable(ConstDictVariable):
         )
 
     tp_methods = {
-        **ConstDictVariable.tp_methods,
         "copy": Method(dict_copy, MethodFlags.NOARGS),
     }
 
