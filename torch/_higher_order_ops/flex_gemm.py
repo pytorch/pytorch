@@ -73,63 +73,6 @@ FLEX_GEMM_BODY_GRAPH_PASSES: tuple[
 ] = (mark_flex_gemm_body_gemm_node,)
 
 
-@torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())
-def mx_e8m0_scale(amax: torch.Tensor, max_power: int = 8) -> torch.Tensor:
-    """Encode FLOOR-mode MX scale from an absolute max as biased E8M0."""
-    mbits_f32 = 23
-    f32_exp_bias = 127
-    e8m0_exp_bias = 127
-    e8m0_nan_val = 255
-    max_abs = amax.to(torch.float32)
-    max_abs_int32 = max_abs.view(torch.int32)
-    extracted_pow2 = (
-        (torch.bitwise_right_shift(max_abs_int32, mbits_f32)) & 0xFF
-    ) - f32_exp_bias
-    scale_e8m0_unbiased = extracted_pow2 - max_power
-    scale_e8m0_unbiased = torch.clamp(
-        scale_e8m0_unbiased, min=-e8m0_exp_bias, max=e8m0_exp_bias + 1
-    )
-    scale_e8m0_biased = (scale_e8m0_unbiased + e8m0_exp_bias).to(torch.uint8)
-    scale_e8m0_biased = torch.where(
-        torch.isnan(max_abs),
-        torch.full_like(scale_e8m0_biased, e8m0_nan_val),
-        scale_e8m0_biased,
-    )
-    return scale_e8m0_biased.view(torch.float8_e8m0fnu)
-
-
-@mx_e8m0_scale.register_fake
-def _(amax: torch.Tensor, max_power: int = 8) -> torch.Tensor:
-    return torch.empty_strided(
-        tuple(amax.shape),
-        tuple(amax.stride()),
-        device=amax.device,
-        dtype=torch.float8_e8m0fnu,
-    )
-
-
-@torch.library.custom_op("flex_gemm::nvfp4_e4m3_scale", mutates_args=())
-def nvfp4_e4m3_scale(amax: torch.Tensor) -> torch.Tensor:
-    """Encode NVFP4 per-block scale as E4M3."""
-    scale = amax.to(torch.float32) / 6.0
-    scale = torch.clamp(
-        scale,
-        min=torch.finfo(torch.float8_e4m3fn).tiny,
-        max=torch.finfo(torch.float8_e4m3fn).max,
-    )
-    return scale.to(torch.float8_e4m3fn)
-
-
-@nvfp4_e4m3_scale.register_fake
-def _(amax: torch.Tensor) -> torch.Tensor:
-    return torch.empty_strided(
-        tuple(amax.shape),
-        tuple(amax.stride()),
-        device=amax.device,
-        dtype=torch.float8_e4m3fn,
-    )
-
-
 def apply_flex_gemm_body_graph_passes(
     body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
 ) -> None:

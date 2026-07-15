@@ -462,7 +462,9 @@ def gemm_epilogue(
             f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
         )
     expected_shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
-    expected_dtype = a.dtype if out_dtype is None else out_dtype
+    expected_dtype = out_dtype
+    if expected_dtype is None:
+        expected_dtype = out.dtype if out is not None else a.dtype
     effective_C = normalize_c(C, expected_shape, beta)
     if out is not None:
         check_matrix("out", out)
