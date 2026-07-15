@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -214,6 +215,42 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void eagerConnectSingleDevice(at::Device device) override;
   void shutdown() override;
   void abort() override;
+  ::c10d::ErrorType getError() override;
+
+  // Fault tolerance / reconfigure API (see Backend.hpp). The handle encodes
+  // "nccl2:<rank>:<uuid>:<store host:port>"; reconfigure() tears down the
+  // current communicator generation (if any) and bootstraps a fresh ncclComm
+  // over the surviving/new members. Implemented in
+  // ProcessGroupNCCLReconfigure.cpp.
+  bool supportsReconfigure() const override {
+    return true;
+  }
+  ::c10d::ReconfigureHandle get_reconfigure_handle() const override;
+  c10::intrusive_ptr<::c10d::Work> reconfigure(
+      const ::c10d::ReconfigureOptions& opts) override;
+
+  // Window / one-sided RMA API (see Backend.hpp and WindowNCCL.hpp). Windows
+  // are zero-copy: tensors must be allocated from this backend's NCCL mempool
+  // (torch.cuda.MemPool(backend.mem_allocator)); the caching-allocator hook
+  // registers each mempool segment with the communicator and WindowNCCL
+  // lazily upgrades the segment to a collective NCCL_WIN_COLL_SYMMETRIC
+  // window on first use. Requires NCCL 2.29+ at runtime.
+  bool supportsWindow() const override {
+    return true;
+  }
+  c10::intrusive_ptr<::c10d::Window> new_window(
+      const std::optional<at::Tensor>& tensor = std::nullopt) override;
+
+  // Caching-allocator segment registration (called by
+  // NcclCachingAllocatorHook, potentially from allocator threads).
+  void register_address(void* addr, size_t len);
+  void deregister_address(void* addr);
+  // Returns {window handle, byte offset of ptr within the segment}, or
+  // {nullptr, 0} if ptr is not inside a window-registered segment.
+  std::pair<ncclWindow_t, size_t> lookupSegmentWindow(const void* ptr);
+  // Registers the segment containing ptr as a NCCL_WIN_COLL_SYMMETRIC window
+  // if it is not one already. Collective: all ranks must call it together.
+  ncclResult_t ensureSegmentWindow(const void* ptr);
 
   void registerAbortHook(int64_t hook_id, ::c10d::AbortHook hook) override;
   void unregisterAbortHook(int64_t hook_id) override;
@@ -241,6 +278,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   int64_t getCommPtr() const;
 
   friend class WorkNCCL;
+  friend class WindowNCCL;
 
  protected:
   [[nodiscard]] cudaEvent_t getEvent();
@@ -469,6 +507,24 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::string name_;
 
   c10::intrusive_ptr<Options> options_c10d_;
+
+  // Identifies the current communicator generation in the reconfigure regime;
+  // -1 until the first reconfigure(). Baked into the reconfigure handle so
+  // peers can detect membership of the same generation.
+  int64_t reconfigure_uuid_{-1};
+
+  // Registration handle for a caching-allocator segment (and its symmetric
+  // window, once ensureSegmentWindow upgraded it). Sorted by base address so
+  // lookupSegmentWindow can find the containing segment via upper_bound.
+  struct RegistrationHandle {
+    void* regHandle{nullptr};
+    ncclWindow_t winHandle{nullptr};
+    size_t len{0};
+  };
+  std::map<void*, RegistrationHandle> memoryRegistrationHandles_;
+  // Guards memoryRegistrationHandles_: register/deregister_address run on
+  // allocator threads while window ops look segments up on the main thread.
+  std::mutex memory_registration_mutex_;
 
   // Abort hooks (c10d::Backend API; storage was in torchcomms' TorchCommBackend
   // base, folded in here).

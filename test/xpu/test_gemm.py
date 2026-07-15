@@ -155,8 +155,6 @@ class TestBasicGEMM(TestCase):
             f(t, m, v, alpha=alpha, beta=beta, out=res2, use_gelu=True)
         else:
             f(t, m, v, alpha=alpha, beta=beta, out=res2)
-        m.to(numpy_dtype).cpu().numpy()
-        v.to(numpy_dtype).cpu().numpy()
         res3 = alpha * (
             m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy()
         )

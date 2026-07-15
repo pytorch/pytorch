@@ -23,6 +23,11 @@ def gemm_config_key(config: quack_gemm_config.GemmConfig) -> GemmConfigKey:
     )
 
 
+def gemm_config_from_key(config_key: GemmConfigKey) -> quack_gemm_config.GemmConfig:
+    """Reconstruct a QuACK GEMM config from its generated-code cache key."""
+    return quack_gemm_config.GemmConfig(**dict(config_key))
+
+
 @cache
 def dense_gemm_config_priority_keys() -> tuple[GemmConfigKey, ...]:
     """Return the measured dense FlexGEMM QuACK preference order."""
