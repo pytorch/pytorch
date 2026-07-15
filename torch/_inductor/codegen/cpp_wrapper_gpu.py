@@ -1105,7 +1105,7 @@ class CppWrapperGpu(CppWrapperCpu):
         if self.device == "cuda":
             buffer.writeline(
                 maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
+                    "CUDA_DRIVER_CHECK(cuCtxSynchronize());"
                 )
             )
             return
