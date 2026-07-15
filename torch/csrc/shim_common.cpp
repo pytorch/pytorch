@@ -2,6 +2,7 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
@@ -147,11 +148,17 @@ static StableIValue from_ivalue(
         return torch::stable::detail::_from(
             std::nullopt, extension_build_version);
       }
-      const StableIValue value =
-          from_ivalue(inner_type, ivalue, extension_build_version);
+      // Allocate the heap slot (the fallible step) before producing the owning
+      // inner value, and guard it: if the recursive from_ivalue throws, the
+      // freshly allocated (still value-0) slot would otherwise leak. On success
+      // ownership passes to the caller, so release the guard. Mirrors
+      // FromImpl<std::optional<T>> in stable/stableivalue_conversions.h.
       StableIValue* sivp = nullptr;
       TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&sivp));
-      *sivp = value;
+      auto sivp_guard = c10::make_scope_exit(
+          [&]() noexcept { (void)torch_delete_stable_ivalue(sivp); });
+      *sivp = from_ivalue(inner_type, ivalue, extension_build_version);
+      sivp_guard.release();
       return torch::stable::detail::_from(sivp, extension_build_version);
     }
     case c10::TypeKind::ListType: {
@@ -310,6 +317,22 @@ static c10::IValue to_ivalue(
   }
 }
 
+// Frees an owning StableIValue that from_ivalue produced for `type`. Delegates
+// to to_ivalue, which consumes the handle and, for aggregate types
+// (optional/list), recursively frees every nested owning handle -- the raw
+// deleters (torch_delete_list / torch_delete_stable_ivalue) would leak those.
+// Only used on the error/rollback path: we are already unwinding, so a
+// secondary failure is swallowed.
+static void free_owning_stable_ivalue(
+    const c10::TypePtr& type,
+    StableIValue stable_ivalue,
+    uint64_t extension_build_version) noexcept {
+  try {
+    (void)to_ivalue(type, stable_ivalue, extension_build_version);
+  } catch (...) {
+  }
+}
+
 class StableIValueBoxedKernel : public c10::OperatorKernel {
  public:
   StableIValueBoxedKernel(
@@ -328,25 +351,65 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     auto ministack =
         std::make_unique<StableIValue[]>(std::max(num_arguments, num_returns));
 
+    // Produce owning argument handles (in reverse) into `ministack`. If a
+    // conversion throws, the handles already written leak, so free them on
+    // unwind. `args_converted` counts the slots holding handles produced here
+    // (from_ivalue is all-or-nothing per slot, so the in-flight slot is never
+    // counted).
+    size_t args_converted = 0;
+    auto arg_guard = c10::make_scope_exit([&]() noexcept {
+      for (size_t i = 0; i < args_converted; i++) {
+        const auto ministack_idx = num_arguments - i - 1;
+        free_owning_stable_ivalue(
+            schema.arguments()[ministack_idx].real_type(),
+            ministack[ministack_idx],
+            extension_build_version_);
+      }
+    });
+
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
       const c10::TypePtr& arg_type =
           schema.arguments()[ministack_idx].real_type();
       ministack[ministack_idx] = from_ivalue(
           arg_type, torch::jit::pop(stack), extension_build_version_);
+      args_converted++;
     }
+
+    // Ownership of the argument handles transfers to the boxed function, which
+    // consumes them and overwrites `ministack` with the return handles. Release
+    // the guard now: keeping it armed across fn_ could double-free arguments fn_
+    // already consumed, and fn_ is a C-ABI boundary that does not propagate C++
+    // exceptions by contract.
+    arg_guard.release();
 
     // boxed function is going to take a stack of StableIValues, cast them to
     // our schema values, and run the function and modify the StableIValue stack
     fn_(ministack.get(), num_arguments, num_returns);
 
+    // Consume the return handles via to_ivalue. Each handle is handed to
+    // to_ivalue (which owns its cleanup) as we reach it, so mark the slot
+    // pending before the call; if a later conversion throws, only the
+    // not-yet-handed handles [ret_pending, num_returns) are still ours to free.
+    size_t ret_pending = 0;
+    auto ret_guard = c10::make_scope_exit([&]() noexcept {
+      for (size_t idx = ret_pending; idx < num_returns; idx++) {
+        free_owning_stable_ivalue(
+            schema.returns()[idx].real_type(),
+            ministack[idx],
+            extension_build_version_);
+      }
+    });
+
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue
     for (size_t idx = 0; idx < num_returns; idx++) {
       const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
+      ret_pending = idx + 1;
       torch::jit::push(
           stack, to_ivalue(ret_type, ministack[idx], extension_build_version_));
     }
+    ret_guard.release();
   }
 
  private:
@@ -420,6 +483,22 @@ AOTITorchError aoti_torch_call_dispatcher(
 
     op.callBoxed(ivalue_stack);
 
+    // Produce owning return handles into the caller's `stack`. If a later
+    // conversion throws, the handles already written leak (the caller only
+    // observes an error code), so free them on unwind; on success the caller
+    // owns them, so release the guard. `returns_converted` counts written slots
+    // (from_ivalue is all-or-nothing, so the in-flight slot is excluded).
+    size_t returns_converted = 0;
+    auto return_guard = c10::make_scope_exit([&]() noexcept {
+      for (size_t idx = 0; idx < returns_converted; idx++) {
+        const auto stack_idx = num_returns - idx - 1;
+        free_owning_stable_ivalue(
+            schema.returns()[idx].real_type(),
+            stack[stack_idx],
+            TORCH_ABI_VERSION);
+      }
+    });
+
     // there should then be num_returns IValues on the stack, which
     // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
@@ -427,7 +506,9 @@ AOTITorchError aoti_torch_call_dispatcher(
       const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), TORCH_ABI_VERSION);
+      returns_converted++;
     }
+    return_guard.release();
   });
 }
 
@@ -575,6 +656,22 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
 
     op.callBoxed(ivalue_stack);
 
+    // Produce owning return handles into the caller's `stack`. If a later
+    // conversion throws, the handles already written leak (the caller only
+    // observes an error code), so free them on unwind; on success the caller
+    // owns them, so release the guard. `returns_converted` counts written slots
+    // (from_ivalue is all-or-nothing, so the in-flight slot is excluded).
+    size_t returns_converted = 0;
+    auto return_guard = c10::make_scope_exit([&]() noexcept {
+      for (size_t idx = 0; idx < returns_converted; idx++) {
+        const auto stack_idx = num_returns - idx - 1;
+        free_owning_stable_ivalue(
+            schema.returns()[idx].real_type(),
+            stack[stack_idx],
+            extension_build_version);
+      }
+    });
+
     // there should then be num_returns IValues on the stack, which
     // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
@@ -582,7 +679,9 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
       const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), extension_build_version);
+      returns_converted++;
     }
+    return_guard.release();
   });
 }
 
