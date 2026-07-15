@@ -176,6 +176,10 @@ class TestGpuWrapper(InductorTestCase):
         ):
             wrapper.generate_debug_sync(IndentedBuffer())
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "cpp_wrapper JIT .so links libcuda (driver) only, not libcudart; cudaDeviceSynchronize is an undefined symbol in fbcode",
+    )
     def test_debug_sync_graph(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
@@ -193,6 +197,10 @@ class TestGpuWrapper(InductorTestCase):
             result = compiled(x)
         self.assertEqual(result, x * 2)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "cpp_wrapper JIT .so links libcuda (driver) only, not libcudart; cudaDeviceSynchronize is an undefined symbol in fbcode",
+    )
     def test_debug_sync_kernel(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
