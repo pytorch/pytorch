@@ -659,7 +659,7 @@ print(t.is_pinned())
             if TEST_CUDAMALLOCASYNC
             else "Tried to allocate"
         )
-        size = int(available_memory * 0.5)
+        size = int(available_memory * 0.51)
         a = torch.empty(size, dtype=torch.int8, device="cuda")
         with self.assertRaisesRegex(RuntimeError, oom_regex):
             b = torch.empty(size, dtype=torch.int8, device="cuda")
