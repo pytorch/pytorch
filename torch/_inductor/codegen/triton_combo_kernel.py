@@ -1702,6 +1702,10 @@ class ComboKernel(Kernel):
                 # Compile-time autotune: per-subkernel winning block sizes are passed as args;
                 # num_warps / num_stages / backend kwargs are autotuned over the distinct winner
                 # launch candidates (flattened to tuples so the meta stays repr-serializable).
+                if not self.combo_launch_candidates:
+                    raise AssertionError(
+                        "compile-time autotune requires at least one launch candidate"
+                    )
                 if self.stitched_block_config is not None:
                     default_config = dict(self.stitched_block_config)
                 meta["stitched_launch_candidates"] = [

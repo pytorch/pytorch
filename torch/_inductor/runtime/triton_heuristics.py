@@ -4079,13 +4079,15 @@ def _handle_combo_kernel_per_subkernel_blocks(
     # default_config holds BLOCK keys for the grid lambda; backend kwargs
     # (HIP options like waves_per_eu) come from stitched_backend_kwargs.
     stitched_warps = combo_meta.get("stitched_num_warps")
-    launch_candidates = combo_meta.get("stitched_launch_candidates")
-    if launch_candidates or stitched_warps is not None:
+    if "stitched_launch_candidates" in combo_meta or stitched_warps is not None:
         # Compile-time autotune emits the distinct winner launch configs (kwargs, num_warps,
         # num_stages) -> combo autotunes kernel-level knobs over them; the chosen block sizes
         # are passed as args via default_config. No-bench mode has no candidates and bakes its
         # blocks into the body, so its config carries only backend kwargs (no block args).
-        if launch_candidates:
+        # Key presence (not truthiness) selects the mode, matching
+        # _combo_has_reduction_subkernel.
+        if "stitched_launch_candidates" in combo_meta:
+            launch_candidates = combo_meta["stitched_launch_candidates"]
             block_config = combo_meta.get("default_config") or {}
             # Blocks are args here (not baked), so coordinate descent can refine
             # the per-subkernel block sizes on top of the compile-time winners.
