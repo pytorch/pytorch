@@ -168,6 +168,22 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             "tvm", device, boxed=False, backward=False, options={"opt_level": 0}
         )
 
+    @unittest.skipIf(not has_tvm(), "requires tvm")
+    def test_tvm_scalar_tensor_input(self, device):
+        class ScalarParam(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = torch.nn.Parameter(torch.tensor(3.0))
+
+            def forward(self, x):
+                return x + self.scale
+
+        model = ScalarParam().eval().to(device)
+        x = torch.randn(2, 10, device=device)
+        expected = model(x)
+        compiled = torch.compile(model, backend="tvm")
+        self.assertTrue(same(expected, compiled(x), tol=0.01))
+
     def test_tvm_scheduler_backends(self, device):
         from torch._dynamo.backends.tvm import tvm_auto_scheduler, tvm_meta_schedule
 
@@ -177,6 +193,20 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             # reaching ImportError proves the partial's kwargs are valid
             with patch.dict(sys.modules, {"tvm": None}):
                 self.assertRaises(ImportError, backend, gm, [torch.randn(2)])
+
+    def test_tvm_relay_future_warning(self, device):
+        import torch._dynamo.backends.tvm as tvm_backend
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        with patch.dict(sys.modules, {"tvm": None}):
+            with self.assertWarns(FutureWarning):
+                self.assertRaises(
+                    ImportError,
+                    tvm_backend._tvm_relay_compile,
+                    gm,
+                    [torch.randn(2)],
+                    {},
+                )
 
     def test_tvm_dispatches_relay_or_relax(self, device):
         import torch._dynamo.backends.tvm as tvm_backend
