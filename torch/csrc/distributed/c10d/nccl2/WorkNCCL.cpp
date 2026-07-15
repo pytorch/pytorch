@@ -32,8 +32,8 @@ WorkNCCL::WorkNCCL(
     ProcessGroupNCCL* comm,
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
-    const at::Tensor& inputTensor)
-    : inputTensor_(inputTensor),
+    at::Tensor inputTensor)
+    : inputTensor_(std::move(inputTensor)),
       comm_(comm),
       stream_(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),

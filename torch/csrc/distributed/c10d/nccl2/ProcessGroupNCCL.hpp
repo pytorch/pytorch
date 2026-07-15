@@ -316,7 +316,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     /* implicit */ RedOpRAII(ncclRedOp_t op);
     explicit RedOpRAII(
         const ::c10d::ReduceOp& op,
-        const ncclComm_t comm,
+        ncclComm_t comm,
         const ncclDataType_t dataType,
         std::shared_ptr<NcclApi> nccl_api);
 
@@ -458,7 +458,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   size_t wordSize(ncclDataType_t type) const;
   RedOpRAII getNcclReduceOp(
       const ::c10d::ReduceOp& op,
-      const ncclComm_t comm,
+      ncclComm_t comm,
       const ncclDataType_t dataType);
   void timeoutWatchdog() noexcept;
   void checkInitialized() const;
@@ -485,7 +485,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   size_t max_event_pool_size_{};
   std::optional<at::cuda::CUDAStream> internal_stream_;
   std::optional<at::cuda::CUDAEvent> dependency_event_;
-  void* barrier_buffer_{};
+  at::DataPtr barrier_buffer_;
   enum class InitializationState {
     UNINITIALIZED,
     INITIALIZED,
@@ -524,7 +524,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     ncclWindow_t winHandle{nullptr};
     size_t len{0};
   };
-  std::map<void*, RegistrationHandle> memoryRegistrationHandles_;
+  std::map<void*, RegistrationHandle, std::less<>> memoryRegistrationHandles_;
   // Guards memoryRegistrationHandles_: register/deregister_address run on
   // allocator threads while window ops look segments up on the main thread.
   std::mutex memory_registration_mutex_;

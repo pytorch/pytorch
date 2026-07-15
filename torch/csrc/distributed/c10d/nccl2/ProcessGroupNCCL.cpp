@@ -11,6 +11,7 @@
 #include <string>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -125,7 +126,8 @@ void ProcessGroupNCCL::initNcclResources() {
   }
 
   if (!barrier_buffer_) {
-    C10_CUDA_CHECK(cudaMalloc(&barrier_buffer_, sizeof(float)));
+    barrier_buffer_ =
+        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
   }
 
   max_event_pool_size_ = kDefaultMaxEventPoolSize;
@@ -251,7 +253,7 @@ void ProcessGroupNCCL::finalize() {
     throw std::runtime_error("Work timed out during finalize");
   } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
     comm_state_ = CommState::ERROR;
-    ncclResult_t asyncErr;
+    ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
         nccl_comm_,
@@ -260,7 +262,7 @@ void ProcessGroupNCCL::finalize() {
     NCCLException ncclException(
         *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
     abortNcclComm();
-    throw ncclException;
+    throw std::move(ncclException);
   }
 
   // Clean up event pool
@@ -271,10 +273,7 @@ void ProcessGroupNCCL::finalize() {
     }
   }
 
-  if (barrier_buffer_) {
-    C10_CUDA_CHECK(cudaFree(barrier_buffer_));
-    barrier_buffer_ = nullptr;
-  }
+  barrier_buffer_.clear();
 
   dependency_event_.reset();
   internal_stream_.reset();
@@ -802,7 +801,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
 
   for (int i = 0; i < comm_size_; ++i) {
     const auto dataType = getNcclDataType(input_list[i]);
-    ncclResult_t opResult;
+    ncclResult_t opResult{};
     if (i == rank_) {
       // This rank receives the reduced result
       opResult = nccl_api_->reduce(
@@ -1215,8 +1214,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
       nccl_api_,
       nccl_comm_,
       nccl_api_->allReduce(
-          barrier_buffer_,
-          barrier_buffer_,
+          barrier_buffer_.get(),
+          barrier_buffer_.get(),
           1,
           ncclFloat32,
           ncclSum,
@@ -1300,14 +1299,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
     NCCL_CHECK(
         nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
 
-    // Root copies its own data using cudaMemcpyAsync
-    C10_CUDA_CHECK(cudaMemcpyAsync(
-        output_tensor.data_ptr(),
-        input_tensor_list[root].data_ptr(),
-        input_tensor_list[root].numel() *
-            input_tensor_list[root].element_size(),
-        cudaMemcpyDeviceToDevice,
-        stream));
+    at::cuda::CUDAStreamGuard stream_guard(
+        at::cuda::getStreamFromExternal(stream, device_.index()));
+    output_tensor.copy_(input_tensor_list[root], true);
   } else {
     // Non-root ranks receive from root
     NCCL_CHECK(
@@ -1399,13 +1393,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     NCCL_CHECK(
         nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
 
-    // Root copies its own data using cudaMemcpyAsync
-    C10_CUDA_CHECK(cudaMemcpyAsync(
-        output_tensor_list[root].data_ptr(),
-        input_tensor.data_ptr(),
-        input_tensor.numel() * input_tensor.element_size(),
-        cudaMemcpyDeviceToDevice,
-        stream));
+    at::cuda::CUDAStreamGuard stream_guard(
+        at::cuda::getStreamFromExternal(stream, device_.index()));
+    output_tensor_list[root].copy_(input_tensor, true);
   } else {
     // Non-root ranks send to root
     NCCL_CHECK(

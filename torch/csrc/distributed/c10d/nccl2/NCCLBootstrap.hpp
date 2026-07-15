@@ -31,7 +31,6 @@ class NCCLBootstrap {
       int comm_size,
       std::shared_ptr<NcclApi> nccl_api,
       std::chrono::milliseconds timeout);
-  ~NCCLBootstrap() noexcept;
 
   // Delete copy and move operations
   NCCLBootstrap(const NCCLBootstrap&) = delete;
@@ -71,7 +70,7 @@ class NCCLBootstrap {
   bool created_internal_store_;
   c10::Device device_;
   std::shared_ptr<NcclApi> nccl_api_;
-  void* barrier_buffer_{nullptr};
+  at::DataPtr barrier_buffer_;
   int rank_;
   int comm_size_;
 

@@ -53,7 +53,7 @@ class WorkNCCL : public c10d::Work {
       ProcessGroupNCCL* comm,
       cudaStream_t stream,
       std::chrono::milliseconds timeout_ms,
-      const at::Tensor& inputTensor);
+      at::Tensor inputTensor);
   ~WorkNCCL() override;
 
   WorkNCCL(const WorkNCCL&) = delete;

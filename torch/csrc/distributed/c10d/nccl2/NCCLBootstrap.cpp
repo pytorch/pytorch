@@ -3,6 +3,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -34,13 +35,9 @@ NCCLBootstrap::NCCLBootstrap(
       store_(std::move(store)),
       created_internal_store_(false),
       device_(device),
-      nccl_api_(std::move(nccl_api)) {
-  // Rank/size come from the c10d Backend ctor. Upstream torchcomms queried
-  // these from TORCHCOMM_RANK/SIZE env (query_ranksize); under c10d they are
-  // known explicitly, so we use them directly.
-  rank_ = rank;
-  comm_size_ = comm_size;
-
+      nccl_api_(std::move(nccl_api)),
+      rank_(rank),
+      comm_size_(comm_size) {
   const char* uniqueid_xchg_env =
       std::getenv("TORCHCOMM_NCCL_BOOTSTRAP_UNIQUEID_EXCHANGE_METHOD");
   if (uniqueid_xchg_env == nullptr) {
@@ -59,22 +56,16 @@ NCCLBootstrap::NCCLBootstrap(
 
   if (device_.index() == -1) {
     const auto device_count = c10::cuda::device_count_ensure_non_zero();
-    device_ = c10::Device(c10::kCUDA, rank_ % device_count);
+    device_ = c10::Device(
+        c10::kCUDA, static_cast<c10::DeviceIndex>(rank_ % device_count));
     TC_LOG(INFO) << "User did not provide device ID; using device cuda:"
                  << static_cast<int>(device_.index());
   }
 
   c10::cuda::CUDAGuard gpuGuard(device_);
 
-  // Allocate CUDA memory for a single float32 value used in barrier operations
-  C10_CUDA_CHECK(cudaMalloc(&barrier_buffer_, sizeof(float)));
-}
-
-NCCLBootstrap::~NCCLBootstrap() noexcept {
-  if (barrier_buffer_ != nullptr) {
-    C10_CUDA_CHECK_WARN(cudaFree(barrier_buffer_));
-    barrier_buffer_ = nullptr;
-  }
+  barrier_buffer_ =
+      c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
 }
 
 std::string NCCLBootstrap::getNCCLStoreKey() {
@@ -160,8 +151,8 @@ void NCCLBootstrap::cleanupTCPStore(ncclComm_t nccl_comm) {
 
     auto stream = at::cuda::getCurrentCUDAStream(device_.index());
     ncclResult_t result = nccl_api_->allReduce(
-        barrier_buffer_,
-        barrier_buffer_,
+        barrier_buffer_.get(),
+        barrier_buffer_.get(),
         1,
         ncclFloat32,
         ncclSum,

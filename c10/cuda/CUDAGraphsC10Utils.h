@@ -111,7 +111,7 @@ void retainGraphUserObject(
     cudaGraph_t graph,
     std::unique_ptr<T> data,
     cudaHostFn_t destroy) {
-  cudaUserObject_t user_object;
+  cudaUserObject_t user_object{};
   C10_CUDA_CHECK(cudaUserObjectCreate(
       &user_object, data.get(), destroy, 1, cudaUserObjectNoDestructorSync));
   data.release();

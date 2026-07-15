@@ -54,7 +54,6 @@ ncclDataType_t getNcclDataTypeInternal(const at::Tensor& tensor) {
     case at::ScalarType::Char:
       return ncclInt8;
     case at::ScalarType::Byte:
-      return ncclUint8;
     case at::ScalarType::Bool:
       return ncclUint8;
     default:
@@ -88,12 +87,11 @@ void createPreMulSum(
 
 } // namespace
 
-ProcessGroupNCCL::RedOpRAII::RedOpRAII(ncclRedOp_t op)
-    : ncclRedOp_(op), comm_(nullptr) {}
+ProcessGroupNCCL::RedOpRAII::RedOpRAII(ncclRedOp_t op) : ncclRedOp_(op) {}
 
 ProcessGroupNCCL::RedOpRAII::RedOpRAII(
     const ::c10d::ReduceOp& op,
-    const ncclComm_t comm,
+    ncclComm_t comm,
     const ncclDataType_t dataType,
     std::shared_ptr<NcclApi> nccl_api)
     : comm_(comm), nccl_api_(std::move(nccl_api)) {
@@ -175,7 +173,7 @@ ncclDataType_t ProcessGroupNCCL::getNcclDataType(const at::Tensor& tensor) {
 
 ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     const ::c10d::ReduceOp& op,
-    const ncclComm_t comm,
+    ncclComm_t comm,
     const ncclDataType_t dataType) {
   switch (op) {
     case ::c10d::ReduceOp::SUM:
@@ -222,12 +220,11 @@ void ProcessGroupNCCL::checkWorkQueue() {
 void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread starting for rank: " << rank_;
 
-  cudaStreamCaptureMode mode = cudaStreamCaptureModeThreadLocal;
-  C10_CUDA_CHECK_WARN(cudaThreadExchangeStreamCaptureMode(&mode));
-
   // Honor the noexcept contract: the loop issues NCCL probes (NCCL_CHECK) and
   // abort paths that can throw; swallow here so nothing escapes this thread.
   try {
+    c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
+        cudaStreamCaptureModeThreadLocal);
     while (!shutdown_) {
       {
         std::unique_lock<std::mutex> lock(timeout_mutex_);
@@ -278,7 +275,7 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
       // Detect a communicator-level async error while the comm is still
       // healthy.
       if (comm_state_ == CommState::NORMAL) {
-        ncclResult_t asyncErr;
+        ncclResult_t asyncErr{};
         NCCL_CHECK(
             nccl_api_,
             nccl_comm_,
@@ -361,7 +358,7 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       }
     }
   } else if (comm_state_ == CommState::ERROR) {
-    ncclResult_t asyncErr;
+    ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
         nccl_comm_,
@@ -373,7 +370,7 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       // In reconfigurable mode we never abort the process: revoke the comm so
       // it can be reconfigured and surface the error to the caller.
       revokeNcclComm();
-      throw ncclException;
+      throw std::move(ncclException);
     }
     abortNcclComm();
     if (options_c10d_->abort_process_on_timeout_or_error) {
@@ -382,7 +379,7 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       runAbortHooks();
       ::abort();
     } else {
-      throw ncclException;
+      throw std::move(ncclException);
     }
   }
 }
@@ -466,11 +463,16 @@ cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   c10::cuda::set_device(device_.index());
   if (async_op) {
     auto current_stream = at::cuda::getCurrentCUDAStream(device_.index());
+    if (!dependency_event_.has_value() || !internal_stream_.has_value()) {
+      throw std::runtime_error("NCCL stream resources are not initialized");
+    }
+    auto& dependency_event = dependency_event_.value();
+    auto& internal_stream = internal_stream_.value();
 
-    dependency_event_->record(current_stream);
-    dependency_event_->block(*internal_stream_);
+    dependency_event.record(current_stream);
+    dependency_event.block(internal_stream);
 
-    return internal_stream_->stream();
+    return internal_stream.stream();
   } else {
     return at::cuda::getCurrentCUDAStream(device_.index()).stream();
   }
@@ -577,7 +579,7 @@ std::pair<ncclWindow_t, size_t> ProcessGroupNCCL::lookupSegmentWindow(
   const auto target = reinterpret_cast<uintptr_t>(ptr);
   // memoryRegistrationHandles_ is sorted by base address; upper_bound + step
   // back finds the segment whose base <= target.
-  auto it = memoryRegistrationHandles_.upper_bound(const_cast<void*>(ptr));
+  auto it = memoryRegistrationHandles_.upper_bound(ptr);
   if (it == memoryRegistrationHandles_.begin()) {
     return {nullptr, 0};
   }
@@ -595,7 +597,7 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
   }
   std::lock_guard<std::mutex> lock(memory_registration_mutex_);
   const auto target = reinterpret_cast<uintptr_t>(ptr);
-  auto it = memoryRegistrationHandles_.upper_bound(const_cast<void*>(ptr));
+  auto it = memoryRegistrationHandles_.upper_bound(ptr);
   if (it == memoryRegistrationHandles_.begin()) {
     return ncclInvalidArgument;
   }
