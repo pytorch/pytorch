@@ -1398,14 +1398,21 @@ def unload_xpu_triton_pyds() -> None:
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
                             # pyrefly: ignore [missing-attribute]
-                            result.kernel.run.mod.__del__()
+                            run = result.kernel.run
+                            if hasattr(run, "mod"):
+                                run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
     if "triton.runtime.driver" in sys.modules:
-        mod = sys.modules["triton.runtime.driver"]
-        del type(mod.driver.active.utils).instance
-        del mod.driver.active.utils
+        driver_mod = sys.modules["triton.runtime.driver"]
+        if hasattr(driver_mod.driver.active, "utils"):
+            utils_cls = type(driver_mod.driver.active.utils)
+            if hasattr(utils_cls, "instance"):
+                del utils_cls.instance
+            elif hasattr(utils_cls, "_instance"):
+                utils_cls._instance = None
+            del driver_mod.driver.active.utils
 
     gc.collect()
 
@@ -3235,7 +3242,17 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
 
 @functools.cache
-def get_gpu_dram_gbps() -> int:
+def get_gpu_dram_gbps() -> float:
+    """
+    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
+    then fall back to the inaccurate triton estimation.
+    """
+    from .analysis.device_info import datasheet_dram_bw_gbs
+
+    ds_bw = datasheet_dram_bw_gbs()
+    if ds_bw is not None:
+        return ds_bw
+
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
