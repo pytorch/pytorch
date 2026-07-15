@@ -263,7 +263,7 @@ def _iterate_valid_model_state(model, dsd_fqn_modifiers="_fqn_modifiers"):
             yield new_fqn, obj
 
         if (
-            getattr(module.__class__, "get_extra_state", nn.Module.get_extra_state)
+            getattr(type(module), "get_extra_state", nn.Module.get_extra_state)
             != nn.Module.get_extra_state
         ):
             new_fqn = f"{curr_fqn}{nn.modules.module._EXTRA_STATE_KEY_SUFFIX}"
@@ -449,7 +449,7 @@ def _verify_state_dict(
 def _state_dict_fn(obj: nn.Module | torch.optim.Optimizer, api: str) -> Callable:
     call = getattr(obj, api)
     if call in _patched_state_dict:
-        call = functools.partial(getattr(obj.__class__, api), self=obj)
+        call = functools.partial(getattr(type(obj), api), self=obj)
     return call
 
 
