@@ -2210,11 +2210,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
   install_spmd_types
-  # On CUDA the single-process (single-GPU) distributed tests are hived off to
-  # the `default` config's 1-GPU runner (see below), so this multi-GPU box only
-  # runs the process-spawning ones. Elsewhere (CPU pull, rocm) there is no such
-  # split, so run the whole suite.
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # On CUDA and ROCm the single-process (single-GPU) distributed tests are hived
+  # off to the `default` config's 1-GPU runner (see below), so this multi-GPU box
+  # only runs the process-spawning ones. Elsewhere (e.g. CPU pull) there is no
+  # such split, so run the whole suite.
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     test_distributed multigpu
   else
     test_distributed
@@ -2366,7 +2366,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   # TODO(temporary): run distributed-single first for faster signal while we
   # validate the split; move to the end once it's proven stable.
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* || "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
     test_distributed_single_gpu
   fi
   test_lazy_tensor_meta_reference_disabled
@@ -2379,7 +2379,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_xpu_bin
   fi
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* || "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
     test_distributed_single_gpu
   fi
   install_torchvision
@@ -2392,7 +2392,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_libtorch_profiler
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* || "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
     test_distributed_single_gpu
   fi
   install_torchvision
