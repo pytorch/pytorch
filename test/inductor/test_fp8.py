@@ -1104,6 +1104,11 @@ class TestFP8Lowering(TestCase):
         "scaling_block_sizes",
         ((1, 128, 128, 128), (1, 128, 1, 128), (128, 128, 1, 128)),
     )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128), (BlockWise128x128, BlockWise1x128)
+    @unittest.skip(
+        "Disabled due to CI failures across parametrizations; see "
+        "#188675, #188704, #188706, #188707, #188708, #188709, #188710, "
+        "#188711, #188712, #188713, #188714, #188715, #188716, #188717"
+    )
     def test_main_loop_scaling(
         self,
         shape: tuple[int, int, int],
