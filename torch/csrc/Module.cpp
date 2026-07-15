@@ -423,8 +423,11 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
+  // NOLINTBEGIN(performance-use-std-move): the extra refcount from copying
+  // (rather than moving) tmp_a/tmp_b is load-bearing, see NB comment above.
   a->cdata = tmp_b;
   b->cdata = tmp_a;
+  // NOLINTEND(performance-use-std-move)
 
   // Fix up the PyObjects associated with each TensorImpl
   a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
@@ -2748,40 +2751,15 @@ Call this whenever a new thread is created in order to propagate values from
     return at::caching::is_cached_tensor(t);
   });
 
+  py_module.def("_is_fake_tensor", [](const at::Tensor& t) -> bool {
+    return t.is_fake();
+  });
+
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     return c10::raw::intrusive_ptr::use_count(storage_impl);
   });
-
-  py_module.def(
-      "_storage_throw_on_immutable_data_ptr", [](size_t storage_impl_ptr) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        return storage_impl->throw_on_immutable_data_ptr();
-      });
-
-  py_module.def(
-      "_storage_throw_on_mutable_data_ptr", [](size_t storage_impl_ptr) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        return storage_impl->throw_on_mutable_data_ptr();
-      });
-
-  py_module.def(
-      "_set_storage_data_ptr_access_error_msg",
-      [](size_t storage_impl_ptr, std::string s) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
-  py_module.def(
-      "_clear_storage_data_ptr_access_error_msg", [](size_t storage_impl_ptr) {
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-        storage_impl->clear_data_ptr_access_error_msg_();
-      });
 
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
