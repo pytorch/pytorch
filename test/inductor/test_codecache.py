@@ -3631,6 +3631,24 @@ class TestFxGraphCacheHashing(TestCase):
                 require_shape_env=False,
             ).validate()
 
+        # A callable hidden inside a list value (e.g.
+        # _fuse_ddp_communication_passes) is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm(
+                    {"_fuse_ddp_communication_passes": [custom_pass]}
+                ),
+                require_shape_env=False,
+            ).validate()
+
+        # A list of non-callables stays cacheable.
+        CacheabilityValidator(
+            self._nested_region_gm(
+                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
+            ),
+            require_shape_env=False,
+        ).validate()
+
     def _nested_region_bw_gm(self, bw_patches):
         from torch._higher_order_ops.invoke_subgraph import (
             get_backward_nested_region_config,

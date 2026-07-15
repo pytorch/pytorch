@@ -8945,6 +8945,12 @@ class Scheduler:
                 return f"invoke_subgraph body has non-GPU ({device}) ops"
         skip_dynamic = config.triton.cudagraph_skip_dynamic_graphs
         for op in body.operations:
+            if isinstance(op, ir.InvokeSubgraph):
+                # A nested region is captured as part of this body, so its body
+                # must be cudagraph-safe too.
+                if reason := self._invoke_subgraph_body_cudagraph_skip_reason(op):
+                    return reason
+                continue
             if reason := self._ir_node_cudagraph_skip_reason(op):
                 return f"invoke_subgraph body has {reason}"
             if skip_dynamic and op.get_free_symbol_uses():

@@ -2876,8 +2876,17 @@ def compile_fx_backward(
 
         fixed = count_tangents(gm)
 
+        # Backward cudagraphs baseline. When the top level is off,
+        # compiler_config_extra.cudagraphs may be True only because a forward
+        # region opted in; that bump is specific to the forward graph and must not
+        # leak into the backward, which has its own regions, so start from off and
+        # re-derive below. When the top level is on, keep the shared box so the
+        # backward respects the forward's final cudagraph determination.
+        if compiler_config_extra.patch_config_for_cudagraphs:
+            cudagraphs = compiler_config_extra.cudagraphs
+        else:
+            cudagraphs = BoxedBool(False)
         # Check if cudagraphs should be overridden for backward via annotation
-        cudagraphs = compiler_config_extra.cudagraphs
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
