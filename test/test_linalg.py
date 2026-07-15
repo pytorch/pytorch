@@ -3307,7 +3307,6 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
-    @skipIfRocm(msg="Skipping test for ROCm due to HipBlas error.")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
@@ -4264,6 +4263,13 @@ class TestLinalg(TestCase):
         if torch.device(device).type != "cuda":
             self.skipTest("cuSOLVER Xpolar path is CUDA-only")
         from torch._native.ops.polar import nvmath_impl as nv
+        from torch._native.ops.polar.impl import _check_nvmath
+
+        # The test invokes the Xpolar kernel directly, bypassing the override's
+        # runtime gate/fallback, so skip when the loaded cuSOLVER does not expose
+        # Xpolar (e.g. a CUDA runtime older than the version that added it).
+        if not _check_nvmath():
+            self.skipTest("cuSOLVER runtime does not expose Xpolar")
 
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         A = make_fullrank(32, 16, device=device, dtype=dtype)
