@@ -1157,7 +1157,10 @@ class CacheabilityValidator:
             self.gm
         ):
             for key, value in config_patches.items():
-                if callable(value):
+                # A value may be a list of callables (e.g.
+                # _fuse_ddp_communication_passes), so look inside sequences too.
+                values = value if isinstance(value, (list, tuple)) else (value,)
+                if any(callable(v) for v in values):
                     self.bypass(
                         f"Uncacheable nested region config '{key}': callable value"
                     )

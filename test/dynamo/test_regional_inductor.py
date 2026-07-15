@@ -616,7 +616,7 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
         def fn(x):
             return g(torch.cos(x)) + 1
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         x = torch.randn(10)
 
         with torch._inductor.config.patch(
@@ -672,7 +672,7 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
             y = torch.softmax(x, dim=-1) * 2
             return g(y)
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         x = torch.randn(4096, 256, device="cuda")
         result, codes = run_and_get_code(lambda: opt_fn(x))
 
@@ -701,7 +701,7 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
             y = torch.softmax(x, dim=-1) * 2
             return g(y)
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         x = torch.randn(4096, 256, device="cuda")
         result, codes = run_and_get_code(lambda: opt_fn(x))
 
@@ -730,7 +730,7 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
         def fn(x):
             return (g(x) * 3).sum()
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         x = torch.randn(4096, 256, device="cuda", requires_grad=True)
         result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
 
@@ -761,7 +761,7 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
         def fn(x):
             return (g(x) * 3).sum()
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         x = torch.randn(4096, 256, device="cuda", requires_grad=True)
         result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
 
