@@ -267,6 +267,38 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
 
     return decorator
 
+def skip_if_lt_x_devices(x, *, allow_cpu=False):
+    """Skip if fewer than x devices available for the current accelerator.
+
+    Unlike @skip_if_lt_x_gpu, this does not hard-code cuda/hpu/xpu.
+    It uses torch.accelerator.current_accelerator() to determine the device type.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            acc = torch.accelerator.current_accelerator()
+            if acc is not None:
+                device_type = acc.type
+                device_module = torch.get_device_module(device_type)
+                if device_module.is_available() and device_module.device_count() >= x:
+                    return func(*args, **kwargs)
+
+            # CPU path: allow running a degenerate version if explicitly requested
+            if allow_cpu and acc is None:
+                return func(*args, **kwargs)
+
+            # NOTE: TEST_SKIPS uses "multi-gpu-{x}" naming for historical/
+            # backward-compatibility reasons only. The skip logic itself is
+            # hardware-agnostic and does not assume CUDA/GPU.
+            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            # NOTE: _maybe_handle_skip_if_lt_x_gpu retains "gpu" in its name
+            # for backward compatibility; it is hardware-agnostic.
+            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
+                sys.exit(test_skip.exit_code)
+        return wrapper
+
+    return decorator
 
 def requires_world_size(n: int):
     """

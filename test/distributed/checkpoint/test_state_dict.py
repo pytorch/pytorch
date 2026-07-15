@@ -46,7 +46,7 @@ from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
     UnitModule,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import skip_if_lt_x_devices
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -223,7 +223,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._test_save_load(init_model_optim)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_fsdp(self) -> None:
         self.run_subtests(
             {
@@ -240,7 +240,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_compiled_fsdp(self) -> None:
         self.run_subtests(
             {
@@ -285,7 +285,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._test_save_load(init_model_optim)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_fsdp2(self) -> None:
         self.run_subtests(
             {
@@ -311,7 +311,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._test_save_load(init_model_optim)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_ddp(self) -> None:
         self.run_subtests(
             {
@@ -362,7 +362,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._test_save_load(init_model_optim, test_frozen)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_fsdp_ddp(self) -> None:
         self.run_subtests(
             {
@@ -382,7 +382,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         self._test_save_load(init_model_optim)
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_devices(1)
     def test_single_gpu(self) -> None:
         self._test_single_gpu(torch.optim.Adam)
         self._test_single_gpu(torch.optim.AdamW)
@@ -415,7 +415,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             set_model_state_dict(model, model_state_dict=model_state_dict)
 
     @with_comms
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_devices(1)
     def test_strict(self) -> None:
         self.run_subtests(
             {"parallelism": ["DDP", "fully_shard"]},
@@ -491,7 +491,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self.assertEqual(ost, {})
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_cpu_offload_full_state_dict(self) -> None:
         self.run_subtests(
             {"optimizer_class": [torch.optim.Adam, torch.optim.AdamW]},
@@ -499,7 +499,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
 
     @with_comms
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_devices(1)
     def test_activation_ckpt_fqns_ddp(self) -> None:
         """Tests that activation checkpointing prefixes are removed from module names"""
         model = CompositeParamModel(device=torch.device(device_type))
@@ -512,7 +512,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.assertEqual(original_keys, new_keys)
 
     @with_comms
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_devices(1)
     def test_activation_ckpt_fqns_fsdp1(self) -> None:
         self.run_subtests(
             {"use_orig_params": [True, False]},
@@ -530,7 +530,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         self.assertEqual(original_keys, new_keys)
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_devices(1)
     def test_extra_state(self) -> None:
         model = CompositeParamModel(device=torch.device(device_type))
 
@@ -548,7 +548,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.assertEqual(model.state_dict()["u1._extra_state"], "MyState")
         self.assertEqual(model.state_dict(), get_model_state_dict(target_model))
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_devices(1)
     def test_non_persistent_buffers(self) -> None:
         model = CompositeParamModel(device=torch.device(device_type))
         model.register_buffer(
@@ -632,7 +632,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             )
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_devices(4)
     def test_broadcast_from_rank0(self) -> None:
         device_mesh = init_device_mesh(device_type, (self.world_size,))
         hsdp_device_mesh = init_device_mesh(device_type, (2, self.world_size // 2))
@@ -652,7 +652,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_fsdp_root_not_initialized(self) -> None:
         # This test verifies that FSDP root is not initialized but we should
         # still be able to  get the state_dict without errors because
@@ -665,7 +665,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         get_optimizer_state_dict(fsdp_model, fsdp_optim)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_optim_state_dict_param_matching(self) -> None:
         # This test verifies parameters between optim and optim_state_dict
         # "initial_lr" is added to optim_state_dict, but not to the new optim
@@ -705,7 +705,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self.assertTrue("initial_lr" in optim.param_groups[0])
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_flattened_osd(self) -> None:
         """
         Test flattened optimizer state dictionaries with different combinations of
@@ -817,13 +817,13 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 get_model_state_dict(model)
 
     @with_comms
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_devices(1)
     def test_deprecate_api(self) -> None:
         self._test_deprecate_partial()
         self._test_deprecate_fsdp_api()
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_shared_weight(self):
         class TiedEmbeddingModel(nn.Module):
             def __init__(self, vocab_size, embedding_dim):
@@ -857,7 +857,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_setting_meta_device_model(self) -> None:
         # This test verifies that we can set model state dict by a meta device model
         torch.manual_seed(0)
@@ -885,7 +885,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self.assertEqual(cpu_model_value, meta_model_value)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_devices(4)
     def test_setting_meta_device_model_broadcasting_and_memory(self) -> None:
         # This test verifies that we can set model state dict by a meta device model
         # With the correlated changes in state_dict, meta device model should be accepted
@@ -931,7 +931,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.assertTrue(memory_reserved <= 768)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_set_cpu_model_state_dict_broadcast_from_rank0(self) -> None:
         torch.manual_seed(42)
         model = nn.Linear(2, 2)
@@ -958,7 +958,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             torch.testing.assert_close(tensor, expected_tensor, msg=expected_name)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_multi_device_load_model_state_dict(self) -> None:
         torch.manual_seed(0)
         with torch.device("meta"):
@@ -993,7 +993,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             )
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_state_dict_with_hook_on_keys(self) -> None:
         with torch.device("meta"):
             metamodel = FusionEmbedding(4, 4, 4)
@@ -1007,7 +1007,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         set_model_state_dict(metamodel_modified, gpumodel_state_dict)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_devices(2)
     def test_multi_param_groups(self) -> None:
         class TestModel(torch.nn.Module):
             def __init__(self):
@@ -1088,7 +1088,7 @@ class TestNoComm(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_devices(1)
     def test_no_dist(self) -> None:
         model = CompositeParamModel(device=torch.device(device_type))
         optim = torch.optim.AdamW(model.parameters(), lr=1e-4)
