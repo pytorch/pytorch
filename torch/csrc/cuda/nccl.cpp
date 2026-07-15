@@ -226,7 +226,7 @@ void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
   std::ostringstream err;
   err << "NCCL Error " << static_cast<int>(status) << ": "
       << ncclGetErrorString(to_nccl_result(status));
-  TORCH_CHECK(false, std::move(err).str());
+  TORCH_CHECK(false, err.str());
 }
 
 struct NcclCommList {
@@ -949,10 +949,30 @@ void gather(
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
 
-  size_t count = inputs.numel();
+  int64_t count = inputs.numel();
   auto type = to_nccl_data_type(inputs);
   const auto* sendbuff = reinterpret_cast<const char*>(inputs.const_data_ptr());
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  void* recv_ptr = nullptr;
+  at::Tensor flat; // keep alive until after NCCL call
+  if (cur_rank == root) {
+    TORCH_CHECK_VALUE(
+        static_cast<int>(outputs.size()) == numranks,
+        "root must provide inputs.size()==numranks");
+    // Allocate one flat buffer [world_size * count]
+    flat = at::empty({numranks * count}, inputs.options());
+    recv_ptr = flat.mutable_data_ptr();
+  }
+  auto* recvbuff = reinterpret_cast<char*>(recv_ptr);
+  NCCL_CHECK(ncclGather(sendbuff, recvbuff, count, type, root, comm, stream));
+  if (cur_rank == root) {
+    // Pack each inputs[i] into its slot
+    for (int i = 0; i < numranks; ++i) {
+      outputs[i].copy_(flat.narrow(0, i * count, count));
+    }
+  }
+#else
   NCCL_CHECK(ncclGroupStart());
 
   if (cur_rank == root) {
@@ -969,6 +989,7 @@ void gather(
     NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   }
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
+#endif
 
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
