@@ -6506,6 +6506,17 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
 
         fn(torch.randn(4))
 
+    # https://github.com/pytorch/pytorch/issues/189925
+    def test_io_text_encoding(self):
+        import _io
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            _io.text_encoding("utf-8")
+            return torch.sin(x)
+
+        fn(torch.randn(4))
+
     # https://github.com/pytorch/pytorch/issues/88813
     def test_return_value_duplication_tensor(self) -> None:
         def fn(val: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
