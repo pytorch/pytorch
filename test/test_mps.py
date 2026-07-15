@@ -7829,6 +7829,25 @@ class TestMPS(TestCaseMPS):
                 helper((2, 2, 16, 16), (2, 2), return_indices, dtype)
                 helper((2, 2, 16, 16), (2, 16), return_indices, dtype)
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
+                # Non-divisible geometry: windows vary in size and overlap.
+                # Regression test for
+                # https://github.com/pytorch/pytorch/issues/190064
+                helper((1, 1, 5, 5), (3, 3), return_indices, dtype)
+                helper((2, 3, 7, 5), (4, 3), return_indices, dtype)
+                helper((3, 10, 9), (7, 7), return_indices, dtype)
+                helper((2, 3, 7, 5), (4, 3), return_indices, dtype, channels_last=True)
+                # Upsampling geometry previously returned the wrong shape.
+                helper((1, 2, 2, 2), (4, 4), return_indices, dtype)
+                helper((1, 2, 2, 3), (3, 7), return_indices, dtype)
+
+    # NaN must propagate and take the index of the first NaN in the window,
+    # matching CPU.
+    def test_adaptive_max_pool2d_nan_propagation(self):
+        x = torch.tensor([[[[1.0, float('nan')], [2.0, 3.0]]]])
+        ref, ref_idx = torch.nn.functional.adaptive_max_pool2d(x, (1, 1), return_indices=True)
+        out, idx = torch.nn.functional.adaptive_max_pool2d(x.to('mps'), (1, 1), return_indices=True)
+        self.assertEqual(out.cpu(), ref, equal_nan=True)
+        self.assertEqual(idx.cpu(), ref_idx)
 
     def test_gelu_simple(self):
         def helper(shape, dtype=torch.float, contiguous=True):

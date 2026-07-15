@@ -9,6 +9,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/adaptive_max_pool2d_backward_native.h>
+#include <ATen/ops/adaptive_max_pool2d_native.h>
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/avg_pool2d.h>
 #include <ATen/ops/avg_pool2d_backward.h>
@@ -1316,6 +1318,92 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)(const Tensor& grad_output,
                                           divisor_override,
                                           /*pooling_dims=*/3,
                                           "avg_pool3d_backward");
+}
+
+TORCH_IMPL_FUNC(adaptive_max_pool2d_out_mps)
+(const Tensor& input, IntArrayRef output_size, const Tensor& output, const Tensor& indices) {
+  using namespace mps;
+  for (int64_t i = 1; i < input.ndimension(); i++) {
+    TORCH_CHECK(input.size(i) > 0,
+                "adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
+                "but input has sizes ",
+                input.sizes(),
+                " with dimension ",
+                i,
+                " being empty");
+  }
+  if (output.numel() == 0) {
+    return;
+  }
+
+  auto input_c = input.contiguous();
+  AdaptiveMaxPoolParams<> params;
+  params.input_h = safe_downcast<int32_t, int64_t>(input.size(-2));
+  params.input_w = safe_downcast<int32_t, int64_t>(input.size(-1));
+  params.output_h = safe_downcast<int32_t, int64_t>(output_size[0]);
+  params.output_w = safe_downcast<int32_t, int64_t>(output_size[1]);
+  params.plane_count = safe_downcast<int32_t, int64_t>(input.numel() / (input.size(-2) * input.size(-1)));
+
+  const bool out_contig = output.is_contiguous();
+  const bool idx_contig = indices.is_contiguous();
+  Tensor out_c = out_contig ? output : at::empty_like(output, MemoryFormat::Contiguous);
+  Tensor idx_c = idx_contig ? indices : at::empty_like(indices, MemoryFormat::Contiguous);
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("adaptive_max_pool2d_" + scalarToMetalTypeString(input));
+      getMPSProfiler().beginProfileKernel(pso, "adaptive_max_pool2d", {input});
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, input_c, out_c, idx_c, params);
+      mtl_dispatch1DJob(computeEncoder, pso, out_c.numel());
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+  if (!out_contig) {
+    output.copy_(out_c);
+  }
+  if (!idx_contig) {
+    indices.copy_(idx_c);
+  }
+}
+
+TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_mps)
+(const Tensor& gradOutput, const Tensor& input, const Tensor& indices, const Tensor& gradInput) {
+  using namespace mps;
+  if (gradInput.numel() == 0) {
+    return;
+  }
+
+  auto grad_output_c = gradOutput.contiguous();
+  auto indices_c = indices.contiguous();
+  AdaptiveMaxPoolParams<> params;
+  params.input_h = safe_downcast<int32_t, int64_t>(input.size(-2));
+  params.input_w = safe_downcast<int32_t, int64_t>(input.size(-1));
+  params.output_h = safe_downcast<int32_t, int64_t>(gradOutput.size(-2));
+  params.output_w = safe_downcast<int32_t, int64_t>(gradOutput.size(-1));
+  params.plane_count = safe_downcast<int32_t, int64_t>(input.numel() / (input.size(-2) * input.size(-1)));
+
+  const bool gi_contig = gradInput.is_contiguous();
+  Tensor gi_c = gi_contig ? gradInput : at::empty_like(gradInput, MemoryFormat::Contiguous);
+  gi_c.zero_();
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("adaptive_max_pool2d_backward_" + scalarToMetalTypeString(gradOutput));
+      getMPSProfiler().beginProfileKernel(pso, "adaptive_max_pool2d_backward", {gradOutput, indices});
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, gi_c, grad_output_c, indices_c, params);
+      mtl_dispatch1DJob(computeEncoder, pso, grad_output_c.numel());
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+  if (!gi_contig) {
+    gradInput.copy_(gi_c);
+  }
 }
 
 } // namespace at::native

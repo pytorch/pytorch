@@ -59,3 +59,14 @@ struct MaxUnpoolingParams {
   ::c10::metal::array<idx_type_t, N> output_strides;
   ::c10::metal::array<idx_type_t, N> indices_strides;
 };
+
+// Both sides are contiguous NCHW; the host copies through contiguous
+// temporaries otherwise.
+template <typename idx_type_t = int32_t>
+struct AdaptiveMaxPoolParams {
+  idx_type_t plane_count; // N * C
+  idx_type_t input_h;
+  idx_type_t input_w;
+  idx_type_t output_h;
+  idx_type_t output_w;
+};

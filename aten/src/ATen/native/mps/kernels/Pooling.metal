@@ -763,6 +763,95 @@ kernel void avg_pool_backward(
       params.divisor_override);
 }
 
+// Adaptive max pooling: one thread per output element. The window for output
+// position o along a dim of input size I and output size O is
+// [floor(o * I / O), ceil((o + 1) * I / O)), so windows vary in size and may
+// overlap for non-divisible geometry. Indices are flattened over the input
+// plane, like max_pool2d. Input offsets use 64-bit math: the input can exceed
+// 2^31 elements even when the output is small.
+template <typename T>
+kernel void adaptive_max_pool2d(
+    constant T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    device int64_t* indices [[buffer(2)]],
+    constant AdaptiveMaxPoolParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  const auto input_h = params.input_h;
+  const auto input_w = params.input_w;
+  const auto output_h = params.output_h;
+  const auto output_w = params.output_w;
+
+  const auto out_plane_area = int64_t(output_h) * output_w;
+  const auto plane = int64_t(tid) / out_plane_area;
+  const auto rem = int32_t(int64_t(tid) % out_plane_area);
+  const int32_t oh = rem / output_w;
+  const int32_t ow = rem % output_w;
+
+  const auto h0 = int32_t((int64_t(oh) * input_h) / output_h);
+  const auto h1 =
+      int32_t(((int64_t(oh) + 1) * input_h + output_h - 1) / output_h);
+  const auto w0 = int32_t((int64_t(ow) * input_w) / output_w);
+  const auto w1 =
+      int32_t(((int64_t(ow) + 1) * input_w + output_w - 1) / output_w);
+
+  constant T* input_plane = input + plane * (int64_t(input_h) * input_w);
+  auto max_val = input_plane[int64_t(h0) * input_w + w0];
+  auto max_index = int64_t(h0) * input_w + w0;
+
+  for (auto h = h0; h < h1; h++) {
+    for (auto w = w0; w < w1; w++) {
+      const auto index = int64_t(h) * input_w + w;
+      const T val = input_plane[index];
+      // NaN propagates and the first NaN encountered wins, matching CPU.
+      if (!isnan(static_cast<float>(max_val)) &&
+          (isnan(static_cast<float>(val)) || val > max_val)) {
+        max_val = val;
+        max_index = index;
+      }
+    }
+  }
+
+  output[tid] = max_val;
+  indices[tid] = max_index;
+}
+
+// One thread per grad_output element; windows can overlap, so different
+// output positions may route into the same input element.
+template <typename T>
+kernel void adaptive_max_pool2d_backward(
+    device AtomicType_t<T>* grad_input [[buffer(0)]],
+    constant T* grad_output [[buffer(1)]],
+    constant int64_t* indices [[buffer(2)]],
+    constant AdaptiveMaxPoolParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  const auto out_plane_area = int64_t(params.output_h) * params.output_w;
+  const auto plane = int64_t(tid) / out_plane_area;
+  const auto input_offset =
+      plane * (int64_t(params.input_h) * params.input_w) + indices[tid];
+  AtomicType<T>::atomic_add(grad_input, input_offset, grad_output[tid]);
+}
+
+#define REGISTER_ADAPTIVE_MAX_POOL_OP(DTYPE)                     \
+  template [[host_name("adaptive_max_pool2d_" #DTYPE)]]          \
+  kernel void adaptive_max_pool2d<DTYPE>(                        \
+      constant DTYPE * input [[buffer(0)]],                      \
+      device DTYPE * output [[buffer(1)]],                       \
+      device int64_t* indices [[buffer(2)]],                     \
+      constant AdaptiveMaxPoolParams<>& params [[buffer(3)]],    \
+      uint tid [[thread_position_in_grid]]);                     \
+                                                                 \
+  template [[host_name("adaptive_max_pool2d_backward_" #DTYPE)]] \
+  kernel void adaptive_max_pool2d_backward<DTYPE>(               \
+      device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],     \
+      constant DTYPE * grad_output [[buffer(1)]],                \
+      constant int64_t* indices [[buffer(2)]],                   \
+      constant AdaptiveMaxPoolParams<>& params [[buffer(3)]],    \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_ADAPTIVE_MAX_POOL_OP(float);
+REGISTER_ADAPTIVE_MAX_POOL_OP(half);
+REGISTER_ADAPTIVE_MAX_POOL_OP(bfloat);
+
 #define REGISTER_POOL_OP(DTYPE)                                               \
   template [[host_name("max_pool_" #DTYPE)]] kernel void max_pool<DTYPE>(     \
       constant DTYPE * input [[buffer(0)]],                                   \
