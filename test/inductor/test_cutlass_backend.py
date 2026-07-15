@@ -353,9 +353,12 @@ class TestCutlassBackend(TestCase):
         cutlass_dir = _get_cutlass_dir()
         self.assertTrue(
             try_import_cutlass(),
-            "CUTLASS backend is required by this test but could not be imported. "
-            f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
-            f"current cutlass_dir={cutlass_dir!r}.",
+            lambda msg: f"{msg}\n"
+            + (
+                "CUTLASS backend is required by this test but could not be imported. "
+                f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
+                f"current cutlass_dir={cutlass_dir!r}."
+            ),
         )
 
         # Scale inputs by 1/sqrt(K) to avoid large accumulation differences
@@ -981,11 +984,11 @@ class TestCutlassBackend(TestCase):
 
             self.assertTrue(
                 all(t != float("inf") for t in timings_by_type["aten"]),
-                f"ATen benchmark failed: {timings_by_type['aten']}",
+                lambda msg: f"{msg}\nATen benchmark failed: {timings_by_type['aten']}",
             )
             self.assertTrue(
                 all(t != float("inf") for t in timings_by_type["cutlass"]),
-                f"CUTLASS benchmark failed: {timings_by_type['cutlass']}",
+                lambda msg: f"{msg}\nCUTLASS benchmark failed: {timings_by_type['cutlass']}",
             )
         finally:
             AlgorithmSelectorCache.benchmark_choices = original_benchmark_choices
@@ -1752,7 +1755,7 @@ class TestCutlassBackend(TestCase):
 
                 self.assertTrue(
                     sa.called,
-                    f"autotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}",
+                    lambda msg: f"{msg}\nautotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}",
                 )
                 args, _ = sa.call_args
                 op_name, choices, _, __ = args
@@ -1772,8 +1775,11 @@ class TestCutlassBackend(TestCase):
                 self.assertGreater(
                     cuda_template_count,
                     0,
-                    "No CUTLASSTemplateCaller choices found for matmul with shape "
-                    f"M={M}, N={N}, K={K}",
+                    lambda msg: f"{msg}\n"
+                    + (
+                        "No CUTLASSTemplateCaller choices found for matmul with shape "
+                        f"M={M}, N={N}, K={K}"
+                    ),
                 )
 
     @skipXPUIf(not Xe2_Or_Later, "")
@@ -2240,7 +2246,6 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @xfailIfSM120OrLater
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_filtered_ops_cache(self):
         class TestModel(torch.nn.Module):
             def forward(self, B):
@@ -2253,21 +2258,23 @@ class TestCutlassBackend(TestCase):
         B = torch.randn(M, M).to(GPU_TYPE).half()
         model = TestModel().to(GPU_TYPE)
 
-        start_time = time.time()
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 1,
-            }
+        counters.clear()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cutlass.cutlass_max_profiling_configs": 1,
+                }
+            ),
         ):
             _ = torch.compile(model)(B)
 
-        if GPU_TYPE == "xpu":
-            time_limit = 100
-        else:
-            time_limit = 60
-        self.assertTrue(time.time() - start_time < time_limit)
+        # All 100 matmuls share one input shape/dtype/layout, so they map to a
+        # single filtered-ops cache key: op filtering runs exactly once (one
+        # miss) and the remaining lowerings hit the cache.
+        self.assertEqual(counters["inductor"]["cutlass_filtered_ops_cache_miss"], 1)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
@@ -3033,7 +3040,7 @@ class TestCutlassBackend(TestCase):
         expected_count = 2 if GPU_TYPE == "xpu" else 1
         self.assertTrue(
             len(set(all_counts)) == expected_count,
-            f"Config counts should be equal across all layout/dtype combinations. "
+            lambda msg: f"{msg}\nConfig counts should be equal across all layout/dtype combinations. "
             f"Got counts: {config_counts}",
         )
 
