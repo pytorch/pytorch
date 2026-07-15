@@ -562,10 +562,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         return VariableTracker.build(tx, self.fn.__name__, source)
 
     tp_getset = {
-        **BaseBuiltinVariable.tp_getset,
         "__name__": GetSet(_builtin_type_get_name, None),
     }
-    tp_members = BaseBuiltinVariable.tp_members
 
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "BuiltinVariable":

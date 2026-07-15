@@ -293,10 +293,9 @@ def _check_method_arity(
     args: Any,
     kwargs: Any,
 ) -> None:
-    # Mirror the TypeErrors CPython raises for builtin methods (see
-    # Objects/call.c and the METH_* convention in Modules/_collectionsmodule.c
-    # etc.), so a traced arity error matches eager. CPython prefixes the owning
-    # type on all of these (e.g. "set.add()", "dict.keys()").
+    # Centralized arity check for a tp_methods handler, driven by MethodFlags,
+    # raising the same TypeErrors CPython raises for builtin methods. Shared by
+    # Method.invoke and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
     qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
@@ -324,7 +323,7 @@ class Method:
     def invoke(
         self,
         vt: VariableTracker,
-        tx: Any,
+        tx: InstructionTranslatorBase,
         name: str,
         args: Any,
         kwargs: Any,
