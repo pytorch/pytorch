@@ -59,19 +59,19 @@ class DistOtherOpsTest(DTensorTestBase):
 
             self.assertTrue(
                 output_mse_abs <= 1e-6,
-                f"Too large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
             )
             self.assertTrue(
                 output_mse_rel <= 1e-6,
-                f"Too large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
             )
             self.assertTrue(
                 grad_mse_abs <= 1e-6,
-                f"Too large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
             )
             self.assertTrue(
                 grad_mse_rel <= 1e-6,
-                f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
     @with_comms
@@ -122,19 +122,19 @@ class DistOtherOpsTest(DTensorTestBase):
 
             self.assertTrue(
                 output_mse_abs <= 1e-6,
-                f"Too large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
             )
             self.assertTrue(
                 output_mse_rel <= 1e-6,
-                f"Too large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
             )
             self.assertTrue(
                 grad_mse_abs <= 1e-6,
-                f"Too large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
             )
             self.assertTrue(
                 grad_mse_rel <= 1e-6,
-                f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
     @with_comms
@@ -173,19 +173,19 @@ class DistOtherOpsTest(DTensorTestBase):
 
             self.assertTrue(
                 loss_mse_abs <= 1e-6,
-                f"Too large absolute mse for loss, expected less equal 1e-6, got {loss_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for loss, expected less equal 1e-6, got {loss_mse_abs}",
             )
             self.assertTrue(
                 loss_mse_rel <= 1e-6,
-                f"Too large relative mse for loss, expected less equal 1e-6, got {loss_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for loss, expected less equal 1e-6, got {loss_mse_rel}",
             )
             self.assertTrue(
                 grad_mse_abs <= 1e-6,
-                f"Too large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
             )
             self.assertTrue(
                 grad_mse_rel <= 1e-6,
-                f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
 
