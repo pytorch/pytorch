@@ -28,7 +28,7 @@ _REGISTER_KS: frozenset[int] = frozenset({2, 4, 8, 16})
 
 # Per-K register ranges tuned on MI355.  K=32 loses to aten in the measured
 # range.  A separate row-count gate below handles GPU underutilization.
-_REGISTER_N_RANGE: tuple[int, int] = (512, 8192)
+_REGISTER_N_RANGE: tuple[int, int] = (1024, 8192)
 
 # Per-K radix ranges tuned on MI355.  Below these N ranges either
 # correctness is not guaranteed for the current FlyDSL radix kernel, or
@@ -36,7 +36,7 @@ _REGISTER_N_RANGE: tuple[int, int] = (512, 8192)
 _RADIX_N_RANGE: dict[int, tuple[int, int]] = {
     64: (16384, 32768),
     128: (16384, 32768),
-    256: (8192, 32768),
+    256: (16384, 32768),
     512: (16384, 32768),
     1024: (32768, 65536),
 }
