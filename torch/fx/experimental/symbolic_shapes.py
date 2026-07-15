@@ -57,11 +57,11 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor, is_gradtrackingtensor
+from torch._custom_class_base import CustomClassBase
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-from torch._opaque_base import OpaqueBase
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
@@ -86,6 +86,7 @@ from torch.utils._sympy.functions import (
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
+    Min,
     Mod,
     PythonMod,
     TruncToInt,
@@ -1007,7 +1008,7 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
     elif val is None:
         pass
     # see Note: [Generator arguments in AOTDispatcher]
-    elif isinstance(val, torch.Generator) or is_opaque_value(val):
+    elif isinstance(val, torch.Generator) or is_custom_class_obj(val):
         pass
     elif isinstance(val, FakeScriptObject):
         pass
@@ -1113,8 +1114,9 @@ def is_symbol_binding_fx_node(node: torch.fx.Node) -> sympy.Symbol | None:
     """
     Check if a given FX node is a symbol binding node.
 
-    A symbol binding node is one that has a SymInt value in its meta that contains
-    a sympy Symbol expression, and is either a placeholder node or contains unbacked symbols.
+    A symbol binding node is one that has a SymInt value in its meta whose
+    placeholder expression is a sympy Symbol, and is either a placeholder node or
+    records that it binds the unbacked symbol in node.meta["unbacked_bindings"].
 
     Args:
         node (torch.fx.Node): The FX node to check
@@ -1122,16 +1124,21 @@ def is_symbol_binding_fx_node(node: torch.fx.Node) -> sympy.Symbol | None:
     Returns:
         Optional[sympy.Symbol]: The sympy Symbol if the node is a symbol binding node, None otherwise
     """
-    if (
-        "val" in node.meta
-        and isinstance(node.meta["val"], torch.SymInt)
-        and isinstance(node.meta["val"].node.expr, sympy.Symbol)
-        and (
-            node.op == "placeholder"
-            or free_unbacked_symbols(node.meta["val"].node.expr)
-        )
+    if "val" not in node.meta or not isinstance(node.meta["val"], torch.SymInt):
+        return None
+
+    expr = _get_placeholder_expr(node.meta["val"].node)
+    if not isinstance(expr, sympy.Symbol):
+        return None
+
+    if node.op == "placeholder":
+        return expr
+
+    if unbacked_bindings := resolve_unbacked_bindings(
+        node.meta["val"].node.shape_env, node.meta.get("unbacked_bindings")
     ):
-        return node.meta["val"].node.expr
+        if expr in unbacked_bindings:
+            return expr
     return None
 
 
@@ -1329,11 +1336,11 @@ def _free_unbacked_symbols_with_path(
         and not is_batchedtensor(a)
         and not is_gradtrackingtensor(a)
     ):
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_real_tensor
 
-        if not isinstance(a, FakeTensor):
+        if not is_fake_tensor(a):
             raise AssertionError(f"Expected FakeTensor, got {type(a)}")
-        match_tensor(a, a.real_tensor)
+        match_tensor(a, maybe_get_real_tensor(a))
     elif (
         isinstance(a, (torch.SymInt, torch.SymFloat))
         and isinstance(s := expr(a), sympy.Symbol)
@@ -6465,11 +6472,11 @@ class ShapeEnv:
                                     inner_context.constraint_strides,  # type: ignore[attr-defined]
                                 )
                             )
-                        case OpaqueBase():
+                        case CustomClassBase():
                             pass
                         case unexpected:
                             raise AssertionError(
-                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                                f"expected Tensor or CustomClassBase, got {type(unexpected)}"
                             )
             else:
                 sources_tensors_constraints = [
@@ -7285,7 +7292,12 @@ class ShapeEnv:
         # axioms with compute hint NYE
         if compute_hint and axioms:
             raise AssertionError("compute_hint and axioms cannot both be set")
-        expr = self.simplify(expr, size_oblivious)
+        expr = self.simplify(
+            expr,
+            size_oblivious,
+            axioms=axioms,
+            var_to_range=var_to_range,
+        )
 
         if compute_hint:
             expr = expr.xreplace(self.backed_var_to_val).xreplace(
@@ -7388,26 +7400,184 @@ class ShapeEnv:
         self._update_version_counter()
 
     @_lru_cache
-    def simplify(self, expr: _SympyT, size_oblivious: bool = False) -> _SympyT:
+    def simplify(
+        self,
+        expr: _SympyT,
+        size_oblivious: bool = False,
+        *,
+        axioms: tuple[SympyBoolean] | None = None,
+        var_to_range: tuple[tuple[sympy.Symbol, ValueRanges[sympy.Expr]]] | None = None,
+    ) -> _SympyT:
         """Use known constraints and replacements to simplify the given expr"""
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        # Simplify max(0/1, x) to x when x >= 0/1. max(1, x) is a commonly introduced
-        # expression when creating contiguous strides.
         if not size_oblivious:
-            min_max_replacements: dict[sympy.Basic, sympy.Basic] = {}
-            for atom in expr.atoms(Max):  # type: ignore[has-type]
-                if len(atom.args) > 2:
-                    continue
-                a, b = atom.args
-                if b == 1 or b == 0:
-                    a, b = b, a
+            range_env = (
+                self.var_to_range if var_to_range is None else dict(var_to_range)
+            )
+            le_cache: dict[tuple[sympy.Basic, sympy.Basic, bool], bool] = {}
 
-                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1)):
-                    min_max_replacements[atom] = b
-                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
-                    min_max_replacements[atom] = b
+            # Keep these cheap checks ahead of bound_sympy; Min/Max
+            # simplification is hot and full interval analysis is noticeably
+            # more expensive on unprovable comparisons.
+            def is_nonnegative_value(value: sympy.Expr) -> bool:
+                try:
+                    return bool(value >= 0)
+                except TypeError:
+                    return False
+
+            def is_nonnegative_term(term: sympy.Expr) -> bool:
+                if term.is_number:
+                    return is_nonnegative_value(term)
+                if term.is_nonnegative:
+                    return True
+                if term.is_Symbol:
+                    vr = range_env.get(term)
+                    return vr is not None and is_nonnegative_value(vr.lower)
+                return False
+
+            def is_nonnegative_sum(expr: sympy.Expr) -> bool:
+                if not isinstance(expr, sympy.Add):
+                    return is_nonnegative_term(expr)
+                return all(is_nonnegative_term(term) for term in expr.args)
+
+            def lower_bound_term(term: sympy.Expr) -> sympy.Expr | None:
+                if term.is_number:
+                    return term
+
+                coeff, base = term.as_coeff_Mul()
+                if base == 1:
+                    return coeff
+                if not coeff.is_number:
+                    return None
+
+                if base.is_Symbol:
+                    vr = range_env.get(base)
+                    if vr is not None:
+                        try:
+                            if bool(coeff >= 0):
+                                return coeff * vr.lower
+                            return coeff * vr.upper
+                        except TypeError:
+                            return None
+                    if base.is_nonnegative and is_nonnegative_value(coeff):
+                        return sympy.Integer(0)
+                return None
+
+            def lower_bound(expr: sympy.Expr) -> sympy.Expr | None:
+                if not isinstance(expr, sympy.Add):
+                    return lower_bound_term(expr)
+
+                result = sympy.Integer(0)
+                for term in expr.args:
+                    term_bound = lower_bound_term(term)
+                    if term_bound is None:
+                        return None
+                    result += term_bound
+                return result
+
+            def definitely_le(
+                a: sympy.Basic,
+                b: sympy.Basic,
+                *,
+                use_static_fallback: bool = False,
+            ) -> bool:
+                cache_key = (a, b, use_static_fallback)
+                if cache_key in le_cache:
+                    return le_cache[cache_key]
+
+                if a == b:
+                    le_cache[cache_key] = True
+                    return True
+                diff = b - a  # type: ignore[operator]
+                diff_lower = lower_bound(diff)
+                if diff_lower is not None and is_nonnegative_value(diff_lower):
+                    le_cache[cache_key] = True
+                    return True
+                if is_nonnegative_sum(diff):
+                    le_cache[cache_key] = True
+                    return True
+
+                comparison_ranges = {
+                    s: vr
+                    for s in diff.free_symbols
+                    if (vr := range_env.get(s)) is not None
+                }
+                if comparison_ranges:
+                    try:
+                        diff_range = bound_sympy(safe_expand(diff), comparison_ranges)
+                        if bool(diff_range.lower >= 0):
+                            le_cache[cache_key] = True
+                            return True
+                    except (AttributeError, KeyError, NotImplementedError, TypeError):
+                        pass
+
+                if use_static_fallback:
+                    comparison = sympy.Le(a, b)
+                    if comparison is sympy.true:
+                        le_cache[cache_key] = True
+                        return True
+                    if comparison is sympy.false:
+                        le_cache[cache_key] = False
+                        return False
+
+                    result = (
+                        self._maybe_evaluate_static(
+                            comparison,
+                            axioms=axioms,
+                            var_to_range=var_to_range,
+                        )
+                        is sympy.true
+                    )
+                    le_cache[cache_key] = result
+                    return result
+
+                le_cache[cache_key] = False
+                return False
+
+            min_max_replacements: dict[sympy.Basic, sympy.Basic] = {}
+            for atom in expr.atoms(Min, Max):  # type: ignore[has-type]
+                args = list(atom.args)
+                if len(args) < 2:
+                    continue
+
+                is_min = isinstance(atom, Min)
+                use_legacy_static_fallback = not is_min and len(args) == 2
+                keep = [True] * len(args)
+                for i, a in enumerate(args):
+                    if not keep[i]:
+                        continue
+                    for j in range(i + 1, len(args)):
+                        if not keep[j]:
+                            continue
+                        b = args[j]
+                        if definitely_le(
+                            a,
+                            b,
+                            use_static_fallback=use_legacy_static_fallback
+                            and (a == 0 or a == 1),
+                        ):
+                            if is_min:
+                                keep[j] = False
+                            else:
+                                keep[i] = False
+                                break
+                        elif definitely_le(
+                            b,
+                            a,
+                            use_static_fallback=use_legacy_static_fallback
+                            and (b == 0 or b == 1),
+                        ):
+                            if is_min:
+                                keep[i] = False
+                                break
+                            else:
+                                keep[j] = False
+
+                new_args = [arg for arg, keep_arg in zip(args, keep) if keep_arg]
+                if len(new_args) != len(args):
+                    min_max_replacements[atom] = atom.func(*new_args, evaluate=False)
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
 
@@ -9152,9 +9322,9 @@ def _get_placeholder_expr(sym_node: SymNode) -> sympy.Expr:
     shape_env = sym_node.shape_env
     if shape_env is None:
         raise AssertionError("shape_env is required for _get_placeholder_expr")
-    result = sym_node._expr
-    if result in shape_env.unbacked_renamings:
-        return shape_env.unbacked_renamings[result]
+    result = cast(sympy.Expr, sym_node._expr)
+    if shape_env.unbacked_renamings:
+        return result.xreplace(shape_env.unbacked_renamings)
     return result
 
 

@@ -8,6 +8,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/macros/Macros.h>
 
 #include <torch/csrc/distributed/c10d/Hooks.hpp>
@@ -504,17 +505,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not support monitoredBarrier, only GLOO supports monitored barrier."));
   }
 
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store. Only implemented
-  // for GLOO and NCCL backends currently.
+  // Deprecated no-op: sequence numbers now always start at 0 on every rank, so
+  // there is no initial value to agree on. Kept for backward compatibility with
+  // existing callers; it warns and does nothing.
   virtual void setSequenceNumberForGroup() {
-    auto backendName = getBackendName();
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            backendName,
-            " does not yet support sequence numbers."));
+    TORCH_WARN_ONCE(
+        "setSequenceNumberForGroup() is deprecated and is now a no-op; "
+        "sequence numbers always start at 0 on every rank. Remove calls to "
+        "_set_sequence_number_for_group().");
   }
 
   // Retrieves the current sequence number for the whole group, which should be
@@ -708,6 +706,18 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ", getBackendName(), " does not support getMemoryStats"));
   }
 
+  c10::impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const c10::impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
+  }
+
+  void incref_pyobject() const noexcept final;
+  void decref_pyobject() const noexcept final;
+  bool try_incref_pyobject() const noexcept final;
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -726,6 +736,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 
   bool use_pg_for_symm_mem_rendezvous_ = false;
+
+  c10::impl::PyObjectSlot pyobj_slot_;
 };
 
 } // namespace c10d

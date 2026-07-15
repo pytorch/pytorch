@@ -83,7 +83,7 @@ class TestMakeFxDynamicSpec(TestCase):
 
         shape = _first_tensor_placeholder_shape(gm)
         self.assertIsInstance(shape[0], torch.SymInt)
-        self.assertGreater(len(free_unbacked_symbols(shape[0])), 0)
+        self.assertEqual(len(free_unbacked_symbols(shape[0])), 1)
         # Static dim stays an int.
         self.assertEqual(int(shape[1]), 3)
 
@@ -554,6 +554,68 @@ class <lambda>(torch.nn.Module):
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+    # ---- @dynamic_spec(...) decorator (auto-attach) ----
+
+    def test_dynamic_spec_decorator_dict_form(self):
+        """``@dynamic_spec({"x": ...})`` on a function is auto-applied by make_fx."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        @dynamic_spec({"x": T([VAR("B"), STATIC])})
+        def fn(x):
+            return x.sum(0)
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(8, 3))
+        (val,) = _user_input_placeholder_vals(gm)
+        self.assertIsInstance(val, torch.Tensor)
+        self.assertEqual(len(free_unbacked_symbols(val.shape[0])), 1)
+
+    def test_dynamic_spec_decorator_with_assumptions(self):
+        """``@dynamic_spec(ShapesSpec(params=..., assumptions=...))`` is auto-applied
+        and the assumption is wired into the shape env: branching on the
+        assumed relation resolves statically (no DDE) and the assertion
+        appears in the traced graph."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        B = VAR("batch")
+
+        @dynamic_spec(
+            ShapesSpec(
+                PARAMS({"x": T([B, STATIC])}),
+                assumptions=[B % 2 == 0],
+            )
+        )
+        def fn(x):
+            # Branching on the assumption: without it, this would raise a DDE.
+            if x.shape[0] % 2 == 0:
+                return x.sum(0)
+            return x.sum(0) * -1
+
+        gm = make_fx(fn, tracing_mode="fake")(torch.randn(8, 3))
+        # The assumption (``Eq(Mod(u0, 2), 0)``) is also materialized as a
+        # runtime assertion in the traced graph.
+        graph_repr = gm.print_readable(print_output=False)
+        self.assertIn("Mod(u0, 2)", graph_repr)
+        self.assertIn("_assert_scalar", graph_repr)
+
+    def test_dynamic_spec_decorator_and_explicit_kwarg_raises(self):
+        """Mixing the decorator with ``make_fx(..., dynamic_shapes=...)``
+        is ambiguous and must raise."""
+        from torch.fx.experimental.dynamic_spec import dynamic_spec
+
+        @dynamic_spec({"x": T([VAR("B"), STATIC])})
+        def fn(x):
+            return x.sum(0)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"`@dynamic_spec\(\.\.\.\)` is attached.*AND a `dynamic_shapes=`",
+        ):
+            make_fx(
+                fn,
+                tracing_mode="fake",
+                dynamic_shapes=PARAMS({"x": T([VAR("Z"), STATIC])}),
+            )(torch.randn(8, 3))
 
 
 if __name__ == "__main__":
