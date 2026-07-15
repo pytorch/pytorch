@@ -2299,7 +2299,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cutlass.cutlass_max_profiling_configs": 1,
-                "cutlass.cutlass_max_profiling_swizzle_options": [1],
             }
         ):
             if use_aoti:
