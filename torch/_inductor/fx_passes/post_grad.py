@@ -1016,16 +1016,26 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
     """Based on a pattern in OPTForCausalLM"""
 
     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        # match full()'s fill_value cast
+        fill_value = int(bool(fill_value) if is_boolean_dtype(dtype) else fill_value)
         # cumsum promotes all integral types to int64
         dtype = torch.int64
 
+    out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
+    # pyrefly: ignore[bad-argument-type]
+    integral_out = bool_out or is_integer_dtype(out_dtype)
+    if integral_out:
+        fill_value = int(bool(fill_value) if bool_out else fill_value)
+    acc_dtype = torch.int64 if integral_out else torch.float64
+
     def repl(*shape):
         dim_size = shape[dim]
-        idx = torch.arange(1, dim_size + 1, device=device, dtype=dtype)
+        idx = torch.arange(1, dim_size + 1, device=device, dtype=acc_dtype)
 
         inter_shape = [1] * len(shape)
         inter_shape[dim] = dim_size
-        return (idx * fill_value).view(inter_shape).expand(shape)
+        return (idx * fill_value).view(inter_shape).expand(shape).to(out_dtype)
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
@@ -1771,12 +1781,51 @@ def view_to_reshape(gm):
     _recursive_view_to_reshape(gm.graph)
 
 
+def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool:
+    if inp.op in ("placeholder", "get_attr"):
+        return True
+
+    inp_val = inp.meta.get("val")
+    output_val = output.meta.get("val")
+    if not (isinstance(inp_val, torch.Tensor) and isinstance(output_val, torch.Tensor)):
+        return False
+
+    if len(inp_val.shape) != len(output_val.shape):
+        return True
+
+    same_shape = statically_known_true(sym_eq(inp_val.shape, output_val.shape))
+    if not same_shape:
+        for inp_dim, output_dim in zip(inp_val.shape, output_val.shape):
+            if statically_known_true(sym_eq(inp_dim, 1)) and not statically_known_true(
+                sym_eq(output_dim, 1)
+            ):
+                return True
+        return False
+
+    return inp_val.layout == torch.strided and any(
+        statically_known_true(sym_eq(stride, 0)) for stride in inp_val.stride()
+    )
+
+
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()
+    if not _is_bias_like_addmm_input(inp, output):
+        return False
+    return all(is_pointwise_use(use) for use in output.users)
+
+
+def should_prefer_unfused_baddbmm(match):
+    inp = match.kwargs["inp"]
+    if not is_gpu(inp.meta["val"].device.type):
+        return False
+
+    output = match.output_node()
+    if not _is_bias_like_addmm_input(inp, output):
+        return False
     return all(is_pointwise_use(use) for use in output.users)
 
 
@@ -1819,6 +1868,47 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         if beta != 1:
             inp = beta * inp
         return inp + mm_result
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.baddbmm,
+        KeywordArg("inp"),
+        Arg(),
+        Arg(),
+        beta=KeywordArg("beta"),
+        alpha=KeywordArg("alpha"),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+    extra_check=should_prefer_unfused_baddbmm,
+)
+def unfuse_bias_baddbmm_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
+    if config.keep_addmm_fused_for_half_dtypes and inp.meta["val"].dtype in (
+        torch.bfloat16,
+        torch.float16,
+    ):
+        if inp.meta["val"].device.type != "xpu":
+            return
+        if not (
+            inp.op == "call_function"
+            and inp.target is torch.ops.prims.convert_element_type.default
+            and inp.args[0].meta["val"].dtype.is_floating_point
+            and torch.finfo(inp.args[0].meta["val"].dtype).bits
+            > torch.finfo(inp.meta["val"].dtype).bits
+        ):
+            return
+
+    def repl(inp, x1, x2, alpha, beta):
+        bmm_result = torch.bmm(x1, x2)
+        if alpha != 1:
+            bmm_result = alpha * bmm_result
+        if beta != 1:
+            inp = beta * inp
+        return inp + bmm_result
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])

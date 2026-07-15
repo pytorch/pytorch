@@ -549,7 +549,7 @@ class TestShapeVarCompile(TestCase):
         (sym,) = free_syms
         self.assertTrue(
             str(sym).startswith("u"),
-            msg=f"expected unbacked symbol (u-prefix), got {sym!r}",
+            msg=lambda msg: f"{msg}\nexpected unbacked symbol (u-prefix), got {sym!r}",
         )
 
     def test_non_strict_raw_unbacked_symint_input_raises_dde_on_branching(self):
@@ -692,7 +692,7 @@ class TestShapeVarCompile(TestCase):
         with self.assertRaisesRegex(
             TypeError, "dynamic spec expects a dict, ShapesSpec, or ParamsSpec"
         ):
-            torch.compile(lambda x: x, dynamic_shapes="not a spec")
+            torch.compile(lambda x: x, dynamic_shapes="not a spec")  # noqa: UNSPECIFIED_BACKEND
 
     @_fx_experimental_config.patch(no_data_dependent_graph_break=True)
     def test_min_max_bypasses_dde_on_branching(self):
@@ -902,7 +902,7 @@ class TestShapeVarDedup(TestCase):
         self.assertGreaterEqual(
             len(refined),
             2,
-            f"min/max [4,16] did not propagate to repeat occurrence; "
+            lambda msg: f"{msg}\nmin/max [4,16] did not propagate to repeat occurrence; "
             f"var_to_range={dict(env.var_to_range)}",
         )
 
@@ -2050,7 +2050,7 @@ class TestDynamicSpecDecoratorCompile(TestCase):
             ValueError,
             r"`@dynamic_spec\(\.\.\.\)` is attached.*AND a `dynamic_shapes=`",
         ):
-            torch.compile(
+            torch.compile(  # noqa: UNSPECIFIED_BACKEND
                 fn,
                 dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("Z"), STATIC])}),
             )(torch.randn(8, 3))
