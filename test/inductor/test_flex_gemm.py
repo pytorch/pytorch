@@ -53,6 +53,17 @@ if cute is not None:
         return acc * row_scale
 
     @cute.jit
+    def scalar_scale_epilogue(acc, scale):
+        return acc * scale
+
+    @cute.jit
+    def captured_affine_scalar_epilogue(acc, col_bias, row_scale, tile_bias, scale):
+        value = ((acc + col_bias) * row_scale + tile_bias) * scale
+        return cute.where(
+            value > cute.full_like(value, 0), value, cute.full_like(value, 0)
+        )
+
+    @cute.jit
     def tuple_aux_epilogue(acc):
         main = (acc + cute.full_like(acc, 1.0)) * cute.full_like(acc, 0.5)
         aux = acc * acc + cute.full_like(acc, 2.0)
@@ -111,6 +122,18 @@ if cute is not None:
         )
         tmp4 = tmp3.broadcast_to(tmp1.shape)
         return tmp1 * (cute.full_like(tmp4, 1.0) / tmp4)
+
+    @cute.jit
+    def physical_group_sum_feed_epilogue(acc, local_reduce0):
+        return acc / local_reduce0
+
+    @cute.jit
+    def physical_group_sum_combine(lhs, rhs):
+        return lhs + rhs
+
+    @cute.jit
+    def physical_group_sum_finalize(value):
+        return value
 
 
 class TestFlexGemmRuntimeImport(TestCase):
@@ -536,6 +559,10 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         cls.relu_epilogue = staticmethod(relu_epilogue)
         cls.captured_affine_epilogue = staticmethod(captured_affine_epilogue)
         cls.row_scale_epilogue = staticmethod(row_scale_epilogue)
+        cls.scalar_scale_epilogue = staticmethod(scalar_scale_epilogue)
+        cls.captured_affine_scalar_epilogue = staticmethod(
+            captured_affine_scalar_epilogue
+        )
         cls.captured_tuple_aux_epilogue = staticmethod(captured_tuple_aux_epilogue)
         cls.tuple_aux_epilogue = staticmethod(tuple_aux_epilogue)
 
@@ -666,6 +693,43 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         ).relu()
         self.assertMatchesLowPrecisionEager(
             out, low_precision_expected, high_precision_expected, k
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_epilogue_infers_scalar_captured_arg_kind(self):
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            gemm_epilogue,
+            resolve_epilogue_arg_kinds,
+        )
+
+        torch.manual_seed(5)
+        m, n, k = 128, 128, 64
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        scale = self.makeTensor(1, 1, dtype=torch.float32)
+
+        # A [1, 1] arg is a scalar even when M == 1 or N == 1 would also
+        # make it a valid row/col broadcast.
+        self.assertEqual(
+            resolve_epilogue_arg_kinds(
+                torch.empty(1, k), torch.empty(k, 1), (torch.empty(1, 1),), ()
+            ),
+            ("scalar",),
+        )
+
+        out = gemm_epilogue(
+            a,
+            b,
+            self.scalar_scale_epilogue,
+            "test_flex_gemm_infer_scalar_arg",
+            out_dtype=torch.float32,
+            epilogue_args=(scale,),
+        )
+        self.assertMatchesLowPrecisionEager(
+            out,
+            (a @ b).float() * scale,
+            (a.double() @ b.double()) * scale.double(),
+            k,
         )
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
@@ -977,6 +1041,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeLocalReducePlan,
+            local_reduce_gemm_act_kwargs,
         )
         from torch._inductor.kernel.flex_gemm.template import (
             FlexGemmEpilogueLocalReduceConfig,
@@ -986,24 +1051,22 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             lambda lhs, rhs: lhs, lambda value: value
         )
         geometry = FlexGemmLocalReduceGeometry(8, 0)
-        self.assertTrue(
-            FlexGemmRuntimeLocalReducePlan(
-                geometry, callbacks=callbacks, feeds_main=True
-            ).feeds_main
+        out = torch.empty(1)
+        feed_plan = FlexGemmRuntimeLocalReducePlan(
+            geometry, callbacks=callbacks, feeds_main=True
         )
-        self.assertTrue(
-            FlexGemmRuntimeLocalReducePlan(
-                geometry,
-                out=torch.empty(1),
-                callbacks=callbacks,
-                feeds_main=True,
-            ).feeds_main
+        shared_plan = FlexGemmRuntimeLocalReducePlan(
+            geometry,
+            out=out,
+            callbacks=callbacks,
+            feeds_main=True,
         )
-        self.assertFalse(
-            FlexGemmRuntimeLocalReducePlan(
-                geometry, out=torch.empty(1), callbacks=callbacks
-            ).feeds_main
+        store_plan = FlexGemmRuntimeLocalReducePlan(
+            geometry, out=out, callbacks=callbacks
         )
+        self.assertTrue(feed_plan.feeds_main)
+        self.assertTrue(shared_plan.feeds_main)
+        self.assertFalse(store_plan.feeds_main)
         self.assertTrue(
             FlexGemmEpilogueLocalReduceConfig(geometry, feeds_main=True).feeds_main
         )
@@ -1015,6 +1078,17 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertFalse(
             FlexGemmEpilogueLocalReduceConfig(geometry, out_index=0).feeds_main
         )
+
+        feed_kwargs = local_reduce_gemm_act_kwargs(
+            feed_plan, None, ("combine", "finalize")
+        )
+        self.assertTrue(feed_kwargs["local_reduce_feeds_main"])
+        self.assertFalse(feed_kwargs["tensor_epilogue_returns_local_reduce"])
+        shared_kwargs = local_reduce_gemm_act_kwargs(
+            shared_plan, out, ("combine", "finalize")
+        )
+        self.assertTrue(shared_kwargs["local_reduce_feeds_main"])
+        self.assertTrue(shared_kwargs["tensor_epilogue_returns_local_reduce"])
 
     def test_output_plan_rejects_invalid_state(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -1209,6 +1283,64 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             self.assertGreater((out.double() - wrong_expected).abs().max(), 1e-2)
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_physical_feed_main_forced_config_extremes_match_reference(self):
+        from torch._inductor.heuristics.template.flex_gemm import (
+            candidate_gemm_configs_for_device,
+            gemm_config_key,
+        )
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmLocalReduceCallbacks,
+            FlexGemmLocalReduceGeometry,
+            validate_flex_gemm_local_reduce_config,
+        )
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            FlexGemmRuntimeLocalReducePlan,
+            gemm_epilogue,
+        )
+
+        m, n, k, group = 128, 128, 64, 32
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16) + 0.5
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16) + 0.5
+        gated = [
+            config
+            for config in candidate_gemm_configs_for_device(a.device)
+            if validate_flex_gemm_local_reduce_config(config, group, 0)
+        ]
+        self.assertTrue(gated)
+        extremes = (
+            min(gated, key=lambda config: (config.tile_m, config.tile_n)),
+            max(gated, key=lambda config: (config.tile_m, config.tile_n)),
+            min(gated, key=lambda config: (config.tile_n, config.tile_m)),
+            max(gated, key=lambda config: (config.tile_n, config.tile_m)),
+        )
+        selected = {gemm_config_key(config): config for config in extremes}.values()
+        accumulator = a.double() @ b.double()
+        grouped = accumulator.view(m // group, group, n)
+        expected = (grouped / grouped.sum(1, keepdim=True)).view(m, n)
+        callbacks = FlexGemmLocalReduceCallbacks(
+            physical_group_sum_combine, physical_group_sum_finalize
+        )
+        local_reduce = FlexGemmRuntimeLocalReducePlan(
+            FlexGemmLocalReduceGeometry(group, 0),
+            callbacks=callbacks,
+            feeds_main=True,
+        )
+        for config in selected:
+            out = gemm_epilogue(
+                a,
+                b,
+                physical_group_sum_feed_epilogue,
+                (
+                    "test_flex_gemm_physical_feed_main_"
+                    f"{config.tile_m}_{config.tile_n}_{config.cluster_m}_{config.cluster_n}"
+                ),
+                out_dtype=torch.float32,
+                local_reduce=local_reduce,
+                config_key=gemm_config_key(config),
+            )
+            torch.testing.assert_close(out.double(), expected, atol=1e-4, rtol=1e-4)
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("shape", ((128, 512, 256), (512, 128, 256), (256, 256, 256)))
     def test_swap_ab_matches_non_swap_and_eager(self, shape):
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
@@ -1308,6 +1440,50 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         ).relu()
         low_precision_expected = (
             ((a @ b).float() + col_bias) * row_scale + tile_bias
+        ).relu()
+        self.assertMatchesLowPrecisionEager(
+            swapped, low_precision_expected, high_precision_expected, k
+        )
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_swap_ab_scalar_captured_arg_matches_non_swap(self):
+        from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
+
+        torch.manual_seed(11)
+        m, n, k = 128, 384, 256
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        col_bias = self.makeTensor(m, 1, dtype=torch.float32)
+        row_scale = self.makeTensor(1, n, dtype=torch.float32)
+        tile_bias = self.makeTensor(m, n, dtype=torch.float32)
+        scale = self.makeTensor(1, 1, dtype=torch.float32)
+        swap_key, non_swap_key = self.swapAndNonSwapConfigKeys(a.device)
+
+        def run(name, config_key):
+            return gemm_epilogue(
+                a,
+                b,
+                self.captured_affine_scalar_epilogue,
+                name,
+                out_dtype=torch.float32,
+                epilogue_args=(col_bias, row_scale, tile_bias, scale),
+                epilogue_arg_kinds=("col", "row", "tile", "scalar"),
+                config_key=config_key,
+            )
+
+        swapped = run("test_flex_gemm_swap_ab_scalar_arg", swap_key)
+        non_swapped = run("test_flex_gemm_non_swap_ab_scalar_arg", non_swap_key)
+        # Scalars are orientation-invariant, so swap_ab must be bit-identical.
+        self.assertEqual(swapped, non_swapped)
+        high_precision_expected = (
+            (
+                (a.double() @ b.double() + col_bias.double()) * row_scale.double()
+                + tile_bias.double()
+            )
+            * scale.double()
+        ).relu()
+        low_precision_expected = (
+            (((a @ b).float() + col_bias) * row_scale + tile_bias) * scale
         ).relu()
         self.assertMatchesLowPrecisionEager(
             swapped, low_precision_expected, high_precision_expected, k
@@ -1516,7 +1692,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         a = torch.randn(4, 8)
         b = torch.randn(8, 5)
-        scale = torch.randn(1, 1)
+        scale = torch.randn(5)
 
         with self.assertRaisesRegex(
             Exception,
@@ -1819,6 +1995,136 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             epilogue_fn(a.double() @ b.double(), scale.double()),
             a.shape[1],
         )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize(
+        "tuned",
+        (False, True),
+        name_fn=lambda tuned: "tuned" if tuned else "untuned",
+    )
+    def test_mm_scalar_captured_arg_fp8_quant_matches_reference(self, tuned):
+        torch._dynamo.reset()
+        m, k, n = 128, 64, 128
+
+        def epilogue_fn(acc, scale):
+            return (acc.float() * scale).to(torch.float8_e4m3fn)
+
+        def fn(a, b, scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, scale),
+                kernel_options={"backend": "QUACK", "tuned": tuned},
+            )
+
+        config_context = contextlib.nullcontext()
+        if tuned:
+            from torch._inductor.template_heuristics import (
+                flex_gemm as flex_gemm_heuristics,
+            )
+
+            configs = flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                torch.device("cuda")
+            )[:2]
+            config_context = mock.patch(
+                "torch._inductor.template_heuristics.flex_gemm.candidate_gemm_configs_for_device",
+                return_value=configs,
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        scale = torch.tensor([[0.25]], device="cuda", dtype=torch.float32)
+        with config_context:
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale
+            )
+
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b, scale),
+            (a.double() @ b.double()) * scale.double(),
+            a.shape[1],
+        )
+        FileCheck().check("epilogue_arg_kinds=('scalar',)").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_scalar_and_row_captured_args_matches_reference(self):
+        m, k, n = 128, 64, 128
+
+        def epilogue_fn(acc, scale, row_scale):
+            return (acc.float() * scale * row_scale).relu()
+
+        def fn(a, b, scale, row_scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, scale, row_scale),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        scale = torch.tensor([[0.5]], device="cuda", dtype=torch.float32)
+        row_scale = torch.randn(1, n, device="cuda", dtype=torch.float32)
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True),
+            a,
+            b,
+            scale,
+            row_scale,
+        )
+
+        self.assertMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(a @ b, scale, row_scale),
+            epilogue_fn(a.double() @ b.double(), scale.double(), row_scale.double()),
+            a.shape[1],
+        )
+        FileCheck().check("epilogue_arg_kinds=('scalar', 'row')").run(code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_scalar_captured_arg_composes_with_compressed_local_reduce(self):
+        m, k, n = 128, 64, 128
+        group = 32
+
+        def epilogue_fn(acc, scale):
+            x = acc.float().view(m, -1, group)
+            return acc.float() * scale, x.abs().amax(-1)
+
+        def fn(a, b, scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, scale),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        scale = torch.tensor([[0.25]], device="cuda", dtype=torch.float32)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale
+        )
+
+        expected, _ = epilogue_fn(a @ b, scale)
+        high_precision_expected, high_precision_aux = epilogue_fn(
+            a.double() @ b.double(), scale.double()
+        )
+        self.assertMatchesLowPrecisionEager(
+            actual, expected, high_precision_expected, a.shape[1]
+        )
+        torch.testing.assert_close(
+            aux, high_precision_aux.float(), atol=1e-3, rtol=1e-3
+        )
+        FileCheck().check("epilogue_arg_kinds=('scalar',)").run(code)
+        self.assertLocalReduceAuxCode(code, group)
 
     @parametrize(
         "case",
