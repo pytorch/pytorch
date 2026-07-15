@@ -80,6 +80,11 @@ def main() -> None:
         subprocess.run([sys.executable, "setup.py", "clean"], check=True)
     pip_install("-q", "-r", "requirements.txt")
     pip_install("-q", "--pre", f"numpy=={numpy_pin()}")
+    # auditwheel repacks the manywheel with a valid ZIP64 record for >4GB ROCm
+    # wheels (pypa/wheel#692); imported by repair_wheel.py. CD-only, so it is
+    # installed here rather than in requirements.txt, and pinned for
+    # reproducible binary builds.
+    pip_install("-q", "auditwheel==6.4.2")
 
     if "rocm" in os.environ.get("DESIRED_CUDA", ""):
         print(f"Running build_amd.py at {time.strftime('%Y-%m-%d %H:%M:%S')}")
