@@ -1465,8 +1465,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         # symbolic_cellvars registers all of the frame's cells; listing it
         # second makes cell contents take precedence over a (shadowing)
         # colliding fast local of the same name.
-        items = list(tx.symbolic_locals.items()) + list(tx.symbolic_cellvars.items())
-        for name, value in items:
+        for name, value in itertools.chain(
+            tx.symbolic_locals.items(), tx.symbolic_cellvars.items()
+        ):
             if name not in frame_local_names:
                 continue
             # Match on CellVariable, not name: a colliding fast local shares a
