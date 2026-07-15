@@ -24,7 +24,6 @@ from torch.cuda._graph_annotations import (
     _HAS_CUDA_BINDINGS,
     _is_tools_id_unavailable,
     clear_kernel_annotations,
-    disable_annotations,
     get_kernel_annotations,
     register_fqn_annotation_hooks,
     remap_to_exec_graph,
@@ -188,7 +187,6 @@ class TestCudagraphFqnAnnotations(TestCase):
 
     def tearDown(self):
         clear_kernel_annotations()
-        disable_annotations()
         torch._dynamo.reset()
         super().tearDown()
 
