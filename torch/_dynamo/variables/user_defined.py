@@ -288,6 +288,33 @@ class UserDefinedVariable(VariableTracker):
                 pass
         return None
 
+    def lookup_tp_method(self, name: str) -> "Method | None":
+        static = super().lookup_tp_method(name)
+
+        def handler(
+            vt: "UserDefinedVariable",
+            tx: "InstructionTranslatorBase",
+            args: list[VariableTracker],
+            kwargs: dict[str, VariableTracker],
+        ) -> "VariableTracker | None":
+            if static is not None:
+                result = static.invoke(vt, tx, name, args, kwargs)
+                if result is not None:
+                    return result
+            return vt._call_method_impl(tx, name, args, kwargs)
+
+        return Method(handler, MethodFlags.VARARGS | MethodFlags.KEYWORDS)
+
+    def _call_method_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "VariableTracker | None":
+        # Object-backed method resolution; declines by default. UDOV/UDCV override.
+        return None
+
 
 class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
@@ -999,18 +1026,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return variables.LambdaVariable(fake_cross_entropy_loss)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
+    def _subclasses(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker | None":
         if (
-            name == "__subclasses__"
-            and len(args) == 0
+            len(args) == 0
             and not kwargs
             and "__subclasses__" not in self.value.__dict__
         ):
@@ -1019,31 +1039,67 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
+        return None
+
+    def _fromkeys(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker | None":
+        if self.value in {collections.OrderedDict, collections.defaultdict}:
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
-        elif self.value is collections.OrderedDict and name == "move_to_end":
-            return args[0].call_method(tx, name, [*args[1:]], kwargs)
-        elif (
+        return None
+
+    def _move_to_end(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker | None":
+        if self.value is collections.OrderedDict:
+            return args[0].call_method(tx, "move_to_end", [*args[1:]], kwargs)
+        return None
+
+    def _copy(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker | None":
+        # copy.copy(x) resolves type(x).__copy__ and calls it with the instance
+        # as the sole argument; dispatch to the instance so the contents (and
+        # defaultdict default_factory / deque maxlen) are preserved.
+        if (
             self.value in {collections.defaultdict, collections.deque}
-            and name == "__copy__"
             and len(args) == 1
             and not kwargs
         ):
-            # copy.copy(x) resolves type(x).__copy__ and calls it with the
-            # instance as the sole argument; dispatch to the instance so the
-            # contents (and defaultdict default_factory / deque maxlen) are
-            # preserved.
-            return args[0].call_method(tx, name, [], kwargs)
-        elif name == "__len__" and len(args) == 1 and not kwargs:
+            return args[0].call_method(tx, "__copy__", [], kwargs)
+        return None
+
+    def _len(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker | None":
+        if len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
 
             return generic_len(tx, args[0])
-        elif issubclass(self.value, dict) and name != "__new__":
+        return None
+
+    tp_methods = {
+        "__subclasses__": Method(
+            _subclasses, MethodFlags.VARARGS | MethodFlags.KEYWORDS
+        ),
+        "fromkeys": Method(_fromkeys, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "move_to_end": Method(_move_to_end, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "__copy__": Method(_copy, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "__len__": Method(_len, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+    }
+
+    def _call_method_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "VariableTracker | None":
+        from .builder import SourcelessBuilder
+
+        if issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, dict).call_method(
                 tx, name, args, kwargs
@@ -1099,7 +1155,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         ).call_function(tx, args, kwargs)
                     break
 
-        return super().call_method(tx, name, args, kwargs)
+        return None
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
@@ -2783,13 +2839,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # CPython: type(z)->nb_power(v, w, z) for a Python class calls v.__pow__(w, z).
         return v.call_method(tx, "__pow__", [w, self], {})
 
-    def call_method(
+    def _call_method_impl(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
-        args: list[Any],
-        kwargs: dict[str, Any],
-    ) -> VariableTracker:
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "VariableTracker | None":
         from .. import trace_rules
         from . import UserMethodVariable
         from .constant import ConstantVariable
@@ -2886,8 +2942,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 "this object.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-
-        return super().call_method(tx, name, args, kwargs)
 
     def sq_concat_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
@@ -4309,31 +4363,37 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             raise AssertionError("_base_vt must not be None for exception repr")
         return cast(variables.ExceptionVariable, self._base_vt)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if (
-            name == "__init__"
-            and (method := self._maybe_get_baseclass_method(name))
-            and inspect.ismethoddescriptor(method)
-            and len(kwargs) == 0
-        ):
+    # Unblocked by UDOV.lookup_tp_method: declare specials as tp_methods and
+    # inherit UDOV's object-backed resolution for everything else. No call_method.
+    def _init(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker | None":
+        method = self._maybe_get_baseclass_method("__init__")
+        if method and inspect.ismethoddescriptor(method) and len(kwargs) == 0:
             return variables.ConstantVariable.create(None)
-        elif (
-            name == "__setattr__"
-            and len(args) == 2
-            and args[0].is_constant_match(
-                "__cause__", "__context__", "__suppress_context__", "__traceback__"
-            )
+        return None
+
+    def _setattr(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker | None":
+        if len(args) == 2 and args[0].is_constant_match(
+            "__cause__", "__context__", "__suppress_context__", "__traceback__"
         ):
-            return self._base_vt.call_method(tx, name, args, kwargs)  # type: ignore[missing-attribute]
-        elif name == "with_traceback":
-            return self._base_vt.call_method(tx, name, args, kwargs)  # type: ignore[missing-attribute]
-        return super().call_method(tx, name, args, kwargs)
+            return self._base_vt.call_method(tx, "__setattr__", args, kwargs)  # type: ignore[missing-attribute]
+        return None
+
+    def _with_traceback(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker":
+        return self._base_vt.call_method(tx, "with_traceback", args, kwargs)  # type: ignore[missing-attribute]
+
+    tp_methods = {
+        "__init__": Method(_init, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "__setattr__": Method(_setattr, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "with_traceback": Method(
+            _with_traceback, MethodFlags.VARARGS | MethodFlags.KEYWORDS
+        ),
+    }
 
     # BaseException args/__cause__/__context__/__suppress_context__/__traceback__
     # are members/getsets; delegate each to the wrapped base exception VT.
@@ -4618,29 +4678,27 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                     raise
         return super().mp_subscript_impl(tx, key)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    def _getitem(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker | None":
         # Dict subclasses can override __missing__ to provide fallback
         # behavior instead of raising a KeyError. This is used, for example,
         # by collections.Counter.
-        if (
-            name == "__getitem__"
-            and self._maybe_get_baseclass_method("__getitem__") in self._base_methods
-            and self._maybe_get_baseclass_method("__missing__")
-        ):
+        if self._maybe_get_baseclass_method(
+            "__getitem__"
+        ) in self._base_methods and self._maybe_get_baseclass_method("__missing__"):
             if self._base_vt is None:
                 raise AssertionError("_base_vt must not be None in call_method")
             try:
-                return self._base_vt.call_method(tx, name, args, kwargs)
+                return self._base_vt.call_method(tx, "__getitem__", args, kwargs)
             except ObservedKeyError:
                 handle_observed_exception(tx)
                 return self.call_method(tx, "__missing__", args, kwargs)
-        return super().call_method(tx, name, args, kwargs)
+        return None
+
+    tp_methods = {
+        "__getitem__": Method(_getitem, MethodFlags.VARARGS | MethodFlags.KEYWORDS)
+    }
 
     def debug_repr(self) -> str:
         if self._base_vt is None:
@@ -4821,54 +4879,56 @@ class OrderedDictVariable(UserDefinedDictVariable):
             return self._base_vt.mp_ass_subscript_impl(tx, key, value)
         return super().mp_ass_subscript_impl(tx, key, value)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    # OrderedDict-exclusive C methods that ConstDictVariable doesn't handle.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
+    def _move_to_end(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker":
         from .constant import ConstantVariable
         from .dicts import HashableTracker
 
-        # OrderedDict-exclusive C methods that ConstDictVariable doesn't handle.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
-        if name == "move_to_end":
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in move_to_end")
-            self._base_vt.install_dict_keys_match_guard()  # type: ignore[union-attr]
-            tx.output.side_effects.mutation(self._base_vt)
-            if args[0] not in self._base_vt:  # type: ignore[operator]
-                raise_observed_exception(KeyError, tx)
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in move_to_end")
+        self._base_vt.install_dict_keys_match_guard()  # type: ignore[union-attr]
+        tx.output.side_effects.mutation(self._base_vt)
+        if args[0] not in self._base_vt:  # type: ignore[operator]
+            raise_observed_exception(KeyError, tx)
 
-            last = True
-            if len(args) == 2 and args[0].is_python_constant():
-                last = args[1].as_python_constant()
-            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
-                last = kwargs["last"].as_python_constant()
+        last = True
+        if len(args) == 2 and args[0].is_python_constant():
+            last = args[1].as_python_constant()
+        if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
+            last = kwargs["last"].as_python_constant()
 
-            key = HashableTracker(args[0])
-            self._base_vt.items.move_to_end(key, last=last)  # type: ignore[union-attr]
-            return ConstantVariable.create(None)
-        elif name == "popitem":
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in popitem")
-            if not self._base_vt.items:  # type: ignore[union-attr]
-                raise_observed_exception(
-                    KeyError, tx, args=["popitem(): dictionary is empty"]
-                )
+        key = HashableTracker(args[0])
+        self._base_vt.items.move_to_end(key, last=last)  # type: ignore[union-attr]
+        return ConstantVariable.create(None)
 
-            last = True
-            if len(args) == 1 and args[0].is_python_constant():
-                last = args[0].as_python_constant()
-            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
-                last = kwargs["last"].as_python_constant()
+    def _popitem(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker":
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in popitem")
+        if not self._base_vt.items:  # type: ignore[union-attr]
+            raise_observed_exception(
+                KeyError, tx, args=["popitem(): dictionary is empty"]
+            )
 
-            k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
-            self._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
-            tx.output.side_effects.mutation(self._base_vt)
-            return variables.TupleVariable([k.vt, v])
-        return super().call_method(tx, name, args, kwargs)
+        last = True
+        if len(args) == 1 and args[0].is_python_constant():
+            last = args[0].as_python_constant()
+        if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
+            last = kwargs["last"].as_python_constant()
+
+        k, v = self._base_vt.items.popitem(last=last)  # type: ignore[union-attr]
+        self._base_vt.should_reconstruct_all = True  # type: ignore[union-attr]
+        tx.output.side_effects.mutation(self._base_vt)
+        return variables.TupleVariable([k.vt, v])
+
+    tp_methods = {
+        "move_to_end": Method(_move_to_end, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "popitem": Method(_popitem, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+    }
 
 
 # TODO: move to dicts.py alongside ConstDictVariable.
@@ -5101,71 +5161,84 @@ class DefaultDictVariable(UserDefinedDictVariable):
             raise AssertionError("_base_vt must not be None in __init__")
         return self._base_vt.call_method(tx, "__init__", args, kwargs)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    def _getitem(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker":
+        if len(args) != 1:
+            raise_args_mismatch(tx, "__getitem__", "1 args", f"{len(args)} args")
+        return self.mp_subscript_impl(tx, args[0])
+
+    def _missing(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker":
+        if len(args) != 1:
+            raise_args_mismatch(tx, "__missing__", "1 args", f"{len(args)} args")
+        return self._missing_impl(tx, args[0])
+
+    def _ior(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker":
+        if kwargs or len(args) != 1:
+            raise_args_mismatch(
+                tx,
+                "__ior__",
+                "1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        return self.nb_inplace_or_impl(tx, args[0])
+
+    def _copy(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker":
+        # defaultdict.copy() / copy.copy(dd) both create a new defaultdict
+        # https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Modules/_collectionsmodule.c#L2290-L2293
+        from .builder import SourcelessBuilder
+
+        if self._base_vt is None:
+            raise AssertionError("_base_vt must not be None in copy")
+        new_dd = tx.output.side_effects.track_new_user_defined_object(
+            SourcelessBuilder.create(tx, dict),
+            SourcelessBuilder.create(tx, collections.defaultdict),
+            [],
+            tx=tx,
+        )
+        if not isinstance(new_dd, DefaultDictVariable):
+            raise AssertionError(f"Expected DefaultDictVariable, got {type(new_dd)}")
+        new_dd.default_factory = self.default_factory
+        new_dd._base_vt = self._base_vt.clone(
+            mutation_type=ValueMutationNew(),
+            source=None,
+        )
+        tx.output.side_effects.store_attr(
+            new_dd, "default_factory", new_dd.default_factory
+        )
+        return new_dd
+
+    def _setattr(
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
+    ) -> "VariableTracker | None":
         from .constant import ConstantVariable
 
-        if name == "__getitem__":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-            return self.mp_subscript_impl(tx, args[0])
-        elif name == "__missing__":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
-            return self._missing_impl(tx, args[0])
-        elif name == "__ior__":
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return self.nb_inplace_or_impl(tx, args[0])
-        elif name in ("copy", "__copy__"):
-            # defaultdict.copy() / copy.copy(dd) both create a new defaultdict
-            # https://github.com/python/cpython/blob/6280bb547840b609feedb78887c6491af75548e8/Modules/_collectionsmodule.c#L2290-L2293
-            from .builder import SourcelessBuilder
-
-            if self._base_vt is None:
-                raise AssertionError("_base_vt must not be None in copy")
-            new_dd = tx.output.side_effects.track_new_user_defined_object(
-                SourcelessBuilder.create(tx, dict),
-                SourcelessBuilder.create(tx, collections.defaultdict),
-                [],
-                tx=tx,
-            )
-            if not isinstance(new_dd, DefaultDictVariable):
-                raise AssertionError(
-                    f"Expected DefaultDictVariable, got {type(new_dd)}"
-                )
-            new_dd.default_factory = self.default_factory
-            new_dd._base_vt = self._base_vt.clone(
-                mutation_type=ValueMutationNew(),
-                source=None,
-            )
+        if len(args) != 2:
+            raise_args_mismatch(tx, "__setattr__", "2 args", f"{len(args)} args")
+        if (
+            istype(args[0], ConstantVariable) and args[0].value == "default_factory"
+        ) and self.is_supported_factory(args[1]):
+            self.default_factory = args[1]
             tx.output.side_effects.store_attr(
-                new_dd, "default_factory", new_dd.default_factory
+                self, "default_factory", self.default_factory
             )
-            return new_dd
-        elif name == "__setattr__":
-            if len(args) != 2:
-                raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
-            if (
-                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
-            ) and self.is_supported_factory(args[1]):
-                self.default_factory = args[1]
-                tx.output.side_effects.store_attr(
-                    self, "default_factory", self.default_factory
-                )
-                return ConstantVariable.create(None)
-            return super().call_method(tx, name, args, kwargs)
-        return super().call_method(tx, name, args, kwargs)
+            return ConstantVariable.create(None)
+        return None
+
+    tp_methods = {
+        "__getitem__": Method(_getitem, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "__missing__": Method(_missing, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "__ior__": Method(_ior, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "copy": Method(_copy, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "__copy__": Method(_copy, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+        "__setattr__": Method(_setattr, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
+    }
 
 
 class UserDefinedSetVariable(UserDefinedObjectVariable):
@@ -5630,20 +5703,17 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
         return super().method_setattr_standard(tx, name, value)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        # A common pattern in the init code of MutableMapping objects is to
-        # update the __dict__ attribute. The parent class
-        # (UserDefinedObjectVariable) implements __dict__ lookups using a VT
-        # (self.dict_vt) that uses the side effects table as source of truth.
-        if name == "get" and type(self.value).get in (  # type: ignore[attr-defined]
+    def _get(self, tx: "InstructionTranslatorBase") -> "VariableTracker | None":
+        # `.get` backed by the stdlib Mapping/dict implementation resolves to a
+        # traceable polyfill; anything else declines to the generic getattro.
+        if type(self.value).get in (  # type: ignore[attr-defined]
             collections.abc.Mapping.get,
             dict.get,
         ):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
-        else:
-            return super().getattro_impl(tx, name)
+        return None
+
+    tp_getset = {"get": GetSet(_get, None)}
 
     def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self._maybe_get_baseclass_method("__len__") in dict_methods:

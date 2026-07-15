@@ -1072,7 +1072,6 @@ class RangeVariable(BaseListVariable):
         return RangeIteratorVariable(new_start, 0, new_step, length)
 
     tp_methods = {
-        **BaseListVariable.tp_methods,
         "count": Method(count, MethodFlags.O),
         "index": Method(index, MethodFlags.O),
         "__reversed__": Method(range_reversed, MethodFlags.NOARGS),
@@ -1315,7 +1314,6 @@ class ListVariable(BaseListVariable):
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     tp_methods = {
-        **BaseListVariable.tp_methods,
         "append": Method(
             BaseListVariable.list_append, MethodFlags.VARARGS | MethodFlags.KEYWORDS
         ),
@@ -1342,6 +1340,7 @@ class ListVariable(BaseListVariable):
             BaseListVariable.list_sort, MethodFlags.VARARGS | MethodFlags.KEYWORDS
         ),
     }
+
 
 class DequeVariable(BaseListVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
@@ -1733,7 +1732,6 @@ class DequeVariable(BaseListVariable):
         )
 
     tp_methods = {
-        **BaseListVariable.tp_methods,
         # append/extend clamp right; appendleft/extendleft clamp left; the rest
         # are the shared list handlers (they don't grow, so need no clamp).
         "append": Method(append, MethodFlags.VARARGS | MethodFlags.KEYWORDS),
@@ -1995,7 +1993,6 @@ class SizeVariable(TupleVariable):
         return result
 
     tp_methods = {
-        **TupleVariable.tp_methods,
         "numel": Method(numel, MethodFlags.NOARGS),
     }
 
