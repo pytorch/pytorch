@@ -7,7 +7,7 @@ resnet50,inductor,float32,dynamic,default,1.81124,0.985
 mobilenet_v3_large,inductor,float32,static,cpp,2.980745
 functorch_maml_omniglot,inductor,float32,dynamic,cpp,1.698,0.98
 yolov3,export-aot-inductor,float32,static,default,1.556697
-mobilenet_v2,export-aot-inductor,float32,static,default,3.095943
+mobilenet_v2,export-aot-inductor,float32,static,default,3.11847
 resnext50_32x4d,export-aot-inductor,float32,dynamic,default,1.49299689
 resnext50_32x4d,inductor,amp,static,default,1.47023111
 vgg16,inductor,amp,static,default,1.2692454
