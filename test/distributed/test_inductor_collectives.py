@@ -1986,7 +1986,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(
             num_triton_kernels,
             1,
-            f"Expected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
+            lambda msg: f"{msg}\nExpected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -2619,6 +2619,41 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self._init_process_group()
         saved_values = _sync_decision_cross_ranks(test_graph, saved_values)
         self.assertEqual(saved_values, [wt1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_different_inputs_skips_sync(self):
+        # When ranks have structurally different graphs, has_same_nodes returns
+        # False and the cross-rank sync is skipped, so each rank keeps its own
+        # saved_values instead of converging to a single rank's decision.
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        node1 = test_graph.placeholder("x")
+        ag = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (node1,),
+        )
+        wt = test_graph.create_node(
+            "call_function", torch.ops._c10d_functional.wait_tensor.default, (ag,)
+        )
+        wt.meta["val"] = torch.randn(10, 10)
+
+        # Diverge the graph structure across ranks so the canonical hashes differ.
+        if self.rank == 0:
+            extra = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+        else:
+            extra = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (wt,)
+            )
+        extra.meta["val"] = torch.randn(10, 10)
+        test_graph.output((extra,))
+
+        self._init_process_group()
+        saved_values = _sync_decision_cross_ranks(test_graph, [extra])
+        self.assertEqual(saved_values, [extra])
 
     @skip_if_lt_x_gpu(2)
     def test_sync_decision_cross_ranks_different_node_order(self):
