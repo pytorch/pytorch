@@ -251,7 +251,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
@@ -742,7 +741,11 @@ inductor_override_kwargs["xpu"] = {
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
-        {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
+        {
+            ("cummin", f16): {"atol": 1e-3, "rtol": 1e-5},
+            # See https://github.com/pytorch/pytorch/pull/186595#issuecomment-4849920339
+            ("combinations", f16): {"grad_atol": 5e-4, "grad_rtol": 2e-3},
+        }
     )
 
 
