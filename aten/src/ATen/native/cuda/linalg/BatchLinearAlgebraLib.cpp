@@ -120,11 +120,12 @@ void apply_ldl_solve_cusolver(
     const Tensor& pivots,
     const Tensor& B,
     bool upper) {
-#if !(defined(CUDART_VERSION) && defined(CUSOLVER_VERSION))
+#if !(defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)) && \
+    !(defined(USE_ROCM) && ROCM_VERSION >= 71400)
   TORCH_CHECK(
       false,
       "Calling torch.linalg.ldl_solve on a CUDA tensor requires compiling ",
-      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER 11.1.2+ (CUDA 11.3.1+) support.");
+      "PyTorch with cuSOLVER/hipSOLVER. Please use PyTorch built with cuSOLVER 11.1.2+ (CUDA 11.3.1+) or hipSOLVER (ROCm 7.14+) support.");
 #else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(pivots.unsqueeze(-1)) > 0);
@@ -636,7 +637,7 @@ std::string _format_non_converging_batches(const std::vector<int64_t>& batches) 
     ss << "and other " << batches.size() - too_long << " batches";
   }
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 // This function returns V, not V^H.
@@ -832,39 +833,48 @@ static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tenso
   int* infos_ptr = infos.data_ptr<int>();
 
 #ifdef USE_CUSOLVER_64_BIT
-  cusolverDnParams_t params;
-  cudaDataType datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
-  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
-
-  for (int64_t i = 0; i < batch_size; i++) {
-    at::cuda::solver::xpotrs(
-      handle, params, uplo, n, nrhs, datatype,
-      A_ptr + i * A_matrix_stride,
-      lda, datatype,
-      self_working_copy_ptr + i * self_matrix_stride,
-      ldb,
-      infos_ptr
-    );
-  }
-
-  TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
-#else // USE_CUSOLVER_64_BIT
-  int n_32 = cuda_int_cast(n, "n");
-  int nrhs_32 = cuda_int_cast(nrhs, "nrhs");
-  int lda_32 = cuda_int_cast(lda, "lda");
-  int ldb_32 = cuda_int_cast(ldb, "ldb");
-
-  for (int64_t i = 0; i < batch_size; i++) {
-    at::cuda::solver::potrs<scalar_t>(
-      handle, uplo, n_32, nrhs_32,
-      A_ptr + i * A_matrix_stride,
-      lda_32,
-      self_working_copy_ptr + i * self_matrix_stride,
-      ldb_32,
-      infos_ptr
-    );
-  }
+  // hipSOLVER xpotrs overflows a 16-bit internal counter after 65535 sequential
+  // calls; only use 64-bit path on ROCm when dimensions exceed int32 range.
+  // cuSOLVER does not have this bug, so always use 64-bit on CUDA.
+#if defined(USE_ROCM)
+  if (n > INT_MAX || nrhs > INT_MAX)
+#else
+  if (true)
+#endif
+  {
+    cusolverDnParams_t params;
+    cudaDataType datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
+    TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
+    for (int64_t i = 0; i < batch_size; i++) {
+      at::cuda::solver::xpotrs(
+        handle, params, uplo, n, nrhs, datatype,
+        A_ptr + i * A_matrix_stride,
+        lda, datatype,
+        self_working_copy_ptr + i * self_matrix_stride,
+        ldb,
+        infos_ptr
+      );
+    }
+    TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
+  } else
 #endif // USE_CUSOLVER_64_BIT
+  {
+    int n_32 = cuda_int_cast(n, "n");
+    int nrhs_32 = cuda_int_cast(nrhs, "nrhs");
+    int lda_32 = cuda_int_cast(lda, "lda");
+    int ldb_32 = cuda_int_cast(ldb, "ldb");
+
+    for (int64_t i = 0; i < batch_size; i++) {
+      at::cuda::solver::potrs<scalar_t>(
+        handle, uplo, n_32, nrhs_32,
+        A_ptr + i * A_matrix_stride,
+        lda_32,
+        self_working_copy_ptr + i * self_matrix_stride,
+        ldb_32,
+        infos_ptr
+      );
+    }
+  }
 }
 
 
@@ -955,7 +965,8 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
 #ifdef USE_CUSOLVER_64_BIT
   size_t worksize_device; // workspaceInBytesOnDevice
   size_t worksize_host; // workspaceInBytesOnHost
-  cusolverDnParams_t params = nullptr; // use default algorithm (currently it's the only option)
+  cusolverDnParams_t params;
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
   at::cuda::solver::xgeqrf_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(),
       params,
@@ -1015,6 +1026,10 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
         infos_data);
 #endif // USE_CUSOLVER_64_BIT
   }
+
+#ifdef USE_CUSOLVER_64_BIT
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
+#endif
 
   // info from geqrf only reports if the i-th parameter is wrong, not about the matrix singularity
   // so we don't need to check it all the time
@@ -1313,7 +1328,8 @@ static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tenso
 #ifdef USE_CUSOLVER_64_BIT
   size_t worksize_device; // workspaceInBytesOnDevice
   size_t worksize_host; // workspaceInBytesOnHost
-  cusolverDnParams_t params = nullptr; // use default algorithm (currently it's the only option)
+  cusolverDnParams_t params;
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
   at::cuda::solver::xsyevd_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(),
       params,
@@ -1376,6 +1392,10 @@ static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tenso
         info_working_ptr);
 #endif // USE_CUSOLVER_64_BIT
   }
+
+#ifdef USE_CUSOLVER_64_BIT
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
+#endif
 }
 
 template <typename scalar_t>
@@ -1521,8 +1541,8 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 #endif
 }
 
-// cuSOLVER Xgeev (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+)
-#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+// cuSOLVER Xgeev (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+; requires ROCm >= 7.14 for hipsolver)
+#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71400)
 
 template <typename scalar_t>
 void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
@@ -1639,7 +1659,7 @@ void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvec
   });
 }
 
-#endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+#endif // (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71400)
 
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
@@ -1664,11 +1684,20 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
     const auto pivots_stride = get_pivots ? pivots.size(-1) : 0;
 
     const auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+    int lwork;
+    at::cuda::solver::getrf_bufferSize<scalar_t>(
+      handle, m, n, self_data, lda, &lwork);
+    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+    auto workspace = allocator.allocate(sizeof(scalar_t) * lwork);
+    auto workspace_ptr = static_cast<scalar_t*>(workspace.get());
+
     for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       at::cuda::solver::getrf<scalar_t>(
         handle, m, n,
         self_data + batch * self_stride,
         lda,
+        workspace_ptr,
         get_pivots ? pivots_data + batch * pivots_stride : nullptr,
         infos_data + batch
       );

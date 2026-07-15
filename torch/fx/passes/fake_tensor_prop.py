@@ -1,11 +1,11 @@
 from typing import Any
 
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
-from torch.fx.node import map_aggregate
+from torch.fx.node import map_aggregate, map_arg
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -76,17 +76,39 @@ class FakeTensorProp(torch.fx.Interpreter):
                 getattr(self.module, n.args[0].target), mode=self._mode
             ).propagate(*example_inputs)
 
-        result = super().run_node(n)
+        old_values = []
+        if overrides := n.meta.get("unbacked_scalar_arg_overrides"):
+            # Dynamo may keep a runtime .item() edge for float schema arguments
+            # while stashing a concrete scalar for fake-only metadata
+            # propagation. Preserve the graph edge and use the scalar only while
+            # replaying the schema parser.
+            def override_arg(arg: torch.fx.Node) -> torch.fx.node.Argument:
+                if (
+                    isinstance(arg, torch.fx.Node)
+                    and arg.name in overrides
+                    and arg in self.env
+                ):
+                    old_values.append((arg, self.env[arg]))
+                    self.env[arg] = overrides[arg.name]
+                return arg
+
+            map_arg((n.args, n.kwargs), override_arg)
+
+        try:
+            result = super().run_node(n)
+        finally:
+            for node, value in old_values:
+                self.env[node] = value
         rebind_unbacked(self._mode.shape_env, n, result)
 
         def extract_val(obj: Any) -> Any:
-            if isinstance(obj, FakeTensor):
+            if is_fake_tensor(obj):
                 return snapshot_fake(obj)
             elif isinstance(obj, torch.Tensor):
                 # TODO: How is it possible that we get a non fake tensor?  We
                 # should be running under the mode...
                 return snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
-            elif isinstance(obj, py_sym_types):
+            elif isinstance(obj, (*py_sym_types, int, float, bool)):
                 return obj
             else:
                 return None
@@ -109,5 +131,17 @@ class FakeTensorProp(torch.fx.Interpreter):
         return self.propagate_dont_convert_inputs(*fake_args)
 
     def propagate_dont_convert_inputs(self, *args: object) -> Any:
+        # In-place ops like shallow_copy_data_ can mutate fake_device on
+        # input FakeTensors during propagation. Save and restore so the
+        # caller's inputs are not permanently corrupted.
+        saved_devices = [
+            (a, a.fake_device)
+            for a in args
+            if isinstance(a, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+        ]
         with self._mode:
-            return super().run(*args)
+            try:
+                return super().run(*args)
+            finally:
+                for fake, device in saved_devices:
+                    fake.fake_device = device

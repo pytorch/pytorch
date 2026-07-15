@@ -175,11 +175,15 @@ class SymPyOps:
     @staticmethod
     def minimum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
+        if result_type == torch.bool:
+            return NotImplemented
         return TypedExpr(Min(x.expr, y.expr), result_type)
 
     @staticmethod
     def maximum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
+        if result_type == torch.bool:
+            return NotImplemented
         return TypedExpr(Max(x.expr, y.expr), result_type)
 
 
@@ -193,9 +197,8 @@ class IndexPropVar:
         return IndexPropVar(expr, is_symbolic=True)
 
     def __post_init__(self):
-        assert not self.is_symbolic or isinstance(self.value, TypedExpr), (
-            "Symbolic IndexPropVar must contain a TypedExpr"
-        )
+        if not (not self.is_symbolic or isinstance(self.value, TypedExpr)):
+            raise AssertionError("Symbolic IndexPropVar must contain a TypedExpr")
 
 
 IndexPropResult: TypeAlias = IndexPropVar | tuple["IndexPropResult", ...]

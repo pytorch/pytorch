@@ -42,6 +42,42 @@ if(USE_KINETO)
     install(TARGETS test_profiler_collection DESTINATION bin)
   endif()
 
+  add_executable(test_global_state_manager
+    ${TORCH_ROOT}/test/cpp/common/main.cpp
+    ${PROFILER_TEST_ROOT}/test_global_state_manager.cpp
+  )
+
+  target_compile_definitions(test_global_state_manager PRIVATE USE_GTEST USE_KINETO)
+
+  target_link_libraries(test_global_state_manager PRIVATE ${PROFILER_TEST_DEPENDENCIES})
+  target_include_directories(test_global_state_manager PRIVATE
+    ${ATen_CPU_INCLUDE}
+    ${KINETO_SOURCE_DIR}/include
+  )
+
+  if(INSTALL_TEST)
+    set_target_properties(test_global_state_manager PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
+    install(TARGETS test_global_state_manager DESTINATION bin)
+  endif()
+
+  add_executable(test_profiler_global_callback_stale_session
+    ${TORCH_ROOT}/test/cpp/common/main.cpp
+    ${PROFILER_TEST_ROOT}/profiler_global_callback_stale_session_test.cpp
+  )
+
+  target_compile_definitions(test_profiler_global_callback_stale_session PRIVATE USE_GTEST USE_KINETO)
+
+  target_link_libraries(test_profiler_global_callback_stale_session PRIVATE ${PROFILER_TEST_DEPENDENCIES})
+  target_include_directories(test_profiler_global_callback_stale_session PRIVATE
+    ${ATen_CPU_INCLUDE}
+    ${KINETO_SOURCE_DIR}/include
+  )
+
+  if(INSTALL_TEST)
+    set_target_properties(test_profiler_global_callback_stale_session PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
+    install(TARGETS test_profiler_global_callback_stale_session DESTINATION bin)
+  endif()
+
   if(USE_DISTRIBUTED)
     add_executable(test_comms_id
       ${TORCH_ROOT}/test/cpp/common/main.cpp
