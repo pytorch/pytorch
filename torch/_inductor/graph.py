@@ -2632,6 +2632,14 @@ class GraphLowering(torch.fx.Interpreter):
                     # cpp_wrapper JIT does not require two passes
                     return self.codegen()
 
+                if self.is_const_graph:
+                    # The const graph runs at model-load time for runtime
+                    # constant folding; its Triton kernels are compiled and
+                    # autotuned as part of the main graph's JIT variant, so
+                    # it must not be pushed through the dual-wrapper JIT
+                    # autotune pass, which cannot execute an is_const_graph.
+                    return self.codegen()
+
                 # AOTI with lazy compile: single codegen pass producing
                 # two separate C++ files — JIT (for autotuning) and AOTI
                 # (for packaging) — via DualIndentedBuffer.
