@@ -106,12 +106,12 @@ _COMPILE_LOCK = threading.RLock()
 #     def _alias_fn(orig_inputs, fw_outs):                     # (3) sibling wrapper
 #         return [gen_alias_from_base(orig_inputs[0], fw_outs[0], False, _vms_0, ...)]
 #     _replay_aliases_ = _alias_fn                             # (3) orchestration's ref
-#     def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):
-#         all_outs = _compiled_fn_(args)                       # (2) inner call invoked
+#     def _runtime_wrapper(_compiled_fn_, args):
+#         orig_inputs, all_outs = _call_compiled_fn_(...)      # (2) inner call invoked
 #         return _replay_aliases_(orig_inputs, all_outs)       # (3) sibling invoked
 #     def call(flat_inputs):
 #         return _runtime_wrapper(
-#             _inner_call, contextlib.nullcontext, lambda: None, list(flat_inputs))
+#             _inner_call, list(flat_inputs))
 #
 # We do NOT reimplement any of this. We CAPTURE AOTAutograd's exact codegen'd wrapper
 # source together with the (pre-exec) globals dict each wrapper closed over: a
@@ -357,12 +357,12 @@ def _compose_standalone_module(
     non_orch = [g for g in captured if g is not orch]
 
     # The generated ``call`` invokes the orchestration POSITIONALLY by its own name (see
-    # the bottom of this function): _runtime_wrapper(chain_head, contextlib.nullcontext,
-    # lambda: None, flat_inputs). That mapping is hardcoded to the codegen'd signature in
-    # runtime_wrappers.py (``def _runtime_wrapper(_compiled_fn_, _first_ctx_,
-    # _on_before_call_, args)``). Verify the captured signature still matches so a future
-    # rename/reorder fails loudly here instead of silently passing wrong arguments.
-    expected_orch_params = ["_compiled_fn_", "_first_ctx_", "_on_before_call_", "args"]
+    # the bottom of this function): _runtime_wrapper(chain_head, flat_inputs).
+    # That mapping is hardcoded to the codegen'd signature in
+    # runtime_wrappers.py (``def _runtime_wrapper(_compiled_fn_, args)``). Verify the
+    # captured signature still matches so a future rename/reorder fails loudly here
+    # instead of silently passing wrong arguments.
+    expected_orch_params = ["_compiled_fn_", "args"]
     orch_def = next(
         (
             n
@@ -524,7 +524,6 @@ def _compose_standalone_module(
         "call",
         "_inner_call",
         "_rebuild",
-        "contextlib",
         _ORCH_ENTRY,
     }
 
@@ -613,24 +612,17 @@ def _compose_standalone_module(
     else:
         final_invoke = (
             f"    return {orch.fn_name}(\n"
-            f"        {chain_head}, contextlib.nullcontext, lambda: None, "
-            "list(flat_inputs)\n    )"
+            f"        {chain_head}, list(flat_inputs)\n    )"
         )
 
     # The single-arg adapter over the orchestration (emitted only when outer wrappers
     # wrap it). The outer wrappers call their inner as ``fn(args)``; this adapts the
-    # orchestration's positional (_compiled_fn_, _first_ctx_, _on_before_call_, args)
-    # signature to that. When there are no outer wrappers the orchestration is invoked
-    # directly in ``call`` (see final_invoke).
+    # orchestration's positional (_compiled_fn_, args) signature to that. When there
+    # are no outer wrappers the orchestration is invoked directly in ``call`` (see
+    # final_invoke).
     orch_invoke_comment = [
-        "    # The 2nd/3rd positional args INTENTIONALLY substitute contextlib.nullcontext",
-        "    # for the runtime's first-invocation context (_FirstInvocationContext) and a",
-        "    # no-op for the profiler-prologue exit. This drops two cold-start diagnostics:",
-        "    # the first-call custom-op aliasing analysis (_AnalyzeCustomOpInputOutputMode,",
-        "    # active when check_custom_op_aliasing is set, which can even RAISE under",
-        "    # error_on_custom_op_aliasing) and the profiler prologue. Neither affects",
-        "    # numerics, so this is not a bug -- the standalone artifact deliberately omits",
-        "    # them. (See the positional-mapping note in _compose_standalone_module.)",
+        "    # Standalone source skips runtime_wrapper's first-call custom-op",
+        "    # aliasing analysis; this does not affect numerics.",
     ]
     entry_block: list[str] = []
     if outer_wrappers:
@@ -640,7 +632,7 @@ def _compose_standalone_module(
             "    # orchestration (dedup / synthetic base) can invoke it as ``fn(args)``.",
             *orch_invoke_comment,
             f"    return {orch.fn_name}(",
-            f"        {chain_head}, contextlib.nullcontext, lambda: None, args",
+            f"        {chain_head}, args",
             "    )",
             "",
         ]
@@ -722,7 +714,6 @@ def _compose_standalone_module(
 
     parts = [
         _MODULE_HEADER,
-        "import contextlib",
         *sorted(imports),
         "",
         "",

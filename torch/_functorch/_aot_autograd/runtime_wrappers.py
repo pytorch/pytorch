@@ -498,7 +498,7 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
 
 class _FirstInvocationContext:
     """
-    Context manager that tracks first invocation and conditionally enables _AnalyzeCustomOpInputOutputMode.
+    Tracks first invocation and conditionally enables _AnalyzeCustomOpInputOutputMode.
     This is useful when we have a custom op where we want to analyze its input
     and output during cold start.
     """
@@ -506,9 +506,9 @@ class _FirstInvocationContext:
     def __init__(self) -> None:
         self._is_first = True
 
-    def __call__(self) -> AbstractContextManager[Any]:
+    def __call__(self) -> AbstractContextManager[Any] | None:
         """
-        Returns a context manager: _AnalyzeCustomOpInputOutputMode on first invocation, nullcontext thereafter.
+        Returns _AnalyzeCustomOpInputOutputMode on first invocation, None thereafter.
         Automatically updates state after first use.
         """
         # NB: Don't run the analyzer when you're forcing compile during FX
@@ -521,7 +521,7 @@ class _FirstInvocationContext:
         ):
             self._is_first = False
             return _AnalyzeCustomOpInputOutputMode()
-        return nullcontext()
+        return None
 
 
 # Note [RuntimeWrapper codegen specification methods]
@@ -551,7 +551,7 @@ class _RuntimeCompiledFnInvoker:
     # code from _create_runtime_wrapper(). Keep both in sync.
     # See Note [RuntimeWrapper codegen specification methods]
     def run(self, args: list[Any], *, on_before_call: Callable[[], None]) -> list[Any]:
-        with self.first_invocation_ctx():
+        def run_impl() -> list[Any]:
             if self.trace_joint:
                 args_ = list(args)
                 # See Note [Detaching inputs that never need gradients]
@@ -597,6 +597,12 @@ class _RuntimeCompiledFnInvoker:
             finally:
                 if grad_enabled:
                     torch._C._set_grad_enabled(True)
+
+        first_ctx = self.first_invocation_ctx()
+        if first_ctx is None:
+            return run_impl()
+        with first_ctx:
+            return run_impl()
 
 
 @dataclass
@@ -805,33 +811,6 @@ class _RuntimeForwardEpilogue:
         ]
 
 
-def _codegen_capture_orig_inputs(
-    rw_lines: list[str],
-    epilogue_args_idx: tuple[int, ...],
-) -> None:
-    if epilogue_args_idx:
-        idx_str = ", ".join(f"{i}: args[{i}]" for i in epilogue_args_idx)
-        rw_lines.append(f"    orig_inputs = {{{idx_str}}}")
-    else:
-        rw_lines.append("    orig_inputs = {}")
-
-
-def _codegen_increment_mutation_versions(
-    rw_lines: list[str],
-    rw_globals: dict[str, object],
-    keep_input_mutations: bool,
-    runtime_metadata: ViewAndMutationMeta,
-) -> None:
-    if (
-        keep_input_mutations
-        and runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
-    ):
-        rw_globals["_increment_version_"] = torch.autograd.graph.increment_version
-        mut_idx = tuple(runtime_metadata.mutated_graph_handled_indices_seen_by_autograd)
-        gen_expr = ", ".join(f"args[{i}]" for i in mut_idx)
-        rw_lines.append(f"    _increment_version_(({gen_expr},))")
-
-
 def _codegen_normalize_as_list(
     lines: list[str], var_name: str, *, indent_level: int
 ) -> None:
@@ -840,66 +819,6 @@ def _codegen_normalize_as_list(
     lines.append(f"{indent}    {var_name} = list({var_name})")
     lines.append(f"{indent}elif not isinstance({var_name}, list):")
     lines.append(f"{indent}    {var_name} = [{var_name}]")
-
-
-def _codegen_compiled_fn_invocation(
-    rw_lines: list[str],
-    rw_globals: dict[str, object],
-    trace_joint: bool,
-    indices_of_inps_to_detach: list[int],
-    disable_amp: bool,
-) -> None:
-    rw_lines.append("    with _first_ctx_():")
-    # trace_joint is known at codegen time. Only the joint/training path needs
-    # forced view replay; inference wrappers should not touch this TLS state.
-    if trace_joint:
-        rw_lines.append("        args_ = list(args)")
-        for idx in indices_of_inps_to_detach:
-            rw_lines.append(
-                f"        if isinstance(args_[{idx}], torch.Tensor): "
-                f"args_[{idx}] = args_[{idx}].detach()"
-            )
-        rw_lines.append(
-            "        prev_view_replay_enabled = torch._C._is_view_replay_enabled()"
-        )
-        rw_lines.append("        try:")
-        rw_lines.append("            if not prev_view_replay_enabled:")
-        rw_lines.append("                torch._C._set_view_replay_enabled(True)")
-        rw_lines.append("            with torch.enable_grad():")
-        rw_lines.append("                _on_before_call_()")
-        if disable_amp:
-            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-            rw_lines.append("                with _DisableAutocast_():")
-            rw_lines.append("                    all_outs = _compiled_fn_(args_)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=5)
-        else:
-            rw_lines.append("                all_outs = _compiled_fn_(args_)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
-        rw_lines.append("        finally:")
-        rw_lines.append(
-            "            if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:"
-        )
-        rw_lines.append(
-            "                torch._C._set_view_replay_enabled(prev_view_replay_enabled)"
-        )
-    else:
-        rw_lines.append("        grad_enabled = torch.is_grad_enabled()")
-        rw_lines.append("        try:")
-        rw_lines.append(
-            "            if grad_enabled: torch._C._set_grad_enabled(False)"
-        )
-        rw_lines.append("            _on_before_call_()")
-        if disable_amp:
-            rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-            rw_lines.append("            with _DisableAutocast_():")
-            rw_lines.append("                all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
-        else:
-            rw_lines.append("            all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=3)
-        rw_lines.append("        finally:")
-        rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
-    rw_lines.append("    del args")
 
 
 # signatures mirror the _RuntimeForwardEpilogue reference methods
@@ -1046,24 +965,6 @@ def _create_runtime_wrapper(
 
         codegen_alias_fn = typing.cast(_EpilogueReplayAliasesFn, buf.build())
 
-    def record_runtime_wrapper_prologue_enter() -> AbstractContextManager[None] | None:
-        if (
-            torch.autograd.profiler._is_profiler_enabled
-            and dynamo_config.record_runtime_overhead
-        ):
-            cm = torch._C._profiler._RecordFunctionFast(
-                "AOTDispatcher Runtime Wrapper Prologue"
-            )
-            cm.__enter__()
-            return cm
-        return None
-
-    def record_runtime_wrapper_prologue_exit(
-        cm: AbstractContextManager[None] | None,
-    ) -> None:
-        if cm is not None:
-            cm.__exit__(None, None, None)
-
     # Codegen mutation epilogue: emit straight-line code per mutated input
     # with all branches resolved at compile time.
     if runtime_metadata.num_mutated_inp_runtime_indices > 0:
@@ -1145,20 +1046,39 @@ def _create_runtime_wrapper(
 
     buf = PySourceBuilder(
         "_runtime_wrapper",
-        args="_compiled_fn_, _first_ctx_, _on_before_call_, args",
+        args="_compiled_fn_, args",
         artifact_name="runtime_wrapper_orchestration",
     )
     buf.bind(torch=torch)
     rw_lines = buf.lines
     rw_globals = buf.globals
 
-    _codegen_capture_orig_inputs(rw_lines, epilogue_args_idx)
-    _codegen_increment_mutation_versions(
-        rw_lines, rw_globals, keep_input_mutations, runtime_metadata
+    indices_of_inps_to_increment_version = ()
+    if (
+        keep_input_mutations
+        and runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
+    ):
+        indices_of_inps_to_increment_version = tuple(
+            runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
+        )
+    call_spec_ctor = getattr(torch._C, "_CompiledFnCallSpec")  # noqa: B009
+    call_compiled_fn = getattr(torch._C, "_aot_autograd_call_compiled_fn")  # noqa: B009
+    call_spec = call_spec_ctor(
+        tuple(indices_of_inps_to_detach),
+        trace_joint,
+        disable_amp,
+        dynamo_config.record_runtime_overhead,
+        epilogue_args_idx,
+        indices_of_inps_to_increment_version,
     )
-    _codegen_compiled_fn_invocation(
-        rw_lines, rw_globals, trace_joint, indices_of_inps_to_detach, disable_amp
+    rw_globals["_call_spec_"] = call_spec
+    rw_globals["_call_compiled_fn_"] = call_compiled_fn
+    rw_lines.append(
+        "    orig_inputs, all_outs = _call_compiled_fn_("
+        "_call_spec_, _compiled_fn_, args)"
     )
+    _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=1)
+    rw_lines.append("    del args")
     _codegen_epilogue(
         rw_lines,
         rw_globals,
@@ -1173,27 +1093,21 @@ def _create_runtime_wrapper(
 
     _inner_compiled_fn = compiled_invoker.compiled_fn
     _first_invocation_ctx = compiled_invoker.first_invocation_ctx
+    first_invocation_pending = True
 
     @simple_wraps(_inner_compiled_fn)
     def runtime_wrapper(args: list[Any]) -> Any:
-        cm = record_runtime_wrapper_prologue_enter()
-        prologue_exited = False
+        nonlocal first_invocation_pending
+        first_ctx = None
+        if first_invocation_pending:
+            first_invocation_pending = False
+            first_ctx = _first_invocation_ctx()
 
-        def exit_prologue() -> None:
-            nonlocal prologue_exited
-            if not prologue_exited:
-                record_runtime_wrapper_prologue_exit(cm)
-                prologue_exited = True
-
-        try:
-            result = _codegen_runtime_wrapper(
-                _inner_compiled_fn,
-                _first_invocation_ctx,
-                exit_prologue,
-                args,
-            )
-        finally:
-            exit_prologue()
+        if first_ctx is None:
+            result = _codegen_runtime_wrapper(_inner_compiled_fn, args)
+        else:
+            with first_ctx:
+                result = _codegen_runtime_wrapper(_inner_compiled_fn, args)
         del args
         return result
 
