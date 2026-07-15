@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 
 import collections
+import dataclasses
 import doctest
 import functools
 import importlib
@@ -1223,6 +1224,59 @@ class TestAssertCloseContainer(TestCase):
 
         with self.assertRaisesRegex(AssertionError, re.escape("item ['b']")):
             torch.testing.assert_close(actual, expected)
+
+    def test_dataclass_with_tensor_fields(self):
+        # Python 3.13+ removed the same-object shortcut in dataclass __eq__, so
+        # Foo(t, 1) == Foo(t, 1) raises when t is a multi-element tensor. assertEqual
+        # / assert_close should still succeed by comparing fields directly.
+        @dataclasses.dataclass
+        class Foo:
+            t: torch.Tensor
+            i: int
+
+        t = torch.zeros(2)
+        actual = Foo(t, 1)
+        expected = Foo(t, 1)
+
+        self.assertEqual(actual, expected)
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+        # Distinct equal tensor values should also compare equal.
+        self.assertEqual(Foo(torch.zeros(2), 1), Foo(torch.zeros(2), 1))
+
+    def test_dataclass_compare_false_fields_ignored(self):
+        @dataclasses.dataclass
+        class Foo:
+            t: torch.Tensor
+            ignored: int = dataclasses.field(compare=False, default=0)
+
+        self.assertEqual(Foo(torch.zeros(2), 1), Foo(torch.zeros(2), 2))
+
+    def test_dataclass_mismatching_tensor_field_msg(self):
+        @dataclasses.dataclass
+        class Foo:
+            t: torch.Tensor
+            i: int
+
+        actual = Foo(torch.tensor(1), 0)
+        expected = Foo(torch.tensor(2), 0)
+
+        with self.assertRaisesRegex(AssertionError, re.escape("item ['t']")):
+            torch.testing.assert_close(actual, expected)
+
+    def test_nested_dataclass_with_tensor_fields(self):
+        @dataclasses.dataclass
+        class Inner:
+            t: torch.Tensor
+
+        @dataclasses.dataclass
+        class Outer:
+            inner: Inner
+            i: int
+
+        t = torch.ones(3)
+        self.assertEqual(Outer(Inner(t), 1), Outer(Inner(t), 1))
 
 
 class TestAssertCloseSparseCOO(TestCase):

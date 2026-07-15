@@ -3,6 +3,7 @@ import abc
 import cmath
 import collections.abc
 import contextlib
+import dataclasses
 from collections.abc import Callable, Collection, Sequence
 from typing import Any, NoReturn
 from typing_extensions import deprecated
@@ -1155,8 +1156,9 @@ def originate_pairs(
 ) -> list[Pair]:
     """Originates pairs from the individual inputs.
 
-    ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
-    :class:`~collections.abc.Mapping`'s. In this case the pairs are originated by recursing through them.
+    ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s,
+    :class:`~collections.abc.Mapping`'s, or dataclass instances. In this case the pairs are
+    originated by recursing through them.
 
     Args:
         actual (Any): Actual input.
@@ -1242,6 +1244,34 @@ def originate_pairs(
                     sequence_types=sequence_types,
                     mapping_types=mapping_types,
                     id=(*id, key),
+                    **options,
+                )
+            )
+        return pairs
+
+    # Dataclass instances fall through to ObjectPair otherwise, which compares with
+    # ``actual == expected``. Dataclass ``__eq__`` treats each field comparison as a
+    # Python bool, so tensor fields raise on Python 3.13+ (no same-object shortcut).
+    # Recurse field-by-field so tensors use the normal tensor comparison path.
+    elif (
+        dataclasses.is_dataclass(actual)
+        and not isinstance(actual, type)
+        and dataclasses.is_dataclass(expected)
+        and not isinstance(expected, type)
+        and type(actual) is type(expected)
+    ):
+        pairs = []
+        for field in dataclasses.fields(actual):
+            if not field.compare:
+                continue
+            pairs.extend(
+                originate_pairs(
+                    getattr(actual, field.name),
+                    getattr(expected, field.name),
+                    pair_types=pair_types,
+                    sequence_types=sequence_types,
+                    mapping_types=mapping_types,
+                    id=(*id, field.name),
                     **options,
                 )
             )
