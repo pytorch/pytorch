@@ -1,5 +1,3 @@
-//  Copyright (c) 2026 Apple Inc.
-
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/native/mps/operations/GemmHeuristics.h>
 

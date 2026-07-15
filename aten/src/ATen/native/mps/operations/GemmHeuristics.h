@@ -1,5 +1,3 @@
-//  Copyright (c) 2026 Apple Inc.
-
 #pragma once
 
 #include <c10/core/ScalarType.h>

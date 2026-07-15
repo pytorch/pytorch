@@ -1421,16 +1421,16 @@ class TestMPS(TestCaseMPS):
                 out_cpu = torch.addmm(bias.cpu(), a.cpu(), b.cpu())
                 self.assertEqual(out_cpu, out.cpu(), **tol)
 
-    def test_gemv_noncontiguous_matrix(self):
-        # A matrix that is neither row- nor column-major forces a contiguous copy.
-        for dtype in (torch.float32, torch.bfloat16):
-            tol = self._gemv_tol(dtype)
-            b = torch.randn(512, 2 * 1000, device="mps", dtype=dtype)[:, ::2]
-            a = torch.randn(1, 512, device="mps", dtype=dtype)
-            self._gemv_check(a, b, **tol)
-            a2 = torch.randn(1000, 2 * 512, device="mps", dtype=dtype)[:, ::2]
-            b2 = torch.randn(512, 1, device="mps", dtype=dtype)
-            self._gemv_check(a2, b2, **tol)
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_gemv_noncontiguous_matrix(self, dtype):
+        # A matrix that is neither row- nor column-major is read with its strides.
+        tol = self._gemv_tol(dtype)
+        b = torch.randn(512, 2 * 1000, device="mps", dtype=dtype)[:, ::2]
+        a = torch.randn(1, 512, device="mps", dtype=dtype)
+        self._gemv_check(a, b, **tol)
+        a2 = torch.randn(1000, 2 * 512, device="mps", dtype=dtype)[:, ::2]
+        b2 = torch.randn(512, 1, device="mps", dtype=dtype)
+        self._gemv_check(a2, b2, **tol)
 
     def test_gemv_strided_output_falls_back(self):
         # Non-unit-stride output is rejected by the gemv gate; the fallback path
@@ -1463,18 +1463,18 @@ class TestMPS(TestCaseMPS):
         out_cpu = torch.nn.functional.linear(x.cpu(), w.cpu(), bias.cpu())
         self.assertEqual(out_cpu, out.cpu(), **tol)
 
-    @parametrize("layout", ["t", "nt"])
+    @serialTest()
+    @largeTensorTest("5GB", device="mps")
+    @parametrize("layout", ["nn", "tn"])
     @parametrize("check", ["head", "tail"])
     def test_gemv_int64_indexing(self, layout, check):
         # Matrices with > 2**31 elements overflow the kernels' int32 indexing
         # and must dispatch the _i64 variants; odd N also hits the i64 vec
-        # clamp. nt is the lm_head decode layout (x @ W.t()) + bias epilogue.
-        if torch.mps.recommended_max_memory() < 12 * 1024**3:
-            raise unittest.SkipTest("needs ~5 GB of MPS memory")
+        # clamp. tn is the lm_head decode layout (x @ W.t()) + bias epilogue.
         K, N = 65536, 32769  # max offset 65535*32769 + 32768 > INT32_MAX
         a = torch.randn(1, K, device="mps", dtype=torch.bfloat16)
-        b = self._gemv_mat(K, N, torch.bfloat16, transpose=layout == "nt")  # 4.3 GB
-        bias = torch.randn(1, N, device="mps", dtype=torch.bfloat16) if layout == "nt" else None
+        b = self._gemv_mat(K, N, torch.bfloat16, transpose=layout == "tn")  # 4.3 GB
+        bias = torch.randn(1, N, device="mps", dtype=torch.bfloat16) if layout == "tn" else None
         got = a @ b if bias is None else torch.addmm(bias, a, b)
         self.assertFalse(got.isnan().any().item())
         # CPU reference over a column slice to stay within RAM.

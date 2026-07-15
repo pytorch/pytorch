@@ -3321,20 +3321,16 @@ REGISTER_EIGH_JACOBI(float);
 REGISTER_EIGH_JACOBI(float2);
 
 // Rank-1 GEMV kernels (M==1 xor N==1): gemv_t/gemv_nt for float/half/bfloat.
-namespace at_gemm {
-
-// 16-byte (sizeof(T)*VEC) aligned vector for coalesced device loads/stores.
-template <typename T, int VEC>
-struct alignas(sizeof(T) * VEC) GemmVec {
-  T v[VEC];
-};
-
 template <typename DT, int VEC, bool XC, typename IDX>
-inline GemmVec<DT, VEC> load_x(device const DT* x, IDX k, IDX xs) {
+inline ::c10::metal::aligned_vector<DT, VEC> load_x(
+    device const DT* x,
+    IDX k,
+    IDX xs) {
+  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
   if IF_CONSTEXPR (XC) {
-    return *((const device GemmVec<DT, VEC>*)(&x[k]));
+    return *((const device Vec*)(&x[k]));
   } else {
-    GemmVec<DT, VEC> r;
+    Vec r;
 #pragma unroll
     for (int i = 0; i < VEC; ++i) {
       r.v[i] = x[(k + i) * xs];
@@ -3343,24 +3339,51 @@ inline GemmVec<DT, VEC> load_x(device const DT* x, IDX k, IDX xs) {
   }
 }
 
+template <typename DT, int VEC, bool STRIDED, typename IDX>
+inline ::c10::metal::aligned_vector<DT, VEC> load_matrix(
+    device const DT* matrix,
+    IDX offset,
+    IDX stride) {
+  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
+  if IF_CONSTEXPR (!STRIDED) {
+    return *((const device Vec*)(&matrix[offset]));
+  } else {
+    Vec result;
+#pragma unroll
+    for (int i = 0; i < VEC; ++i) {
+      result.v[i] = matrix[(offset + i) * stride];
+    }
+    return result;
+  }
+}
+
+template <typename DT, bool STRIDED, typename IDX>
+inline DT load_matrix_element(device const DT* matrix, IDX offset, IDX stride) {
+  if IF_CONSTEXPR (STRIDED) {
+    return matrix[offset * stride];
+  } else {
+    return matrix[offset];
+  }
+}
+
 // Epilogue applied to one output element, cast to OUT_T. beta==0 must not read
-// self (may be uninitialized/NaN; matches addmm semantics).
+// bias (may be uninitialized/NaN; matches addmm semantics).
 template <GemmEpilogue EPI, typename OUT_T, typename ACC_T, typename IDX>
 inline OUT_T apply_epilogue(
     ACC_T acc,
     IDX r,
     IDX c,
-    device const OUT_T* self,
-    IDX self_r,
-    IDX self_c,
-    ::c10::metal::opmath_t<OUT_T> alpha,
-    ::c10::metal::opmath_t<OUT_T> beta) {
+    device const OUT_T* bias,
+    IDX bias_r,
+    IDX bias_c,
+    float alpha,
+    float beta) {
   using op_t = ::c10::metal::opmath_t<OUT_T>;
   op_t v = static_cast<op_t>(acc);
-  if IF_CONSTEXPR (EPI == GemmEpilogue::AlphaBeta) {
+  if IF_CONSTEXPR (EPI == GemmEpilogue::Bias) {
     v = alpha * v;
     if (beta != op_t(0)) {
-      v += beta * static_cast<op_t>(self[r * self_r + c * self_c]);
+      v += beta * static_cast<op_t>(bias[r * bias_r + c * bias_c]);
     }
   }
   return static_cast<OUT_T>(v);
@@ -3368,22 +3391,28 @@ inline OUT_T apply_epilogue(
 
 // y = x @ B, B is (K, N) row-major. Lanes own VEC columns (a coalesced line);
 // NSIMD simdgroups split K and reduce in threadgroup memory.
-template <typename DT, int NSIMD, int VEC, GemmEpilogue EPI, typename IDX = int>
+template <
+    typename DT,
+    int NSIMD,
+    int VEC,
+    GemmEpilogue EPI,
+    bool STRIDED = false,
+    typename IDX = int>
 kernel void gemv_t(
     device const DT* B [[buffer(0)]],
     device const DT* x [[buffer(1)]],
     device DT* y [[buffer(2)]],
     constant GemvDims& gP [[buffer(3)]],
-    device const DT* self [[buffer(4)]],
-    constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>& alpha_beta
-    [[buffer(5)]],
+    device const DT* bias [[buffer(4)]],
+    constant ::c10::metal::array<float, 2>& alpha_beta [[buffer(5)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint sgid [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
   using ACC_T = ::c10::metal::opmath_t<DT>;
-  using Vec = GemmVec<DT, VEC>;
+  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
   constexpr int BLOCK_N = 32 * VEC;
-  const IDX gN = IDX(gP.n), gK = IDX(gP.K), gLdb = IDX(gP.ld), gXs = IDX(gP.xs);
+  const IDX gN = IDX(gP.n), gK = IDX(gP.K), gLdb = IDX(gP.ld);
+  const IDX gMs = IDX(gP.ms), gXs = IDX(gP.xs);
   // +1 pad: the reduce reads partials[lane][cc] down a column; an odd row
   // stride keeps those 32 accesses on distinct banks.
   threadgroup ACC_T partials[NSIMD][BLOCK_N + 1];
@@ -3405,10 +3434,10 @@ kernel void gemv_t(
   if (full) {
     IDX k = k_start;
     for (; k + 4 <= k_end; k += 4) {
-      Vec b0 = *((const device Vec*)(&B[(k + 0) * gLdb + n0]));
-      Vec b1 = *((const device Vec*)(&B[(k + 1) * gLdb + n0]));
-      Vec b2 = *((const device Vec*)(&B[(k + 2) * gLdb + n0]));
-      Vec b3 = *((const device Vec*)(&B[(k + 3) * gLdb + n0]));
+      Vec b0 = load_matrix<DT, VEC, STRIDED>(&B[(k + 0) * gLdb], n0, gMs);
+      Vec b1 = load_matrix<DT, VEC, STRIDED>(&B[(k + 1) * gLdb], n0, gMs);
+      Vec b2 = load_matrix<DT, VEC, STRIDED>(&B[(k + 2) * gLdb], n0, gMs);
+      Vec b3 = load_matrix<DT, VEC, STRIDED>(&B[(k + 3) * gLdb], n0, gMs);
       ACC_T x0 = (ACC_T)x[(k + 0) * gXs], x1 = (ACC_T)x[(k + 1) * gXs];
       ACC_T x2 = (ACC_T)x[(k + 2) * gXs], x3 = (ACC_T)x[(k + 3) * gXs];
 #pragma unroll
@@ -3420,7 +3449,7 @@ kernel void gemv_t(
       }
     }
     for (; k < k_end; ++k) {
-      Vec bv = *((const device Vec*)(&B[k * gLdb + n0]));
+      Vec bv = load_matrix<DT, VEC, STRIDED>(&B[k * gLdb], n0, gMs);
       ACC_T xk = (ACC_T)x[k * gXs];
 #pragma unroll
       for (int i = 0; i < VEC; ++i) {
@@ -3434,7 +3463,9 @@ kernel void gemv_t(
       for (int i = 0; i < VEC; ++i) {
         IDX n = n0 + i;
         if (n < gN) {
-          acc[i] += (ACC_T)B[k * gLdb + n] * xk;
+          acc[i] +=
+              (ACC_T)load_matrix_element<DT, STRIDED>(&B[k * gLdb], n, gMs) *
+              xk;
         }
       }
     }
@@ -3455,7 +3486,7 @@ kernel void gemv_t(
     const IDX n = col0 + cc;
     if (lane == 0 && n < gN) {
       y[n] = apply_epilogue<EPI, DT, ACC_T>(
-          v, IDX(0), n, self, IDX(gP.self_r), IDX(gP.self_c), alpha, beta);
+          v, IDX(0), n, bias, IDX(gP.bias_r), IDX(gP.bias_c), alpha, beta);
     }
   }
 }
@@ -3470,9 +3501,8 @@ kernel void gemv_t2d(
     device const DT* x [[buffer(1)]],
     device DT* y [[buffer(2)]],
     constant GemvDims& gP [[buffer(3)]],
-    device const DT* self [[buffer(4)]],
-    constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>& alpha_beta
-    [[buffer(5)]],
+    device const DT* bias [[buffer(4)]],
+    constant ::c10::metal::array<float, 2>& alpha_beta [[buffer(5)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint sgid [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
@@ -3480,7 +3510,7 @@ kernel void gemv_t2d(
   constexpr int VEC = 16 / sizeof(DT);
   constexpr int C = 32 / KQ;
   constexpr int BLOCK_N = C * VEC;
-  using Vec = GemmVec<DT, VEC>;
+  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
   threadgroup ACC_T partials[NSIMD][BLOCK_N + 1];
   const IDX gN = IDX(gP.n), gK = IDX(gP.K), gLdb = IDX(gP.ld), gXs = IDX(gP.xs);
   const IDX col0 = IDX(tgid.x) * BLOCK_N;
@@ -3556,7 +3586,7 @@ kernel void gemv_t2d(
     const IDX n = col0 + cc;
     if (lane == 0 && n < gN) {
       y[n] = apply_epilogue<EPI, DT, ACC_T>(
-          v, IDX(0), n, self, IDX(gP.self_r), IDX(gP.self_c), alpha, beta);
+          v, IDX(0), n, bias, IDX(gP.bias_r), IDX(gP.bias_c), alpha, beta);
     }
   }
 }
@@ -3569,21 +3599,22 @@ template <
     int VEC,
     GemmEpilogue EPI,
     bool XC,
+    bool STRIDED = false,
     typename IDX = int>
 kernel void gemv_nt(
     device const DT* A [[buffer(0)]],
     device const DT* x [[buffer(1)]],
     device DT* y [[buffer(2)]],
     constant GemvDims& gP [[buffer(3)]],
-    device const DT* self [[buffer(4)]],
-    constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>& alpha_beta
-    [[buffer(5)]],
+    device const DT* bias [[buffer(4)]],
+    constant ::c10::metal::array<float, 2>& alpha_beta [[buffer(5)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint sgid [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
   using ACC_T = ::c10::metal::opmath_t<DT>;
-  using Vec = GemmVec<DT, VEC>;
-  const IDX gM = IDX(gP.n), gK = IDX(gP.K), gLda = IDX(gP.ld), gXs = IDX(gP.xs);
+  using Vec = ::c10::metal::aligned_vector<DT, VEC>;
+  const IDX gM = IDX(gP.n), gK = IDX(gP.K), gLda = IDX(gP.ld);
+  const IDX gMs = IDX(gP.ms), gXs = IDX(gP.xs);
   const int K_STRIDE = 32 * VEC;
 
   const IDX row = IDX(tgid.x) * NSIMD + IDX(sgid);
@@ -3598,10 +3629,10 @@ kernel void gemv_nt(
     Vec x1 = load_x<DT, VEC, XC>(x, k + 1 * K_STRIDE, gXs);
     Vec x2 = load_x<DT, VEC, XC>(x, k + 2 * K_STRIDE, gXs);
     Vec x3 = load_x<DT, VEC, XC>(x, k + 3 * K_STRIDE, gXs);
-    Vec a0 = *((const device Vec*)(&Arow[k + 0 * K_STRIDE]));
-    Vec a1 = *((const device Vec*)(&Arow[k + 1 * K_STRIDE]));
-    Vec a2 = *((const device Vec*)(&Arow[k + 2 * K_STRIDE]));
-    Vec a3 = *((const device Vec*)(&Arow[k + 3 * K_STRIDE]));
+    Vec a0 = load_matrix<DT, VEC, STRIDED>(Arow, k + 0 * K_STRIDE, gMs);
+    Vec a1 = load_matrix<DT, VEC, STRIDED>(Arow, k + 1 * K_STRIDE, gMs);
+    Vec a2 = load_matrix<DT, VEC, STRIDED>(Arow, k + 2 * K_STRIDE, gMs);
+    Vec a3 = load_matrix<DT, VEC, STRIDED>(Arow, k + 3 * K_STRIDE, gMs);
 #pragma unroll
     for (int i = 0; i < VEC; ++i) {
       acc += (ACC_T)a0.v[i] * (ACC_T)x0.v[i];
@@ -3612,7 +3643,7 @@ kernel void gemv_nt(
   }
   for (; k + VEC <= gK; k += K_STRIDE) {
     Vec xv = load_x<DT, VEC, XC>(x, k, gXs);
-    Vec av = *((const device Vec*)(&Arow[k]));
+    Vec av = load_matrix<DT, VEC, STRIDED>(Arow, k, gMs);
 #pragma unroll
     for (int i = 0; i < VEC; ++i) {
       acc += (ACC_T)av.v[i] * (ACC_T)xv.v[i];
@@ -3620,7 +3651,8 @@ kernel void gemv_nt(
   }
   if (lane == 0) {
     for (IDX kk = (gK / VEC) * VEC; kk < gK; ++kk) {
-      acc += (ACC_T)Arow[kk] * (ACC_T)x[kk * gXs];
+      acc += (ACC_T)load_matrix_element<DT, STRIDED>(Arow, kk, gMs) *
+          (ACC_T)x[kk * gXs];
     }
   }
 
@@ -3630,9 +3662,9 @@ kernel void gemv_nt(
         s,
         row,
         IDX(0),
-        self,
-        IDX(gP.self_r),
-        IDX(gP.self_c),
+        bias,
+        IDX(gP.bias_r),
+        IDX(gP.bias_c),
         alpha_beta[0],
         alpha_beta[1]);
   }
@@ -3641,20 +3673,24 @@ kernel void gemv_nt(
 // Explicit instantiations (host_name = dispatch key): exactly the configs the
 // GemvPolicy can emit, closed under clamp_vec (vec halved when the matrix is
 // not vec-aligned) and the T2D->Standard misalignment fallback.
-#define MB_GEMV_T(DT, NSIMD, VEC, EN, EV)                           \
-  template [[host_name("gemv_t_" #DT "_" #NSIMD "_" #VEC "_" #EN)]] \
-  kernel void gemv_t<DT, NSIMD, VEC, GemmEpilogue::EV>(             \
-      device const DT*,                                             \
-      device const DT*,                                             \
-      device DT*,                                                   \
-      constant GemvDims&,                                           \
-      device const DT*,                                             \
-      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&, \
-      uint3,                                                        \
-      uint,                                                         \
+#define MB_GEMV_T(DT, NSIMD, VEC, EN, EV, SN, SV)                            \
+  template[                                                                  \
+      [host_name("gemv_t_" #DT "_" #NSIMD "_" #VEC "_" #EN SN)]] kernel void \
+  gemv_t<DT, NSIMD, VEC, GemmEpilogue::EV, SV>(                              \
+      device const DT*,                                                      \
+      device const DT*,                                                      \
+      device DT*,                                                            \
+      constant GemvDims&,                                                    \
+      device const DT*,                                                      \
+      constant ::c10::metal::array<float, 2>&,                               \
+      uint3,                                                                 \
+      uint,                                                                  \
       uint);
-#define MB_GEMV_T_E(DT, NSIMD, VEC) \
-  MB_GEMV_T(DT, NSIMD, VEC, none, None) MB_GEMV_T(DT, NSIMD, VEC, ab, AlphaBeta)
+#define MB_GEMV_T_E(DT, NSIMD, VEC)                       \
+  MB_GEMV_T(DT, NSIMD, VEC, none, None, "", false)        \
+  MB_GEMV_T(DT, NSIMD, VEC, ab, Bias, "", false)          \
+  MB_GEMV_T(DT, NSIMD, VEC, none, None, "_strided", true) \
+  MB_GEMV_T(DT, NSIMD, VEC, ab, Bias, "_strided", true)
 
 #define MB_GEMV_T2D(DT, NSIMD, KQ, EN, EV)                           \
   template [[host_name("gemv_t2d_" #DT "_" #NSIMD "_" #KQ "_" #EN)]] \
@@ -3664,37 +3700,43 @@ kernel void gemv_nt(
       device DT*,                                                    \
       constant GemvDims&,                                            \
       device const DT*,                                              \
-      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&,  \
+      constant ::c10::metal::array<float, 2>&,                       \
       uint3,                                                         \
       uint,                                                          \
       uint);
 #define MB_GEMV_T2D_E(DT, NSIMD, KQ)     \
   MB_GEMV_T2D(DT, NSIMD, KQ, none, None) \
-  MB_GEMV_T2D(DT, NSIMD, KQ, ab, AlphaBeta)
+  MB_GEMV_T2D(DT, NSIMD, KQ, ab, Bias)
 
-#define MB_GEMV_NT(DT, NSIMD, VEC, EN, EV, XN, XV)                  \
-  template [[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN   \
-                       "_" #XN)]] kernel void                       \
-  gemv_nt<DT, NSIMD, VEC, GemmEpilogue::EV, XV>(                    \
-      device const DT*,                                             \
-      device const DT*,                                             \
-      device DT*,                                                   \
-      constant GemvDims&,                                           \
-      device const DT*,                                             \
-      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&, \
-      uint3,                                                        \
-      uint,                                                         \
+#define MB_GEMV_NT(DT, NSIMD, VEC, EN, EV, XN, XV, SN, SV)       \
+  template[[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN \
+                      "_" #XN SN)]] kernel void                  \
+  gemv_nt<DT, NSIMD, VEC, GemmEpilogue::EV, XV, SV>(             \
+      device const DT*,                                          \
+      device const DT*,                                          \
+      device DT*,                                                \
+      constant GemvDims&,                                        \
+      device const DT*,                                          \
+      constant ::c10::metal::array<float, 2>&,                   \
+      uint3,                                                     \
+      uint,                                                      \
       uint);
 // VEC==1: a vector x load degenerates to a scalar one, strided-x only.
-#define MB_GEMV_NT_E1(DT, NSIMD)                  \
-  MB_GEMV_NT(DT, NSIMD, 1, none, None, xs, false) \
-  MB_GEMV_NT(DT, NSIMD, 1, ab, AlphaBeta, xs, false)
+#define MB_GEMV_NT_E1(DT, NSIMD)                                    \
+  MB_GEMV_NT(DT, NSIMD, 1, none, None, xs, false, "", false)        \
+  MB_GEMV_NT(DT, NSIMD, 1, ab, Bias, xs, false, "", false)          \
+  MB_GEMV_NT(DT, NSIMD, 1, none, None, xs, false, "_strided", true) \
+  MB_GEMV_NT(DT, NSIMD, 1, ab, Bias, xs, false, "_strided", true)
 
-#define MB_GEMV_NT_EV(DT, NSIMD, VEC)                  \
-  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xs, false)    \
-  MB_GEMV_NT(DT, NSIMD, VEC, ab, AlphaBeta, xs, false) \
-  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xc, true)     \
-  MB_GEMV_NT(DT, NSIMD, VEC, ab, AlphaBeta, xc, true)
+#define MB_GEMV_NT_EV(DT, NSIMD, VEC)                                 \
+  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xs, false, "", false)        \
+  MB_GEMV_NT(DT, NSIMD, VEC, ab, Bias, xs, false, "", false)          \
+  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xc, true, "", false)         \
+  MB_GEMV_NT(DT, NSIMD, VEC, ab, Bias, xc, true, "", false)           \
+  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xs, false, "_strided", true) \
+  MB_GEMV_NT(DT, NSIMD, VEC, ab, Bias, xs, false, "_strided", true)   \
+  MB_GEMV_NT(DT, NSIMD, VEC, none, None, xc, true, "_strided", true)  \
+  MB_GEMV_NT(DT, NSIMD, VEC, ab, Bias, xc, true, "_strided", true)
 
 // fp32 t: nsimd tiers {4, 8, 16, 32} at vec 2 (clamped to 1), scalar columns
 // {32, 1}; nt: nsimd {4, 16} at vec 4 (clamped to 2/1); t2d at kq=4.
@@ -3741,43 +3783,52 @@ MB_GEMV_LP(bfloat)
 // so the host skips the policy and uses one fixed config per side, closed
 // under the alignment clamps: gemv_t {16, 2}, gemv_nt {8, 8} (fp32 {8, 4});
 // no t2d.
-#define MB_GEMV_T_I64(DT, NSIMD, VEC, EN, EV)                              \
-  template [[host_name("gemv_t_" #DT "_" #NSIMD "_" #VEC "_" #EN "_i64")]] \
-  kernel void gemv_t<DT, NSIMD, VEC, GemmEpilogue::EV, long>(              \
-      device const DT*,                                                    \
-      device const DT*,                                                    \
-      device DT*,                                                          \
-      constant GemvDims&,                                                  \
-      device const DT*,                                                    \
-      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&,        \
-      uint3,                                                               \
-      uint,                                                                \
+#define MB_GEMV_T_I64(DT, NSIMD, VEC, EN, EV, SN, SV)              \
+  template[[host_name("gemv_t_" #DT "_" #NSIMD "_" #VEC "_" #EN SN \
+                      "_i64")]] kernel void                        \
+  gemv_t<DT, NSIMD, VEC, GemmEpilogue::EV, SV, long>(              \
+      device const DT*,                                            \
+      device const DT*,                                            \
+      device DT*,                                                  \
+      constant GemvDims&,                                          \
+      device const DT*,                                            \
+      constant ::c10::metal::array<float, 2>&,                     \
+      uint3,                                                       \
+      uint,                                                        \
       uint);
-#define MB_GEMV_T_I64_E(DT, NSIMD, VEC)     \
-  MB_GEMV_T_I64(DT, NSIMD, VEC, none, None) \
-  MB_GEMV_T_I64(DT, NSIMD, VEC, ab, AlphaBeta)
+#define MB_GEMV_T_I64_E(DT, NSIMD, VEC)                       \
+  MB_GEMV_T_I64(DT, NSIMD, VEC, none, None, "", false)        \
+  MB_GEMV_T_I64(DT, NSIMD, VEC, ab, Bias, "", false)          \
+  MB_GEMV_T_I64(DT, NSIMD, VEC, none, None, "_strided", true) \
+  MB_GEMV_T_I64(DT, NSIMD, VEC, ab, Bias, "_strided", true)
 
-#define MB_GEMV_NT_I64(DT, NSIMD, VEC, EN, EV, XN, XV)                    \
-  template [[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN "_" #XN \
-                       "_i64")]] kernel void                              \
-  gemv_nt<DT, NSIMD, VEC, GemmEpilogue::EV, XV, long>(                    \
-      device const DT*,                                                   \
-      device const DT*,                                                   \
-      device DT*,                                                         \
-      constant GemvDims&,                                                 \
-      device const DT*,                                                   \
-      constant ::c10::metal::array<::c10::metal::opmath_t<DT>, 2>&,       \
-      uint3,                                                              \
-      uint,                                                               \
+#define MB_GEMV_NT_I64(DT, NSIMD, VEC, EN, EV, XN, XV, SN, SV)              \
+  template[[host_name("gemv_nt_" #DT "_" #NSIMD "_" #VEC "_" #EN "_" #XN SN \
+                      "_i64")]] kernel void                                 \
+  gemv_nt<DT, NSIMD, VEC, GemmEpilogue::EV, XV, SV, long>(                  \
+      device const DT*,                                                     \
+      device const DT*,                                                     \
+      device DT*,                                                           \
+      constant GemvDims&,                                                   \
+      device const DT*,                                                     \
+      constant ::c10::metal::array<float, 2>&,                              \
+      uint3,                                                                \
+      uint,                                                                 \
       uint);
-#define MB_GEMV_NT_I64_E1(DT, NSIMD)                  \
-  MB_GEMV_NT_I64(DT, NSIMD, 1, none, None, xs, false) \
-  MB_GEMV_NT_I64(DT, NSIMD, 1, ab, AlphaBeta, xs, false)
-#define MB_GEMV_NT_I64_EV(DT, NSIMD, VEC)                  \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xs, false)    \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, AlphaBeta, xs, false) \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xc, true)     \
-  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, AlphaBeta, xc, true)
+#define MB_GEMV_NT_I64_E1(DT, NSIMD)                                    \
+  MB_GEMV_NT_I64(DT, NSIMD, 1, none, None, xs, false, "", false)        \
+  MB_GEMV_NT_I64(DT, NSIMD, 1, ab, Bias, xs, false, "", false)          \
+  MB_GEMV_NT_I64(DT, NSIMD, 1, none, None, xs, false, "_strided", true) \
+  MB_GEMV_NT_I64(DT, NSIMD, 1, ab, Bias, xs, false, "_strided", true)
+#define MB_GEMV_NT_I64_EV(DT, NSIMD, VEC)                                 \
+  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xs, false, "", false)        \
+  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, Bias, xs, false, "", false)          \
+  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xc, true, "", false)         \
+  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, Bias, xc, true, "", false)           \
+  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xs, false, "_strided", true) \
+  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, Bias, xs, false, "_strided", true)   \
+  MB_GEMV_NT_I64(DT, NSIMD, VEC, none, None, xc, true, "_strided", true)  \
+  MB_GEMV_NT_I64(DT, NSIMD, VEC, ab, Bias, xc, true, "_strided", true)
 
 #define MB_GEMV_I64_LP(DT)    \
   MB_GEMV_T_I64_E(DT, 16, 2)  \
@@ -3794,5 +3845,3 @@ MB_GEMV_T_I64_E(float, 16, 1)
 MB_GEMV_NT_I64_EV(float, 8, 4)
 MB_GEMV_NT_I64_EV(float, 8, 2)
 MB_GEMV_NT_I64_E1(float, 8)
-
-} // namespace at_gemm

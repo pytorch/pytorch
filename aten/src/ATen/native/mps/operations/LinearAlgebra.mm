@@ -95,24 +95,26 @@ AlphaBeta make_alpha_beta(const Scalar& alpha, const Scalar& beta, ScalarType sc
   return alpha_beta;
 }
 
-// Describes how a kernel reads one logical matrix from possibly-strided memory.
-struct Resolved {
-  Tensor view; // original tensor or a contiguous copy
-  int64_t ld; // leading dim (row stride, with the other dim unit-stride)
-  bool trans; // true when stored column-major (the "other" orientation)
+// Describes how a kernel reads one logical matrix.
+struct ResolvedMatrix {
+  Tensor tensor;
+  int64_t ld; // leading stride in the selected orientation
+  int64_t stride; // stride along the reduction/output dimension
+  bool transposed; // true when stored column-major
 };
 
-Resolved resolve_mat(const Tensor& mat, int64_t row_dim, int64_t col_dim) {
-  const int64_t rows = mat.size(row_dim), cols = mat.size(col_dim);
-  const int64_t row_stride = mat.stride(row_dim), col_stride = mat.stride(col_dim);
+ResolvedMatrix resolve_matrix(const Tensor& matrix) {
+  const auto rows = matrix.size(0);
+  const auto cols = matrix.size(1);
+  const auto row_stride = matrix.stride(0);
+  const auto col_stride = matrix.stride(1);
   if (col_stride == 1 && row_stride >= cols) {
-    return {mat, row_stride, false};
+    return {matrix, row_stride, col_stride, false};
   }
   if (row_stride == 1 && col_stride >= rows) {
-    return {mat, col_stride, true};
+    return {matrix, col_stride, row_stride, true};
   }
-  auto contig = mat.contiguous();
-  return {contig, cols, false};
+  return {matrix, row_stride, col_stride, false};
 }
 
 // Rank-1 GEMV launch. Matrix orientation selects gemv_t vs gemv_nt; one
@@ -120,24 +122,24 @@ Resolved resolve_mat(const Tensor& mat, int64_t row_dim, int64_t col_dim) {
 void dispatch_gemv(const Tensor& A,
                    const Tensor& B,
                    const Tensor& out,
-                   const std::optional<Tensor>& self,
+                   const std::optional<Tensor>& bias,
+                   const ResolvedMatrix& matrix,
                    const Scalar& alpha,
                    const Scalar& beta,
-                   at_gemm::GemmEpilogue epi,
+                   GemmEpilogue epi,
                    const GemvPolicy& policy,
                    bool m_is_one,
                    int64_t outlen,
-                   int64_t K,
                    bool idx64) {
   const auto dt = out.scalar_type();
   const std::string dt_str = scalarToMetalTypeString(out);
   constexpr int64_t r = 0, c = 1;
+  const auto K = A.size(1);
 
-  // Matrix is B when M==1, else A; resolve to (ld, trans).
-  const Resolved mat = resolve_mat(m_is_one ? B : A, r, c);
   // gemv_t when the output runs along the matrix's columns; else gemv_nt.
-  const bool gemv_use_t = m_is_one ? !mat.trans : mat.trans;
-  const int64_t align = mat.ld | mat.view.storage_offset();
+  const bool gemv_use_t = m_is_one ? !matrix.transposed : matrix.transposed;
+  const bool matrix_contiguous = matrix.stride == 1;
+  const int64_t align = matrix_contiguous ? matrix.ld | matrix.tensor.storage_offset() : 0;
   GemvConfig cfg;
   if (idx64) {
     // Offsets overflow int32: such operands are DRAM-bound, so skip the
@@ -150,9 +152,9 @@ void dispatch_gemv(const Tensor& A,
   // T2D loads a full 16 bytes per lane; misaligned matrices fall back to the
   // scalar-column standard kernel.
   const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
-  if (cfg.kernel == GemvKernel::T2D && (align & (t2d_vec - 1))) {
+  if (cfg.kernel == GemvKernel::T2D && (!matrix_contiguous || (align & (t2d_vec - 1)))) {
     cfg.kernel = GemvKernel::Standard;
-    cfg.vec = 1;
+    cfg.vec = matrix_contiguous ? 1 : 2;
   }
   const GemvConfig launch_cfg = cfg;
   const bool gemv_t2d = gemv_use_t && launch_cfg.kernel == GemvKernel::T2D;
@@ -162,35 +164,44 @@ void dispatch_gemv(const Tensor& A,
   // Vectorized x loads need x unit-stride and VEC-aligned (nt only).
   const bool xc = !gemv_use_t && launch_cfg.vec > 1 && vec_xs == 1 && (vvec.storage_offset() % launch_cfg.vec) == 0;
 
-  Tensor self_e;
+  Tensor expanded_bias;
   int64_t out_stride = 0;
-  if (epi == at_gemm::GemmEpilogue::AlphaBeta) {
-    TORCH_INTERNAL_ASSERT(self.has_value());
-    self_e = self->expand_as(out);
-    out_stride = m_is_one ? self_e.stride(c) : self_e.stride(r);
+  if (epi == GemmEpilogue::Bias) {
+    TORCH_INTERNAL_ASSERT(bias.has_value());
+    expanded_bias = bias->expand_as(out);
+    out_stride = m_is_one ? expanded_bias.stride(c) : expanded_bias.stride(r);
   } else {
-    self_e = mat.view; // dummy binding for buffer(4); never dereferenced
+    expanded_bias = matrix.tensor; // dummy binding for buffer(4); never dereferenced
   }
 
-  // gemv_t indexes self at (0,n) -> self_c; gemv_nt at (row,0) -> self_r.
-  at_gemm::GemvDims dims;
+  // gemv_t indexes bias at (0,n); gemv_nt indexes it at (row,0).
+  GemvDims dims;
   dims.n = outlen;
   dims.K = K;
-  dims.ld = mat.ld;
+  dims.ld = matrix.ld;
+  dims.ms = matrix.stride;
   dims.xs = vec_xs;
-  dims.self_r = gemv_use_t ? 0 : out_stride;
-  dims.self_c = gemv_use_t ? out_stride : 0;
+  dims.bias_r = gemv_use_t ? 0 : out_stride;
+  dims.bias_c = gemv_use_t ? out_stride : 0;
 
-  const auto epi_str = epi == at_gemm::GemmEpilogue::AlphaBeta ? "ab" : "none";
+  const auto epi_str = epi == GemmEpilogue::Bias ? "ab" : "none";
+  const auto matrix_str = matrix_contiguous ? "" : "_strided";
   const auto idx_str = idx64 ? "_i64" : "";
   std::string fname;
   if (gemv_t2d) {
     fname = fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, launch_cfg.nsimd, launch_cfg.kq, epi_str);
   } else if (gemv_use_t) {
-    fname = fmt::format("gemv_t_{}_{}_{}_{}{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str, idx_str);
+    fname =
+        fmt::format("gemv_t_{}_{}_{}_{}{}{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str, matrix_str, idx_str);
   } else {
-    fname = fmt::format(
-        "gemv_nt_{}_{}_{}_{}_{}{}", dt_str, launch_cfg.nsimd, launch_cfg.vec, epi_str, xc ? "xc" : "xs", idx_str);
+    fname = fmt::format("gemv_nt_{}_{}_{}_{}_{}{}{}",
+                        dt_str,
+                        launch_cfg.nsimd,
+                        launch_cfg.vec,
+                        epi_str,
+                        xc ? "xc" : "xs",
+                        matrix_str,
+                        idx_str);
   }
   auto pso = lib.getPipelineStateForFunc(fname);
   const NSUInteger threads_per_tg = static_cast<NSUInteger>(launch_cfg.nsimd * 32);
@@ -203,10 +214,10 @@ void dispatch_gemv(const Tensor& A,
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(pso, "gemm_gemv", {mat.view, vvec});
+      getMPSProfiler().beginProfileKernel(pso, "gemm_gemv", {matrix.tensor, vvec});
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso];
-      mtl_setArgs(enc, mat.view, vvec, out, dims, self_e, ab);
+      mtl_setArgs(enc, matrix.tensor, vvec, out, dims, expanded_bias, ab);
       [enc dispatchThreadgroups:MTLSizeMake(num_groups, 1, 1) threadsPerThreadgroup:MTLSizeMake(threads_per_tg, 1, 1)];
       getMPSProfiler().endProfileKernel(pso);
     }
@@ -215,16 +226,16 @@ void dispatch_gemv(const Tensor& A,
 
 // Rank-1 GEMV gate for mm/addmm: dispatch when out is rank-1 (M==1 xor N==1)
 // and unit-stride along its length, otherwise return false to fall back to MPSGraph
-// A=(M,K), B=(K,N), self=bias.
+// A=(M,K), B=(K,N).
 bool try_mps_gemv(const Tensor& A,
                   const Tensor& B,
                   const Tensor& out,
-                  const std::optional<Tensor>& self,
+                  const std::optional<Tensor>& bias,
                   const Scalar& alpha,
                   const Scalar& beta,
-                  at_gemm::GemmEpilogue epi) {
-  if (!c10::isFloatingType(out.scalar_type())) {
-    // gemv kernels are float-only; integer types fall back to MPSGraph
+                  GemmEpilogue epi) {
+  const auto dtype = out.scalar_type();
+  if (dtype != at::kFloat && dtype != at::kHalf && dtype != at::kBFloat16) {
     return false;
   }
   const auto M = A.size(0);
@@ -240,14 +251,16 @@ bool try_mps_gemv(const Tensor& A,
   if (!out_unit) {
     return false;
   }
+  const auto matrix = resolve_matrix(m_is_one ? B : A);
   // The kernels index device memory with 32-bit signed ints in the fast path
-  // (e.g. k*ld + n); operands whose largest offset would not fit dispatch the
-  // 64-bit-index variants instead. K alone can exceed int32 while all offsets
-  // fit when a broadcast operand has stride-0 dims.
+  // (e.g. k*ld + n). Operands whose largest offset does not fit, including an
+  // output with more than 2**31 elements, dispatch 64-bit-index variants.
+  // Check K separately because a stride-zero expanded operand can have a
+  // representable maximum offset but still require a 64-bit loop bound.
   const bool idx64 = K >= std::numeric_limits<int32_t>::max() || !offsetsFitIn<int32_t>(A, B, out) ||
-      (self.has_value() && !offsetsFitIn<int32_t>(*self));
+      (bias.has_value() && !offsetsFitIn<int32_t>(*bias));
   const GemvPolicy policy = GemvPolicy::current();
-  dispatch_gemv(A, B, out, self, alpha, beta, epi, policy, m_is_one, outlen, K, idx64);
+  dispatch_gemv(A, B, out, bias, matrix, alpha, beta, epi, policy, m_is_one, outlen, idx64);
   return true;
 }
 
@@ -948,7 +961,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   }
 
   // Rank-1 (M==1 xor N==1): route mm/mv to the metal GEMV kernels.
-  if (try_mps_gemv(self, other, output, std::nullopt, 1, 0, at_gemm::GemmEpilogue::None)) {
+  if (try_mps_gemv(self, other, output, std::nullopt, 1, 0, GemmEpilogue::None)) {
     return output;
   }
 
@@ -1168,7 +1181,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   }
 
   // Rank-1 (M==1 xor N==1): route addmm/addmv to the metal GEMV kernels.
-  if (try_mps_gemv(self, other, output, *bias_, alpha, beta, at_gemm::GemmEpilogue::AlphaBeta)) {
+  if (try_mps_gemv(self, other, output, *bias_, alpha, beta, GemmEpilogue::Bias)) {
     return output;
   }
 
