@@ -748,7 +748,10 @@ def convolution(
                 GROUPS=groups,
                 ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                 num_stages=cfg.num_stages,
-                num_warps=cfg.num_warps,
+                # The non-unrolled loop in this template triggers triton#1254
+                # with 8 warps, producing incorrect results; clamp to 4 warps
+                # to work around this, matching the forward conv path.
+                num_warps=min(cfg.num_warps, 4),
                 **cfg.kwargs,
             )
 
@@ -1136,7 +1139,10 @@ def convolution_backward_lowering(
                         GROUPS=groups,
                         ALLOW_TF32=torch.backends.cudnn.allow_tf32,
                         num_stages=cfg.num_stages,
-                        num_warps=cfg.num_warps,
+                        # The non-unrolled loop in this template triggers triton#1254
+                        # with 8 warps, producing incorrect results; clamp to 4 warps
+                        # to work around this, matching the forward conv path.
+                        num_warps=min(cfg.num_warps, 4),
                         **cfg.kwargs,
                     )
 
@@ -1192,7 +1198,10 @@ def convolution_backward_lowering(
                         GROUPS=groups,
                         ALLOW_TF32=torch.backends.cudnn.allow_tf32,
                         num_stages=cfg.num_stages,
-                        num_warps=cfg.num_warps,
+                        # The non-unrolled loop in this template triggers triton#1254
+                        # with 8 warps, producing incorrect results; clamp to 4 warps
+                        # to work around this, matching the forward conv path.
+                        num_warps=min(cfg.num_warps, 4),
                         **cfg.kwargs,
                     )
 
