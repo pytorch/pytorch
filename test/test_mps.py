@@ -1532,6 +1532,27 @@ class TestMPS(TestCaseMPS):
         helper(())
         helper((2, 4))
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/190050:
+    # in_features == 0 aborted the process in forward and raised in backward.
+    def test_linear_zero_in_features(self):
+        for has_bias in (True, False):
+            with self.subTest(bias=has_bias):
+                x_cpu = torch.randn(3, 4, 0, requires_grad=True)
+                m_cpu = torch.nn.Linear(0, 5, bias=has_bias)
+                out_cpu = m_cpu(x_cpu)
+                out_cpu.backward(torch.ones_like(out_cpu))
+
+                x_mps = x_cpu.detach().clone().to("mps").requires_grad_()
+                m_mps = copy.deepcopy(m_cpu).to("mps")
+                out_mps = m_mps(x_mps)
+                out_mps.backward(torch.ones_like(out_mps))
+
+                self.assertEqual(out_mps.cpu(), out_cpu)
+                self.assertEqual(x_mps.grad.cpu(), x_cpu.grad)
+                self.assertEqual(m_mps.weight.grad.cpu(), m_cpu.weight.grad)
+                if has_bias:
+                    self.assertEqual(m_mps.bias.grad.cpu(), m_cpu.bias.grad)
+
     def test_linear_errors(self):
         # Mixed CPU<->MPS tensors
         size = (3, 3)
