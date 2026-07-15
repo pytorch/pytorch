@@ -532,8 +532,20 @@ sycl::event scaled_matmul(
   // 1.1 Create memory descriptors. get_onednn_md() respects the tensor's real
   // strides and unpacks Float4_e2m1fn_x2 (2 logical elements per byte) into the
   // logical shape oneDNN's f4_e2m1 descriptor expects.
-  dnnl::memory::desc src_md = get_onednn_md(mat1);
-  dnnl::memory::desc weights_md = get_onednn_md(mat2);
+  //
+  // For packed FP4 the x2 packing is along the contraction (K) dim. Which dim
+  // is K is fixed by the operand shapes that TORCH_META_FUNC(_scaled_mm_v2)
+  // checks: mat1 is [M, K] so K is dim 1; mat2 is [K, N] so K is dim 0. We
+  // pass those dims to get_onednn_md instead of re-deriving them from strides;
+  // get_onednn_md separately requires the K dim to be contiguous (stride-1).
+  std::optional<int> mat1_packed_dim;
+  std::optional<int> mat2_packed_dim;
+  if (is_fp4) {
+    mat1_packed_dim = 1;
+    mat2_packed_dim = 0;
+  }
+  dnnl::memory::desc src_md = get_onednn_md(mat1, mat1_packed_dim);
+  dnnl::memory::desc weights_md = get_onednn_md(mat2, mat2_packed_dim);
   dnnl::memory::desc dst_md = get_onednn_md(result);
 
   dnnl::memory::desc bias_md;

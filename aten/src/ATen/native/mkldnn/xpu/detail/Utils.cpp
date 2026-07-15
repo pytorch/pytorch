@@ -131,7 +131,9 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
   return strides;
 }
 
-dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
+dnnl::memory::desc get_onednn_md(
+    const at::Tensor& tensor,
+    std::optional<int> packed_dim) {
   Tensor t = tensor.sizes().empty() ? tensor.unsqueeze(0) : tensor;
   auto dims = get_onednn_dims(t);
   auto strides = get_onednn_strides(t);
@@ -142,19 +144,40 @@ dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   // (unpacked) shape with element-unit strides: double the packed dim's extent
   // and scale every other dim's stride by 2 (the packed dim stays stride 1).
   if (t.scalar_type() == at::ScalarType::Float4_e2m1fn_x2) {
-    int packed_dim = -1;
-    for (size_t i = 0; i < strides.size(); ++i) {
-      if (strides[i] == 1) {
-        packed_dim = static_cast<int>(i);
-        break;
+    // The packed dim is the matmul's contraction (K) dim. Callers that already
+    // know it (e.g. scaled_matmul, from the operand roles / contraction dims)
+    // pass it in; otherwise recover it by locating the contiguous (stride-1)
+    // dim. Either way the packed dim must be stride-1 for the unpacking below.
+    int pd = -1;
+    if (packed_dim.has_value()) {
+      pd = *packed_dim;
+      TORCH_CHECK(
+          pd >= 0 && pd < static_cast<int>(strides.size()),
+          "oneDNN FP4 matmul: packed_dim ",
+          pd,
+          " out of range for ",
+          strides.size(),
+          "-D tensor");
+      TORCH_CHECK(
+          strides[pd] == 1,
+          "oneDNN FP4 matmul requires the packed dimension to be contiguous (stride-1), got strides ",
+          t.strides(),
+          " for packed_dim ",
+          pd);
+    } else {
+      for (size_t i = 0; i < strides.size(); ++i) {
+        if (strides[i] == 1) {
+          pd = static_cast<int>(i);
+          break;
+        }
       }
+      TORCH_CHECK(
+          pd >= 0,
+          "oneDNN FP4 matmul requires a contiguous (stride-1) packed dimension, got strides ",
+          t.strides());
     }
-    TORCH_CHECK(
-        packed_dim >= 0,
-        "oneDNN FP4 matmul requires a contiguous (stride-1) packed dimension, got strides ",
-        t.strides());
     for (size_t i = 0; i < strides.size(); ++i) {
-      if (static_cast<int>(i) == packed_dim) {
+      if (static_cast<int>(i) == pd) {
         dims[i] *= 2;
       } else {
         strides[i] *= 2;
