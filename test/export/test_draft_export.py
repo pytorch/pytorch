@@ -98,6 +98,28 @@ class TestDraftExport(TestCase):
         self.assertEqual(getattr(second_dim, "max", None), first_dim.max)
         self.assertIn("AUTO", repr(second_dim))
 
+    def test_shared_storage_parameters_with_offset(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                base = torch.randn(12)
+                self.p0 = torch.nn.Parameter(base[:6].view(2, 3))
+                self.p1 = torch.nn.Parameter(base[6:].view(2, 3))
+
+            def forward(self, x):
+                return x + self.p0.sum() + self.p1.sum()
+
+        mod = M()
+        x = torch.randn(2, 3)
+
+        ep = draft_export(
+            mod,
+            (x,),
+            dynamic_shapes={"x": {0: Dim("batch", min=1, max=4)}},
+        )
+        self.assertTrue(ep._report.successful())
+        self.assertEqual(ep.module()(x), mod(x))
+
     def test_missing_meta_kernel_custom_op_basic(self):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
 

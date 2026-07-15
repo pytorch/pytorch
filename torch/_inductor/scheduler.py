@@ -1080,6 +1080,9 @@ class SchedulerBuffer:
             raise AssertionError("expected op to be set")
         return op.get_name()
 
+    def is_ordering_only(self) -> bool:
+        return self.node.ordering_only
+
     def __hash__(self) -> int:
         return hash(self.node.name)
 
@@ -2232,7 +2235,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def _compute_attrs(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ir.ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[_P, _T] | None = None,
     ) -> None:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
@@ -2268,7 +2271,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def recompute_size_and_body(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ir.ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[..., Any] | None = None,
     ) -> None:
         fake_deps: OrderedSet[Dep] = OrderedSet(
@@ -3546,7 +3549,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for device_nodes in device_groups.values():
                 stream_groups: dict[int, list[BaseSchedulerNode]] = defaultdict(list)
                 for node in device_nodes:
-                    stream_groups[scheduler.node_to_stream.get(node, 0)].append(node)
+                    stream_groups[scheduler.get_node_stream(node)].append(node)
                 for stream_nodes in stream_groups.values():
                     grouped_nodes.extend(
                         [
@@ -4239,6 +4242,7 @@ class Scheduler:
         self._multi_stream_nodes: bool = False
         # Maps stream_idx → user_object_index for retrieving user stream objects
         self.stream_idx_to_user_obj_idx: dict[int, int] = {}
+        self.user_obj_idx_to_stream_idx: dict[int, int] = {}
         self._populate_stream_assignments()
 
         self.nodes = self.fuse_nodes(self.nodes)
@@ -4329,6 +4333,24 @@ class Scheduler:
                     ),
                 )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+
+        if config.aten_distributed_optimizations.enable_simple_overlap:
+            if (
+                not config.reorder_for_peak_memory
+                and not config.reorder_for_compute_comm_overlap
+            ):
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
+            with dynamo_timed(
+                "Scheduler.simple_overlap",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
+            ):
+                self.nodes = comms.simple_overlap(self.nodes)
+
         self.process_grouped_nodes()
 
         if (
@@ -4394,21 +4416,15 @@ class Scheduler:
         """
         from .stream_constants import DEFAULT_STREAM_IDX
 
-        # Map user_object_index to stream index (1-indexed for side streams)
-        user_obj_to_stream_idx: dict[int, int] = {}
-        stream_idx_counter = itertools.count(1)  # 0 is reserved for default stream
-
         for node in self.nodes:
             stream_idx = DEFAULT_STREAM_IDX
 
             if node.node is not None:
                 user_obj_idx = node.node.get_stream_idx()
                 if user_obj_idx is not None:
-                    if user_obj_idx not in user_obj_to_stream_idx:
-                        new_stream_idx = next(stream_idx_counter)
-                        user_obj_to_stream_idx[user_obj_idx] = new_stream_idx
-                        self.stream_idx_to_user_obj_idx[new_stream_idx] = user_obj_idx
-                    stream_idx = user_obj_to_stream_idx[user_obj_idx]
+                    stream_idx = self._get_or_create_stream_idx_for_user_obj(
+                        user_obj_idx
+                    )
 
             self.node_to_stream[node] = stream_idx
 
@@ -4441,6 +4457,60 @@ class Scheduler:
             for stream_idx in self.node_to_stream.values()
         )
 
+    def _get_or_create_stream_idx_for_user_obj(self, user_obj_idx: int) -> int:
+        stream_idx = self.user_obj_idx_to_stream_idx.get(user_obj_idx)
+        if stream_idx is None:
+            # 0 is reserved for the default stream.
+            stream_idx = len(self.user_obj_idx_to_stream_idx) + 1
+            self.user_obj_idx_to_stream_idx[user_obj_idx] = stream_idx
+            self.stream_idx_to_user_obj_idx[stream_idx] = user_obj_idx
+        return stream_idx
+
+    def get_node_stream(self, node: BaseSchedulerNode) -> int:
+        from .stream_constants import DEFAULT_STREAM_IDX
+
+        if node in self.node_to_stream:
+            return self.node_to_stream[node]
+
+        child_streams = OrderedSet(
+            self.get_node_stream(child)
+            for child in node.get_nodes()
+            if child is not node
+        )
+        if len(child_streams) == 1:
+            stream_idx = next(iter(child_streams))
+        elif len(child_streams) > 1:
+            raise AssertionError(
+                f"Scheduler node {node.get_name()} combines multiple streams: "
+                f"{list(child_streams)}"
+            )
+        elif (
+            node.node is not None
+            and (user_obj_idx := node.node.get_stream_idx()) is not None
+        ):
+            stream_idx = self._get_or_create_stream_idx_for_user_obj(user_obj_idx)
+        else:
+            buffer_streams = OrderedSet(
+                self.buff_to_stream[buf_name]
+                for buf_name in node.get_buffer_names()
+                if buf_name in self.buff_to_stream
+            )
+            if len(buffer_streams) > 1:
+                raise AssertionError(
+                    f"Scheduler node {node.get_name()} has outputs on multiple "
+                    f"streams: {list(buffer_streams)}"
+                )
+            stream_idx = (
+                next(iter(buffer_streams)) if buffer_streams else DEFAULT_STREAM_IDX
+            )
+
+        self.node_to_stream[node] = stream_idx
+        if stream_idx != DEFAULT_STREAM_IDX:
+            self._multi_stream_nodes = True
+        for buf_name in node.get_buffer_names():
+            self.buff_to_stream.setdefault(buf_name, stream_idx)
+        return stream_idx
+
     def _has_multi_stream_nodes(self) -> bool:
         """Check if any nodes are assigned to non-default streams."""
         return self._multi_stream_nodes
@@ -4458,7 +4528,7 @@ class Scheduler:
         """
         if not self._has_multi_stream_nodes():
             return False
-        return self.get_buf_stream(buf_name) != self.node_to_stream.get(node, 0)
+        return self.get_buf_stream(buf_name) != self.get_node_stream(node)
 
     @property
     def current_device(self) -> torch.device | None:
@@ -4696,6 +4766,13 @@ class Scheduler:
                     )
                 for alt_name in buf.get_mutations():
                     alt_name = rename(alt_name)
+                    is_ordering_only = buf.is_ordering_only()
+                    if is_ordering_only:
+                        add_user(alt_name, node, is_weak=True)
+                        node.add_fake_dep(
+                            WeakDep(alt_name, mutating_buf=buf.get_name(), is_fake=True)
+                        )
+                        continue
                     # this node must run after the prior writer
                     add_user(alt_name, node)
                     node.add_fake_dep(StarDep(alt_name, mode=node_mode))
@@ -5033,6 +5110,12 @@ class Scheduler:
             ancestors: OrderedSet[str] = OrderedSet()
             for dep in node.unmet_dependencies:
                 dep_node_name = self.name_to_buf[dep.name].defining_op_name()
+                # A node can transiently depend on a buffer it also writes (a
+                # self-edge, e.g. from a mutating op whose read and write
+                # resolve to the same buffer). A node is never its own
+                # ancestor, so skip it rather than KeyError on itself.
+                if dep_node_name == node.get_name():
+                    continue
                 ancestors.add(dep_node_name)
                 ancestors |= name_to_ancestors[dep_node_name]
             name_to_ancestors[node.get_name()] = ancestors
@@ -5051,22 +5134,20 @@ class Scheduler:
         name_to_min_distance: dict[str, int] = {}
         name_to_max_distance: dict[str, int] = {}
         for node in self.nodes:
-            if not node.unmet_dependencies:
+            # Skip self-edges (a node depending on a buffer it also writes); a
+            # node is not at any distance from itself. See compute_ancestors.
+            dep_ops = [
+                op
+                for dep in node.unmet_dependencies
+                if (op := self.name_to_buf[dep.name].defining_op_name())
+                != node.get_name()
+            ]
+            if not dep_ops:
                 min_dist = 0
                 max_dist = 0
             else:
-                dep_min_dists = [
-                    name_to_min_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
-                ]
-                dep_max_dists = [
-                    name_to_max_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
-                ]
-                min_dist = min(dep_min_dists)
-                max_dist = max(dep_max_dists)
+                min_dist = min(name_to_min_distance[op] + 1 for op in dep_ops)
+                max_dist = max(name_to_max_distance[op] + 1 for op in dep_ops)
             name_to_min_distance[node.get_name()] = min_dist
             name_to_max_distance[node.get_name()] = max_dist
             node.min_input_distance = min_dist
@@ -5976,9 +6057,7 @@ class Scheduler:
 
         # Propagate stream assignment to the fused node so that subsequent
         # fusion rounds still respect stream boundaries.
-        stream1 = self.node_to_stream.get(node1)
-        if stream1 is not None:
-            self.node_to_stream[node3] = stream1
+        self.node_to_stream[node3] = self.get_node_stream(node1)
 
         return node3
 
@@ -6358,9 +6437,12 @@ class Scheduler:
             self.name_to_fused_node.update(
                 {n.get_name(): combo_node for n in combo_node.get_nodes()}
             )
-            stream = self.node_to_stream.get(accepted[0])
-            if stream is not None:
-                self.node_to_stream[combo_node] = stream
+            accepted_streams = OrderedSet(self.get_node_stream(n) for n in accepted)
+            if len(accepted_streams) != 1:
+                raise AssertionError(
+                    f"Combo kernel combines multiple streams: {list(accepted_streams)}"
+                )
+            self.node_to_stream[combo_node] = next(iter(accepted_streams))
 
         for num, node_list in enumerate(
             ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
@@ -7625,9 +7707,9 @@ class Scheduler:
 
         # Prevent fusion across stream boundaries
         if self._has_multi_stream_nodes():
-            stream1 = self.node_to_stream.get(node1)
-            stream2 = self.node_to_stream.get(node2)
-            if stream1 is not None and stream2 is not None and stream1 != stream2:
+            stream1 = self.get_node_stream(node1)
+            stream2 = self.get_node_stream(node2)
+            if stream1 != stream2:
                 return False
 
         if isinstance(node1, FusedNestedReductions):
@@ -8973,9 +9055,9 @@ class Scheduler:
         name_to_graph_input_index = {
             name: idx for idx, name in enumerate(V.graph.graph_inputs)
         }
-        name_to_graph_output_index = {
-            name: idx for idx, name in enumerate(V.graph.get_output_names())
-        }
+        name_to_graph_output_indices: dict[str, list[int]] = defaultdict(list)
+        for idx, name in enumerate(V.graph.get_output_names()):
+            name_to_graph_output_indices[name].append(idx)
 
         V.graph.partition_maps = []
         for partition_id, signature in enumerate(signatures):
@@ -8992,7 +9074,9 @@ class Scheduler:
 
             output_mapping = []
             for node in signature.output_nodes:
-                output_mapping.append(name_to_graph_output_index.get(node.get_name()))
+                output_mapping.append(
+                    name_to_graph_output_indices.get(node.get_name(), [])
+                )
 
             V.graph.partition_maps.append(
                 GraphPartitionMap(
@@ -9509,11 +9593,12 @@ class Scheduler:
 
         parent_wrapper_code = V.graph.wrapper_code
         graph_partition_id = next(self._graph_partition_counter)
+        graph_name = parent_wrapper_code.get_partition_name(graph_partition_id)
 
         with V.graph.set_current_wrapper_code():
             V.graph.init_wrapper_code(
                 is_subgraph=True,
-                subgraph_name=f"partition_{graph_partition_id}",
+                subgraph_name=graph_name,
                 parent_wrapper_code=parent_wrapper_code,
                 partition_signatures=signature,
             )
@@ -9543,7 +9628,6 @@ class Scheduler:
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 
-            graph_name = V.graph.name
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
         V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)
@@ -9741,7 +9825,9 @@ class Scheduler:
                         num_streams = 1
                         if self._has_multi_stream_nodes():
                             # Count unique streams (excluding default stream 0)
-                            unique_streams = OrderedSet(self.node_to_stream.values())
+                            unique_streams = OrderedSet(
+                                self.get_node_stream(n) for n in self.nodes
+                            )
                             num_streams = (
                                 max(unique_streams) + 1 if unique_streams else 1
                             )
@@ -9984,7 +10070,7 @@ class Scheduler:
         """Code-gen to enter the Stream context assigned to node."""
         if isinstance(node, NopKernelSchedulerNode):
             raise AssertionError("expected node to not be a NopKernelSchedulerNode")
-        node_stream = self.node_to_stream[node]
+        node_stream = self.get_node_stream(node)
         self._current_stream_ctx = V.graph.wrapper_code.codegen_cuda_stream_enter(
             stream_idx=node_stream,
         )
@@ -10003,12 +10089,10 @@ class Scheduler:
         the previous node's stream. NopKernelSchedulerNodes have stream=None and inherit the
         enclosing stream context (or do nothing if no context is active yet).
         """
-        if node not in self.node_to_stream:
-            raise AssertionError("expected node to be in node_to_stream")
         stream = (
             None
             if isinstance(node, NopKernelSchedulerNode)
-            else self.node_to_stream[node]
+            else self.get_node_stream(node)
         )
         if self.current_stream_idx == stream:
             # Covers: same stream as current (no switch needed), and both None

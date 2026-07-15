@@ -592,6 +592,42 @@ class TestRecursiveScript(JitTestCase):
         ):
             jit_obj(1, 2, 3, 4)
 
+    def test_prepare_scriptable_already_scripted_with_ignored_child(self):
+        # Scripting a wrapper around an already-scripted child used to re-walk that
+        # child's _modules and re-assign its __jit_ignored_attributes__ submodule (a
+        # non-scripted nn.Module), raising "Cannot re-assign modules in a ScriptModule
+        # with non-scripted module". The _modules loop now skips already-scripted
+        # children, so re-scripting the wrapper succeeds.
+        class IgnoredChild(torch.nn.Module):
+            __jit_ignored_attributes__ = ["sub"]
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.sub = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                if torch.jit.is_scripting():
+                    return torch.zeros_like(x)
+                return self._real(x)
+
+            @torch.jit.ignore
+            def _real(self, x):
+                return self.sub(x)
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+
+            def forward(self, x):
+                return self.inner.forward(x)
+
+        inner = torch.jit.script(IgnoredChild())
+        self.assertIn("sub", dict(inner.named_children()))
+        scripted = torch.jit.script(Wrapper(inner))
+        t = torch.randn(2, 4)
+        self.assertEqual(scripted(t), torch.zeros_like(t))
+
     def test_attributes(self):
         @torch.jit.script
         class Inner2:
