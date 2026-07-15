@@ -8072,7 +8072,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def mask_mod(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        dtype = device_configs[device].dtypes_fast[0]
+        dtype = device_configs[torch.device(device).type].dtypes_fast[0]
 
         def create_inputs(S):
             q, k, v = (
