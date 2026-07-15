@@ -95,9 +95,8 @@ void max_pool_3d_input_iter(
       [input_strides[0] * bounds0.start + input_strides[1] * bounds1.start +
        input_strides[2] * bounds2.start];
   auto size12 = geom.input_sizes[1] * geom.input_sizes[2];
-  auto max_index =
-      bounds0.start * size12 + bounds1.start * geom.input_sizes[2] +
-      bounds2.start;
+  auto max_index = bounds0.start * size12 +
+      bounds1.start * geom.input_sizes[2] + bounds2.start;
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0 += d0) {
     auto offset0 = input_strides[0] * i0;
