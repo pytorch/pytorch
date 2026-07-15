@@ -190,7 +190,6 @@ class SymPyOps:
             return NotImplemented
         return TypedExpr(Max(x.expr, y.expr), result_type)
 
-
 @dataclass
 class IndexPropVar:
     value: Any  # Either an IR value, or TypedExpr if is_symbolic is true
