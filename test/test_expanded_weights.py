@@ -16,6 +16,10 @@ from torch.nn.utils._expanded_weights.expanded_weights_utils import (
     unpack_expanded_weight_or_tensor,
 )
 from torch.nn.utils._per_sample_grad import call_for_per_sample_grads
+
+# tf32_off only disables CUDA/cuDNN reduced-precision paths; it is a
+# no-op on non-CUDA backends (their own reduced-precision modes, if any,
+# remain enabled).
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -83,7 +87,9 @@ class TestExpandedWeightHelperFunction(TestCase):
             RuntimeError, r"do not support inputs that are also ExpandedWeights."
         ):
             input = ExpandedWeight(
-                torch.randn(3, 4, requires_grad=True), 3, loss_reduction="sum"
+                torch.randn(3, 4, device=device, requires_grad=True),
+                3,
+                loss_reduction="sum",
             )
             expanded_args, expanded_kwargs = standard_kwargs(
                 ("bias",), (input, weight, bias)
@@ -100,17 +106,17 @@ class TestExpandedWeightHelperFunction(TestCase):
             RuntimeError, r"requires a batch dimension but got an input of size 0"
         ):
             expanded_args, expanded_kwargs = standard_kwargs(
-                ("bias",), (torch.tensor(3), weight, bias)
+                ("bias",), (torch.tensor(3, device=device), weight, bias)
             )
             forward_helper(nn.functional.linear, expanded_args, expanded_kwargs)
         with self.assertRaisesRegex(
             RuntimeError, r"0 is not a valid batch size for Expanded Weights"
         ):
             expanded_args, expanded_kwargs = standard_kwargs(
-                ("bias",), (torch.randn(0, 1, 2), weight, bias)
+                ("bias",), (torch.randn(0, 1, 2, device=device), weight, bias)
             )
             forward_helper(nn.functional.linear, expanded_args, expanded_kwargs)
-        input = torch.randn(3, 4)
+        input = torch.randn(3, 4, device=device)
         for weight_batched, bias_batched in product([True, False], [True, False]):
             if not weight_batched and not bias_batched:
                 continue
@@ -374,7 +380,7 @@ class TestExpandedWeightFunctional(TestCase):
                     kwargs=sample_input.kwargs,
                 )
                 if (
-                    "cuda" in device
+                    device != "cpu"
                     and "max_norm" in sample_input.kwargs
                     and "padding_idx" in sample_input.kwargs
                 ):
@@ -473,9 +479,10 @@ class TestExpandedWeightFunctional(TestCase):
             self.assertEqual(res, exp, atol=atol, rtol=rtol)
 
     def _compute_tolerances(self, device):
-        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(
-            0
-        ) == (8, 6)
+        # TODO: non-CUDA accelerators with higher numerical variance have no hook
+        # to widen these tolerances; add per-backend tolerance overrides if needed.
+        is_cuda = device.startswith("cuda")
+        is_cuda_sm86 = is_cuda and torch.cuda.get_device_capability(0) == (8, 6)
         return (9e-3, 5e-5) if is_cuda_sm86 else (1e-4, 5e-5)
 
     @tf32_off()
