@@ -4,6 +4,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
+#include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <structmember.h>
@@ -658,7 +659,7 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 // mappings for output tensors as well.
 static void _wrap_outputs(
     THPFunction* self,
-    const variable_list& input_vars,
+    at::ArrayRef<const Variable*> input_vars,
     PyObject* raw_output,
     PyObject* outputs,
     bool is_executable,
@@ -779,7 +780,7 @@ static void _wrap_outputs(
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
-    const auto& wrapped_output = wrapped_outputs[i];
+    auto& wrapped_output = wrapped_outputs[i];
     // Keep the non-tensor outputs as is.
     if (!THPVariable_Check(obj) || !wrapped_output.has_value()) {
       if (is_executable) {
@@ -800,7 +801,8 @@ static void _wrap_outputs(
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
-      PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
+      PyTuple_SetItem(
+          outputs, i, THPVariable_Wrap(std::move(wrapped_output.value())));
     }
   }
 }
@@ -931,7 +933,9 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 
 struct UnpackedInput {
   THPObjectPtr input_tuple;
-  variable_list input_vars;
+  // Borrowed from Tensor arguments kept alive by input_tuple. Avoids copying
+  // at::Tensor handles on the common apply path.
+  c10::SmallVector<const Variable*, 24> input_vars;
   // record_function_inputs is for RECORD_FUNCTION only
   std::vector<c10::IValue> record_function_inputs;
 };
@@ -944,6 +948,15 @@ struct InputFlags {
 };
 
 namespace {
+edge_list collect_next_edges(at::ArrayRef<const Variable*> input_vars) {
+  edge_list next_edges;
+  next_edges.reserve(input_vars.size());
+  for (const auto* input_var : input_vars) {
+    next_edges.emplace_back(torch::autograd::impl::gradient_edge(*input_var));
+  }
+  return next_edges;
+}
+
 std::pair<UnpackedInput, InputFlags> unpack_input(
     PyObject* args,
     bool fill_record_function_inputs) {
@@ -953,8 +966,11 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
   auto num_args = PyTuple_GET_SIZE(args);
   unpacked.input_tuple = PyTuple_New(num_args);
   flags.needs_input_grad = PyTuple_New(num_args);
+  unpacked.input_vars.reserve(num_args);
+  flags.is_variable_input.reserve(num_args);
   bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
       torch::autograd::profiler::getProfilerConfig().report_input_shapes;
+  bool any_requires_grad = false;
 
   for (const auto i : c10::irange(num_args)) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
@@ -976,8 +992,10 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
       }
     } else {
       const auto& tensor = THPVariable_Unpack(arg);
-      unpacked.input_vars.push_back(tensor);
-      PyObject* needs_grad = tensor.requires_grad() ? Py_True : Py_False;
+      unpacked.input_vars.push_back(&tensor);
+      const bool requires_grad = tensor.requires_grad();
+      any_requires_grad |= requires_grad;
+      PyObject* needs_grad = requires_grad ? Py_True : Py_False;
       Py_INCREF(needs_grad);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
       // tensor -> IValue conversion is expensive, only do it if we need it.
@@ -989,11 +1007,10 @@ std::pair<UnpackedInput, InputFlags> unpack_input(
     PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
   }
 
-  flags.is_executable =
-      GradMode::is_enabled() && any_variable_requires_grad(unpacked.input_vars);
-  flags.next_edges =
-      (flags.is_executable ? collect_next_edges(unpacked.input_vars)
-                           : edge_list());
+  flags.is_executable = GradMode::is_enabled() && any_requires_grad;
+  flags.next_edges = flags.is_executable
+      ? collect_next_edges(unpacked.input_vars)
+      : edge_list();
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
@@ -1049,7 +1066,7 @@ void _append_subgraph(
 torch::jit::Node* _trace_pre_record(
     PyObject* op_obj,
     PyObject* input_objects,
-    const variable_list& input_vars) {
+    at::ArrayRef<const Variable*> input_vars) {
   if (!jit::tracer::isTracing()) {
     return nullptr;
   }
@@ -1073,14 +1090,19 @@ torch::jit::Node* _trace_pre_record(
 
   Py_INCREF(op_obj);
   auto pyobj = THPObjectPtr(op_obj);
+  variable_list owned;
+  owned.reserve(input_vars.size());
+  for (const auto* input_var : input_vars) {
+    owned.emplace_back(*input_var);
+  }
   return jit::tracer::preRecordPythonTrace(
-      std::move(pyobj), arg_types, input_vars, std::move(scalar_args));
+      std::move(pyobj), arg_types, owned, std::move(scalar_args));
 }
 
 void _trace_post_record(
     torch::jit::Node* node,
     PyObject* op_obj,
-    const variable_list& input_vars,
+    at::ArrayRef<const Variable*> /* input_vars */,
     PyObject* output_objects,
     bool is_inplace,
     bool unpack_output) {
@@ -1177,8 +1199,8 @@ PyObject* process_outputs(
   if (is_executable) {
     grad_fn->input_info.clear();
     grad_fn->input_info.reserve(unpacked.input_vars.size());
-    for (auto& var : unpacked.input_vars) {
-      grad_fn->input_info.emplace_back(var);
+    for (const auto* var : unpacked.input_vars) {
+      grad_fn->input_info.emplace_back(*var);
     }
   }
 
