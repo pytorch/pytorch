@@ -392,7 +392,7 @@ class TestTritonHeuristics(TestCase):
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
-        from torch._inductor.template_heuristics.triton import (
+        from torch._inductor.heuristics.template.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
             ROCmConfigHeuristic,
@@ -717,7 +717,7 @@ class TestArgumentCloneAndRestore(TestCase):
         self.assertTrue(torch.allclose(gpu_tensor, gpu_tensor_clone))
         self.assertTrue(
             peak_mem_after <= peak_mem_before + self.MEM_TOLERANCE,
-            f"{peak_mem_before=} v.s. {peak_mem_after=}",
+            lambda msg: f"{msg}\n{peak_mem_before=} v.s. {peak_mem_after=}",
         )
 
         # Avoid OOM in CI
@@ -837,7 +837,7 @@ class TestDumpLaunchTensors(TestCase):
                     self.assertLessEqual(
                         len(indices),
                         max_runs,
-                        f"Kernel {base_name} has more runs ({len(indices)}) than max ({max_runs})",
+                        lambda msg: f"{msg}\nKernel {base_name} has more runs ({len(indices)}) than max ({max_runs})",
                     )
 
                     # Verify the indices are within [0, max_runs)
@@ -845,7 +845,7 @@ class TestDumpLaunchTensors(TestCase):
                         self.assertLess(
                             idx,
                             max_runs,
-                            f"Run index {idx} exceeds max_runs-1 ({max_runs - 1})",
+                            lambda msg: f"{msg}\nRun index {idx} exceeds max_runs-1 ({max_runs - 1})",
                         )
 
         finally:

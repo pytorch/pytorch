@@ -170,6 +170,69 @@ class TestFuseOrErr(TestCase):
         self.assertEqual(out, x.sin() + 1)
         self.assertTrue(called["yes"])
 
+    def test_eager_multi_input_autograd(self):
+        # Eager execution calls the closure directly, so multi-input autograd
+        # works (it does not route backward through the HOP).
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        fuse_or_err(lambda a, b: a + b)(x, y).sum().backward()
+        self.assertEqual(x.grad, torch.ones_like(x))
+        self.assertEqual(y.grad, torch.ones_like(y))
+
+    def test_eager_accepts_kwargs(self):
+        # In eager, keyword arguments to the wrapped region are passed through.
+        x = torch.randn(4)
+        out = fuse_or_err(lambda a, b=1: a + b)(x, b=2)
+        self.assertEqual(out, x + 2)
+
+    def test_kwargs_under_compile_raise(self):
+        def fn(x):
+            return fuse_or_err(lambda a, b: a + b)(x, b=x)
+
+        with self.assertRaisesRegex(RuntimeError, r"keyword arguments"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(torch.randn(8))
+
+    @requires_gpu
+    def test_upstream_lazy_operand_not_miscounted(self):
+        # A region whose op realizes an upstream lazy operand as a side effect
+        # must not count that operand as a region op (regression: false positive).
+        def fn(x):
+            y = x.sin()  # upstream lazy pointwise, becomes an operand
+            return fuse_or_err(lambda a: a @ a)(y)  # region is a single extern mm
+
+        x = torch.randn(64, 64, device=GPU_TYPE)
+        ref = (x.sin()) @ (x.sin())
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    @requires_gpu
+    def test_combo_kernel_counts_as_one(self):
+        # With combo kernels, independent pointwise ops merge into one launched
+        # kernel; the check runs after combo formation so this must not error.
+        import torch._inductor.config as inductor_config
+
+        def fn(x, y):
+            return fuse_or_err(lambda a, b: (a.sin(), b.cos()))(x, y)
+
+        x = torch.randn(128, device=GPU_TYPE)
+        y = torch.randn(128, device=GPU_TYPE)
+        ref = (x.sin(), y.cos())
+        with inductor_config.patch(combo_kernels=True, benchmark_combo_kernel=False):
+            res = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+        self.assertEqual(ref, res)
+
+    @requires_gpu
+    def test_zero_kernel_region_passes(self):
+        # "at most one kernel": a region that materializes no kernel trivially
+        # passes.
+        def fn(x):
+            return fuse_or_err(lambda a: a.size(0))(x)
+
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(
+            torch.randn(8, device=GPU_TYPE)
+        )
+        self.assertEqual(res, 8)
+
 
 if __name__ == "__main__":
     run_tests()

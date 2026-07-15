@@ -3,6 +3,7 @@ import functools
 from collections.abc import Callable
 from typing import Any
 
+import torch
 from torch._higher_order_ops.base_hop import (
     BaseHOP,
     BaseHOPFunction,
@@ -73,9 +74,14 @@ def fuse_or_err(fn: Callable | None = None, *, fuse_backward: bool = False) -> C
             return x.sin().cos()
 
     Under ``torch.compile`` the wrapped region is inlined into the graph and, if
-    Inductor does not fuse all of its ops into one kernel, compilation raises
-    with the reason the region split (a warning is emitted in fbcode). Outside
-    ``torch.compile`` the closure runs eagerly with no fusion check.
+    Inductor does not fuse its materialized ops into a single kernel, compilation
+    raises with the reason the region split (a warning is emitted in fbcode). A
+    region that materializes no kernel (e.g. pure views / shape ops) trivially
+    passes -- the contract is "at most one kernel". Outside ``torch.compile`` the
+    closure is called directly, with no fusion check.
+
+    The wrapped region takes positional operands; keyword arguments are only
+    supported in eager (not under ``torch.compile``).
 
     Args:
         fn: the closure to wrap. When omitted, ``fuse_or_err`` returns a
@@ -86,7 +92,16 @@ def fuse_or_err(fn: Callable | None = None, *, fuse_backward: bool = False) -> C
 
     def wrap(f: Callable) -> Callable:
         @functools.wraps(f)
-        def inner(*operands: Any):
+        def inner(*operands: Any, **kwargs: Any):
+            # Outside torch.compile there is no fusion to check, so just run the
+            # closure directly (this also keeps eager autograd off the HOP path).
+            if not torch.compiler.is_compiling():
+                return f(*operands, **kwargs)
+            if kwargs:
+                raise RuntimeError(
+                    "fuse_or_err: keyword arguments to the wrapped region are "
+                    "not supported under torch.compile; pass operands positionally."
+                )
             return _fuse_or_err(f, *operands, fuse_backward=fuse_backward)
 
         return inner

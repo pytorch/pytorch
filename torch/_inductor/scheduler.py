@@ -2236,7 +2236,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def _compute_attrs(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ir.ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[_P, _T] | None = None,
     ) -> None:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
@@ -2272,7 +2272,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def recompute_size_and_body(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ir.ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[..., Any] | None = None,
     ) -> None:
         fake_deps: OrderedSet[Dep] = OrderedSet(
@@ -4250,8 +4250,6 @@ class Scheduler:
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
-        self._verify_fuse_or_err_groups()
-
         if any(
             isinstance(node, FusedExternTritonKernelSchedulerNode)
             for node in self.nodes
@@ -4275,6 +4273,10 @@ class Scheduler:
                 log_waitcounter=True,
             ):
                 self.create_combo_kernel_nodes(num_ck_nodes=None)
+
+        # Run after all kernel-boundary-forming passes (fusion, merge_loops,
+        # combo kernels) so the "single kernel" check reflects the final schedule.
+        self._verify_fuse_or_err_groups()
 
         # torch.cond can contain arbitrary subgraphs, which can contain collectives
         # reordering these can cause a nccl hang
@@ -5113,6 +5115,12 @@ class Scheduler:
             ancestors: OrderedSet[str] = OrderedSet()
             for dep in node.unmet_dependencies:
                 dep_node_name = self.name_to_buf[dep.name].defining_op_name()
+                # A node can transiently depend on a buffer it also writes (a
+                # self-edge, e.g. from a mutating op whose read and write
+                # resolve to the same buffer). A node is never its own
+                # ancestor, so skip it rather than KeyError on itself.
+                if dep_node_name == node.get_name():
+                    continue
                 ancestors.add(dep_node_name)
                 ancestors |= name_to_ancestors[dep_node_name]
             name_to_ancestors[node.get_name()] = ancestors
@@ -5131,22 +5139,20 @@ class Scheduler:
         name_to_min_distance: dict[str, int] = {}
         name_to_max_distance: dict[str, int] = {}
         for node in self.nodes:
-            if not node.unmet_dependencies:
+            # Skip self-edges (a node depending on a buffer it also writes); a
+            # node is not at any distance from itself. See compute_ancestors.
+            dep_ops = [
+                op
+                for dep in node.unmet_dependencies
+                if (op := self.name_to_buf[dep.name].defining_op_name())
+                != node.get_name()
+            ]
+            if not dep_ops:
                 min_dist = 0
                 max_dist = 0
             else:
-                dep_min_dists = [
-                    name_to_min_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
-                ]
-                dep_max_dists = [
-                    name_to_max_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
-                ]
-                min_dist = min(dep_min_dists)
-                max_dist = max(dep_max_dists)
+                min_dist = min(name_to_min_distance[op] + 1 for op in dep_ops)
+                max_dist = max(name_to_max_distance[op] + 1 for op in dep_ops)
             name_to_min_distance[node.get_name()] = min_dist
             name_to_max_distance[node.get_name()] = max_dist
             node.min_input_distance = min_dist
@@ -6118,36 +6124,36 @@ class Scheduler:
     def _fuse_or_err_reason(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> str:
-        # Re-run can_fuse with fusion_log captured so we can surface the exact
-        # WhyNoFuse reason the pair did not combine.
-        records: list[str] = []
-
-        class _CaptureHandler(logging.Handler):
-            def emit(self, record: logging.LogRecord) -> None:
-                records.append(record.getMessage())
-
-        handler = _CaptureHandler(level=logging.DEBUG)
-        prev_level = fusion_log.level
-        prev_propagate = fusion_log.propagate
-        fusion_log.addHandler(handler)
-        fusion_log.setLevel(logging.DEBUG)
-        fusion_log.propagate = False
-        try:
-            legal = self.can_fuse(node1, node2) or self.can_fuse(node2, node1)
-        except Exception:
-            legal = False
-        finally:
-            fusion_log.removeHandler(handler)
-            fusion_log.setLevel(prev_level)
-            fusion_log.propagate = prev_propagate
-
-        if legal:
-            return (
-                "fusion is legal but Inductor's fusion heuristics/benchmarking "
-                "chose not to fuse them (e.g. exceeds a fusion size/score limit)"
+        # Read-only, best-effort explanation of why two kernels did not fuse. We
+        # deliberately do NOT re-run can_fuse here: can_fuse can commit
+        # speculative loop mutations (kept when it returns True), which would
+        # corrupt the finalized schedule on the fbcode warn-and-continue path.
+        # Reconfiguring the global fusion_log is also not concurrency-safe.
+        def is_extern(n: BaseSchedulerNode) -> bool:
+            return any(
+                isinstance(sub, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+                for sub in n.get_nodes()
             )
-        reasons = OrderedSet(m for m in records if m.startswith("cannot fuse"))
-        return "; ".join(reasons) if reasons else "unknown (run with TORCH_LOGS=fusion)"
+
+        if is_extern(node1) or is_extern(node2):
+            return "one side is an extern / non-Triton kernel and cannot be fused"
+        if node1.get_device() != node2.get_device():
+            return f"different devices ({node1.get_device()} vs {node2.get_device()})"
+        if node1.group != node2.group:
+            return (
+                f"incompatible iteration domains {node1.group} vs {node2.group} "
+                "(e.g. different shapes, or pointwise vs reduction)"
+            )
+        writes1 = OrderedSet(d.name for d in node1.read_writes.writes)
+        writes2 = OrderedSet(d.name for d in node2.read_writes.writes)
+        reads1 = OrderedSet(d.name for d in node1.read_writes.reads)
+        reads2 = OrderedSet(d.name for d in node2.read_writes.reads)
+        if not ((writes1 & reads2) or (writes2 & reads1) or (reads1 & reads2)):
+            return "no shared data to fuse over (independent kernels)"
+        return (
+            "fusion legal but declined by Inductor heuristics/benchmarking; "
+            "run with TORCH_LOGS=fusion for details"
+        )
 
     def fuse_two_nodes(
         self,
