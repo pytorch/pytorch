@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
 
 #include <string>
@@ -193,3 +195,5 @@ TracingGuard::TracingGuard(
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
