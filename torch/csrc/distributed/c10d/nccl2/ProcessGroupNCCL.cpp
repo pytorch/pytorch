@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <array>
@@ -1518,3 +1520,5 @@ const char* NCCLException::what() const noexcept {
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
