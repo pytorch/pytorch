@@ -6619,6 +6619,11 @@
   dispatch:
     CUDA: _philox_key_fold_in_cuda
 
+- func: _philox_key_fold_in.Tensor(Tensor key, Tensor data) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _philox_key_fold_in_tensor_cuda
+
 - func: _philox_normal_(Tensor(a!) self, Tensor key, float mean=0, float std=1) -> Tensor(a!)
   variants: function, method
   dispatch:
