@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -140,7 +141,7 @@ class DeterministicTest(TestCase):
             ref = out_full[:size].contiguous()
             self.assertTrue(
                 torch.equal(ref, out),
-                f"persistent reduction diverged at size={size} (FULL={FULL})",
+                lambda msg: f"{msg}\npersistent reduction diverged at size={size} (FULL={FULL})",
             )
             size //= 2
 
@@ -163,6 +164,7 @@ class DeterministicTest(TestCase):
 
             torch.testing.assert_close(eager, compiled_out)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180681")
     @unittest.skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])
@@ -216,7 +218,7 @@ class DeterministicTest(TestCase):
             self.assertTrue(
                 "The result is bitwise equivalent to the previously saved result"
                 in out.stdout.decode(),
-                f"stdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}",
+                lambda msg: f"{msg}\nstdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}",
             )
 
 

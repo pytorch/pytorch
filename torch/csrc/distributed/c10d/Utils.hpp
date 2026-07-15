@@ -56,13 +56,13 @@ inline std::string toString(at::IntArrayRef l) {
     ss << l[i];
   }
   ss << ')';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 inline std::string toString(const c10::Layout& layout) {
   std::stringstream ss;
   ss << layout;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 inline void assertSameType(

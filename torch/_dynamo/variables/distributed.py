@@ -35,7 +35,7 @@ from .base import VariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 class DistributedVariable(VariableTracker):
@@ -70,19 +70,13 @@ class DistributedVariable(VariableTracker):
         # check if the distributed package is available or not
         return torch.distributed.is_available()
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
     def richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
-
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
 
 
 def is_from_local(value: object) -> bool:
@@ -134,7 +128,9 @@ class WorldMetaClassVariable(DistributedVariable):
     def python_type(self) -> type:
         return type(self.value)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if name == "WORLD":
             if not self.source:
                 raise AssertionError(
@@ -151,7 +147,7 @@ class WorldMetaClassVariable(DistributedVariable):
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
 
 class BackwardHookVariable(VariableTracker):
@@ -162,7 +158,7 @@ class BackwardHookVariable(VariableTracker):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         module: VariableTracker,
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
@@ -237,9 +233,12 @@ class BackwardHookVariable(VariableTracker):
     def as_proxy(self) -> torch.fx.Proxy:
         return self.proxy
 
+    def python_type(self) -> type:
+        return torch.utils.hooks.BackwardHook
+
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -249,7 +248,10 @@ class BackwardHookVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
     def _setup_hook(
-        self, tx: "InstructionTranslator", hook_method_name: str, args: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        hook_method_name: str,
+        args: VariableTracker,
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 

@@ -19,7 +19,17 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Final, Generic, Literal, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    cast,
+    Final,
+    Generic,
+    get_args,
+    Literal,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+)
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -28,12 +38,14 @@ from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
+    TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
     XPU_KERNEL_FORMAT,
 )
@@ -42,10 +54,10 @@ from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
-    _NUM_THREADS_PER_WARP,
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    InductorMeta,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     ReductionHint,
@@ -53,6 +65,7 @@ from .hints import (
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
     TRITON_MAX_TENSOR_NUMEL,
+    TritonMeta,
 )
 from .runtime_utils import (
     cache_dir,
@@ -78,7 +91,6 @@ from .static_triton_launcher import (
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
-    cc_warp_size,
     CompiledKernel,
     Config,
     GPUTarget,
@@ -112,6 +124,22 @@ class NoTritonConfigsError(RuntimeError):
     pass
 
 
+def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
+    """
+    Enable Triton debug asserts whenever indirect indexing asserts are on,
+    except on HIP where older Triton releases lack the required support.
+
+    Triton 3.7 is the first release that includes the upstream debug-assert
+    support needed by ROCm, so HIP kernels must keep this disabled below that
+    version to remain compatible.
+    """
+    if not inductor_meta.get("assert_indirect_indexing", True):
+        return False
+    if not inductor_meta.get("is_hip", False):
+        return True
+    return get_triton_version() >= (3, 7)
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Container, Hashable
 
@@ -121,12 +149,20 @@ if TYPE_CHECKING:
 
     LauncherType = Any
 
-_KernelType = (
+_KernelType: TypeAlias = (
     CompiledKernel | StaticallyLaunchedCudaKernel | StaticallyLaunchedXpuKernel
 )
-_T = TypeVar("_T", bound=_KernelType)
+_T = TypeVar(
+    "_T",
+    CompiledKernel,
+    StaticallyLaunchedCudaKernel,
+    StaticallyLaunchedXpuKernel,
+)
+if get_args(_KernelType) != _T.__constraints__:
+    raise AssertionError("_KernelType args must match _T type constraints")
 
 log = logging.getLogger(__name__)
+autotuning_inputs_log = torch._logging.getArtifactLogger(__name__, "autotuning_inputs")
 
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
@@ -163,6 +199,42 @@ def get_total_reduction_numel(numels: dict[str, int]) -> int:
     )
 
 
+def _resolve_dims(dims, cfg_kwargs, constants):
+    """Resolve a list of block/shape/stride dims to concrete ints."""
+    result = []
+    for s in dims:
+        if isinstance(s, int):
+            result.append(s)
+        elif isinstance(s, str) and s in constants:
+            result.append(int(constants[s]))
+        elif isinstance(s, str) and s in cfg_kwargs:
+            result.append(int(cfg_kwargs[s]))
+        else:
+            log.debug("host-side TMA: unresolved descriptor dim %r; skipping", s)
+            return None
+    return result
+
+
+@functools.lru_cache(None)
+def _warn_host_tma_clone(name: str) -> None:
+    log.warning(
+        "host-side TMA: input %s is not %d-byte aligned; cloning it (an extra "
+        "copy per launch). Pass aligned inputs to avoid this.",
+        name,
+        TMA_ALIGNMENT,
+    )
+
+
+def _host_tma_aligned(tensor, name):
+    """Return a TMA_ALIGNMENT-aligned view of `tensor`, cloning (with a one-time
+    warning) only if its base address is not aligned. Used by the host-side TMA
+    launcher to build TensorDescriptors from aligned storage."""
+    if tensor.data_ptr() % TMA_ALIGNMENT == 0:
+        return tensor
+    _warn_host_tma_clone(name)
+    return tensor.clone()
+
+
 def autotune_hints_to_configs(
     hints: OrderedSet[AutotuneHint],
     size_hints,
@@ -182,6 +254,13 @@ def autotune_hints_to_configs(
     configs: list[Config] = []
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
+            if device_props.warp_size is None:
+                log.debug(
+                    "Skipping %s autotune hint because device %s does not report warp_size",
+                    AutotuneHint.ONE_ELEMENT_PER_THREAD,
+                    device_props.type,
+                )
+                continue
             if len(size_hints) == 1:
                 xyz_options = ((block_size // 4, None, None),)
             elif len(size_hints) == 2:
@@ -192,13 +271,13 @@ def autotune_hints_to_configs(
                     (1, block_size // 4, 1),
                     (1, 1, block_size // 4),
                 )
+            warp_size = device_props.warp_size_or_default
             configs.extend(
                 triton_config(
                     size_hints,
                     *xyz,
-                    num_elements_per_warp=(
-                        device_props.warp_size if device_props.warp_size else 32
-                    ),
+                    num_elements_per_warp=warp_size,
+                    warp_size=warp_size,
                 )
                 for xyz in xyz_options
             )
@@ -208,17 +287,12 @@ def autotune_hints_to_configs(
 
 def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
     call_args = []
-    call_kwargs = {}
+    call_kwargs = dict(kwargs)
     for arg in args:
         if isinstance(arg, (int, bool)):
             call_args.append(str(arg))
         else:
             call_args.append("T")
-    for k, v in kwargs.items():
-        if isinstance(arg, (int, bool)):
-            call_kwargs[k] = v
-        else:
-            call_kwargs[k] = v
     call_kwargs.update(launcher.config.kwargs)
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
@@ -276,7 +350,7 @@ def _dump_launch_tensors(args, kernel_path, kernel_hash, kernel_name):
 
 
 def check_autotune_cache(
-    configs: list[Config], filename: str | None, inductor_meta: dict[str, Any]
+    configs: list[Config], filename: str | None, inductor_meta: InductorMeta
 ) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
     """
     Given a list of configs, checks autotune cache and return metadata
@@ -292,6 +366,9 @@ def check_autotune_cache(
     ):
         configs_hash = hash_configs(configs)
 
+        from torch._inductor.compile_worker import watchdog
+
+        watchdog.report_phase(watchdog.Phase.QUERYING_CACHE)
         autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
         if autotune_cache:
             if best_config := autotune_cache.read_best(inductor_meta, configs):
@@ -419,14 +496,14 @@ class CachingAutotuner(KernelInterface):
     def __init__(
         self,
         fn,
-        triton_meta,  # passed directly to triton
+        triton_meta: TritonMeta,  # passed directly to triton
         configs,
         save_cache_hook,
         mutated_arg_names: list[str],  # see [Note: clone mutated buffers]
         optimize_mem,
         heuristic_type,
         size_hints=None,
-        inductor_meta=None,  # metadata not relevant to triton
+        inductor_meta: InductorMeta | None = None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
         filename: str | None = None,
         reset_to_zero_arg_names: list[str] | None = None,
@@ -434,19 +511,25 @@ class CachingAutotuner(KernelInterface):
     ):
         super().__init__()
 
-        assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
+        if len(configs) == 0:
+            raise AssertionError("Non-empty TritonConfig list required for compiling")
         # makes sure there are no pre-hooks on any of the triton configs
         for cfg in configs:
             validate_triton_config(cfg)
 
         self.fn = fn
         self.device_props: DeviceProperties = triton_meta["device"]
-        self.triton_meta = {
-            **triton_meta,
-            "device": self.device_props.index,
-            "device_type": self.device_props.type,
-        }
-        self.inductor_meta = {} if inductor_meta is None else inductor_meta
+        self.triton_meta: TritonMeta = cast(
+            TritonMeta,
+            {
+                **triton_meta,
+                "device": self.device_props.index,
+                "device_type": self.device_props.type,
+            },
+        )
+        self.inductor_meta: InductorMeta = (
+            {} if inductor_meta is None else inductor_meta
+        )
         # Add device properties to inductor_meta for use by coordinate descent tuner
         self.inductor_meta["warp_size"] = self.device_props.warp_size
         self.inductor_meta["max_threads_per_block"] = (
@@ -477,13 +560,13 @@ class CachingAutotuner(KernelInterface):
             for c in self.configs:
                 log.debug(c)
 
-        self.compile_results: list[CompileResult[_KernelType]] = []
+        self.compile_results: list[_KernelCompileResult] = []
         self.launchers: list[LauncherType] = []
         self.lock = threading.Lock()
         self.benchmark_failure_reasons: dict[Any, BenchmarkFailureReason] = {}
         if os.getenv("TRITON_CACHE_DIR") is None:
             os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
-                self.triton_meta.get("device", 0)
+                cast(int, self.triton_meta.get("device", 0))
             )
         log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
@@ -548,6 +631,37 @@ class CachingAutotuner(KernelInterface):
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
 
+    @staticmethod
+    def _close_compiled_kernel(kernel: Any) -> None:
+        if kernel is None:
+            return
+        close = getattr(kernel, "close", None)
+        if close is not None:
+            close()
+            return
+        module = getattr(kernel, "module", None)
+        if module is not None:
+            # Transitional fallback for Triton versions before CompiledKernel.close().
+            # Their __del__ unloads the module and clears kernel.module, so repeated
+            # calls from our idempotent benchmark cleanup paths are harmless.
+            delete = getattr(kernel, "__del__", None)
+            if delete is not None:
+                delete()
+
+    def release_benchmark_artifacts(self) -> None:
+        for launcher in self.launchers:
+            kernel = getattr(launcher, "__self__", None)
+            self._close_compiled_kernel(kernel)
+
+        for result in self.compile_results:
+            self._close_compiled_kernel(getattr(result, "kernel", None))
+
+        self.launchers = []
+        self.compile_results = []
+        self.benchmark_failure_reasons.clear()
+        self._cached_launcher = None
+        self._debug_call = None
+
     def is_statically_launchable(self):
         """
         Checks if every compiled kernel is statically launchable, which
@@ -566,7 +680,8 @@ class CachingAutotuner(KernelInterface):
         On cache load on static autotuner, we need to recheck the autotune cache, since
         a best config could have been found from a previous run
         """
-        assert self.is_statically_launchable()
+        if not self.is_statically_launchable():
+            raise AssertionError("Expected statically launchable kernel")
 
         configs = [result.config for result in self.compile_results]
 
@@ -634,10 +749,11 @@ class CachingAutotuner(KernelInterface):
             for result in self.compile_results:
                 TritonBundler.put(
                     triton_hash_to_path_key(result.kernel.hash),  # type: ignore[attr-defined]
-                    self.triton_meta.get("device", 0),
+                    cast(int, self.triton_meta.get("device", 0)),
                 )
             return
-        assert not self.launchers
+        if self.launchers:
+            raise AssertionError("launchers already populated before precompile")
         if not self.configs:
             raise NoTritonConfigsError("No triton configs are available")
 
@@ -666,12 +782,31 @@ class CachingAutotuner(KernelInterface):
             and self.inductor_meta.get("dynamic_scale_rblock", True)
             and not self.inductor_meta.get("persistent_reduction")
             and self.heuristic_type == HeuristicType.REDUCTION
-            and self.size_hints is not None
+            # Combo kernels with per-subkernel blocks set size_hints=None but
+            # carry per-subkernel size hints in combo_grid_meta.
+            and (self.size_hints is not None or self._combo_has_reduction_subkernel)
             # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
             and device_prop.type in ["cuda", "hip"]
             and bool(device_prop.major)
             and (device_prop.major >= 8 or torch.version.hip)
             and device_prop.regs_per_multiprocessor is not None
+            and device_prop.warp_size is not None
+        )
+
+    @functools.cached_property
+    def _combo_has_reduction_subkernel(self) -> bool:
+        """True for a combo kernel (per-subkernel blocks) with a non-persistent
+        reduction sub-kernel; these carry size_hints=None at the autotuner level."""
+        combo_meta = self.inductor_meta.get("combo_grid_meta")
+        if combo_meta is None or "heuristic_0" not in combo_meta:
+            return False
+        # No-bench stitched combos use a single fixed config and don't autotune;
+        # don't add scaling candidates for them.
+        if "stitched_num_warps" in combo_meta:
+            return False
+        return any(
+            combo_meta.get(f"heuristic_{i}") == "reduction"
+            for i in range(combo_meta["num_kernels"])
         )
 
     def _iter_rblock_scale_candidates(self):
@@ -682,21 +817,56 @@ class CachingAutotuner(KernelInterface):
         # TODO(jansel): we should find a way to move this extra compile into the worker process
         # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
-        assert device_prop.regs_per_multiprocessor
-        assert device_prop.max_threads_per_multi_processor
-        assert device_prop.multi_processor_count
+        if not device_prop.regs_per_multiprocessor:
+            raise AssertionError("device_prop.regs_per_multiprocessor is not set")
+        if not device_prop.max_threads_per_multi_processor:
+            raise AssertionError(
+                "device_prop.max_threads_per_multi_processor is not set"
+            )
+        if not device_prop.multi_processor_count:
+            raise AssertionError("device_prop.multi_processor_count is not set")
+        if device_prop.warp_size is None:
+            raise AssertionError("device_prop.warp_size is not set")
         seen_config_hashes: OrderedSet[Hashable] | None = None
-        warp_size = device_prop.warp_size or 32
+        warp_size = device_prop.warp_size
+        # Combo kernels with per-subkernel blocks pass size_hints=None and carry
+        # per-subkernel xnumel_i / XBLOCK_i in combo_grid_meta. Only total_block
+        # is derived differently; reduction-block selection and the occupancy
+        # logic below are shared with the single-kernel path.
+        combo_meta = (
+            self.inductor_meta.get("combo_grid_meta")
+            if self.size_hints is None
+            else None
+        )
         for result in self.compile_results:
             triton_config = result.config
             compiled_binary = result.kernel
-            assert len(self.size_hints) >= 2
-            xblock = triton_config.kwargs.get("XBLOCK", 1)
+            if combo_meta is not None:
+                # Combo grid sums each sub-kernel's blocks (SequentialFlatten);
+                # xnumel_i is None for dynamic shapes, so those dims are skipped.
+                total_block = 0
+                for i in range(combo_meta["num_kernels"]):
+                    xnumel = combo_meta.get(f"xnumel_{i}")
+                    if isinstance(xnumel, int):
+                        xblock = triton_config.kwargs.get(f"XBLOCK_{i}", 1)
+                        total_block += (xnumel + xblock - 1) // xblock
+            else:
+                if len(self.size_hints) < 2:
+                    raise AssertionError(
+                        f"Expected at least 2 size_hints, got {len(self.size_hints)}"
+                    )
+                xblock = triton_config.kwargs.get("XBLOCK", 1)
+                total_block = (self.size_hints["x"] + xblock - 1) // xblock
+            # Tunable reduction blocks. Combo's per-subkernel kwargs are suffixed
+            # (R0_BLOCK_0, R1_BLOCK_0, R0_BLOCK_1, ...); persistent/pointwise
+            # sub-kernels carry no R*_BLOCK kwarg so they drop out naturally. Same
+            # rule for both paths.
             reduction_kwargs = [
                 kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
             ]
+            if not reduction_kwargs:
+                continue
             rblocks = [triton_config.kwargs[kwarg] for kwarg in reduction_kwargs]
-            total_block = (self.size_hints["x"] + xblock - 1) // xblock
             nreg = getattr(compiled_binary, "n_regs", None)
             if nreg is None:
                 continue
@@ -725,14 +895,14 @@ class CachingAutotuner(KernelInterface):
             nreg_per_warp = nreg * warp_size
             nreg_per_block = nreg_per_warp * triton_config.num_warps
 
-            # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
+            # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processor / (warp_size * num_warps)'
             # The formula below is a tighter upper bound since we have the assumption that
             #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
             # due to the if condition above and:
             #   regs_per_multiprocessor / nreg_per_block
-            #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
-            #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
-            #   = max_threads_per_multi_processor / (32 * num_warps)
+            #   = regs_per_multiprocessor / (nreg * warp_size * num_warps)
+            #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * warp_size * num_warps)
+            #   = max_threads_per_multi_processor / (warp_size * num_warps)
             # Using a tighter upper bound can reveal more optimization opportunities.
             max_blocks_per_sm = max(
                 device_prop.regs_per_multiprocessor // nreg_per_block, 1
@@ -750,7 +920,7 @@ class CachingAutotuner(KernelInterface):
             min_rblock = self.inductor_meta.get("min_rblock")
             if (
                 min_rblock is not None
-                and largest_rkwarg == "R0_BLOCK"
+                and largest_rkwarg.startswith("R0_BLOCK")
                 and new_rblock < min_rblock
             ):
                 continue
@@ -773,6 +943,33 @@ class CachingAutotuner(KernelInterface):
             )
             self._ensure_kernel_loaded()
             yield new_config
+
+            # Combo kernels additionally offer an all-reduction-blocks-halved
+            # candidate. A combo's register count is the max across sub-kernel
+            # branches, so a balanced combo (sub-kernels with similar register
+            # use) only drops below the occupancy limit when every branch
+            # shrinks, not just the largest.
+            if combo_meta is not None and len(reduction_kwargs) > 1:
+                all_halved = copy.deepcopy(triton_config)
+                too_small = False
+                for kwarg in reduction_kwargs:
+                    halved = triton_config.kwargs[kwarg] // 2
+                    # A block that is already 1 would halve to 0 (invalid -> Triton
+                    # compile error). Skip the candidate rather than emit a 0 block.
+                    if halved < 1 or (
+                        min_rblock is not None
+                        and kwarg.startswith("R0_BLOCK")
+                        and halved < min_rblock
+                    ):
+                        too_small = True
+                        break
+                    all_halved.kwargs[kwarg] = halved
+                if not too_small:
+                    all_hash = triton_config_to_hashable(all_halved)
+                    if all_hash not in seen_config_hashes:
+                        seen_config_hashes.add(all_hash)
+                        self._ensure_kernel_loaded()
+                        yield all_halved
 
     def _dynamic_scale_rblock(self):
         if (
@@ -797,7 +994,7 @@ class CachingAutotuner(KernelInterface):
         return result.make_launcher()
 
     def _make_launcher(
-        self, compile_result: CompileResult[_KernelType]
+        self, compile_result: _KernelCompileResult
     ) -> tuple[LauncherType, None] | tuple[None, Exception]:
         """Create a launcher from a compile result.
 
@@ -823,28 +1020,57 @@ class CachingAutotuner(KernelInterface):
         device_interface = self.get_device_interface()
         launchers = []
         exc = None
-        # DeviceGuard ensures each launcher's binary loads onto the right device.
-        with DeviceGuard(device_interface, self.triton_meta["device"]):
-            for result in self.compile_results:
-                launcher, exc = self._make_launcher(result)
-                if launcher is not None:
-                    launchers.append(launcher)
-            if len(launchers) == 0:
-                result = self.compile_results[-1]
-                config = result.config
-                if (
-                    isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
-                    and (
-                        config.num_stages > 1 or config.kwargs.get("NUM_STAGES", 1) > 1
+        try:
+            # DeviceGuard ensures each launcher's binary loads onto the right device.
+            with DeviceGuard(device_interface, cast(int, self.triton_meta["device"])):
+                for result in self.compile_results:
+                    launcher, exc = self._make_launcher(result)
+                    if launcher is not None:
+                        launchers.append(launcher)
+                if len(launchers) == 0:
+                    result = self.compile_results[-1]
+                    config = result.config
+                    if (
+                        isinstance(exc, (OutOfResources, torch.cuda.OutOfMemoryError))
+                        and (
+                            config.num_stages > 1
+                            or config.kwargs.get("NUM_STAGES", 1) > 1
+                        )
+                        and self.inductor_meta.get("dynamic_disable_pipelining", True)
+                    ):
+                        self.launchers = [self.compile_by_disabling_pipelining(config)]
+                        return
+                    raise RuntimeError(
+                        f"No valid triton configs. {type(exc).__name__}: {exc}"
                     )
-                    and self.inductor_meta.get("dynamic_disable_pipelining", True)
-                ):
-                    self.launchers = [self.compile_by_disabling_pipelining(config)]
-                    return
-                raise RuntimeError(
-                    f"No valid triton configs. {type(exc).__name__}: {exc}"
-                )
-        self.launchers = launchers
+            self.launchers = launchers
+        finally:
+            # Drop the retained failed-config exception. Holding it keeps its traceback
+            # (and thus the whole benchmarking frame chain up to do_bench via f_back)
+            # alive; do_bench's 256MB L2-flush buffer would then leak one-per-autotuned
+            # kernel until cyclic GC runs -- which never happens under gc.disable(). We
+            # only needed exc's type/message above.
+            exc = None
+
+    def _prune_compile_results_to_launcher(self, launcher: LauncherType) -> None:
+        if not self.compile_results:
+            return
+
+        launcher_config = launcher.config  # type: ignore[attr-defined]
+        for result in self.compile_results:
+            if result.config is launcher_config:
+                self.compile_results = [result]
+                return
+
+        launcher_config_hash = triton_config_to_hashable(launcher_config)
+        for result in self.compile_results:
+            if triton_config_to_hashable(result.config) == launcher_config_hash:
+                self.compile_results = [result]
+                return
+
+        raise AssertionError(
+            f"Autotuned launcher config does not match any compile result: {launcher_config}"
+        )
 
     def _ensure_kernel_loaded(self) -> None:
         """Reload the kernel in the parent process if needed.
@@ -858,8 +1084,10 @@ class CachingAutotuner(KernelInterface):
         callback. No-op when the function is already present.
         """
         if self.fn.fn is None:
-            assert hasattr(self, "_reload_kernel")
-            assert callable(self._reload_kernel)
+            if not hasattr(self, "_reload_kernel"):
+                raise AssertionError("_reload_kernel attribute not set")
+            if not callable(self._reload_kernel):
+                raise AssertionError("_reload_kernel must be callable")
             self.fn = self._reload_kernel().fn
 
     def prepare_for_pickle(self) -> tuple[Any, ...]:
@@ -906,17 +1134,23 @@ class CachingAutotuner(KernelInterface):
     def prepare_for_caching(self) -> None:
         """
         Statically Launched CUDA Kernels have a raw cubin on them
-        that we don't need to store in the cache(since TritonBundler handles the collection for us)
+        that we don't need to store in the cache(since TritonBundler handles the collection for us),
+        this behavior is gated by keep_static_cubin_raw config.
         """
+        # Only cubin_raw must be retained: __getstate__ already nulls cubin_path
+        # on every serialize, so a cold-container load rehydrates the cubin from
+        # cubin_raw (reload_cubin_path calls reload_cubin_from_raw) instead of
+        # pointing at a missing file.
+        if torch._inductor.config.keep_static_cubin_raw:
+            return
         for result in self.compile_results:
             if isinstance(result, StaticTritonCompileResult):
                 # Don't save this in the inductor cache, as it is very large
                 result.kernel.cubin_raw = None
 
     def __getstate__(self) -> dict[str, Any]:
-        assert not self.launchers, (
-            "pickle should not be called with after make_launchers()"
-        )
+        if self.launchers:
+            raise AssertionError("pickle should not be called after make_launchers()")
         return {
             **self.__dict__,
             "lock": None,
@@ -941,7 +1175,9 @@ class CachingAutotuner(KernelInterface):
         of the triton signature are passed in as options to triton.compile
         instead
         """
-        compile_meta = copy.deepcopy(self.triton_meta)
+        compile_meta: dict[str, Any] = cast(
+            dict[str, Any], copy.deepcopy(self.triton_meta)
+        )
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
 
@@ -966,7 +1202,10 @@ class CachingAutotuner(KernelInterface):
             if backend_options:
                 # Stash backend-only options separately so they do not get mixed into
                 # `constants`, which are interpreted as signature-bound constexpr args.
-                compile_meta["backend_options"] = backend_options
+                compile_meta["backend_options"] = {
+                    **compile_meta.get("backend_options", {}),
+                    **backend_options,
+                }
         compile_meta["constants"].update(cfg_kwargs)
 
         for i in get_constexprs(self.fn):
@@ -981,9 +1220,41 @@ class CachingAutotuner(KernelInterface):
                 cfg, "num_buffers_warp_spec", 0
             )
 
-        compile_meta["debug"] = self.inductor_meta.get(
-            "assert_indirect_indexing", True
-        ) and not self.inductor_meta.get("is_hip", False)
+        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
+        if host_tma_args:
+            all_constants = compile_meta["constants"]
+            for key in list(compile_meta["signature"]):
+                desc_info = host_tma_args.get(key)
+                if desc_info is None or not isinstance(desc_info, dict):
+                    continue
+                block_shape_vals = _resolve_dims(
+                    desc_info["block_shape"], cfg_kwargs, all_constants
+                )
+                shape_vals = _resolve_dims(
+                    desc_info["shape"], cfg_kwargs, all_constants
+                )
+                stride_vals = _resolve_dims(
+                    desc_info["strides"], cfg_kwargs, all_constants
+                )
+                if (
+                    block_shape_vals is None
+                    or shape_vals is None
+                    or stride_vals is None
+                    or any(v <= 0 for v in block_shape_vals)
+                ):
+                    continue
+                ty = compile_meta["signature"][key]
+                if isinstance(ty, str) and ty.startswith("*"):
+                    dtype_str = ty[1:]
+                elif isinstance(ty, str) and ty.startswith("tensordesc<"):
+                    dtype_str = ty.split("<")[1].split("[")[0]
+                else:
+                    continue
+                compile_meta["signature"][key] = (
+                    f"tensordesc<{dtype_str}{list(block_shape_vals)}>"
+                )
+
+        compile_meta["debug"] = _should_enable_triton_debug_asserts(self.inductor_meta)
 
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
@@ -1033,19 +1304,22 @@ class CachingAutotuner(KernelInterface):
             for k in tlx_only_cuda_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
-        if self.device_props.type == "hip":
-            # HIP backend options are consumed by Triton out-of-band from the kernel
-            # signature. They are intentionally *not* present in `constants`.
-            options.update(compile_meta.get("backend_options", {}))
+        # Backend options are consumed by Triton out-of-band from the kernel
+        # signature. They are intentionally *not* present in `constants`.
+        options.update(compile_meta.get("backend_options", {}))
 
         if self.device_props.type == "xpu" and XPU_KERNEL_FORMAT == "zebin":
             options["generate_native_code"] = True
 
         return options
 
-    def _precompile_config(self, cfg: Config) -> CompileResult[_KernelType]:
+    def _precompile_config(
+        self, cfg: Config, *, cc_override: str | int | None = None
+    ) -> _KernelCompileResult:
         """Ahead of time compile a given autotuner config."""
         compile_meta = self._create_compile_meta(cfg)
+        if cc_override is not None:
+            compile_meta["cc"] = cc_override
 
         if self.device_props.type == "cpu":
             triton_helpers.set_driver_to_cpu()
@@ -1076,7 +1350,7 @@ class CachingAutotuner(KernelInterface):
         target = GPUTarget(
             compile_meta["device_type"],
             arch,
-            cc_warp_size(compile_meta["cc"]),
+            self.device_props.warp_size_or_default,
         )
 
         options = self._create_compile_options(cfg, compile_meta)
@@ -1127,7 +1401,8 @@ class CachingAutotuner(KernelInterface):
                 log.exception("jit_post_compile_hook failed")
 
         TritonBundler.put(
-            triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
+            triton_hash_to_path_key(binary.hash),
+            cast(int, self.triton_meta.get("device", 0)),
         )
         # If the binary has a cubin file to directly launch, save it on the binary
         static_launcher = StaticTritonCompileResult.can_statically_launch(
@@ -1166,17 +1441,19 @@ class CachingAutotuner(KernelInterface):
             return float("inf")
 
         device_interface = self.get_device_interface()
-        stream = device_interface.get_raw_stream(device_interface.current_device())
 
         cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
 
         def kernel_call():
+            # Resolve the raw stream at call time rather than at closure-creation
+            # time so that CUDA graph capture on a different stream works correctly.
+            stream = device_interface.get_raw_stream(device_interface.current_device())
             cloned_args, cloned_kwargs = self.maybe_clone_args(
                 cpu_copies, *args, **kwargs
             )
+            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
-            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
@@ -1190,7 +1467,9 @@ class CachingAutotuner(KernelInterface):
                             **cloned_kwargs,
                             stream=stream,
                         )
-                    except Exception:
+                    except Exception as e:
+                        if isinstance(e, TypeError):
+                            self._check_launcher_call_args(launcher, cloned_args)
                         log.error(
                             "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                             kernel_name,
@@ -1208,7 +1487,9 @@ class CachingAutotuner(KernelInterface):
                         **cloned_kwargs,
                         stream=stream,
                     )
-                except Exception:
+                except Exception as e:
+                    if isinstance(e, TypeError):
+                        self._check_launcher_call_args(launcher, cloned_args)
                     log.error(
                         "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                         kernel_name,
@@ -1275,7 +1556,10 @@ class CachingAutotuner(KernelInterface):
                 "xpu",
             ):
                 nonlocal budget
-                assert isinstance(arg, torch.Tensor)
+                if not isinstance(arg, torch.Tensor):
+                    raise AssertionError(
+                        f"Expected torch.Tensor for mutated arg, got {type(arg)}"
+                    )
                 required_storage_length = compute_required_storage_length(
                     arg.size(),
                     arg.stride(),
@@ -1323,22 +1607,18 @@ class CachingAutotuner(KernelInterface):
             return
         for i, arg in enumerate(args):
             if self.fn.arg_names[i] in self.reset_to_zero_arg_names:
-                assert isinstance(
-                    arg,
-                    torch.Tensor,
-                ), (
-                    "self.reset_to_zero_arg_names should only contain valid argument names"
-                )
+                if not isinstance(arg, torch.Tensor):
+                    raise AssertionError(
+                        "self.reset_to_zero_arg_names should only contain valid argument names"
+                    )
                 arg.zero_()
 
         for name, arg in kwargs.items():
             if name in self.reset_to_zero_arg_names:
-                assert isinstance(
-                    arg,
-                    torch.Tensor,
-                ), (
-                    "self.reset_to_zero_arg_names should only contain valid argument names"
-                )
+                if not isinstance(arg, torch.Tensor):
+                    raise AssertionError(
+                        "self.reset_to_zero_arg_names should only contain valid argument names"
+                    )
                 arg.zero_()
 
     def maybe_clone_args(
@@ -1354,7 +1634,10 @@ class CachingAutotuner(KernelInterface):
 
         def prepare_arg(name, arg):
             if name in self.mutated_arg_names and name not in exclude:
-                assert isinstance(arg, torch.Tensor)
+                if not isinstance(arg, torch.Tensor):
+                    raise AssertionError(
+                        f"Expected torch.Tensor for mutated arg '{name}', got {type(arg)}"
+                    )
                 return clone_preserve_strides(arg)
             else:
                 return arg
@@ -1368,6 +1651,114 @@ class CachingAutotuner(KernelInterface):
 
     def clone_args(self, *args, **kwargs) -> tuple[list[Any], dict[str, Any]]:
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
+
+    @staticmethod
+    def _close_static_launcher(launcher: LauncherType) -> None:
+        if not getattr(launcher, "_is_static", False):
+            return
+        runner = getattr(launcher, "__globals__", {}).get("runner")
+        kernel = getattr(runner, "__self__", None)
+        close = getattr(kernel, "close", None)
+        if close is not None:
+            close()
+
+    def _release_static_launchers_except(self, keep_launcher: LauncherType) -> None:
+        for launcher in self.launchers:
+            if launcher is not keep_launcher:
+                self._close_static_launcher(launcher)
+        if not getattr(keep_launcher, "_is_static", False):
+            return
+        keep_hash = getattr(keep_launcher, "cache_hash", None)
+        if keep_hash is None:
+            return
+        keep_results = [
+            result
+            for result in self.compile_results
+            if isinstance(result, StaticTritonCompileResult)
+            and triton_hash_to_path_key(result.kernel.hash) == keep_hash
+        ]
+        if len(keep_results) == 1:
+            for result in self.compile_results:
+                if result is not keep_results[0] and isinstance(
+                    result, StaticTritonCompileResult
+                ):
+                    close = getattr(result.kernel, "close", None)
+                    if close is not None:
+                        close()
+            self.compile_results = keep_results
+
+    def _log_autotune_inputs(self, args, kwargs) -> None:
+        """Log input tensor shapes/dtypes and scalar values for autotuning."""
+        kernel_name = self.inductor_meta.get("kernel_name", self.fn.__name__)
+        signature = self.triton_meta.get("signature", {})
+        arg_names = list(signature.keys())
+
+        autotuning_inputs_log.debug("=" * 60)
+        autotuning_inputs_log.debug("Autotuning inputs for kernel: %s", kernel_name)
+        autotuning_inputs_log.debug("=" * 60)
+        autotuning_inputs_log.debug("  Heuristic type: %s", self.heuristic_type)
+        autotuning_inputs_log.debug("  Size hints: %s", self.size_hints)
+        autotuning_inputs_log.debug(
+            "  Num configs to benchmark: %d", len(self.launchers)
+        )
+        autotuning_inputs_log.debug(
+            "  Device: %s (index=%s)", self.device_props.type, self.device_props.index
+        )
+        autotuning_inputs_log.debug("-" * 60)
+        autotuning_inputs_log.debug("Arguments:")
+
+        for i, arg in enumerate(args):
+            arg_name = arg_names[i] if i < len(arg_names) else f"arg_{i}"
+            arg_signature = signature.get(arg_name, "unknown")
+            if isinstance(arg, torch.Tensor):
+                autotuning_inputs_log.debug(
+                    "  [%d] %s (%s): Tensor(shape=%s, dtype=%s, device=%s, stride=%s, contiguous=%s)",
+                    i,
+                    arg_name,
+                    arg_signature,
+                    tuple(arg.shape),
+                    arg.dtype,
+                    arg.device,
+                    arg.stride(),
+                    arg.is_contiguous(),
+                )
+            elif isinstance(arg, (int, float, bool)):
+                autotuning_inputs_log.debug(
+                    "  [%d] %s (%s): %s (type=%s)",
+                    i,
+                    arg_name,
+                    arg_signature,
+                    arg,
+                    type(arg).__name__,
+                )
+            else:
+                autotuning_inputs_log.debug(
+                    "  [%d] %s (%s): %s (type=%s)",
+                    i,
+                    arg_name,
+                    arg_signature,
+                    repr(arg)[:100],
+                    type(arg).__name__,
+                )
+
+        if kwargs:
+            autotuning_inputs_log.debug("-" * 60)
+            autotuning_inputs_log.debug("Keyword arguments:")
+            for k, v in kwargs.items():
+                if isinstance(v, torch.Tensor):
+                    autotuning_inputs_log.debug(
+                        "  %s: Tensor(shape=%s, dtype=%s, device=%s)",
+                        k,
+                        tuple(v.shape),
+                        v.dtype,
+                        v.device,
+                    )
+                else:
+                    autotuning_inputs_log.debug(
+                        "  %s: %s (type=%s)", k, v, type(v).__name__
+                    )
+
+        autotuning_inputs_log.debug("=" * 60)
 
     def benchmark_all_configs(self, *args, **kwargs):
         with (
@@ -1387,10 +1778,21 @@ class CachingAutotuner(KernelInterface):
             #     str(self.compile_id),
             # ),
         ):
-            timings = {
-                launcher: self.bench(launcher, *args, **kwargs)
-                for launcher in self.launchers
-            }
+            timings = {}
+            best_launcher = None
+            best_timing = float("inf")
+            for launcher in self.launchers:
+                timing = self.bench(launcher, *args, **kwargs)
+                timings[launcher] = timing
+                # Close losing static launchers eagerly so exhaustive autotuning
+                # keeps only the current winner and candidate modules loaded.
+                if best_launcher is None or timing < best_timing:
+                    if best_launcher is not None:
+                        self._close_static_launcher(best_launcher)
+                    best_launcher = launcher
+                    best_timing = timing
+                else:
+                    self._close_static_launcher(launcher)
 
             for k, v in timings.items():
                 self.coordesc_tuner.cache_benchmark_result(k.config, v)
@@ -1422,7 +1824,10 @@ class CachingAutotuner(KernelInterface):
             return timings
 
     def autotune_to_one_config(self, *args, **kwargs):
-        """Do the actual autotuning"""
+        """Execute autotuning to select the optimal kernel configuration."""
+        if autotuning_inputs_log.isEnabledFor(logging.DEBUG):
+            self._log_autotune_inputs(args, kwargs)
+
         start_time = time.time_ns()
         timings = self.benchmark_all_configs(*args, **kwargs)
         benchmark_time_taken_ns = time.time_ns() - start_time
@@ -1467,7 +1872,10 @@ class CachingAutotuner(KernelInterface):
                     best_time,
                 )
 
-        self.launchers = [builtins.min(timings, key=timings.get)]
+        best_launcher = builtins.min(timings, key=timings.get)
+        self._release_static_launchers_except(best_launcher)
+        self.launchers = [best_launcher]
+        self._prune_compile_results_to_launcher(best_launcher)
         self.autotune_time_taken_ns = (
             self.precompile_time_taken_ns + benchmark_time_taken_ns
         )
@@ -1646,55 +2054,117 @@ class CachingAutotuner(KernelInterface):
         return launcher
 
     def save_gpu_kernel(self, stream, launcher):
+        """Save the selected GPU kernel binary and assembly for AOTI packaging."""
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
-        assert key is not None, "kernel_name can not be None"
-        params = {
-            "mangled_name": (
-                launcher.bin.metadata.name
-                if hasattr(launcher.bin.metadata, "name")
-                else launcher.bin.metadata["name"]
-            ),
-            "num_warps": (
-                launcher.bin.num_warps
-                if hasattr(launcher.bin, "num_warps")
-                else launcher.bin.metadata.num_warps
-            ),
-            "shared_mem": (
-                launcher.bin.shared
-                if hasattr(launcher.bin, "shared")
-                else launcher.bin.metadata.shared
-            ),
-            "stream": stream,
-            # User defined triton kernels will have arbitrary kwarg names
-            "config": config_to_dict(launcher.config),
-            "inductor_meta": self.inductor_meta,
-            "triton_meta": self.triton_meta,
-            "def_args": launcher.def_args,
-            "call_args": launcher.call_args,
-            "global_scratch": launcher.global_scratch,
-            "profile_scratch": launcher.profile_scratch,
-        }
+        if key is None:
+            raise AssertionError("kernel_name can not be None")
+        binary = launcher.bin
 
-        from torch._inductor import config
+        from torch._inductor import config as inductor_config
+
+        target_cc = None
+        cuda_arch = None
+        if (
+            self.device_props.type == "cuda"
+            and torch.version.hip is None
+            and inductor_config.aot_inductor.emit_multi_arch_kernel
+        ):
+            from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
+
+            cuda_arch = cuda_compile_utils._aoti_cuda_target_arch()
+            if inductor_config.cuda.arch is not None:
+                target_cc = cuda_compile_utils._cuda_arch_number(cuda_arch)
+                device_cc = cuda_compile_utils._cuda_arch_number(
+                    str(self.device_props.cc)
+                )
+                if target_cc == device_cc:
+                    target_cc = None
+
+        if target_cc is not None:
+            # Autotuning must run kernels compiled for the actual GPU, but AOTI
+            # needs to package PTX/cubin for the requested deployment target.
+            # Recompile the selected config for the target arch without loading
+            # or benchmarking that binary on the current device.
+            target_result = self._precompile_config(
+                launcher.config, cc_override=target_cc
+            )
+            if isinstance(target_result, TritonCompileResult):
+                binary = target_result.kernel
+            else:
+                raise RuntimeError(
+                    "AOTI CUDA target-arch packaging requires a Triton binary"
+                )
+
+        # Prefer Level 0 launch metadata schema (versioned, stable contract)
+        # over hasattr probing of CompiledKernel internals.
+        # TODO: When the AOTI C++ launch path gains cuLaunchKernelEx support for
+        # CTA clusters, add num_ctas/cluster_dims here from the schema.
+        # Currently num_ctas is already captured via config_to_dict(launcher.config)
+        # for scratch space scaling, but is not used in the actual kernel launch.
+        schema = getattr(binary, "launch_metadata_schema", None)
+        if schema is not None and inductor_config.use_launch_metadata_schema:
+            params: dict[str, Any] = {
+                "mangled_name": schema["entry_name"],
+                "num_warps": schema["num_warps"],
+                "shared_mem": schema["shared_mem"],
+                "stream": stream,
+                "config": config_to_dict(launcher.config),
+                "inductor_meta": self.inductor_meta,
+                "triton_meta": self.triton_meta,
+                "def_args": launcher.def_args,
+                "call_args": launcher.call_args,
+                "global_scratch": launcher.global_scratch,
+                "profile_scratch": launcher.profile_scratch,
+                "cuda_arch": cuda_arch,
+            }
+        else:
+            # Fallback: hasattr probing for older Triton versions
+            params: dict[str, Any] = {
+                "mangled_name": (
+                    binary.metadata.name
+                    if hasattr(binary.metadata, "name")
+                    else binary.metadata["name"]
+                ),
+                "num_warps": (
+                    binary.num_warps
+                    if hasattr(binary, "num_warps")
+                    else binary.metadata.num_warps
+                ),
+                "shared_mem": (
+                    binary.shared
+                    if hasattr(binary, "shared")
+                    else binary.metadata.shared
+                ),
+                "stream": stream,
+                "config": config_to_dict(launcher.config),
+                "inductor_meta": self.inductor_meta,
+                "triton_meta": self.triton_meta,
+                "def_args": launcher.def_args,
+                "call_args": launcher.call_args,
+                "global_scratch": launcher.global_scratch,
+                "profile_scratch": launcher.profile_scratch,
+                "cuda_arch": cuda_arch,
+            }
+
         from torch._inductor.codecache import CudaKernelParamCache
 
         bin_type = {"hip": "hsaco", "xpu": XPU_KERNEL_FORMAT}.get(
             self.device_props.type, "cubin"
         )
-        binary = launcher.bin.asm[bin_type]
+        kernel_binary = binary.asm[bin_type]
 
         # ROCm multi-arch: capture LLVM IR
-        if torch.version.hip and config.aot_inductor.emit_multi_arch_kernel:
+        if torch.version.hip and inductor_config.aot_inductor.emit_multi_arch_kernel:
             # Multi-arch ROCm: Capture LLVM IR for cross-architecture compilation
             asm_type = "ll"
 
             # llir is the key to obtain LLVM IR from triton
-            asm = launcher.bin.asm.get("llir", None)
+            asm = binary.asm.get("llir", None)
 
             # CRITICAL: Multi-arch compilation cannot proceed without LLVM IR
             # Fail fast with clear error message pointing to the issue
             if not asm:
-                available_keys = list(launcher.bin.asm.keys())
+                available_keys = list(binary.asm.keys())
                 raise RuntimeError(
                     f"ROCm multi-arch requires LLVM IR, but none found. "
                     f"Available keys: {available_keys}. "
@@ -1706,9 +2176,9 @@ class CachingAutotuner(KernelInterface):
             asm_type = {"hip": "amdgcn", "cuda": "ptx", "xpu": "spv"}.get(
                 self.device_props.type
             )
-            asm = launcher.bin.asm.get(asm_type, None)
+            asm = binary.asm.get(asm_type, None)
 
-        CudaKernelParamCache.set(key, params, binary, bin_type, asm, asm_type)
+        CudaKernelParamCache.set(key, params, kernel_binary, bin_type, asm, asm_type)
         self.cuda_kernel_saved = True
 
     def save_cpu_kernel(self, launcher):
@@ -1721,7 +2191,8 @@ class CachingAutotuner(KernelInterface):
         from torch._inductor.codecache import CpuTritonKernelCache
 
         key = self.inductor_meta.get("kernel_name")
-        assert key is not None, "kernel_name can not be None"
+        if key is None:
+            raise AssertionError("kernel_name can not be None")
 
         compiled = launcher.bin
         kernel_bytes = compiled.asm.get("so")
@@ -1775,7 +2246,7 @@ class CachingAutotuner(KernelInterface):
         E.g., assuming regular autotune only get one config C1; while max-autotune get 4 configs C1, C2, C3, C4
         and max-autotune figure out C3 is the best.
 
-        Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
+        Then if coordinate descent tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
         if not self._should_coordesc_tune:
@@ -1816,12 +2287,13 @@ class CachingAutotuner(KernelInterface):
             )
             return out
 
-        assert not (
+        if (
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
             and "R0_BLOCK" in launcher.config.kwargs
-        ), (
-            "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
-        )
+        ):
+            raise AssertionError(
+                "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
+            )
         start_time = time.time_ns()
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
@@ -2028,7 +2500,12 @@ class CachingAutotuner(KernelInterface):
 
         try:
             self._pre_launch(launcher, *args, stream=stream, **kwargs)
-            result = launcher(*args, **kwargs, stream=stream)
+            try:
+                result = launcher(*args, **kwargs, stream=stream)
+            except Exception as e:
+                if isinstance(e, TypeError):
+                    self._check_launcher_call_args(launcher, args)
+                raise
         finally:
             self._post_launch()
 
@@ -2046,6 +2523,24 @@ class CachingAutotuner(KernelInterface):
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
 
+    def _check_launcher_call_args(
+        self,
+        launcher: LauncherType,
+        args: tuple[Any, ...],
+    ) -> None:
+        """Raise TypeError with a helpful message when stream is passed positionally."""
+        expected = getattr(launcher, "_expected_positional_count", None)
+        if expected is None:
+            return
+
+        if len(args) > expected:
+            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
+            raise TypeError(
+                f"{kernel_name}: too many positional arguments - "
+                f"expected {expected}, got {len(args)}. "
+                "'stream' must be passed as a keyword argument."
+            ) from None
+
     def _build_fast_launcher(self, launcher: LauncherType) -> LauncherType | None:
         """Try to build a _FastCudaLauncher-backed version of the launcher.
 
@@ -2060,6 +2555,11 @@ class CachingAutotuner(KernelInterface):
             "use_fast_triton_launcher",
             torch._inductor.config.use_fast_triton_launcher,
         ):
+            return None
+
+        # _FastCudaLauncher binds CUDA/HIP function pointers; XPU static
+        # launchers use SYCL kernels stored in PyCapsules.
+        if self.device_props.type not in ("cuda", "hip"):
             return None
 
         try:
@@ -2115,10 +2615,20 @@ class CachingAutotuner(KernelInterface):
                 "cache_hash",
                 "store_cubin",
                 "_is_static",
+                "_expected_positional_count",
             ):
                 val = getattr(launcher, attr, None)
                 if val is not None:
                     setattr(new_launcher, attr, val)
+            # _FastCudaLauncher bakes kernel.function (a raw CUfunction pointer)
+            # into a C object and never re-reads it, and replacing the "runner"
+            # global drops this launcher's only reference to the owning static
+            # kernel. Without an explicit reference the kernel can be collected or
+            # closed while this launcher is still cached and callable; its
+            # close()/__del__ then unloads the module and leaves the baked pointer
+            # dangling, producing a CUDA "misaligned address" error on the next
+            # launch. Keep the owner alive for as long as the fast launcher is.
+            new_launcher._static_kernel_owner = kernel  # type: ignore[attr-defined]
             return new_launcher
         except (AttributeError, TypeError, KeyError, ValueError):
             # Expected failures - silent fallback is OK.
@@ -2194,7 +2704,7 @@ class CompileResult(Generic[_T]):
         kernel: _T,
         config: Config,
         compile_meta: dict[str, Any],
-        inductor_meta: dict[str, Any],
+        inductor_meta: InductorMeta,
     ):
         self.kernel = kernel
         self.config = config
@@ -2203,7 +2713,9 @@ class CompileResult(Generic[_T]):
 
     def make_launcher(self) -> LauncherType: ...
 
-    def _gen_launcher_code(self, scope, def_args, runner_args) -> LauncherType:
+    def _gen_launcher_code(
+        self, scope, def_args, runner_args, pre_runner_lines=None
+    ) -> LauncherType:
         grid = GridExpr.from_meta(self.inductor_meta, self.config)
         # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
         lines = [
@@ -2212,11 +2724,16 @@ class CompileResult(Generic[_T]):
             f"    grid_0 = {grid.x_grid}",
             f"    grid_1 = {grid.y_grid}",
             f"    grid_2 = {grid.z_grid}",
+            *(f"    {l}" for l in (pre_runner_lines or [])),
             f"    runner({', '.join(runner_args)})",
         ]
         launcher_code = "\n".join(lines)
         exec(launcher_code, scope)
-        return scope["launcher"]
+        launcher = scope["launcher"]
+        # Stash expected positional arg count at codegen time so
+        # _check_launcher_call_args can validate without inspect.signature().
+        launcher._expected_positional_count = len(def_args)
+        return launcher
 
     def _get_arg_lists(
         self, arg_names, constexprs
@@ -2297,6 +2814,13 @@ class CompileResult(Generic[_T]):
         return call_args, def_args, none_args
 
 
+_KernelCompileResult: TypeAlias = (
+    CompileResult[CompiledKernel]
+    | CompileResult[StaticallyLaunchedCudaKernel]
+    | CompileResult[StaticallyLaunchedXpuKernel]
+)
+
+
 class CannotStaticallyLaunchKernel(Exception):
     pass
 
@@ -2310,8 +2834,8 @@ class StaticTritonCompileResult(CompileResult[_T]):
     @staticmethod
     def can_statically_launch(
         kernel: CompiledKernel,
-        inductor_meta: dict[str, Any],
-        triton_meta: dict[str, Any],
+        inductor_meta: InductorMeta,
+        triton_meta: TritonMeta,
         heuristic_type: HeuristicType,
     ) -> _KernelType | None:
         if not torch._inductor.config.use_static_triton_launcher:
@@ -2354,7 +2878,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 triton_meta.get("device_type"), ".cubin"
             )
             cubin_location = os.path.join(
-                triton_cache_dir(triton_meta.get("device", 0)),
+                triton_cache_dir(cast(int, triton_meta.get("device", 0))),
                 triton_hash_to_path_key(kernel.hash),
                 f"{kernel.src.fn.__name__}{binary_ext}",
             )
@@ -2656,7 +3180,53 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 *call_args,
             ]
 
-        launcher = self._gen_launcher_code(scope, def_args, runner_args)
+        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
+        pre_runner_lines: list[str] = []
+        if host_tma_args:
+            if not has_triton_stable_tma_api():
+                raise RuntimeError(
+                    "host-side TMA requires a Triton with the stable TMA API "
+                    "(triton.tools.tensor_descriptor.TensorDescriptor)"
+                )
+            from triton.tools.tensor_descriptor import TensorDescriptor
+
+            scope["_host_tma_aligned"] = _host_tma_aligned
+            scope["TensorDescriptor"] = TensorDescriptor
+            cfg_kwargs = cfg.kwargs
+            all_constants = compile_meta["constants"]
+
+            for inner_name, desc_info in host_tma_args.items():
+                if inner_name not in call_args or not isinstance(desc_info, dict):
+                    continue
+                block_shape_vals = _resolve_dims(
+                    desc_info["block_shape"], cfg_kwargs, all_constants
+                )
+                shape_vals = _resolve_dims(
+                    desc_info["shape"], cfg_kwargs, all_constants
+                )
+                stride_vals = _resolve_dims(
+                    desc_info["strides"], cfg_kwargs, all_constants
+                )
+                if (
+                    block_shape_vals is None
+                    or shape_vals is None
+                    or stride_vals is None
+                ):
+                    continue
+                desc_var = f"{inner_name}_host_tma_desc"
+                aligned_var = f"{inner_name}_aligned"
+                pre_runner_lines.append(
+                    f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                )
+                pre_runner_lines.append(
+                    f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
+                    f" {stride_vals}, {block_shape_vals})"
+                )
+                runner_args = [desc_var if a == inner_name else a for a in runner_args]
+
+        launcher = self._gen_launcher_code(
+            scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
+        )
 
         launcher = scope["launcher"]
         launcher.config = cfg
@@ -2794,7 +3364,13 @@ class DebugAutotuner(CachingAutotuner):
             return
         else:
             possible_names = _find_names(self)
-            kernel_name = f"{max(possible_names, key=len)}"
+            if possible_names:
+                kernel_name = f"{max(possible_names, key=len)}"
+            else:
+                # In the AOTI lazy compile path, the CachingAutotuner is not
+                # bound to a module-level name, so _find_names returns empty.
+                # Fall back to the kernel name recorded in inductor_meta.
+                kernel_name = self.inductor_meta.get("kernel_name") or self.fn.__name__
             if not re.match(self.regex_filter, kernel_name):
                 return
             if len(self.launchers) != 1:
@@ -2853,10 +3429,10 @@ def hash_configs(configs: list[Config]):
 def cached_autotune(
     size_hints: list[int] | None,
     configs: list[Config],
-    triton_meta,
+    triton_meta: TritonMeta,
     heuristic_type,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     custom_kernel=False,
     caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
     debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner,
@@ -2874,12 +3450,13 @@ def cached_autotune(
             configs, size_hints, inductor_meta
         )
     configs = unique_configs(configs)
-    assert len(configs) == 1 or filename
+    if len(configs) != 1 and not filename:
+        raise AssertionError("filename required when multiple configs are provided")
 
     configs, autotune_cache, autotune_cache_info = check_autotune_cache(
         configs, filename, inductor_meta
     )
-    mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
+    mutated_arg_names = cast("list[str]", inductor_meta.pop("mutated_arg_names", ()))
     optimize_mem = inductor_meta.pop("optimize_mem", True)
 
     if "restore_value" in triton_meta:
@@ -2899,7 +3476,10 @@ def cached_autotune(
         if "XBLOCK" not in inspect.signature(fn.fn).parameters:
             for tconfig in configs:
                 if "XBLOCK" in tconfig.kwargs:
-                    assert tconfig.kwargs["XBLOCK"] == 1
+                    if tconfig.kwargs["XBLOCK"] != 1:
+                        raise AssertionError(
+                            f"Expected XBLOCK == 1 when not in fn params, got {tconfig.kwargs['XBLOCK']}"
+                        )
                     tconfig.kwargs.pop("XBLOCK")
 
         if inductor_meta.get("profile_bandwidth"):
@@ -2960,16 +3540,18 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
             continue
         block = cfg[f"{label}BLOCK"]
         if numel == 1:
-            assert block == 1, (
-                f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
-                f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
-            )
+            if block != 1:
+                raise AssertionError(
+                    f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
+                    f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
+                )
         max_block = TRITON_MAX_BLOCK[label]
         max_block_str = f'config.triton.max_block["{label}"]'
-        assert max_block % block == 0, (
-            f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
-            f" but {label}BLOCK={block} and {max_block_str}={max_block} (cfg={cfg})."
-        )
+        if max_block % block != 0:
+            raise AssertionError(
+                f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
+                f" but {label}BLOCK={block} and {max_block_str}={max_block} (cfg={cfg})."
+            )
 
 
 def check_max_block(cfg: dict[str, int]):
@@ -2981,9 +3563,10 @@ def check_max_block(cfg: dict[str, int]):
         if block_suffix in var:
             prefix = var.removesuffix(block_suffix)
             max_block = TRITON_MAX_BLOCK[prefix]
-            assert val <= max_block, (
-                f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
-            )
+            if val > max_block:
+                raise AssertionError(
+                    f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
+                )
 
 
 def _check_native_matmul_block_numel(
@@ -3028,7 +3611,7 @@ def _cap_native_matmul_configs(configs: list[Config], r0_block: int) -> list[Con
 def _enforce_reduction_config_block_minimums(
     configs: list[Config],
     size_hints: dict[str, int],
-    inductor_meta: dict[str, Any],
+    inductor_meta: InductorMeta,
 ) -> list[Config]:
     min_xblock = inductor_meta.get("min_xblock")
     min_rblock = inductor_meta.get("min_rblock")
@@ -3036,9 +3619,10 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        assert not (frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys()), (
-            f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
-        )
+        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys():
+            raise AssertionError(
+                f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
+            )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
         if not (has_xblock or has_rblock):
@@ -3084,10 +3668,18 @@ def _enforce_reduction_config_block_minimums(
     return configs
 
 
-def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
-    # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
-    # therefore using half the number of warps here correspondingly.
-    if torch.version.hip:
+def _num_warps(
+    num_warps,
+    max_num_warps=8,
+    min_num_warps=2,
+    register_intensive=False,
+    *,
+    warp_size: int = 32,
+):
+    # On wave64 AMD GPUs (CDNA / gfx9) each warp has 64 lanes, double NVIDIA
+    # and RDNA, so use half the number of warps to keep total thread count
+    # comparable. RDNA (wave32) follows the NVIDIA path.
+    if warp_size == 64:
         max_num_warps = (max_num_warps + 1) // 2
         min_num_warps = (min_num_warps + 1) // 2
     # persistent reduction is register intensive
@@ -3096,13 +3688,10 @@ def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=F
     return next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
 
 
-def _check_max_grid_x(size_hints, x, num_warps):
+def _check_max_grid_x(size_hints, x, num_warps, *, warp_size: int = 32):
     # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
     max_grid_x = 2147483647
     max_block_x = TRITON_MAX_BLOCK["X"]
-    warp_size = (
-        64 if torch.version.hip else 32
-    )  # TODO: query warp size once #129663 is merged
     num_blocks = (size_hints["x"] + x - 1) // x
 
     if torch.version.hip:
@@ -3139,6 +3728,8 @@ def triton_config(
     matrix_instr=None,
     waves_per_eu=None,
     kpack=None,
+    *,
+    warp_size: int = 32,
 ) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
@@ -3198,7 +3789,9 @@ def triton_config(
     # Calculate num_warps if they are not hard passed to config
     if num_warps is None:
         num_warps = _num_warps(
-            conditional_product(x, y, z) // num_elements_per_warp, min_num_warps=1
+            conditional_product(x, y, z) // num_elements_per_warp,
+            min_num_warps=1,
+            warp_size=warp_size,
         )
     # we are going to arrive at 2 warps only if bs was too small due to
     # numel being too small. However to workaround some ptx bugs we still
@@ -3215,11 +3808,11 @@ def triton_config(
     # Increase x to satisfy min_elem_per_thread requirements.
     block_size = max(
         conditional_product(x, y, z),
-        min_elem_per_thread * _NUM_THREADS_PER_WARP * num_warps,
+        min_elem_per_thread * warp_size * num_warps,
     )
     x *= math.ceil(block_size / conditional_product(x, y, z))
 
-    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps, warp_size=warp_size)
     x = min(x, size_hints["x"])
 
     cfg = {"XBLOCK": x}
@@ -3262,20 +3855,21 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
         prefix = f"r{idx}_"
         max_size = min(size_hints[prefix], TRITON_MAX_BLOCK[prefix.upper()])
         dim = min(max_size, remaining)
-        assert remaining % dim == 0, (
-            f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
-        )
+        if remaining % dim != 0:
+            raise AssertionError(
+                f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
+            )
         rnumels[prefix] = dim
         remaining //= dim
 
     # Sanity check the results.
     final_numel = conditional_product(*rnumels.values())
-    assert r == final_numel, (
-        f"Expected ND reduction size ({rnumels}) to have {r} elements."
-    )
-    assert all(rnumels[prefix] <= size_hints[prefix] for prefix in rnumels), (
-        f"rnumels exceed size_hints. {rnumels} > {size_hints}"
-    )
+    if r != final_numel:
+        raise AssertionError(
+            f"Expected ND reduction size ({rnumels}) to have {r} elements."
+        )
+    if not all(rnumels[prefix] <= size_hints[prefix] for prefix in rnumels):
+        raise AssertionError(f"rnumels exceed size_hints. {rnumels} > {size_hints}")
 
     return rnumels
 
@@ -3291,6 +3885,8 @@ def triton_config_reduction(
     dynamic_scale_rblock=True,
     reduction_hint=None,
     min_num_warps=None,
+    *,
+    warp_size: int = 32,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -3331,10 +3927,13 @@ def triton_config_reduction(
         _num_warps_func = _num_warps
 
     num_warps = _num_warps_func(
-        num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
+        num_warps,
+        max_num_warps=max_num_warps,
+        register_intensive=register_intensive,
+        warp_size=warp_size,
     )
 
-    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps, warp_size=warp_size)
 
     for prefix in sorted(rnumels):
         while total_numel() > target:
@@ -3417,8 +4016,8 @@ def _update_combo_kernel_kwargs(
 
 def _handle_combo_kernel_per_subkernel_blocks(
     size_hints: dict[str, int],
-    inductor_meta: dict[str, Any],
-    triton_meta: dict[str, Any],
+    inductor_meta: InductorMeta,
+    triton_meta: TritonMeta,
     filename: str | None = None,
     reduction_hint: bool = False,
     tile_hint: Any = None,
@@ -3443,6 +4042,20 @@ def _handle_combo_kernel_per_subkernel_blocks(
     if combo_meta is None or "heuristic_0" not in combo_meta:
         return None
 
+    # CAP no-bench: combo_grid_meta carries a stitched config; skip the
+    # combo_tuning_groups computation and return a single stitched config.
+    # default_config holds BLOCK keys for the grid lambda; backend kwargs
+    # (HIP options like waves_per_eu) come from stitched_backend_kwargs.
+    stitched_warps = combo_meta.get("stitched_num_warps")
+    if stitched_warps is not None:
+        return [
+            triton.Config(
+                combo_meta["stitched_backend_kwargs"],
+                num_warps=stitched_warps,
+                num_stages=combo_meta["stitched_num_stages"],
+            )
+        ]
+
     num_kernels = combo_meta["num_kernels"]
     inductor_meta_clean = {
         k: v for k, v in inductor_meta.items() if k != "combo_grid_meta"
@@ -3465,10 +4078,13 @@ def _handle_combo_kernel_per_subkernel_blocks(
         # via TritonKernel.inductor_meta_per_kernel(). Forward into
         # inductor_meta_i so pointwise()/_reduction_configs()/_persistent_reduction_configs()
         # pick configs based on the actual sub-kernel .
-        inductor_meta_i = {
-            **inductor_meta_clean,
-            **combo_meta.get(f"inductor_meta_{i}", {}),
-        }
+        inductor_meta_i = cast(
+            "InductorMeta",
+            {
+                **inductor_meta_clean,
+                **combo_meta.get(f"inductor_meta_{i}", {}),
+            },
+        )
 
         if subkernel_heuristic == "pointwise":
             cfgs = pointwise(
@@ -3583,6 +4199,8 @@ def triton_config_tiled_reduction(
     num_stages=1,
     register_intensive=False,
     waves_per_eu=None,
+    *,
+    warp_size: int = 32,
 ):
     """
     Construct a tile reduction triton config with some adjustment
@@ -3613,9 +4231,12 @@ def triton_config_tiled_reduction(
         y *= 2
 
     cfg = _get_config({"x": x, "y": y, **rnumels})
-    num_warps = _num_warps(total_numel() // 256, min_num_warps=1)
+    num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
     num_warps = _num_warps(
-        num_warps, max_num_warps=16, register_intensive=register_intensive
+        num_warps,
+        max_num_warps=16,
+        register_intensive=register_intensive,
+        warp_size=warp_size,
     )
     check_config(cfg, xnumel=size_hints["x"], ynumel=size_hints["y"])
     check_max_block(cfg)
@@ -3626,8 +4247,10 @@ def triton_config_tiled_reduction(
     return config
 
 
-def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Config]):
-    tma_min_block_sizes: dict[str, int]
+def _maybe_filter_configs_for_tma_restrictions(
+    inductor_meta: InductorMeta, configs: list[Config]
+):
+    tma_min_block_sizes: dict[str, int] | None
     if (tma_min_block_sizes := inductor_meta.get("tma_min_block_sizes")) and configs:
         # Rn blocks are not provided to the kernel for persistent reductions
         if inductor_meta.get("persistent_reduction"):
@@ -3637,9 +4260,13 @@ def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Conf
                 if not prefix_is_reduction(block_type.lower())
             }
 
-        assert all(
+        if not all(
             block_type in configs[0].kwargs for block_type in tma_min_block_sizes
-        )
+        ):
+            raise AssertionError(
+                f"Not all TMA block types found in config kwargs: "
+                f"missing {OrderedSet(tma_min_block_sizes) - OrderedSet(configs[0].kwargs)}"
+            )
 
         # Add a config that is guaranteed to compile
         example_config = configs[0]
@@ -3675,11 +4302,11 @@ def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Conf
 
 def pointwise(
     size_hints,
-    triton_meta,
+    triton_meta: TritonMeta,
     tile_hint=None,
     filename=None,
     min_elem_per_thread=0,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     return_configs=False,
 ):
     """
@@ -3705,7 +4332,8 @@ def pointwise(
             filename=filename,
         )
 
-    assert not inductor_meta.get("no_x_dim")
+    if inductor_meta.get("no_x_dim"):
+        raise AssertionError("no_x_dim should not be set for this heuristic")
 
     numel = functools.reduce(operator.mul, size_hints.values())
     bs = max(256, min(numel // 128, 1024))
@@ -3717,135 +4345,22 @@ def pointwise(
         triton_meta["device"],
     )
 
+    warp_size = triton_meta["device"].warp_size_or_default
     triton_config_with_settings = functools.partial(
-        triton_config, min_elem_per_thread=min_elem_per_thread
+        triton_config, min_elem_per_thread=min_elem_per_thread, warp_size=warp_size
     )
 
-    configs = None
-    if len(size_hints) == 1:
-        if not inductor_meta.get("autotune_pointwise", True) and not (
-            inductor_meta.get("max_autotune")
-            or inductor_meta.get("max_autotune_pointwise")
-        ):
-            configs = [triton_config_with_settings(size_hints, bs)]
-        else:
-            configs = [
-                triton_config_with_settings(size_hints, bs, num_elements_per_warp=256),
-                triton_config_with_settings(
-                    size_hints, bs // 2, num_elements_per_warp=64
-                ),
-                *hinted_configs,
-            ]
-            # Additional configs appended for ROCm builds
-            if torch.version.hip:
-                configs.extend(
-                    [
-                        triton_config_with_settings(
-                            size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            4096,  # wrt: better than the max_block for some kernel
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            2048,
-                            num_warps=8,
-                            num_stages=2,
-                            waves_per_eu=1,  # 20% improvement
-                        ),
-                    ]
-                )
-                if inductor_meta.get("atomic_add_found"):
-                    configs.extend(
-                        [
-                            triton_config_with_settings(
-                                size_hints,
-                                64,
-                                num_warps=1,
-                                num_stages=1,  # 250% improvement
-                            )
-                        ]
-                    )
-            if torch.xpu.is_available():
-                configs.extend(
-                    [  # intel-xpu-backend-for-triton #5133
-                        triton_config_with_settings(size_hints, 32),
-                    ]
-                )
-    if len(size_hints) == 2:
-        # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
-        # ROCm has observed improvement by diverging here
-        if (
-            not inductor_meta.get("autotune_pointwise", True)
-            or (
-                torch.version.hip is None
-                and tile_hint == TileHint.SQUARE
-                and torch.version.xpu is None
-            )
-        ) and not (
-            inductor_meta.get("max_autotune")
-            or inductor_meta.get("max_autotune_pointwise")
-        ):
-            configs = [triton_config_with_settings(size_hints, 32, 32)]
-        else:
-            configs = [
-                triton_config_with_settings(size_hints, 32, 32),
-                triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
-                triton_config_with_settings(size_hints, 256, 16),
-                triton_config_with_settings(size_hints, 16, 256),
-                triton_config_with_settings(size_hints, bs, 1),
-                triton_config_with_settings(size_hints, 1, bs),
-                *hinted_configs,
-            ]
-            # Additional configs appended for ROCm builds
-            if torch.version.hip:
-                configs.extend(
-                    [
-                        triton_config_with_settings(
-                            size_hints, 64, 32
-                        ),  # better for some kernels
-                        triton_config_with_settings(
-                            size_hints, 128, 16
-                        ),  # +10% for some kernels
-                        triton_config_with_settings(
-                            size_hints, 128, 32
-                        ),  # additional 10% more
-                        triton_config_with_settings(
-                            size_hints, 32, 512
-                        ),  # +30% for some kernels
-                    ]
-                )
-            if torch.xpu.is_available():
-                configs.extend(
-                    [
-                        # intel-xpu-backend-for-triton #5198
-                        triton_config_with_settings(size_hints, 32, 32, num_warps=8),
-                        # intel-xpu-backend-for-triton #5199
-                        triton_config_with_settings(size_hints, 4, 256),
-                    ]
-                )
-    if len(size_hints) == 3:
-        if not (
-            inductor_meta.get("max_autotune")
-            or inductor_meta.get("max_autotune_pointwise")
-            or torch.xpu.is_available()
-        ):
-            configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
-        else:
-            configs = [
-                triton_config_with_settings(size_hints, 16, 16, 16),
-                triton_config_with_settings(size_hints, 64, 8, 8),
-                triton_config_with_settings(size_hints, 8, 64, 8),
-                triton_config_with_settings(size_hints, 8, 8, 64),
-                triton_config_with_settings(size_hints, bs, 1, 1),
-                triton_config_with_settings(size_hints, 1, bs, 1),
-                triton_config_with_settings(size_hints, 1, 1, bs),
-                *hinted_configs,
-            ]
+    from torch._inductor.heuristics.registry import get_codegen_heuristic
 
-    if not configs:
-        raise NotImplementedError(f"size_hints: {size_hints}")
+    pointwise_heuristic = get_codegen_heuristic("pointwise", triton_meta["device"].type)
+    configs = pointwise_heuristic.get_configs(
+        size_hints,
+        bs,
+        triton_config_with_settings,
+        hinted_configs,
+        tile_hint=tile_hint,
+        inductor_meta=inductor_meta,
+    )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     if return_configs:
@@ -3919,7 +4434,7 @@ triton_native_persistent_bmm_configs = _config_helper(bmm=True, persistent=True)
 
 
 def _get_tiling_scores(
-    inductor_meta: dict[str, Any],
+    inductor_meta: InductorMeta,
     size_hints: dict[str, int],
 ) -> dict[str, float]:
     """
@@ -3931,8 +4446,8 @@ def _get_tiling_scores(
 def _reduction_configs(
     *,
     size_hints: dict[str, int],
-    inductor_meta: dict[str, Any],
-    triton_meta: dict[str, Any],
+    inductor_meta: InductorMeta,
+    triton_meta: TritonMeta,
     num_dynamic=0,
 ) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint")
@@ -3951,6 +4466,7 @@ def _reduction_configs(
     )
 
     device_major = triton_meta["device"].major
+    warp_size = triton_meta["device"].warp_size_or_default
     # Prefer smaller MAX_R0_BLOCK for Blackwell
     MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
     if size_hints["x"] >= 1024 and loads_and_red >= 10:
@@ -4004,6 +4520,7 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
                 waves_per_eu=waves_per_eu,
+                warp_size=warp_size,
             )
         else:
             # For other cases, use the original function
@@ -4017,6 +4534,7 @@ def _reduction_configs(
                 waves_per_eu=waves_per_eu,
                 dynamic_scale_rblock=dynamic_scale_rblock,
                 reduction_hint=reduction_hint,
+                warp_size=warp_size,
             )
 
     def outer_config_opt():
@@ -4068,7 +4586,12 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        2 if rnumel <= 2048 else 1,  # 1024 or less is persistent
+        # Default XBLOCK=2 launches too few programs to fill
+        # the device. Prefer XBLOCK=1 so the autotuner has a candidate
+        # that can saturate all CUs.
+        1
+        if (torch.version.hip and size_hints.get("x", 0) <= 64)
+        else (2 if rnumel <= 2048 else 1),  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
@@ -4215,12 +4738,17 @@ def adapt_config_for_tiling(
     register_intensive=False,
     persistent_reduction=False,
     waves_per_eu=None,
+    *,
+    warp_size: int = 32,
 ) -> Config:
     """
     Create an adapted configuration based on tiling scores,
     redistributing the same total block size (x * r) according to tiling scores.
     """
-    assert all(s in tiling_scores for s in size_hints)
+    if not all(s in tiling_scores for s in size_hints):
+        raise AssertionError(
+            f"Missing size_hints in tiling_scores: {OrderedSet(size_hints) - OrderedSet(tiling_scores)}"
+        )
     target_block_product = original_x * original_r
     block_sizes = match_target_block_product(
         size_hints, tiling_scores, target_block_product
@@ -4234,11 +4762,12 @@ def adapt_config_for_tiling(
         num_stages=num_stages,
         register_intensive=register_intensive,
         waves_per_eu=waves_per_eu,
+        warp_size=warp_size,
     )
 
 
 def filter_reduction_configs_for_determinism(
-    inductor_meta: dict[str, Any], configs: list[Config]
+    inductor_meta: InductorMeta, configs: list[Config]
 ) -> list[Config]:
     """
     Filter configs for reduction so the numerics can be deterministic.
@@ -4251,7 +4780,8 @@ def filter_reduction_configs_for_determinism(
     - if there is still a tie, pick the config with second largest XBLOCK
     """
     configs = unique_configs(configs)
-    assert len(configs) > 0
+    if len(configs) == 0:
+        raise AssertionError("No configs remaining after deduplication")
 
     def _do_filter_due_to_inductor_config():
         return (
@@ -4290,7 +4820,8 @@ def filter_reduction_configs_for_determinism(
     if len(newconfigs) > 0:
         configs = newconfigs
 
-    assert len(configs) > 0
+    if len(configs) == 0:
+        raise AssertionError("No configs remaining after filtering")
 
     def _r0_block(c):
         return c.kwargs.get("R0_BLOCK", -1)
@@ -4313,7 +4844,8 @@ def filter_reduction_configs_for_determinism(
 
     def _pick_config():
         nonlocal configs
-        assert len(configs) > 0
+        if len(configs) == 0:
+            raise AssertionError("No configs available for selection")
         if len(configs) == 1:
             return configs[0]
 
@@ -4346,9 +4878,9 @@ def filter_reduction_configs_for_determinism(
 def reduction(
     size_hints,
     reduction_hint=False,
-    triton_meta=None,
+    triton_meta: TritonMeta | None = None,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     return_configs=False,
 ):
     """args to @triton.heuristics()"""
@@ -4356,6 +4888,9 @@ def reduction(
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
+
+    if triton_meta is None:
+        raise AssertionError("triton_meta must not be None")
 
     configs = _handle_combo_kernel_per_subkernel_blocks(
         size_hints,
@@ -4374,7 +4909,8 @@ def reduction(
             filename=filename,
         )
 
-    assert triton_meta is not None
+    if triton_meta is None:
+        raise AssertionError("triton_meta must not be None")
 
     num_dynamic = 0
     for k in triton_meta["signature"]:
@@ -4407,9 +4943,9 @@ def reduction(
 def cooperative_reduction(
     size_hints,
     reduction_hint,
-    triton_meta,
+    triton_meta: TritonMeta,
     filename,
-    inductor_meta,
+    inductor_meta: InductorMeta | None = None,
 ):
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
@@ -4417,9 +4953,10 @@ def cooperative_reduction(
         size_hints["x"] = 1
 
     # Cooperative reductions currently only support a single reduction dimension.
-    assert len(size_hints) == 2, (
-        "Cooperative reductions don't support tiling reduction dims"
-    )
+    if len(size_hints) != 2:
+        raise AssertionError(
+            "Cooperative reductions don't support tiling reduction dims"
+        )
     xnumel, rnumel = size_hints["x"], size_hints["r0_"]
 
     # Note that we must never create more CTAs than there are SMs, because we
@@ -4461,8 +4998,8 @@ def cooperative_reduction(
 def _persistent_reduction_configs(
     size_hints,
     reduction_hint=False,
-    inductor_meta=None,
-    triton_meta=None,
+    inductor_meta: InductorMeta | None = None,
+    triton_meta: TritonMeta | None = None,
 ):
     inductor_meta = {} if inductor_meta is None else inductor_meta
     # Under deterministic mode, canonicalize the batch-dim hint so the
@@ -4479,6 +5016,7 @@ def _persistent_reduction_configs(
     rnumel = get_total_reduction_numel(size_hints)
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
+    warp_size = triton_meta["device"].warp_size_or_default
 
     if triton_meta.get("native_matmul"):
         native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")
@@ -4517,6 +5055,7 @@ def _persistent_reduction_configs(
                 rnumel,
                 register_intensive=True,
                 reduction_hint=reduction_hint,
+                warp_size=warp_size,
             )
             for xblock in xblock_vals
             if xblock == 1
@@ -4539,6 +5078,7 @@ def _persistent_reduction_configs(
                     block_sizes["x"],
                     block_sizes["y"],
                     rnumel,
+                    warp_size=warp_size,
                 )
             )
 
@@ -4547,6 +5087,7 @@ def _persistent_reduction_configs(
             size_hints,
             2 * (256 // rnumel) if rnumel <= 256 else 1,
             rnumel,
+            warp_size=warp_size,
         )
     ]
 
@@ -4582,6 +5123,7 @@ def _persistent_reduction_configs(
                         num_warps=num_warps,
                         min_num_warps=min_num_warps,
                         reduction_hint=reduction_hint,
+                        warp_size=warp_size,
                     )
                 ]
 
@@ -4608,9 +5150,9 @@ def _persistent_reduction_configs(
 def persistent_reduction(
     size_hints,
     reduction_hint=False,
-    triton_meta=None,
+    triton_meta: TritonMeta | None = None,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     return_configs=False,
 ):
     """Generate persistent reductions + mix-order if available"""
@@ -4618,6 +5160,9 @@ def persistent_reduction(
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
+
+    if triton_meta is None:
+        raise AssertionError("triton_meta must not be None")
 
     configs = _handle_combo_kernel_per_subkernel_blocks(
         size_hints,
@@ -4652,9 +5197,9 @@ def persistent_reduction(
         "max_autotune_pointwise"
     )
 
-    if inductor_meta.get("RSPLIT_SIZE"):
+    rsplit_size = inductor_meta.get("RSPLIT_SIZE")
+    if rsplit_size:
         new_configs = []
-        rsplit_size = inductor_meta.get("RSPLIT_SIZE")
         rnumel_hint = size_hints["r0_"]
         min_x_block = 1
         if rnumel_hint <= 512:
@@ -4728,9 +5273,9 @@ def persistent_reduction(
 def split_scan(
     size_hints,
     reduction_hint=False,
-    triton_meta=None,
+    triton_meta: TritonMeta | None = None,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
 ):
     """Heuristic for TritonSplitScanKernel"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
@@ -4738,7 +5283,8 @@ def split_scan(
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
 
-    assert triton_meta is not None
+    if triton_meta is None:
+        raise AssertionError("triton_meta must not be None")
     if len(size_hints) != 2:
         raise NotImplementedError(f"size_hints: {size_hints}")
 
@@ -4768,11 +5314,11 @@ def split_scan(
 def template(
     num_stages,
     num_warps,
-    triton_meta,
+    triton_meta: TritonMeta,
     num_consumer_groups=0,
     num_buffers_warp_spec=0,
     filename=None,
-    inductor_meta=None,
+    inductor_meta: InductorMeta | None = None,
     **kwargs,
 ):
     """
@@ -4845,7 +5391,9 @@ def config_from_dict(config: dict[str, Any]) -> Config:
     return Config(config, **_pop_config_kwargs(config))
 
 
-def fixed_config(config, filename, triton_meta, inductor_meta):
+def fixed_config(
+    config, filename, triton_meta: TritonMeta, inductor_meta: InductorMeta
+):
     """
     Used when the configuration is already decided at compile time
     """
@@ -4861,7 +5409,11 @@ def fixed_config(config, filename, triton_meta, inductor_meta):
 
 
 def user_autotune(
-    configs, triton_meta, filename=None, inductor_meta=None, custom_kernel=False
+    configs,
+    triton_meta: TritonMeta,
+    filename=None,
+    inductor_meta: InductorMeta | None = None,
+    custom_kernel=False,
 ):
     """
     Compile a user defined triton kernel
@@ -4881,10 +5433,13 @@ def user_autotune(
     )
 
 
-def foreach(triton_meta, filename=None, inductor_meta=None):
+def foreach(
+    triton_meta: TritonMeta, filename=None, inductor_meta: InductorMeta | None = None
+):
     """
     Compile a triton foreach kernel
     """
+    inductor_meta = {} if inductor_meta is None else inductor_meta
     configs = []
 
     # Naive autotuning path for num_warps
@@ -4910,7 +5465,7 @@ def foreach(triton_meta, filename=None, inductor_meta=None):
 class GridExpr:
     """Generate code for grid size expressions in launcher"""
 
-    inductor_meta: dict[str, Any]
+    inductor_meta: InductorMeta
     mode: Literal["python", "cpp"] = "python"
     prefix: list[str] = dataclasses.field(default_factory=list)
     x_grid: str | int = 1
@@ -4918,7 +5473,8 @@ class GridExpr:
     z_grid: str | int = 1
 
     def __post_init__(self) -> None:
-        assert self.mode in ("python", "cpp")
+        if self.mode not in ("python", "cpp"):
+            raise AssertionError(f"mode must be 'python' or 'cpp', got {self.mode!r}")
 
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         raise NotImplementedError
@@ -4980,12 +5536,13 @@ class GridExpr:
 
     @staticmethod
     def from_meta(
-        inductor_meta: dict[str, Any],
+        inductor_meta: InductorMeta,
         cfg: Config | dict[str, int],
         mode: Literal["python", "cpp"] = "python",
     ) -> GridExpr:
         grid_cls = globals()[inductor_meta["grid_type"]]
-        assert issubclass(grid_cls, GridExpr)
+        if not issubclass(grid_cls, GridExpr):
+            raise AssertionError(f"Expected GridExpr subclass, got {grid_cls}")
         grid = grid_cls(inductor_meta=inductor_meta, mode=mode)
         if isinstance(cfg, Config):
             cfg = config_to_dict(cfg)
@@ -5020,17 +5577,18 @@ class GridExpr:
     @classmethod
     def from_meta_lazy(
         cls,
-        inductor_meta: dict[str, Any] | None,
+        inductor_meta: InductorMeta | None,
         kernel_name: str,
     ) -> GridExpr:
         """Factory method for lazy compile mode."""
-        assert inductor_meta is not None, (
-            "inductor_meta must be specified for lazy compile"
-        )
+        if inductor_meta is None:
+            raise AssertionError("inductor_meta must be specified for lazy compile")
         grid_type = inductor_meta.get("grid_type", None)
-        assert grid_type is not None, "grid_type must be specified for lazy compile"
+        if grid_type is None:
+            raise AssertionError("grid_type must be specified for lazy compile")
         grid_cls = globals()[grid_type]
-        assert issubclass(grid_cls, GridExpr)
+        if not issubclass(grid_cls, GridExpr):
+            raise AssertionError(f"Expected GridExpr subclass, got {grid_cls}")
         grid = grid_cls(inductor_meta=inductor_meta, mode="cpp")
         grid.generate_lazy(kernel_name)
         return grid
@@ -5087,9 +5645,12 @@ class MixOrderReductionGrid(GridExpr):
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
         if not is_lazy:
-            assert split_size, "Missing RSPLIT_SIZE"
-            assert xblock, "Missing XBLOCK"
-            assert split_size % xblock == 0, f"{split_size=}, {xblock=}"
+            if not split_size:
+                raise AssertionError("Missing RSPLIT_SIZE")
+            if not xblock:
+                raise AssertionError("Missing XBLOCK")
+            if split_size % xblock != 0:
+                raise AssertionError(f"{split_size=}, {xblock=}")
         self.x_grid = self.ceildiv("xnumel", split_size)
 
 
@@ -5102,7 +5663,10 @@ class CooperativeReductionGrid(GridExpr):
 class SplitScanGrid(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         if not is_lazy:
-            assert meta.get("XBLOCK", 1) == 1
+            if meta.get("XBLOCK", 1) != 1:
+                raise AssertionError(
+                    f"Expected XBLOCK == 1 for SplitScanGrid, got {meta.get('XBLOCK', 1)}"
+                )
         self.x_grid = self.ceildiv("r0_numel", meta.get("R0_BLOCK"))
         self.y_grid = "xnumel"
 
@@ -5142,9 +5706,13 @@ class ComboKernelGrid(GridExpr):
         ynumels = []
 
         for num in range(combo_meta["num_kernels"]):
-            assert (
-                combo_meta[f"xnumel_{num}"] is None or combo_meta[f"xnumel_{num}"] > 0
-            )
+            if (
+                combo_meta[f"xnumel_{num}"] is not None
+                and combo_meta[f"xnumel_{num}"] <= 0
+            ):
+                raise AssertionError(
+                    f"xnumel_{num} must be None or positive, got {combo_meta[f'xnumel_{num}']}"
+                )
             no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
             xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
             if f"ynumel_{num}" in combo_meta:
@@ -5188,7 +5756,10 @@ class SequentialComboKernelGrid(ComboKernelGrid):
         no_x_dims: list[bool],
         meta: dict[str, int],
     ) -> str | int:
-        assert len(xnumels) == len(no_x_dims)
+        if len(xnumels) != len(no_x_dims):
+            raise AssertionError(
+                f"xnumels and no_x_dims length mismatch: {len(xnumels)} != {len(no_x_dims)}"
+            )
         return self.summation(
             [
                 self.ceildiv(x, 1 if no_x_dim else meta.get("XBLOCK"))
@@ -5217,7 +5788,10 @@ class SequentialFlattenComboKernelGrid(GridExpr):
         total_blocks_list = []
         for num in range(combo_meta["num_kernels"]):
             xnumel = combo_meta[f"xnumel_{num}"]
-            assert xnumel is None or xnumel > 0
+            if xnumel is not None and xnumel <= 0:
+                raise AssertionError(
+                    f"xnumel_{num} must be None or positive, got {xnumel}"
+                )
             xnumel = xnumel or f"xnumel_{num}"
             x_blocks = self.ceildiv(
                 xnumel,
@@ -5247,7 +5821,10 @@ class RoundRobinComboKernelGrid(ComboKernelGrid):
         no_x_dims: list[bool],
         meta: dict[str, int],
     ) -> str:
-        assert len(xnumels) == len(no_x_dims)
+        if len(xnumels) != len(no_x_dims):
+            raise AssertionError(
+                f"xnumels and no_x_dims length mismatch: {len(xnumels)} != {len(no_x_dims)}"
+            )
         num_kernels = self.inductor_meta["combo_grid_meta"]["num_kernels"]
         exprs = [x for x, no_x_dim in zip(xnumels, no_x_dims) if no_x_dim]
         xnumels_x_dim = [x for x, no_x_dim in zip(xnumels, no_x_dims) if not no_x_dim]
