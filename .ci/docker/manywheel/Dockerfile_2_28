@@ -171,6 +171,18 @@ RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION} && rm install_rocSHMEM.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 
+# The ROCm base image (rocm/dev-almalinux-8) ships the distro's system
+# python3-devel (Python 3.6). Its python3.pc sits on pkg-config's default search
+# path and its python3.6m headers on the default include path. cp315 has no
+# numpy wheel, so numpy is built from source, and meson's Cython check resolves
+# `pkg-config python3` to that 3.6 .pc and fails with "Cython requires Python
+# 3.8+". We never install this package ourselves and never build against the
+# system interpreter (all wheels target /opt/python/cp*), so remove it outright
+# rather than leaving it to hijack the from-source build. CUDA/XPU/CPU images
+# don't ship it. This removes the need for the in-tree pkg-config redirect /
+# numpy skips in .ci/manywheel and .ci/pytorch.
+RUN yum remove -y python3-devel
+
 FROM cpu_final as xpu_final
 # XPU CD use rolling driver
 ENV XPU_DRIVER_TYPE ROLLING
