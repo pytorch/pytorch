@@ -35,14 +35,10 @@ jobs:
     outputs:
       x86: ${{ steps.pick.outputs.x86 }}
       arm64: ${{ steps.pick.outputs.arm64 }}
-      x86_buildkit: ${{ steps.pick.outputs.x86_buildkit }}
-      arm64_buildkit: ${{ steps.pick.outputs.arm64_buildkit }}
     steps:
       - id: pick
         shell: bash
         run: |
-          echo "x86_buildkit=tcp://buildkitd-amd64.buildkit:1234" >> "${GITHUB_OUTPUT}"
-          echo "arm64_buildkit=tcp://buildkitd-arm64.buildkit:1234" >> "${GITHUB_OUTPUT}"
           if [[ "${GITHUB_REF}" == refs/heads/main || "${GITHUB_REF}" == refs/heads/nightly || "${GITHUB_REF}" == refs/heads/release/* || "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "x86=mt-rel-l-x86iavx512-44-340" >> "${GITHUB_OUTPUT}"
             echo "arm64=mt-rel-l-arm64g3-44-340" >> "${GITHUB_OUTPUT}"
@@ -63,17 +59,17 @@ jobs:
       fail-fast: false
       matrix:
         include: [
-          { name: "manylinux2_28-builder",          tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "${{ needs.select-runner.outputs.x86_buildkit }}" },
-          { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "${{ needs.select-runner.outputs.x86_buildkit }}" },
-          { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "${{ needs.select-runner.outputs.x86_buildkit }}" },
-          { name: "manylinuxaarch64-builder",       tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.arm64 }}", buildkit_addr: "${{ needs.select-runner.outputs.arm64_buildkit }}" },
-          { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.arm64 }}", buildkit_addr: "${{ needs.select-runner.outputs.arm64_buildkit }}" },
-          { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "${{ needs.select-runner.outputs.arm64 }}", buildkit_addr: "${{ needs.select-runner.outputs.arm64_buildkit }}" },
-          { name: "manylinux2_28-builder",          tag: "rocm7.1",           runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "${{ needs.select-runner.outputs.x86_buildkit }}" },
-          { name: "manylinux2_28-builder",          tag: "rocm7.2",           runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "${{ needs.select-runner.outputs.x86_buildkit }}" },
-          { name: "manylinux2_28-builder",          tag: "cpu",               runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "${{ needs.select-runner.outputs.x86_buildkit }}" },
-          { name: "manylinux2_28_aarch64-builder",  tag: "cpu-aarch64",       runner: "${{ needs.select-runner.outputs.arm64 }}", buildkit_addr: "${{ needs.select-runner.outputs.arm64_buildkit }}" },
-          { name: "manylinux2_28-builder",          tag: "xpu",               runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "${{ needs.select-runner.outputs.x86_buildkit }}" },
+          { name: "manylinux2_28-builder",          tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "tcp://buildkitd-amd64.buildkit:1234" },
+          { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "tcp://buildkitd-amd64.buildkit:1234" },
+          { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "tcp://buildkitd-amd64.buildkit:1234" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda13.2",          runner: "${{ needs.select-runner.outputs.arm64 }}", buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "${{ needs.select-runner.outputs.arm64 }}", buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "${{ needs.select-runner.outputs.arm64 }}", buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234" },
+          { name: "manylinux2_28-builder",          tag: "rocm7.1",           runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "tcp://buildkitd-amd64.buildkit:1234" },
+          { name: "manylinux2_28-builder",          tag: "rocm7.2",           runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "tcp://buildkitd-amd64.buildkit:1234" },
+          { name: "manylinux2_28-builder",          tag: "cpu",               runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "tcp://buildkitd-amd64.buildkit:1234" },
+          { name: "manylinux2_28_aarch64-builder",  tag: "cpu-aarch64",       runner: "${{ needs.select-runner.outputs.arm64 }}", buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234" },
+          { name: "manylinux2_28-builder",          tag: "xpu",               runner: "${{ needs.select-runner.outputs.x86 }}", buildkit_addr: "tcp://buildkitd-amd64.buildkit:1234" },
         ]
     name: ${{ matrix.name }}:${{ matrix.tag }}
     steps:
