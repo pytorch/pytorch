@@ -134,12 +134,12 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         self.assertEqual(recv_t, torch.full((1,), float(prev), device=self.device))
 
 
-class ProcessGroupNCCL2LazyTest(ProcessGroupNCCL2Test):
+class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
     # The whole nccl2 suite, run against the lazy wrapper: collectives go to
     # the primary comm, send/recv to lazily-created per-peer pair comms.
     @classmethod
     def backend_str(cls) -> str:
-        return "nccl2-lazy"
+        return "nccl-lazy"
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

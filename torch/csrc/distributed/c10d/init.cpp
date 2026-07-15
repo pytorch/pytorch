@@ -4039,7 +4039,7 @@ Returns:
               abort_process_on_timeout_or_error);
 
   intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
-      module, "ProcessGroupNCCL2Lazy", backend)
+      module, "ProcessGroupNCCLLazy", backend)
       .def(
           py::init(
               [](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -4055,7 +4055,7 @@ Returns:
           py::arg("rank"),
           py::arg("size"),
           py::arg("options"),
-          R"(Create a new ProcessGroupNCCL2Lazy instance.)")
+          R"(Create a new ProcessGroupNCCLLazy instance.)")
       .def(
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       int rank,
@@ -4068,7 +4068,7 @@ Returns:
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          R"(Create a new ProcessGroupNCCL2Lazy instance.)")
+          R"(Create a new ProcessGroupNCCLLazy instance.)")
       .def(
           "get_error",
           &::c10d::nccl2::ProcessGroupNCCLLazy::getError,

@@ -1126,7 +1126,7 @@ class ProcessGroupNCCL2(Backend):
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
 
-class ProcessGroupNCCL2Lazy(Backend):
+class ProcessGroupNCCLLazy(Backend):
     def __init__(
         self,
         store: Store,
