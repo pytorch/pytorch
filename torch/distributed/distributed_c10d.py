@@ -292,6 +292,16 @@ except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
+    # In-tree NCCL backend built on the torchcomms engine (selected via the
+    # "nccl2" backend / entry point). Available whenever NCCL is built.
+    from torch._C._distributed_c10d import ProcessGroupNCCL2
+
+    ProcessGroupNCCL2.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupNCCL2"]
+except ImportError:
+    pass
+
+try:
     from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
 
     ProcessGroupGloo.__module__ = "torch.distributed.distributed_c10d"
@@ -322,6 +332,7 @@ if TYPE_CHECKING:
         ProcessGroupGloo,
         ProcessGroupMPI,
         ProcessGroupNCCL,
+        ProcessGroupNCCL2,
         ProcessGroupUCC,
         ProcessGroupXCCL,
     )
@@ -602,6 +613,28 @@ def _create_nccl_process_group(
     return backend_class
 
 
+def _create_nccl2_process_group(
+    opts: _DistributedBackendOptions, backend_options: Any | None
+) -> C10DBackend:
+    if not is_nccl_available():
+        raise RuntimeError("Distributed package doesn't have NCCL built in")
+    # Accept a ProcessGroupNCCL2.Options if given; otherwise (None, or a
+    # ProcessGroupNCCL.Options passed through the generic path) build a fresh one.
+    if backend_options is not None and isinstance(
+        backend_options, ProcessGroupNCCL2.Options
+    ):
+        pg_options = backend_options
+    else:
+        pg_options = ProcessGroupNCCL2.Options()
+    # pyrefly: ignore [bad-argument-type]
+    pg_options._timeout = opts.timeout
+    pg_options.global_ranks_in_group = opts.global_ranks_in_group
+    pg_options.group_name = opts.group_id
+    if opts.enable_reconfigure:
+        pg_options.enable_reconfigure = True
+    return ProcessGroupNCCL2(opts.store, opts.group_rank, opts.group_size, pg_options)
+
+
 def _create_ucc_process_group(
     opts: _DistributedBackendOptions, backend_options: Any | None
 ) -> C10DBackend:
@@ -662,6 +695,19 @@ def _register_builtin_nccl_backend() -> None:
         extended_api=True,
         devices=Backend.backend_capability[Backend.NCCL],
         _backend_type=ProcessGroup.BackendType.NCCL,
+    )
+
+
+def _register_builtin_nccl2_backend() -> None:
+    # In-tree torchcomms NCCL backend. CUSTOM backend type; registering with
+    # devices=["cuda"] sets capability without claiming the cuda default (which
+    # stays "nccl"), so this only takes effect when explicitly requested.
+    Backend.register_backend(
+        "nccl2",
+        _create_nccl2_process_group,
+        extended_api=True,
+        devices=["cuda"],
+        _backend_type=ProcessGroup.BackendType.CUSTOM,
     )
 
 
@@ -2802,26 +2848,31 @@ def _abort_process_group(group: ProcessGroup | None = None):
     if _world.pg_map.get(pg, None) is None:
         raise ValueError("Invalid process group specified or has been destroyed.")
 
+    device = torch.accelerator.current_accelerator() or torch.device("cpu")
     try:
-        backend = pg._get_backend(
-            torch.accelerator.current_accelerator() or torch.device("cpu")
-        )
+        backend = pg._get_backend(device)
     except RuntimeError:
         backend = None
 
     if group is None or group == GroupMember.WORLD:
-        # Abort all backends within a ncclGroupStart|End semantic.
-        # This ensures that different NCCL communicators' abort calls won't
-        # deadlock each other.
+        # Abort all backends within a coalescing region (ncclGroupStart|End
+        # semantic for NCCL). This ensures that different communicators'
+        # abort calls won't deadlock each other.
         # For details, please see: https://github.com/pytorch/pytorch/issues/119797
-        if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-            backend._group_start()
-        for pg_to_abort in sorted(
-            _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
-        ):
-            pg_to_abort.abort()
-        if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-            backend._group_end()
+        # getattr instead of a direct attribute access because custom Python
+        # backends are ProcessGroup subclasses, which don't expose the
+        # Backend.supports_coalescing property.
+        coalescing_device = (
+            device if getattr(backend, "supports_coalescing", False) else None
+        )
+        # Drop any pending coalesced ops; everything is being aborted anyway
+        # and _coalescing_manager requires an empty op list on entry.
+        _world.pg_coalesce_state.pop(pg, None)
+        with _coalescing_manager(pg, coalescing_device):
+            for pg_to_abort in sorted(
+                _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
+            ):
+                pg_to_abort.abort()
 
         _update_default_pg(None)
         _world.pg_map.clear()
