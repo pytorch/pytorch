@@ -173,8 +173,13 @@ void embedding_bag_impl(
   const bool is_last_bag = bag_idx + 1 == num_bags;
   uint32_t indices_start =
       (bag_idx == 0) ? 0u : static_cast<uint32_t>(offsets[bag_idx]);
-  uint32_t indices_end =
-      is_last_bag ? num_indices : static_cast<uint32_t>(offsets[offsets_end]);
+  // With include_last_offset the host decremented num_bags, so the terminal
+  // offset lives at offsets[num_bags] and ends the last bag; indices past it
+  // belong to no bag.
+  uint32_t indices_end = is_last_bag
+      ? (params.include_last_offset ? static_cast<uint32_t>(offsets[num_bags])
+                                    : num_indices)
+      : static_cast<uint32_t>(offsets[offsets_end]);
 
   if (indices_end > num_indices || indices_end < indices_start) {
     TORCH_REPORT_ERROR(
@@ -304,7 +309,13 @@ void embedding_bag_backward_sum_mean_impl(
     uint tid) {
   auto feature_size = params.feature_size;
   auto indices_idx = tid / feature_size;
-  auto bag_idx = static_cast<uint32_t>(offset2bag[indices_idx]);
+  auto bag_idx_raw = offset2bag[indices_idx];
+  // Indices past the terminal offset (include_last_offset) belong to no bag;
+  // forward marks them with -1.
+  if (bag_idx_raw < 0) {
+    return;
+  }
+  auto bag_idx = static_cast<uint32_t>(bag_idx_raw);
   auto bag_size_val = bag_size[bag_idx];
   auto weight_idx = indices[indices_idx];
   auto padding_idx = params.padding_idx;
@@ -419,10 +430,16 @@ kernel void embedding_bag_per_sample_weights_backward(
   auto padding_idx = params.padding_idx;
   auto indices_idx = tid / feature_size;
   auto weight_idx = indices[indices_idx];
+  auto bag_idx_raw = offset2bag[indices_idx];
+  // Indices past the terminal offset (include_last_offset) belong to no bag;
+  // forward marks them with -1.
+  if (bag_idx_raw < 0) {
+    return;
+  }
 
   if (weight_idx != padding_idx) {
     auto feature_idx = tid % feature_size;
-    auto bag_idx = static_cast<uint32_t>(offset2bag[indices_idx]);
+    auto bag_idx = static_cast<uint32_t>(bag_idx_raw);
     constant auto& output_grad_strides = params.output_grad_strides;
     constant auto& weight_strides = params.weight_strides;
     auto per_sample_weights_grad_stride = params.per_sample_weights_grad_stride;

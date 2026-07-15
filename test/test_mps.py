@@ -16388,6 +16388,103 @@ class TestErrorInputs(TestCase):
             )
             torch.mps.synchronize()
 
+    # Regression tests for https://github.com/pytorch/pytorch/issues/190060
+    # (include_last_offset ignored the terminal offset) and
+    # https://github.com/pytorch/pytorch/issues/190061 (scale_grad_by_freq
+    # silently ignored).
+    def test_embedding_bag_include_last_offset(self, device):
+        W = torch.arange(16.0).reshape(4, 4)
+        idx = torch.tensor([0, 1, 2])
+        offs = torch.tensor([0, 2])  # one bag: indices [0, 2); index 2 is trailing
+
+        # the well-defined case (terminal offset == len(indices)): CPU parity
+        offs_full = torch.tensor([0, 3])
+        for mode in ("sum", "mean", "max"):
+            with self.subTest(mode=mode, trailing=False):
+                w_cpu = W.clone().requires_grad_()
+                out_cpu = torch.nn.functional.embedding_bag(
+                    idx, w_cpu, offs_full, mode=mode, include_last_offset=True)
+                out_cpu.sum().backward()
+                w_mps = W.clone().to(device).requires_grad_()
+                out_mps = torch.nn.functional.embedding_bag(
+                    idx.to(device), w_mps, offs_full.to(device), mode=mode, include_last_offset=True)
+                out_mps.sum().backward()
+                self.assertEqual(out_mps.cpu(), out_cpu)
+                self.assertEqual(w_mps.grad.cpu(), w_cpu.grad)
+
+        # trailing index, sum mode: CPU agrees the terminal offset ends the bag
+        w_cpu = W.clone().requires_grad_()
+        out_cpu = torch.nn.functional.embedding_bag(
+            idx, w_cpu, offs, mode="sum", include_last_offset=True)
+        out_cpu.sum().backward()
+        w_mps = W.clone().to(device).requires_grad_()
+        out_mps = torch.nn.functional.embedding_bag(
+            idx.to(device), w_mps, offs.to(device), mode="sum", include_last_offset=True)
+        out_mps.sum().backward()
+        self.assertEqual(out_mps.cpu(), out_cpu)
+        self.assertEqual(w_mps.grad.cpu(), w_cpu.grad)
+
+        # trailing index, mean/max: CPU currently leaks the trailing index into
+        # the divisor (mean) and candidates (max) -- see #52851 -- so compare
+        # against the CSR-contract values instead of CPU.
+        out_mean = torch.nn.functional.embedding_bag(
+            idx.to(device), W.to(device), offs.to(device), mode="mean", include_last_offset=True)
+        self.assertEqual(out_mean.cpu(), torch.tensor([[2.0, 3.0, 4.0, 5.0]]))
+        w_mps = W.clone().to(device).requires_grad_()
+        out_max = torch.nn.functional.embedding_bag(
+            idx.to(device), w_mps, offs.to(device), mode="max", include_last_offset=True)
+        self.assertEqual(out_max.cpu(), torch.tensor([[4.0, 5.0, 6.0, 7.0]]))
+        out_max.sum().backward()
+        expected_max_grad = torch.zeros(4, 4)
+        expected_max_grad[1] = 1.0
+        self.assertEqual(w_mps.grad.cpu(), expected_max_grad)
+
+        # per_sample_weights with a trailing index: no gradient may reach it
+        psw_cpu = torch.tensor([0.5, 2.0, 3.0], requires_grad=True)
+        w_cpu = W.clone().requires_grad_()
+        torch.nn.functional.embedding_bag(
+            idx, w_cpu, offs, mode="sum", include_last_offset=True,
+            per_sample_weights=psw_cpu).sum().backward()
+        psw_mps = psw_cpu.detach().clone().to(device).requires_grad_()
+        w_mps = W.clone().to(device).requires_grad_()
+        torch.nn.functional.embedding_bag(
+            idx.to(device), w_mps, offs.to(device), mode="sum", include_last_offset=True,
+            per_sample_weights=psw_mps).sum().backward()
+        self.assertEqual(w_mps.grad.cpu(), w_cpu.grad)
+        # CPU gives the trailing index a nonzero per-sample-weight gradient
+        # even though it contributes nothing to the output; check the in-bag
+        # entries against CPU and the trailing entry against the contract.
+        self.assertEqual(psw_mps.grad.cpu()[:2], psw_cpu.grad[:2])
+        self.assertEqual(psw_mps.grad.cpu()[2].item(), 0.0)
+
+    def test_embedding_bag_scale_grad_by_freq(self, device):
+        # all-repeated indices: CPU parity
+        for mode in ("sum", "mean"):
+            with self.subTest(mode=mode):
+                w_cpu = torch.randn(4, 3, requires_grad=True)
+                idx = torch.tensor([1, 1, 2, 2])
+                offs = torch.tensor([0])
+                torch.nn.functional.embedding_bag(
+                    idx, w_cpu, offs, mode=mode, scale_grad_by_freq=True).sum().backward()
+                w_mps = w_cpu.detach().clone().to(device).requires_grad_()
+                torch.nn.functional.embedding_bag(
+                    idx.to(device), w_mps, offs.to(device), mode=mode,
+                    scale_grad_by_freq=True).sum().backward()
+                self.assertEqual(w_mps.grad.cpu(), w_cpu.grad)
+
+        # mixed frequencies: CPU divides index 3's gradient by index 1's count
+        # (counts[indices_data[i]] with the unique-group counter i at
+        # EmbeddingBag.cpp:1573), so compare against the documented semantics.
+        w_mps = torch.ones(4, 3, device=device).requires_grad_()
+        idx = torch.tensor([1, 1, 3], device=device)
+        offs = torch.tensor([0], device=device)
+        torch.nn.functional.embedding_bag(
+            idx, w_mps, offs, mode="sum", scale_grad_by_freq=True).sum().backward()
+        expected = torch.zeros(4, 3)
+        expected[1] = 1.0  # two occurrences, each scaled by 1/2
+        expected[3] = 1.0  # one occurrence, scaled by 1/1
+        self.assertEqual(w_mps.grad.cpu(), expected)
+
     def test_gather_out_of_bounds(self, device):
         with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
             torch.gather(torch.zeros(3, 4, device=device), 1, torch.tensor([[4]], device=device))

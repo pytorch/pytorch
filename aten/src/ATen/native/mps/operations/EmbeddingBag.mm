@@ -18,6 +18,9 @@
 #include <ATen/ops/_embedding_bag_native.h>
 #include <ATen/ops/_embedding_bag_per_sample_weights_backward_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -74,7 +77,11 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   int64_t feature_size = weight.size(1);
 
   auto bag_size = at::empty({num_bags}, indices.options());
-  auto offset2bag = at::empty({indices.size(0)}, indices.options());
+  // With include_last_offset, indices past the terminal offset belong to no
+  // bag; -1 marks them so backward can skip them (the kernel never visits
+  // them, so an uninitialized buffer would leak garbage bag ids).
+  auto offset2bag = include_last_offset ? at::full({indices.size(0)}, -1, indices.options())
+                                        : at::empty({indices.size(0)}, indices.options());
   auto output = at::empty({num_bags, feature_size}, weight.options());
 
   Tensor max_indices;
@@ -106,6 +113,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   params.mode = static_cast<EmbeddingBagMode>(mode);
   params.padding_idx = padding_idx;
   params.num_weights = weight.size(0);
+  params.include_last_offset = include_last_offset;
 
   auto num_threads = output.numel();
   MPSStream* stream = getCurrentMPSStream();
@@ -246,6 +254,13 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
       getMPSProfiler().endProfileKernel(pipeline_state);
     }
   });
+
+  if (scale_grad_by_freq) {
+    // Match CPU/CUDA: divide each row's gradient by its index's frequency.
+    auto counts = at::zeros({num_weights}, output_grad.options());
+    counts.index_add_(0, indices, at::ones_like(indices, output_grad.options()));
+    weight_grad.div_(counts.clamp_min(1).unsqueeze(1));
+  }
 
   return std::move(weight_grad);
 }
