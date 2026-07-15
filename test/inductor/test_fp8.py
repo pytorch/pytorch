@@ -48,20 +48,7 @@ from torch.utils._sympy.symbol import SymT
 from torch.utils._triton import has_triton_tma_device
 
 
-_PRIOR_FP32_MATMUL_PRECISION: str | None = None
-
-
-def setUpModule():
-    global _PRIOR_FP32_MATMUL_PRECISION
-    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
-    torch.set_float32_matmul_precision("high")
-
-
-def tearDownModule():
-    global _PRIOR_FP32_MATMUL_PRECISION
-    if _PRIOR_FP32_MATMUL_PRECISION is not None:
-        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
-        _PRIOR_FP32_MATMUL_PRECISION = None
+torch.set_float32_matmul_precision("high")
 
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
