@@ -42,7 +42,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes, largeTensorTest
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
 import numpy as np
@@ -7680,6 +7680,41 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(input_cast_cpu, input.to(dtype=dst_dtype))
         helper(torch.half, torch.float)
         helper(torch.float, torch.half)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/189563
+    @parametrize("src_dtype,dst_dtype", [
+        (torch.float, torch.half),
+        (torch.float, torch.int),
+        (torch.half, torch.float),
+    ])
+    @parametrize("src_offset", [0, 1])
+    def test_cast_mps_to_cpu_preserves_source(self, src_dtype, dst_dtype, src_offset):
+        input_cpu = torch.arange(9, dtype=src_dtype)
+        input_mps = input_cpu.to("mps")
+        source = input_mps[src_offset:]
+
+        # Offset the destination by a 4-byte-aligned, non-page-aligned amount so the
+        # cast writes into the CPU buffer at a nonzero offset.
+        dst_offset = 2 if dst_dtype in (torch.half, torch.bfloat16) else 1
+        output_storage = torch.empty(source.numel() + dst_offset, dtype=dst_dtype)
+        output = output_storage[dst_offset:]
+        self.assertEqual(output.data_ptr() % 4, 0)
+        self.assertNotEqual(output.data_ptr() % os.sysconf("SC_PAGE_SIZE"), 0)
+        output.copy_(source)
+
+        self.assertEqual(output, input_cpu[src_offset:].to(dst_dtype))
+        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
+
+    def test_cast_mps_to_cpu_preserves_transposed_layout(self):
+        input_cpu = torch.arange(12, dtype=torch.float).reshape(3, 4).t()
+        input_mps = input_cpu.to("mps")
+
+        output_storage = torch.empty(input_cpu.numel() + 2, dtype=torch.half)
+        output = output_storage[2:].as_strided(input_cpu.size(), input_cpu.stride())
+        output.copy_(input_mps)
+
+        self.assertEqual(output, input_cpu.to(torch.half))
+        self.assertTrue(torch.equal(input_mps.cpu(), input_cpu))
 
     def test_cast_mps_to_mps(self):
         def helper(src_dtype, dst_dtype):
@@ -15902,6 +15937,7 @@ class TestConsistency(TestCaseMPS):
     # test fails.
     @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
     @serialTest()
+    @largeTensorTest("25GB", device='mps')
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("trigger_32bit_overflow", [False, True])
     def test_group_norm_backward_large_input(self, device, dtype, trigger_32bit_overflow):
@@ -16068,6 +16104,14 @@ class TestComplex(TestCase):
                     self.assertEqual(src_mps.cpu(), expected)
                 with self.subTest(src=src_label, dst=dst_label, op="copy_"):
                     self.assertEqual(dst_mps.cpu(), dst_cpu)
+                # A dtype-converting D2H copy must honor the neg bit and leave the
+                # source untouched (regression for
+                # https://github.com/pytorch/pytorch/issues/189563).
+                dst_half = dst_xform(torch.empty(4, 4, dtype=torch.half))
+                dst_half.copy_(src_mps)
+                with self.subTest(src=src_label, dst=dst_label, op="copy_cast"):
+                    self.assertEqual(dst_half, expected.to(torch.half))
+                    self.assertEqual(v.cpu(), v_cpu)
 
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088

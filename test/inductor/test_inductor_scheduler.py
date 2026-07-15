@@ -35,7 +35,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -603,10 +602,6 @@ class TestScheduler(TestCase):
         torch._logging.set_logs()
 
     @xfailIfNoAcceleratorTriton
-    @skipIfXpu(
-        msg="InvalidModule: Invalid SPIR-V module, "
-        "https://github.com/intel/torch-xpu-ops/issues/2329"
-    )
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(

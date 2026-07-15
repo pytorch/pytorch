@@ -99,7 +99,6 @@ from torch._guards import (
     Source,
     StorageOverlap,
 )
-from torch._inductor.utils import IndentedBuffer
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
@@ -112,6 +111,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._indented_buffer import IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -2287,7 +2287,12 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard)
-        if isinstance(value, torch._subclasses.FakeTensor) and value.pytype:
+        if (
+            isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                value, torch._subclasses.FakeTensor
+            )
+            and value.pytype
+        ):
             t = value.pytype
         else:
             t = type(value)
@@ -3566,7 +3571,9 @@ class GuardBuilder(GuardBuilderBase):
 
             pytype = type(value)
             dispatch_keys = torch._C._dispatch_keys(value)
-            if isinstance(value, torch._subclasses.FakeTensor):
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                value, torch._subclasses.FakeTensor
+            ):
                 if value.pytype is not None:
                     pytype = value.pytype
                 if value.dispatch_keys is not None:
@@ -4207,7 +4214,9 @@ class GuardsStatePickler(pickle.Pickler):
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            if isinstance(obj, torch._subclasses.FakeTensor):
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                obj, torch._subclasses.FakeTensor
+            ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
 
             return type(self)._unpickle_tensor, (
@@ -5129,7 +5138,7 @@ class CheckFunctionManager:
 
 
 def build_guard_function(code_parts: list[str], closure_args: str) -> tuple[str, str]:
-    from torch._inductor.utils import IndentedBuffer
+    from torch.utils._indented_buffer import IndentedBuffer
 
     csepass = PyExprCSEPass()
     try:

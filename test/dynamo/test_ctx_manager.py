@@ -2097,6 +2097,15 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_cuda_use_mem_pool_context_manager(self):
         self._check_cuda_use_mem_pool(backend="eager")
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_mem_pool_id(self):
+        def fn(pool):
+            return pool.id
+
+        pool = torch.cuda.MemPool()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(pool), pool.id)
+
     @requires_cuda_and_triton
     def test_cuda_use_mem_pool_context_manager_inductor(self):
         self._check_cuda_use_mem_pool()

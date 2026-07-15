@@ -91,12 +91,12 @@ class CUDAMemPoolVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if name == "id":
             if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+                install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
             return ConstantVariable.create(self.value.id)
         unimplemented(
             gb_type="unsupported torch.cuda.MemPool attribute",

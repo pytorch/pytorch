@@ -3938,6 +3938,7 @@ class CommonTemplate:
         )
 
     @skip_if_triton_cpu  # divide by zero; cannot xfail because it crashes process
+    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/6401")
     def test_div7(self):
         def fn(a, b):
             return (
@@ -4575,6 +4576,35 @@ for dtype in (torch.int32, torch.int64):
             return torch.ops.aten.expand.default(a, [3, 4], implicit=False) + 1
 
         self.common(fn, (torch.randn(1, 4),))
+
+    def test_nested_reduction_broadcast_outer_product(self):
+        # Regression: for a fused broadcast+reduce whose broadcast
+        # materializes [N, N] from [N] and [N, 1], the codegen used to emit
+        # nested reduction loops that advanced a block_ptr through the entire
+        # inner loop without rewinding it at outer-loop suffix. Any backend
+        # that lowers the loops to iter-arg-threaded control flow (e.g.
+        # `scf.for` on Triton-MTIA) would then load out-of-bounds on outer
+        # iterations >= 1 and silently drop most of the reduction. This test
+        # verifies numerical correctness for the outer-product-broadcast +
+        # sum/mean pattern at a size large enough to exercise multi-tile
+        # reduction paths.
+        def fn(a, b):
+            return (a * b).sum(), torch.mean(a * b)
+
+        # Non-zero mean so a truncated reduction cannot hide behind noise.
+        # rtol is relaxed from the float32 default because summing N^2=1M
+        # elements accumulates float32 rounding (~1e-5 relative), while the
+        # bug this catches causes a >90% error, so the looser bound still
+        # detects any regression.
+        self.common(
+            fn,
+            (
+                torch.randn(1024) + 3.0,
+                (torch.randn(1024) + 3.0).view(-1, 1),
+            ),
+            rtol=2e-4,
+            atol=1e-5,
+        )
 
     def test_squeeze1(self):
         def fn(a):
@@ -17237,6 +17267,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertFalse(".run(" in code[0])
 
     # skip cpu test since rms norm is always decomposed on cpu
+    @skipIfXpu(msg="_fused_rms_norm is not implemented on XPU yet")
     def test_lite_mode_not_decompose(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
@@ -17450,6 +17481,32 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "buf2", [16, 32], [32, 1], ["s77", "s27"], ["s27", 1]
         )
         FileCheck().check(check1).check(check2).run(code)
+
+    @lowering.force_fallback(aten.add.Tensor)
+    def test_no_redundant_assignment_single_output_fallback(self):
+        @torch.compile
+        def f(x):
+            return x + 2
+
+        x = torch.randn(16, 32, device=self.device)
+        expected = x + 2
+        actual, source_codes = run_and_get_code(f, x)
+        self.assertEqual(actual, expected)
+        source_code = "\n".join(source_codes)
+        self.assertIn("torch.ops.aten.add.Tensor", source_code)
+        if config.cpp_wrapper:
+            FileCheck().check_regex(
+                r'assert_size_stride\([^,]+, \{.*\}, \{.*\}, "torch\.ops\.aten\.add\.Tensor"(, .*)?\)'
+            ).run(source_code)
+        else:
+            FileCheck().check_regex(
+                r"assert_(size_stride|tensor_metadata)\([^,]+, \(.*\), \(.*\), ([^,]+, )?'torch\.ops\.aten\.add\.Tensor'\)"
+            ).run(source_code)
+            if torch.device(self.device).type == "cuda" and config.alignment_asserts:
+                FileCheck().check_regex(
+                    r"assert_alignment\(buf\d+, \d+, 'torch.ops.aten.add.Tensor'\)"
+                ).run(source_code)
+        self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
 
     @requires_gpu_and_triton
     @config.patch(use_fast_math=True)
@@ -18009,6 +18066,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (x, y, mask)
         self.common(Model(), inputs)
 
+    @skipIfXpu(
+        msg="Profile not enabled on XPU CI, "
+        "https://github.com/intel/torch-xpu-ops/issues/2334"
+    )
     @skipIfRocmArch(NAVI_ARCH)
     @requires_gpu_and_triton
     @parametrize("use_cat", [True, False])
