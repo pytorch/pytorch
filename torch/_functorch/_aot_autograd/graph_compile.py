@@ -1240,6 +1240,9 @@ def run_joint_graph_passes_on_hops(
 
             # When the region sets backward-specific inductor config, compile the
             # partitioned backward under it; the forward keeps its own config.
+            # Stamp both the subgraph module (read during lowering) and the HOP
+            # node (read by cudagraph partitioning) so the backward config is
+            # applied consistently.
             fw_region_config = fw_node.meta.get("custom", {}).get(
                 "nested_region_config"
             )
@@ -1249,6 +1252,10 @@ def run_joint_graph_passes_on_hops(
             ):
                 bw_region_config = get_backward_nested_region_config(fw_region_config)
                 new_bw_hop_gm.meta["nested_region_config"] = bw_region_config
+                new_bw_node.meta["custom"] = {
+                    **new_bw_node.meta.get("custom", {}),
+                    "nested_region_config": bw_region_config,
+                }
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
