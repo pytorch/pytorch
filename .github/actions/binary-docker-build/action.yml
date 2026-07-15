@@ -32,9 +32,9 @@ runs:
       shell: bash
       run: |
         set -ex
-        case "${RUNNER_ARCH}" in
-          ARM64) buildkit_addr="tcp://buildkitd-arm64.buildkit:1234" ;;
-          *)     buildkit_addr="tcp://buildkitd-amd64.buildkit:1234" ;;
+        case "$(uname -m)" in
+          aarch64|arm64) buildkit_addr="tcp://buildkitd-arm64.buildkit:1234" ;;
+          *)             buildkit_addr="tcp://buildkitd-amd64.buildkit:1234" ;;
         esac
         docker buildx create \
           --name remote-buildkit \
