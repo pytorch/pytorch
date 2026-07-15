@@ -33,7 +33,7 @@ import math
 import re
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
-from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
@@ -66,7 +66,12 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import (
+    _COW_TENSOR_UNSUPPORTED,
+    _try_is_cow_tensor,
+    GuardBuilder,
+    install_guard,
+)
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -1488,6 +1493,113 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return VariableTracker.build(
                 tx, tx.symbolic_torch_function_state.torch_function_subclass_enabled
             )
+
+        @register(torch._C._is_cow_tensor)  # pyrefly: ignore[missing-attribute]
+        def handle_is_cow_tensor(
+            self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        ) -> ConstantVariable:
+            if not arg.is_tensor():
+                raise AssertionError(
+                    f"_is_cow_tensor expects a tensor, got {arg.python_type_name()}"
+                )
+
+            def has_prior_cow_state_changing_op() -> bool:
+                if not isinstance(arg, TensorVariable):
+                    return False
+                graph = arg.as_proxy().node.graph
+                return any(
+                    (node.op == "call_method" and node.target == "_lazy_clone")
+                    or (node.op == "call_function" and node.target is torch._lazy_clone)
+                    for node in graph.nodes
+                )
+
+            if arg.source is None:
+                unimplemented(
+                    gb_type="source-less COW tensor check",
+                    context="torch._C._is_cow_tensor on source-less tensor",
+                    explanation=(
+                        "Dynamo cannot safely guard COW state for an intermediate "
+                        "tensor without a source."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on intermediate tensors inside "
+                        "torch.compile regions.",
+                    ],
+                )
+            if tx.output.current_tracer.is_export or torch.compiler._is_exporting_flag:
+                unimplemented(
+                    gb_type="COW tensor check during export",
+                    context="torch._C._is_cow_tensor during export",
+                    explanation=(
+                        "Dynamo cannot safely export COW-state-dependent "
+                        "control flow because COW state is not represented in "
+                        "the exported graph."
+                    ),
+                    hints=[
+                        "Avoid checking COW state inside torch.export regions.",
+                    ],
+                )
+            fake_version = arg._get_fake_version()  # pyrefly: ignore[missing-attribute]
+            if fake_version is not None and fake_version > 0:
+                unimplemented(
+                    gb_type="COW tensor check after mutation",
+                    context="torch._C._is_cow_tensor after tensor mutation",
+                    explanation=(
+                        "Dynamo cannot safely fold a COW state check after "
+                        "the tensor's state may have changed inside the "
+                        "compiled frame."
+                    ),
+                    hints=[
+                        "Move the COW state check before tensor mutations or "
+                        "outside the torch.compile region.",
+                    ],
+                )
+            if has_prior_cow_state_changing_op():
+                unimplemented(
+                    gb_type="COW tensor check after COW-state-changing op",
+                    context="torch._C._is_cow_tensor after _lazy_clone",
+                    explanation=(
+                        "Dynamo cannot safely fold a COW state check after "
+                        "an op in the current graph may have changed that "
+                        "tensor's COW state."
+                    ),
+                    hints=[
+                        "Move the COW state check before _lazy_clone or outside "
+                        "the torch.compile region.",
+                    ],
+                )
+            real_value = arg.get_real_value()  # pyrefly: ignore[missing-attribute]
+            if is_fake_tensor(real_value):
+                unimplemented(
+                    gb_type="COW tensor check on FakeTensor",
+                    context="torch._C._is_cow_tensor on FakeTensor",
+                    explanation=(
+                        "Dynamo cannot safely evaluate COW state from a "
+                        "FakeTensor because COW state is not represented in "
+                        "FakeTensor metadata."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on FakeTensors inside "
+                        "torch.compile regions.",
+                    ],
+                )
+            cow_state = _try_is_cow_tensor(real_value)
+            if cow_state is _COW_TENSOR_UNSUPPORTED:
+                unimplemented(
+                    gb_type="COW tensor check on Python tensor subclass",
+                    context="torch._C._is_cow_tensor on Python tensor subclass",
+                    explanation=(
+                        "Dynamo cannot safely evaluate COW state for Python "
+                        "tensor subclasses because their storage semantics are "
+                        "controlled by __torch_dispatch__."
+                    ),
+                    hints=[
+                        "Avoid checking COW state on tensor subclasses inside "
+                        "torch.compile regions.",
+                    ],
+                )
+            install_guard(arg.source.make_guard(GuardBuilder.COW_TENSOR_MATCH))
+            return VariableTracker.build(tx, cast(bool, cow_state))
 
         @register(torch._C._is_torch_function_all_disabled)
         def handle_is_torch_function_all_disabled(

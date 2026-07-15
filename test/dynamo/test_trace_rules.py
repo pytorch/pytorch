@@ -72,7 +72,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch.resize_as_",
     "torch.resize_as_sparse_",
     "torch._C._data_address",
-    "torch._C._is_cow_tensor",
     "torch._lazy_clone",
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
