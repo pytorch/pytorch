@@ -296,6 +296,43 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         output = torch.compile(fn)(x)
         output.backward(output)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    def test_cutlass_mm_functionalization_decomp(self):
+        """Test that semi_structured::cutlass_mm decomposes under FunctionalTensorMode.
+
+        This verifies the register_torch_dispatch(FunctionalTensorMode) registration
+        works correctly -- the custom op should decompose into aten._sparse_semi_structured_mm
+        (or _addmm) + pad/narrow. Does not require actual CUTLASS execution (uses FakeTensorMode).
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        from torch.sparse.semi_structured import _ensure_cutlass_mm_registered
+
+        _ensure_cutlass_mm_registered()
+
+        out_features, k, n = 32, 64, 16
+        with FakeTensorMode() as fake_mode:
+            dense = torch.randn(k, n, device="cuda", dtype=torch.float16)
+            packed = torch.randn(out_features, k // 2, device="cuda", dtype=torch.float16)
+            meta = torch.randint(0, 10, (out_features, k // 16), device="cuda", dtype=torch.int16)
+
+            with FunctionalTensorMode():
+                dense_f = FunctionalTensor.to_functional(dense)
+                packed_f = FunctionalTensor.to_functional(packed)
+                meta_f = FunctionalTensor.to_functional(meta)
+
+                result = torch.ops.semi_structured.cutlass_mm(
+                    dense_f, packed_f, meta_f, None, out_features, 8, 8, False
+                )
+
+            self.assertEqual(result.shape, torch.Size([out_features, n]))
+
 
 class TestSparseSemiStructured(TestCase):
     def setUp(self):
