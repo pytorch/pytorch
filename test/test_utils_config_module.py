@@ -454,7 +454,8 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 break
 
         self.assertFalse(
-            error_messages, f"concurrent patch usage failed: {error_messages}"
+            error_messages,
+            lambda msg: f"{msg}\nconcurrent patch usage failed: {error_messages}",
         )
         self.assertTrue(config.e_bool)
 
@@ -621,7 +622,7 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertEqual(
                 len(deprecation_warnings),
                 0,
-                f"Unexpected config deprecation warnings: {[str(x.message) for x in deprecation_warnings]}",
+                lambda msg: f"{msg}\nUnexpected config deprecation warnings: {[str(x.message) for x in deprecation_warnings]}",
             )
 
     def test_patch_then_global(self):

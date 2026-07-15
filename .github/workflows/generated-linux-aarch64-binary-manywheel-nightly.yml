@@ -38,31 +38,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
+  # Computes the manylinux builder image tag suffix at runtime. On release
+  # candidate tag pushes (v1.2.3-rc4) it resolves to "-<.ci/docker tree hash>",
+  # pinning the build/test/upload jobs to the reproducible image published by
+  # binary-docker-build; otherwise it is empty (main's floating tag). ciflow/*
+  # tags keep the floating tag. Done in a shared job so the value can feed the
+  # job-level `container:` directives, which are resolved before any step runs.
+  get-docker-tag:
+    # Only runs on tag pushes (release candidates); on branch/PR runs it is
+    # skipped and its output reads as blank, so the floating tag is used.
+    if: ${{ github.repository_owner == 'pytorch' && github.ref_type == 'tag' }}
+    name: get-docker-tag
+    runs-on: ubuntu-24.04
+    outputs:
+      docker_image_suffix: ${{ steps.calc.outputs.docker_image_suffix }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          submodules: false
+          show-progress: false
+      - name: Calculate docker image suffix
+        id: calc
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          suffix=""
+          if [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
+            suffix="-$(git rev-parse HEAD:.ci/docker)"
+          fi
+          echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
 
   manywheel-cpu-aarch64-build:
     name: manywheel-cpu-aarch64-build
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.r7g.12xlarge.memory"
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: get-docker-tag
+    runs-on: "linux.arm64.r7g.12xlarge.memory"
     timeout-minutes: 420
     container:
-      image: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64
+      image: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cpu
       GPU_ARCH_VERSION: ""
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
@@ -138,19 +163,19 @@ jobs:
 
   manywheel-cuda-aarch64-cu126-build:
     name: manywheel-cuda-aarch64-cu126-build
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.r7g.12xlarge.memory"
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: get-docker-tag
+    runs-on: "linux.arm64.r7g.12xlarge.memory"
     timeout-minutes: 420
     container:
-      image: pytorch/manylinuxaarch64-builder:cuda12.6
+      image: pytorch/manylinuxaarch64-builder:cuda12.6${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.6
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.6${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
@@ -227,24 +252,24 @@ jobs:
 
   manywheel-cuda-aarch64-cu130-build:
     name: manywheel-cuda-aarch64-cu130-build
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.r7g.12xlarge.memory"
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: get-docker-tag
+    runs-on: "linux.arm64.r7g.12xlarge.memory"
     timeout-minutes: 420
     container:
-      image: pytorch/manylinuxaarch64-builder:cuda13.0
+      image: pytorch/manylinuxaarch64-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda13.0
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda-aarch64-13_0"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -316,24 +341,24 @@ jobs:
 
   manywheel-cuda-aarch64-cu132-build:
     name: manywheel-cuda-aarch64-cu132-build
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.r7g.12xlarge.memory"
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: get-docker-tag
+    runs-on: "linux.arm64.r7g.12xlarge.memory"
     timeout-minutes: 420
     container:
-      image: pytorch/manylinuxaarch64-builder:cuda13.2
+      image: pytorch/manylinuxaarch64-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: cu132
       GPU_ARCH_VERSION: "13.2-aarch64"
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda13.2
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t"
       BUILD_NAME_PREFIX: "manywheel-py"
       BUILD_NAME_SUFFIX: "-cuda-aarch64-13_2"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     steps:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -405,8 +430,8 @@ jobs:
 
   manywheel-test:
     name: ${{ matrix.build_name }}-test
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-cpu-aarch64-build, manywheel-cuda-aarch64-cu126-build, manywheel-cuda-aarch64-cu130-build, manywheel-cuda-aarch64-cu132-build]
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-docker-tag, manywheel-cpu-aarch64-build, manywheel-cuda-aarch64-cu126-build, manywheel-cuda-aarch64-cu130-build, manywheel-cuda-aarch64-cu132-build]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
@@ -675,11 +700,11 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: linux-aarch64-binary-manywheel
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: ""
       runs_on: ${{ matrix.runs_on }}
       use_container_directive: true
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -692,7 +717,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    needs: [manywheel-cpu-aarch64-build, manywheel-cuda-aarch64-cu126-build, manywheel-cuda-aarch64-cu130-build, manywheel-cuda-aarch64-cu132-build, manywheel-test]
+    needs: [get-docker-tag, manywheel-cpu-aarch64-build, manywheel-cuda-aarch64-cu126-build, manywheel-cuda-aarch64-cu130-build, manywheel-cuda-aarch64-cu132-build, manywheel-test]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
@@ -929,7 +954,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
     secrets:

@@ -41,11 +41,11 @@ class TestModule(TestCase):
             for item_name, item in items:
                 self.assertEqual(
                     item.device, device,
-                    f'{name} {item_name} is on device {item.device} instead of the expected device {device}')
+                    lambda msg: f'{msg}\n{name} {item_name} is on device {item.device} instead of the expected device {device}')
                 if item.dtype.is_floating_point:
                     self.assertEqual(
                         item.dtype, dtype,
-                        f'{name} {item_name} is of dtype {item.dtype} instead of the expected dtype {dtype}')
+                        lambda msg: f'{msg}\n{name} {item_name} is of dtype {item.dtype} instead of the expected dtype {dtype}')
         _check_module(module.named_parameters(), "Parameter")
         _check_module(module.named_buffers(), "Buffer")
 
@@ -824,7 +824,7 @@ class TestModule(TestCase):
             except AttributeError as e:
                 if "'training'" in str(e):
                     self.assertTrue(module_info.train_and_eval_differ,
-                                    f"The ModuleInfo entry for {module_info.name} has "
+                                    lambda msg: f"{msg}\nThe ModuleInfo entry for {module_info.name} has "
                                     "train_and_eval_differ=False, but the training mode was found to "
                                     "affect the forward pass. Consider setting train_and_eval_differ=True "
                                     "for this ModuleInfo entry.")
