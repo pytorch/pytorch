@@ -9,7 +9,7 @@
 
 namespace c10d::nccl2 {
 
-// "nccl2-lazy" backend: ProcessGroupNCCL wrapped in the generic
+// "nccl-lazy" backend: ProcessGroupNCCL wrapped in the generic
 // c10d::LazyBackend so each point-to-point peer pair gets its own
 // lazily-created 2-rank ncclComm (and therefore its own stream). See
 // lazy/LazyBackend.hpp for the wrapper semantics.
@@ -23,7 +23,7 @@ namespace c10d::nccl2 {
 class TORCH_API ProcessGroupNCCLLazy
     : public ::c10d::LazyBackend<ProcessGroupNCCL> {
  public:
-  static constexpr std::string_view kBackendName = "nccl2-lazy";
+  static constexpr std::string_view kBackendName = "nccl-lazy";
 
   ProcessGroupNCCLLazy(
       c10::intrusive_ptr<::c10d::Store> store,
