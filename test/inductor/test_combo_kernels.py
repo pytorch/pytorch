@@ -1915,11 +1915,14 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             + counters["inductor"]["combo_subkernel_autotune_cached"]
         )
         self.assertEqual(processed, 4)
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
         if mode == "cdt":
             self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_caching(self):
+        from torch._inductor.codecache import PyCodeCache
+
         def f(a, b, c, d):
             return a + b, c * d
 
@@ -1945,13 +1948,63 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             torch.compile(f)(*inps)  # cold: subkernels benchmarked
             cold = counters["inductor"]["combo_subkernel_autotune"]
             self.assertGreater(cold, 0)
+            self.assertEqual(
+                counters["inductor"]["combo_subkernel_autotune_fallback"], 0
+            )
 
+            # Simulate a new process: drop the in-memory module cache (which would
+            # otherwise serve the already-tuned autotuner object) but keep the on-disk
+            # caches, so the warm run genuinely re-imports and reads .best_config.
             torch._dynamo.reset()
+            PyCodeCache.cache_clear(purge=False)
             counters.clear()
             torch.compile(f)(*inps)  # warm: reuse .best_config, no re-benchmark
             self.assertEqual(counters["inductor"]["combo_subkernel_autotune"], 0)
             warm_cached = counters["inductor"]["combo_subkernel_autotune_cached"]
             self.assertEqual(warm_cached, cold)
+            self.assertEqual(
+                counters["inductor"]["combo_subkernel_autotune_fallback"], 0
+            )
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_looped_reduction(self):
+        # rnumel far above the persistent threshold -> looped reductions, whose winning
+        # configs carry R0_BLOCK; the combo must expose R0_BLOCK_i as constexpr args.
+        def f(a, b):
+            return a.sum(-1), b.amax(-1)
+
+        inps = [
+            torch.randn(64, 65536, device=GPU_TYPE),
+            torch.randn(64, 32768, device=GPU_TYPE),
+        ]
+        counters.clear()
+        with fresh_cache():
+            out, code = run_and_get_code(torch.compile(f), *inps)
+        # loose tolerance: summing 65536 fp32 elements is accumulation-order sensitive
+        self.assertEqual(out, f(*inps), atol=1e-3, rtol=1e-3)
+        src = " ".join(code)
+        FileCheck().check("R0_BLOCK_0").check("R0_BLOCK_1").run(src)
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_dynamic_shapes(self):
+        def f(a, b):
+            return a + 1.0, b * 2.0
+
+        a = torch.randn(4096, device=GPU_TYPE)
+        b = torch.randn(6144, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(a, 0)
+        torch._dynamo.mark_dynamic(b, 0)
+        counters.clear()
+        with fresh_cache():
+            fn_c = torch.compile(f, dynamic=True)
+            out = fn_c(a, b)
+        self.assertEqual(out, f(a, b))
+        # recompile-free on new dynamic sizes
+        a2 = torch.randn(5000, device=GPU_TYPE)
+        b2 = torch.randn(7000, device=GPU_TYPE)
+        self.assertEqual(fn_c(a2, b2), f(a2, b2))
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_excludes_indirect_indexing(self):
