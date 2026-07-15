@@ -29,7 +29,7 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _unwrap_efc_compiled_obj,
 )
 from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heuristics
-from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, Layout, TensorBox
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
@@ -75,6 +75,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         scale_type_b: Any | None = None,
         swizzle_type_a: Any | None = None,
         swizzle_type_b: Any | None = None,
+        swap_ab: bool = False,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, ())
         self.kernel = kernel
@@ -87,6 +88,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         self.scale_type_b = scale_type_b
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
+        self.swap_ab = swap_ab
 
     def benchmark(
         self,
@@ -128,6 +130,19 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
         _ensure_fp4_dtype_registered()
+
+        # For swap_ab, transpose mat_a/mat_b and swap scales before
+        # creating GemmArguments. This matches the dummy tensor setup
+        # used during kernel filtering. Use a temp (N, M) output buffer
+        # since the kernel computes (N, M) but the caller expects (M, N).
+        swap_ab_final_out = None
+        if self.swap_ab and len(input_tensors) >= 4:
+            a, b, sa, sb = input_tensors[:4]
+            input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
+            swap_ab_final_out = out
+            out = torch.empty(
+                out.shape[1], out.shape[0], dtype=out.dtype, device=out.device
+            )
 
         helper_kwargs: dict[str, Any] = {}
         if self.variant == GemmVariant.SCALED_GEMM:
@@ -213,6 +228,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
                 workspace=workspace,
                 assume_supported_args=True,
             )
+            if swap_ab_final_out is not None:
+                swap_ab_final_out.copy_(out.t())
 
         return run_kernel
 
@@ -249,12 +266,15 @@ class NVUniversalGemmCaller(ChoiceCaller):
         swizzle_type_a: Any | None = None,
         swizzle_type_b: Any | None = None,
         supports_epilogue_fusion: bool = False,
+        swap_ab: bool = False,
+        kernel_layout: Layout | None = None,
     ) -> None:
         super().__init__(
             name=name,
             input_nodes=input_nodes,
             layout=layout,
-            description=f"{variant.op_name} {kernel.metadata.kernel_name}",
+            description=f"{variant.op_name} {kernel.metadata.kernel_name}"
+            + (" swap_ab" if swap_ab else ""),
         )
         self.kernel = kernel
         self.accumulator_type = accumulator_type
@@ -265,6 +285,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
+        self.swap_ab = swap_ab
+        self._kernel_layout = kernel_layout or layout
         self._cached_output_node: TensorBox | None = None
 
         output_buffer = Buffer(name=f"{variant.op_name}_out", layout=layout)
@@ -281,6 +303,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
             scale_type_b=scale_type_b,
             swizzle_type_a=swizzle_type_a,
             swizzle_type_b=swizzle_type_b,
+            swap_ab=swap_ab,
         )
 
     def __str__(self) -> str:
@@ -302,6 +325,9 @@ class NVUniversalGemmCaller(ChoiceCaller):
         if self._cached_output_node is not None:
             return self._cached_output_node
 
+        # For swap_ab, use the original (M, N) layout so the scheduler and
+        # downstream IR see the expected shape. The runtime handles the
+        # transpose internally via a temp buffer in _nvgemm_run.
         buffer = NVUniversalGemmBuffer(
             layout=self.layout,
             inputs=self.input_nodes,
@@ -314,9 +340,11 @@ class NVUniversalGemmCaller(ChoiceCaller):
             swizzle_type_a=self.swizzle_type_a,
             swizzle_type_b=self.swizzle_type_b,
             supports_epilogue_fusion=self.supports_epilogue_fusion,
+            swap_ab=self.swap_ab,
         )
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]
+
         self._cached_output_node = TensorBox.create(buffer)
         return self._cached_output_node
 
@@ -341,15 +369,19 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 self.scale_type_b,
                 self.swizzle_type_a,
                 self.swizzle_type_b,
+                "swap_ab" if self.swap_ab else "",
             )
         )
 
     def info_dict(self) -> dict[str, Any]:
-        return {
+        info = {
             "name": self.name,
             "backend": self.variant.op_name,
             "kernel_name": self.kernel.metadata.kernel_name,
         }
+        if self.swap_ab:
+            info["swap_ab"] = True
+        return info
 
     def get_make_kernel_render(self):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
@@ -369,6 +401,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         swizzle_type_a = self.swizzle_type_a
         swizzle_type_b = self.swizzle_type_b
         input_nodes = self.input_nodes
+        swap_ab = self.swap_ab
 
         def make_kernel_render(
             out_node,
@@ -407,6 +440,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 epilogue_reads=epilogue_reads,
                 epilogue_writes=epilogue_writes,
                 epilogue_var_renames=epilogue_var_renames,
+                swap_ab=swap_ab,
             )
 
             def render():
@@ -484,6 +518,8 @@ def _add_nv_gemm_choices_impl(
     scale_type_b: Any | None = None,
     swizzle_type_a: Any | None = None,
     swizzle_type_b: Any | None = None,
+    swap_ab: bool = False,
+    kernel_layout: Layout | None = None,
 ) -> None:
     """
     Unified implementation for adding NVIDIA Universal GEMM choices.
@@ -516,7 +552,18 @@ def _add_nv_gemm_choices_impl(
         )
         for node in input_nodes
     ]
-    out_tensor = _create_dummy_tensor_from_layout(layout)
+
+    if swap_ab and len(dummy_tensors) >= 4:
+        # swap_ab: transpose mat_a/mat_b dummies and swap scales.
+        # Original: dummy[0]=mat_a(M,K/2) row, dummy[1]=mat_b(K/2,N) col
+        # Swap: new_A=mat_b.t()=(N,K/2) row, new_B=mat_a.t()=(K/2,M) col
+        # Scales: new_scale_a=scale_b, new_scale_b=scale_a
+        d_a, d_b, d_sa, d_sb = dummy_tensors[:4]
+        if d_a is not None and d_b is not None:
+            dummy_tensors = [d_b.t(), d_a.t(), d_sb, d_sa] + dummy_tensors[4:]
+
+    effective_layout = kernel_layout if kernel_layout is not None else layout
+    out_tensor = _create_dummy_tensor_from_layout(effective_layout)
 
     if any(t is None for t in dummy_tensors) or out_tensor is None:
         log.debug("Failed to create dummy tensors for %s", variant.op_name)
@@ -571,7 +618,7 @@ def _add_nv_gemm_choices_impl(
     non_efc_kernels, efc_kernels = partition_compatible_kernels(
         args, cc_int, _classify, num_buckets=2
     )
-    if not config.epilogue_fusion:
+    if not config.epilogue_fusion or swap_ab:
         efc_kernels = []
     if not non_efc_kernels and not efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
@@ -616,6 +663,8 @@ def _add_nv_gemm_choices_impl(
                 swizzle_type_a=swizzle_type_a,
                 swizzle_type_b=swizzle_type_b,
                 supports_epilogue_fusion=supports_epilogue_fusion,
+                swap_ab=swap_ab,
+                kernel_layout=kernel_layout,
             )
             choices.append(caller)
             num_added += 1
@@ -728,4 +777,53 @@ def add_nv_universal_scaled_gemm_choices(
         scale_type_b=scale_type_b,
         swizzle_type_a=swizzle_type_a,
         swizzle_type_b=swizzle_type_b,
+    )
+
+    # swap_ab: swap A/B operands so the large N goes on the M-axis.
+    # Improves tile utilization for small-M decode shapes (M << N).
+    if not config.nvgemm_swap_ab:
+        return
+
+    # In the IR, mat_a=(M, K/2) row-major, mat_b=(K/2, N) column-major (already .t()).
+    # swap_ab computes: un_transpose(mat_b) @ transpose(mat_a) = (N,K/2)@(K/2,M) = (N,M).
+    # Scales: new A uses scale_b (weight scale), new B uses scale_a (activation scale).
+    # The un-transposed mat_b is (N, K/2) row-major — same as the original weight.
+    # The transposed mat_a is (K/2, M) column-major.
+    # Both have the same layout pattern as the original (row-major A, column-major B).
+
+    # Scale inference: new A is the original weight (N, K/2), no transpose.
+    # For infer_scale_swizzle_ir, we need to pass the un-transposed shape.
+    # mat_b.t() gives (N, K/2) — but we use transpose=True on mat_b itself
+    # since mat_b is (K/2, N), so transpose=True flips it to (N, K/2).
+    swap_scale_type_a, swap_swizzle_type_a = infer_scale_swizzle_ir(
+        mat_b, scale_b, transpose=True
+    )
+    # New B is the original activation (M, K/2), used transposed as (K/2, M).
+    # infer_scale_swizzle_ir with transpose=True on mat_a flips (M, K/2) to (K/2, M).
+    swap_scale_type_b, swap_swizzle_type_b = infer_scale_swizzle_ir(
+        mat_a, scale_a, transpose=True
+    )
+
+    if swap_scale_type_a is None or swap_scale_type_b is None:
+        return
+
+    # Kernel output shape is (N, M) — the transpose of the original (M, N)
+    m, n = layout.size[0], layout.size[1]
+    swap_kernel_layout = FixedLayout(layout.device, layout.dtype, [n, m])
+
+    # Skip heuristic filtering for swap_ab: mm_inputs has original (M, N, K) but
+    # the swapped kernel sees (N, M, K). Let the benchmark pick the best kernel.
+    _add_nv_gemm_choices_impl(
+        choices=choices,
+        layout=layout,
+        input_nodes=input_nodes,
+        variant=GemmVariant.SCALED_GEMM,
+        accumulator_type=accumulator_type or torch.float32,
+        mm_inputs=None,
+        scale_type_a=swap_scale_type_a,
+        scale_type_b=swap_scale_type_b,
+        swizzle_type_a=swap_swizzle_type_a,
+        swizzle_type_b=swap_swizzle_type_b,
+        swap_ab=True,
+        kernel_layout=swap_kernel_layout,
     )
