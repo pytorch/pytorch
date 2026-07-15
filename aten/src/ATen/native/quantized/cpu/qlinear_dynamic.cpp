@@ -920,7 +920,7 @@ class QLinearUnpackedDynamicFp16 final {
 
     auto out_channel = weight.sym_sizes().vec()[0];
     auto out_sizes = input.sym_sizes().vec();
-    out_sizes[out_sizes.size() - 1] = out_channel;
+    out_sizes[out_sizes.size() - 1] = std::move(out_channel);
 
     return at::empty_symint(out_sizes, input.options());
   }
