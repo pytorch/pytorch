@@ -253,8 +253,7 @@ bool try_mps_gemv(const Tensor& A,
   }
   const auto matrix = resolve_matrix(m_is_one ? B : A);
   // Dispatch 64-bit-index variants when numel or storage offsets exceed int32.
-  const bool idx64 = !offsetsFitIn<int32_t>(A, B, out) ||
-      (bias.has_value() && !offsetsFitIn<int32_t>(*bias));
+  const bool idx64 = !offsetsFitIn<int32_t>(A, B, out) || (bias.has_value() && !offsetsFitIn<int32_t>(*bias));
   const GemvPolicy policy = GemvPolicy::current();
   dispatch_gemv(A, B, out, bias, matrix, alpha, beta, epi, policy, m_is_one, outlen, idx64);
   return true;
