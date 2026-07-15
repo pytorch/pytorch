@@ -1138,21 +1138,21 @@ inline void swap(
 
 // To allow weak_intrusive_ptr inside std::map or std::set, we need operator<
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator<(
+[[nodiscard]] inline bool operator<(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ < rhs.target_;
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator==(
+[[nodiscard]] inline bool operator==(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return lhs.target_ == rhs.target_;
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
-inline bool operator!=(
+[[nodiscard]] inline bool operator!=(
     const weak_intrusive_ptr<TTarget1, NullType1>& lhs,
     const weak_intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return !operator==(lhs, rhs);
