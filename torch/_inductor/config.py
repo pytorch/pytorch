@@ -210,10 +210,7 @@ fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
 cpp_cache_precompile_headers: bool = (
-    os.environ.get(
-        "TORCHINDUCTOR_CPP_CACHE_PRECOMPILE_HEADERS", "0" if is_fbcode() else "1"
-    )
-    == "1"
+    os.environ.get("TORCHINDUCTOR_CPP_CACHE_PRECOMPILE_HEADERS", "1") == "1"
 )
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
@@ -2420,7 +2417,7 @@ class aot_inductor:
     package_constants_on_disk_format: str | None = None
 
     # Experimental.  Controls automatic precompiling of common AOTI include files.
-    precompile_headers: bool = not is_fbcode()
+    precompile_headers: bool = True
 
     # Embed generated kernel binary files into model.so
     embed_kernel_binary: bool | None = None
