@@ -137,6 +137,34 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    def test_arch_filter_rejects_min_cc_only_kernels(self):
+        """designed_for_min_cc <= device cc is insufficient: an arch-conditional
+        sm90 kernel reports min_cc=90 but only lists a cc=90 target and won't
+        compile on sm100. The exact-arch filter (via _device_target) must reject
+        kernels a min_cc-only check would wrongly accept.
+        """
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        major, minor = torch.cuda.get_device_capability()
+        cc = major * 10 + minor
+        device_target = kernel_cache._device_target(cc)
+
+        kernel_cache.clear_cache()
+        manifest = kernel_cache._get_kernel_cache()
+        min_cc_ok = [k for k in manifest.values() if k.designed_for_min_cc <= cc]
+        arch_ok = [
+            k
+            for k in min_cc_ok
+            if device_target.supports_operators_from(k.metadata.supported_targets)
+        ]
+
+        self.assertTrue(min_cc_ok, "no kernels pass the min_cc check")
+        self.assertLess(
+            len(arch_ok),
+            len(min_cc_ok),
+            "exact-arch filter should reject kernels that min_cc alone accepts",
+        )
+
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
 

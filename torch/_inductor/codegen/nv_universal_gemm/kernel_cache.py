@@ -10,6 +10,7 @@ The first call to get_kernel_by_name() loads all kernels from cutlass.operators
 dict for O(1) lookup (~0.1 μs).
 """
 
+import functools
 import logging
 import threading
 from collections.abc import Callable
@@ -19,6 +20,20 @@ import torch
 
 
 log = logging.getLogger(__name__)
+
+
+@functools.cache
+def _device_target(cc: int) -> Any:
+    """The CUDA arch target for this device (e.g. cc=100 -> TargetSm '100a').
+
+    Used to reject kernels whose `supported_targets` don't cover this device.
+    `designed_for_min_cc` alone is insufficient: an arch-conditional sm90 kernel
+    reports min_cc=90 (which is <= a 100 device) yet only lists a cc=90 target
+    and fails to compile on sm100 ("expects arch sm_90a, but got sm_100a").
+    """
+    from cutlass.operators.arch import TargetSm
+
+    return TargetSm.ensure(f"{cc}a")
 
 
 def _epilogue_args_signature(epilogue_args: Any) -> tuple:
@@ -171,9 +186,12 @@ def partition_compatible_kernels(
     candidates = list(_get_kernel_cache().values())
     if efc_only:
         candidates = [k for k in candidates if _is_efc_kernel(k)]
+    device_target = _device_target(cc)
     buckets: list[list[Any]] = [[] for _ in range(num_buckets)]
     for kernel in candidates:
         if kernel.designed_for_min_cc > cc:
+            continue
+        if not device_target.supports_operators_from(kernel.metadata.supported_targets):
             continue
         bucket = classifier(kernel.metadata)
         if bucket < 0:
