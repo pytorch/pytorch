@@ -1152,7 +1152,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         if dtype == torch.float32:
             # Inputs are converted to TF32 internally for sparse GEMM,
             # so make dense GEMM to do the same for matching results.
-            orig = torch.backends.cuda.matmul.allow_tf32
+            orig = torch.backends.cuda.matmul.fp32_precision
             torch.backends.cuda.matmul.allow_tf32 = True
 
         batch_shapes = [[], [3], [3, 1]]
@@ -1192,7 +1192,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             )
 
         if dtype == torch.float32:
-            torch.backends.cuda.matmul.allow_tf32 = orig
+            torch.backends.cuda.matmul.fp32_precision = orig
 
     @unittest.skipIf(
         TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS"
@@ -1257,7 +1257,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         if dtype == torch.float32:
             # Inputs are converted to TF32 internally for sparse GEMM,
             # so make dense GEMM to do the same for matching results.
-            orig = torch.backends.cuda.matmul.allow_tf32
+            orig = torch.backends.cuda.matmul.fp32_precision
             torch.backends.cuda.matmul.allow_tf32 = True
 
         dtype_out = {
@@ -1280,7 +1280,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             run_test(m, n, k, device, dtype, dtype_out[dtype], use_input, rtol, atol)
 
         if dtype == torch.float32:
-            torch.backends.cuda.matmul.allow_tf32 = orig
+            torch.backends.cuda.matmul.fp32_precision = orig
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @inference_dtypes
