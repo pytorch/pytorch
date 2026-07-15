@@ -94,7 +94,9 @@ jobs:
         run: pip install pyyaml==6.0.2
       - name: Update metamates rule
         env:
-          GH_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
+          # Reading the closed pytorch/metamates team needs an org-member token;
+          # pytorchupdatebot is not an org member, so use pytorchbot here.
+          GH_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
         run: |
           python .github/scripts/update_metamates_rule.py
       - name: Create or update PR
