@@ -1211,6 +1211,8 @@ int64_t KinetoEvent::externalId() const {
       type != libkineto::ActivityType::CONCURRENT_KERNEL &&
       type != libkineto::ActivityType::CUDA_RUNTIME &&
       type != libkineto::ActivityType::CUDA_DRIVER &&
+      type != libkineto::ActivityType::XPU_RUNTIME &&
+      type != libkineto::ActivityType::XPU_DRIVER &&
       type != libkineto::ActivityType::PRIVATEUSE1_RUNTIME &&
       type != libkineto::ActivityType::PRIVATEUSE1_DRIVER) {
     return static_cast<int64_t>(result_->visit(c10::overloaded(
