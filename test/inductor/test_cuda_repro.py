@@ -1651,9 +1651,8 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180948")
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "requires CUDA or XPU")
     @config.patch(
         emulate_precision_casts=False,
         emulate_precision_casts_on_saved_tensors=True,
