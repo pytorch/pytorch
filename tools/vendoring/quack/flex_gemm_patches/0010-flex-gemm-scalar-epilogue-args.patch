@@ -4,8 +4,8 @@ index 895aeec9d7b..de134691751 100644
 +++ b/epi_ops.py
 @@ -557,6 +557,39 @@ class ColVecTupleLoad(VecTupleLoad):
      vec_op_cls = CapturedColVecLoad
- 
- 
+
+
 +class CapturedScalarLoad(EpiOp):
 +    """Loads a captured (1,)-shaped tensor's element once per tile. No smem."""
 +
@@ -41,7 +41,7 @@ index 895aeec9d7b..de134691751 100644
 +
  class TileStore(EpiOp):
      """Tile-sized output tensor stored via TMA (e.g. postact).
- 
+
 diff --git a/gemm_act.py b/gemm_act.py
 index 5030cf895fa..bf143521b42 100644
 --- a/gemm_act.py
@@ -181,7 +181,7 @@ index 5030cf895fa..bf143521b42 100644
 +        for kind in tensor_epilogue_arg_kinds
      )
      colvec_ndim = colvec_bias.ndim if colvec_bias is not None else 0
- 
+
 @@ -1079,6 +1098,7 @@ def gemm_act(
          tuple(tensor.ndim for tensor in tensor_epilogue_colvec_biases),
          tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_tile_biases_p),
