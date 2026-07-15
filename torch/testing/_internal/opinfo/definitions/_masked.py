@@ -1338,9 +1338,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
-            DecorateInfo(
-                unittest.skip("Skipped!"), "TestFwdGradients", "test_fn_gradgrad"
-            ),
         ),
         sample_inputs_func=sample_inputs_masked_logaddexp,
         gradcheck_wrapper=gradcheck_wrapper_masked_pointwise_operation,
