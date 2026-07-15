@@ -62,7 +62,7 @@ _tensor_epilogue_fns: dict[str, Callable] = {}
 _local_reduce_combine_fns: dict[str, Callable] = {}
 _local_reduce_finalize_fns: dict[str, Callable] = {}
 # Feed-main must fit within grouped_rowvec_reduce_value's lane-layout M extent.
-MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 32
+LOCAL_REDUCE_FRAGMENT_WIDTH = 32
 
 
 def power_of_2_divisibility(value: int, max_divisibility: int) -> int:
@@ -213,7 +213,7 @@ class GemmActMixin(ComposableEpiMixin):
         if (
             args.mLocalReduce is not None
             and args.local_reduce_axis == 0
-            and args.local_reduce_group > 32
+            and args.local_reduce_group > LOCAL_REDUCE_FRAGMENT_WIDTH
         ):
             smem_warps = max((warp_shape_mnk[0] if warp_shape_mnk is not None else 1) - 1, 0)
             result += EpiSmemBytes(
@@ -379,8 +379,8 @@ class GemmActMixin(ComposableEpiMixin):
         tDrLocalReduceValue = None
         if const_expr(params.local_reduce_feeds_main):
             tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
-            combine_fn = const_expr(params.mLocalReduce[1])
-            finalize_fn = const_expr(params.mLocalReduce[2])
+            combine_fn = const_expr(params.mLocalReduce.combine_fn)
+            finalize_fn = const_expr(params.mLocalReduce.finalize_fn)
             tDrLocalReduceValue = grouped_rowvec_reduce_value(
                 self, tRS_rD, tDrLocalReduce, combine_fn, finalize_fn
             )
@@ -438,13 +438,13 @@ class GemmActMixin(ComposableEpiMixin):
                 if const_expr(params.tensor_epilogue_returns_local_reduce):
                     tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
                     if const_expr(params.local_reduce_feeds_main):
-                        tDrLocalReduce = tDrLocalReduce[1]
+                        tDrLocalReduce = tDrLocalReduce.local_reduce
                     tDrLocalReduce.store(epilogue_result[len(params.mAuxOut) + 1])
                 tRS_rAuxOut = tuple(aux_results)
             elif const_expr(params.tensor_epilogue_returns_local_reduce):
                 tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
                 if const_expr(params.local_reduce_feeds_main):
-                    tDrLocalReduce = tDrLocalReduce[1]
+                    tDrLocalReduce = tDrLocalReduce.local_reduce
                 tRS_rD.store(epilogue_result[0])
                 tDrLocalReduce.store(epilogue_result[1])
                 tRS_rAuxOut = cute.make_rmem_tensor(
@@ -1059,10 +1059,10 @@ def gemm_act(
             raise NotImplementedError("local_reduce_feeds_main currently supports only axis 0")
         if local_reduce_group <= 0:
             raise RuntimeError("local_reduce_group must be positive")
-        if local_reduce_group > MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP:
+        if local_reduce_group > LOCAL_REDUCE_FRAGMENT_WIDTH:
             raise NotImplementedError(
                 "local_reduce_feeds_main currently supports only same-warp axis-0 "
-                f"groups <= {MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP}"
+                f"groups <= {LOCAL_REDUCE_FRAGMENT_WIDTH}"
             )
         if tensor_epilogue_fn is None and tensor_epilogue_key is None:
             raise RuntimeError(
@@ -1072,6 +1072,14 @@ def gemm_act(
             raise RuntimeError(
                 "local_reduce_feeds_main requires generated local-reduce callback keys"
             )
+        if LOCAL_REDUCE_FRAGMENT_WIDTH % local_reduce_group != 0:
+            raise RuntimeError(
+                "local_reduce_group must divide TensorSSA fragment width 32"
+            )
+        if A.shape[-2] % local_reduce_group != 0:
+            raise RuntimeError(
+                "local_reduce_group must divide the selected GEMM output dimension"
+            )
     if local_reduce_out is not None and tensor_epilogue_fn is None and tensor_epilogue_key is None:
         raise RuntimeError("local_reduce_out requires tensor_epilogue_fn")
     if local_reduce_out is not None:
@@ -1079,7 +1087,10 @@ def gemm_act(
             raise RuntimeError("local_reduce_group must be positive")
         if local_reduce_axis not in (0, 1):
             raise RuntimeError("local_reduce_axis must be 0 or 1")
-        if (local_reduce_axis == 0 or local_reduce_group > 32) and (
+        if (
+            local_reduce_axis == 0
+            or local_reduce_group > LOCAL_REDUCE_FRAGMENT_WIDTH
+        ) and (
             local_reduce_combine_key is None or local_reduce_finalize_key is None
         ):
             raise RuntimeError(
