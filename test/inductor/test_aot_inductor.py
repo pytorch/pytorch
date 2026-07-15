@@ -9385,6 +9385,15 @@ copy_tests(
 # Lazy-autotune-mode-specific failures go here. Inherits regular GPU failures.
 GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
     **GPU_TEST_FAILURES,
+    "test_aot_inductor_consts_cpp_build": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_constant_folding": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_duplicate_constant_folding": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_constant_type_propagation": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_update_inactive_constant_buffer_with_interleaved_folded_constants": fail_gpu(
+        ("cuda", "xpu"), is_skip=True
+    ),
+    "test_autotune_with_constant_folding": fail_gpu(("cuda", "xpu"), is_skip=True),
+    "test_constant_folding_with_update": fail_gpu(("cuda", "xpu"), is_skip=True),
 }
 
 
