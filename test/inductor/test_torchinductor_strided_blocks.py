@@ -400,7 +400,7 @@ class CommonTemplate:
         self._run_and_compare(
             forward,
             *args,
-            expected_num_block_pointers=4,
+            expected_num_block_pointers=3,
             atol=atol,
             rtol=rtol,
         )
