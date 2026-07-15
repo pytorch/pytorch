@@ -52,8 +52,8 @@ import torch
 import torch._logging
 from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import (
-    get_dynamo_observed_exception,
     FakeTensorObservedException,
+    get_dynamo_observed_exception,
     ObservedException,
     TensorifyScalarRestartAnalysis,
 )
@@ -1722,6 +1722,9 @@ class InstructionTranslatorBase(
             return not self.output.should_exit
         except TensorifyScalarRestartAnalysis:
             raise
+        except FakeTensorObservedException as e:
+            self.exception_handler(e)
+            return True
         except exc.ObservedException as e:
             self.exception_handler(e)
             return True
@@ -2869,10 +2872,10 @@ class InstructionTranslatorBase(
 
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
-            if hasattr(raised_exception, "convert_to_TorchRuntimeError"):
+            if isinstance(raised_exception, FakeTensorObservedException):
                 from .exc import format_graph_break_message
 
-                curr = self.exn_vt_stack.get_current_exception()
+                curr = self.exn_vt_stack.get_raised_exception()
                 raw_msg = ""
                 if isinstance(curr, variables.ExceptionVariable) and curr.args:
                     raw_msg = curr.args[0].as_python_constant()
@@ -2887,13 +2890,12 @@ class InstructionTranslatorBase(
                 )
                 raise e.with_traceback(raised_exception.__traceback__) from None
 
-            curr_exc = self.exn_vt_stack.get_current_exception()
+            curr_exc = self.exn_vt_stack.get_raised_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
                 )  # sanity check
-
             unimplemented(
                 gb_type="Observed exception",
                 context=f"raised exception {curr_exc.debug_repr()}",
