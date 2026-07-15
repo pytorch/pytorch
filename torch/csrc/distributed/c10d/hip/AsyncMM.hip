@@ -227,8 +227,6 @@ at::Tensor async_input_mm_impl_ck_tile_config(
   TORCH_CHECK(chunk_size_M % tile_size_M == 0,
               "async_input_mm: chunk_size_M must be divisible by tile_size_M");
 
-  const ck_tile::index_t tiles_m =
-      ck_tile::integer_divide_ceil(M, static_cast<ck_tile::index_t>(tile_size_M));
   const ck_tile::index_t tiles_per_chunk = chunk_size_M / tile_size_M;
   const ck_tile::index_t tile_idx_pivot = a_chunk_pivot * tiles_per_chunk;
 
