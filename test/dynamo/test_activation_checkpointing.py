@@ -415,7 +415,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             # Check for the pattern with any graph ID (the ID depends on test order)
             self.assertTrue(
                 re.search(r"# ac_graph_id: \d+ - PREFER_RECOMPUTE", gm_str),
-                f"Expected ac_graph_id pattern not found in:\n{gm_str}",
+                lambda msg: f"{msg}\nExpected ac_graph_id pattern not found in:\n{gm_str}",
             )
             return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
 
@@ -1850,7 +1850,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 x, x, x, None, True, dropout_p=0.0
             )[0]
 
-        @torch.compile(mode="reduce-overhead")
+        @torch.compile(mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
         def attn(x):
             return eager_attn(x)
 
@@ -3042,7 +3042,7 @@ def forward(self, arg0_1, arg1_1):
 
         self.assertTrue(
             any("relu" in name for name in recomputed_nodes),
-            f"Expected relu_recomputed but got: {recomputed_nodes}",
+            lambda msg: f"{msg}\nExpected relu_recomputed but got: {recomputed_nodes}",
         )
 
     def _compile_with_joint_graph_pass_and_capture(self, fn, inputs):
@@ -3601,9 +3601,9 @@ def forward(self, arg0_1, arg1_1):
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
     mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
-    detach = torch.ops.aten.detach.default(mm_1);  mm_1 = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    cos = torch.ops.aten.cos.default(detach_1);  detach_1 = None
+    alias = torch.ops.aten.alias.default(mm_1);  mm_1 = None
+    alias_1 = torch.ops.aten.alias.default(alias);  alias = None
+    cos = torch.ops.aten.cos.default(alias_1);  alias_1 = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(t, mul);  t = mul = None
@@ -3633,21 +3633,22 @@ def forward(self, arg0_1, arg1_1):
         gm = self._trace_train_step(Model(), torch.randn(2, 4))
 
         # mm is PREFER_RECOMPUTE so it gets recomputed in backward (mm_1).
-        # sin is MUST_SAVE so its output is saved via detach.
+        # sin is MUST_SAVE so its output is saved via alias under make_fx's
+        # default detach decomposition.
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg1_1, arg0_1)
     sin = torch.ops.aten.sin.default(mm);  mm = None
-    detach = torch.ops.aten.detach.default(sin);  detach = None
+    alias = torch.ops.aten.alias.default(sin);  alias = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
     mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
-    detach_1 = torch.ops.aten.detach.default(mm_1);  mm_1 = None
-    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-    cos = torch.ops.aten.cos.default(detach_2);  detach_2 = None
+    alias_1 = torch.ops.aten.alias.default(mm_1);  mm_1 = None
+    alias_2 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+    cos = torch.ops.aten.cos.default(alias_2);  alias_2 = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(t, mul);  t = mul = None
@@ -3709,14 +3710,14 @@ def forward(self, arg0_1, arg1_1):
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
     mm_1 = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg0_1 = None
-    detach = torch.ops.aten.detach.default(mm_1)
+    alias = torch.ops.aten.alias.default(mm_1)
     sin_1 = torch.ops.aten.sin.default(mm_1);  mm_1 = None
     empty_like_1 = torch.ops.aten.empty_like.default(sin_1);  sin_1 = None
     bernoulli__1 = torch.ops.aten.bernoulli_.float(empty_like_1);  empty_like_1 = None
     div__1 = torch.ops.aten.div_.Scalar(bernoulli__1, 0.5);  bernoulli__1 = None
     mul_1 = torch.ops.aten.mul.Tensor(expand, div__1);  expand = div__1 = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    cos = torch.ops.aten.cos.default(detach_1);  detach_1 = None
+    alias_1 = torch.ops.aten.alias.default(alias);  alias = None
+    cos = torch.ops.aten.cos.default(alias_1);  alias_1 = None
     mul_2 = torch.ops.aten.mul.Tensor(mul_1, cos);  mul_1 = cos = None
     t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(t, mul_2);  t = mul_2 = None
@@ -3732,7 +3733,7 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.fx.traceback import preserve_node_meta
 
-        compiled_f = torch.compile(lambda x: x.sin().cos(), fullgraph=True)
+        compiled_f = torch.compile(lambda x: x.sin().cos(), fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
 
         @contextlib.contextmanager
         def skip_nested_compile():
@@ -3786,18 +3787,18 @@ def forward(self, x_1):
     sum_1 = torch.ops.aten.sum.default(cos);  cos = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
     expand = torch.ops.aten.expand.default(ones_like, [8]);  ones_like = None
-    detach = torch.ops.aten.detach.default(x_1)
+    alias = torch.ops.aten.alias.default(x_1)
     sin_1 = torch.ops.aten.sin.default(x_1);  x_1 = None
-    detach_1 = torch.ops.aten.detach.default(sin_1);  sin_1 = None
-    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-    sin_2 = torch.ops.aten.sin.default(detach_2);  detach_2 = None
+    alias_1 = torch.ops.aten.alias.default(sin_1);  sin_1 = None
+    alias_2 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+    sin_2 = torch.ops.aten.sin.default(alias_2);  alias_2 = None
     neg = torch.ops.aten.neg.default(sin_2);  sin_2 = None
     mul = torch.ops.aten.mul.Tensor(expand, neg);  expand = neg = None
-    detach_3 = torch.ops.aten.detach.default(detach);  detach = None
-    cos_1 = torch.ops.aten.cos.default(detach_3);  detach_3 = None
+    alias_3 = torch.ops.aten.alias.default(alias);  alias = None
+    cos_1 = torch.ops.aten.cos.default(alias_3);  alias_3 = None
     mul_1 = torch.ops.aten.mul.Tensor(mul, cos_1);  mul = cos_1 = None
-    detach_4 = torch.ops.aten.detach.default(sum_1);  sum_1 = None
-    return (detach_4, mul_1)""",
+    alias_4 = torch.ops.aten.alias.default(sum_1);  sum_1 = None
+    return (alias_4, mul_1)""",
         )
 
 
