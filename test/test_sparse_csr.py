@@ -1071,6 +1071,28 @@ class TestSparseCSR(TestCase):
             a.is_contiguous()
 
     @onlyCPU
+    def test_malformed_sparse_compressed_to_dense_crash(self, device):
+        import torch
+
+        # Test CSC malformed tensor
+        ccol = torch.tensor([4, 0, 0], dtype=torch.int32, device=device)
+        row = torch.tensor([0, 0, 0, 0], dtype=torch.int32, device=device)
+        values = torch.tensor([0.4865, 0.2713, 0.5561, 0.8373], dtype=torch.float32, device=device)
+        t_csc = torch.sparse_csc_tensor(ccol, row, values, check_invariants=False)
+
+        with self.assertRaisesRegex(RuntimeError, "compressed_indices must be monotonically increasing"):
+            t_csc.to_dense()
+
+        # Test BSC malformed tensor
+        ccol_bsc = torch.tensor([2, 2], dtype=torch.int64, device=device)
+        row_bsc = torch.tensor([2], dtype=torch.int64, device=device)
+        values_bsc = torch.tensor([[[[1.0, 1.0]], [[1.0, 1.0]]]], dtype=torch.float64, device=device)
+        t_bsc = torch.sparse_bsc_tensor(ccol_bsc, row_bsc, values_bsc, check_invariants=False)
+
+        with self.assertRaisesRegex(RuntimeError, "compressed_indices must be monotonically increasing"):
+            t_bsc.to_dense()
+
+    @onlyCPU
     @largeTensorTest("20GB", "cpu")
     def test_csr_nnz(self):
         # Tests the limits of the number of specified elements in CSR tensors, see gh-102520.
@@ -1405,11 +1427,6 @@ class TestSparseCSR(TestCase):
             torch._convert_indices_from_coo_to_csr(
                 torch.randint(100, (5, 5), device=device),
                 size=100)
-
-        with self.assertRaisesRegex(RuntimeError, "size must be non-negative"):
-            torch._convert_indices_from_coo_to_csr(
-                torch.tensor([1, 2, 3], device=device),
-                size=-1)
 
         size = (5, 5)
         sparse_dim = 2

@@ -771,6 +771,18 @@ Tensor sparse_compressed_to_dense(
   auto batch_indices =
       at::arange(0, n_batch, options).repeat_interleave(nnz_per_batch);
   auto ncompressed = compressed_rows ? nrows : ncols;
+  TORCH_CHECK(
+      compressed_indices.size(-1) == ncompressed + 1,
+      "sparse_compressed_to_dense: expected compressed_indices to have size ",
+      ncompressed + 1,
+      " but got ",
+      compressed_indices.size(-1));
+  TORCH_CHECK(
+      plain_indices.size(-1) == nnz_per_batch,
+      "sparse_compressed_to_dense: expected plain_indices to have size ",
+      nnz_per_batch,
+      " but got ",
+      plain_indices.size(-1));
   auto compressed_indices_over_all_batches = at::cat(
       {compressed_indices.slice(1, 0, ncompressed).flatten() +
            nnz_per_batch *
@@ -1919,10 +1931,31 @@ void convert_indices_from_csr_to_coo_cpu(
         for (const auto i_ : c10::irange(start, end)) {
           auto b = i_ / nrows;
           auto i = i_ % nrows;
-          std::fill(
-              &data_out[b * nnz + crow_indices_data_in[b * (nrows + 1) + i]],
-              &data_out
-                  [b * nnz + crow_indices_data_in[b * (nrows + 1) + i + 1]],
+
+          _offset = crow_indices_data_in[b * (nrows + 1) + i];
+          auto end_offset = crow_indices_data_in[b * (nrows + 1) + i + 1];
+
+          TORCH_CHECK(
+              start_offset <= end_offset,
+              "compressed_indices must be monotonically increasing, but got start_offset ",
+              start_offset, " > end_o
+              fset ", end_offse
+              , " at inde
+               ", i);
+
+    
+                   TORCH_CHECK(
+              end_offset <= nnz,
+              "compressed_indices end_offset ", end_offse
+              ,
+         
+              otal number of non-zero elements (nnz) ", nnz);
+
+   
+                   
+
+              &data_out[b * nnz + start_offset],
+              &data_out[b * nnz + end_offset],
               static_cast<output_t>(i));
         }
       });
@@ -2509,3 +2542,4 @@ std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   return outs;
 }
 } // namespace at::native
+                     
