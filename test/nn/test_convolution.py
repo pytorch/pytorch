@@ -383,23 +383,6 @@ class TestConvolutionNN(NNTestCase):
                 padding=[2**31, 2**31, 2**31],
             )
 
-    def test_slow_conv_transpose3d_kernel_size_mismatch(self):
-        inp = torch.full((1, 2, 4, 5, 4), 0.5, dtype=torch.double)
-        weight = torch.full((2, 3, 2, 3, 2), 0.5, dtype=torch.double)
-        with self.assertRaisesRegex(
-            RuntimeError, "kernel_size.*must match weight spatial dimensions"
-        ):
-            torch.ops.aten.slow_conv_transpose3d(
-                inp,
-                weight,
-                [1, 1, 1],
-                torch.full((3,), 0.5, dtype=torch.double),
-                [1, 1, 1],
-                [2, 2, 2],
-                [0, 0, 0],
-                [1, 1, 1],
-            )
-
     def test_Conv1d_module_same_padding(self):
         # Compare module against functional: without strides/dilation, asymmetric padding
         x = torch.rand(1, 1, 20)
@@ -1386,6 +1369,23 @@ class TestConvolutionNN(NNTestCase):
 
 
 class TestConvolutionNNDeviceType(NNTestCase):
+    def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
+        inp = torch.full((1, 2, 4, 5, 4), 0.5, dtype=torch.double, device=device)
+        weight = torch.full((2, 3, 2, 3, 2), 0.5, dtype=torch.double, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "kernel_size.*must match weight spatial dimensions"
+        ):
+            torch.ops.aten.slow_conv_transpose3d(
+                inp,
+                weight,
+                [1, 1, 1],
+                torch.full((3,), 0.5, dtype=torch.double, device=device),
+                [1, 1, 1],
+                [2, 2, 2],
+                [0, 0, 0],
+                [1, 1, 1],
+            )
+
     def run_conv_double_back_test(
         self,
         kern,
