@@ -7385,7 +7385,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
                 k = processed.view(batch_size, 1, seq_len, self.dim).detach()
                 v = processed.view(batch_size, 1, seq_len, self.dim).detach()
 
-                out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+                out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)  # noqa: UNSPECIFIED_BACKEND
                 out = flex_attention(q, k, v, block_mask=block_mask)
 
                 return out
@@ -8060,7 +8060,7 @@ SavedForBackwardsAOTOutput(idx=5)""",
         # https://github.com/pytorch/pytorch/issues/144211
         # torch.compile(one_hot) should raise on out-of-bounds indices,
         # not silently produce wrong results.
-        one_hot = torch.compile(torch.nn.functional.one_hot, fullgraph=True)
+        one_hot = torch.compile(torch.nn.functional.one_hot, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
 
         a = torch.arange(0, 5) % 3  # [0, 1, 2, 0, 1]
         with self.assertRaises(RuntimeError):
@@ -8217,7 +8217,7 @@ SavedForBackwardsAOTOutput(idx=5)""",
             warnings.simplefilter("always")
             eager_result = f(size, out_wrong.clone())
 
-        cf = torch.compile(f, dynamic=True)
+        cf = torch.compile(f, dynamic=True)  # noqa: UNSPECIFIED_BACKEND
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
             compiled_result = cf(size, out_wrong.clone())
@@ -8444,7 +8444,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mod = Repro()
         x = torch.arange(9, device=torch.device(device))
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def f(x):
             return mod(x)
 
@@ -9410,7 +9410,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         if not has_triton():
             self.skipTest("requires triton")
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def flex_chunk(q, k, v, block_mask, scale):
             out, aux = flex_attention(
                 q,
@@ -9429,7 +9429,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             d = e0 + e1
             return (out * e0 + new_out * e1) / d, (mx + torch.log(d)).squeeze(-1)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def ref_attn(q, k, v, block_mask, scale):
             return flex_attention(q, k, v, block_mask=block_mask, scale=scale)
 
