@@ -6506,6 +6506,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         swizzle_type_b: Any | None = None,
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
+        bias_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6520,6 +6521,9 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
         self.swap_ab = swap_ab
+        # When set, the last entry of `inputs` is an addmm bias consumed as a
+        # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
+        self.bias_node = bias_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
@@ -6570,6 +6574,13 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
+        # For a baked addmm bias, the bias is the last input and is consumed by
+        # the epilogue, not as a GEMM operand.
+        bias_node = None
+        if self.bias_node is not None:
+            bias_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
+
         kernel_name = str(Placeholder.KERNEL_NAME)
 
         render_kernel = NVUniversalGemmKernel(
@@ -6589,6 +6600,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             epilogue_writes=epilogue_writes,
             epilogue_var_renames=epilogue_var_renames,
             swap_ab=self.swap_ab,
+            bias_node=bias_node,
         )
 
         def render():
