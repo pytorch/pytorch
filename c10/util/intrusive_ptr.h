@@ -1236,7 +1236,7 @@ inline void decref(weak_intrusive_ptr_target* self) {
 }
 
 template <typename T>
-inline T* lock(T* self) {
+[[nodiscard]] inline T* lock(T* self) {
   auto wptr = c10::weak_intrusive_ptr<T>::reclaim(self);
   auto ptr = wptr.lock();
   wptr.release();
@@ -1244,7 +1244,7 @@ inline T* lock(T* self) {
 }
 
 // This gives the STRONG refcount of a WEAK pointer
-inline uint32_t use_count(weak_intrusive_ptr_target* self) {
+[[nodiscard]] inline uint32_t use_count(weak_intrusive_ptr_target* self) {
   auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = wptr.use_count();
   wptr.release();
