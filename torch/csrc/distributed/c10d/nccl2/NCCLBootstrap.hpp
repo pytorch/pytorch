@@ -13,7 +13,6 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 
 #include <nccl.h>
-#include <torch/csrc/distributed/c10d/nccl2/CudaApi.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 
 namespace c10d::nccl2 {
@@ -31,7 +30,6 @@ class NCCLBootstrap {
       int rank,
       int comm_size,
       std::shared_ptr<NcclApi> nccl_api,
-      std::shared_ptr<CudaApi> cuda_api,
       std::chrono::milliseconds timeout);
   ~NCCLBootstrap() noexcept;
 
@@ -73,7 +71,6 @@ class NCCLBootstrap {
   bool created_internal_store_;
   c10::Device device_;
   std::shared_ptr<NcclApi> nccl_api_;
-  std::shared_ptr<CudaApi> cuda_api_;
   void* barrier_buffer_{nullptr};
   int rank_;
   int comm_size_;

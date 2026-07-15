@@ -4,6 +4,7 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLCCA.hpp>
@@ -222,10 +223,7 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread starting for rank: " << rank_;
 
   cudaStreamCaptureMode mode = cudaStreamCaptureModeThreadLocal;
-  CUDA_CHECK_IGNORE(
-      cuda_api_,
-      cuda_api_->threadExchangeStreamCaptureMode(&mode),
-      "Failed to swap capture mode for timeout thread");
+  C10_CUDA_CHECK_WARN(cudaThreadExchangeStreamCaptureMode(&mode));
 
   // Honor the noexcept contract: the loop issues NCCL probes (NCCL_CHECK) and
   // abort paths that can throw; swallow here so nothing escapes this thread.
@@ -390,19 +388,8 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
 }
 
 bool ProcessGroupNCCL::getGraphCaptureMode() {
-  cudaStream_t current_stream =
-      cuda_api_->getCurrentCUDAStream(device_.index());
-  cudaStreamCaptureStatus capture_status;
-
-  cudaError_t err =
-      cuda_api_->streamIsCapturing(current_stream, &capture_status);
-  if (err == cudaSuccess) {
-    return capture_status == cudaStreamCaptureStatusActive;
-  }
-
-  throw std::runtime_error(
-      "Failed to check CUDA stream capture status: " +
-      std::string(cuda_api_->getErrorString(err)));
+  auto current_stream = at::cuda::getCurrentCUDAStream(device_.index());
+  return c10::cuda::isStreamCapturingMayInitCtx(current_stream);
 }
 
 c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
@@ -430,61 +417,23 @@ void ProcessGroupNCCL::enqueueWork(
   // In graph capture mode, keep a reference to the work object to prevent
   // premature destruction until the graph gets destroyed, organized per graph
   if (getGraphCaptureMode()) {
-    cudaStreamCaptureStatus capture_status;
-    unsigned long long graph_id;
-    cudaGraph_t graph;
-
-    cudaError_t err = cuda_api_->streamGetCaptureInfo_v2(
-        stream, &capture_status, &graph_id, &graph, nullptr, nullptr);
-    if (err != cudaSuccess) {
-      throw std::runtime_error(
-          "Failed to get CUDA stream capture info: " +
-          std::string(cuda_api_->getErrorString(err)));
-    } else if (capture_status == cudaStreamCaptureStatusActive) {
+    auto capture_info = c10::cuda::captureInfoMayInitCtx(stream);
+    if (capture_info.status == c10::cuda::CaptureStatus::Active) {
       std::lock_guard<std::mutex> lock(graph_capture_work_mutex_);
 
       // Check if this is the first work object for this graph
-      bool is_first_work = graph_capture_work_refs_[graph_id].empty();
+      bool is_first_work = graph_capture_work_refs_[capture_info.id].empty();
 
       // Add work reference to the per-graph container
-      graph_capture_work_refs_[graph_id].push_back(work);
+      graph_capture_work_refs_[capture_info.id].push_back(work);
 
       // If this is the first work object for this graph, set up automatic
       // cleanup
       if (is_first_work) {
-        // Create cleanup data that will be passed to the callback
-        auto* cleanup_data = new GraphCleanupData(this, graph_id);
-
-        // Create a CUDA user object with our cleanup callback
-        cudaUserObject_t user_object;
-        err = cuda_api_->userObjectCreate(
-            &user_object,
-            cleanup_data,
-            graphCleanupCallback,
-            1, // initial reference count
-            cudaUserObjectNoDestructorSync);
-        if (err != cudaSuccess) {
-          // If we failed to create the user object, clean up manually
-          delete cleanup_data;
-          throw std::runtime_error(
-              "Failed to create user object: " +
-              std::string(cuda_api_->getErrorString(err)));
-        } else {
-          // Retain the user object in the graph so it gets cleaned up when the
-          // graph is destroyed
-          err = cuda_api_->graphRetainUserObject(
-              graph,
-              user_object,
-              1, // reference count
-              cudaGraphUserObjectMove);
-          if (err != cudaSuccess) {
-            // If we failed to retain the user object, clean up manually
-            delete cleanup_data;
-            throw std::runtime_error(
-                "Failed to retain user object: " +
-                std::string(cuda_api_->getErrorString(err)));
-          }
-        }
+        c10::cuda::retainGraphUserObject(
+            capture_info.graph,
+            std::make_unique<GraphCleanupData>(this, capture_info.id),
+            graphCleanupCallback);
       }
     }
   } else {
@@ -514,30 +463,16 @@ cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   // (unlike upstream torchcomms, which ran with the device already set). Pin it
   // here -- the first call in every collective -- so subsequent event/record
   // ops in this op target device_ (events are pooled per device_).
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->setDevice(device_.index()),
-      "Failed to set CUDA device for operation");
+  c10::cuda::set_device(device_.index());
   if (async_op) {
-    // Get current PyTorch CUDA stream for this device
-    cudaStream_t current_stream =
-        cuda_api_->getCurrentCUDAStream(device_.index());
+    auto current_stream = at::cuda::getCurrentCUDAStream(device_.index());
 
-    // Record event on current stream and wait for it on internal stream
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->eventRecord(dependency_event_, current_stream),
-        "Failed to record dependency event");
+    dependency_event_->record(current_stream);
+    dependency_event_->block(*internal_stream_);
 
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->streamWaitEvent(internal_stream_, dependency_event_, 0),
-        "Failed to make internal stream wait for dependency event");
-
-    return internal_stream_;
+    return internal_stream_->stream();
   } else {
-    // Use the current PyTorch CUDA stream for synchronous operations
-    return cuda_api_->getCurrentCUDAStream(device_.index());
+    return at::cuda::getCurrentCUDAStream(device_.index()).stream();
   }
 }
 
@@ -564,33 +499,23 @@ void ProcessGroupNCCL::checkTensorsDevice(
 }
 
 // Protected methods (not in the private section of the header)
-cudaEvent_t ProcessGroupNCCL::getEvent() {
+std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent() {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
   if (!event_pool_.empty()) {
-    cudaEvent_t event = event_pool_.front();
+    auto event = std::move(event_pool_.front());
     event_pool_.pop();
     return event;
   }
 
-  // Create new event if pool is empty
-  cudaEvent_t event;
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->eventCreateWithFlags(&event, cudaEventDisableTiming),
-      "Failed to create event");
-  return event;
+  return std::make_unique<at::cuda::CUDAEvent>(cudaEventDisableTiming);
 }
 
-void ProcessGroupNCCL::returnEvent(cudaEvent_t event) {
+void ProcessGroupNCCL::returnEvent(std::unique_ptr<at::cuda::CUDAEvent> event) {
   std::lock_guard<std::mutex> lock(event_pool_mutex_);
 
   if (event_pool_.size() < max_event_pool_size_) {
-    event_pool_.push(event);
-  } else {
-    // Pool is full, destroy the event
-    CUDA_CHECK(
-        cuda_api_, cuda_api_->eventDestroy(event), "Failed to destroy event");
+    event_pool_.push(std::move(event));
   }
 }
 
