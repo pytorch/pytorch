@@ -2733,6 +2733,38 @@ class outer_fn(torch.nn.Module):
             "the make_fx graph; disable_proxy_modes_tracing is not active",
         )
 
+    def test_stable_hash_for_caching_is_rank_specific(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/188390.
+        # _stable_hash_for_caching must include the local tensor's device so
+        # that each rank produces a unique AOTAutograd cache key.  Before the
+        # fix, the device was omitted and rank 1 incorrectly reused rank 0's
+        # compiled kernel, causing CUDA errors at runtime.
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        local = torch.empty(2, 4)
+        dt = DTensor.from_local(local, mesh, [Shard(0)], run_check=False)
+        h0 = dt._stable_hash_for_caching()
+        # Swap to a different device type to verify the device string participates
+        # in the hash.  This does not model two real CPU ranks (both would be plain
+        # "cpu" with no index); see test_stable_hash_for_caching_cuda_ranks for the
+        # actual multi-rank scenario.  _spec is intentionally left inconsistent with
+        # _local_tensor; this is a focused unit test of the hash only.
+        dt._local_tensor = dt._local_tensor.to("meta")
+        h1 = dt._stable_hash_for_caching()
+        self.assertNotEqual(h0, h1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_stable_hash_for_caching_cuda_ranks(self):
+        # Exercise the exact scenario from #188390: two DTensors with identical
+        # global specs but local tensors on cuda:0 vs cuda:1 must produce
+        # different AOTAutograd cache keys.
+        mesh = DeviceMesh("cuda", torch.arange(self.world_size))
+        local0 = torch.empty(2, 4, device="cuda:0")
+        local1 = torch.empty(2, 4, device="cuda:1")
+        dt0 = DTensor.from_local(local0, mesh, [Shard(0)], run_check=False)
+        dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
+        h0, h1 = dt0._stable_hash_for_caching(), dt1._stable_hash_for_caching()
+        self.assertNotEqual(h0, h1)
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
