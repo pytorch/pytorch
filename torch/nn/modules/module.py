@@ -2165,7 +2165,7 @@ class Module:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
         extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
         if (
-            getattr(self.__class__, "get_extra_state", Module.get_extra_state)
+            getattr(type(self), "get_extra_state", Module.get_extra_state)
             is not Module.get_extra_state
         ):
             destination[extra_state_key] = self.get_extra_state()
@@ -2508,7 +2508,7 @@ class Module:
 
         extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
         if (
-            getattr(self.__class__, "set_extra_state", Module.set_extra_state)
+            getattr(type(self), "set_extra_state", Module.set_extra_state)
             is not Module.set_extra_state
         ):
             if extra_state_key in state_dict:

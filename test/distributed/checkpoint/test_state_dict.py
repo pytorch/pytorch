@@ -16,6 +16,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.checkpoint import state_dict as ptd_state_dict
 from torch.distributed.checkpoint.state_dict import (
+    _iterate_valid_model_state,
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
     get_model_state_dict,
@@ -547,6 +548,73 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         set_model_state_dict(target_model, get_model_state_dict(target_model))
         self.assertEqual(model.state_dict()["u1._extra_state"], "MyState")
         self.assertEqual(model.state_dict(), get_model_state_dict(target_model))
+
+    @skip_if_lt_x_gpu(1)
+    def test_compiled_extra_state_uses_actual_type(self) -> None:
+        class ExtraStateModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.ones(()))
+                self.extra_state = "initial"
+
+            def forward(self, x):
+                return x * self.param
+
+            def get_extra_state(self):
+                return self.extra_state
+
+            def set_extra_state(self, state):
+                self.extra_state = state
+
+            def state_dict(self, *args, **kwargs):
+                if type(self) is not ExtraStateModule:
+                    raise AssertionError("state_dict called on the wrong module type")
+                return super().state_dict(*args, **kwargs)
+
+            def load_state_dict(self, *args, **kwargs):
+                if type(self) is not ExtraStateModule:
+                    raise AssertionError(
+                        "load_state_dict called on the wrong module type"
+                    )
+                return super().load_state_dict(*args, **kwargs)
+
+        model = torch.compile(
+            ExtraStateModule().to(device_type),
+            backend="eager",
+        )
+        valid_state_names = {name for name, _ in _iterate_valid_model_state(model)}
+
+        self.assertIn("_orig_mod._extra_state", valid_state_names)
+        self.assertNotIn("_extra_state", valid_state_names)
+
+        model_state_dict = get_model_state_dict(model)
+        self.assertEqual(set(model_state_dict.keys()), {"param", "_extra_state"})
+        self.assertEqual(model_state_dict["_extra_state"], "initial")
+
+        target_model = ExtraStateModule().to(device_type)
+        compiled_target = torch.compile(target_model, backend="eager")
+        target_model.extra_state = "before load"
+
+        set_model_state_dict(compiled_target, model_state_dict=dict(model_state_dict))
+        self.assertEqual(target_model.extra_state, "initial")
+
+        patched_model = torch.compile(
+            ExtraStateModule().to(device_type),
+            backend="eager",
+        )
+        _patch_model_state_dict(patched_model)
+        self.assertEqual(
+            set(patched_model.state_dict().keys()),
+            {"param", "_extra_state"},
+        )
+
+        patched_target = ExtraStateModule().to(device_type)
+        patched_compiled_target = torch.compile(patched_target, backend="eager")
+        _patch_model_state_dict(patched_compiled_target)
+        patched_target.extra_state = "before load"
+
+        patched_compiled_target.load_state_dict(dict(model_state_dict))
+        self.assertEqual(patched_target.extra_state, "initial")
 
     @skip_if_lt_x_gpu(1)
     def test_non_persistent_buffers(self) -> None:

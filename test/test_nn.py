@@ -2217,6 +2217,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, 'Missing key'):
             m.load_state_dict(m.state_dict())
 
+    @skipIfTorchDynamo("TorchDynamo cannot trace this synthetic __class__ proxy")
+    def test_extra_state_uses_actual_type(self):
+
+        class ExtraStateModule(torch.nn.Module):
+            def get_extra_state(self):
+                return "extra"
+
+            def set_extra_state(self, state):
+                pass
+
+        class ProxyModule(torch.nn.Module):
+            @property
+            def __class__(self):
+                return ExtraStateModule
+
+        m = ProxyModule()
+        self.assertEqual(m.__class__, ExtraStateModule)
+        self.assertEqual(type(m), ProxyModule)
+        self.assertNotIn('_extra_state', m.state_dict())
+
+        incompatible_keys = m.load_state_dict({}, strict=True)
+        self.assertEqual(incompatible_keys.missing_keys, [])
+        self.assertEqual(incompatible_keys.unexpected_keys, [])
+
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
