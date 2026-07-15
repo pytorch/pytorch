@@ -892,7 +892,7 @@ Tensor get_expanded_index(const Tensor& index, SymIntArrayRef self_size, int64_t
   // Now apply expand to index_
   {
     VmapSymDimVector new_index_shape = {self_size.begin(), self_size.end()};
-    new_index_shape[dim] = idx_size;
+    new_index_shape[dim] = std::move(idx_size);
     index_ = index_.expand_symint(new_index_shape);
   }
   return index_;
@@ -1102,6 +1102,47 @@ std::tuple<Tensor, std::optional<int64_t>> masked_fill_scalar_batch_rule(
   auto tensors = binary_pointwise_align(self, self_bdim, mask, mask_bdim);
   auto result = at::masked_fill(std::get<0>(tensors), std::get<1>(tensors), source);
   return std::make_tuple(std::move(result), 0);
+}
+
+std::tuple<Tensor, std::optional<int64_t>> masked_fill_tensor_batch_rule(
+    const Tensor & self,
+    std::optional<int64_t> self_bdim,
+    const Tensor & mask,
+    std::optional<int64_t> mask_bdim,
+    const Tensor & value,
+    std::optional<int64_t> value_bdim) {
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto mask_logical_rank = rankWithoutBatchDim(mask, mask_bdim);
+  auto max_logical_rank = std::max(self_logical_rank, mask_logical_rank);
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto mask_ = moveBatchDimToFront(mask, mask_bdim);
+
+  self_ = maybePadToLogicalRank(self_, self_bdim, max_logical_rank);
+  mask_ = maybePadToLogicalRank(mask_, mask_bdim, max_logical_rank);
+
+  if (!value_bdim) {
+    return std::make_tuple(at::masked_fill(self_, mask_, value), 0);
+  }
+
+  TORCH_CHECK(
+      rankWithoutBatchDim(value, value_bdim) == 0,
+      "vmap: expected masked_fill `value` to be a batched scalar (logical rank 0), "
+      "but got logical rank ",
+      rankWithoutBatchDim(value, value_bdim));
+
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  TORCH_CHECK(
+      !(value_.is_complex() && !self_.is_complex()),
+      "value cannot be converted to type ",
+      self_.scalar_type(),
+      " without overflow");
+  TORCH_CHECK(
+      value_.device() == self_.device() || value_.device().is_cpu(),
+      "masked_fill: Expected inputs to be on same device");
+  value_ = value_.to(self_.device(), self_.scalar_type());
+  value_ = maybePadToLogicalRank(value_, value_bdim, max_logical_rank);
+  return std::make_tuple(at::where(mask_, value_, self_), 0);
 }
 
 std::tuple<Tensor, std::optional<int64_t>> index_fill_batch_rule_helper(
@@ -1342,6 +1383,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);
   VMAP_SUPPORT2(masked_fill, Scalar, masked_fill_scalar_batch_rule);
+  VMAP_SUPPORT2(masked_fill, Tensor, masked_fill_tensor_batch_rule);
   VMAP_SUPPORT2(index_fill_, int_Tensor, index_fill__int_tensor_batch_rule);
   VMAP_SUPPORT2(index_fill_, int_Scalar, index_fill__int_scalar_batch_rule);
   VMAP_SUPPORT2(index_fill, int_Tensor, index_fill_int_tensor_batch_rule);
