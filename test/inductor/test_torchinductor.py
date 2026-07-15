@@ -6278,6 +6278,20 @@ for dtype in (torch.int32, torch.int64):
         if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
             self.skipTest("Expected failure under subprocess compile mode")
 
+        if (
+            IS_FBCODE
+            and nhwc
+            and in_channels == 128
+            and out_channels == 128
+            and groups == 1
+            and kernel == 3
+            and stride == 1
+        ):
+            self.skipTest(
+                "Triton max-autotune conv backend gives out-of-tolerance results for "
+                "128ch groups=1 NHWC transposed conv in fbcode (T275754523)"
+            )
+
         def fn(x, weight):
             return torch.ops.aten.convolution(
                 x,
