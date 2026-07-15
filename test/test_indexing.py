@@ -49,7 +49,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class TestIndexingDevice(TestCase):
+class TestIndexing(TestCase):
     def test_index(self, device):
         def consec(size, start=1):
             sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
@@ -2581,7 +2581,7 @@ class NumpyTests(TestCase):
 
 
 instantiate_device_type_tests(
-    TestIndexingDevice, globals(), except_for="meta", allow_mps=True, allow_xpu=True
+    TestIndexing, globals(), except_for="meta", allow_mps=True, allow_xpu=True
 )
 instantiate_device_type_tests(NumpyTests, globals(), except_for="meta", allow_xpu=True)
 
