@@ -1061,31 +1061,43 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
-  if (output_mask[0]) {
-    grad_input = miopen_convolution_transpose_backward_input(
-        grad_output,
-        weight,
-        padding,
-        stride,
-        dilation,
-        groups,
-        benchmark,
-        deterministic);
-  }
-  if (output_mask[1]) {
-    grad_weight = miopen_convolution_transpose_backward_weight(
-        weight.sizes(),
-        grad_output,
-        input,
-        padding,
-        stride,
-        dilation,
-        groups,
-        benchmark,
-        deterministic);
-  }
-  if (output_mask[2]) {
-    grad_bias = miopen_convolution_backward_bias(grad_output);
+  if (grad_output.numel() == 0) {
+    if (output_mask[0]) {
+      grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (output_mask[1]) {
+      grad_weight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (output_mask[2]) {
+      grad_bias = at::zeros({weight.size(1) * groups}, grad_output.options());
+    }
+  } else {
+    if (output_mask[0]) {
+      grad_input = miopen_convolution_transpose_backward_input(
+          grad_output,
+          weight,
+          padding,
+          stride,
+          dilation,
+          groups,
+          benchmark,
+          deterministic);
+    }
+    if (output_mask[1]) {
+      grad_weight = miopen_convolution_transpose_backward_weight(
+          weight.sizes(),
+          grad_output,
+          input,
+          padding,
+          stride,
+          dilation,
+          groups,
+          benchmark,
+          deterministic);
+    }
+    if (output_mask[2]) {
+      grad_bias = miopen_convolution_backward_bias(grad_output);
+    }
   }
 
   return std::tuple<Tensor,Tensor,Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
@@ -1226,6 +1238,9 @@ Tensor miopen_convolution_backward_input(
   TensorArg grad_input{grad_input_t, "result", 0};
   convolution_shape_check(
       c, grad_input, weight, grad_output, padding, stride, dilation, groups);
+  if (grad_input_t.numel() == 0) {
+    return grad_input_t;
+  }
 
   Tensor weight_contig = weight->contiguous(memory_format);
   Tensor grad_output_contig = grad_output->contiguous(memory_format);
@@ -1658,6 +1673,9 @@ Tensor miopen_convolution_transpose(
       groups,
       benchmark,
       deterministic);
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
   if (bias->defined()) {
     miopen_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
   }
