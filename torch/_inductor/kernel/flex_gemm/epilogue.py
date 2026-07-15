@@ -34,6 +34,7 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR,
     LOCAL_REDUCE_FINALIZE_FN_SUFFIX,
     LOCAL_REDUCE_FINALIZE_SCALAR_ONLY_ERROR,
+    LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_MATCH_NODE_ERROR,
     LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR,
@@ -44,7 +45,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_SINGLE_PHYSICAL_FINALIZE_ERROR,
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
     local_reduce_unsupported_tensorssa_error,
-    MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS,
     statically_known_shape_equal,
     validate_local_reduce_feed_main_capability,
     validate_local_reduce_tensorssa_group_size,
@@ -647,10 +647,7 @@ class FlexGemmLocalReduceAnalysis:
         if layout.axis != 0:
             if not self.feed_main_grouped_reduction(value, grouped_source, layout):
                 return None
-            if (
-                layout.group_size
-                <= MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS
-            ):
+            if layout.group_size <= LOCAL_REDUCE_FRAGMENT_WIDTH:
                 # Intentional fallthrough: axis-1 feeds within one TensorSSA
                 # fragment lower as plain generated TensorSSA without a feed plan.
                 return None
@@ -1055,6 +1052,11 @@ class FlexGemmEpilogueEmitter:
         self.store_sources[node] = self.env[node]
         return True
 
+    def propagate_physical_reduction(self, node: torch.fx.Node, source: Any) -> None:
+        """Preserve physical callback provenance through shape-only wrappers."""
+        if isinstance(source, torch.fx.Node) and source in self.physical_reductions:
+            self.physical_reductions[node] = self.physical_reductions[source]
+
     def physical_finalize_arg(self, value: Any) -> Any:
         """Replace physical reduction inputs with their generated value expression."""
         if isinstance(value, torch.fx.Node) and value in self.physical_reductions:
@@ -1099,10 +1101,12 @@ class FlexGemmEpilogueEmitter:
         lowered = lower_squeeze(node, self.env, self.store_sources)
         if lowered is not None:
             self.env[node] = lowered
+            self.propagate_physical_reduction(node, node.args[0])
             return
         lowered = lower_getitem(node, self.env, self.store_sources)
         if lowered is not None:
             self.env[node] = lowered
+            self.propagate_physical_reduction(node, node.args[0])
             return
         lowered = lower_prepare_softmax_online(
             node,
@@ -1125,6 +1129,7 @@ class FlexGemmEpilogueEmitter:
         )
         if lowered is not None:
             self.env[node] = lowered
+            self.propagate_physical_reduction(node, node.args[0])
             return
         lowered = lower_tensorssa_reduce(
             node,
