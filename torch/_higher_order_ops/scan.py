@@ -10,6 +10,7 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -33,7 +34,6 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
     validate_subgraph_args_types,
 )
-from torch._guards import detect_fake_mode
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -92,7 +92,6 @@ def _build_empty_output_for_length_zero(
             init,
         )
         _, sample_y = combine_fn(fake_init, None)
-        # _, sample_y = combine_fn(init, None)
     return pytree.tree_map(
         lambda l: torch.empty([0] + list(l.shape), dtype=l.dtype, device=l.device)
         if isinstance(l, torch.Tensor)
@@ -186,6 +185,7 @@ def scan(
     # Determine whether xs carries any tensor data.
     xs_has_tensors = any(isinstance(l, torch.Tensor) for l in leaves_xs_orig)
 
+    # short-cuts
     if length is not None:
         if isinstance(length, bool) or not isinstance(length, int) or length < 0:
             raise RuntimeError(
@@ -205,7 +205,7 @@ def scan(
     elif not xs_has_tensors:
         return init, []
 
-    def _validate_input(cfn, lxs, linit, d, r):
+    def _validate_input(cfn, lxs, linit, d, r, l):
         # Basic arguments check
         if not callable(cfn):
             raise RuntimeError(f"Combine_fn must be a callable, but got {cfn}")
@@ -213,6 +213,12 @@ def scan(
             raise RuntimeError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
+
+        if l is not None and xs_has_tensors and lxs[0].shape[d] != l:
+            raise RuntimeError(
+                f"scan() length={l} does not match xs size along dim={d}: "
+                f"{lxs[0].shape[d]}"
+            )
 
         # Checks for init
         if len(linit) == 0:
@@ -237,13 +243,7 @@ def scan(
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
 
-    if length is not None and xs_has_tensors and leaves_xs_orig[0].shape[dim] != length:
-        raise RuntimeError(
-            f"scan() length={length} does not match xs size along dim={dim}: "
-            f"{leaves_xs_orig[0].shape[dim]}"
-        )
-
-    _validate_input(combine_fn, leaves_xs_orig, leaves_init, dim, reverse)
+    _validate_input(combine_fn, leaves_xs_orig, leaves_init, dim, reverse, length)
 
     # Move scan dim to 0 and always perform scan on dim 0
     leaves_xs = []

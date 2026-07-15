@@ -4683,47 +4683,36 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(bad_body, init, None, length=length)
 
-    # TODO: extend to "compile" and "compile_dynamic_shape" once inductor
-    # supports xs=None / None-output scan (currently hits "Boolean value of
-    # Tensor with more than one value" and "'NoneType' has no attribute 'size'").
     @skipIfTorchDynamo("don't test compile on compile")
     @parametrize("compile_mode", ["none", "eager"])
-    def test_scan_xs_none_length_tensor_output(self, compile_mode):
-        # Counter-loop (xs=None) with tensor output across eager and compiled paths.
-        def body(c, x):
-            return c + 1.0, (c + 1.0).clone()
+    @parametrize("output", ["tensor", "none"])
+    @parametrize("autograd", [False, True])
+    def test_scan_xs_none_length(self, compile_mode, output, autograd):
+        if output == "none" and autograd:
+            self.skipTest("None output + autograd not yet supported in scan")
 
-        init = torch.tensor(0.0)
+        if output == "tensor":
+
+            def body(c, x):
+                return torch.sin(c), torch.sin(c).clone()
+        else:
+
+            def body(c, x):  # noqa: E306
+                return torch.sin(c), None
+
+        init = torch.tensor(0.5, requires_grad=autograd)
         scan_fct = compile_mode_helper(scan, compile_mode)
-        carry, ys = scan_fct(body, init, None, length=4)
-        self.assertEqual(carry, torch.tensor(4.0))
-        self.assertEqual(ys, torch.tensor([1.0, 2.0, 3.0, 4.0]))
-        expected = _fake_scan(body, init, None, length=4)
-        self.assertEqual((carry, ys), expected)
+        result = scan_fct(body, init, None, length=3)
+        result_exp = _fake_scan(body, init, None, length=3)
+        self.assertEqual(result, result_exp)
 
-    # TODO: extend to "compile" and "compile_dynamic_shape" once inductor
-    # supports xs=None / None-output scan (currently hits "'NoneType' has no
-    # attribute 'size'").
-    @skipIfTorchDynamo("don't test compile on compile")
-    @parametrize("compile_mode", ["none", "eager"])
-    def test_scan_xs_none_length_none_output(self, compile_mode):
-        # Counter-loop (xs=None) with None output across eager and compiled paths.
-        def body(c, x):
-            return c + 1.0, None
-
-        init = torch.tensor(0.0)
-        scan_fct = compile_mode_helper(scan, compile_mode)
-        carry, ys = scan_fct(body, init, None, length=4)
-        self.assertEqual(carry, torch.tensor(4.0))
-        self.assertIsNone(ys)
-        expected = _fake_scan(body, init, None, length=4)
-        self.assertEqual((carry, ys), expected)
+        if autograd:
+            self.check_autograd(result, result_exp, (init,))
 
     @parametrize("output", ["tensor", "none"])
     def test_scan_xs_none_length_zero(self, output):
-        # length=0 returns init unchanged; output shape is [0, ...] for tensors,
-        # or None when the body produces None.
         if output == "tensor":
+
             def body(c, x):
                 return c, (c * 2).clone()
 
@@ -4733,6 +4722,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             self.assertEqual(ys.shape, torch.Size([0, 3]))
             self.assertEqual(ys.dtype, init.dtype)
         else:
+
             def body(c, x):  # noqa: E306
                 return c + 1.0, None
 
@@ -4746,15 +4736,14 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     @skipIfNoDynamoSupport
     @parametrize("output", ["tensor", "none"])
     def test_scan_xs_none_length_zero_compile(self, output):
-        # length==0 returns early via _build_empty_output_for_length_zero, which
-        # calls detect_fake_mode -- a non-Tensor-returning torch op that Dynamo
-        # cannot trace. Assert the expected error so this limitation is pinned.
         if output == "tensor":
+
             def body(c, x):
                 return c, (c * 2).clone()
 
             init = torch.tensor([1.0, 2.0, 3.0])
         else:
+
             def body(c, x):  # noqa: E306
                 return c + 1.0, None
 
@@ -4770,26 +4759,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             f(init)
 
-    def test_scan_xs_none_length_grad(self):
-        def body(c, x):
-            return torch.sin(c), torch.sin(c).clone()
-
-        init = torch.tensor(0.5, requires_grad=True)
-        carry, ys = scan(body, init, None, length=3)
-        (carry.sum() + ys.sum()).backward()
-        self.assertIsNotNone(init.grad)
-        self.assertTrue(torch.isfinite(init.grad).all())
-
-        # Reference: compare against manual unrolled forward
-        init_ref = torch.tensor(0.5, requires_grad=True)
-        c = init_ref
-        ys_ref = []
-        for _ in range(3):
-            c = torch.sin(c)
-            ys_ref.append(c.clone())
-        (c.sum() + torch.stack(ys_ref).sum()).backward()
-        self.assertEqual(init.grad, init_ref.grad)
-
     def test_scan_xs_none_length_vmap(self):
         def body(c, x):
             return c + 1.0, (c + 1.0).clone()
@@ -4804,9 +4773,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
     @skipIfNoDynamoSupport
     def test_scan_xs_none_length_dynamic_compile(self):
-        # Dynamo specialises on the integer value of length (treating it as a
-        # compile-time constant), so each distinct length value produces a
-        # separate graph. Verify correct results and that the cache is used.
         def body(c, x):
             return c + 1.0, (c + 1.0).clone()
 
@@ -4822,7 +4788,9 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         r4 = f(init, 4)
         self.assertEqual(r4, (torch.tensor(4.0), torch.tensor([1.0, 2.0, 3.0, 4.0])))
         r6 = f(init, 6)
-        self.assertEqual(r6, (torch.tensor(6.0), torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])))
+        self.assertEqual(
+            r6, (torch.tensor(6.0), torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+        )
         f(init, 4)  # should hit cache, no new compilation
         self.assertEqual(cc.frame_count, 2)
 
