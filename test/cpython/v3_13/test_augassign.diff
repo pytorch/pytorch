@@ -1,0 +1,39 @@
+diff --git a/test/cpython/v3_13/test_augassign.py b/test/cpython/v3_13/test_augassign.py
+index 5930d9e7a29..9e2623eadb4 100644
+--- a/test/cpython/v3_13/test_augassign.py
++++ b/test/cpython/v3_13/test_augassign.py
+@@ -1,9 +1,27 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_augassign.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ # Augmented assignment test.
+ 
+ import unittest
+ 
+ 
+-class AugAssignTest(unittest.TestCase):
++class AugAssignTest(CPythonTestCase):
+     def testBasic(self):
+         x = 2
+         x += 1
+@@ -323,4 +341,4 @@ __ilshift__ called
+ '''.splitlines())
+ 
+ if __name__ == '__main__':
+-    unittest.main()
++    run_tests()
