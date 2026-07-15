@@ -375,9 +375,6 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
 
   auto pso_step1 = lib.getPipelineStateForFunc(fmt::format("count_nonzero_prefix_sum_{}", type_str));
   auto pso_step2 = lib.getPipelineStateForFunc("prefix_sum_blocks");
-  auto pso_step3 = lib.getPipelineStateForFunc(fmt::format("scatter_nonzero_indices_{}", type_str));
-  TORCH_INTERNAL_ASSERT([pso_step1 maxTotalThreadsPerThreadgroup] == [pso_step3 maxTotalThreadsPerThreadgroup],
-                        "nonzero: step 1 and step 3 threadgroup sizes must match");
 
   uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
   uint64_t num_blocks = at::ceil_div(static_cast<uint64_t>(numel), static_cast<uint64_t>(threads_per_group));
@@ -431,6 +428,16 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   // Clamp to uint32: max_elements is user-supplied (int64) on the static path
   // and could exceed 2^32, which would silently truncate and drop nonzeros.
   uint32_t max_entries = static_cast<uint32_t>(std::min<int64_t>(*max_elements, std::numeric_limits<uint32_t>::max()));
+
+  // Pick the scatter index width. tid is a 32-bit grid position, so the flat
+  // input index is bounded by numel; the output offset is num_nonzeros * ndim.
+  // Small tensors that fit 32-bit index math use the uint variant (fast 32-bit
+  // div/mod in the coordinate decomposition); only larger ones pay for 64-bit.
+  const bool use_32bit_index = canUse32BitIndexMath(input) && canUse32BitIndexMath(out);
+  auto pso_step3 = lib.getPipelineStateForFunc(
+      fmt::format("scatter_nonzero_indices_{}_{}", type_str, use_32bit_index ? "i32" : "i64"));
+  TORCH_INTERNAL_ASSERT([pso_step1 maxTotalThreadsPerThreadgroup] == [pso_step3 maxTotalThreadsPerThreadgroup],
+                        "nonzero: step 1 and step 3 threadgroup sizes must match");
 
   // Step 3: scatter indices, capped at max_entries
   dispatch_sync_with_rethrow(stream->queue(), ^() {
