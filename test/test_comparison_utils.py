@@ -49,7 +49,6 @@ class TestComparisonUtils(TestCase):
 instantiate_device_type_tests(
     TestComparisonUtils,
     globals(),
-    except_for=("meta", "cpu"),
     allow_mps=True,
     allow_xpu=True,
 )
