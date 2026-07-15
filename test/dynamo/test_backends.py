@@ -194,6 +194,20 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             with patch.dict(sys.modules, {"tvm": None}):
                 self.assertRaises(ImportError, backend, gm, [torch.randn(2)])
 
+    def test_tvm_relay_future_warning(self, device):
+        import torch._dynamo.backends.tvm as tvm_backend
+
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        with patch.dict(sys.modules, {"tvm": None}):
+            with self.assertWarns(FutureWarning):
+                self.assertRaises(
+                    ImportError,
+                    tvm_backend._tvm_relay_compile,
+                    gm,
+                    [torch.randn(2)],
+                    {},
+                )
+
     def test_tvm_dispatches_relay_or_relax(self, device):
         import torch._dynamo.backends.tvm as tvm_backend
 
