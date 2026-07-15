@@ -31,9 +31,8 @@ if TYPE_CHECKING:
 
 
 # swap_ab transposes the dispatched GEMM, so a row broadcast becomes a col
-# broadcast (and vice versa) while tile broadcasts only transpose their data and
-# scalars are orientation-invariant.
-_SWAPPED_ARG_KIND = {"row": "col", "col": "row", "tile": "tile", "scalar": "scalar"}
+# broadcast (and vice versa) while tile broadcasts only transpose their data.
+_SWAPPED_ARG_KIND = {"row": "col", "col": "row", "tile": "tile"}
 
 
 def inductor_quack_cache_dir() -> str:
@@ -87,19 +86,17 @@ def check_matrix_row_major_layout(name: str, tensor: torch.Tensor) -> None:
 
 
 def check_epilogue_arg_kinds(epilogue_arg_kinds: tuple[str, ...]) -> None:
-    """Require each epilogue arg kind to be row, col, tile, or scalar."""
+    """Require each epilogue arg kind to be row, col, or tile."""
     for kind in epilogue_arg_kinds:
-        if kind not in ("tile", "row", "col", "scalar"):
+        if kind not in ("tile", "row", "col"):
             raise NotImplementedError(
-                f"FlexGEMM supports only tile/row/col/scalar args, got {epilogue_arg_kinds}"
+                f"FlexGEMM supports only tile/row/col args, got {epilogue_arg_kinds}"
             )
 
 
 def infer_epilogue_arg_kind(a: torch.Tensor, b: torch.Tensor, arg: torch.Tensor) -> str:
     """Infer a captured epilogue tensor's broadcast kind from its shape."""
     m, n = a.shape[-2], b.shape[-1]
-    if tuple(arg.shape) == (1, 1):
-        return "scalar"
     if tuple(arg.shape) == (m, n):
         return "tile"
     if tuple(arg.shape) == (1, n):
@@ -108,7 +105,7 @@ def infer_epilogue_arg_kind(a: torch.Tensor, b: torch.Tensor, arg: torch.Tensor)
         return "col"
     raise NotImplementedError(
         "FlexGEMM captured tensor args must match the GEMM output "
-        "shape or broadcast as [1, N] / [M, 1] / [1, 1]"
+        "shape or broadcast as [1, N] / [M, 1]"
     )
 
 
@@ -124,7 +121,6 @@ def validate_epilogue_arg_shape(
         "tile": (m, n),
         "row": (1, n),
         "col": (m, 1),
-        "scalar": (1, 1),
     }
     if tuple(arg.shape) != expected_shapes[kind]:
         raise RuntimeError(
@@ -163,16 +159,12 @@ def split_epilogue_args(
     epilogue_args: tuple[torch.Tensor, ...],
     epilogue_arg_kinds: tuple[str, ...],
 ) -> tuple[
-    tuple[torch.Tensor, ...],
-    tuple[torch.Tensor, ...],
-    tuple[torch.Tensor, ...],
-    tuple[torch.Tensor, ...],
+    tuple[torch.Tensor, ...], tuple[torch.Tensor, ...], tuple[torch.Tensor, ...]
 ]:
-    """Group epilogue tensors into QuACK row, col, tile, and scalar argument lists."""
+    """Group epilogue tensors into QuACK row, col, and tile argument lists."""
     row_args = []
     col_args = []
     tile_args = []
-    scalar_args = []
     for arg, kind in zip(epilogue_args, epilogue_arg_kinds):
         arg = quack_epilogue_arg(arg)
         match kind:
@@ -182,9 +174,7 @@ def split_epilogue_args(
                 col_args.append(arg.squeeze(-1).unsqueeze(0))
             case "tile":
                 tile_args.append(arg.unsqueeze(0))
-            case "scalar":
-                scalar_args.append(arg.reshape(1))
-    return tuple(row_args), tuple(col_args), tuple(tile_args), tuple(scalar_args)
+    return tuple(row_args), tuple(col_args), tuple(tile_args)
 
 
 def normalize_c(
@@ -325,7 +315,6 @@ def dispatch_gemm_act(
     row_args: tuple[torch.Tensor, ...],
     col_args: tuple[torch.Tensor, ...],
     tile_args: tuple[torch.Tensor, ...],
-    scalar_args: tuple[torch.Tensor, ...],
     alpha: float,
     beta: float,
     config,
@@ -407,7 +396,6 @@ def dispatch_gemm_act(
         tensor_epilogue_rowvec_biases=row_args,
         tensor_epilogue_colvec_biases=col_args,
         tensor_epilogue_tile_biases=tile_args,
-        tensor_epilogue_scalar_biases=scalar_args,
         alpha=alpha,
         beta=beta,
         use_tma_gather=config.use_tma_gather,
@@ -451,7 +439,7 @@ def gemm_epilogue(
         aux_outs: Preallocated same-shape aux tensors for tuple epilogues.
         local_reduce: Optional structural local-reduce plan from generated code.
         epilogue_args: Optional tensor args captured by the epilogue.
-        epilogue_arg_kinds: Explicit ``tile``, ``row``, ``col``, or ``scalar`` kind per arg.
+        epilogue_arg_kinds: Explicit ``tile``, ``row``, or ``col`` kind per arg.
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
         expected_ndim: Optional generated-op rank contract for A and B operands.
         device_capacity_override: Parent-computed capability for compile-only workers.
@@ -534,7 +522,7 @@ def gemm_epilogue(
     )
     for index, arg in enumerate(epilogue_args):
         check_matrix_major_layout(f"epilogue_args[{index}]", arg)
-    row_args, col_args, tile_args, scalar_args = split_epilogue_args(
+    row_args, col_args, tile_args = split_epilogue_args(
         epilogue_args, inferred_arg_kinds
     )
 
@@ -575,7 +563,6 @@ def gemm_epilogue(
             row_args,
             col_args,
             tile_args,
-            scalar_args,
             alpha,
             beta,
             config=(
