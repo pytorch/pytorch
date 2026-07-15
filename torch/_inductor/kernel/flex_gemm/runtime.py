@@ -122,6 +122,15 @@ def resolve_epilogue_arg_kinds(
     return epilogue_arg_kinds
 
 
+# NOTE [Boolean epilogue tensor storage]
+# PyTorch bool tensors are byte-addressed, but CuTeDSL models cutlass.Boolean as
+# a 1-bit logical type. Keep the manual uint8 storage view
+# see https://github.com/NVIDIA/cutlass/issues/3348 for details
+def quack_epilogue_arg(arg: torch.Tensor) -> torch.Tensor:
+    """Adapt logical epilogue tensors to QuACK's physical tensor ABI."""
+    return arg.view(torch.uint8) if arg.dtype is torch.bool else arg
+
+
 def split_epilogue_args(
     epilogue_args: tuple[torch.Tensor, ...],
     epilogue_arg_kinds: tuple[str, ...],
@@ -133,6 +142,7 @@ def split_epilogue_args(
     col_args = []
     tile_args = []
     for arg, kind in zip(epilogue_args, epilogue_arg_kinds):
+        arg = quack_epilogue_arg(arg)
         match kind:
             case "row":
                 row_args.append(arg)
@@ -163,6 +173,7 @@ def dispatch_gemm_act(
     b: torch.Tensor,
     C: torch.Tensor | None,
     out: torch.Tensor,
+    aux_out: torch.Tensor | None,
     epilogue_key: str,
     epilogue_arg_kinds: tuple[str, ...],
     row_args: tuple[torch.Tensor, ...],
@@ -177,17 +188,20 @@ def dispatch_gemm_act(
 
     ``config.swap_ab`` dispatches the transposed problem (only the tile schedule
     changes, not numerics): it swaps the A/B operands, writes through transposed
-    ``out``/``C`` views, and swaps the row/col broadcast roles of captured aux
-    tensors so each still aligns with the transposed accumulator.
+    ``out``/``C``/``aux_out`` views, and swaps the row/col broadcast roles of
+    captured aux tensors so each still aligns with the transposed accumulator.
+    Tuple epilogues route the main result through QuACK ``D`` and aux through
+    ``PostAct``/``mAuxOut``.
     """
     from torch._vendor.quack.gemm_act import gemm_act as gemm_act_dispatch
 
     # QuACK consumes A as (l, m, k) and B as (l, n, k); b is (k, n) so b.mT is (n, k).
     quack_a, quack_b = a, b.mT
-    quack_out, quack_c = out, C
+    quack_out, quack_aux_out, quack_c = out, aux_out, C
     if config.swap_ab:
         quack_a, quack_b = quack_b, quack_a
         quack_out = out.mT
+        quack_aux_out = None if aux_out is None else aux_out.mT
         quack_c = None if C is None else C.mT
         row_args, col_args = col_args, row_args
         tile_args = tuple(tile.mT for tile in tile_args)
@@ -199,17 +213,25 @@ def dispatch_gemm_act(
     quack_a = quack_a.unsqueeze(0) if quack_a.ndim == 2 else quack_a
     quack_b = quack_b.unsqueeze(0) if quack_b.ndim == 2 else quack_b
     quack_out = quack_out.unsqueeze(0) if quack_out.ndim == 2 else quack_out
+    if quack_aux_out is not None and quack_aux_out.dtype is torch.bool:
+        quack_aux_out = quack_aux_out.view(torch.uint8)
+    if quack_aux_out is not None and quack_aux_out.ndim == 2:
+        quack_aux_out = quack_aux_out.unsqueeze(0)
     if quack_c is not None and quack_c.ndim == 2:
         quack_c = quack_c.unsqueeze(0)
+
+    returns_aux = quack_aux_out is not None
+    quack_d = quack_out if returns_aux else None
+    quack_postact = quack_aux_out if returns_aux else quack_out
 
     gemm_act_dispatch(
         quack_a,
         quack_b,
-        None,  # D
+        quack_d,
         quack_c,
-        quack_out,
+        quack_postact,
         None,  # tile_count_semaphore
-        None,  # cu_seqlens_m
+        None,  # activation
         config.tile_m,
         config.tile_n,
         config.cluster_m,
@@ -219,6 +241,7 @@ def dispatch_gemm_act(
         persistent=True,
         is_dynamic_persistent=config.is_dynamic_persistent,
         tensor_epilogue_key=epilogue_key,
+        tensor_epilogue_returns_aux=returns_aux,
         tensor_epilogue_arg_kinds=epilogue_arg_kinds,
         tensor_epilogue_rowvec_biases=row_args,
         tensor_epilogue_colvec_biases=col_args,
@@ -241,6 +264,7 @@ def gemm_epilogue(
     beta: float = 1.0,
     out_dtype: torch.dtype | None = None,
     out: torch.Tensor | None = None,
+    aux_out: torch.Tensor | None = None,
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
     config_key: GemmConfigKey | None = None,
@@ -260,6 +284,7 @@ def gemm_epilogue(
         beta: Scale applied to ``C`` when ``C`` is present.
         out_dtype: Optional output dtype. Defaults to ``a.dtype``.
         out: Optional preallocated output tensor with shape ``[M, N]`` or ``[B, M, N]``.
+        aux_out: Optional preallocated same-shape aux tensor for tuple epilogues.
         epilogue_args: Optional tensor args captured by the epilogue.
         epilogue_arg_kinds: Explicit ``tile``, ``row``, or ``col`` kind per arg.
         config_key: Optional explicit QuACK config key selected by Inductor autotune.
@@ -294,6 +319,21 @@ def gemm_epilogue(
             )
         if out.dtype != expected_dtype:
             raise RuntimeError(f"out dtype must be {expected_dtype}, got {out.dtype}")
+    if aux_out is not None:
+        if a.ndim != 2:
+            raise NotImplementedError(
+                "FlexGEMM generic aux tuple epilogues currently support only 2-D aten.mm"
+            )
+        if effective_C is not None or alpha != 1.0 or beta != 1.0:
+            raise NotImplementedError(
+                "FlexGEMM generic aux tuple epilogues cannot be combined with C/alpha/beta yet"
+            )
+        check_matrix("aux_out", aux_out)
+        check_matrix_major_layout("aux_out", aux_out)
+        if tuple(aux_out.shape) != expected_shape:
+            raise RuntimeError(
+                f"aux_out shape must be {expected_shape}, got {tuple(aux_out.shape)}"
+            )
     if a.ndim == 3 and epilogue_args:
         raise NotImplementedError("FlexGEMM batched args are not supported yet")
     if epilogue_args and effective_C is not None:
@@ -304,7 +344,7 @@ def gemm_epilogue(
         raise NotImplementedError(
             "FlexGEMM args cannot be combined with non-default alpha/beta yet"
         )
-    tensors = (C, out, *epilogue_args)
+    tensors = (C, out, aux_out, *epilogue_args)
     check_same_device(a, b, *(tensor for tensor in tensors if tensor is not None))
     inferred_arg_kinds = resolve_epilogue_arg_kinds(
         a, b, epilogue_args, epilogue_arg_kinds
@@ -323,7 +363,7 @@ def gemm_epilogue(
         if out is None
         else out
     )
-    from torch._inductor.template_heuristics.flex_gemm import (
+    from torch._inductor.heuristics.template.flex_gemm import (
         candidate_gemm_configs_for_device,
     )
     from torch._vendor.quack.cache import cache_dir_override
@@ -334,6 +374,7 @@ def gemm_epilogue(
             b,
             effective_C,
             out,
+            aux_out,
             epilogue_key,
             inferred_arg_kinds,
             row_args,

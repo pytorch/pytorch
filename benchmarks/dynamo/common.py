@@ -423,7 +423,7 @@ def output_json(filename, headers, row):
                     "benchmark_values": [value],
                 }
 
-            print(json.dumps(record), file=f)
+            print(json.dumps(record, default=str), file=f)
 
 
 def get_suite_from_model_iter_fn(model_iter_fn):
@@ -464,6 +464,7 @@ def output_signpost(data, args, suite, error=None):
         "disable_output",
         "export_profiler_trace",
         "profiler_trace_name",
+        "profile_details",
         "explain",
         "stats",
         "print_memory",
@@ -4014,6 +4015,21 @@ def main(runner, original_dir=None, args=None):
                 process_entry(0, runner, original_dir, args)
 
 
+# Per-model tolerance (percent) for the backed-vs-unbacked compiled-time parity
+# check. Most models track backed vs unbacked to within ~0.5%. MobileBertForMaskedLM
+# has bimodal compiled timings (backed and unbacked land in different modes
+# independently), so its backed-vs-unbacked diff is ~+-2% run-to-run jitter with no
+# directional regression; it gets a wider band so the noise doesn't red the periodic
+# job while a genuine regression is still caught.
+UNBACKED_PARITY_THRESHOLDS = {"MobileBertForMaskedLM": 3.0}
+DEFAULT_UNBACKED_PARITY_THRESHOLD = 1.0
+
+
+def _unbacked_parity_diff_pct(backed_ms, unbacked_ms):
+    """Percent by which the unbacked compiled time exceeds the backed one."""
+    return (unbacked_ms - backed_ms) / backed_ms * 100
+
+
 def _run_compare_backed_unbacked(runner, args):
     """Run backed and unbacked per-model, alternating, and compare speedup."""
     import re
@@ -4032,7 +4048,7 @@ def _run_compare_backed_unbacked(runner, args):
             b_ms = modes.get("backed_ms")
             u_ms = modes.get("unbacked_ms")
             if b_ms is not None and u_ms is not None:
-                ms_diff_pct = (u_ms - b_ms) / b_ms * 100
+                ms_diff_pct = _unbacked_parity_diff_pct(b_ms, u_ms)
                 print(
                     f"  {name:<40s} {b_ms:>10.3f} {u_ms:>11.3f} {ms_diff_pct:>+7.1f}%",
                     flush=True,
@@ -4145,7 +4161,7 @@ def _run_compare_backed_unbacked(runner, args):
         ):
             b_ms = all_results[model]["backed_ms"]
             u_ms = all_results[model]["unbacked_ms"]
-            ms_diff_pct = (u_ms - b_ms) / b_ms * 100
+            ms_diff_pct = _unbacked_parity_diff_pct(b_ms, u_ms)
             print(
                 f"  => diff: {ms_diff_pct:+.1f}% ({b_ms:.3f} ms vs {u_ms:.3f} ms)",
                 flush=True,
@@ -4161,6 +4177,27 @@ def _run_compare_backed_unbacked(runner, args):
             print(f"  => diff: {diff_pct:+.1f}% (ratio-based, no ms data)", flush=True)
 
     print_comparison(all_results)
+
+    # Emit a canonical regression verdict using per-model thresholds. The CI
+    # wrapper (.ci/pytorch/test.sh) detects the UNBACKED_PARITY_REGRESSION line
+    # rather than re-deriving the threshold, so the policy lives here as data.
+    regressions = []
+    for name, modes in all_results.items():
+        b_ms = modes.get("backed_ms")
+        u_ms = modes.get("unbacked_ms")
+        if b_ms is not None and u_ms is not None:
+            diff_pct = _unbacked_parity_diff_pct(b_ms, u_ms)
+            threshold = UNBACKED_PARITY_THRESHOLDS.get(
+                name, DEFAULT_UNBACKED_PARITY_THRESHOLD
+            )
+            if diff_pct > threshold:
+                regressions.append(
+                    f"{name}: +{diff_pct:.2f}% > {threshold:.1f}% threshold"
+                )
+    if regressions:
+        print(f"UNBACKED_PARITY_REGRESSION: {', '.join(regressions)}", flush=True)
+    else:
+        print("UNBACKED_PARITY_OK: no per-model regressions", flush=True)
 
 
 def write_csv_when_exception(args, name: str, status: str, device=None):
@@ -4665,15 +4702,20 @@ def run(runner, args, original_dir=None):
     args.profile_details = {}
     if args.export_profiler_trace:
         if should_profile_details:
+            device_activity = {
+                "cuda": torch.profiler.ProfilerActivity.CUDA,
+                "xpu": torch.profiler.ProfilerActivity.XPU,
+            }
+            activities = [torch.profiler.ProfilerActivity.CPU]
+            for dev in args.devices:
+                if dev in device_activity:
+                    activities.append(device_activity[dev])
             args.profile_details = {
                 "record_shapes": True,
                 "profile_memory": True,
                 "with_stack": True,
                 "with_modules": True,
-                "activities": [
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
+                "activities": activities,
             }
 
         if args.profiler_trace_name is None:
