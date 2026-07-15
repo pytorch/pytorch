@@ -85,7 +85,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
     is_script = False
     check_shape = True
     check_dtype = True
-    # OnnxBackend override; None keeps the VerificationOptions default (ORT CPU).
+    # OnnxBackend override; None uses the VerificationOptions default backend.
     ort_backend: verification.OnnxBackend | None = None
 
     def setUp(self):
