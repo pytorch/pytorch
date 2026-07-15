@@ -215,12 +215,14 @@ manual_torch_name_rule_map: dict[
     # dispatcher. As a result, the AOT graph does not have these setter
     # or getter functions, producing an incorrect graph when it comes
     # to rng states.
+    "torch.accelerator.random.get_rng_offset": SkipFunctionVariable,
     "torch.accelerator.random.get_rng_state": SkipFunctionVariable,
     "torch.accelerator.random.get_rng_state_all": SkipFunctionVariable,
     "torch.accelerator.random.manual_seed": SkipFunctionVariable,
     "torch.accelerator.random.manual_seed_all": SkipFunctionVariable,
     "torch.accelerator.random.seed": SkipFunctionVariable,
     "torch.accelerator.random.seed_all": SkipFunctionVariable,
+    "torch.accelerator.random.set_rng_offset": SkipFunctionVariable,
     "torch.accelerator.random.set_rng_state": SkipFunctionVariable,
     "torch.accelerator.random.set_rng_state_all": SkipFunctionVariable,
     "torch.get_rng_state": SkipFunctionVariable,

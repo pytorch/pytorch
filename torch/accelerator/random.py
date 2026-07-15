@@ -204,14 +204,79 @@ def seed_all() -> None:
     _lazy_call(cb)
 
 
+def get_rng_offset(device: _device_t = None) -> int:
+    r"""Return the RNG offset of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
+    on the specified device.
+
+    The offset indicates how far the generator has advanced within its random
+    number sequence for the current seed. It is a companion to
+    :func:`torch.accelerator.random.initial_seed`: the seed selects the sequence, the offset selects the
+    position within it.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): The device to return the RNG offset of.
+            If not given, uses :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        int: the RNG offset of the default generator for the specified device.
+
+    .. warning::
+        This function eagerly initializes the accelerator runtime.
+    """
+    device_index = _get_device_index(device) if device is not None else None
+
+    def cb() -> int:
+        idx = (
+            device_index
+            if device_index is not None
+            else torch.accelerator.current_device_index()
+        )
+        default_generator = torch._C._accelerator_getDefaultGenerator(idx)
+        return default_generator.get_offset()
+
+    return _lazy_call(cb)
+
+
+def set_rng_offset(offset: int, device: _device_t = None) -> None:
+    r"""Set the RNG offset of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>`
+    on the specified device.
+
+    The offset selects the position within the random number sequence determined
+    by the current seed, without changing the seed itself.
+
+    Args:
+        offset (int): The desired RNG offset.
+        device (:class:`torch.device`, str, int, optional): The device to set the offset for.
+            If not given, uses :func:`torch.accelerator.current_device_index` by default.
+
+    .. note::
+        If the accelerator runtime is not yet initialized, the state is deferred
+        and applied once the runtime is ready. See :ref:`lazy-initialization-and-fork-safety-note`.
+    """
+    device_index = _get_device_index(device) if device is not None else None
+
+    def cb() -> None:
+        idx = (
+            device_index
+            if device_index is not None
+            else torch.accelerator.current_device_index()
+        )
+        default_generator = torch._C._accelerator_getDefaultGenerator(idx)
+        default_generator.set_offset(offset)
+
+    _lazy_call(cb)
+
+
 __all__ = [
     "initial_seed",
+    "get_rng_offset",
     "get_rng_state",
     "get_rng_state_all",
     "manual_seed",
     "manual_seed_all",
     "seed",
     "seed_all",
+    "set_rng_offset",
     "set_rng_state",
     "set_rng_state_all",
 ]
