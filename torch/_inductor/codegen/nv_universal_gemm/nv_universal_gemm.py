@@ -26,6 +26,7 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
     _current_target_sm,
     _get_scaled_gemm_modes,
     _make_disk_config_key,
+    _nvgemm_bias_add_epilogue,
     _rewrap_efc_compiled_obj,
     _unwrap_efc_compiled_obj,
 )
@@ -33,6 +34,7 @@ from torch._inductor.heuristics.template.nv_universal_gemm import get_nvgemm_heu
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, Layout, TensorBox
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
+from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
 
@@ -77,10 +79,12 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         swizzle_type_a: Any | None = None,
         swizzle_type_b: Any | None = None,
         swap_ab: bool = False,
+        has_bias_epilogue: bool = False,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, ())
         self.kernel = kernel
         self.accumulator_type = accumulator_type
+        self.has_bias_epilogue = has_bias_epilogue
         self._workspace: torch.Tensor | None = None
         self._disk_fn_cache: dict = {}
         self.workspace_size = workspace_size
@@ -131,6 +135,11 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
         _ensure_fp4_dtype_registered()
+
+        if self.has_bias_epilogue:
+            # Benchmark the real fused kernel (GEMM + bias-add epilogue). The
+            # bias is the last input; the rest are the GEMM operands.
+            return self._make_bias_run_fn(input_tensors, out)
 
         # For swap_ab, transpose mat_a/mat_b and swap scales before creating
         # GemmArguments. The swapped GEMM computes (N, M) = out.t(); write it
@@ -231,6 +240,92 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         return run_kernel
 
+    def _make_bias_run_fn(self, input_tensors, out):
+        """Build a run fn for the fused GEMM + bias-add epilogue (addmm).
+
+        Mirrors make_run_fn's disk caching but with the bias epilogue: the
+        unwrap/rewrap machinery serializes the EFC artifact, so subprocess
+        precompile (which writes the same key) hands off to the benchmark
+        instead of recompiling serially.
+        """
+        from cutlass.operators.arguments import EpilogueArguments
+        from cutlass.operators.artifact import CompiledArtifact
+
+        from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
+
+        *gemm_tensors, bias = input_tensors
+        gemm_tensors = tuple(gemm_tensors)
+        epilogue_args = EpilogueArguments(_nvgemm_bias_add_epilogue, bias=bias, D=out)
+
+        kernel_name = self.kernel.metadata.operator_name
+        cache_key = _create_gemm_cache_key(
+            gemm_tensors, out, has_epilogue=True, aux_tensors=(bias,)
+        )
+        dev_idx = gemm_tensors[0].device.index or 0
+        disk_config_key = _make_disk_config_key(
+            kernel_name,
+            self.variant.name,
+            self.accumulator_type,
+            self.scale_type_a,
+            self.scale_type_b,
+            self.swizzle_type_a,
+            self.swizzle_type_b,
+        )
+
+        def disk_fallback(kernel):
+            compiled_fn = disk_cache_get(
+                self._disk_fn_cache, kernel_name, disk_config_key, cache_key, dev_idx
+            )
+            if compiled_fn is not None:
+                compiled_fn = _rewrap_efc_compiled_obj(
+                    compiled_fn, kernel, epilogue_args=epilogue_args
+                )
+            if compiled_fn is not None:
+                return CompiledArtifact(
+                    compiled_fn, kernel, _current_target_sm(dev_idx)
+                )
+            return None
+
+        artifact, args, kernel, was_compiled = _compile_nvgemm(
+            self.variant.name,
+            gemm_tensors,
+            out,
+            self.accumulator_type,
+            kernel_name=kernel_name,
+            epilogue_args=epilogue_args,
+            epilogue_source="nvgemm_addmm_bias_v1",
+            fallback_fn=disk_fallback,
+        )
+
+        if was_compiled:
+            disk_cache_set(
+                self._disk_fn_cache,
+                kernel_name,
+                disk_config_key,
+                cache_key,
+                _unwrap_efc_compiled_obj(artifact.compiled_obj),
+                dev_idx,
+            )
+
+        if self.workspace_size > 0:
+            self._workspace = torch.empty(
+                self.workspace_size, device=out.device, dtype=torch.int8
+            )
+        else:
+            self._workspace = None
+        workspace = self._workspace
+
+        def run_kernel():
+            kernel.run(
+                args,
+                artifact,
+                stream=torch.cuda.current_stream(),
+                workspace=workspace,
+                assume_supported_args=True,
+            )
+
+        return run_kernel
+
     def precompile(self):
         input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
         out = self.output_tensor_meta.to_tensor()
@@ -266,13 +361,15 @@ class NVUniversalGemmCaller(ChoiceCaller):
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
         kernel_layout: Layout | None = None,
+        bias_node: Buffer | None = None,
     ) -> None:
         super().__init__(
             name=name,
             input_nodes=input_nodes,
             layout=layout,
             description=f"{variant.op_name} {kernel.metadata.operator_name}"
-            + (" swap_ab" if swap_ab else ""),
+            + (" swap_ab" if swap_ab else "")
+            + (" bias" if bias_node is not None else ""),
         )
         self.kernel = kernel
         self.accumulator_type = accumulator_type
@@ -284,6 +381,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.swizzle_type_b = swizzle_type_b
         self.supports_epilogue_fusion = supports_epilogue_fusion
         self.swap_ab = swap_ab
+        self.bias_node = bias_node
         self._kernel_layout = kernel_layout or layout
         self._cached_output_node: TensorBox | None = None
 
@@ -302,6 +400,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
             swizzle_type_a=swizzle_type_a,
             swizzle_type_b=swizzle_type_b,
             swap_ab=swap_ab,
+            has_bias_epilogue=bias_node is not None,
         )
 
     def __str__(self) -> str:
@@ -320,8 +419,19 @@ class NVUniversalGemmCaller(ChoiceCaller):
         # Without memoization, each call registers a new buffer (via
         # TemplateBuffer.__init__ → V.graph.register_buffer), leaking orphan
         # buffers into the graph's name tables during EFC benchmarking.
+        #
+        # But a buffer registered during a benchmark sub-context can have its
+        # name freed when that context rolls back `V.graph.buffers` (names are
+        # `buf{len(buffers)}`, so a freed slot is reused). A stale cached buffer
+        # then collides with a fresh buffer that reused its name, corrupting
+        # finalize_multi_template_buffers. Drop the cache entry in that case and
+        # rebuild a properly-registered buffer.
         if self._cached_output_node is not None:
-            return self._cached_output_node
+            # pyrefly: ignore [missing-attribute]
+            cached_name = self._cached_output_node.data.data.get_name()
+            if cached_name in V.graph.name_to_buffer:
+                return self._cached_output_node
+            self._cached_output_node = None
 
         # For swap_ab, use the original (M, N) layout so the scheduler and
         # downstream IR see the expected shape. The runtime handles the
@@ -339,6 +449,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
             swizzle_type_b=self.swizzle_type_b,
             supports_epilogue_fusion=self.supports_epilogue_fusion,
             swap_ab=self.swap_ab,
+            bias_node=self.bias_node,
         )
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]
@@ -400,6 +511,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         swizzle_type_b = self.swizzle_type_b
         input_nodes = self.input_nodes
         swap_ab = self.swap_ab
+        has_bias = self.bias_node is not None
 
         def make_kernel_render(
             out_node,
@@ -418,6 +530,13 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 if isinstance(inp, StorageBox):
                     inp = inp.data
                 processed_inputs.append(inp)
+
+            # A baked bias is the last input, consumed by the epilogue rather
+            # than as a GEMM operand.
+            bias_node = None
+            if has_bias:
+                bias_node = processed_inputs[-1]
+                processed_inputs = processed_inputs[:-1]
 
             kernel_name = str(Placeholder.KERNEL_NAME)
 
@@ -439,6 +558,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
                 epilogue_writes=epilogue_writes,
                 epilogue_var_renames=epilogue_var_renames,
                 swap_ab=swap_ab,
+                # pyrefly: ignore [bad-argument-type]
+                bias_node=bias_node,
             )
 
             def render():
@@ -518,6 +639,7 @@ def _add_nv_gemm_choices_impl(
     swizzle_type_b: Any | None = None,
     swap_ab: bool = False,
     kernel_layout: Layout | None = None,
+    bias_node: Buffer | None = None,
 ) -> None:
     """
     Unified implementation for adding NVIDIA Universal GEMM choices.
@@ -525,7 +647,7 @@ def _add_nv_gemm_choices_impl(
     Args:
         choices: List to append ChoiceCaller objects to
         layout: Output layout
-        input_nodes: Input tensor nodes
+        input_nodes: GEMM operand nodes (A, B)
         variant: The GEMM variant (determines behavior)
         accumulator_type: Accumulator dtype
         mm_inputs: Optional MMKernelInputs for heuristics
@@ -533,6 +655,8 @@ def _add_nv_gemm_choices_impl(
         scale_type_b: ScalingType for B (required for SCALED_GEMM)
         swizzle_type_a: SwizzleType for A (required for SCALED_GEMM)
         swizzle_type_b: SwizzleType for B (required for SCALED_GEMM)
+        bias_node: Optional addmm bias, consumed as a fixed bias-add epilogue.
+            Requires EFC kernels; only these are considered when set.
     """
     from torch._inductor.utils import _ensure_fp4_dtype_registered
 
@@ -613,11 +737,15 @@ def _add_nv_gemm_choices_impl(
         # broadcast bug. Tracking: https://github.com/pytorch/pytorch/issues/181901
         return -1
 
+    # A baked bias-add requires an epilogue-fusion-capable (EFC) kernel, so
+    # scan only EFC kernels -- skips supports() on the far larger non-EFC set.
     non_efc_kernels, efc_kernels = partition_compatible_kernels(
-        args, cc_int, _classify, num_buckets=2
+        args, cc_int, _classify, num_buckets=2, efc_only=bias_node is not None
     )
     if not config.epilogue_fusion or swap_ab:
         efc_kernels = []
+    if bias_node is not None:
+        non_efc_kernels = []
     if not non_efc_kernels and not efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
         return
@@ -643,6 +771,12 @@ def _add_nv_gemm_choices_impl(
         (kernel, True) for kernel in efc_kernels
     ]
 
+    # When a bias is baked in, it is appended as the last caller input so the
+    # scheduler tracks it as a read; the caller/kernel split it back off.
+    caller_input_nodes = (
+        [*input_nodes, bias_node] if bias_node is not None else input_nodes
+    )
+
     num_added = 0
     for kernel, supports_epilogue_fusion in all_kernels:
         name = f"{variant.op_name}_{next(NVUniversalGemmCaller.index_counter)}"
@@ -650,7 +784,7 @@ def _add_nv_gemm_choices_impl(
         try:
             caller = NVUniversalGemmCaller(
                 name=name,
-                input_nodes=input_nodes,
+                input_nodes=caller_input_nodes,
                 layout=layout,
                 kernel=kernel,
                 accumulator_type=accumulator_type,
@@ -663,6 +797,7 @@ def _add_nv_gemm_choices_impl(
                 supports_epilogue_fusion=supports_epilogue_fusion,
                 swap_ab=swap_ab,
                 kernel_layout=kernel_layout,
+                bias_node=bias_node,
             )
             choices.append(caller)
             num_added += 1
@@ -699,6 +834,56 @@ def add_nv_universal_gemm_choices(
         variant=GemmVariant.GEMM,
         accumulator_type=accumulator_type or torch.float32,
         mm_inputs=inputs,
+    )
+
+
+def add_nv_universal_addmm_choices(
+    choices: list[ChoiceCaller],
+    layout: Layout,
+    inputs: MMKernelInputs,
+    bias_node: Buffer,
+    alpha: float | int = 1,
+    beta: float | int = 1,
+    accumulator_type: torch.dtype | None = None,
+) -> None:
+    """Add NVGEMM addmm choices: ``bias + mat1 @ mat2`` via an EFC bias-add
+    epilogue.
+
+    Only the plain ``alpha == beta == 1`` case is handled; other scalings fall
+    back to the remaining backends. ``bias_node`` should be the original
+    (un-expanded) bias so a 1D row vector routes to the row-broadcast epilogue
+    impl -- passing the (M, N) broadcast *view* is rejected by cutlass.operators.
+    """
+    if not ensure_nv_universal_gemm_available():
+        return
+    # Bias-add requires an epilogue-fusion-capable (EFC) kernel.
+    if not config.epilogue_fusion:
+        return
+    if alpha != 1 or beta != 1:
+        return
+
+    # Only broadcastable row-vector or full biases are supported. The bias last
+    # dim must match N; higher-rank or column-only biases are left to fallbacks.
+    n = layout.size[-1]
+    bias_size = bias_node.get_size()
+    # Only rank-1 (row vector) or rank-2 (full) biases are supported. The
+    # epilogue indexes bias_size[-1], so a rank-0 scalar bias would IndexError;
+    # reject it (and higher-rank biases) so they fall through to other backends.
+    if not 1 <= len(bias_size) <= 2:
+        return
+    if not V.graph.sizevars.statically_known_equals(bias_size[-1], n):
+        return
+
+    mat1, mat2 = inputs.mat1mat2()
+    gemm_inputs = MMKernelInputs([mat1, mat2])
+    _add_nv_gemm_choices_impl(
+        choices=choices,
+        layout=layout,
+        input_nodes=[mat1, mat2],
+        variant=GemmVariant.GEMM,
+        accumulator_type=accumulator_type or torch.float32,
+        mm_inputs=gemm_inputs,
+        bias_node=bias_node,
     )
 
 
