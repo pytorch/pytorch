@@ -133,17 +133,29 @@ _AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE = {
         ("ipu", _maybe_dispatch_key("AutocastIPU")),
         ("hpu", _maybe_dispatch_key("AutocastHPU")),
         ("xla", _maybe_dispatch_key("AutocastXLA")),
-        (
-            torch._C._get_privateuse1_backend_name(),
-            _maybe_dispatch_key("AutocastPrivateUse1"),
-        ),
         ("mtia", _maybe_dispatch_key("AutocastMTIA")),
         ("maia", _maybe_dispatch_key("AutocastMAIA")),
     )
     if key is not None
 }
+_AUTOCAST_PRIVATEUSE1_DISPATCH_KEY = _maybe_dispatch_key("AutocastPrivateUse1")
 
-_AUTOCAST_DISPATCH_KEYS = tuple(_AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE.values())
+_AUTOCAST_DISPATCH_KEYS = tuple(
+    key
+    for key in (
+        *_AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE.values(),
+        _AUTOCAST_PRIVATEUSE1_DISPATCH_KEY,
+    )
+    if key is not None
+)
+
+
+def _autocast_dispatch_key_for_device_type(
+    device_type: str,
+) -> torch._C.DispatchKey | None:
+    if device_type == torch._C._get_privateuse1_backend_name():
+        return _AUTOCAST_PRIVATEUSE1_DISPATCH_KEY
+    return _AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE.get(device_type)
 
 
 def _extra_autocast_dispatch_keys(
@@ -154,7 +166,7 @@ def _extra_autocast_dispatch_keys(
         return None
 
     device_type = torch.device(device).type
-    default_autocast_key = _AUTOCAST_DISPATCH_KEY_BY_DEVICE_TYPE.get(device_type)
+    default_autocast_key = _autocast_dispatch_key_for_device_type(device_type)
     extra_keys = torch._C.DispatchKeySet.from_raw_repr(0)
     for autocast_key in _AUTOCAST_DISPATCH_KEYS:
         if autocast_key != default_autocast_key and dispatch_keys.has(autocast_key):
@@ -169,12 +181,8 @@ def _extra_autocast_dispatch_keys_for_tensor(
     device: torch.device | str,
     t: Tensor,
 ) -> torch.DispatchKeySet | None:
-    if isinstance(t, FakeTensor):
-        if t.extra_dispatch_keys is not None:
-            return _extra_autocast_dispatch_keys(device, t.extra_dispatch_keys)
-        if t.dispatch_keys is not None:
-            return _extra_autocast_dispatch_keys(device, t.dispatch_keys)
-        return None
+    if is_fake_tensor(t):
+        return _extra_autocast_dispatch_keys(device, torch._C._dispatch_keys(t))
 
     # XLA:CUDA tensors have device type XLA but use AutocastCUDA. Avoid probing
     # ordinary tensors here, since Dynamo guards on direct dispatch-key reads.
@@ -182,6 +190,27 @@ def _extra_autocast_dispatch_keys_for_tensor(
         return None
 
     return _extra_autocast_dispatch_keys(device, torch._C._dispatch_keys(t))
+
+
+def _common_extra_autocast_dispatch_keys(
+    output_device: torch.device | str,
+    flat_args: Sequence[object],
+) -> torch.DispatchKeySet | None:
+    output_device = torch.device(output_device)
+    found_keys = None
+    for arg in flat_args:
+        if not is_fake_tensor(arg) or arg.device != output_device:
+            continue
+        arg_extra_dispatch_keys = _extra_autocast_dispatch_keys_for_tensor(
+            output_device, arg
+        )
+        if arg_extra_dispatch_keys is None:
+            continue
+        if found_keys is not None and found_keys != arg_extra_dispatch_keys:
+            return None
+        found_keys = arg_extra_dispatch_keys
+
+    return found_keys
 
 
 # Check if device type supports device index
@@ -314,10 +343,17 @@ def get_plain_tensors(
     return out
 
 
+def is_fake_tensor(x: object) -> TypeGuard[Tensor]:
+    # True if x is itself a fake tensor: a Python FakeTensor, or a C++ fake.
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return True
+    return isinstance(x, Tensor) and torch._C._is_fake_tensor(x)
+
+
 def is_fake(x: object) -> TypeGuard[Tensor]:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(x, FakeTensor):
+    if is_fake_tensor(x):
         return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
@@ -352,7 +388,7 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(t, FakeTensor):
+    if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
         inner_tensor_names, _ = t.__tensor_flatten__()
@@ -385,19 +421,19 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
 
 
 def maybe_get_real_tensor(x: object) -> Tensor | None:
-    if isinstance(x, FakeTensor):
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.real_tensor
     return None
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
-    if isinstance(x, FakeTensor):
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.fake_device
     return None
 
 
 def maybe_get_fake_constant(x: object) -> Tensor | None:
-    if isinstance(x, FakeTensor):
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.constant
     return None
 
@@ -472,7 +508,12 @@ class FakeTensorConverter:
         # when you have a constant, aliased tensor:
         # const_tensor.add_(torch.rand([1]))
         # all aliases of it must become no longer const
-        if not isinstance(fake_tensor, FakeTensor) or fake_tensor.constant is None:
+        if (
+            not isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                fake_tensor, FakeTensor
+            )
+            or fake_tensor.constant is None
+        ):
             raise AssertionError("fake_tensor must be a FakeTensor with a constant")
         weak_st = StorageWeakRef(fake_tensor.constant._typed_storage())
 
@@ -484,7 +525,7 @@ class FakeTensorConverter:
         self.constant_storage_mapping[weak_st].append(weakref.ref(fake_tensor))
 
     def invalidate_constant_aliases(self, tensor: Tensor) -> None:
-        if isinstance(tensor, FakeTensor):
+        if isinstance(tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise AssertionError("Expected a real tensor, not a FakeTensor")
 
         weak_st = StorageWeakRef(tensor._typed_storage())
@@ -583,7 +624,7 @@ class FakeTensorConverter:
         source_device = t.device
         source_dispatch_keys = (
             t.dispatch_keys
-            if isinstance(t, FakeTensor)
+            if isinstance(t, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             else (
                 torch._C._dispatch_keys(t)
                 if torch.device(source_device).type == "xla"
@@ -1155,7 +1196,7 @@ class FakeTensor(Tensor):
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys
         self.extra_dispatch_keys = extra_autocast_dispatch_keys
-        if isinstance(real_tensor, FakeTensor):
+        if isinstance(real_tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise AssertionError("real_tensor must not be a FakeTensor")
         self.real_tensor = real_tensor
         self.nonzero_memo = None
@@ -1213,7 +1254,7 @@ class FakeTensor(Tensor):
         # need to handle here to avoid infinite recursion
         # see [in_kernel_invocation]
         if func is torch.ops.prim.device.default:
-            if len(args) != 1 or not isinstance(args[0], FakeTensor):
+            if len(args) != 1 or not isinstance(args[0], FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 raise AssertionError(
                     "Expected exactly one FakeTensor argument for prim.device.default"
                 )
@@ -1250,7 +1291,7 @@ class FakeTensor(Tensor):
 
         fake_mode = None
         for arg in pytree.arg_tree_leaves(*args, **kwargs):
-            if isinstance(arg, FakeTensor):
+            if isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 fake_mode = arg.fake_mode
                 break
 
@@ -1322,7 +1363,7 @@ class FakeTensor(Tensor):
         def merge_devices(t: object) -> None:
             nonlocal common_device
             nonlocal is_cpu_zero_dim
-            if not isinstance(t, FakeTensor):
+            if not isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 return
 
             if common_device is None:
@@ -1766,7 +1807,12 @@ class FakeTensorMode(TorchDispatchMode):
     # to distinguish between our fake tensor and other fake tensors.  That's
     # what this function does.
     def is_our_fake(self, t: object) -> TypeGuard[FakeTensor]:
-        return isinstance(t, FakeTensor) and t.fake_mode is self
+        return (
+            isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+                t, FakeTensor
+            )
+            and t.fake_mode is self
+        )
 
     # If we should avoid device init. This changes the behavior of various APIs:
     # - We avoid constant-prop on Tensors with ops that move them to another device
@@ -2139,7 +2185,7 @@ class FakeTensorMode(TorchDispatchMode):
             return
 
         for arg in args:
-            if isinstance(arg, FakeTensor):
+            if isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 if not self.is_our_fake(arg):
                     raise _BypassDispatchCache("not our fake")
                 if arg.constant is not None:
@@ -2201,7 +2247,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
-        if not isinstance(output, FakeTensor):
+        if not isinstance(output, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise _BypassDispatchCache("non-FakeTensor output")
 
         # Avoid caching FakeTensors with constants attached since those
@@ -2427,7 +2473,7 @@ class FakeTensorMode(TorchDispatchMode):
         if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
             inplace_arg = args[entry.inplace_idx]
-            if not isinstance(inplace_arg, FakeTensor):
+            if not isinstance(inplace_arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 raise AssertionError("inplace_arg must be a FakeTensor")
             return inplace_arg
 
@@ -2481,7 +2527,7 @@ class FakeTensorMode(TorchDispatchMode):
         if isinstance(func, torch._ops.OpOverload) and func.is_view:
             # For view ops, the storage should be the same as the tensor input.
             view_arg = args[cast(int, entry.view_idx)]
-            if not isinstance(view_arg, FakeTensor):
+            if not isinstance(view_arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 raise AssertionError("view_arg must be a FakeTensor")
             storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
@@ -2988,7 +3034,7 @@ class FakeTensorMode(TorchDispatchMode):
         def maybe_to_real_tensor(
             t: T,
         ) -> T | Tensor | torch._C.ScriptObject | None:
-            if isinstance(t, FakeTensor):
+            if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                 return t.real_tensor
             elif isinstance(t, py_sym_types):
                 if self.shape_env is None:
@@ -3078,7 +3124,7 @@ class FakeTensorMode(TorchDispatchMode):
             log.debug("maybe_propagate_real_tensors %s", func)
 
             def go(t: object, real_t: Tensor) -> None:
-                if isinstance(t, FakeTensor):
+                if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
                     # NB: unconditionally overwrite
                     log.debug(
                         "maybe_propagate_real_tensors %s -> %s", id(t), id(real_t)
@@ -3388,10 +3434,13 @@ class FakeTensorMode(TorchDispatchMode):
                     else fake_tensor_tls.allow_non_fake_inputs_override
                 )
                 if not allow_non_fake_inputs:
-                    if isinstance(x, FakeTensor) and x.fake_mode is not self:
-                        raise AssertionError(
-                            f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
-                        )
+                    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                        # pyrefly: ignore [missing-attribute]
+                        x_fake_mode = x.fake_mode
+                        if x_fake_mode is not self:
+                            raise AssertionError(
+                                f"Mixing fake modes NYI x.fake_mode={x_fake_mode} vs self={self}"
+                            )
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise AssertionError(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
@@ -3427,31 +3476,12 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             (func is aten.alias.default or func is aten.detach.default)
             and len(flat_args) == 1
-            and isinstance(flat_args[0], FakeTensor)
+            and isinstance(flat_args[0], FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
         ):
             input_dispatch_keys = flat_args[0].dispatch_keys
             preserve_dispatch_keys = input_dispatch_keys is not None
             input_extra_dispatch_keys = flat_args[0].extra_dispatch_keys
             preserve_extra_dispatch_keys = input_extra_dispatch_keys is not None
-
-        def get_common_extra_dispatch_keys(
-            output_device: torch.device | str,
-        ) -> torch.DispatchKeySet | None:
-            output_device = torch.device(output_device)
-            found_keys = None
-            for arg in flat_args:
-                if not isinstance(arg, FakeTensor) or arg.device != output_device:
-                    continue
-                arg_extra_dispatch_keys = _extra_autocast_dispatch_keys_for_tensor(
-                    output_device, arg
-                )
-                if arg_extra_dispatch_keys is None:
-                    continue
-                if found_keys is not None and found_keys != arg_extra_dispatch_keys:
-                    return None
-                found_keys = arg_extra_dispatch_keys
-
-            return found_keys
 
         def wrap(e: T) -> T | FakeTensor:
             nonlocal common_device
@@ -3489,8 +3519,8 @@ class FakeTensorMode(TorchDispatchMode):
                         self,
                         e,
                         output_device,
-                        extra_dispatch_keys=get_common_extra_dispatch_keys(
-                            output_device
+                        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
+                            output_device, flat_args
                         ),
                     )
                 if preserve_dispatch_keys:
@@ -3605,7 +3635,7 @@ class FakeTensorMode(TorchDispatchMode):
         trace: bool = True,
     ) -> FakeTensor:
         if (
-            isinstance(tensor, FakeTensor)
+            isinstance(tensor, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
             and tensor.fake_mode is self
             and static_shapes is None
             and source is None
@@ -3827,7 +3857,7 @@ def _device_handler(args: Sequence[object]) -> torch.device:
     # to return NotImplemented here, in which case the FakeTensor
     # handler on args[0] would handle it, but we're being nice and
     # short-circuiting quickly.
-    if len(args) != 1 or not isinstance(args[0], FakeTensor):
+    if len(args) != 1 or not isinstance(args[0], FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         raise AssertionError(
             "Expected exactly one FakeTensor argument for _device_handler"
         )
@@ -3852,7 +3882,7 @@ def _check_for_subclass(flat_args: Sequence[object]) -> bool:
 
 
 def _check_for_subclass_arg(x: object) -> bool:
-    if isinstance(x, FakeTensor):
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return False
     if not isinstance(x, Tensor):
         return False

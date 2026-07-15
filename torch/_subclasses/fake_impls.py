@@ -37,11 +37,12 @@ from torch._prims_common import (
     ShapeType,
 )
 from torch._subclasses.fake_tensor import (
-    _extra_autocast_dispatch_keys_for_tensor,
+    _common_extra_autocast_dispatch_keys,
     DataDependentOutputException,
     DynamicOutputShapeException,
     FakeTensor,
     in_kernel_invocation_manager,
+    is_fake_tensor,
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
@@ -293,13 +294,16 @@ def constructors(
     out_device = out_device if out_device is not None else default_device
     if has_device_arg:
         new_kwargs["device"] = torch.device("meta")
+    extra_dispatch_keys = _common_extra_autocast_dispatch_keys(
+        out_device, pytree.tree_leaves((args, new_kwargs))
+    )
     # _like constructors have fake tensor inputs (maybe this causes the non-like
     # to fail? hmmm)
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     if r.device.type == "meta":
         return fake_mode.fake_tensor_converter.from_meta_and_device(
-            fake_mode, r, out_device
+            fake_mode, r, out_device, extra_dispatch_keys=extra_dispatch_keys
         )
     return fake_mode.fake_tensor_converter.from_real_tensor(fake_mode, r)
 
@@ -369,7 +373,10 @@ def non_kwarg_to(
         r = func(inp, **new_kwargs)
     # TODO: I think this does the wrong thing if r is inp
     return fake_mode.fake_tensor_converter.from_meta_and_device(
-        fake_mode, r, out_device
+        fake_mode,
+        r,
+        out_device,
+        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(out_device, [inp]),
     )
 
 
@@ -385,7 +392,7 @@ def workaround_stride_incorrect_op(
     # This is a workaround for meta implementations with incorrect strides
 
     def is_symbolic(x: object) -> bool:
-        if isinstance(x, FakeTensor):
+        if is_fake_tensor(x):
             return x._has_symbolic_sizes_strides
         if isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             return True
@@ -432,7 +439,7 @@ def _spdiags_static_offsets(offsets: FakeTensorLike) -> list[int] | None:
     constant = getattr(offsets, "constant", None)
     if constant is None:
         constant = getattr(offsets, "real_tensor", None)
-    if isinstance(constant, FakeTensor):
+    if is_fake_tensor(constant):
         return None
     if constant is None or constant.device.type != "cpu":
         return None
@@ -587,7 +594,12 @@ def _spdiags(
                 )
 
     return fake_mode.fake_tensor_converter.from_meta_and_device(
-        fake_mode, out, diagonals.device
+        fake_mode,
+        out,
+        diagonals.device,
+        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
+            diagonals.device, [diagonals]
+        ),
     )
 
 
@@ -612,12 +624,24 @@ def _to_dense(
                 dtype=self.dtype,
                 device="meta",
             )
-        return FakeTensor(fake_mode, out, self.fake_device)
+        return FakeTensor(
+            fake_mode,
+            out,
+            self.fake_device,
+            extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
+                self.fake_device, [self]
+            ),
+        )
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(self, dtype=dtype, masked_grad=masked_grad)
     return fake_mode.fake_tensor_converter.from_meta_and_device(
-        fake_mode, out, self.fake_device
+        fake_mode,
+        out,
+        self.fake_device,
+        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
+            self.fake_device, [self]
+        ),
     )
 
 
@@ -1627,7 +1651,14 @@ def run_and_return_new_tensor_of_input_device(
 
     if out is new_kwargs["input"]:
         return out  # copy_
-    return FakeTensor(fake_mode, out, out_device)
+    return FakeTensor(
+        fake_mode,
+        out,
+        out_device,
+        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
+            out_device, pytree.tree_leaves(new_kwargs)
+        ),
+    )
 
 
 _is_builtin_namespaces = ordered_set("aten", "prims", "prim")
@@ -1647,7 +1678,12 @@ def maybe_to_dense_mkldnn(
     dtype: torch.dtype | None = None,
     masked_grad: bool | None = None,
 ) -> object:
-    if not isinstance(a, FakeTensor) or not a.is_mkldnn:
+    # this function invokes in_kernel_invocation_manager and creates python
+    # FakeTensor, revisit later for C++ behaviour
+    if (
+        not isinstance(a, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+        or not a.is_mkldnn
+    ):
         return NotImplemented
 
     out_dtype = dtype if dtype is not None else a.dtype
@@ -1674,7 +1710,12 @@ def maybe_to_dense_mkldnn(
             dtype=out_dtype,
             device="meta",
         )
-    return FakeTensor(fake_mode, out, a.fake_device)
+    return FakeTensor(
+        fake_mode,
+        out,
+        a.fake_device,
+        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(a.fake_device, [a]),
+    )
 
 
 class _ToDenseMkldnn(torch.autograd.Function):
@@ -1803,7 +1844,7 @@ def to_dense_python_tls_impl(
 ) -> torch.Tensor:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
-    if isinstance(self, (FakeTensor, FunctionalTensor)):
+    if isinstance(self, (FakeTensor, FunctionalTensor)):  # noqa: ISINSTANCE_FAKE_TENSOR
         return to_dense_composite_impl(self, dtype=dtype, masked_grad=masked_grad)
 
     with torch._C._ExcludeDispatchKeyGuard(_PYTHON_TLS_SNAPSHOT_KEYSET):
@@ -1831,7 +1872,7 @@ def to_mkldnn(
     a: FakeTensor,
     dtype: torch.dtype | None = None,
 ) -> object:
-    if not isinstance(a, FakeTensor):
+    if not isinstance(a, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return NotImplemented
 
     out_dtype = dtype if dtype is not None else a.dtype
@@ -1865,7 +1906,11 @@ def to_mkldnn(
             device="meta",
         )
     return FakeTensor(
-        fake_mode, out, a.fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS
+        fake_mode,
+        out,
+        a.fake_device,
+        dispatch_keys=_MKLDNN_DISPATCH_KEYS,
+        extra_dispatch_keys=_common_extra_autocast_dispatch_keys(a.fake_device, [a]),
     )
 
 
@@ -1900,10 +1945,16 @@ def foreach_run_and_map_input_device(
     out_fake = []
 
     for i, meta_t in enumerate(out_meta):
-        device, _ = FakeTensor._find_common_device(func, [tl[i] for tl in tensor_lists])
+        inputs = [tl[i] for tl in tensor_lists]
+        device, _ = FakeTensor._find_common_device(func, inputs)
         out_fake.append(
             fake_mode.fake_tensor_converter.from_meta_and_device(
-                fake_mode, meta_t, device
+                fake_mode,
+                meta_t,
+                device,
+                extra_dispatch_keys=_common_extra_autocast_dispatch_keys(
+                    device, inputs
+                ),
             )
         )
 
@@ -2074,7 +2125,7 @@ def conv(
     )
 
     def expect_fake_tensor(name: str, value: object) -> FakeTensor:
-        if not isinstance(value, FakeTensor):
+        if not isinstance(value, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise AssertionError(
                 "Expected fake convolution tensor arguments to be FakeTensors, "
                 f"but {name} was {type(value).__name__}"
@@ -2162,6 +2213,10 @@ def conv(
                 input_, weight, conv_backend
             )
 
+    extra_dispatch_keys = _common_extra_autocast_dispatch_keys(
+        device, pytree.tree_leaves(new_kwargs)
+    )
+
     def convert(
         t: torch.Tensor | None, mem_fmt: torch.memory_format | None
     ) -> FakeTensor | None:
@@ -2173,7 +2228,12 @@ def conv(
                 t = t.unsqueeze(2).to(memory_format=mem_fmt).squeeze(2)
             else:
                 t = t.to(memory_format=mem_fmt)
-        return FakeTensor(fake_mode, t, device)
+        return FakeTensor(
+            fake_mode,
+            t,
+            device,
+            extra_dispatch_keys=extra_dispatch_keys,
+        )
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(**new_kwargs)
@@ -2271,7 +2331,7 @@ def _fake_alias(fake_mode: FakeTensorMode, x: FakeTensor) -> FakeTensor:
 def fake_alias(
     fake_mode: FakeTensorMode, func: OpOverload, x: FakeTensor
 ) -> FakeTensor | object:
-    if not isinstance(x, FakeTensor):
+    if not isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return NotImplemented
     return _fake_alias(fake_mode, x)
 
@@ -2423,22 +2483,9 @@ def make_fast_binary_impl(
             elif op.device != common_device:
                 return slow("error")
 
-        common_extra_dispatch_keys = None
-        for op in operands:
-            if not isinstance(op, FakeTensor) or op.device != common_device:
-                continue
-            op_extra_dispatch_keys = _extra_autocast_dispatch_keys_for_tensor(
-                common_device, op
-            )
-            if op_extra_dispatch_keys is None:
-                continue
-            if (
-                common_extra_dispatch_keys is not None
-                and common_extra_dispatch_keys != op_extra_dispatch_keys
-            ):
-                common_extra_dispatch_keys = None
-                break
-            common_extra_dispatch_keys = op_extra_dispatch_keys
+        common_extra_dispatch_keys = _common_extra_autocast_dispatch_keys(
+            common_device, operands
+        )
 
         # compute_fast_setup_type
         definitely_contiguous = True
@@ -2500,8 +2547,17 @@ def make_fast_binary_impl(
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
 def fast_detach(
-    fake_mode: FakeTensorMode, x: FakeTensor, include_real: bool = False
-) -> FakeTensor:
+    fake_mode: FakeTensorMode | None,
+    x: FakeTensor | torch.Tensor,
+    include_real: bool = False,
+) -> torch.Tensor:
+    if (
+        not isinstance(x, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+        or fake_mode is None
+    ):
+        raise AssertionError(
+            "type widening added for cpp faketensor but this is not used yet"
+        )
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
     dispatch_keys = x.dispatch_keys

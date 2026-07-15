@@ -1153,7 +1153,7 @@ terrible spacing
                 elif node.op == "placeholder":
                     self.assertFalse(
                         seen_get_attr,
-                        f"placeholder '{node.name}' found after get_attr "
+                        lambda msg: f"{msg}\nplaceholder '{node.name}' found after get_attr "
                         f"in submodule '{name}'",
                     )
 
@@ -1686,7 +1686,7 @@ class {test_classname}(torch.nn.Module):
 
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
+                self.assertIsNotNone(node.type, lambda msg: f"{msg}\nNode {node} should be annotated but is not.")
 
         my_module = MyModule2()
         my_module_traced = torch.fx.symbolic_trace(my_module)
@@ -1701,7 +1701,7 @@ class {test_classname}(torch.nn.Module):
 
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
+                self.assertIsNotNone(node.type, lambda msg: f"{msg}\nNode {node} should be annotated but is not.")
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
@@ -2380,7 +2380,7 @@ if TEST_Z3:
             for sympy_expr, z3_expr in test_cases:
                 result = toZ3.run(sympy_expr)
                 self.assertTrue(
-                    z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
+                    z3_expr.eq(result), msg=lambda msg: f"{msg}\nexpected: {z3_expr}. Got: {result}"
                 )
 
         def test_sat(self):

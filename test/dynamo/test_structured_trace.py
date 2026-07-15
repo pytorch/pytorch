@@ -78,6 +78,15 @@ class StructuredTraceTestingFilter(logging.Filter):
     def filter(self, record):
         if "str" in record.metadata:
             return False
+        # torch_version is a global artifact emitted once per process the first
+        # time the trace handler initializes. Its presence (and commit-hash
+        # payload) depends on run context and test ordering, so drop it here to
+        # keep each test's expected inline output deterministic.
+        if (
+            "artifact" in record.metadata
+            and record.metadata["artifact"].get("name") == "torch_version"
+        ):
+            return False
         if self.match_name is not None:
             if "artifact" in record.metadata:
                 if self.match_name != record.metadata["artifact"]["name"]:
@@ -358,7 +367,7 @@ class StructuredTraceTest(TestCase):
 
     @requires_cuda_and_triton
     def test_cudagraphs(self):
-        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
         fn_opt(torch.ones(1000, 1000, device="cuda"))
         self.assertExpectedInline(
             self.buffer.getvalue(),
@@ -1124,7 +1133,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
             return grads
 
-        fn_opt = torch.compile(fn)
+        fn_opt = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         fn_opt()
         self.assertParses()
         expected = [
@@ -1166,7 +1175,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
         def f(x):
             return x + 1
 
-        f = torch.compile(f)
+        f = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
 
         def user_context() -> str:
             nonlocal num_calls
@@ -1200,7 +1209,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
         def f(x):
             return x + 1
 
-        f = torch.compile(f)
+        f = torch.compile(f)  # noqa: UNSPECIFIED_BACKEND
 
         def user_context() -> str:
             return "user_context: " + str(step.step)
