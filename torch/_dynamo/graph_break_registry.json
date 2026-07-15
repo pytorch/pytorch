@@ -1665,6 +1665,14 @@
       ]
     }
   ],
+  "GB6441": [
+    {
+      "Gb_type": "unsupported torch.cuda.MemPool attribute",
+      "Context": "torch.cuda.MemPool.{name}",
+      "Explanation": "Dynamo only supports reading torch.cuda.MemPool.id.",
+      "Hints": []
+    }
+  ],
   "GB0116": [
     {
       "Gb_type": "Unexpected type in sourceless builder",
@@ -4274,6 +4282,22 @@
         "line of code that is not in a try/with block, and has an empty Python stack.",
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
+    }
+  ],
+  "GB2473": [
+    {
+      "Gb_type": "torch.cuda.use_mem_pool graph break",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph breaks inside torch.cuda.use_mem_pool.",
+      "Hints": []
+    }
+  ],
+  "GB4996": [
+    {
+      "Gb_type": "torch.cuda.use_mem_pool with non-constant device",
+      "Context": "device={device}",
+      "Explanation": "Dynamo requires the device argument to torch.cuda.use_mem_pool to be a Python constant.",
+      "Hints": []
     }
   ],
   "GB6604": [
