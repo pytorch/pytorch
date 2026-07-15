@@ -280,24 +280,21 @@ def substitute_in_graph(
 
     Example::
 
-        >>> import operator
-        >>> operator.indexOf([1, 2, 3, 4, 5], 3)
-        2
-        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
+        >>> import binascii
+        >>> binascii.b2a_base64(b"abc")
+        b'YWJj\n'
+        >>> torch.compile(binascii.b2a_base64, fullgraph=True)(b"abc")
         ... # xdoctest: +SKIP("Long tracebacks")
         Traceback (most recent call last):
         ...
         torch._dynamo.exc.Unsupported: ...
 
-        >>> @torch.compiler.substitute_in_graph(operator.indexOf)
-        ... def indexOf(a, b, /):
-        ...     for i, item in enumerate(a):
-        ...         if item is b or item == b:
-        ...             return i
-        ...     raise ValueError("sequence.index(x): x not in sequence")
+        >>> @torch.compiler.substitute_in_graph(binascii.b2a_base64)
+        ... def b2a_base64(data, /, *, newline=True):
+        ...     return b"YWJj\n"
         >>>
-        >>> torch.compile(operator.indexOf, fullgraph=True)([1, 2, 3, 4, 5], 3)
-        2
+        >>> torch.compile(binascii.b2a_base64, fullgraph=True)(b"abc")
+        b'YWJj\n'
     """
     import torch._dynamo
 
