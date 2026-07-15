@@ -276,7 +276,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64, f16},
     "tan": {f16},
-    "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {
         b8,
