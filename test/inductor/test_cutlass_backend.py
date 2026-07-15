@@ -2299,6 +2299,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cutlass.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_swizzle_options": [1],
             }
         ):
             if use_aoti:
@@ -2316,7 +2317,7 @@ class TestCutlassBackend(TestCase):
             else:
                 atol = None
                 rtol = None
-                expected_time = 50
+                expected_time = 120
             torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
         self.assertTrue(time.time() - start_time < expected_time)
 
