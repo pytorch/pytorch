@@ -151,6 +151,15 @@ class FxGraphRunnableTest(TestCase):
         self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
         self.assertIn("def forward", payload)  # sanity-check for actual FX code
 
+        # The generated repro is executed as a standalone `sys.executable`
+        # subprocess, which does not work under buck: torch is not importable in
+        # the subprocess and the fbcode-only load_library preloads reference
+        # libraries absent on CPU runners. Verifying payload generation is the
+        # coverage available here; this is the same reason run_tests() is gated
+        # to non-fbcode at the bottom of this file.
+        if IS_FBCODE or IS_SANDCASTLE:
+            return
+
         with WritableTempFile("w", suffix=".py") as tmp:
             tmp.write(payload)
             tmp.flush()
