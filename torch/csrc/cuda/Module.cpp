@@ -1213,7 +1213,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", pci_domain_id=" << prop.pciDomainID
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
-        return stream.str();
+        return std::move(stream).str();
       });
 
   m.def(
@@ -1247,6 +1247,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
+  });
+
+  m.def("_cuda_memoryMetadataSupported", []() {
+    return c10::cuda::CUDACachingAllocator::supportsUserMetadata();
   });
 
   m.def("_cuda_setMemoryMetadata", [](const std::string& metadata) {

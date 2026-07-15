@@ -1080,6 +1080,9 @@ class SchedulerBuffer:
             raise AssertionError("expected op to be set")
         return op.get_name()
 
+    def is_ordering_only(self) -> bool:
+        return self.node.ordering_only
+
     def __hash__(self) -> int:
         return hash(self.node.name)
 
@@ -2232,7 +2235,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def _compute_attrs(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ir.ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[_P, _T] | None = None,
     ) -> None:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
@@ -2268,7 +2271,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def recompute_size_and_body(
         self,
-        extra_indexing_constraints: tuple[dict[Any, Any], list[Any]] | None = None,
+        extra_indexing_constraints: ir.ExtraIndexingConstraints | None = None,
         recompute_sizes_body_func: Callable[..., Any] | None = None,
     ) -> None:
         fake_deps: OrderedSet[Dep] = OrderedSet(
@@ -4763,7 +4766,7 @@ class Scheduler:
                     )
                 for alt_name in buf.get_mutations():
                     alt_name = rename(alt_name)
-                    is_ordering_only = getattr(buf, "ordering_only", False)
+                    is_ordering_only = buf.is_ordering_only()
                     if is_ordering_only:
                         add_user(alt_name, node, is_weak=True)
                         node.add_fake_dep(
@@ -5107,6 +5110,12 @@ class Scheduler:
             ancestors: OrderedSet[str] = OrderedSet()
             for dep in node.unmet_dependencies:
                 dep_node_name = self.name_to_buf[dep.name].defining_op_name()
+                # A node can transiently depend on a buffer it also writes (a
+                # self-edge, e.g. from a mutating op whose read and write
+                # resolve to the same buffer). A node is never its own
+                # ancestor, so skip it rather than KeyError on itself.
+                if dep_node_name == node.get_name():
+                    continue
                 ancestors.add(dep_node_name)
                 ancestors |= name_to_ancestors[dep_node_name]
             name_to_ancestors[node.get_name()] = ancestors
@@ -5125,22 +5134,20 @@ class Scheduler:
         name_to_min_distance: dict[str, int] = {}
         name_to_max_distance: dict[str, int] = {}
         for node in self.nodes:
-            if not node.unmet_dependencies:
+            # Skip self-edges (a node depending on a buffer it also writes); a
+            # node is not at any distance from itself. See compute_ancestors.
+            dep_ops = [
+                op
+                for dep in node.unmet_dependencies
+                if (op := self.name_to_buf[dep.name].defining_op_name())
+                != node.get_name()
+            ]
+            if not dep_ops:
                 min_dist = 0
                 max_dist = 0
             else:
-                dep_min_dists = [
-                    name_to_min_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
-                ]
-                dep_max_dists = [
-                    name_to_max_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
-                ]
-                min_dist = min(dep_min_dists)
-                max_dist = max(dep_max_dists)
+                min_dist = min(name_to_min_distance[op] + 1 for op in dep_ops)
+                max_dist = max(name_to_max_distance[op] + 1 for op in dep_ops)
             name_to_min_distance[node.get_name()] = min_dist
             name_to_max_distance[node.get_name()] = max_dist
             node.min_input_distance = min_dist
