@@ -1,6 +1,5 @@
 #include <torch/nativert/executor/triton/TritonKernelManager.h>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAStream.h>
@@ -15,12 +14,12 @@ const at::cuda::NVRTC& get_nvrtc() {
 }
 } // namespace
 
-#define CU_LOG_ERROR(fn, result, ...)                    \
-  {                                                      \
-    LOG(ERROR) << #fn << " returned error: " << result;  \
-    const char* errMsg = nullptr;                        \
-    (void)get_nvrtc().cuGetErrorString(result, &errMsg); \
-    LOG(ERROR) << "cuGetErrorString: " << errMsg;        \
+#define CU_LOG_ERROR(fn, result, ...)                   \
+  {                                                     \
+    LOG(ERROR) << #fn << " returned error: " << result; \
+    const char* errMsg = nullptr;                       \
+    get_nvrtc().cuGetErrorString(result, &errMsg);      \
+    LOG(ERROR) << "cuGetErrorString: " << errMsg;       \
   }
 
 namespace torch::nativert {
@@ -61,12 +60,6 @@ class CudaKernelInputs final : public KernelInputs {
     arg_ptrs_[arg_idx_] = arg;
     inputs_[arg_idx_] = reinterpret_cast<void*>(&arg_ptrs_[arg_idx_]);
     arg_idx_++;
-  }
-
-  void add_scalar_arg(const c10::IValue& value, std::string_view param_type)
-      override {
-    TORCH_CHECK(arg_idx_ < num_args_, "Too many args");
-    inputs_[arg_idx_++] = store_scalar_arg(value, param_type);
   }
 
  private:
@@ -157,9 +150,7 @@ void CudaTritonKernelManager::launch(
     const LaunchParams& launch_params,
     void** args /* { ...inputs, output }*/) {
   const auto& cuda_params = static_cast<const CudaLaunchParams&>(launch_params);
-  // HIP wavefront size is 64 on most AMD GPUs vs 32 on NVIDIA; query it so
-  // blockDim.x = warp_size * num_warps matches the compiled Triton kernel.
-  const int kThreadsPerWarp = at::cuda::warp_size();
+  const constexpr int kThreadsPerWarp = 2 << 4;
 
   auto kernel_fn = load();
   TORCH_CHECK(

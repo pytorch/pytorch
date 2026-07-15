@@ -108,7 +108,7 @@ class TestMisc(JitTestCase):
     def test_future_isinstance(self):
         @torch.jit.script
         def fn(x: Any) -> torch.jit.Future[int]:
-            assert isinstance(x, jit.Future[int])  # noqa: S101
+            assert isinstance(x, jit.Future[int])
             return x
 
         FileCheck().check("Future[int]").run(fn.graph)

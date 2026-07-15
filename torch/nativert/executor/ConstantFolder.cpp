@@ -102,7 +102,7 @@ void ConstantFolder::unlinkConstants(
         if (user == output) {
           continue;
         }
-        if (!foldable.contains(user)) {
+        if (foldable.find(user) == foldable.end()) {
           constFoldableCandidates.push(user);
         }
       }
@@ -115,7 +115,7 @@ void ConstantFolder::unlinkConstants(
         // we only store folded values if there is a non-foldable user
         if (const auto& users = value->users();
             std::any_of(users.begin(), users.end(), [&](const auto* u) {
-              return !foldable.contains(u);
+              return foldable.find(u) == foldable.end();
             })) {
           foldedOutputValueIds_.insert(value->id());
         }
@@ -123,16 +123,19 @@ void ConstantFolder::unlinkConstants(
     }
   }
 
-  if (VLOG_IS_ON(1)) {
-    for (const auto& f : foldables_) {
-      VLOG(1) << "Const-folded node: " << *f.node;
-    }
-    VLOG(1) << "Const-folded " << foldables_.size() << " nodes";
+  for (const auto& f : foldables_) {
+    VLOG(1) << "Const-folded node: " << *f.node;
   }
+  LOG(INFO) << "Const-folded " << foldables_.size() << " nodes";
 
   // remove moved (i.e., associated w/ const-folded nodes) kernels
   // from the input kernel vector
-  std::erase(kernels, nullptr);
+  kernels.erase(
+      std::remove_if(
+          kernels.begin(),
+          kernels.end(),
+          [](const auto& k) { return k == nullptr; }),
+      kernels.end());
 
   graph_.renumberValues();
   graph_.finalize();

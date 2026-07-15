@@ -19,14 +19,11 @@ def format_tensor_descriptor(spec: Spec) -> str:
         dtype_str = str(spec.dtype).replace("torch.", "")
         return f"dtype={dtype_str}"
     elif isinstance(spec, TensorSpec):
-        # For tensors, show size, stride, dtype, and device (queried from active plugin).
-        # Imported lazily to avoid an import cycle with codegen.py.
-        from torchfuzz.codegen import get_device_info
-
+        # For tensors, show size, stride, dtype, and device (assuming cuda for now)
         size_str = str(tuple(spec.size))
         stride_str = str(tuple(spec.stride))
         dtype_str = str(spec.dtype).replace("torch.", "")
-        device_str = get_device_info().device_name
+        device_str = "cuda"  # Most fuzzing is done on GPU
 
         return f"size={size_str}, stride={stride_str}, dtype={dtype_str}, device={device_str}"
     else:

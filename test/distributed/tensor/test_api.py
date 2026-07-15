@@ -254,8 +254,7 @@ class DTensorAPITest(DTensorTestBase):
             return DTensor.from_local(inputs[0], device_mesh, [Shard(0)])
 
         def output_fn(mod, outputs, device_mesh):
-            if not isinstance(outputs, DTensor):
-                raise AssertionError(f"Expected DTensor, got {type(outputs)}")
+            assert isinstance(outputs, DTensor)
             return outputs.to_local()
 
         replica_module = distribute_module(
@@ -331,8 +330,7 @@ class DTensorAPITest(DTensorTestBase):
             return DTensor.from_local(inputs[0], device_mesh, [Shard(0)])
 
         def output_fn(outputs, device_mesh):
-            if not isinstance(outputs, DTensor):
-                raise AssertionError(f"Expected DTensor, got {type(outputs)}")
+            assert isinstance(outputs, DTensor)
             return outputs.to_local()
 
         with self.assertWarnsRegex(FutureWarning, "Deprecating"):

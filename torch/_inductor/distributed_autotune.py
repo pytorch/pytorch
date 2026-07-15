@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -74,8 +74,7 @@ def schedule(scheduler: torch._inductor.scheduler.Scheduler) -> None:
     Finish the distributed autotuning by propagating the autotuning results
     between the ranks and then replacing the placeholder with the real Buffer.
     """
-    if not config.distributed_max_autotune_gemm:
-        raise AssertionError("distributed_max_autotune_gemm config must be enabled")
+    assert config.distributed_max_autotune_gemm
     autotune_results = _autotune_local_nodes(scheduler)
     choices_by_index = _sync(autotune_results)
     _autotune_remote_nodes(scheduler, choices_by_index)
@@ -87,13 +86,10 @@ def graph_context() -> Generator[None, None, None]:
     Wrapped around processing a graph, sets up figuring out which ranks tune
     which shapes.
     """
-    if isinstance(
+    assert not isinstance(
         V.get_distributed_autotune_state(check_poisoned=False),  # type: ignore[call-arg]
         _DistributedAutotuneState,
-    ):
-        raise AssertionError(
-            "distributed autotune state is already active, nested graph_context is not allowed"
-        )
+    )
     V.set_distributed_autotune_state(_DistributedAutotuneState())
     try:
         yield
@@ -177,17 +173,15 @@ class _DistributedAutotuneBuffer(MultiTemplateBuffer):
 
         with patch.object(V.graph, "scheduler", None):
             kernel_inputs = MMKernelInputs([*self.original_inputs])
-            if not isinstance(self.layout, Layout):
-                raise AssertionError(f"Expected Layout, got {type(self.layout)}")
+            assert isinstance(self.layout, Layout)
             choice = ser_choice.get_choice(self.layout, kernel_inputs)
-            buffer, _ = autotune_select_algorithm(
+            buffer = autotune_select_algorithm(
                 self._kernel_name,
                 [choice],
                 kernel_inputs.nodes(),
                 self.layout,
             )
-            if not isinstance(buffer, TensorBox):
-                raise AssertionError(f"Expected TensorBox, got {type(buffer)}")
+            assert isinstance(buffer, TensorBox)
             return buffer
 
 
@@ -198,8 +192,7 @@ def _sync(autotune_results: list[_SerializedChoice]) -> Sequence[_SerializedChoi
     """
 
     autotune_pg = get_autotune_pg()
-    if not autotune_pg:
-        raise AssertionError("autotune process group is not initialized")
+    assert autotune_pg
 
     # Perform allgather
     all_states: list[list[_SerializedChoice]] = [None] * autotune_pg.size()  # type: ignore[list-item]
@@ -212,15 +205,12 @@ def _sync(autotune_results: list[_SerializedChoice]) -> Sequence[_SerializedChoi
     check_count = 0
     for other_results in all_states:
         for choice in other_results:
-            if not isinstance(choice, _SerializedChoice):
-                raise AssertionError(f"Expected _SerializedChoice, got {type(choice)}")
-            if choices_by_index[choice.index] is not None:
-                raise AssertionError(f"duplicate choice for index {choice.index}")
+            assert isinstance(choice, _SerializedChoice)
+            assert choices_by_index[choice.index] is None
             choices_by_index[choice.index] = choice
             check_count += 1
 
-    if node_count != check_count:
-        raise AssertionError(f"count mismatch: {node_count} != {check_count}")
+    assert node_count == check_count, f"count mismatch: {node_count} != {check_count}"
     return choices_by_index
 
 
@@ -263,7 +253,7 @@ class _SerializedChoice:
         return ktc.choice
 
     @staticmethod
-    def _compute_kwargs(description: str) -> dict[str, int | str | bool]:
+    def _compute_kwargs(description: str) -> dict[str, Union[int, str, bool]]:
         """
         Given a template description turn it into input kwargs.
         """
@@ -272,7 +262,7 @@ class _SerializedChoice:
 
         # TODO: It seems like it would be better if the template could provide
         # this directly instead of having to parse a string.
-        kwargs: dict[str, int | str | bool] = {}
+        kwargs: dict[str, Union[int, str, bool]] = {}
         for cfg in description.split(","):
             key, val = cfg.split("=", 1)
             key, val = key.strip(), val.strip()
@@ -283,10 +273,7 @@ class _SerializedChoice:
             elif val.isdigit():
                 kwargs[key] = int(val)
             else:
-                if not (val.startswith("'") and val.endswith("'")):
-                    raise AssertionError(
-                        f"expected string value to be single-quoted, got {val!r}"
-                    )
+                assert val.startswith("'") and val.endswith("'")
                 kwargs[key] = val[1:-1]
         return kwargs
 
@@ -354,10 +341,7 @@ def _autotune_local_nodes(
         if info is None:
             continue
 
-        if not info.local:
-            raise AssertionError(
-                "expected info.local to be True for locally autotuned node"
-            )
+        assert info.local
 
         # We force autotuning here
         # Still takes advantage of async precompile
@@ -368,10 +352,9 @@ def _autotune_local_nodes(
         autotune_results.append(choice)
 
     state = V.distributed_autotune_state
-    if len(autotune_results) != state.autotuned_local_count:
-        raise AssertionError(
-            f"incorrect local autotuned nodes found ({len(autotune_results)} != {state.autotuned_local_count})"
-        )
+    assert len(autotune_results) == state.autotuned_local_count, (
+        f"incorrect local autotuned nodes found ({len(autotune_results)} != {state.autotuned_local_count})"
+    )
     return autotune_results
 
 
@@ -388,23 +371,15 @@ def _autotune_remote_nodes(
         if isinstance(node, SchedulerNode) and isinstance(
             (dist_node := node.node), _DistributedAutotuneBuffer
         ):
-            if dist_node.origin_node is None:
-                raise AssertionError("dist_node.origin_node must not be None")
+            assert dist_node.origin_node is not None
             info = dist_node.origin_node.meta[_DISTRIBUTED_AUTOTUNE_KEY]
             out_tensorbox = dist_node.autotune(choices_by_index[info.index])
 
             out_storage = out_tensorbox.data
-            if not isinstance(out_storage, StorageBox):
-                raise AssertionError(f"Expected StorageBox, got {type(out_storage)}")
+            assert isinstance(out_storage, StorageBox)
             out_buffer = out_storage.data
-            if not isinstance(out_buffer, OperationBuffer):
-                raise AssertionError(
-                    f"Expected OperationBuffer, got {type(out_buffer)}"
-                )
+            assert isinstance(out_buffer, OperationBuffer)
 
-            if out_buffer.layout != dist_node.layout:
-                raise AssertionError(
-                    f"layout mismatch: {out_buffer.layout} != {dist_node.layout}"
-                )
+            assert out_buffer.layout == dist_node.layout
 
             scheduler._replace_node(out_buffer, dist_node, i, node)

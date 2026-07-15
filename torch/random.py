@@ -2,25 +2,8 @@
 import contextlib
 import warnings
 from collections.abc import Generator
-from typing import TYPE_CHECKING
 
 import torch
-
-
-__all__ = [
-    "set_rng_state",
-    "get_rng_state",
-    "manual_seed",
-    "seed",
-    "initial_seed",
-    "fork_rng",
-    "thread_safe_generator",
-]
-
-
-if TYPE_CHECKING:
-    from torch.utils.data._utils.worker import WorkerInfo
-
 from torch._C import default_generator
 
 
@@ -159,7 +142,7 @@ def fork_rng(
     enabled=True,
     _caller="fork_rng",
     _devices_kw="devices",
-    device_type=None,
+    device_type="cuda",
 ) -> Generator:
     """
     Forks the RNG, so that when you return, the RNG is reset
@@ -174,9 +157,7 @@ def fork_rng(
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
             to delete it and unindent your Python code under it.
-        device_type (str): device type str, default is ``None``, in which case the type
-            is taken from :func:`torch.accelerator.current_accelerator`, falling back
-            to ``"cuda"`` when the type cannot be determined. As for supported devices,
+        device_type (str): device type str, default is `cuda`. As for supported device,
             see details in :ref:`accelerator<accelerators>`
     """
 
@@ -184,11 +165,8 @@ def fork_rng(
         yield
         return
 
-    acc = torch.accelerator.current_accelerator()
-    # Default to cuda instead of CPU since CPU rng is always forked
-    device_type = device_type or (acc.type if acc is not None else "cuda")
-
-    device_mod = torch.get_device_module(device_type)
+    device_type = torch.device(device_type).type
+    device_mod = getattr(torch, device_type, None)
     if device_mod is None:
         raise RuntimeError(
             f"torch has no module of `{device_type}`, you should register "
@@ -237,39 +215,3 @@ def fork_rng(
         torch.set_rng_state(cpu_rng_state)
         for device, device_rng_state in zip(devices, device_rng_states):
             device_mod.set_rng_state(device_rng_state, device)
-
-
-def thread_safe_generator() -> torch.Generator | None:
-    """Returns a thread-safe random number generator for use in DataLoader workers.
-    This function provides a convenient way for transforms and user code to use
-    thread-safe random number generation without manually checking worker context.
-    When called in a DataLoader thread worker, returns the worker's thread-local
-    :class:`torch.Generator`. When called in the main process or process workers,
-    returns ``None`` (which causes PyTorch functions to use the default global RNG).
-    Returns:
-        Optional[torch.Generator]: Thread-local generator in thread workers, None otherwise.
-    Example::
-        >>> from torch.random import thread_safe_generator
-        >>> generator = thread_safe_generator()
-        >>> torch.randint(0, 10, (5,), generator=generator)
-    Example with transforms::
-        >>> from torch.random import thread_safe_generator
-        >>> class MyRandomTransform:
-        ...     def __call__(self, img):
-        ...         generator = thread_safe_generator()
-        ...         offset = torch.randint(0, 10, (2,), generator=generator)
-        ...         return img[..., offset[0]:, offset[1]:]
-    """
-    # Lazy import to avoid circular dependency during torch module initialization
-    # torch.__init__ loads torch.random early, but torch.utils.data triggers
-    # torch.distributed which needs torch to be fully initialized
-    from torch.utils.data import get_worker_info
-
-    worker_info: WorkerInfo | None = get_worker_info()
-    if (
-        worker_info is not None
-        and worker_info.worker_method == "thread"
-        and worker_info.rng is not None
-    ):
-        return worker_info.rng.torch_generator
-    return None

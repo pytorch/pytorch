@@ -10,7 +10,7 @@ from typing import Any
 
 import torch
 from torch import Tensor
-from torch._environment import is_fbcode, is_prod
+from torch._environment import is_fbcode
 from torch._utils import _LazySeedTracker
 from torch.types import Device
 
@@ -111,14 +111,10 @@ def _lazy_init() -> None:
 
         # Install the C++ resource manager to enable Buck resource lookup from Python.
         # This must be called before _mtia_init() which may access Buck resources.
-        if is_fbcode() and is_prod():
-            try:
-                from libfb.py.cxx_resources import cxx_resource_manager
+        if is_fbcode():
+            from libfb.py.cxx_resources import cxx_resource_manager
 
-                cxx_resource_manager.install()
-            except ModuleNotFoundError:
-                # cxx_resource_manager is not available in all build configurations
-                pass
+            cxx_resource_manager.install()
 
         torch._C._mtia_init()
         # Some of the queued calls may reentrantly call _lazy_init();
@@ -168,13 +164,13 @@ def synchronize(device: Device = None) -> None:
 
 def device_count() -> int:
     r"""Return the number of MTIA devices available."""
+    # TODO: Update _accelerator_hooks_device_count to abstract a MTIA device count API
     return torch._C._mtia_getDeviceCount()
 
 
 def current_device() -> int:
     r"""Return the index of a currently selected device."""
-    # pyrefly: ignore [missing-attribute]
-    return torch._C._mtia_getDevice()
+    return torch._C._accelerator_hooks_get_current_device()
 
 
 def current_stream(device: Device = None) -> Stream:
@@ -186,8 +182,7 @@ def current_stream(device: Device = None) -> Stream:
             by :func:`~torch.mtia.current_device`, if :attr:`device` is ``None``
             (default).
     """
-    device_idx = _get_device_index(device, optional=True)
-    return torch._C._mtia_getCurrentStream(device_idx)
+    return torch._C._mtia_getCurrentStream(_get_device_index(device, optional=True))
 
 
 def default_stream(device: Device = None) -> Stream:
@@ -278,8 +273,7 @@ def set_device(device: Device) -> None:
     """
     device = _get_device_index(device)
     if device >= 0:
-        # pyrefly: ignore [missing-attribute]
-        torch._C._mtia_setDevice(device)
+        torch._C._accelerator_hooks_set_current_device(device)
 
 
 def get_device_properties(device: Device = None) -> dict[str, Any]:
@@ -306,12 +300,10 @@ class device:
         self.prev_idx = -1
 
     def __enter__(self):
-        # pyrefly: ignore [missing-attribute]
-        self.prev_idx = torch._C._mtia_maybeExchangeDevice(self.idx)
+        self.prev_idx = torch._C._accelerator_hooks_maybe_exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        # pyrefly: ignore [missing-attribute]
-        self.idx = torch._C._mtia_maybeExchangeDevice(self.prev_idx)
+        self.idx = torch._C._accelerator_hooks_maybe_exchange_device(self.prev_idx)
         return False
 
 

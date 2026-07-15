@@ -1,3 +1,4 @@
+# flake8: noqa: F401
 r"""Quantized Reference Modules.
 
 This module is in the process of migration to

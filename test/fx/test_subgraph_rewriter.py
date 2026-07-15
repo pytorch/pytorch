@@ -514,10 +514,8 @@ class TestSubgraphRewriter(JitTestCase):
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
         for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
             if n.op == "placeholder":
-                if n.type is not int:
-                    raise AssertionError(f"Expected n.type to be int, got {n.type}")
-                if m.type is not int:
-                    raise AssertionError(f"Expected m.type to be int, got {m.type}")
+                assert n.type is int
+                assert m.type is int
 
     def test_subgraph_rewriter_replace_consecutive_submodules(self):
         def f(x):
@@ -674,10 +672,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         traced.graph.lint()
         placeholder_nodes = [n for n in traced.graph.nodes if n.op == "placeholder"]
-        if len(placeholder_nodes) != 3:
-            raise AssertionError(
-                f"Expected 3 placeholder nodes, got {len(placeholder_nodes)}"
-            )
+        assert len(placeholder_nodes) == 3
 
         ref_outs = comparison_fn(x1, x2, x3)
         test_outs = traced.forward(x1, x2, x3)
@@ -950,7 +945,7 @@ class TestSubgraphRewriter(JitTestCase):
 def forward(self, x):
     _reshape_alias_copy_default_1 = torch.ops.aten._reshape_alias_copy.default(x, [3, 4], [1, 2]);  x = None
     return _reshape_alias_copy_default_1""",
-        )
+        )  # noqa: B950
 
     def test_replacement_with_attrs(self):
         class M(torch.nn.Module):

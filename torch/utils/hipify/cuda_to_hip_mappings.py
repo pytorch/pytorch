@@ -24,6 +24,7 @@ MATH_TRANSPILATIONS = collections.OrderedDict([
     ("std::frexp", ("::frexp")),
 ])
 
+# pyrefly: ignore  # no-matching-overload
 CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("CUresult", "hipError_t"),
     ("cudaError_t", "hipError_t"),
@@ -349,6 +350,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("tensorpipe/tensorpipe_cuda.h", "tensorpipe/tensorpipe_hip.h"),
 ])
 
+# pyrefly: ignore  # no-matching-overload
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("__CUDACC__", "__HIPCC__"),
     ("CUDA_ERROR_INVALID_CONTEXT", "hipErrorInvalidContext"),
@@ -766,7 +768,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("CU_MEM_HANDLE_TYPE_WIN32", "hipMemHandleTypeWin32"),
     ("CU_MEM_HANDLE_TYPE_WIN32_KMT", "hipMemHandleTypeWin32Kmt"),
     ("CU_MEM_LOCATION_TYPE_DEVICE", "hipMemLocationTypeDevice"),
-    ("CU_MEM_LOCATION_TYPE_HOST", "hipMemLocationTypeHost"),
     ("CU_MEM_LOCATION_TYPE_INVALID", "hipMemLocationTypeInvalid"),
     ("CU_MEM_OPERATION_TYPE_MAP", "hipMemOperationTypeMap"),
     ("CU_MEM_OPERATION_TYPE_UNMAP", "hipMemOperationTypeUnmap"),
@@ -1354,7 +1355,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cudaEventCreateWithFlags", "hipEventCreateWithFlags"),
     ("cudaEventDestroy", "hipEventDestroy"),
     ("cudaEventRecord", "hipEventRecord"),
-    ("cudaEventRecordWithFlags", "hipEventRecordWithFlags"),
     ("cudaEventElapsedTime", "hipEventElapsedTime"),
     ("cudaEventSynchronize", "hipEventSynchronize"),
     ("cudaEventQuery", "hipEventQuery"),
@@ -1362,10 +1362,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cudaEventBlockingSync", "hipEventBlockingSync"),
     ("cudaEventDisableTiming", "hipEventDisableTiming"),
     ("cudaEventInterprocess", "hipEventInterprocess"),
-    ("cudaEventRecordDefault", "hipEventRecordDefault"),
-    ("cudaEventRecordExternal", "hipEventRecordExternal"),
-    ("cudaEventWaitDefault", "hipEventWaitDefault"),
-    ("cudaEventWaitExternal", "hipEventWaitExternal"),
     ("cudaStreamCreate", "hipStreamCreate"),
     ("cudaStreamCreateWithFlags", "hipStreamCreateWithFlags"),
     ("cudaStreamCreateWithPriority", "hipStreamCreateWithPriority"),
@@ -2401,20 +2397,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cublasSrotmg_v2", "hipblasSrotmg_v2"),
     ("cublasDrotmg_v2", "hipblasDrotmg_v2"),
     ("cublasComputeType_t", "hipblasComputeType_t"),
-    ("CUBLAS_COMPUTE_16F", "HIPBLAS_COMPUTE_16F"),
     ("CUBLAS_COMPUTE_32I", "HIPBLAS_COMPUTE_32I"),
     ("CUBLAS_COMPUTE_32F", "HIPBLAS_COMPUTE_32F"),
     ("CUBLAS_COMPUTE_32F_FAST_TF32", "HIPBLAS_COMPUTE_32F_FAST_TF32"),
     ("CUBLAS_COMPUTE_64F", "HIPBLAS_COMPUTE_64F"),
-    ("cublasMath_t", "hipblasMath_t"),
-    ("CUBLAS_DEFAULT_MATH", "HIPBLAS_DEFAULT_MATH"),
-    ("CUBLAS_TENSOR_OP_MATH", "HIPBLAS_TENSOR_OP_MATH"),
-    ("CUBLAS_PEDANTIC_MATH", "HIPBLAS_PEDANTIC_MATH"),
-    ("CUBLAS_TF32_TENSOR_OP_MATH", "HIPBLAS_TF32_TENSOR_OP_MATH"),
-    (
-        "CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION",
-        "HIPBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION",
-    ),
     ("cublasLtEpilogue_t", "hipblasLtEpilogue_t"),
     ("CUBLASLT_EPILOGUE_DEFAULT", "HIPBLASLT_EPILOGUE_DEFAULT"),
     ("CUBLASLT_EPILOGUE_RELU", "HIPBLASLT_EPILOGUE_RELU"),
@@ -2692,7 +2678,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cub::RowMajorTid", "hipcub::RowMajorTid"),
     ("cub::CachingDeviceAllocator", "hipcub::CachingDeviceAllocator"),
     ("cub::CountingInputIterator", "hipcub::CountingInputIterator"),
-    ("cub::DeviceHistogram", "hipcub::DeviceHistogram"),
     ("cub::DeviceRadixSort", "hipcub::DeviceRadixSort"),
     ("cub::DeviceReduce", "hipcub::DeviceReduce"),
     ("cub::DeviceRunLengthEncode", "hipcub::DeviceRunLengthEncode"),
@@ -3236,8 +3221,6 @@ CUDA_SPECIAL_MAP = collections.OrderedDict([
     ("cusolverDnGetStream", "hipsolverDnGetStream"),
     ("cusolverDnDestroy", "hipsolverDnDestroy"),
     ("cusolverDnParams_t", "hipsolverDnParams_t"),
-    ("cusolverDnCreateParams", "hipsolverDnCreateParams"),
-    ("cusolverDnDestroyParams", "hipsolverDnDestroyParams"),
     ("cusolverDnCgeqrf", "hipsolverDnCgeqrf"),
     ("cusolverDnCgeqrf_bufferSize", "hipsolverDnCgeqrf_bufferSize"),
     ("cusolverDnCgesvd", "hipsolverDnCgesvd"),
@@ -3316,15 +3299,11 @@ CUDA_SPECIAL_MAP = collections.OrderedDict([
     ("cusolverDnSsyevjBatched", "hipsolverDnSsyevjBatched"),
     ("cusolverDnSsyevjBatched_bufferSize", "hipsolverDnSsyevjBatched_bufferSize"),
     ("cusolverDnSsyevj_bufferSize", "hipsolverDnSsyevj_bufferSize"),
-    ("cusolverDnXgeev", "hipsolverDnXgeev"),
-    ("cusolverDnXgeev_bufferSize", "hipsolverDnXgeev_bufferSize"),
     ("cusolverDnXgeqrf", "hipsolverDnXgeqrf"),
     ("cusolverDnXgeqrf_bufferSize", "hipsolverDnXgeqrf_bufferSize"),
     ("cusolverDnXpotrf", "hipsolverDnXpotrf"),
     ("cusolverDnXpotrf_bufferSize", "hipsolverDnXpotrf_bufferSize"),
     ("cusolverDnXpotrs", "hipsolverDnXpotrs"),
-    ("cusolverDnXsyevBatched", "hipsolverDnXsyevBatched"),
-    ("cusolverDnXsyevBatched_bufferSize", "hipsolverDnXsyevBatched_bufferSize"),
     ("cusolverDnXsyevd", "hipsolverDnXsyevd"),
     ("cusolverDnXsyevd_bufferSize", "hipsolverDnXsyevd_bufferSize"),
     ("cusolverDnZgeqrf", "hipsolverDnZgeqrf"),
@@ -3361,8 +3340,6 @@ CUDA_SPECIAL_MAP = collections.OrderedDict([
     ("cusolverDnSsytrf", "hipsolverDnSsytrf"),
     ("cusolverDnZsytrf", "hipsolverDnZsytrf"),
     ("cusolverDnCsytrf", "hipsolverDnCsytrf"),
-    ("cusolverDnXsytrs_bufferSize", "hipsolverDnXsytrs_bufferSize"),
-    ("cusolverDnXsytrs", "hipsolverDnXsytrs"),
     ("cusolverDnSgesvdaStridedBatched_bufferSize", "hipsolverDnSgesvdaStridedBatched_bufferSize"),
     ("cusolverDnDgesvdaStridedBatched_bufferSize", "hipsolverDnDgesvdaStridedBatched_bufferSize"),
     ("cusolverDnCgesvdaStridedBatched_bufferSize", "hipsolverDnCgesvdaStridedBatched_bufferSize"),
@@ -3417,23 +3394,6 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudnnTensorDescriptor_t ", "miopenTensorDescriptor_t "),
     ("CUDNN_ENFORCE", "MIOPEN_ENFORCE"),
     ("CUDNN_CHECK", "MIOPEN_CHECK"),
-    # NVSHMEM → rocSHMEM mappings (only symbols used in hipified files:
-    # NVSHMEMSymmetricMemory.cpp and nvshmem_team_manager.hpp).
-    ("NVSHMEM_TEAM_INVALID", "rocshmem::ROCSHMEM_TEAM_INVALID"),
-    ("NVSHMEM_TEAM_WORLD", "rocshmem::ROCSHMEM_TEAM_WORLD"),
-    ("NVSHMEMX_INIT_WITH_UNIQUEID", "rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID"),
-
-    ("nvshmem_malloc", "rocshmem::rocshmem_malloc"),
-    ("nvshmem_free", "rocshmem::rocshmem_free"),
-    ("nvshmem_ptr", "rocshmem::rocshmem_ptr"),
-    ("nvshmem_team_t", "rocshmem::rocshmem_team_t"),
-    ("nvshmem_team_split_strided", "rocshmem::rocshmem_team_split_strided"),
-
-    ("nvshmemx_uniqueid_t", "rocshmem::rocshmem_uniqueid_t"),
-    ("nvshmemx_get_uniqueid", "rocshmem::rocshmem_get_uniqueid"),
-    ("nvshmemx_init_attr", "rocshmem::rocshmem_init_attr"),
-    ("nvshmemx_init_attr_t", "rocshmem::rocshmem_init_attr_t"),
-    ("nvshmemx_set_attr_uniqueid_args", "rocshmem::rocshmem_set_attr_uniqueid_args"),
 ])
 
 C10_MAPPINGS = collections.OrderedDict([
@@ -3453,11 +3413,9 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAMathCompat.h", "c10/hip/HIPMathCompat.h"),
     ("c10/cuda/CUDAMiscFunctions.h", "c10/hip/HIPMiscFunctions.h"),
     ("c10/cuda/CUDAStream.h", "c10/hip/HIPStream.h"),
-    ("c10/cuda/PeerToPeerAccess.h", "c10/hip/PeerToPeerAccess.h"),
     ("c10/cuda/CUDAEvent.h", "c10/hip/HIPEvent.h"),
     ("c10/cuda/impl/CUDAGuardImpl.h", "c10/hip/impl/HIPGuardImpl.h"),
     ("c10/cuda/impl/CUDATest.h", "c10/hip/impl/HIPTest.h"),
-    ("CUDATest.hpp", "HIPTest.hpp"),
     ("c10/cuda/impl/cuda_cmake_macros.h", "c10/hip/impl/hip_cmake_macros.h"),
     # TODO: Remove these. They were necessary for Meta-internal builds.
     ("c10::hip::c10_hip_check_implementation", "c10::cuda::c10_cuda_check_implementation"),

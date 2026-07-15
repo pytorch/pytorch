@@ -7,6 +7,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <cmath>
@@ -20,7 +21,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/view_as_real.h>
-#include <ATen/ops/_assert_async.h>
 #endif
 
 namespace at::native::templates {
@@ -191,17 +191,9 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, std::optional<in
     TORCH_CHECK( \
       !std.is_complex(), \
       "normal expects standard deviation to be non-complex"); \
-    if (std.numel() > 0 && !std.is_meta()) { \
-      if (std.is_cuda()) { \
-        at::_assert_async( \
-          std.min().ge(0), \
-          "normal expects all elements of std >= 0.0"); \
-      } else { \
-        TORCH_CHECK( \
-          std.min().ge(0).item<bool>(), \
-          "normal expects all elements of std >= 0.0"); \
-      } \
-    } \
+    TORCH_CHECK( \
+      std.numel() == 0 || std.is_meta() || std.min().ge(0).item<bool>(), \
+      "normal expects all elements of std >= 0.0"); \
   } while (0)
 
 #define CHECK_NORMAL_STD(std) \
@@ -308,8 +300,8 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, std::optiona
             "uniform_ expects to-from <= std::numeric_limits<", toString(self.scalar_type()),
             ">::max(), but found to=", to, " and from=", from,
             " which result in to-from to exceed the limit");
-      from = std::clamp(from, min, max);
-      to = std::clamp(to, min, max);
+      from = std::min(std::max(from, min), max);
+      to = std::max(std::min(to, max), min);
     });
     CHECK_EMPTY_AND_RETURN(self);
     auto iter = at::TensorIterator::borrowing_nullary_op(self);
@@ -370,6 +362,7 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, std::optional<Ge
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
 Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
   CHECK_EMPTY_AND_RETURN(self);
+  NoNamesGuard guard;
   at::assert_no_internal_overlap(self);
   bernoulli_tensor_kernel<RNG>()(self, p_, gen);
   return self;
@@ -391,6 +384,7 @@ Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, std::optional<Gen
   // TODO: Fix resize_as_. See pytorch/pytorch#11665.
   result.resize_(self.sizes());
   bernoulli_impl_<bernoulli_tensor_kernel, RNG>(result, self, gen);
+  namedinference::propagate_names(result, self);
   return result;
 }
 

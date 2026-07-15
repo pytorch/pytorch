@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Generator
 from contextlib import contextmanager
 from itertools import chain
-from typing import Any
+from typing import Any, Optional
 
 from torch.utils._appending_byte_serializer import (
     AppendingByteSerializer,
@@ -171,23 +171,6 @@ def _deserialize_single_cache(
 CacheArtifactsResult = dict[str, list[CacheArtifact]]
 
 
-@dataclasses.dataclass(frozen=True)
-class CacheArtifactRecorder:
-    """
-    Shared entry point for cache implementations to record artifacts.
-    """
-
-    artifact_type: str
-    key: str
-
-    def record(self, content: Any) -> None:
-        CacheArtifactManager.record_artifact(self.artifact_type, self.key, content)
-
-    def record_if_present(self, content: Any | None) -> None:
-        if content is not None:
-            self.record(content)
-
-
 class CacheArtifactManager:
     """
     Lightweight manager class for collecting and processing cache artifacts for
@@ -195,7 +178,7 @@ class CacheArtifactManager:
 
     Intended Lifecycle:
     - Execute code via torch.compile, this will call
-        CacheArtifactRecorder.record on each cache artifact
+        CacheArtifactManager.record_artifact on each cache artifact
     - Call CacheArtifactManager.serialize to convert all the cache artifacts
         to portable format
     - Call CacheArtifactManager.deserialize to hot load the cache artifacts on
@@ -259,7 +242,7 @@ class CacheArtifactManager:
         artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
         if artifact in cls._seen_artifacts:
             return
-        log.debug("Recording %s", artifact)
+        log.debug("Recording %s", str(artifact))
         cls._new_cache_artifacts[artifact_type].append(artifact)
         cls._seen_artifacts.add(artifact)
 
@@ -271,7 +254,7 @@ class CacheArtifactManager:
         return len(cls._new_cache_artifacts) != 0
 
     @classmethod
-    def serialize(cls) -> tuple[bytes, CacheInfo] | None:
+    def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
         """
         Converts the "mega" list into portable format
         """
@@ -280,7 +263,7 @@ class CacheArtifactManager:
             cls._cache_info.add(artifact)
 
         if cls._cache_info.empty():
-            # If there are no artifacts, don't just return bytes with
+            # If there are not artifacts, dont just return bytes with
             # version.
             return None
 
@@ -297,7 +280,7 @@ class CacheArtifactManager:
         return None
 
     @staticmethod
-    def deserialize(serialized_artifacts: bytes) -> CacheArtifactsResult | None:
+    def deserialize(serialized_artifacts: bytes) -> Optional[CacheArtifactsResult]:
         """
         Converts the portable format back into CacheArtifacts
         """

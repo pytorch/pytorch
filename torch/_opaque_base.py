@@ -1,11 +1,12 @@
-import logging
+class OpaqueBaseMeta(type):
+    def __instancecheck__(cls, instance):
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        return super().__instancecheck__(instance) or (
+            isinstance(instance, FakeScriptObject)
+            and super().__instancecheck__(instance.real_obj)
+        )
 
 
-log = logging.getLogger(__name__)
-
-log.warning("torch._opaque_base is deprecated, use torch._custom_class_base instead")
-
-from torch._custom_class_base import (  # noqa: F401
-    CustomClassBase as OpaqueBase,
-    CustomClassBaseMeta as OpaqueBaseMeta,
-)
+class OpaqueBase(metaclass=OpaqueBaseMeta):
+    pass

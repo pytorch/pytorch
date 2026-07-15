@@ -1,9 +1,10 @@
+# mypy: allow-untyped-defs
 import collections
 import heapq
 import operator
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx
@@ -20,8 +21,8 @@ __all__ = [
     "stable_topological_sort",
 ]
 
-Tensors = tuple[torch.Tensor] | list[torch.Tensor]
-TensorOrTensors = torch.Tensor | Tensors
+Tensors = Union[tuple[torch.Tensor], list[torch.Tensor]]
+TensorOrTensors = Union[torch.Tensor, Tensors]
 NodeList = list[torch.fx.Node]
 NodeSet = set[torch.fx.Node]
 Names = list[str]
@@ -29,7 +30,7 @@ CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
 
 @compatibility(is_backward_compatible=False)
-def get_acc_ops_name(k: str | type) -> str:
+def get_acc_ops_name(k):
     if isinstance(k, str):
         return k
     elif k.__module__ and "acc_ops" in k.__module__:
@@ -104,7 +105,7 @@ class FxNetAccFusionsFinder:
     Such groups are called fusion groups.
     """
 
-    def __init__(self, module: torch.fx.GraphModule, acc_nodes: NodeSet) -> None:
+    def __init__(self, module: torch.fx.GraphModule, acc_nodes: NodeSet):
         self.module = module
         self.nodes = list(module.graph.nodes)
         self.acc_nodes = acc_nodes
@@ -124,7 +125,7 @@ class FxNetAccFusionsFinder:
         # Nodes that in the fusion group that haven't been processed yet.
         nodes_need_process: NodeSet
 
-        def add_node(self, node: torch.fx.Node) -> None:
+        def add_node(self, node):
             """
             Add a node to fusion group.
             """
@@ -145,9 +146,9 @@ class FxNetAccFusionsFinder:
     def recursive_add_node(
         self,
         fusion_group: "FxNetAccFusionsFinder.FusionGroup",
-        inputs: NodeSet | NodeList,
-        visited: NodeSet | None = None,
-    ) -> bool:
+        inputs: Union[NodeSet, NodeList],
+        visited: Optional[NodeSet] = None,
+    ):
         """
         Start from inputs and going reverse topological order. If any upstream node
         is in the fusion group, add all the nodes in this path to fusion group.
@@ -301,7 +302,7 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for node in gm.graph.nodes:
         for user in node.users:
             indeg[user] += 1
-    queue: collections.deque[torch.fx.Node] = collections.deque()
+    queue: collections.deque = collections.deque()
     # Add all nodes with no dependencies to the queue
     for node in gm.graph.nodes:
         if indeg[node] == 0:

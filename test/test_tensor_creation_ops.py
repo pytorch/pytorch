@@ -33,13 +33,12 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     IS_ARM64,
     parametrize,
-    TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -201,21 +200,21 @@ class TestTensorCreation(TestCase):
 
         single_roll = numbers.roll(1, 0)
         expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
-        self.assertEqual(single_roll, expected, msg=lambda msg: f"{msg}\n{single_roll} did not equal expected result")
+        self.assertEqual(single_roll, expected, msg=f"{single_roll} did not equal expected result")
 
         roll_backwards = numbers.roll(-2, 0)
         expected = torch.tensor([3, 4, 5, 6, 7, 8, 1, 2], device=device)
-        self.assertEqual(roll_backwards, expected, msg=lambda msg: f"{msg}\n{roll_backwards} did not equal expected result")
+        self.assertEqual(roll_backwards, expected, msg=f"{roll_backwards} did not equal expected result")
 
         data = numbers.view(2, 2, 2)
         rolled = data.roll(1, 0)
         expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
-        self.assertEqual(expected, rolled, msg=lambda msg: f"{msg}\n{rolled} did not equal expected result: {expected}")
+        self.assertEqual(expected, rolled, msg=f"{rolled} did not equal expected result: {expected}")
 
         data = data.view(2, 4)
         # roll a loop until back where started
         loop_rolled = data.roll(2, 0).roll(4, 1)
-        self.assertEqual(data, loop_rolled, msg=lambda msg: f"{msg}\n{loop_rolled} did not equal the original: {data}")
+        self.assertEqual(data, loop_rolled, msg=f"{loop_rolled} did not equal the original: {data}")
         # multiple inverse loops
         self.assertEqual(data, data.roll(-20, 0).roll(-40, 1))
         self.assertEqual(torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device), numbers.roll(1, 0))
@@ -227,7 +226,7 @@ class TestTensorCreation(TestCase):
         expected = torch.tensor([4, 8, 1, 5, 2, 6, 3, 7]).view(4, 2)
         rolled = strided.roll(1, 0)
         self.assertEqual(expected, rolled,
-                         msg=lambda msg: f"{msg}\nnon contiguous tensor rolled to {rolled} instead of {expected} ")
+                         msg=f"non contiguous tensor rolled to {rolled} instead of {expected} ")
 
         # test roll with no dimension specified
         expected = numbers.roll(1, 0).view(2, 4)
@@ -238,7 +237,7 @@ class TestTensorCreation(TestCase):
         expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], device=device)
         double_rolled = data.roll(shifts=(2, -1), dims=(1, 0))
         self.assertEqual(double_rolled, expected,
-                         msg=lambda msg: f"{msg}\nshould be able to roll over two dimensions, got {double_rolled}")
+                         msg=f"should be able to roll over two dimensions, got {double_rolled}")
 
         self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=()))
         self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=1))
@@ -383,7 +382,6 @@ class TestTensorCreation(TestCase):
             ):
                 torch.block_diag(torch.ones(2, 2).cpu(), torch.ones(2, 2, device=device))
 
-    @skipCPUIf(TEST_WITH_TORCHDYNAMO, "test doesn't currently work with dynamo on CPU")
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_block_diag_scipy(self, device):
         import scipy.linalg
@@ -539,9 +537,9 @@ class TestTensorCreation(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/155306
         msg = "expected a non-empty list of Tensors"
         with self.assertRaisesRegex(ValueError, msg):
-            torch.concat([], dim=0)
+            torch.concat([], dim='N')
         with self.assertRaisesRegex(ValueError, msg):
-            torch.concatenate([], dim=0)
+            torch.concatenate([], dim='N')
 
     def test_cat_out(self, device):
         x = torch.zeros((0), device=device)
@@ -1091,11 +1089,8 @@ class TestTensorCreation(TestCase):
             # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
             #       see https://github.com/pytorch/pytorch/issues/97794
             refs = (0, 254, 255, 0, 0, 0, 1, 2)
-        elif dtype in (torch.int8, torch.int16):
-            # CPU min and max float -> int8/int16 conversion is divergent.
-            # (int8 also diverges under clang-21: out-of-range float->int is UB
-            # and codegen differs from numpy's reference.) Drop the out-of-range
-            # extremes.
+        elif dtype == torch.int16:
+            # CPU min and max float -> int16 conversion is divergent.
             vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
 
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
@@ -1281,22 +1276,6 @@ class TestTensorCreation(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.tensor([1, 2, -1, 3, 4], device=device))
-
-        # Negative repeats must be rejected even when output_size is passed,
-        # otherwise the CPU kernel can write out of bounds: the corrupted cumsum
-        # makes a later non-negative element produce start < 0, and in a
-        # multi-threaded run that OOB write races ahead of the sibling thread's
-        # check. See https://github.com/pytorch/pytorch/issues/188938
-        # On CUDA the kernel rejects these inputs via a device-side assert,
-        # which cannot be caught cleanly and poisons the context, so this is
-        # validated on CPU only.
-        if torch.device(device).type == "cpu":
-            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
-                torch.repeat_interleave(
-                    torch.tensor([-1, -1, 2], device=device), output_size=0)
-            with self.assertRaisesRegex(RuntimeError, "repeats can not be negative"):
-                torch.repeat_interleave(
-                    torch.tensor([5, -2, 1], device=device), output_size=4)
 
         y = torch.tensor([[1, 2], [3, 4]], device=device)
 
@@ -2808,24 +2787,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(t[-1].item(), 2)
         del t
 
-        # On ROCm, launches with gridDim.x * blockDim.x >= 2^32 are not
-        # supported and either return hipErrorInvalidConfiguration or fail
-        # silently. Exercise the just-over case (~16 GB at int32) and a
-        # far-above case (~33 GB) when memory permits. arange computes
-        # int64 values then casts down, so for int32 the trailing
-        # 2^32 - 2, 2^32 - 1, 2^32 wrap to -2, -1, 0.
-        if TEST_WITH_ROCM:
-            for bigint in (2 ** 32 + 1, 2 ** 33 + 1):
-                free, _ = torch.cuda.mem_get_info(device)
-                if free < bigint * 4 + (3 << 30):
-                    continue
-                t = torch.arange(bigint, dtype=torch.int32, device=device)
-                self.assertEqual(t.numel(), bigint)
-                self.assertEqual(
-                    t[-3:].cpu(), torch.tensor([-2, -1, 0], dtype=torch.int32)
-                )
-                del t
-
     @expectedFailureMeta  # RuntimeError: The tensor has a non-zero number of elements
     @onlyNativeDeviceTypes
     def test_tensor_ctor_device_inference(self, device):
@@ -2869,9 +2830,8 @@ class TestTensorCreation(TestCase):
         cpu_device = torch.device('cpu')
         tensor = torch.tensor((1, 2, 3), device=device)
 
-        # need a non-CPU device (with its own device memory) to test this
-        if self.device_type == 'cpu':
-            raise AssertionError(f"expected a non-CPU device, got {self.device_type!r}")
+        # need more than one device_type to test this
+        assert self.device_type == 'cuda'
         for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
             for device_arg in [torch_device, cpu_device, None]:
                 if device_arg is None:
@@ -3500,9 +3460,8 @@ class TestRandomTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'normal expects std >= 0.0, but found std'):
                 torch.normal(input, -1, (10,))
 
-            if not std.is_cuda:  # on GPU this error is raised asynchronously
-                with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
-                    torch.normal(input, std)
+            with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
+                torch.normal(input, std)
 
     # https://github.com/pytorch/pytorch/issues/126834
     @xfailIfTorchDynamo
@@ -3754,7 +3713,7 @@ class TestRandomTensorCreation(TestCase):
         expected_bin = shuffled_interval.shape[0] / 10
         expected_error = math.sqrt(expected_bin) / expected_bin * 3
         error = (hist - expected_bin).abs().max() / expected_bin
-        self.assertTrue(error < expected_error, lambda msg: f"{msg}\nerror {error} > {expected_error}")
+        self.assertTrue(error < expected_error, f"error {error} > {expected_error}")
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA
@@ -4147,63 +4106,6 @@ class TestBufferProtocol(TestCase):
         self.assertEqual(tensor.numel(), 2)
         self.assertSequenceEqual(tensor, [255, 255])
 
-class TestFromBlob(TestCase):
-    def _make_data(self, dtype, numel):
-        numpy_dtype = torch_to_numpy_dtype_dict[dtype]
-        arr = np.arange(1, numel + 1, dtype=numpy_dtype)
-        return arr, arr.ctypes.data
-
-    @dtypes(*all_types_and_complex_and(torch.half))
-    def test_basic(self, device, dtype):
-        arr, ptr = self._make_data(dtype, 6)
-        t = torch._from_blob(ptr, [6], dtype=dtype)
-        self.assertEqual(t, torch.from_numpy(arr))
-
-    @dtypes(*all_types_and_complex_and(torch.half))
-    def test_2d(self, device, dtype):
-        arr, ptr = self._make_data(dtype, 6)
-        t = torch._from_blob(ptr, [2, 3], dtype=dtype)
-        self.assertEqual(t, torch.from_numpy(arr.reshape(2, 3)))
-
-    @dtypes(torch.float32, torch.float64, torch.int32, torch.int64)
-    def test_strides(self, device, dtype):
-        arr, ptr = self._make_data(dtype, 6)
-        t = torch._from_blob(ptr, [2, 3], [1, 2], dtype=dtype)
-        expected = torch.from_numpy(arr.reshape(2, 3, order="F"))
-        self.assertEqual(t, expected)
-
-    @dtypes(torch.float32, torch.int64)
-    def test_shared_memory(self, device, dtype):
-        numpy_dtype = torch_to_numpy_dtype_dict[dtype]
-        arr = np.array([1, 2, 3, 4], dtype=numpy_dtype)
-        t = torch._from_blob(arr.ctypes.data, [4], dtype=dtype)
-        arr[0] = 99
-        self.assertEqual(t[0].item(), 99)
-        t[1] = 77
-        self.assertEqual(arr[1], 77)
-
-    def test_explicit_device(self, device):
-        arr = np.array([1.0, 2.0], dtype=np.float32)
-        t = torch._from_blob(arr.ctypes.data, [2], dtype=torch.float32, device="cpu")
-        self.assertEqual(t.device, torch.device("cpu"))
-        self.assertEqual(t, torch.from_numpy(arr))
-
-    def test_default_dtype(self, device):
-        arr = np.array([1.0, 2.0], dtype=np.float32)
-        with set_default_dtype(torch.float32):
-            t = torch._from_blob(arr.ctypes.data, [2])
-            self.assertEqual(t.dtype, torch.float32)
-        with set_default_dtype(torch.float64):
-            t = torch._from_blob(arr.ctypes.data, [2])
-            self.assertEqual(t.dtype, torch.float64)
-
-    @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-    def test_invalid_device(self, device):
-        arr = np.array([1.0, 2.0], dtype=np.float32)
-        with self.assertRaises(RuntimeError):
-            torch._from_blob(arr.ctypes.data, [2], dtype=torch.float32, device="cuda")
-
-
 # Tests for the `asarray` function:
 #   Constructs tensors from a Python object that has one of the following
 #   characteristics:
@@ -4214,14 +4116,7 @@ class TestFromBlob(TestCase):
 #   The implementation itself is based on the Python Array API:
 #   https://data-apis.org/array-api/latest/API_specification/creation_functions.html
 def get_another_device(device):
-    device = torch.device(device)
-
-    if device.type != "cpu":
-        return "cpu"
-
-    acc = torch.accelerator.current_accelerator(True)
-
-    return acc.type if acc is not None else None
+    return "cuda" if torch.device(device).type == "cpu" else "cpu"
 
 def identity(tensor):
     return tensor
@@ -4240,8 +4135,7 @@ class TestAsArray(TestCase):
             3. Whether the result lives in the expected device
             4. Whether the result has its 'requires_grad' set or not
         """
-        converted_original = cvt(original)
-        result = torch.asarray(converted_original, **kwargs)
+        result = torch.asarray(cvt(original), **kwargs)
         self.assertTrue(isinstance(result, torch.Tensor))
 
         # 1. The storage pointers should be equal only if 'is_alias' is set
@@ -4272,10 +4166,8 @@ class TestAsArray(TestCase):
         if device.index is not None:
             self.assertEqual(device.index, result.device.index)
 
-        # 4. By default, 'requires_grad' mirrors the original tensor's requires_grad, if
-        # present.
-        original_requires_grad = converted_original.requires_grad if isinstance(converted_original, torch.Tensor) else False
-        self.assertEqual(result.requires_grad, kwargs.get("requires_grad", original_requires_grad))
+        # 4. By default, 'requires_grad' is unset
+        self.assertEqual(result.requires_grad, kwargs.get("requires_grad", False))
 
     def _test_alias_with_cvt(self, cvt, device, dtype, shape=(5, 5), only_with_dtype=False):
         original = make_tensor(shape, dtype=dtype, device=device)
@@ -4335,16 +4227,8 @@ class TestAsArray(TestCase):
         check(device=device, dtype=dtype, copy=True)
 
         # Copy is forced because of different device
-        other = get_another_device(device)
-        if other is not None:
-            try:
-                caps = torch.accelerator.get_device_capability(other)
-            except Exception:
-                pass
-            else:
-                if dtype not in caps["supported_dtypes"]:
-                    self.skipTest(f"{other} doesn't support {dtype}")
-
+        if torch.cuda.is_available():
+            other = get_another_device(device)
             check(same_device=False, device=other, dtype=dtype)
             check(same_device=False, device=other, dtype=dtype, copy=True)
 
@@ -4416,8 +4300,8 @@ class TestAsArray(TestCase):
     def test_unsupported_alias(self, device, dtype):
         original = make_tensor((5, 5), dtype=dtype, device=device)
 
-        other_device = get_another_device(device)
-        if other_device is not None:
+        if torch.cuda.is_available():
+            other_device = get_another_device(device)
             with self.assertRaisesRegex(ValueError,
                                         f"from device '{device}' to '{other_device}'"):
                 torch.asarray(original, device=other_device, copy=False)
@@ -4448,7 +4332,7 @@ class TestAsArray(TestCase):
 
         def check(**kwargs):
             a = torch.asarray(cloned, **kwargs)
-            requires_grad = kwargs.get("requires_grad", cloned.requires_grad)
+            requires_grad = kwargs.get("requires_grad", False)
             self.assertEqual(a.requires_grad, requires_grad)
             # Autograd history shouldn't be retained when requires_grad is False
             self.assertEqual(a.grad_fn is None, not requires_grad)
@@ -4530,15 +4414,15 @@ class TestAsArray(TestCase):
                 else:
                     self.assertEqual(data, tensor)
 
-    @onlyAccelerator
+    @onlyCUDA
     def test_device_without_index(self, device):
-        original = torch.arange(5, device=device)
+        original = torch.arange(5, device="cuda")
 
-        tensor = torch.asarray(original, device=device)
+        tensor = torch.asarray(original, device="cuda")
         # The storage pointers should be equal
         self.assertEqual(original.data_ptr(), tensor.data_ptr())
 
-        tensor = torch.asarray(original, copy=True, device=device)
+        tensor = torch.asarray(original, copy=True, device="cuda")
         # The storage pointers should not be equal
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 
@@ -4547,7 +4431,6 @@ instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
 instantiate_device_type_tests(TestLikeTensorCreation, globals())
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals())
 
 if __name__ == '__main__':

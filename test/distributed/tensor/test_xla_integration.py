@@ -23,8 +23,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 # wrapper to check xla test requirements
 def with_xla(func: Callable) -> Callable:
-    if func is None:
-        raise AssertionError("Expected func to not be None")
+    assert func is not None
 
     @wraps(func)  # pyre-ignore[6]
     def wrapper(
@@ -75,10 +74,7 @@ class DTensorXLAIntegrationTest(TestCase):
                     tensor_to_shard, device_mesh, shard_spec
                 )
                 # TODO(yeounoh) switch to DTensor API when XLAShardedTensor inherits DTensor
-                if type(dist_tensor).__name__ != "XLAShardedTensor":
-                    raise AssertionError(
-                        f"Expected XLAShardedTensor, got {type(dist_tensor).__name__}"
-                    )
+                assert type(dist_tensor).__name__ == "XLAShardedTensor"
                 global_tensor = dist_tensor.global_tensor  # type:ignore[attr-defined]
                 self.assertEqual(
                     global_tensor.size(), torch.Size([3 * device_count, 3])
@@ -103,10 +99,7 @@ class DTensorXLAIntegrationTest(TestCase):
             )
             dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
             # TODO(yeounoh) switch to DTensor API when XLAShardedTensor inherits DTensor
-            if type(dist_tensor).__name__ != "XLAShardedTensor":
-                raise AssertionError(
-                    f"Expected XLAShardedTensor, got {type(dist_tensor).__name__}"
-                )
+            assert type(dist_tensor).__name__ == "XLAShardedTensor"
             global_tensor = dist_tensor.global_tensor  # type:ignore[attr-defined]
             self.assertEqual(global_tensor.size(), torch.Size([3 * device_count, 3]))
             local_tensor = dist_tensor.local_shards[0].data
@@ -134,10 +127,7 @@ class DTensorXLAIntegrationTest(TestCase):
                     tensor_to_shard, device_mesh, shard_spec
                 )
                 # TODO(yeounoh) switch to DTensor API when XLAShardedTensor inherits DTensor
-                if type(dist_tensor).__name__ != "XLAShardedTensor":
-                    raise AssertionError(
-                        f"Expected XLAShardedTensor, got {type(dist_tensor).__name__}"
-                    )
+                assert type(dist_tensor).__name__ == "XLAShardedTensor"
                 global_tensor = dist_tensor.global_tensor  # type:ignore[attr-defined]
                 self.assertEqual(
                     global_tensor.size(), torch.Size([3 * device_count // 2, 3])

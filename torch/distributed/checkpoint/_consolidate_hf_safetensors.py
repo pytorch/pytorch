@@ -5,6 +5,7 @@ import glob
 import json
 import logging
 import math
+import mmap
 import os
 import struct
 import time
@@ -198,17 +199,17 @@ def _write_metadata(
             output_data.metadata_size = f.tell()
 
 
-def _read_tensor_data(
-    f,
+def _read_tensor_data_mmap(
+    file_path: str,
     start_offset: int,
     end_offset: int,
     metadata_size: int,
 ) -> bytes:
     """
-    Read a specific byte range of tensor data from an open safetensors file.
+    Read tensor data from a safetensors file using memory mapping for efficiency.
 
     Args:
-        f: An open file object (handle) for the safetensors file
+        file_path: Path to the safetensors file
         start_offset: Start offset of tensor data within the data section
         end_offset: End offset of tensor data within the data section
         metadata_size: Size of the metadata header
@@ -216,11 +217,12 @@ def _read_tensor_data(
     Returns:
         Raw tensor data as bytes
     """
-    absolute_start = metadata_size + start_offset
-    length = end_offset - start_offset
-
-    f.seek(absolute_start)
-    return f.read(length)
+    # Use mmap for efficient access
+    with open(file_path, "rb") as f:
+        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            absolute_start = metadata_size + start_offset
+            absolute_end = metadata_size + end_offset
+            return bytes(mm[absolute_start:absolute_end])
 
 
 def _process_output_file(
@@ -229,7 +231,7 @@ def _process_output_file(
     input_files_data: dict[str, _InputFileData],
 ) -> None:
     """
-    Process a single output file by writing tensor data from input files using direct reads.
+    Process a single output file by writing tensor data from input files using memory mapping.
 
     This function is designed to be run in parallel for different output files.
 
@@ -243,71 +245,55 @@ def _process_output_file(
         output_data.fqn_data.items(), key=lambda x: x[1].offset_in_file
     )
 
-    file_handles = {}
-    dcp_metadata = {}
-    for safetensors_file, file_data in input_files_data.items():
-        dcp_metadata[safetensors_file] = _get_dcp_custom_metadata(file_data.metadata)
+    with open(output_file, "r+b") as output_stream:
+        output_stream.seek(0, os.SEEK_END)
+        # Process each tensor in sequential output order
+        for tensor_fqn, tensor_fqn_data in sorted_tensors:
+            full_tensor_mv = memoryview(
+                bytearray(
+                    math.prod(tensor_fqn_data.shape_in_file)
+                    * tensor_fqn_data.dtype_size
+                )
+            )
 
-    try:
-        # Open all input files for reading
-        for safetensors_file in input_files_data:
-            file_handles[safetensors_file] = open(safetensors_file, "rb")  # noqa: SIM115
+            # Process each input safetensors file
+            for safetensors_file in input_files_data:
+                file_metadata = input_files_data[safetensors_file].metadata
+                input_metadata_size = input_files_data[safetensors_file].metadata_size
 
-        with open(output_file, "r+b") as output_stream:
-            output_stream.seek(0, os.SEEK_END)
-            # Process each tensor in sequential output order
-            for tensor_fqn, tensor_fqn_data in sorted_tensors:
-                full_tensor_mv = memoryview(
-                    bytearray(
-                        math.prod(tensor_fqn_data.shape_in_file)
-                        * tensor_fqn_data.dtype_size
-                    )
+                if tensor_fqn not in file_metadata:
+                    continue
+
+                metadata = file_metadata[tensor_fqn]
+
+                data_offsets = metadata[DATA_OFFSETS_KEY]
+
+                # Use memory mapping to read tensor data efficiently
+                data_to_write = _read_tensor_data_mmap(
+                    safetensors_file,
+                    data_offsets[0],
+                    data_offsets[1],
+                    input_metadata_size,
                 )
 
-                # Process each input safetensors file
-                for safetensors_file in input_files_data:
-                    file_metadata = input_files_data[safetensors_file].metadata
-                    input_metadata_size = input_files_data[
-                        safetensors_file
-                    ].metadata_size
+                # Get the offsets of this tensor shard within the full tensor
+                # pyrefly: ignore [unsupported-operation]
+                fqn_custom_metadata = _get_dcp_custom_metadata(file_metadata)[
+                    tensor_fqn
+                ]  # type: ignore[index]
+                offsets_of_tensor_being_read = fqn_custom_metadata[SAVED_OFFSETS_KEY]  # type: ignore[index]
 
-                    if tensor_fqn not in file_metadata:
-                        continue
+                # Write this tensor shard to the appropriate position in the output file
+                _write_sub_tensor_to_file_optimized(
+                    full_tensor_mv,
+                    data_to_write,
+                    tensor_fqn_data.dtype_size,  # Size of each element in bytes
+                    tensor_fqn_data.shape_in_file,  # Full tensor shape
+                    offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
+                    metadata[SHAPE_KEY],  # Shape of this shard
+                )
 
-                    metadata = file_metadata[tensor_fqn]
-
-                    data_offsets = metadata[DATA_OFFSETS_KEY]
-
-                    # Use explicit reads to fetch tensor data efficiently
-                    data_to_write = _read_tensor_data(
-                        file_handles[safetensors_file],
-                        data_offsets[0],
-                        data_offsets[1],
-                        input_metadata_size,
-                    )
-
-                    # Get the offsets of this tensor shard within the full tensor
-                    # pyrefly: ignore [unsupported-operation]
-                    fqn_custom_metadata = dcp_metadata[safetensors_file][tensor_fqn]  # type: ignore[index]
-                    offsets_of_tensor_being_read = fqn_custom_metadata[
-                        SAVED_OFFSETS_KEY
-                    ]  # type: ignore[index]
-
-                    # Write this tensor shard to the appropriate position in the output file
-                    _write_sub_tensor_to_file_optimized(
-                        full_tensor_mv,
-                        data_to_write,
-                        tensor_fqn_data.dtype_size,  # Size of each element in bytes
-                        tensor_fqn_data.shape_in_file,  # Full tensor shape
-                        offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
-                        metadata[SHAPE_KEY],  # Shape of this shard
-                    )
-
-                output_stream.write(full_tensor_mv)
-
-    finally:
-        for f in file_handles.values():
-            f.close()
+            output_stream.write(full_tensor_mv)
 
 
 def _write_data(
@@ -738,8 +724,7 @@ def consolidate_safetensors_files_on_every_rank(
         if rank == 0:
             # Merge all output_files_data from all ranks
             all_output_files_data: dict[str, _OutputFileData] = {}
-            if gathered_output_files_data is None:
-                raise AssertionError
+            assert gathered_output_files_data is not None
             for rank_data in gathered_output_files_data:
                 all_output_files_data.update(rank_data)
 

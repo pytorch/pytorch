@@ -220,12 +220,6 @@ like the following:
 When creating a new {class}`Function`, the following methods are available to `ctx`.
 
 ```{eval-rst}
-.. autoclass:: torch.autograd.function.FunctionCtx
-    :no-members:
-
-.. autoclass:: torch.autograd.function.FunctionMeta
-    :no-members:
-
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -281,9 +275,6 @@ Base custom {class}`Function` used to build PyTorch utilities
     gradcheck
     gradgradcheck
     GradcheckError
-    get_analytical_jacobian
-    get_numerical_jacobian
-    get_numerical_jacobian_wrt_specific_input
 ```
 
 % Just to reset the base path for the rest of this file
@@ -319,10 +310,6 @@ and vtune profiler based using
     profiler.EnforceUnique
     profiler.KinetoStepTracker
     profiler.record_function
-    profiler_util.EventList
-    profiler_util.FormattedTimesMixin
-    profiler_util.FunctionEvent
-    profiler_util.FunctionEventAvg
     profiler_util.Interval
     profiler_util.Kernel
     profiler_util.MemRecordsAcc
@@ -362,7 +349,6 @@ and vtune profiler based using
     :nosignatures:
 
     grad_mode.set_multithreading_enabled
-    grad_mode.enforce_grad_layout_policy
 
 
 ```
@@ -409,9 +395,7 @@ You can also define how these saved tensors should be packed / unpacked using ho
 A common application is to trade compute for memory by saving those intermediary results
 to disk or to CPU instead of leaving them on the GPU. This is especially useful if you
 notice your model fits on GPU during evaluation, but not training.
-When writing a ``pack_hook`` that keeps its input tensor, call ``.detach()`` on it first
-to avoid a reference cycle when the saved tensor is a graph output; see
-{ref}`saved-tensors-hooks-doc` for details.
+Also see {ref}`saved-tensors-hooks-doc`.
 
 ```{eval-rst}
 .. autoclass:: torch.autograd.graph.saved_tensors_hooks
@@ -442,15 +426,7 @@ to avoid a reference cycle when the saved tensor is a graph output; see
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.autograd.graph.region_activation_memory_budget
-```
-
-```{eval-rst}
 .. autofunction:: torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch
-```
-
-```{eval-rst}
-.. autofunction:: torch.autograd.graph.set_override_stale_capture_stream
 ```
 
 % This module needs to be documented. Adding here in the meantime
@@ -494,19 +470,5 @@ to avoid a reference cycle when the saved tensor is a graph output; see
 ```
 
 ```{eval-rst}
-.. automodule:: torch.autograd.variable
-
-.. currentmodule:: torch.autograd.variable
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    Variable
-    VariableMeta
-```
-
-```{eval-rst}
 .. py:module:: torch.autograd.variable
-   :noindex:
 ```

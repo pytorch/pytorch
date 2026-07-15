@@ -24,7 +24,6 @@
      jacfwd
      hessian
      functionalize
-     rearrange
 ```
 
 ## Utilities for working with torch.nn.Modules

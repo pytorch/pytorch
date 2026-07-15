@@ -1,4 +1,3 @@
-# Owner(s): ["oncall: pt2"]
 name: Upload torch dynamo performance stats
 
 on:
@@ -9,7 +8,7 @@ on:
 
 jobs:
   get-conclusion:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       conclusion: ${{ fromJson(steps.get-conclusion.outputs.data).conclusion }}
     steps:

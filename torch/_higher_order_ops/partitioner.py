@@ -1,12 +1,14 @@
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Union
 
 import torch
 from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
 
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+logger.setLevel(logging.DEBUG)
 
 
 def _find_hop_subgraph_outputs(gm: torch.fx.GraphModule) -> tuple[torch.fx.Node]:
@@ -63,7 +65,7 @@ class HopPartitionedGraph:
 
         if len(fw_outputs) != self.n_fw_outputs + self.n_intermediates:
             invalid_reasons.append(
-                f"len(fw_outputs) ({len(fw_outputs)}) != n_fw_outputs ({self.n_fw_outputs}) + n_intermediates ({self.n_intermediates})"
+                f"len(fw_outputs) ({len(fw_outputs)}) != n_fw_outputs ({self.n_fw_outputs}) + n_intermediates ({self.n_intermediates})"  # noqa: B950
             )
 
         bw_phs = list(self.bw_gm.graph.find_nodes(op="placeholder"))
@@ -81,8 +83,8 @@ class HopPartitionedGraph:
         bw_grads = bw_phs[-self.n_fw_outputs :]
 
         def _match_size_or_expr(
-            val1: torch.SymInt | torch.Tensor,
-            val2: torch.SymInt | torch.Tensor,
+            val1: Union[torch.SymInt, torch.Tensor],
+            val2: Union[torch.SymInt, torch.Tensor],
         ) -> bool:
             if type(val1) is not type(val2):
                 return False
@@ -107,7 +109,8 @@ class HopPartitionedGraph:
         if len(invalid_reasons) > 0:
             newline = "\n"
             raise RuntimeError(
-                f"Invalid HopPartitionedGraph. Reasons:\n{newline.join(invalid_reasons)}"
+                "Invalid HopPartitionedGraph. Reasons:\n",
+                f"{newline.join(invalid_reasons)}",
             )
 
     def _reorder_fw_output(self) -> None:
@@ -119,7 +122,7 @@ class HopPartitionedGraph:
         are inputs that contain symints.
 
         To simplify downstream processing, this graph pass normalizes the output of fw_gm
-        to be consistent with the backward inputs:
+        to be consistent with the bacwkard inputs:
 
         fw_gm:
           - input: fw_args
@@ -309,7 +312,7 @@ class HopJointGraph:
 
 def create_hop_joint_graph(
     fw_fn: Callable,
-    fw_args: tuple[torch.Tensor | torch.SymInt, ...],
+    fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...],
     functionalize: bool,
 ) -> HopJointGraph:
     fw_gm = materialize_as_graph(fw_fn, fw_args, force_enable_grad=True)
@@ -354,7 +357,7 @@ class HopGraphMinCutPartitioner:
     @staticmethod
     def create_partitioned_graph(
         fw_fn: Callable,
-        fw_args: tuple[torch.Tensor | torch.SymInt, ...],
+        fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...],
         *,
         always_recompute_complex_exprs: bool = False,
     ) -> HopPartitionedGraph:

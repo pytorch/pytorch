@@ -48,7 +48,7 @@ std::string get_mkldnn_version() {
   #else
     ss << "MKLDNN not found";
   #endif
-  return std::move(ss).str();
+  return ss.str();
 }
 
 std::string get_openmp_version() {
@@ -86,7 +86,7 @@ std::string get_openmp_version() {
   #else
     ss << "OpenMP not found";
   #endif
-  return std::move(ss).str();
+  return ss.str();
 }
 
 std::string get_cpu_capability() {
@@ -102,9 +102,7 @@ std::string get_cpu_capability() {
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
     case native::CPUCapability::ZVECTOR:
       return "Z VECTOR";
-#elif defined(HAVE_SVE_CPU_DEFINITION)
-    case native::CPUCapability::SVE128:
-      return "SVE128";
+#elif defined(HAVE_SVE256_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
     case native::CPUCapability::SVE256:
       return "SVE256";
 #else
@@ -124,7 +122,7 @@ static std::string used_cpu_capability() {
   // environment variable
   std::ostringstream ss;
   ss << "CPU capability usage: " << get_cpu_capability();
-  return std::move(ss).str();
+  return ss.str();
 }
 
 std::string show_config() {
@@ -210,7 +208,7 @@ std::string show_config() {
   // TODO: do XLA
   // TODO: do MPS
 
-  return std::move(ss).str();
+  return ss.str();
 }
 
 std::string get_cxx_flags() {
@@ -220,9 +218,8 @@ std::string get_cxx_flags() {
     "Buck does not populate the `CXX_FLAGS` field of Caffe2 build options. "
     "As a result, `get_cxx_flags` is OSS only."
   );
-  #else
-  return caffe2::GetBuildOptions().at("CXX_FLAGS");
   #endif
+  return caffe2::GetBuildOptions().at("CXX_FLAGS");
 }
 
 }

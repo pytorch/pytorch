@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 
-from __future__ import annotations
-
 import json
 import os
 import re
-from typing import Any, cast
+from typing import Any, cast, Optional
 from urllib.error import HTTPError
 
 from github_utils import gh_fetch_url, gh_post_pr_comment, gh_query_issues_by_labels
@@ -50,7 +48,7 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def get_merge_commit_sha(repo: GitRepo, pr: GitHubPR) -> str | None:
+def get_merge_commit_sha(repo: GitRepo, pr: GitHubPR) -> Optional[str]:
     """
     Return the merge commit SHA iff the PR has been merged. For simplicity, we
     will only cherry pick PRs that have been merged into main
@@ -59,7 +57,7 @@ def get_merge_commit_sha(repo: GitRepo, pr: GitHubPR) -> str | None:
     return commit_sha if pr.is_closed() else None
 
 
-def get_release_version(onto_branch: str) -> str | None:
+def get_release_version(onto_branch: str) -> Optional[str]:
     """
     Return the release version if the target branch is a release branch
     """

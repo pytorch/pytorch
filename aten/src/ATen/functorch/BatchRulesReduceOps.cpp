@@ -7,7 +7,6 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/ScalarOps.h>
 
 #include <utility>
 
@@ -74,14 +73,6 @@ static Tensor all_decomp(const Tensor& self) {
 
 static Tensor any_decomp(const Tensor& self) {
   return at::any(self.flatten(), 0, false);
-}
-
-static Tensor count_nonzero_decomp(
-  const Tensor& self, std::optional<int64_t> dim) {
-if (dim.has_value()) {
-  return at::count_nonzero(self, IntArrayRef{*dim});
-}
-return at::count_nonzero(self, range(0, self.dim()));
 }
 
 enum class ReductionCase:uint8_t { DimArray, Dim };
@@ -382,8 +373,7 @@ static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
       auto self_ = reshape_dim_into(*self_bdim, -1, self);
       auto result = at::searchsorted(buckets, self_, out_int32, right, side, sorter_);
       result = reshape_dim_outof(-1, bdim_size, result);
-      auto result_bdim = result.dim() - 2;
-      return std::make_tuple(std::move(result), result_bdim);
+      return std::make_tuple(result, result.dim() - 2);
     }
     TORCH_INTERNAL_ASSERT(false);
   }
@@ -411,17 +401,6 @@ static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
     return std::make_tuple(std::move(result), self_bdim);
   }
   TORCH_INTERNAL_ASSERT(false);
-}
-
-static Tensor searchsorted_scalar_decomp(
-    const Tensor& sorted_sequence,
-    const Scalar& self,
-    bool out_int32,
-    bool right,
-    std::optional<std::string_view> side,
-    const std::optional<Tensor>& sorter) {
-  auto self_tensor = at::native::wrapped_scalar_tensor(self, sorted_sequence.device());
-  return at::searchsorted(sorted_sequence, self_tensor, out_int32, right, side, sorter);
 }
 
 static Tensor bucketize_decomp_Tensor(
@@ -469,7 +448,6 @@ static Tensor bucketize_decomp_Scalar(
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(searchsorted, Tensor, searchsorted_batch_rule);
-  m.impl("searchsorted.Scalar", searchsorted_scalar_decomp);
   REDUCTION_NO_KEEPDIM_ARG(_fft_r2c);
   REDUCTION_NO_KEEPDIM_ARG(_fft_c2r);
   REDUCTION_NO_KEEPDIM_ARG(_fft_c2c);
@@ -486,7 +464,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
   m.impl("bucketize.Tensor", bucketize_decomp_Tensor);
   m.impl("bucketize.Scalar", bucketize_decomp_Scalar);
-  m.impl("count_nonzero", count_nonzero_decomp);
   REDUCTION_BOXED_ARGS(count_nonzero.dim_IntList, 1, KEEPDIM_CASE_FALSE, -1);
   REDUCTION_NO_KEEPDIM_ARG(cummax);
   REDUCTION_NO_KEEPDIM_ARG(cummin);

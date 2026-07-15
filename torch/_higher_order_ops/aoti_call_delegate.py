@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import torch
 import torch.utils._pytree as pytree
-from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -80,7 +79,7 @@ def call_delegate_cpu(
         weight_args + input_args,
         lambda a: isinstance(a, tuple(map_types.keys())),
     )
-    has_fake_args = any(is_fake_tensor(arg) for arg in new_args)
+    has_fake_args = any(isinstance(arg, FakeTensor) for arg in new_args)
     if has_fake_args:
         # use stateless original_gm for tracing with fake tensors
         fake_out = original_gm(*new_args)
@@ -130,14 +129,16 @@ def call_delegate_proxy_torch_dispatch_mode(
     return res
 
 
-@register_fake(aoti_call_delegate, skip_cache=True)
+@aoti_call_delegate.py_impl(FakeTensorMode)
 def call_delegate_fake_tensor_mode(
+    mode: FakeTensorMode,
     lowered_module: AOTI_LOWERED_MODULE,  # type: ignore[valid-type]
     original_gm: torch.fx.GraphModule,
     weight_args: list[torch.Tensor],
     input_args: list[torch.Tensor],
 ) -> list[torch.Tensor]:
-    return call_delegate_cpu(lowered_module, original_gm, weight_args, input_args)
+    with mode:
+        return call_delegate_cpu(lowered_module, original_gm, weight_args, input_args)
 
 
 @aoti_call_delegate.py_functionalize_impl

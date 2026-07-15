@@ -47,8 +47,7 @@ struct TORCH_API DynamicLayer {
       std::optional<RandomnessType> randomness = std::nullopt,
       std::optional<bool> prev_grad_mode = std::nullopt,
       std::optional<bool> pre_fwd_grad_mode = std::nullopt,
-      std::optional<bool> functionalize_add_back_views = std::nullopt,
-      std::optional<bool> prev_inference_mode = std::nullopt);
+      std::optional<bool> functionalize_add_back_views = std::nullopt);
 
   TransformType key() const;
   int64_t layerId() const;
@@ -70,8 +69,7 @@ TORCH_API int64_t initAndPushDynamicLayer(
     std::optional<RandomnessType> randomness = std::nullopt,
     std::optional<bool> prev_grad_mode = std::nullopt,
     std::optional<bool> prev_fwd_grad_mode = std::nullopt,
-    std::optional<bool> functionalize_add_back_views = std::nullopt,
-    std::optional<bool> prev_inference_mode = std::nullopt);
+    std::optional<bool> functionalize_add_back_views = std::nullopt);
 TORCH_API DynamicLayer popDynamicLayerAndDeleteMetadata();
 TORCH_API std::optional<DynamicLayer> maybeCurrentDynamicLayer();
 TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();

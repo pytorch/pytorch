@@ -61,7 +61,7 @@ variable_list AccumulateGrad_apply_functional_no_hooks_ivalue(
   // Functional Tensors insert an Error node to assert that backward is never
   // called
   if (variable.grad_fn() &&
-      dynamic_cast<Error*>(variable.grad_fn().get()) == nullptr) {
+      std::dynamic_pointer_cast<Error>(variable.grad_fn()) == nullptr) {
     throw std::logic_error(
         "leaf variable has been moved into the graph interior");
   }
@@ -156,8 +156,7 @@ variable_list AccumulateGrad::apply_with_saved(
   // name without the namespace
   std::string name = "AccumulateGrad";
 
-  // Proxy a functional accumulate-grad call that takes the current grad
-  // explicitly and returns the updated grad.
+  // proxy a call to torch.ops.inductor.accumulate_grad_.default
   static bool flag [[maybe_unused]] = [&]() {
     std::vector<at::TypePtr> schema = {
         IValuePacker<at::Tensor>::packed_type(),
@@ -173,13 +172,8 @@ variable_list AccumulateGrad::apply_with_saved(
   }();
 
   const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-  at::Tensor functional_grad = interface->call_accumulate_grad(
-      saved.get_py_compiler(),
-      variable_copy,
-      grad_copy,
-      grads[0],
-      !post_hooks().empty());
-  variable_copy.mutable_grad() = std::move(functional_grad);
+  interface->call_accumulate_grad(
+      saved.get_py_compiler(), variable_copy, grads[0], !post_hooks().empty());
 
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {

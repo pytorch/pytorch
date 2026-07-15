@@ -266,14 +266,14 @@ class Hardtanh(Module):
         super().__init__()
         if min_value is not None:
             warnings.warn(
-                "keyword argument `min_value` is deprecated and renamed to `min_val`",
+                "keyword argument `min_value` is deprecated and rename to `min_val`",
                 FutureWarning,
                 stacklevel=2,
             )
             min_val = min_value
         if max_value is not None:
             warnings.warn(
-                "keyword argument `max_value` is deprecated and renamed to `max_val`",
+                "keyword argument `max_value` is deprecated and rename to `max_val`",
                 FutureWarning,
                 stacklevel=2,
             )
@@ -421,9 +421,8 @@ class Tanh(Module):
     Examples::
 
         >>> m = nn.Tanh()
-        >>> input = torch.tensor([-2.0, -0.5, 0.0, 0.5, 2.0])
-        >>> m(input)
-        tensor([-0.9640, -0.4621,  0.0000,  0.4621,  0.9640])
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def forward(self, input: Tensor) -> Tensor:
@@ -1323,7 +1322,7 @@ class MultiheadAttention(Module):
 
             .. note::
                 `batch_first` argument is ignored for unbatched inputs.
-        """
+        """  # noqa: B950
         why_not_fast_path = ""
         if (
             (attn_mask is not None and torch.is_floating_point(attn_mask))
@@ -1395,7 +1394,6 @@ class MultiheadAttention(Module):
         elif torch.is_autocast_enabled():
             why_not_fast_path = "autocast is enabled"
 
-        fast_path_blocked_by_tracing = False
         if not why_not_fast_path:
             tensor_args = (
                 query,
@@ -1410,6 +1408,8 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
+            elif _is_make_fx_tracing():
+                why_not_fast_path = "we are running make_fx tracing"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = (
                     "some Tensor argument's device is neither one of "
@@ -1422,9 +1422,6 @@ class MultiheadAttention(Module):
                     "grad is enabled and at least one of query or the "
                     "input/output projection weights or biases requires_grad"
                 )
-            elif _is_make_fx_tracing():
-                why_not_fast_path = "we are running make_fx tracing"
-                fast_path_blocked_by_tracing = True
             if not why_not_fast_path:
                 merged_mask, mask_type = self.merge_masks(
                     attn_mask, key_padding_mask, query
@@ -1514,11 +1511,7 @@ class MultiheadAttention(Module):
                 is_causal=is_causal,
             )
         if self.batch_first and is_batched:
-            attn_output = attn_output.transpose(1, 0)
-            if fast_path_blocked_by_tracing:
-                # Keep the traced slowpath layout aligned with eager fastpath.
-                attn_output = attn_output.contiguous()
-            return attn_output, attn_output_weights
+            return attn_output.transpose(1, 0), attn_output_weights
         else:
             return attn_output, attn_output_weights
 
@@ -1807,8 +1800,6 @@ class Softmax(Module):
     dim: int | None
 
     def __init__(self, dim: int | None = None) -> None:
-        if dim is not None and (not isinstance(dim, int) or isinstance(dim, bool)):
-            raise TypeError(f"dim must be an int or None, got {type(dim)}")
         super().__init__()
         self.dim = dim
 
@@ -1894,8 +1885,6 @@ class LogSoftmax(Module):
     dim: int | None
 
     def __init__(self, dim: int | None = None) -> None:
-        if dim is not None and (not isinstance(dim, int) or isinstance(dim, bool)):
-            raise TypeError(f"dim must be an int or None, got {type(dim)}")
         super().__init__()
         self.dim = dim
 

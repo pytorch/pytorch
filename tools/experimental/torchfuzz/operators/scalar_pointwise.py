@@ -8,7 +8,7 @@ from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec
 
 
-class ScalarPointwiseOperatorBase(Operator):
+class ScalarPointwiseOperator(Operator):
     """Base class for scalar pointwise operations."""
 
     def __init__(self, name: str, symbol: str):
@@ -51,28 +51,28 @@ class ScalarPointwiseOperatorBase(Operator):
         return f"{output_name} = {input_names[0]} {self.symbol} {input_names[1]}"
 
 
-class ScalarAddOperator(ScalarPointwiseOperatorBase):
+class ScalarAddOperator(ScalarPointwiseOperator):
     """Operator for scalar addition."""
 
     def __init__(self):
         super().__init__("scalar_add", "+")
 
 
-class ScalarMulOperator(ScalarPointwiseOperatorBase):
+class ScalarMulOperator(ScalarPointwiseOperator):
     """Operator for scalar multiplication."""
 
     def __init__(self):
         super().__init__("scalar_mul", "*")
 
 
-class ScalarSubOperator(ScalarPointwiseOperatorBase):
+class ScalarSubOperator(ScalarPointwiseOperator):
     """Operator for scalar subtraction."""
 
     def __init__(self):
         super().__init__("scalar_sub", "-")
 
 
-class ScalarDivOperator(ScalarPointwiseOperatorBase):
+class ScalarDivOperator(ScalarPointwiseOperator):
     """Operator for scalar division."""
 
     def __init__(self):

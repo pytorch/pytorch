@@ -1,7 +1,8 @@
+# mypy: allow-untyped-defs
 import functools
 from collections.abc import Hashable
 from dataclasses import dataclass, fields
-from typing import Any, TypeVar
+from typing import TypeVar
 from typing_extensions import dataclass_transform
 
 
@@ -13,14 +14,14 @@ class _UnionTag(str):
     _cls: Hashable
 
     @staticmethod
-    def create(t: str, cls: type["_Union"]) -> "_UnionTag":
+    def create(t, cls):
         tag = _UnionTag(t)
         if hasattr(tag, "_cls"):
             raise AssertionError("tag already has _cls attribute")
         tag._cls = cls
         return tag
 
-    def __eq__(self, cmp: object) -> bool:
+    def __eq__(self, cmp) -> bool:
         if not isinstance(cmp, str):
             raise AssertionError(f"expected str, got {type(cmp)}")
         other = str(cmp)
@@ -30,13 +31,12 @@ class _UnionTag(str):
             )
         return str(self) == other
 
-    def __hash__(self) -> int:
+    def __hash__(self):
         return hash(str(self))
 
 
 @functools.cache
-def _get_field_names(cls: type["_Union"]) -> set[str]:
-    # pyrefly: ignore[bad-argument-type]  # TODO _Union subclasses are dataclasses at runtime via _union_dataclass
+def _get_field_names(cls) -> set[str]:
     return {f.name for f in fields(cls)}
 
 
@@ -57,14 +57,14 @@ class _Union:
     _type: _UnionTag
 
     @classmethod
-    def create(cls: type[T], **kwargs: object) -> T:
+    def create(cls, **kwargs):
         if len(kwargs) != 1:
             raise AssertionError(f"expected exactly 1 kwarg, got {len(kwargs)}")
         obj = cls(**{**{f.name: None for f in fields(cls)}, **kwargs})  # type: ignore[arg-type]
         obj._type = _UnionTag.create(next(iter(kwargs.keys())), cls)
         return obj
 
-    def __post_init__(self) -> None:
+    def __post_init__(self):
         if any(
             f.name in ("type", "_type", "create", "value")
             for f in fields(self)  # type: ignore[arg-type, misc]
@@ -83,12 +83,12 @@ class _Union:
             ) from e
 
     @property
-    def value(self) -> Any:
+    def value(self):
         return getattr(self, self.type)
 
-    def __getattribute__(self, name: str) -> Any:
+    def __getattribute__(self, name):
         attr = super().__getattribute__(name)
-        if attr is None and name in _get_field_names(type(self)) and name != self.type:
+        if attr is None and name in _get_field_names(type(self)) and name != self.type:  # type: ignore[arg-type]
             raise AttributeError(f"Field {name} is not set.")
         return attr
 
@@ -97,8 +97,8 @@ class _Union:
             return False
         return self.type == other.type and self.value == other.value
 
-    def __str__(self) -> str:
+    def __str__(self):
         return self.__repr__()
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"{type(self).__name__}({self.type}={getattr(self, self.type)})"

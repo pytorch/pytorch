@@ -1,10 +1,8 @@
 """GitHub Label Utilities."""
 
-from __future__ import annotations
-
 import json
 from functools import lru_cache
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 
 from github_utils import gh_fetch_url_and_headers, GitHubComment
 
@@ -77,7 +75,7 @@ def gh_get_labels(org: str, repo: str) -> list[str]:
 
 
 def gh_add_labels(
-    org: str, repo: str, pr_num: int, labels: str | list[str], dry_run: bool
+    org: str, repo: str, pr_num: int, labels: Union[str, list[str]], dry_run: bool
 ) -> None:
     if dry_run:
         print(f"Dryrun: Adding labels {labels} to PR {pr_num}")
@@ -108,7 +106,7 @@ def get_release_notes_labels(org: str, repo: str) -> list[str]:
     ]
 
 
-def has_required_labels(pr: GitHubPR) -> bool:
+def has_required_labels(pr: "GitHubPR") -> bool:
     pr_labels = pr.get_labels()
     # Check if PR is not user facing
     is_not_user_facing_pr = any(

@@ -1,4 +1,5 @@
 import importlib
+from typing import Optional
 
 from torch.testing._internal.common_utils import TestCase
 
@@ -8,8 +9,8 @@ class AOMigrationTestCase(TestCase):
         self,
         package_name: str,
         function_list: list[str],
-        base: str | None = None,
-        new_package_name: str | None = None,
+        base: Optional[str] = None,
+        new_package_name: Optional[str] = None,
     ):
         r"""Tests individual function list import by comparing the functions
         and their hashes."""
@@ -24,16 +25,14 @@ class AOMigrationTestCase(TestCase):
         for fn_name in function_list:
             old_function = getattr(old_location, fn_name)
             new_function = getattr(new_location, fn_name)
-            if old_function != new_function:
-                raise AssertionError(f"Functions don't match: {fn_name}")
-            if hash(old_function) != hash(new_function):
-                raise AssertionError(
-                    f"Hashes don't match: {old_function}({hash(old_function)}) vs. "
-                    f"{new_function}({hash(new_function)})"
-                )
+            assert old_function == new_function, f"Functions don't match: {fn_name}"
+            assert hash(old_function) == hash(new_function), (
+                f"Hashes don't match: {old_function}({hash(old_function)}) vs. "
+                f"{new_function}({hash(new_function)})"
+            )
 
     def _test_dict_import(
-        self, package_name: str, dict_list: list[str], base: str | None = None
+        self, package_name: str, dict_list: list[str], base: Optional[str] = None
     ):
         r"""Tests individual function list import by comparing the functions
         and their hashes."""
@@ -46,10 +45,8 @@ class AOMigrationTestCase(TestCase):
         for dict_name in dict_list:
             old_dict = getattr(old_location, dict_name)
             new_dict = getattr(new_location, dict_name)
-            if old_dict != new_dict:
-                raise AssertionError(f"Dicts don't match: {dict_name}")
+            assert old_dict == new_dict, f"Dicts don't match: {dict_name}"
             for key in new_dict:
-                if old_dict[key] != new_dict[key]:
-                    raise AssertionError(
-                        f"Dicts don't match: {dict_name} for key {key}"
-                    )
+                assert old_dict[key] == new_dict[key], (
+                    f"Dicts don't match: {dict_name} for key {key}"
+                )

@@ -135,7 +135,7 @@ std::string sanitizeName(const std::string& input_name) {
       sanitized_name << '_';
     }
   }
-  return std::move(sanitized_name).str();
+  return sanitized_name.str();
 }
 
 class VarNameSanitizer : public IRMutator {
@@ -690,7 +690,7 @@ class FunctionInliner : public IRMutator {
         success_ = false;
         return nullptr;
       }
-      // Add a mapping for each function parameter to its source name.
+      // Add a mapping for each function parameter to it's source name.
       inline_mapping_[func_callee_arg] = func_caller_param;
       GRAPH_DEBUG(
           "ComputeInline: Inline mapping: ",
@@ -2830,6 +2830,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
       if (reduceOp) {
         throw std::runtime_error(
             "can only cache accesses used by at most a single reduceOp");
+        return {nullptr, nullptr};
       }
 
       reduceOp = ro;
@@ -2841,6 +2842,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   auto bounds_it = consumer_bounds_info.find(producer);
   if (bounds_it == consumer_bounds_info.end()) {
     throw std::runtime_error("consumer does not use the Tensor produced");
+    return {nullptr, nullptr};
   }
 
   TORCH_INTERNAL_ASSERT(

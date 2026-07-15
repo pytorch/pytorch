@@ -14,9 +14,8 @@ from typing import Any, TypeGuard
 import torch
 from torch import Tensor
 from torch._C import _functionalization
-from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr
@@ -50,15 +49,7 @@ def sync_functional_tensor(t: torch.Tensor) -> None:
     if is_traceable_wrapper_subclass(t):
         attrs, _ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
         for attr in attrs:
-            match getattr(t, attr):
-                case Tensor() as inner:
-                    sync_functional_tensor(inner)
-                case CustomClassBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
-                    )
+            sync_functional_tensor(getattr(t, attr))
     else:
         torch._sync(t)
 
@@ -92,24 +83,14 @@ def is_fun(t: object) -> TypeGuard[FunctionalTensor | Tensor]:
         # goes at the bottom.
         # recurse here, so we can support nested wrapper subclasses
         t_attrs, _ = t.__tensor_flatten__()  # type: ignore[attr-defined]
-        got_fun: bool | None = None
-        for attr in t_attrs:
-            match getattr(t, attr):
-                case Tensor() as v:
-                    fun = is_fun(v)
-                    if got_fun is None:
-                        got_fun = fun
-                    elif got_fun != fun:
-                        raise AssertionError(
-                            "mixed functional/non-functional inner tensors"
-                        )
-                case CustomClassBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
-                    )
-        return got_fun or False
+        t_inners = [getattr(t, attr) for attr in t_attrs]
+        any_fun = any(is_fun(x) for x in t_inners)
+        all_fun = all(is_fun(x) for x in t_inners)
+        if any_fun != all_fun:
+            raise AssertionError(
+                f"mixed functional/non-functional inner tensors: any_fun={any_fun}, all_fun={all_fun}"
+            )
+        return any_fun
 
     return isinstance(t, FunctionalTensor)
 
@@ -122,18 +103,7 @@ def has_data_mutation(t: object) -> bool:
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
         # A tensor subclass was updated if any of its inner elements were updated
-        for attr in attrs:
-            match getattr(t, attr):
-                case Tensor() as v:
-                    if has_data_mutation(v):
-                        return True
-                case CustomClassBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
-                    )
-        return False
+        return any(has_data_mutation(getattr(t, attr)) for attr in attrs)
     else:
         if isinstance(t, torch.Tensor):
             if not isinstance(t, FunctionalTensor):
@@ -146,18 +116,9 @@ def are_all_mutations_hidden_from_autograd(t: object) -> bool:
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
         # If all inner elements are mutations hidden from autograd, then it is a mutation hidden from autograd.
-        for attr in attrs:
-            match getattr(t, attr):
-                case Tensor() as v:
-                    if not are_all_mutations_hidden_from_autograd(v):
-                        return False
-                case CustomClassBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
-                    )
-        return True
+        return all(
+            are_all_mutations_hidden_from_autograd(getattr(t, attr)) for attr in attrs
+        )
     elif isinstance(t, torch.Tensor):
         if not isinstance(t, FunctionalTensor):
             raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
@@ -169,18 +130,10 @@ def are_all_mutations_hidden_from_autograd(t: object) -> bool:
 def are_all_mutations_under_no_grad_or_inference_mode(t: torch.Tensor) -> bool:
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
-        for attr in attrs:
-            match getattr(t, attr):
-                case Tensor() as v:
-                    if not are_all_mutations_under_no_grad_or_inference_mode(v):
-                        return False
-                case CustomClassBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
-                    )
-        return True
+        return all(
+            are_all_mutations_under_no_grad_or_inference_mode(getattr(t, attr))
+            for attr in attrs
+        )
     else:
         if not isinstance(t, FunctionalTensor):
             raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
@@ -192,19 +145,10 @@ def are_all_mutations_under_no_grad_or_inference_mode(t: torch.Tensor) -> bool:
 def was_inductor_storage_resized(t: object) -> bool:
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
-        for attr in attrs:
-            match getattr(t, attr):
-                case Tensor() as v:
-                    if was_inductor_storage_resized(v):
-                        raise RuntimeError(
-                            f"storage resizing is not supported on tensor subclass: {type(t)}"
-                        )
-                case CustomClassBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
-                    )
+        if any(was_inductor_storage_resized(getattr(t, attr)) for attr in attrs):
+            raise RuntimeError(
+                f"storage resizing is not supported on tensor subclass: {type(t)}"
+            )
         return False
     elif not isinstance(t, torch.Tensor):
         return False
@@ -212,16 +156,6 @@ def was_inductor_storage_resized(t: object) -> bool:
         if not isinstance(t, FunctionalTensor):
             raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
         return torch._functionalize_was_inductor_storage_resized(t.elem)
-
-
-def was_shallow_copy_data(t: object) -> bool:
-    if is_traceable_wrapper_subclass(t):
-        return False
-    if not isinstance(t, torch.Tensor):
-        return False
-    if not isinstance(t, FunctionalTensor):
-        raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
-    return torch._functionalize_was_shallow_copy_data(t.elem)  # type: ignore[attr-defined]
 
 
 # f_arg here is either
@@ -238,24 +172,16 @@ def has_metadata_mutation(
     if is_traceable_wrapper_subclass(f_arg):
         attrs, _ = f_arg.__tensor_flatten__()
         # A tensor subclass was updated if any of its inner elements were updated
-        for attr in attrs:
-            match getattr(f_arg, attr):
-                case Tensor():
-                    f_inner_t = getattr(f_arg, attr)
-                    inner_t = getattr(arg, attr)
-                    if has_metadata_mutation(
-                        f_inner_t,
-                        inner_t,
-                        check_only_storage_mutation=check_only_storage_mutation,
-                    ):
-                        return True
-                case CustomClassBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
-                    )
-        return False
+        f_inner_ts = [getattr(f_arg, attr) for attr in attrs]
+        inner_ts = [getattr(arg, attr) for attr in attrs]
+        return any(
+            has_metadata_mutation(
+                f_inner_t,
+                inner_t,
+                check_only_storage_mutation=check_only_storage_mutation,
+            )
+            for f_inner_t, inner_t in zip(f_inner_ts, inner_ts)
+        )
     else:
         if not isinstance(f_arg, torch.Tensor):
             if isinstance(arg, torch.Tensor):
@@ -267,7 +193,7 @@ def has_metadata_mutation(
             raise AssertionError(
                 f"expected FunctionalTensor for f_arg, got {type(f_arg)}"
             )
-        if not is_fake_tensor(arg):
+        if not isinstance(arg, FakeTensor):
             raise AssertionError(f"expected FakeTensor for arg, got {type(arg)}")
 
         arg_after = torch._from_functional_tensor(f_arg.elem)
@@ -276,7 +202,7 @@ def has_metadata_mutation(
         # However, multiple set_() calls can cancel out. So we also check whether the
         # storage of the tensor has changed.
         # Note: if an input experienced two set_() calls that cancel out, **and**
-        # it experiences a data mutation, we pessimistically think that the set_()
+        # it experiences an data mutation, we pessimistically think that the set_()
         # call is necessary here. We could in theory fix this, but this will
         # hopefully never happen in user code, and is not needed for fsdp.
         if is_sparse_any(arg):
@@ -489,21 +415,6 @@ class ViewMetaSequence:
 
         return self.metadata == other.metadata
 
-    @classmethod
-    def _from_parts(
-        cls, sequence: list[_functionalization.ViewMeta], metadata: MetadataKey
-    ) -> ViewMetaSequence:
-        # Rebuild a ViewMetaSequence directly from its parts, bypassing the
-        # FunctionalTensor-based __init__. This lets the recipe be reconstructed from
-        # plain values rather than from a live FunctionalTensor or an embedded pickle.
-        # Sole caller: torch._functorch._aot_autograd.source_emit, when baking a
-        # ViewMetaSequence into standalone source; keep the attributes set here in sync
-        # with __init__ (sequence, metadata) or the reconstructed object diverges.
-        self = cls.__new__(cls)
-        self.sequence = sequence
-        self.metadata = metadata
-        return self
-
 
 # new_arg and arg here are either:
 # (1) both a FakeTensor
@@ -529,18 +440,10 @@ def was_tensor_updated(arg: torch.Tensor, new_arg: torch.Tensor) -> bool:
         if attrs != new_attrs:
             raise AssertionError(f"attrs mismatch: {attrs} != {new_attrs}")
         # A tensor subclass was updated if any of its inner elements were updated
-        for attr in attrs:
-            match getattr(arg, attr):
-                case Tensor() as v:
-                    if was_tensor_updated(v, getattr(new_arg, attr)):
-                        return True
-                case CustomClassBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
-                    )
-        return False
+        return any(
+            was_tensor_updated(getattr(arg, attr), getattr(new_arg, attr))
+            for attr in attrs
+        )
     else:
         return arg is not new_arg
 
@@ -563,18 +466,10 @@ def was_tensor_metadata_updated(arg: Any, new_arg: Any) -> bool:
         if attrs != new_attrs:
             raise AssertionError(f"attrs mismatch: {attrs} != {new_attrs}")
         # A tensor subclass was updated if any of its inner elements were updated
-        for attr in attrs:
-            match getattr(arg, attr):
-                case Tensor() as v:
-                    if was_tensor_metadata_updated(v, getattr(new_arg, attr)):
-                        return True
-                case CustomClassBase():
-                    pass
-                case unexpected:
-                    raise AssertionError(
-                        f"expected Tensor or CustomClassBase, got {type(unexpected)}"
-                    )
-        return False
+        return any(
+            was_tensor_metadata_updated(getattr(arg, attr), getattr(new_arg, attr))
+            for attr in attrs
+        )
     else:
         return arg is not new_arg and StorageWeakRef(
             arg.untyped_storage()
@@ -586,7 +481,6 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
     allowed_mutation_ops = [
         torch.ops.aten.copy_.default,
         torch.ops.aten.set_.source_Tensor,
-        torch.ops.aten.shallow_copy_data_.default,
     ]
     if hasattr(torch.ops.fsdp, "copy_"):
         allowed_mutation_ops.append(torch.ops.fsdp.copy_.default)

@@ -178,10 +178,7 @@ class TestFSDPStateDict(FSDPTest):
     def _compare_models(
         self, model, model_new, assert_fn, check_fp16=False, check_buffers=True
     ):
-        if assert_fn not in (self.assertEqual, self.assertNotEqual):
-            raise AssertionError(
-                f"Expected assert_fn in (self.assertEqual, self.assertNotEqual), got {assert_fn}"
-            )
+        assert assert_fn in (self.assertEqual, self.assertNotEqual)
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_new):
                 self._state_compare(model, model_new, assert_fn)
@@ -313,7 +310,7 @@ class TestFSDPStateDict(FSDPTest):
                     self.assertEqual(
                         tensor.device,
                         torch.device("cpu"),
-                        lambda msg: f"{msg}\n{key} is unexpectedly on device {tensor.device}",
+                        f"{key} is unexpectedly on device {tensor.device}",
                     )
             else:
                 # For non-FSDP roots, the non FSDP portion can still have parameters on rank 0,
@@ -322,7 +319,7 @@ class TestFSDPStateDict(FSDPTest):
                     self.assertEqual(
                         fsdp_state_dict,
                         {},
-                        lambda msg: f"{msg}\nExpected empty state_dict but got {fsdp_state_dict} on rank {dist.get_rank()}",
+                        f"Expected empty state_dict but got {fsdp_state_dict} on rank {dist.get_rank()}",
                     )
 
     @skip_if_lt_x_gpu(2)
@@ -1093,7 +1090,7 @@ class TestFSDPStateDict(FSDPTest):
             self.assertEqual(
                 tensor.data_ptr(),
                 sd1[prefixed_tensor_name].data_ptr(),
-                lambda msg: f"{msg}\n{prefixed_tensor_name}",
+                f"{prefixed_tensor_name}",
             )
         # should not apply mixed_precision to ignored buffers
         for buffer_name in buffer_to_buffer_name.values():
@@ -1215,12 +1212,8 @@ class TestFSDPStateDict(FSDPTest):
         # Create an unexpected key
         sd["unexpected"] = torch.ones(1)
         missing, unexpected = model.load_state_dict(sd, strict=False)
-        if len(missing) != 1:
-            raise AssertionError(f"Expected len(missing) == 1, got {len(missing)}")
-        if len(unexpected) != 1:
-            raise AssertionError(
-                f"Expected len(unexpected) == 1, got {len(unexpected)}"
-            )
+        assert len(missing) == 1
+        assert len(unexpected) == 1
         self.assertTrue(FSDP_PREFIX not in missing[0])
         self.assertTrue(FSDP_PREFIX not in unexpected[0])
 
@@ -1257,11 +1250,7 @@ class TestFSDPStateDict(FSDPTest):
 
                 fsdp_model.load_state_dict(sharded)
                 for p1, p2 in zip(param_copy, fsdp_model.parameters()):
-                    self.assertEqual(
-                        p1,
-                        p2,
-                        lambda msg: f"{msg}\nnot equal: {p1.sum()} vs {p2.sum()}",
-                    )
+                    self.assertEqual(p1, p2, f"not equal: {p1.sum()} vs {p2.sum()}")
 
     @skip_if_lt_x_gpu(2)
     def test_world_size_one(self):

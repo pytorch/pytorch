@@ -7,7 +7,7 @@ aten = torch.ops.aten
 import inspect
 import warnings
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Optional, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.types import Number
@@ -68,7 +68,7 @@ def signatures_match(decomposition_sig, torch_op_sig):
 
 def register_decomposition(
     aten_op: torch._ops.OpOverload,
-    registry: dict[str, torch.jit.ScriptFunction] | None = None,
+    registry: Optional[dict[str, torch.jit.ScriptFunction]] = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def decomposition_decorator(f: Callable[_P, _T]) -> Callable[_P, _T]:
         nonlocal registry
@@ -104,8 +104,8 @@ def register_decomposition(
 @register_decomposition(aten.var.correction)
 def var_decomposition(
     input: Tensor,
-    dim: list[int] | None = None,
-    correction: Number | None = None,
+    dim: Optional[list[int]] = None,
+    correction: Optional[Number] = None,
     keepdim: bool = False,
 ) -> Tensor:
     if dim is None:

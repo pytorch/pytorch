@@ -12,27 +12,28 @@ function install_timm() {
   local commit
   commit=$(get_pinned_commit timm)
 
-  pip_install --no-deps "git+https://github.com/huggingface/pytorch-image-models@${commit}"
+  pip_install "git+https://github.com/huggingface/pytorch-image-models@${commit}"
 }
 
 function install_torchbench() {
   local commit
   commit=$(get_pinned_commit torchbench)
-  mkdir torchbench && chown jenkins torchbench
-  as_jenkins git clone https://github.com/pytorch/benchmark torchbench
+  git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
-  as_jenkins git checkout "$commit"
+  git checkout "$commit"
 
-  env_run python install.py --continue_on_fail
+  python install.py --continue_on_fail
 
   echo "Print all dependencies after TorchBench is installed"
-  env_run python -mpip freeze
+  python -mpip freeze
   popd
+
+  chown -R jenkins torchbench
+  chown -R jenkins /opt/conda
 }
 
 # Pango is needed for weasyprint which is needed for doctr
-sudo apt-get update
-sudo apt-get install -y libpango-1.0-0 libpangocairo-1.0-0
+conda_install pango
 
 # Detect CUDA version and use appropriate wheel index
 # DESIRED_CUDA is set as ENV in the Dockerfile (e.g., "13.0.2", "12.8.1")
@@ -48,10 +49,6 @@ fi
 # Stable packages are ok here, just to satisfy TorchBench check
 pip_install torch torchvision torchaudio --index-url "${CUDA_INDEX_URL}"
 
-# Pin setuptools<82 to avoid breaking visdom install (setuptools 82 removed
-# pkg_resources which visdom's setup.py depends on)
-pip_install 'setuptools<82'
-
 install_torchbench
 install_huggingface
 install_timm
@@ -60,11 +57,11 @@ install_timm
 # NS: It's very important to uninstall some of the system dependencies
 # Otherwise torchnbench test might start to fail with hard to detect errors
 # Especially if cudnn/nccl version are different between nightly and last release
-env_run pip uninstall -y torch torchvision torchaudio triton torchao
+conda_run pip uninstall -y torch torchvision torchaudio triton torchao
 if [[ "${DESIRED_CUDA}" == 13.* ]]; then
-  env_run pip uninstall -y nvidia-nccl-cu13
-  env_run pip uninstall -y nvidia-cudnn-cu13
+  conda_run pip uninstall -y nvidia-nccl-cu13
+  conda_run pip uninstall -y nvidia-cudnn-cu13
 else
-  env_run pip uninstall -y nvidia-nccl-cu12
-  env_run pip uninstall -y nvidia-cudnn-cu12
+  conda_run pip uninstall -y nvidia-nccl-cu12
+  conda_run pip uninstall -y nvidia-cudnn-cu12
 fi

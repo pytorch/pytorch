@@ -8,35 +8,6 @@
 
 namespace torch::autograd {
 
-static const Variable& input_at(const variable_list& inputs, size_t i) {
-  return inputs[i];
-}
-
-static const Variable& input_at(
-    at::ArrayRef<const Variable*> inputs,
-    size_t i) {
-  return *inputs[i];
-}
-
-static variable_list call_jvp(
-    const variable_list& inputs,
-    variable_list input_grads,
-    const _jvp_fn_t& jvp_user_function) {
-  return jvp_user_function(inputs, std::move(input_grads));
-}
-
-static variable_list call_jvp(
-    at::ArrayRef<const Variable*> inputs,
-    variable_list input_grads,
-    const _jvp_fn_t& jvp_user_function) {
-  variable_list owned;
-  owned.reserve(inputs.size());
-  for (const auto* input : inputs) {
-    owned.emplace_back(*input);
-  }
-  return jvp_user_function(std::move(owned), std::move(input_grads));
-}
-
 // This function has two main goals:
 //  1) Use the user-provided jvp function to populate the outputs' forward
 //  gradient 2) Perform error checking to ensure that view and inplace ops are
@@ -55,9 +26,8 @@ static variable_list call_jvp(
 //  sure that its
 //    forward grad was also modified inplace and already present on the
 //    corresponding output.
-template <typename InputVarsType>
 static void _process_forward_mode_AD(
-    const InputVarsType& inputs,
+    const variable_list& inputs,
     std::unordered_map<at::TensorImpl*, size_t> inputs_mapping,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const optional_variable_list& outputs,
@@ -84,7 +54,7 @@ static void _process_forward_mode_AD(
     grad_impls.resize(num_inputs);
 
     for (const auto i : c10::irange(num_inputs)) {
-      const auto& inp = input_at(inputs, i);
+      const auto& inp = inputs[i];
       if (inp.is_view() && impl::get_view_autograd_meta(inp)->has_fw_view()) {
         inputs_bases.emplace(
             impl::get_view_autograd_meta(inp)
@@ -101,7 +71,7 @@ static void _process_forward_mode_AD(
   // Extract the input's forward gradients and record any info we will need
   // later
   for (const auto i : c10::irange(num_inputs)) {
-    const auto& inp = input_at(inputs, i);
+    const auto& inp = inputs[i];
     if (!inp.defined()) {
       continue;
     }
@@ -125,7 +95,7 @@ static void _process_forward_mode_AD(
   torch::autograd::variable_list forward_grads;
   {
     at::AutoFwGradMode fw_grad_mode(false);
-    forward_grads = call_jvp(inputs, std::move(input_grads), jvp_user_function);
+    forward_grads = jvp_user_function(inputs, std::move(input_grads));
   }
 
   const auto num_forward_grads = forward_grads.size();
@@ -184,7 +154,7 @@ static void _process_forward_mode_AD(
             "forward mode gradients as-is. If the forward is modifying an input inplace, then the jvp "
             "function must modify the gradient inplace and return it as-is.")
       } else {
-        // If that Tensor didn't have gradients already, set the newly returned
+        // If that Tensor didn't had gradients already, set the newly returned
         // one We could also use inputs[inp_idx] here as it is the same as out
         out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
       }
@@ -203,7 +173,7 @@ static void _process_forward_mode_AD(
           // have a common base)
           const auto matching_input_idx =
               inputs_bases[out_view_info.base_.unsafeGetTensorImpl()];
-          const auto& matching_input = input_at(inputs, matching_input_idx);
+          const auto& matching_input = inputs[matching_input_idx];
 
           const auto& matching_input_grad = matching_input._fw_grad(level);
 
@@ -289,7 +259,7 @@ static optional_variable_list _process_backward_mode_ad(
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
-    const c10::intrusive_ptr<Node>& cdata,
+    const std::shared_ptr<Node>& cdata,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
     bool pure_view) {
@@ -297,7 +267,7 @@ static optional_variable_list _process_backward_mode_ad(
 
 #ifndef STRIP_ERROR_MESSAGES
   const char* error_msg_input_returned_as_is =
-      "An input that has been returned as-is as output is being saved for backward. "
+      "A input that has been returned as-is as output is being saved for backward. "
       "This is not supported if you override setup_context. You should return and "
       "save a view of the input instead, e.g. with x.view_as(x) or setup ctx inside "
       "the forward function itself.";
@@ -472,13 +442,12 @@ static optional_variable_list _process_backward_mode_ad(
   return outputs;
 }
 
-template <typename InputVarsType>
-static optional_variable_list _wrap_outputs_impl(
-    const InputVarsType& input_vars,
+optional_variable_list _wrap_outputs(
+    const variable_list& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
-    const c10::intrusive_ptr<Node>& cdata,
+    const std::shared_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
@@ -486,10 +455,7 @@ static optional_variable_list _wrap_outputs_impl(
   std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
   inputs_mapping.reserve(input_vars.size());
   for (const auto i : c10::irange(input_vars.size())) {
-    const auto& input_var = input_at(input_vars, i);
-    if (input_var.defined()) {
-      inputs_mapping.emplace(input_var.unsafeGetTensorImpl(), i);
-    }
+    inputs_mapping.emplace(input_vars[i].unsafeGetTensorImpl(), i);
   }
 
   // Limit pure views to 1-1 mapping as it is unclear if it is even
@@ -520,52 +486,6 @@ static optional_variable_list _wrap_outputs_impl(
       jvp_user_function);
 
   return outputs;
-}
-
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-optional_variable_list _wrap_outputs(
-    const variable_list& input_vars,
-    const std::unordered_set<at::TensorImpl*>& non_differentiable,
-    const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    const at::ArrayRef<std::optional<Variable>> raw_outputs,
-    const c10::intrusive_ptr<Node>& cdata,
-    const _jvp_fn_t& jvp_user_function,
-    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view) {
-  return _wrap_outputs_impl(
-      input_vars,
-      non_differentiable,
-      dirty_inputs,
-      raw_outputs,
-      cdata,
-      jvp_user_function,
-      to_save_if_setup_context,
-      view_as_self_fn,
-      pure_view);
-}
-
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-optional_variable_list _wrap_outputs(
-    at::ArrayRef<const Variable*> input_vars,
-    const std::unordered_set<at::TensorImpl*>& non_differentiable,
-    const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    const at::ArrayRef<std::optional<Variable>> raw_outputs,
-    const c10::intrusive_ptr<Node>& cdata,
-    const _jvp_fn_t& jvp_user_function,
-    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view) {
-  return _wrap_outputs_impl(
-      input_vars,
-      non_differentiable,
-      dirty_inputs,
-      raw_outputs,
-      cdata,
-      jvp_user_function,
-      to_save_if_setup_context,
-      view_as_self_fn,
-      pure_view);
 }
 
 void check_variable_result(

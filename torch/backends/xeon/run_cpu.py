@@ -156,7 +156,7 @@ class _CPUinfo:
             # Sample output of: `lscpu --parse=CPU,Core,Socket,Node`
             #
             # # The following is the parsable format, which can be fed to other
-            # # programs. Each different item in every column has a unique ID
+            # # programs. Each different item in every column has an unique ID
             # # starting from zero.
             # # CPU,Core,Socket,Node
             # 0,0,0,0
@@ -249,8 +249,8 @@ class _CPUinfo:
                 "Numa Aware: cores:%s on different NUMA nodes:%s. To avoid \
 this behavior, please use --ncores-per-instance knob to make sure number of cores is divisible by --ncores-per-\
 instance. Alternatively, please use --skip-cross-node-cores knob.",
-                core_list,
-                numa_ids,
+                str(core_list),
+                str(numa_ids),
             )
         if len(numa_ids) == 0:
             raise RuntimeError(
@@ -295,15 +295,11 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
                 break
         if not lib_set:
             for lib_path in library_paths:
-                # pyrefly: ignore [unbound-name]
                 library_file = os.path.join(lib_path, f"lib{lib_type}.so")
                 matches = glob.glob(library_file)
                 if len(matches) > 0:
-                    # pyrefly: ignore [unbound-name]
                     ld_preloads = [f"{matches[0]}", os.getenv("LD_PRELOAD", "")]
-                    # pyrefly: ignore [unbound-name]
                     os.environ["LD_PRELOAD"] = os.pathsep.join(
-                        # pyrefly: ignore [unbound-name]
                         [p.strip(os.pathsep) for p in ld_preloads if p]
                     )
                     lib_find = True
@@ -345,7 +341,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_tc = self.add_lib_preload(lib_type="tcmalloc")
             if not find_tc:
                 msg = f'{self.msg_lib_notfound} you can use "conda install -c conda-forge gperftools" to install {{0}}'
-                logger.warning(msg.format("TCmalloc", "tcmalloc"))
+                logger.warning(msg.format("TCmalloc", "tcmalloc"))  # noqa: G001
             else:
                 logger.info("Use TCMalloc memory allocator")
 
@@ -353,7 +349,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_je = self.add_lib_preload(lib_type="jemalloc")
             if not find_je:
                 msg = f'{self.msg_lib_notfound} you can use "conda install -c conda-forge jemalloc" to install {{0}}'
-                logger.warning(msg.format("Jemalloc", "jemalloc"))
+                logger.warning(msg.format("Jemalloc", "jemalloc"))  # noqa: G001
             else:
                 logger.info("Use JeMalloc memory allocator")
                 self.set_env(
@@ -426,7 +422,7 @@ Value applied: %s. Value ignored: %s",
             find_iomp = self.add_lib_preload(lib_type="iomp5")
             if not find_iomp:
                 msg = f'{self.msg_lib_notfound} you can use "conda install mkl" to install {{0}}'
-                logger.warning(msg.format("iomp", "iomp5"))
+                logger.warning(msg.format("iomp", "iomp5"))  # noqa: G001
             else:
                 logger.info("Using Intel OpenMP")
                 if set_kmp_affinity:

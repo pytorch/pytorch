@@ -255,11 +255,14 @@ Vectorized<uint8_t> Vectorized<uint8_t>::blend(
     if (count == size()) {                                                     \
       return vld1q_u##bit(reinterpret_cast<const uint##bit##_t*>(ptr));        \
     } else {                                                                   \
-      __at_align__ uint##bit##_t tmp_values[size()] = {};                      \
+      __at_align__ uint##bit##_t tmp_values[size()];                           \
+      for (const auto i : c10::irange(size())) {                               \
+        tmp_values[i] = 0;                                                     \
+      }                                                                        \
       std::memcpy(                                                             \
           tmp_values,                                                          \
           reinterpret_cast<const uint##bit##_t*>(ptr),                         \
-          std::min<int64_t>(count, size()) * sizeof(uint##bit##_t));           \
+          count * sizeof(uint##bit##_t));                                      \
       return vld1q_u##bit(reinterpret_cast<const uint##bit##_t*>(tmp_values)); \
     }                                                                          \
   }                                                                            \
@@ -270,10 +273,7 @@ Vectorized<uint8_t> Vectorized<uint8_t>::blend(
     } else {                                                                   \
       uint##bit##_t tmp_values[size()];                                        \
       vst1q_u##bit(reinterpret_cast<uint##bit##_t*>(tmp_values), values);      \
-      std::memcpy(                                                             \
-          ptr,                                                                 \
-          tmp_values,                                                          \
-          std::min<int64_t>(count, size()) * sizeof(uint##bit##_t));           \
+      std::memcpy(ptr, tmp_values, count * sizeof(uint##bit##_t));             \
     }                                                                          \
   }
 

@@ -4,8 +4,8 @@ import logging
 import operator
 import textwrap
 from collections import Counter
-from collections.abc import Callable, Iterable, Sequence
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -30,9 +30,9 @@ from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     ConvertIntKey,
     DivideByKey,
+    free_unbacked_symbols,
 )
 from torch.utils import _pytree as pytree
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import OptimizedPythonReferenceAnalysis
@@ -94,14 +94,13 @@ class SymbolBuffer(CodegenSymbol):
     def get_name(self) -> str:
         return str(self.symbol)
 
-    def get_example(self) -> torch.Tensor | torch.SymInt:
+    def get_example(self) -> Union[torch.Tensor, torch.SymInt]:
         sym_int = convert_to_symint(self.symbol)
-        if not isinstance(sym_int, torch.SymInt):
-            raise AssertionError(f"expected torch.SymInt, got {type(sym_int)}")
+        assert isinstance(sym_int, torch.SymInt)
         return sym_int
 
 
-CodegenBuffer = BufferLike | SymbolBuffer
+CodegenBuffer = Union[BufferLike, SymbolBuffer]
 
 
 @dataclasses.dataclass
@@ -167,15 +166,12 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             self.codegen_subgraph_common(subgraph)
 
     def define_subgraph_launcher_fn(
-        self, name: str, subgraph_code: ValueWithLineMap | FileBackedGraphModule
+        self, name: str, subgraph_code: Union[ValueWithLineMap, FileBackedGraphModule]
     ) -> None:
         """
         Record subgms as they're generated.
         """
-        if not isinstance(subgraph_code, FileBackedGraphModule):
-            raise AssertionError(
-                f"expected FileBackedGraphModule, got {type(subgraph_code)}"
-            )
+        assert isinstance(subgraph_code, FileBackedGraphModule)
         self.subgms[name] = subgraph_code.gm
 
     @property
@@ -185,7 +181,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def get_fx_graph_inputs(
         self,
-    ) -> dict[str, ir.TensorBox | ir.TorchBindObject | sympy.Expr | None]:
+    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr, None]]:
         """
         Get the input nodes corresponding to FX graph placeholders.
         """
@@ -236,26 +232,17 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         PythonWrapperCodegen.write_header(self)
 
-    def register_alignment_check_inputs(self) -> None:
-        """FXIR does not emit deferred alignment copies.
-        Alignment is handled by the runtime wrapper."""
-
-    def codegen_deferred_alignment_copies(self, input_names: Iterable[str]) -> None:
-        """FXIR does not emit deferred alignment copies."""
-
     @classmethod
     def create(
         cls: type["WrapperFxCodegen"],
         is_subgraph: bool,
-        subgraph_name: str | None,
-        parent_wrapper: PythonWrapperCodegen | None,
-        partition_signatures: ir.GraphPartitionSignature | None = None,
+        subgraph_name: Optional[str],
+        parent_wrapper: Optional[PythonWrapperCodegen],
+        partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ) -> "WrapperFxCodegen":
         if is_subgraph:
-            if subgraph_name is None:
-                raise AssertionError("subgraph_name must not be None for subgraphs")
-            if parent_wrapper is None:
-                raise AssertionError("parent_wrapper must not be None for subgraphs")
+            assert subgraph_name is not None
+            assert parent_wrapper is not None
 
             # Subgraphs override some methods of PythonWrapperCodegen.
             # Apply these overrides to the user-provided class, with priority given to
@@ -287,7 +274,7 @@ class FxConverter:
 
     lines: list[Line]
     prologue: str
-    graph_inputs: dict[str, ir.TensorBox | ir.TorchBindObject | sympy.Expr | None]
+    graph_inputs: dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr, None]]
     graph_outputs: list[ir.IRNode]
     subgms: dict[str, torch.fx.GraphModule]
     is_subgraph: bool
@@ -296,7 +283,7 @@ class FxConverter:
         graph = torch.fx.Graph()
         self.gm = GraphModule({}, graph)  # Wrapper FX IR.
         self.buffer_to_node: dict[
-            str | None, torch.fx.Node
+            Optional[str], torch.fx.Node
         ] = {}  # Symbol table for codegen.
         self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
         self._unique_symbol_ids: Counter[str] = Counter()
@@ -322,11 +309,6 @@ class FxConverter:
             """)
             )
 
-        # Parallel compile workers strip the Python function from the pickled
-        # JITFunction. FXIR stores the JITFunction in the Triton HOP side table,
-        # so reload it in the parent before runtime execution can need it.
-        kernel._ensure_kernel_loaded()
-
         return kernel
 
     def _create_as_strided(
@@ -334,10 +316,8 @@ class FxConverter:
         input_node: torch.fx.Node,
         size: tuple[Any, ...],
         stride: tuple[Any, ...],
-        offset: int | sympy.Expr,
+        offset: Union[int, sympy.Expr],
     ) -> torch.fx.Node:
-        if isinstance(offset, sympy.Expr):
-            offset = replace_floor_div(offset)
         return self.gm.graph.call_function(
             torch.as_strided,
             args=(
@@ -353,11 +333,10 @@ class FxConverter:
         Updates the symbol table to record that an Inductor buffer maps to the result of
         an FX node.
         """
-        if node in self.buffer_to_node:
-            raise AssertionError(f"node already recorded in buffer_to_node: {node}")
+        assert node not in self.buffer_to_node
         self.buffer_to_node[buffer.get_name()] = node
 
-    def _free(self, buffer: CodegenBuffer | ir.TorchBindObject) -> None:
+    def _free(self, buffer: Union[CodegenBuffer, ir.TorchBindObject]) -> None:
         """
         Removes the buffer from the symbol table.
         """
@@ -432,7 +411,7 @@ class FxConverter:
         """
 
         def _codegen_symbol(
-            sym_or_exp: sympy.Symbol | sympy.Expr,
+            sym_or_exp: Union[sympy.Symbol, sympy.Expr],
             base_node: torch.fx.Node,
             target: torch._ops.OpOverload,
             dim: int,
@@ -513,7 +492,7 @@ class FxConverter:
             setattr(self.gm, name, value)
             self.buffer_to_node[name] = node
 
-    def _generate_buffer(self, node: ir.IRNode) -> torch.fx.Node | None:
+    def _generate_buffer(self, node: ir.IRNode) -> Optional[torch.fx.Node]:
         """
         Generates FX IR for transformations on a buffer, such as ReinterpretView.
         Does nothing if no such transformations are present.
@@ -523,7 +502,7 @@ class FxConverter:
             # Generate FX nodes to compute the shape expression.
             return self._sympy_interp(node.expr).node
 
-        def generate_to_buffer(node: ir.IRNode) -> BufferLike | None:
+        def generate_to_buffer(node: ir.IRNode) -> Optional[BufferLike]:
             if isinstance(node, (ir.Buffer, WorkspaceArg)):
                 return node
             elif isinstance(node, ir.NoneAsConstantBuffer):
@@ -534,16 +513,12 @@ class FxConverter:
                 # We need to introduce a new symbol if the output is a ReinterpretView.
                 # Use a WorkspaceArg for this.
                 buffer = self._get_buffer(node.data)
-                if not isinstance(buffer, (ir.Buffer, WorkspaceArg)):
-                    raise AssertionError(
-                        f"expected ir.Buffer or WorkspaceArg, got {type(buffer)}"
-                    )
+                assert isinstance(buffer, (ir.Buffer, WorkspaceArg))
                 unique_name = self.gm.graph._graph_namespace.create_name(
                     f"{buffer.get_name()}_view", None
                 )
                 device = buffer.get_device()
-                if not device:
-                    raise AssertionError(f"buffer has no device: {buffer}")
+                assert device
                 reused_as = WorkspaceArg(
                     count=buffer.get_size(),
                     zero_mode=WorkspaceZeroMode.UNINITIALIZED,
@@ -564,7 +539,7 @@ class FxConverter:
 
     def _generate_outputs(
         self,
-    ) -> torch.fx.Node | None | list[torch.fx.Node | None]:
+    ) -> Union[Optional[torch.fx.Node], list[Optional[torch.fx.Node]]]:
         """
         Generate FX IR for graph outputs.
         """
@@ -601,8 +576,7 @@ class FxConverter:
         Look up the getattr node for a subgraph.
         """
         graph = subgraph.graph
-        if graph is None:
-            raise AssertionError("subgraph.graph must not be None")
+        assert graph is not None
         return self.subgm_getattrs[graph.name]
 
     def generate(self) -> torch.fx.GraphModule:
@@ -670,14 +644,15 @@ class FxConverter:
         )
         return self.expr_to_proxy[expr]
 
-    def _generate_sym_node(self, s: int | sympy.Expr) -> int | torch.fx.Node:
+    def _generate_sym_node(
+        self, s: Union[int, sympy.Expr]
+    ) -> Union[int, torch.fx.Node]:
         if isinstance(s, (int, sympy.Integer)):
             return int(s)
         elif isinstance(s, sympy.Symbol):
-            if s not in self.expr_to_proxy:
-                raise AssertionError(
-                    f"Could not find a node corresponding to the symbol {s}"
-                )
+            assert s in self.expr_to_proxy, (
+                f"Could not find a node corresponding to the symbol {s}"
+            )
             return self.expr_to_proxy[s].node
         elif isinstance(s, sympy.Expr):
             return self._sympy_interp(s).node
@@ -690,20 +665,17 @@ class FxConverter:
 
     def _generate_sym_nodes(
         self, shape: Sequence[sympy.Expr]
-    ) -> list[int | torch.fx.Node]:
+    ) -> list[Union[int, torch.fx.Node]]:
         return [self._generate_sym_node(s) for s in shape]
 
     def _generate_allocate(self, line: WrapperLine) -> None:
-        if not isinstance(line, AllocateLine):
-            raise AssertionError(f"expected AllocateLine, got {type(line)}")
+        assert isinstance(line, AllocateLine)
         buffer = line.node
         name = buffer.get_name()
-        if name in V.graph.removed_buffers:
-            raise AssertionError(f"buffer {name} is in removed_buffers")
+        assert name not in V.graph.removed_buffers
 
         device = buffer.get_device()
-        if not device:
-            raise AssertionError(f"buffer has no device: {buffer}")
+        assert device
         dtype = buffer.get_dtype()
         shape = self._generate_sym_nodes(buffer.get_size())
         stride = self._generate_sym_nodes(buffer.get_stride())
@@ -713,18 +685,15 @@ class FxConverter:
             args=(shape, stride),
             kwargs={"dtype": dtype, "device": device.type},
         )
-        if not name:
-            raise AssertionError(f"buffer has an empty name: {buffer}")
+        assert name
         node.name = name
         self._record_allocation(buffer, node)
 
     def _generate_conditional(self, line: WrapperLine) -> None:
-        if not isinstance(line, ConditionalLine):
-            raise AssertionError(f"expected ConditionalLine, got {type(line)}")
+        assert isinstance(line, ConditionalLine)
 
-        def get_subgm_attr(subgraph: ir.Subgraph | None) -> torch.fx.Node:
-            if subgraph is None:
-                raise AssertionError("subgraph must not be None")
+        def get_subgm_attr(subgraph: Optional[ir.Subgraph]) -> torch.fx.Node:
+            assert subgraph is not None
             return self._get_subgm_attr(subgraph)
 
         # Access the subgraphs as getattrs.
@@ -734,14 +703,12 @@ class FxConverter:
             for subgraph in (ir_node.true_subgraph, ir_node.false_subgraph)
         ]
 
-        def generate_buffer(node: ir.IRNode | None) -> torch.fx.Node | None:
-            if node is None:
-                raise AssertionError("node must not be None")
+        def generate_buffer(node: Optional[ir.IRNode]) -> Optional[torch.fx.Node]:
+            assert node is not None
             return self._generate_buffer(node)
 
         predicate = generate_buffer(ir_node.predicate)
-        if ir_node.operands is None:
-            raise AssertionError("ir_node.operands must not be None")
+        assert ir_node.operands is not None
         operands = tuple(generate_buffer(arg) for arg in ir_node.operands)
         fx_node = self.gm.graph.call_function(
             torch.ops.higher_order.cond,
@@ -749,29 +716,22 @@ class FxConverter:
         )
         self._record_allocation(ir_node, fx_node)
 
-    def _generate_assert_size_stride(self, line: WrapperLine) -> None:
-        pass
-
     def _generate_comment(self, line: WrapperLine) -> None:
-        if not isinstance(line, CommentLine):
-            raise AssertionError(f"expected CommentLine, got {type(line)}")
+        assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
 
     def _generate_dynamic_scalar(self, line: WrapperLine) -> None:
-        if not isinstance(line, DynamicScalarLine):
-            raise AssertionError(f"expected DynamicScalarLine, got {type(line)}")
+        assert isinstance(line, DynamicScalarLine)
 
         ir_node = line.node
         (input_ir_node,) = ir_node.inputs
-        if not isinstance(input_ir_node, ir.IRNode):
-            raise AssertionError(f"expected ir.IRNode, got {type(input_ir_node)}")
+        assert isinstance(input_ir_node, ir.IRNode)
         input_fx_node = self._generate_buffer(input_ir_node)
         keypath = ir_node.keypath
         graph = self.gm.graph
 
-        def generate_item(x: torch.fx.Node | None) -> torch.fx.Node:
-            if x is None:
-                raise AssertionError("x must not be None")
+        def generate_item(x: Optional[torch.fx.Node]) -> torch.fx.Node:
+            assert x is not None
             return graph.call_function(
                 aten.item.default,
                 args=(x,),
@@ -794,32 +754,23 @@ class FxConverter:
         self._generate_size_proxy(result_fx_node, result_symbol)
 
     def _generate_enter_device_context_manager(self, line: WrapperLine) -> None:
-        if not isinstance(line, EnterDeviceContextManagerLine):
-            raise AssertionError(
-                f"expected EnterDeviceContextManagerLine, got {type(line)}"
-            )
+        assert isinstance(line, EnterDeviceContextManagerLine)
         # We ignore the device context in FX IR.
 
     def _generate_exit_device_context_manager(self, line: WrapperLine) -> None:
-        if not isinstance(line, ExitDeviceContextManagerLine):
-            raise AssertionError(
-                f"expected ExitDeviceContextManagerLine, got {type(line)}"
-            )
+        assert isinstance(line, ExitDeviceContextManagerLine)
         # We ignore the device context in FX IR.
 
     def _generate_enter_subgraph(self, line: WrapperLine) -> None:
-        if not isinstance(line, EnterSubgraphLine):
-            raise AssertionError(f"expected EnterSubgraphLine, got {type(line)}")
+        assert isinstance(line, EnterSubgraphLine)
         # We ignore memory planning lines in FX IR.
 
     def _generate_exit_subgraph(self, line: WrapperLine) -> None:
-        if not isinstance(line, ExitSubgraphLine):
-            raise AssertionError(f"expected ExitSubgraphLine, got {type(line)}")
+        assert isinstance(line, ExitSubgraphLine)
         # We ignore memory planning lines in FX IR.
 
     def _generate_free(self, line: WrapperLine) -> None:
-        if not isinstance(line, FreeLine):
-            raise AssertionError(f"expected FreeLine, got {type(line)}")
+        assert isinstance(line, FreeLine)
 
         buf = line.node
 
@@ -830,22 +781,18 @@ class FxConverter:
         self._free(buf)
 
     def _generate_free_if_not_reused(self, line: WrapperLine) -> None:
-        if not isinstance(line, FreeIfNotReusedLine):
-            raise AssertionError(f"expected FreeIfNotReusedLine, got {type(line)}")
+        assert isinstance(line, FreeIfNotReusedLine)
         buf = line.node
-        if buf.get_name() in V.graph.removed_buffers:
-            raise AssertionError(f"buffer {buf.get_name()} is in removed_buffers")
+        assert buf.get_name() not in V.graph.removed_buffers
         if not line.is_reused:
             self._free(buf)
 
     def _generate_line_context(self, line: WrapperLine) -> None:
-        if not isinstance(line, LineContext):
-            raise AssertionError(f"expected LineContext, got {type(line)}")
+        assert isinstance(line, LineContext)
         # We ignore line context in FX IR.
 
     def _generate_reinterpret(self, line: WrapperLine) -> None:
-        if not isinstance(line, ReinterpretLine):
-            raise AssertionError(f"expected ReinterpretLine, got {type(line)}")
+        assert isinstance(line, ReinterpretLine)
         self._generate_reinterpret_helper(line.node, line.reused_as, line.layout)
 
     def _generate_reinterpret_helper(
@@ -855,15 +802,15 @@ class FxConverter:
 
         # Look up output metadata.
         name = result_buffer.get_name()
-        if not name:
-            raise AssertionError(f"result_buffer has an empty name: {result_buffer}")
+        assert name
         size = tuple(layout.size)
         stride = tuple(layout.stride)
         if isinstance(layout, ir.NonOwningLayout):
             # Look up the view's layout.
             view = layout.view
-            if not isinstance(view, ir.ReinterpretView):
-                raise AssertionError(f"unexpected type: {type(view)}")
+            assert isinstance(view, ir.ReinterpretView), (
+                f"unexpected type: {type(view)}"
+            )
             layout = view.layout
         offset = input_buffer.get_offset() + layout.offset
 
@@ -873,16 +820,11 @@ class FxConverter:
         self._record_allocation(result_buffer, result_node)
 
     def _generate_reuse(self, line: WrapperLine) -> None:
-        if not isinstance(line, ReuseLine):
-            raise AssertionError(f"expected ReuseLine, got {type(line)}")
+        assert isinstance(line, ReuseLine)
         old = line.node
         new = line.reused_as
-        if any(buf.get_name() in V.graph.removed_buffers for buf in (old, new)):
-            raise AssertionError("old or new buffer is in removed_buffers")
-        if old.get_dtype() != new.get_dtype():
-            raise AssertionError(
-                f"dtype mismatch: {old.get_dtype()} != {new.get_dtype()}"
-            )
+        assert not any(buf.get_name() in V.graph.removed_buffers for buf in (old, new))
+        assert old.get_dtype() == new.get_dtype()
 
         old_node = self.buffer_to_node[old.get_name()]
         result_node = old_node
@@ -909,8 +851,7 @@ class FxConverter:
             self._free(old)
 
     def _generate_multi_output(self, line: WrapperLine) -> None:
-        if not isinstance(line, MultiOutputLine):
-            raise AssertionError(f"expected MultiOutputLine, got {type(line)}")
+        assert isinstance(line, MultiOutputLine)
 
         arg_node = self.buffer_to_node[line.arg_name]
 
@@ -922,8 +863,7 @@ class FxConverter:
 
         # Extract the index for tuple access.
         inds = line.indices[0][1:]
-        if len(inds) != 1:
-            raise AssertionError(f"Cannot convert {inds} to an index.")
+        assert len(inds) == 1, f"Cannot convert {inds} to an index."
         idx = inds[0]
 
         node = self.gm.graph.call_function(operator.getitem, args=(arg_node, idx))
@@ -933,8 +873,8 @@ class FxConverter:
     def _generate_fallback_call(
         self,
         ir_node: ir.ExternKernel,
-        args: tuple[Any, ...] | None = None,
-        kwargs: dict[str, Any] | None = None,
+        args: Optional[tuple[Any, ...]] = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ) -> None:
         fx_node = self.gm.graph.call_function(
             ir_node.op_overload,  # type: ignore[arg-type]
@@ -943,28 +883,21 @@ class FxConverter:
         )
         result_buffer = ir_node.codegen_reference()
         self.buffer_to_node[result_buffer] = fx_node
-        # For in-place mutation ops (e.g., scatter_reduce_, index_put_),
-        # update the buffer mapping for mutated inputs so downstream
-        # references to the mutated buffer see the post-mutation node.
-        for mutated_name in ir_node.get_mutation_names():
-            self.buffer_to_node[mutated_name] = fx_node
 
     def _generate_index_put_fallback(self, line: WrapperLine) -> None:
-        if not isinstance(line, IndexPutFallbackLine):
-            raise AssertionError(f"expected IndexPutFallbackLine, got {type(line)}")
+        assert isinstance(line, IndexPutFallbackLine)
         ir_node = line.node
 
         def generate_buffer_or_none(
-            x: ir.IRNode | Sequence[ir.IRNode] | None,
-        ) -> torch.fx.Node | None:
+            x: Union[ir.IRNode, Sequence[ir.IRNode], None],
+        ) -> Optional[torch.fx.Node]:
             """
             Handles None before calling _generate_buffer.
             """
             if x is None:
                 return None
 
-            if not isinstance(x, ir.IRNode):
-                raise AssertionError(f"expected ir.IRNode, got {type(x)}")
+            assert isinstance(x, ir.IRNode)
             return self._generate_buffer(x)
 
         (x, values) = [generate_buffer_or_none(t) for t in ir_node.inputs[:2]]
@@ -974,11 +907,9 @@ class FxConverter:
         self._generate_fallback_call(ir_node, args)
 
     def _generate_scatter_fallback(self, line: WrapperLine) -> None:
-        if not isinstance(line, ScatterFallbackLine):
-            raise AssertionError(f"expected ScatterFallbackLine, got {type(line)}")
+        assert isinstance(line, ScatterFallbackLine)
         ir_node = line.node
-        if not ir.is_node_sequence(ir_node.inputs):
-            raise AssertionError("ir_node.inputs is not a node sequence")
+        assert ir.is_node_sequence(ir_node.inputs)
         (x, index, src) = [self._generate_buffer(t) for t in ir_node.inputs] + (
             [] if ir_node.src_is_tensor else [ir_node.constant_args[1]]
         )
@@ -986,44 +917,31 @@ class FxConverter:
         kwargs = {}
         if reduce := ir_node.kwargs.get("reduce"):
             kwargs["reduce"] = reduce
-        # Only pass kwargs that the op's schema actually accepts, since
-        # ScatterFallback stores both reduce and include_self for all
-        # scatter variants, but not all ops support them (e.g.,
-        # scatter_.value has no kwargs, scatter_reduce_.two has both).
-        if not isinstance(ir_node.op_overload, torch._ops.OpOverload):
-            raise AssertionError(
-                f"expected torch._ops.OpOverload, got {type(ir_node.op_overload)}"
-            )
-        schema_arg_names = OrderedSet(
-            [a.name for a in ir_node.op_overload._schema.arguments]
-        )
-        kwargs = {k: v for k, v in ir_node.kwargs.items() if k in schema_arg_names}
 
         self._generate_fallback_call(ir_node, args, kwargs)
 
     def _generate_null(self, line: WrapperLine) -> None:
-        if not isinstance(line, NullLine):
-            raise AssertionError(f"expected NullLine, got {type(line)}")
+        assert isinstance(line, NullLine)
         # Does nothing.
 
     def _generate_comm_buffer_allocate(self, line: WrapperLine) -> None:
-        if not (isinstance(line, AllocateLine) and line.comm_buffer):
-            raise AssertionError("expected AllocateLine with comm_buffer set")
+        assert isinstance(line, AllocateLine) and line.comm_buffer
         raise NotImplementedError("Comm buffer allocation is not yet supported")
 
     def _generate_comm_buffer_free(self, line: WrapperLine) -> None:
-        if not (isinstance(line, FreeIfNotReusedLine) and line.comm_buffer):
-            raise AssertionError("expected FreeIfNotReusedLine with comm_buffer set")
+        assert isinstance(line, FreeIfNotReusedLine) and line.comm_buffer
         self._free(line.node)
 
     def _generate_triton_call(self, line: WrapperLine) -> None:
-        if not isinstance(line, KernelCallLine):
-            raise AssertionError(f"expected KernelCallLine, got {type(line)}")
+        assert isinstance(line, KernelCallLine)
 
         # Collect all kwargs, including autotuned block sizes.
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
+
+        class UnbackedSymintsError(Exception):
+            pass
 
         def tune_kernel(tuner: CachingAutotuner, call_args: Sequence[Any]) -> None:
             from triton.runtime import driver
@@ -1040,10 +958,13 @@ class FxConverter:
                 for dynamic shapes.
                 """
 
-                def to_size_hint_sympy_int(arg: sympy.Expr | int) -> int:
-                    return V.graph.sizevars.optimization_hint(arg)
+                def to_size_hint_sympy_int(arg: Union[sympy.Expr, int]) -> int:
+                    if len(free_unbacked_symbols(arg)) > 0:
+                        # NYI: tuning args require backed symints.
+                        raise UnbackedSymintsError
+                    return V.graph.sizevars.size_hint(arg)
 
-                def to_size_hint_list(arg: list[torch.SymInt | int]) -> list[int]:
+                def to_size_hint_list(arg: list[Union[torch.SymInt, int]]) -> list[int]:
                     args_sympy = [
                         x.node.expr if isinstance(x, torch.SymInt) else x for x in arg
                     ]
@@ -1068,25 +989,11 @@ class FxConverter:
         # The FX backend currently only supports compile-time tuning.
         kernel_name = tuner.fn.__name__
         if config.triton.autotune_at_compile_time:
-            # Skip compile-time autotuning if any unbacked symbol lacks a user-provided
-            # optimization hint — autotuning with the generic fallback would
-            # produce meaningless results.
-            hinted = V.graph.sizevars.all_unbacked_explicitly_hinted
-            can_tune = True
-            for arg in call_args:
-                if isinstance(arg, torch.fx.Node):
-                    fake = arg.meta["val"]
-                    if not hinted(list(fake.shape) + list(fake.stride())):
-                        can_tune = False
-                        break
-                elif not hinted(arg):
-                    can_tune = False
-                    break
-            if can_tune:
+            try:
                 tune_kernel(tuner, call_args)
-            else:
+            except UnbackedSymintsError:
                 log.info(
-                    "Detected unhinted unbacked symints. Skipping compile-time autotuning for kernel %s.",
+                    "Detected unbacked symints. Skipping autotuning for kernel %s.",
                     kernel_name,
                 )
         else:
@@ -1138,8 +1045,9 @@ class FxConverter:
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
         call_kwargs = dict(zip(signature, call_args))
         # pyrefly: ignore [missing-attribute]
-        if any(kwarg in kernel_config.kwargs for kwarg in call_kwargs):
-            raise AssertionError(f"kwargs overlap config: {call_kwargs}")
+        assert not any(kwarg in kernel_config.kwargs for kwarg in call_kwargs), (
+            f"kwargs overlap config: {call_kwargs}"
+        )
         # pyrefly: ignore [missing-attribute]
         call_kwargs.update(kernel_config.kwargs)
 
@@ -1149,19 +1057,6 @@ class FxConverter:
         call_kwargs = {
             name: self._generate_sym_node(val) for name, val in call_kwargs.items()
         }
-        backend_options = triton_meta.get("backend_options", {})
-        if backend_options:
-            # FXIR executes Triton kernels through the HOP, not the already
-            # materialized CachingAutotuner launcher. Preserve backend option
-            # values in the HOP payload so a direct FXIR run or later Inductor
-            # re-lowering re-enters Triton JIT with the same compiler options
-            # that were used during FXIR precompile/autotune.
-            for name, value in backend_options.items():
-                # If the backend option is also a kernel parameter, call_kwargs
-                # already contains the launch value reconstructed from the Triton
-                # signature/config. Keep that value and only add backend options
-                # that are not otherwise represented in the HOP payload.
-                call_kwargs.setdefault(name, value)
 
         # Store non-graphable kwargs in the side table.
         (
@@ -1169,30 +1064,21 @@ class FxConverter:
             constant_args_idx,
         ) = tracing_triton_hopifier_singleton.store_non_graphable_args(call_kwargs)
 
-        hop_kwargs: dict[str, Any] = {
-            "kernel_idx": kernel.wrapped.kernel_idx,
-            "constant_args_idx": constant_args_idx,
-            "grid": wrapper_grid,
-            "tma_descriptor_metadata": {},
-            "kwargs": call_kwargs,
-        }
-        if backend_options:
-            # Keep the FXIR HOP call shape unchanged for normal Inductor
-            # kernels. Some downstream HOP py_impls have fixed keyword-only
-            # signatures and only need launch_kwargs when there are real
-            # Triton backend options to preserve.
-            hop_kwargs["launch_kwargs"] = tuple(backend_options)
-
         triton_node = self.gm.graph.call_function(
             triton_kernel_wrapper_mutation,
-            kwargs=hop_kwargs,
+            kwargs={
+                "kernel_idx": kernel.wrapped.kernel_idx,
+                "constant_args_idx": constant_args_idx,
+                "grid": wrapper_grid,
+                "tma_descriptor_metadata": {},
+                "kwargs": call_kwargs,
+            },
         )
         if extra_options:
             triton_node.meta["extra_options"] = extra_options
 
     def _generate_extern_kernel_alloc(self, line: WrapperLine) -> None:
-        if not isinstance(line, ExternKernelAllocLine):
-            raise AssertionError(f"expected ExternKernelAllocLine, got {type(line)}")
+        assert isinstance(line, ExternKernelAllocLine)
         node = line.node
         self._generate_extern_kernel_common(node, node)
 
@@ -1200,8 +1086,7 @@ class FxConverter:
         self,
         line: WrapperLine,
     ) -> None:
-        if not isinstance(line, ExternKernelOutLine):
-            raise AssertionError(f"expected ExternKernelOutLine, got {type(line)}")
+        assert isinstance(line, ExternKernelOutLine)
         node = line.node
         out_node = node.output_view if node.output_view else node
         self._generate_extern_kernel_common(node, out_node)
@@ -1214,8 +1099,7 @@ class FxConverter:
         """
 
         # Get FX nodes corresponding to the call args.
-        if not ir.is_node_sequence(kernel.inputs):
-            raise AssertionError("kernel.inputs is not a node sequence")
+        assert ir.is_node_sequence(kernel.inputs)
         tensor_nodes = tuple(self._generate_buffer(arg) for arg in kernel.inputs)
         if hasattr(kernel, "unflatten_args"):
             args, _ = kernel.unflatten_args(tensor_nodes, kernel.constant_args)
@@ -1230,7 +1114,7 @@ class FxConverter:
             for k, v in kernel.kwargs.items()
         }
 
-        result_buffer: str | None = None
+        result_buffer: Optional[str] = None
         if isinstance(kernel, ir.ExternKernelOut):
             kwargs["out"] = self.buffer_to_node[out_ir_node.codegen_reference()]
         elif isinstance(kernel.layout, (ir.Layout, ir.MultiOutputLayout)):
@@ -1248,24 +1132,21 @@ class FxConverter:
 
         # Assign the result to the given name.
         if result_buffer:
-            if "out" in kwargs:
-                raise AssertionError(
-                    f"Extern kernel '{kernel}' has both result and out kwarg. Expected only one."
-                )
+            assert "out" not in kwargs, (
+                f"Extern kernel '{kernel}' has both result and out kwarg. Expected only one."
+            )
             fx_node.name = result_buffer
             self.buffer_to_node[result_buffer] = fx_node
 
     def _generate_kernel_call(self, line: WrapperLine) -> None:
-        if not isinstance(line, KernelCallLine):
-            raise AssertionError(f"expected KernelCallLine, got {type(line)}")
+        assert isinstance(line, KernelCallLine)
         if not line.triton:
             raise NotImplementedError("FX conversion only supports Triton kernels.")
 
         self._generate_triton_call(line)
 
     def _generate_kernel_definition(self, line: WrapperLine) -> None:
-        if not isinstance(line, KernelDefinitionLine):
-            raise AssertionError(f"expected KernelDefinitionLine, got {type(line)}")
+        assert isinstance(line, KernelDefinitionLine)
 
         # Generate code for the kernel.
         kernel_code = PythonWrapperCodegen._format_kernel_definition(
@@ -1278,8 +1159,7 @@ class FxConverter:
         self.kernels[line.kernel_name] = TritonKernel(tuner, wrapped)
 
     def _generate_symbolic_call_arg(self, line: WrapperLine) -> None:
-        if not isinstance(line, SymbolicCallArgLine):
-            raise AssertionError(f"expected SymbolicCallArgLine, got {type(line)}")
+        assert isinstance(line, SymbolicCallArgLine)
         # Store the arg: expr mapping for later use.
         arg = line.arg
 
@@ -1287,8 +1167,7 @@ class FxConverter:
         self.expr_to_proxy[arg.inner] = inner_expr_proxy
 
     def _generate_unbacked_symbol_defs(self, line: WrapperLine) -> None:
-        if not isinstance(line, UnbackedSymbolDefsLine):
-            raise AssertionError(f"expected UnbackedSymbolDefsLine, got {type(line)}")
+        assert isinstance(line, UnbackedSymbolDefsLine)
         graph = self.gm.graph
 
         def convert_key(node: torch.fx.Node, path: pytree.KeyPath) -> torch.fx.Node:
@@ -1307,8 +1186,7 @@ class FxConverter:
                     "stride": aten.sym_stride.int,
                     "storage_offset": aten.sym_storage_offset,
                 }[entry.name]
-                if not callable(target):
-                    raise AssertionError(f"target is not callable: {target}")
+                assert callable(target)
                 node = graph.call_function(
                     target,
                     args=(
@@ -1331,8 +1209,7 @@ class FxConverter:
 
         root_node = self.buffer_to_node[line.output_name]
         unbacked_bindings = line.unbacked_bindings
-        if unbacked_bindings is None:
-            raise AssertionError("line.unbacked_bindings must not be None")
+        assert unbacked_bindings is not None
         for s, keypath in unbacked_bindings.items():
             # Check if we already generated this symbol.
             if s.name in self.buffer_to_node:

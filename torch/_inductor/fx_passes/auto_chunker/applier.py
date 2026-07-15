@@ -1,7 +1,7 @@
 import copy
 import logging
 import operator
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch import Tensor
@@ -62,14 +62,14 @@ class ChunkingApplier:
         self.num_chunk = num_chunk
 
         # tangent node to the all-one tensor
-        self.overriden_tangent: dict[Node, Node | None] = {}
+        self.overriden_tangent: dict[Node, Optional[Node]] = {}
 
         self.subgraph_input: list[Node] = []
         self.subgraph_body: list[Node] = []
         self.subgraph_output: list[Node] = []
         self._categorize_subgraph_nodes()
 
-        self.chunk_sizes: list[int] | None = None
+        self.chunk_sizes: Optional[list[int]] = None
 
         # First index is node index,
         # Second index is chunk index.
@@ -78,12 +78,11 @@ class ChunkingApplier:
         # check self.chunk_subgraph_input for more details
         self.chunked_subgraph_input: list[list[Node]] = []
 
-        self.accumulators: dict[Node, Node | None] = {}
+        self.accumulators: dict[Node, Optional[Node]] = {}
         self.chunks_for_recovering: dict[Node, list[Node]] = {}
         for node in self.subgraph_output:
             meta = get_chunking_meta(node)
-            if not meta:
-                raise AssertionError("expected chunking meta for subgraph output node")
+            assert meta
             if meta.chunk_dim is not None:
                 self.chunks_for_recovering[node] = []
             else:
@@ -94,7 +93,7 @@ class ChunkingApplier:
 
     def _categorize_subgraph_nodes(self) -> None:
         """
-        For each chunked node, decide if it's an input/body/output node of the
+        For each chunked node, decide if it's a input/body/output node of the
         chunking subgraph.
         """
         for node in self.parent_graph.nodes:
@@ -136,13 +135,11 @@ class ChunkingApplier:
             else:
                 self.subgraph_body.append(node)
 
-        if len(self.subgraph_body) <= 0:
-            raise AssertionError("expected non-empty subgraph body")
+        assert len(self.subgraph_body) > 0
 
     def replace_tangent_to_one(self) -> None:
         for idx, node in enumerate(self.overriden_tangent):
-            if not is_tangent_node(node):
-                raise AssertionError(f"expected tangent node, got {node}")
+            assert is_tangent_node(node)
 
             fake_tensor = node.meta["val"]
             one = self.parent_graph.call_function(
@@ -163,8 +160,7 @@ class ChunkingApplier:
         """
         for node_idx, subgraph_input in enumerate(self.subgraph_input):
             meta = get_chunking_meta(subgraph_input)
-            if meta is None:
-                raise AssertionError("expected chunking meta for subgraph input")
+            assert meta is not None
 
             # not chunked
             if meta.chunk_dim is None:
@@ -236,22 +232,17 @@ class ChunkingApplier:
             env[input_node] = _create_placeholder_node(input_node)
 
         for overriden_tangent_node in self.overriden_tangent.values():
-            if overriden_tangent_node is None:
-                raise AssertionError("expected tangent node to be set")
+            assert overriden_tangent_node is not None
             env[overriden_tangent_node] = _create_placeholder_node(
                 overriden_tangent_node
             )
 
         for accum in self.accumulators.values():
-            if accum is None:
-                raise AssertionError("expected accumulator to be set")
+            assert accum is not None
             env[accum] = _create_placeholder_node(accum)
 
         for original_node in self.subgraph_body + self.subgraph_output:
-            if original_node.op == "placeholder":
-                raise AssertionError(
-                    f"unexpected placeholder node in subgraph body/output: {original_node}"
-                )
+            assert original_node.op != "placeholder"
 
             # Chunk aten.full
             if (
@@ -260,7 +251,6 @@ class ChunkingApplier:
                 and meta.chunk_dim is not None
             ):
                 shape = list(original_node.args[0])  # type: ignore[arg-type]
-                # pyrefly: ignore [unsupported-operation]
                 shape[meta.chunk_dim] = chunk_size
                 env[original_node] = new_graph.call_function(
                     aten.full.default,
@@ -268,36 +258,19 @@ class ChunkingApplier:
                     original_node.kwargs,
                 )
                 continue
-            # Chunk aten.expand: adjust the target shape at the chunk dimension
+            # Chunk aten.expand a scalar
             if (
                 original_node.target == aten.expand.default
                 and isinstance(original_node.args[0], torch.fx.Node)
+                and original_node.args[0].meta["val"].numel() == 1
                 and (meta := get_chunking_meta(original_node)) is not None
                 and meta.chunk_dim is not None
             ):
                 shape = list(original_node.args[1])  # type: ignore[arg-type]
-                # pyrefly: ignore [unsupported-operation]
                 shape[meta.chunk_dim] = chunk_size
                 env[original_node] = new_graph.call_function(
                     aten.expand.default,
                     (env.get(original_node.args[0], original_node.args[0]), shape),  # type: ignore[arg-type]
-                    original_node.kwargs,
-                )
-                continue
-
-            # Chunk aten.view: adjust the target shape at the chunk dimension
-            if (
-                original_node.target == aten.view.default
-                and isinstance(original_node.args[0], torch.fx.Node)
-                and (meta := get_chunking_meta(original_node)) is not None
-                and meta.chunk_dim is not None
-            ):
-                shape = list(original_node.args[1])  # type: ignore[arg-type]
-                # pyrefly: ignore [unsupported-operation]
-                shape[meta.chunk_dim] = chunk_size
-                env[original_node] = new_graph.call_function(
-                    aten.view.default,
-                    (env[original_node.args[0]], shape),  # type: ignore[arg-type]
                     original_node.kwargs,
                 )
                 continue
@@ -308,8 +281,7 @@ class ChunkingApplier:
         # Do the accumulation inside this subgraph
         for node, accum in self.accumulators.items():
             lhs = env[node]
-            if accum is None:
-                raise AssertionError("expected accumulator to be set")
+            assert accum is not None
             rhs = env[accum]
 
             # add `addend` and `accum`
@@ -331,8 +303,7 @@ class ChunkingApplier:
         return sub_gm
 
     def build_subgraphs(self) -> None:
-        if self.chunk_sizes is None:
-            raise AssertionError("expected chunk_sizes to be set")
+        assert self.chunk_sizes is not None
         for chunk_size in self.chunk_sizes:
             if chunk_size in self.chunk_size_to_gm_attr:
                 continue
@@ -348,8 +319,7 @@ class ChunkingApplier:
 
     def call_subgraph_for_each_chunk(self) -> None:
         for chunk_id in range(self.num_chunk):
-            if self.chunk_sizes is None:
-                raise AssertionError("expected chunk_sizes to be set")
+            assert self.chunk_sizes is not None
             chunk_size = self.chunk_sizes[chunk_id]
             subgraph_id = self.chunk_size_to_gm_attr[chunk_size]
             sub_gm = self.parent_graph.get_attr(subgraph_id)
@@ -358,8 +328,7 @@ class ChunkingApplier:
             chunks_iter = iter(self.chunked_subgraph_input)
             for node in self.subgraph_input:
                 chunking_meta = get_chunking_meta(node)
-                if chunking_meta is None:
-                    raise AssertionError("expected chunking meta for subgraph input")
+                assert chunking_meta is not None
                 if chunking_meta.chunk_dim is not None:
                     args.append(next(chunks_iter)[chunk_id])
                 else:
@@ -369,8 +338,7 @@ class ChunkingApplier:
             args += list(self.overriden_tangent.values())  # type: ignore[arg-type]
 
             for accum in self.accumulators.values():
-                if accum is None:
-                    raise AssertionError("expected accumulator to be set")
+                assert accum is not None
                 args.append(accum)
 
             output_node = self.parent_graph.call_function(
@@ -396,8 +364,7 @@ class ChunkingApplier:
         """
         for node in self.subgraph_output:
             meta = get_chunking_meta(node)
-            if meta is None:
-                raise AssertionError("expected chunking meta for subgraph output")
+            assert meta is not None
 
             recovered: torch.fx.Node = node
 
@@ -424,8 +391,7 @@ class ChunkingApplier:
                         prims.convert_element_type.default, (recovered, original_dtype)
                     )
 
-            if recovered is node:
-                raise AssertionError("expected recovered node to differ from original")
+            assert recovered is not node
             node.replace_all_uses_with(recovered)
 
     def erase_original_nodes(self) -> None:

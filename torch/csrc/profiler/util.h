@@ -3,8 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <list>
-#include <memory>
-#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -106,9 +104,6 @@ TORCH_API std::vector<FileLineFunc> prepareCallstack(
     const std::vector<jit::StackEntry>& cs);
 TORCH_API std::vector<std::string> callstackStr(
     const std::vector<FileLineFunc>& cs);
-TORCH_API std::string joinStacks(
-    const std::vector<std::string>& stacks,
-    const char* delim);
 TORCH_API std::string stacksToStr(
     const std::vector<std::string>& stacks,
     const char* delim);
@@ -118,12 +113,6 @@ TORCH_API std::vector<std::vector<int64_t>> inputSizes(
 TORCH_API std::string variantShapesToStr(const std::vector<shape>& shapes);
 TORCH_API std::string shapesToStr(
     const std::vector<std::vector<int64_t>>& shapes);
-TORCH_API std::vector<shape> variantShapesTruncated(
-    const std::vector<shape>& shapes);
-TORCH_API std::vector<shape> shapesToInputShapes(
-    const std::vector<std::vector<int64_t>>& shapes);
-TORCH_API std::vector<std::string> concreteInputsToStrList(
-    const std::vector<c10::IValue>& inputs);
 TORCH_API std::string strListToStr(const std::vector<std::string>& types);
 TORCH_API std::string inputOpIdsToStr(
     const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);
@@ -148,7 +137,7 @@ uint64_t TORCH_API computeFlops(
 std::string shapeToStr(const std::vector<int64_t>& shape);
 
 template <typename T>
-class GlobalStateManager {
+class TORCH_API GlobalStateManager {
  public:
   static GlobalStateManager& singleton() {
     /* library-local */ static GlobalStateManager singleton_;
@@ -156,34 +145,26 @@ class GlobalStateManager {
   }
 
   static void push(std::shared_ptr<T>&& state) {
-    auto& self = singleton();
-    std::lock_guard<std::mutex> guard(self.mutex_);
-    if (self.state_) {
+    if (singleton().state_) {
       LOG(WARNING) << "GlobalStatePtr already exists!";
     } else {
-      self.state_ = std::move(state);
+      singleton().state_ = std::move(state);
     }
   }
 
-  static std::shared_ptr<T> get() {
-    auto& self = singleton();
-    std::lock_guard<std::mutex> guard(self.mutex_);
-    return self.state_;
+  static auto* get() {
+    return singleton().state_.get();
   }
 
   static std::shared_ptr<T> pop() {
-    auto& self = singleton();
-    std::lock_guard<std::mutex> guard(self.mutex_);
-    return std::move(self.state_);
+    auto out = singleton().state_;
+    singleton().state_.reset();
+    return out;
   }
 
  private:
   GlobalStateManager() = default;
 
-  // Guards state_ so a worker thread copying the pointer in get() (which keeps
-  // the state alive for the duration of an in-flight callback) cannot race the
-  // thread that tears the profiler down and resets state_ in pop().
-  std::mutex mutex_;
   std::shared_ptr<T> state_;
 };
 
@@ -220,11 +201,8 @@ constexpr auto kGroupRanks = "Process Group Ranks";
 constexpr auto kRank = "Rank";
 constexpr auto kP2pSrc = "Src Rank";
 constexpr auto kP2pDst = "Dst Rank";
-constexpr auto kSeqNum = "Seq";
 constexpr auto kInTensorsStart = "Input Tensors start";
 constexpr auto kOutTensorsStart = "Output Tensors start";
-constexpr auto kIsAsynchronizedOp = "Is asynchronized op";
-constexpr auto kCommsId = "Comms Id";
 #endif // USE_DISTRIBUTED
 
 } // namespace torch::profiler::impl

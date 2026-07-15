@@ -13,15 +13,12 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/BFloat16.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 #include <c10/util/complex.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/overflows.h>
-
-#include <torch/headeronly/core/Dispatch_v2.h>
 
 namespace c10 {
 
@@ -71,11 +68,10 @@ class C10_API Scalar {
       "int64_t is the same as long long on Windows");
   Scalar(long vv) : Scalar(vv, true) {}
 #endif
-#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__NetBSD__) || \
-    defined(__FreeBSD__) || defined(__OpenBSD__)
+#if defined(__linux__) && !defined(__ANDROID__)
   static_assert(
       sizeof(void*) != 8 || std::is_same_v<long, int64_t>,
-      "int64_t is the same as long on 64 bit Linux and BSDs");
+      "int64_t is the same as long on 64 bit Linux");
 #if LONG_MAX != INT_MAX
   Scalar(long long vv) : Scalar(vv, true) {}
 #endif /* not 32-bit system */
@@ -141,11 +137,7 @@ class C10_API Scalar {
   }
 
   // TODO: Support ComplexHalf accessor
-  // Can't use AT_FORALL_SCALAR_TYPES_V2 here because macros don't allow
-  // one to go from EnumValue to EnumName.
-  // Add a new statement here when adding to AT_ALL_SCALAR_TYPES_WITH_COMPLEX.
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ACCESSOR)
-  DEFINE_ACCESSOR(c10::complex<c10::BFloat16>, BComplex32)
   DEFINE_ACCESSOR(uint16_t, UInt16)
   DEFINE_ACCESSOR(uint32_t, UInt32)
   DEFINE_ACCESSOR(uint64_t, UInt64)
@@ -192,6 +184,12 @@ class C10_API Scalar {
 
   bool isFloatingPoint() const {
     return Tag::HAS_d == tag || Tag::HAS_sd == tag;
+  }
+
+  [[deprecated(
+      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")]] bool
+  isIntegral() const {
+    return Tag::HAS_i == tag || Tag::HAS_si == tag || Tag::HAS_u == tag;
   }
 
   bool isIntegral(bool includeBool) const {
@@ -459,10 +457,7 @@ using OptionalScalarRef = c10::OptionalRef<Scalar>;
   inline T Scalar::to<T>() const { \
     return to##name();             \
   }
-
-// Add a new statement here when adding to AT_ALL_SCALAR_TYPES_WITH_COMPLEX.
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_TO)
-DEFINE_TO(c10::complex<c10::BFloat16>, BComplex32)
 DEFINE_TO(uint16_t, UInt16)
 DEFINE_TO(uint32_t, UInt32)
 DEFINE_TO(uint64_t, UInt64)

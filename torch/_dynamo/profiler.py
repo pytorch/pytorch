@@ -38,8 +38,7 @@ class ProfileMetrics:
         return self
 
     def __add__(self, other: ProfileMetrics) -> ProfileMetrics:
-        if not isinstance(other, ProfileMetrics):
-            raise AssertionError(f"Expected ProfileMetrics, got {type(other)}")
+        assert isinstance(other, ProfileMetrics)
         return ProfileMetrics(
             self.microseconds + other.microseconds,
             self.operators + other.operators,

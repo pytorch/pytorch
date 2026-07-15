@@ -1,4 +1,3 @@
-#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -1154,9 +1153,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
     if (max_indices) {
       max_indices->copy_(bag_size);
     }
-  } else {
-    TORCH_CHECK(mode == EmbeddingBagMode::MAX, "`mode` must be sum, mean, or max.")
-
+  } else { // EmbeddingBagMode::MAX
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,

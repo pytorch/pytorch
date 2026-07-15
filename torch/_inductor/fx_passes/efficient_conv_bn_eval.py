@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-import inspect
-
 import torch
 import torch.nn as nn
 from torch._dynamo.utils import counters
@@ -14,11 +12,6 @@ from ..pattern_matcher import (
     register_graph_pattern,
 )
 from .pre_grad import efficient_conv_bn_eval_pass
-
-
-# Cache the signature of F.batch_norm at module load time to avoid repeated
-# introspection during graph transformation (fixes performance regression).
-_BATCH_NORM_SIGNATURE = inspect.signature(torch.nn.functional.batch_norm)
 
 
 def efficient_conv_bn_eval(
@@ -39,10 +32,8 @@ def efficient_conv_bn_eval(
         x (torch.Tensor): Input feature map.
     """
 
-    if bn.running_var is None:
-        raise AssertionError("expected bn.running_var to not be None")
-    if bn.running_mean is None:
-        raise AssertionError("expected bn.running_mean to not be None")
+    assert bn.running_var is not None
+    assert bn.running_mean is not None
 
     # These lines of code are designed to deal with various cases
     # like bn without affine transform, and conv without bias
@@ -107,8 +98,7 @@ def efficient_conv_bn_eval_decomposed(
      reduced numerical stability.
     Args:
     """
-    if bn_running_var is None:
-        raise AssertionError("expected bn_running_var to not be None")
+    assert bn_running_var is not None
 
     # These lines of code are designed to deal with various cases
     # like bn without affine transform, and conv without bias
@@ -156,37 +146,17 @@ def efficient_conv_bn_eval_decomposed(
     and inductor_config.efficient_conv_bn_eval_fx_passes,
 )
 def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs):
-    """
-    Graph transformation pass for fusing F.batch_norm with preceding conv operations.
-
-    This pass handles F.batch_norm calls with default arguments by normalizing
-    the args tuple using inspect.signature. It fuses batch normalization with
-    the preceding convolution for more efficient evaluation.
-    """
     bn_node = match.nodes[0]
     graph = match.graph
-
-    # Normalize arguments by binding to cached signature and applying defaults.
-    # This handles cases where F.batch_norm is called with fewer than 8 args.
-    bound_args = _BATCH_NORM_SIGNATURE.bind(*bn_node.args, **bn_node.kwargs)
-    bound_args.apply_defaults()
-    # Use bound_args.args instead of mutating bn_node.args
-    normalized_args = bound_args.args
+    assert len(bn_node.args) == 8
 
     # We can only use efficient conv-bn for eval mode with track_running_stats
-    # normalized_args[5] is the "training" argument
-    training_arg = normalized_args[5]
-
-    # Safety check: if 'training' is a symbolic Node (from tracing/export),
-    # we cannot optimize since we don't know the value at compile time.
-    if isinstance(training_arg, torch.fx.Node):
-        return
-
-    if training_arg:
+    # bn_node.args is `training`
+    if bn_node.args[-3]:
         return
 
     # Check if the input is Conv
-    input_node = normalized_args[0]
+    input_node = bn_node.args[0]
 
     if input_node.op != "call_function":  # type: ignore[union-attr]
         return
@@ -214,15 +184,12 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
 
     with graph.inserting_before(bn_node):
         # prepare args for the fused function
-        bn_running_mean = normalized_args[1]
-        bn_running_var = normalized_args[2]
-        bn_weight = normalized_args[3]
-        bn_bias = normalized_args[4]
-        bn_eps = normalized_args[7]
-        if len(conv_node.args) < 2:  # type: ignore[union-attr]
-            raise AssertionError(
-                f"expected at least 2 conv_node args, got {len(conv_node.args)}"  # type: ignore[union-attr]
-            )
+        bn_running_mean = bn_node.args[1]
+        bn_running_var = bn_node.args[2]
+        bn_weight = bn_node.args[3]
+        bn_bias = bn_node.args[4]
+        bn_eps = bn_node.args[7]
+        assert len(conv_node.args) >= 2  # type: ignore[union-attr]
         conv_input = conv_node.args[0]  # type: ignore[union-attr]
         conv_weight = conv_node.args[1]  # type: ignore[union-attr]
         conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None  # type: ignore[union-attr]
@@ -273,8 +240,7 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
 def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwargs):
     bn_node = match.nodes[0]
     graph = match.graph
-    if len(bn_node.args) != 9:
-        raise AssertionError(f"expected 9 bn_node args, got {len(bn_node.args)}")
+    assert len(bn_node.args) == 9
 
     # We can only use efficient conv-bn for eval mode with track_running_stats
     # bn_node.args is `training`
@@ -315,10 +281,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
         bn_running_mean = bn_node.args[3]
         bn_running_var = bn_node.args[4]
         bn_eps = bn_node.args[7]
-        if len(conv_node.args) < 2:  # type: ignore[union-attr]
-            raise AssertionError(
-                f"expected at least 2 conv_node args, got {len(conv_node.args)}"  # type: ignore[union-attr]
-            )
+        assert len(conv_node.args) >= 2  # type: ignore[union-attr]
         conv_input = conv_node.args[0]  # type: ignore[union-attr]
         conv_weight = conv_node.args[1]  # type: ignore[union-attr]
         conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None  # type: ignore[union-attr]

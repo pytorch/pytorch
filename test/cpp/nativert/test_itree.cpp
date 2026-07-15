@@ -755,7 +755,7 @@ TEST(ITreeTest, IValueApplyFromArgs) {
 {}
 return(%o1)
 )",
-        std::move(ss).str());
+        ss.str());
 
     auto graph = stringToGraph(source);
     std::vector<const Value*> userInputs(

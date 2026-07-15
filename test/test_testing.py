@@ -22,7 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfXpu
+    TEST_WITH_ROCM, decorateIf
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -78,40 +78,6 @@ class TestTesting(TestCase):
                 self.assertEqual(actual, expected, msg=extra_msg)
         finally:
             self.longMessage = long_message
-
-    def test_callable_msg(self):
-        # A callable msg is invoked only on failure, across all assert* methods.
-        invoked = []
-
-        def lazy(standard_msg):
-            invoked.append(standard_msg)
-            return f"{standard_msg}\nsentinel"
-
-        # Passing: callable not invoked.
-        self.assertEqual(1, 1, msg=lazy)
-        self.assertTrue(True, msg=lazy)
-        self.assertIn(1, [1, 2], msg=lazy)
-        self.assertGreater(2, 1, msg=lazy)
-        self.assertIsNone(None, msg=lazy)
-        self.assertEqual(invoked, [])
-
-        # Failing: callable invoked once with the standard message.
-        failing = [
-            lambda: self.assertTrue(False, msg=lazy),
-            lambda: self.assertIn(9, [1, 2], msg=lazy),
-            lambda: self.assertGreater(1, 2, msg=lazy),
-            lambda: self.assertEqual(1, 2, msg=lazy),
-        ]
-        for fail in failing:
-            invoked.clear()
-            with self.assertRaises(AssertionError) as cm:
-                fail()
-            self.assertEqual(len(invoked), 1)
-            self.assertEqual(str(cm.exception), f"{invoked[0]}\nsentinel")
-
-        # A plain string msg is unchanged.
-        with self.assertRaisesRegex(AssertionError, re.escape("True is not false : plain")):
-            self.assertFalse(True, msg="plain")
 
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
@@ -316,38 +282,6 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, equal_nan=True, rtol=0, atol=0)
 
-    @onlyNativeDeviceTypes
-    @dtypes(torch.float16, torch.float32)
-    def test_isclose_equal_nan_broadcast(self, device, dtype):
-        # Regression test: isclose with equal_nan=True should handle broadcasting
-        # See https://github.com/pytorch/pytorch/issues/174985
-        nan = torch.nan
-
-        # One-sided broadcast: different sizes
-        a = torch.tensor([nan], device=device, dtype=dtype)
-        b = torch.tensor([nan, nan], device=device, dtype=dtype)
-        result = torch.isclose(a, b, equal_nan=True)
-        self.assertEqual(result, torch.tensor([True, True], device=device))
-
-        # One-sided broadcast: scalar-like vs vector
-        a = torch.tensor([nan], device=device, dtype=dtype)
-        b = torch.tensor([nan, 1.0, nan], device=device, dtype=dtype)
-        result = torch.isclose(a, b, equal_nan=True)
-        self.assertEqual(result, torch.tensor([True, False, True], device=device))
-
-        # Mutual broadcast
-        a = torch.tensor([[nan], [1.0]], device=device, dtype=dtype)  # [2, 1]
-        b = torch.tensor([[nan, 1.0]], device=device, dtype=dtype)    # [1, 2]
-        result = torch.isclose(a, b, equal_nan=True)
-        expected = torch.tensor([[True, False], [False, True]], device=device)
-        self.assertEqual(result, expected)
-
-        # Same shape (fast path) still works
-        a = torch.tensor([nan, 1.0], device=device, dtype=dtype)
-        b = torch.tensor([nan, 1.0], device=device, dtype=dtype)
-        result = torch.isclose(a, b, equal_nan=True)
-        self.assertEqual(result, torch.tensor([True, True], device=device))
-
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
@@ -385,7 +319,7 @@ if __name__ == '__main__':
         has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
-            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+            f"Expected device assert error in stderr, got: {stderr}",
         )
         if torch.version.cuda:
             # should run only 1 test because it throws unrecoverable error.
@@ -432,14 +366,13 @@ if __name__ == '__main__':
         has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
-            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+            f"Expected device assert error in stderr, got: {stderr}",
         )
         if torch.version.cuda:
             # should run only 1 test because it throws unrecoverable error.
             self.assertIn('errors=1', stderr)
 
 
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/106308")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
@@ -485,7 +418,7 @@ if __name__ == '__main__':
         # Test the `get_supported_dtypes` helper function.
         # We acquire the dtypes for few Ops dynamically and verify them against
         # the correct statically described values.
-        ops_to_test = list(filter(lambda op: op.formatted_name in ['atan2', 'topk', 'xlogy'], op_db))
+        ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
 
         for op in ops_to_test:
             dynamic_dtypes = opinfo.utils.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
@@ -609,61 +542,6 @@ if __name__ == '__main__':
         env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
         self.assertNotIn('OK', stderr.decode('ascii'))
-
-
-class TestEnvironmentDefFlag(TestCase):
-    """Verify env-var-vs-implication precedence in TestEnvironment.def_flag."""
-
-    def setUp(self):
-        super().setUp()
-        import torch.testing._internal.common_utils as _cu
-        self._cu = _cu
-        self._defined: list[str] = []
-
-    def tearDown(self):
-        for name in self._defined:
-            if hasattr(self._cu, name):
-                delattr(self._cu, name)
-
-    def _def_flag(self, name, **kwargs):
-        from torch.testing._internal.common_utils import TestEnvironment
-        self._defined.append(name)
-        kwargs.setdefault("include_in_repro", False)
-        return TestEnvironment.def_flag(name, **kwargs)
-
-    def test_explicit_zero_overrides_implication(self):
-        # Regression: PYTORCH_TEST_WITH_ROCM=0 must override
-        # implied_by_fn=lambda: torch.version.hip is not None.
-        with unittest.mock.patch.dict(os.environ, {"FOO_DF_1": "0"}):
-            self.assertFalse(self._def_flag(
-                "FOO_DF_1", env_var="FOO_DF_1",
-                implied_by_fn=lambda: True))
-
-    def test_explicit_one_with_no_implication(self):
-        with unittest.mock.patch.dict(os.environ, {"FOO_DF_2": "1"}):
-            self.assertTrue(self._def_flag(
-                "FOO_DF_2", env_var="FOO_DF_2",
-                implied_by_fn=lambda: False))
-
-    def test_unset_with_implication_true(self):
-        env = {k: v for k, v in os.environ.items() if k != "FOO_DF_3"}
-        with unittest.mock.patch.dict(os.environ, env, clear=True):
-            self.assertTrue(self._def_flag(
-                "FOO_DF_3", env_var="FOO_DF_3",
-                implied_by_fn=lambda: True))
-
-    def test_unset_with_implication_false(self):
-        env = {k: v for k, v in os.environ.items() if k != "FOO_DF_4"}
-        with unittest.mock.patch.dict(os.environ, env, clear=True):
-            self.assertFalse(self._def_flag(
-                "FOO_DF_4", env_var="FOO_DF_4",
-                implied_by_fn=lambda: False))
-
-    def test_default_true_explicit_zero_overrides_implication(self):
-        with unittest.mock.patch.dict(os.environ, {"FOO_DF_5": "0"}):
-            self.assertFalse(self._def_flag(
-                "FOO_DF_5", env_var="FOO_DF_5",
-                default=True, implied_by_fn=lambda: True))
 
 
 def make_assert_close_inputs(actual: Any, expected: Any) -> list[tuple[Any, Any]]:
@@ -2229,7 +2107,7 @@ class TestTestParametrizationDeviceType(TestCase):
         for op in op_db:
             for dtype in op.supported_dtypes(torch.device(device).type):
                 for flag_part in ('flag_disabled', 'flag_enabled'):
-                    expected_name = f'{device_cls.__name__}.test_op_parametrized_{op.formatted_name}_{flag_part}_{device}_{dtype_name(dtype)}'
+                    expected_name = f'{device_cls.__name__}.test_op_parametrized_{op.formatted_name}_{flag_part}_{device}_{dtype_name(dtype)}'  # noqa: B950
                     expected_test_names.append(expected_name)
 
         test_names = _get_test_names_for_test_class(device_cls)
@@ -2486,7 +2364,6 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
-    @skipIfXpu(msg="The test is flaky on XPU, see https://github.com/pytorch/pytorch/issues/110040")
     # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
     def test_circular_dependencies(self) -> None:
@@ -2500,11 +2377,6 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
-                           "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
-                           "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
-                           "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
-                           "torch._native.ops.scatter_add",  # depends on cutlass
-                           "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
@@ -2514,9 +2386,7 @@ class TestImports(TestCase):
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
-                           "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
-                           "torch._vendor.quack",  # depends on cutlass / cuda-python
-                           "torch.profiler._cupti",  # depends on cupti-python
+                           "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
@@ -2531,10 +2401,6 @@ class TestImports(TestCase):
             ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
             ignored_modules.append("torch.testing._internal.common_fsdp")
             ignored_modules.append("torch.testing._internal.common_distributed")
-
-        if sys.version_info < (3, 12):
-            # depends on Python 3.12+ syntax
-            ignored_modules.append("torch.testing._internal.py312_intrinsics")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, _, files in os.walk(torch_dir):
@@ -2573,10 +2439,6 @@ class TestImports(TestCase):
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
 
-    def test_not_import_triton(self) -> None:
-        out = self._check_python_output("import torch;import sys;print('triton' not in sys.modules)")
-        self.assertEqual(out.strip(), "True")
-
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
         # Calling logging.basicConfig, among other things, modifies the global
@@ -2600,21 +2462,15 @@ class TestOpInfos(TestCase):
 
         # Construction with natural syntax
         s = SampleInput(a, b, c, d=d, e=e)
-        if s.input is not a:
-            raise AssertionError("s.input should be a")
-        if s.args != (b, c):
-            raise AssertionError(f"s.args should be (b, c), got {s.args}")
-        if s.kwargs != dict(d=d, e=e):
-            raise AssertionError(f"s.kwargs mismatch: got {s.kwargs}")
+        assert s.input is a
+        assert s.args == (b, c)
+        assert s.kwargs == dict(d=d, e=e)
 
         # Construction with explicit args and kwargs
         s = SampleInput(a, args=(b,), kwargs=dict(c=c, d=d, e=e))
-        if s.input is not a:
-            raise AssertionError("s.input should be a")
-        if s.args != (b,):
-            raise AssertionError(f"s.args should be (b,), got {s.args}")
-        if s.kwargs != dict(c=c, d=d, e=e):
-            raise AssertionError(f"s.kwargs mismatch: got {s.kwargs}")
+        assert s.input is a
+        assert s.args == (b,)
+        assert s.kwargs == dict(c=c, d=d, e=e)
 
         # Construction with a mixed form will error
         with self.assertRaises(AssertionError):
@@ -2642,10 +2498,8 @@ class TestOpInfos(TestCase):
         # But when only input is given, metadata is allowed for backward
         # compatibility
         s = SampleInput(a, broadcasts_input=True)
-        if s.input is not a:
-            raise AssertionError("s.input should be a")
-        if not s.broadcasts_input:
-            raise AssertionError("s.broadcasts_input should be True")
+        assert s.input is a
+        assert s.broadcasts_input
 
     def test_sample_input_metadata(self) -> None:
         a, b = (object() for _ in range(2))
@@ -2685,149 +2539,6 @@ class TestOpInfoSampleFunctions(TestCase):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
         self.assertIsInstance(samples, Iterator)
-
-# Tests test classification.
-class TestHardwareClassifications(TestCase):
-    def setUp(self):
-        super().setUp()
-        import torch.testing._internal.common_utils as _cu
-
-        self._cu = _cu
-
-    def _suite_test_names(self, suite) -> set[str]:
-        return {test_case.id().split(".")[-1] for test_case in self._cu.HardwareClassificationTestLoader.iter_test_cases_recursively(suite)}
-
-    def test_filter_suite(self):
-        requirement = self._cu.HardwareClassification
-
-        class GenericTest(TestCase):
-            hw_classification = requirement.GENERIC
-
-            def test_generic(self):
-                pass
-
-        class CudaTest(TestCase):
-            hw_classification = requirement.CUDA
-
-            def test_cuda(self):
-                pass
-
-        class MissingClassificationTest(TestCase):
-            def test_missing_classification(self):
-                pass
-
-        suite = unittest.TestSuite(
-            [
-                unittest.defaultTestLoader.loadTestsFromTestCase(GenericTest),
-                unittest.defaultTestLoader.loadTestsFromTestCase(CudaTest),
-                unittest.defaultTestLoader.loadTestsFromTestCase(MissingClassificationTest),
-            ]
-        )
-
-        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.GENERIC})
-        filtered_suite = loader.get_filtered_suite(suite)
-
-        self.assertEqual(
-            self._suite_test_names(filtered_suite),
-            {"test_generic"},
-        )
-
-    def test_filter_suite_uses_inherited_metadata(self):
-        requirement = self._cu.HardwareClassification
-
-        class AcceleratorBase(TestCase):
-            hw_classification = requirement.ACCELERATOR
-
-        class AcceleratorChild(AcceleratorBase):
-            def test_inherited_classification(self):
-                pass
-
-        suite = unittest.defaultTestLoader.loadTestsFromTestCase(AcceleratorChild)
-        loader = self._cu.HardwareClassificationTestLoader({self._cu.HardwareClassification.ACCELERATOR})
-        filtered_suite = loader.get_filtered_suite(suite)
-
-        self.assertEqual(
-            self._suite_test_names(filtered_suite),
-            {"test_inherited_classification"},
-        )
-
-    def test_hw_classification_test_loader(self):
-        requirement = self._cu.HardwareClassification
-        import types
-
-        # Build a mock module with test classes
-        class GenericA(TestCase):
-            hw_classification = requirement.GENERIC
-
-            def test_a1(self):
-                pass
-
-            def test_a2(self):
-                pass
-
-        class GenericB(TestCase):
-            hw_classification = requirement.GENERIC
-
-            def test_b1(self):
-                pass
-
-        class Cuda(TestCase):
-            hw_classification = requirement.CUDA
-
-            def test_c1(self):
-                pass
-
-        mod = types.ModuleType("_test_hc_module")
-        mod.GenericA = GenericA
-        mod.GenericB = GenericB
-        mod.Cuda = Cuda
-
-        loader = self._cu.HardwareClassificationTestLoader({requirement.GENERIC})
-
-        with self.subTest(method="loadTestsFromModule"):
-            suite = loader.loadTestsFromModule(mod)
-            self.assertEqual(
-                self._suite_test_names(suite),
-                {"test_a1", "test_a2", "test_b1"},
-            )
-
-        with self.subTest(method="loadTestsFromNames"):
-            suite = loader.loadTestsFromNames(
-                ["GenericA.test_a1", "Cuda.test_c1"],
-                module=mod,
-            )
-            self.assertEqual(self._suite_test_names(suite), {"test_a1"})
-
-        with self.subTest(method="loadTestsFromName"):
-            suite = loader.loadTestsFromName(
-                "Cuda.test_c1",
-                module=mod,
-            )
-            self.assertEqual(self._suite_test_names(suite), set())
-
-    def test_hw_classification_test_loader_no_filter(self):
-        import types
-
-        class GenericA(TestCase):
-            hw_classification = self._cu.HardwareClassification.GENERIC
-
-            def test_a(self):
-                pass
-
-        class Cuda(TestCase):
-            hw_classification = self._cu.HardwareClassification.CUDA
-
-            def test_b(self):
-                pass
-
-        mod = types.ModuleType("_test_hc_module_none")
-        mod.GenericA = GenericA
-        mod.Cuda = Cuda
-
-        loader = self._cu.HardwareClassificationTestLoader(None)
-        suite = loader.loadTestsFromModule(mod)
-
-        self.assertEqual(self._suite_test_names(suite), {"test_a", "test_b"})
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())

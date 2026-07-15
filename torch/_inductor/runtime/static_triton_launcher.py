@@ -93,7 +93,6 @@ class StaticallyLaunchedTritonKernel:
         def needs_scratch_arg(scratch_name: str, param_name: str) -> bool:
             # pyrefly: ignore [missing-attribute]
             if hasattr(kernel.metadata, param_name):
-                # pyrefly: ignore [missing-attribute]
                 if getattr(kernel.metadata, param_name) > 0:
                     raise NotImplementedError(
                         f"{scratch_name} scratch not yet supported"
@@ -111,7 +110,6 @@ class StaticallyLaunchedTritonKernel:
         # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
-        self.module: int | None = None  # Owns the HIP/CUDA module loaded for function
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -129,8 +127,7 @@ class StaticallyLaunchedTritonKernel:
         reload it from the raw cubin file.
         """
         if self.cubin_path is None:
-            if self.cubin_raw is None:
-                raise AssertionError("cubin_raw must be set when cubin_path is None")
+            assert self.cubin_raw is not None
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
@@ -141,32 +138,14 @@ class StaticallyLaunchedTritonKernel:
         if self.function is not None:
             return
 
-        if not hasattr(self, "cubin_path"):
-            raise AssertionError("cubin_path attribute not set before load_kernel")
-        if self.cubin_path is None:
-            raise AssertionError("cubin_path must not be None before load_kernel")
-        (self.module, self.function, self.n_regs, self.n_spills) = (
-            self.C_impl._load_kernel(self.cubin_path, self.name, self.shared, device)
+        assert hasattr(self, "cubin_path")
+        assert self.cubin_path is not None
+        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
+            self.cubin_path, self.name, self.shared, device
         )
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
         self.cubin_raw = None
-
-    def close(self) -> None:
-        mod = self.module
-        if mod is None:
-            return
-        # Clear Python-visible handles first so repeated cleanup is harmless even if
-        # the driver reports an error while unloading.
-        self.module = None
-        self.function = None
-        self.C_impl._unload_kernel(mod)
-
-    def __del__(self) -> None:
-        try:
-            self.close()
-        except Exception:
-            pass
 
     @staticmethod
     @functools.lru_cache
@@ -199,8 +178,8 @@ class StaticallyLaunchedTritonKernel:
         """
         if ty[0] == "*":
             return "O"
-        elif ty == "nvTmaDesc" or ty.startswith("tensordesc<"):
-            raise NotImplementedError("TMA descriptor kernels are not yet supported")
+        elif ty == "nvTmaDesc":
+            raise NotImplementedError("nvTmaDesc kernels are not yet supported")
         return StaticallyLaunchedTritonKernel.type_mappings()[ty]
 
     def arg_ty_from_signature(self, src: ASTSource) -> str:
@@ -244,7 +223,6 @@ class StaticallyLaunchedTritonKernel:
         # Remove objects that are no longer valid for pickling
         state = self.__dict__.copy()
         state["function"] = None
-        state["module"] = None
         # Cubin paths aren't consistent across processes, so we clear
         # and reload them.
         state["cubin_path"] = None
@@ -261,8 +239,7 @@ class StaticallyLaunchedTritonKernel:
         """Actually run the kernel at runtime. This function is the hot codepath."""
 
         # Assert load_kernel() has been called and args match
-        if self.function is None:
-            raise AssertionError("load_kernel() must be called before run()")
+        assert self.function is not None
 
         # TODO: actually, if the args *don't* match, we probably should
         # throw an exception. But if inductor is the only one calling this
@@ -306,8 +283,7 @@ class StaticallyLaunchedTritonKernel:
                     arg_tys = arg_tys + "O"
                     args = (*args, None)
         # pyrefly: ignore [bad-argument-type]
-        if len(args) != len(arg_tys):
-            raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")
+        assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
@@ -359,28 +335,6 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         # pyrefly: ignore [missing-attribute]
         self.cubin_raw = kernel.asm.get("zebin", None)
         super().__init__(kernel)
-
-    def load_kernel(self, device: int) -> None:
-        if self.function is not None:
-            return
-
-        if not hasattr(self, "cubin_path"):
-            raise AssertionError("expected cubin_path attribute to be set")
-        if self.cubin_path is None:
-            raise AssertionError("expected cubin_path to not be None")
-        # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
-        # not a separate module/function pair like the CUDA/HIP launcher.
-        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
-            self.cubin_path, self.name, self.shared, device
-        )
-        self.module = None
-        self.cubin_path = None
-        self.cubin_raw = None
-
-    def close(self) -> None:
-        self.module = None
-        # Drop the PyCapsule reference so its destructor can release sycl::kernel.
-        self.function = None
 
 
 def statically_launched_kernel_by_device(

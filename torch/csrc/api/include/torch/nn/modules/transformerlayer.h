@@ -22,7 +22,7 @@ namespace torch::nn {
 /// TransformerEncoderLayer module.
 /// See
 /// https://pytorch.org/docs/main/generated/torch.nn.TransformerEncoderLayer.html
-/// to learn about the exact behavior of this encoder layer model
+/// to learn abouut the exact behavior of this encoder layer model
 ///
 /// See the documentation for `torch::nn::TransformerEncoderLayer` class to
 /// learn what constructor arguments are supported for this encoder layer model
@@ -70,12 +70,12 @@ class TORCH_API TransformerEncoderLayerImpl
 
   /// pre feedforward, normalization layer
   LayerNorm norm1 = nullptr;
-  /// post feedforward, normalization layer
+  /// post feedfastward, normalization layer
   LayerNorm norm2 = nullptr;
 
-  /// pre feedforward, dropout layer
+  /// pre feedfastward, dropout layer
   Dropout dropout1 = nullptr;
-  /// post feedforward, dropout layer
+  /// post feedfastward, dropout layer
   Dropout dropout2 = nullptr;
 };
 

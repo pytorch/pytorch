@@ -108,8 +108,7 @@ class MemoryTracker:
             # h3 = m.register_backward_hook(self._create_backward_hook(name))
             self._hooks.extend([h1, h2])
         self._device_module.empty_cache()
-        if getattr(self, "profile_mode", None) is not None:
-            raise AssertionError
+        assert getattr(self, "profile_mode", None) is None
         self.profile_mode = MemoryProfileDispatchMode(self)
         self.profile_mode.__enter__()
 
@@ -127,8 +126,7 @@ class MemoryTracker:
         for h in self._hooks:
             h.remove()
         self._hooks.clear()
-        if getattr(self, "profile_mode", None) is None:
-            raise AssertionError
+        assert getattr(self, "profile_mode", None) is not None
         self.profile_mode.__exit__(None, None, None)
         self.profile_mode = None
 

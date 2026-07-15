@@ -152,7 +152,7 @@ std::vector<std::string> PrefixStore::listKeys() {
   filteredKeys.reserve(keys.size());
 
   for (auto& key : keys) {
-    if (key.starts_with(prefix_)) {
+    if (key.find(prefix_) == 0) {
       key = key.substr(prefix_.size() + 1);
       filteredKeys.push_back(std::move(key));
     }

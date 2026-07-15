@@ -6,7 +6,6 @@
 #include <ATen/mps/MPSHooks.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
-#include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/Logging.h>
 
 namespace at::mps {
@@ -25,30 +24,30 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
     case 26:
       switch (minor) {
         case 0:
-          return is_macos_at_least(MacOSVersion::MACOS_26_0);
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
         default:
           TORCH_WARN("Can't check whether running on 26.", minor, "+ returning one for 26.0+");
-          return is_macos_at_least(MacOSVersion::MACOS_26_0);
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS);
       }
     case 15:
       switch (minor) {
         case 0:
-          return is_macos_at_least(MacOSVersion::MACOS_15_0);
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
         case 1:
-          return is_macos_at_least(MacOSVersion::MACOS_15_1);
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS);
         default:
           TORCH_WARN("Can't check whether running on 15.", minor, "+ returning one for 15.1+");
-          return is_macos_at_least(MacOSVersion::MACOS_15_1);
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS);
       }
     case 14:
       switch (minor) {
         case 0:
           return true;
         case 4:
-          return is_macos_at_least(MacOSVersion::MACOS_14_4);
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
         default:
           TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.4+");
-          return is_macos_at_least(MacOSVersion::MACOS_14_4);
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
       }
     case 13:
       return true;
@@ -91,7 +90,6 @@ void* MPSHooks::getDispatchQueue() const {
 
 void MPSHooks::emptyCache() const {
   at::mps::getIMPSAllocator()->emptyCache();
-  at::native::mps::MPSGraphCache::getInstance()->clear();
 }
 
 size_t MPSHooks::getCurrentAllocatedMemory() const {
@@ -104,10 +102,6 @@ size_t MPSHooks::getDriverAllocatedMemory() const {
 
 size_t MPSHooks::getRecommendedMaxMemory() const {
   return at::mps::getIMPSAllocator()->getRecommendedMaxMemory();
-}
-
-size_t MPSHooks::getMaxBufferLength() const {
-  return [MPSDevice::getInstance()->device() maxBufferLength];
 }
 
 void MPSHooks::setMemoryFraction(double ratio) const {
@@ -159,7 +153,7 @@ bool MPSHooks::isPinnedPtr(const void* data) const {
 }
 
 Allocator* MPSHooks::getPinnedMemoryAllocator() const {
-  return at::mps::getMPSPinnedAllocator();
+  return at::mps::getIMPSAllocator(true);
 }
 
 using at::MPSHooksRegistry;

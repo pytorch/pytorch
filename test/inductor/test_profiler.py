@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch._inductor.test_case
@@ -11,7 +12,7 @@ import torch._inductor.utils
 from torch import _dynamo as torchdynamo
 from torch._inductor import config
 from torch.profiler import ProfilerActivity, record_function
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import skipIfXpu, TemporaryFileName
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU_AND_TRITON,
@@ -26,6 +27,10 @@ HAS_TRITON = has_triton()
 
 
 class DynamoProfilerTests(torch._inductor.test_case.TestCase):
+    @skipIfXpu(
+        msg="AssertionError: False is not true, "
+        "https://github.com/intel/torch-xpu-ops/issues/2335"
+    )
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_triton_launch(self):
         # Verify that we get some sort of CPU-side indication of triton kernel launches
@@ -56,7 +61,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue(any((event.get("name") in valid_names) for event in events))
 
     def _test_profiling_kernel_names(
-        self, fn, args, kernel_name_str: str, check_fn: Callable | None = None
+        self, fn, args, kernel_name_str: str, check_fn: Optional[Callable] = None
     ):
         """
         We expect a record_function event to be added on the CPU side, surrounding
@@ -220,6 +225,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue(hooks_called["enter"])
         self.assertTrue(hooks_called["exit"])
 
+    @skipIfXpu(
+        msg="TypeError: list indices must be integers or slices, not str, https://github.com/intel/torch-xpu-ops/issues/2335"
+    )
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_pt2_triton_attributes(self):
         from torch._inductor.codecache import code_hash
@@ -275,36 +283,23 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
         def check_triton_event(e) -> None:
             args = e.get("args", {})
-            self.assertNotEqual(args, {}, msg=lambda msg: f"{msg}\nevent = {e}")
+            self.assertNotEqual(args, {}, msg=f"event = {e}")
 
-            self.assertEqual(
-                args["kernel_backend"], "triton", msg=lambda msg: f"{msg}\nevent = {e}"
-            )
+            self.assertEqual(args["kernel_backend"], "triton", msg=f"event = {e}")
 
-            self.assertTrue("stream" in args, msg=lambda msg: f"{msg}\nevent = {e}")
-            self.assertTrue(
-                "kernel_file" in args, msg=lambda msg: f"{msg}\nevent = {e}"
-            )
+            self.assertTrue("stream" in args, msg=f"event = {e}")
+            self.assertTrue("kernel_file" in args, msg=f"event = {e}")
             kernel_file = args["kernel_file"]
-            self.assertTrue(
-                os.path.isfile(kernel_file), msg=lambda msg: f"{msg}\nevent = {e}"
-            )
+            self.assertTrue(os.path.isfile(kernel_file), msg=f"event = {e}")
 
-            self.assertTrue(
-                "kernel_hash" in args, msg=lambda msg: f"{msg}\nevent = {e}"
-            )
+            self.assertTrue("kernel_hash" in args, msg=f"event = {e}")
             self.assertEqual(
-                args["kernel_hash"],
-                get_hash(kernel_file),
-                msg=lambda msg: f"{msg}\nevent = {e}",
+                args["kernel_hash"], get_hash(kernel_file), msg=f"event = {e}"
             )
 
+            self.assertTrue("kernel_kwargs" in args, msg=f"event = {e}")
             self.assertTrue(
-                "kernel_kwargs" in args, msg=lambda msg: f"{msg}\nevent = {e}"
-            )
-            self.assertTrue(
-                args["kernel_kwargs"].startswith("XBLOCK="),
-                msg=lambda msg: f"{msg}\nevent = {e}",
+                args["kernel_kwargs"].startswith("XBLOCK="), msg=f"event = {e}"
             )
 
         for e in triton_events:
@@ -355,7 +350,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         sin: "f32[10][1]cpu" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
         cos: "f32[10][1]cpu" = torch.ops.aten.cos.default(sin);  sin = None
         add: "f32[10][1]cpu" = torch.ops.aten.add.Tensor(cos, 2);  cos = None
-        return (add,)""",
+        return (add,)""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )

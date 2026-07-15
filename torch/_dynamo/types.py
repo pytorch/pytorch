@@ -13,8 +13,8 @@ ensuring type safety and clear contracts between different components of the sys
 
 import dataclasses
 import types
-from collections.abc import Callable, Mapping
-from typing import Any, NamedTuple, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Any, NamedTuple, Optional, Protocol, Union
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
@@ -55,9 +55,9 @@ class GuardFn(Protocol):
     code_parts: list[str]
     verbose_code_parts: list[str]
     global_scope: dict[str, object]
-    guard_fail_fn: Callable[[GuardFail], None] | None
-    cache_entry: CacheEntry | None
-    extra_state: ExtraState | None
+    guard_fail_fn: Optional[Callable[[GuardFail], None]]
+    cache_entry: Optional[CacheEntry]
+    extra_state: Optional[ExtraState]
 
     # maps locals of user function to bool
     def __call__(self, f_locals: dict[str, object]) -> bool: ...
@@ -82,8 +82,7 @@ class ConvertFrameReturn:
     )
     # also apply frame_exec strategy to future frames with same code
     apply_to_code: bool = True
-    guarded_code: GuardedCode | None = None
-    skip_reason: str | None = None
+    guarded_code: Optional[GuardedCode] = None
 
 
 def wrap_guarded_code(guarded_code: GuardedCode) -> ConvertFrameReturn:
@@ -97,20 +96,12 @@ class DynamoCallbackFn(Protocol):
     def __call__(
         self,
         frame: DynamoFrameType,
-        cache_entry: CacheEntry | None,
+        cache_entry: Optional[CacheEntry],
         frame_state: FrameState,
     ) -> ConvertFrameReturn: ...
 
 
-DynamoCallback = DynamoCallbackFn | None | bool
-
-
-CompilerConfig = Mapping[str, Any]
-
-
-@runtime_checkable
-class CompilerConfigProvider(Protocol):
-    def get_compiler_config(self) -> CompilerConfig | None: ...
+DynamoCallback = Union[DynamoCallbackFn, None, bool]
 
 
 class DynamoGuardHook(Protocol):
@@ -146,4 +137,4 @@ class ProfilerEndHook(Protocol):
 class BytecodeHook(Protocol):
     def __call__(
         self, code: types.CodeType, new_code: types.CodeType
-    ) -> types.CodeType | None: ...
+    ) -> Optional[types.CodeType]: ...

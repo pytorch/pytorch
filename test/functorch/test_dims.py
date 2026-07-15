@@ -5,7 +5,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import gc
-import unittest
 from unittest import skip, skipIf
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
@@ -15,13 +14,9 @@ import functorch.dim
 import torch
 from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
 from torch.testing._internal.common_utils import (
-    IS_LINUX,
-    IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TEST_CUDA,
-    TEST_WITH_ROCM,
-    TEST_WITH_SLOW,
     TestCase,
 )
 
@@ -117,15 +112,13 @@ class TestMin(TestCase):
         gc.collect()
         # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
         self.assertEqual(
-            extra_memory,
-            0,
-            lambda msg: f"{msg}\nextra cuda memory left allocated: {extra_memory}",
+            extra_memory, 0, f"extra cuda memory left allocated: {extra_memory}"
         )
         self.assertEqual(
             len(interesting),
             0,
             (
-                lambda msg: f"{msg}\nextra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
+                f"extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
                 f"{[type(t) for t in interesting]}"
             ),
         )
@@ -292,10 +285,6 @@ class TestMin(TestCase):
         for _ in range(10):
             f()
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
-        "https://github.com/pytorch/pytorch/issues/86710",
-    )
     @skipIf(not TEST_CUDA, "no CUDA")
     def test_attn_cuda(self):
         # size from the BERT paper, 90% pretraining of sequence length 128
@@ -426,11 +415,9 @@ class TestMin(TestCase):
         )
 
         r = [id(x) for x in torch.rand_like(A[i, k]).dims]
-        if not (id(i) in r and id(k) in r):
-            raise AssertionError("Expected i and k to be in dims")
+        assert id(i) in r and id(k) in r
         r = [id(x) for x in torch.nn.functional.dropout(A[i, k]).dims]
-        if not (id(i) in r and id(k) in r):
-            raise AssertionError("Expected i and k to be in dims")
+        assert id(i) in r and id(k) in r
 
     def test_simple(self):
         i, j, k = dims()
@@ -516,14 +503,11 @@ class TestMin(TestCase):
 
     def test_dim_args(self):
         a = dimlists()
-        if not isinstance(a, DimList):
-            raise AssertionError(f"Expected DimList, got {type(a)}")
+        assert isinstance(a, DimList)
         a = dims()
         b = dimlists()
-        if not isinstance(a, Dim):
-            raise AssertionError(f"Expected Dim, got {type(a)}")
-        if not isinstance(b, DimList):
-            raise AssertionError(f"Expected DimList, got {type(b)}")
+        assert isinstance(a, Dim)
+        assert isinstance(b, DimList)
         self.assertEqual(str(a), "a")
         a, b = dims(sizes=[3, 4])
         self.assertEqual(a.size, 3)
@@ -620,8 +604,7 @@ class TestMin(TestCase):
     def test_dims_with_size(self):
         x = dims(3)
         self.assertEqual(len(x), 3)
-        if not isinstance(x[0], Dim):
-            raise AssertionError(f"Expected Dim, got {type(x[0])}")
+        assert isinstance(x[0], Dim)
 
         class Foo:
             pass

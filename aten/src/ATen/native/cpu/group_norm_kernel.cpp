@@ -1424,15 +1424,12 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
           D);
 
         // Step 2. Compute dX.
-        if (dX_data) {
-          T* dX_ptr = dX_data + n * HxW * C + g * D;
-          const PT* rstd_ptr = rstd_data + i;
-          const opmath_t c2 = (db_gamma * opmath_t(mean_data[i]) - ds_gamma) *
-              opmath_t(rstd_data[i]) * opmath_t(rstd_data[i]) * opmath_t(rstd_data[i]) * s;
-          const opmath_t c3 = -c2 * opmath_t(mean_data[i]) - db_gamma * opmath_t(rstd_data[i]) * s;
-          ApplyInputGradientsChannelsLastColMov<T, PT, opmath_t>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D);
-        }
-
+        T* dX_ptr = dX_data + n * HxW * C + g * D;
+        const PT* rstd_ptr = rstd_data + i;
+        const opmath_t c2 = (db_gamma * opmath_t(mean_data[i]) - ds_gamma) *
+            opmath_t(rstd_data[i]) * opmath_t(rstd_data[i]) * opmath_t(rstd_data[i]) * s;
+        const opmath_t c3 = -c2 * opmath_t(mean_data[i]) - db_gamma * opmath_t(rstd_data[i]) * s;
+        ApplyInputGradientsChannelsLastColMov<T, PT, opmath_t>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D);
         data_index_step(n, N, g, G);
       }
     });

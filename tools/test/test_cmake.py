@@ -7,7 +7,7 @@ import unittest
 import unittest.mock
 
 import tools.setup_helpers.cmake
-import tools.setup_helpers.env
+import tools.setup_helpers.env  # noqa: F401 unused but resolves circular import
 
 
 if typing.TYPE_CHECKING:

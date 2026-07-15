@@ -13,7 +13,7 @@ import collections
 import itertools
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeVar
+from typing import Optional, TypeVar
 
 
 DTYPES = {
@@ -22,7 +22,7 @@ DTYPES = {
     "bf16": "cutlass::bfloat16_t",
 }
 
-SM_RANGES: list[tuple[int, int]] = [(50, 69), (70, 74), (75, 79), (80, 121)]
+SM = [50, 70, 75, 80, 100]  # Sm80 kernels support up to Sm100
 
 KERNEL_IMPL_TEMPLATE = """__global__ void __launch_bounds__(
     {CPP_CLASS}::kNumThreads,
@@ -30,7 +30,7 @@ KERNEL_IMPL_TEMPLATE = """__global__ void __launch_bounds__(
 {NAME}(typename {CPP_CLASS}::Params p) {{
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= {SM}0
-#if __CUDA_ARCH__ <= {SM_MAX}0
+#if __CUDA_ARCH__ < {SM_MAX}0
   if (!p.advance_to_block()) {{
     return;
   }}
@@ -57,7 +57,7 @@ class FwdKernel:
     max_k: int
     supports_dropout: bool = True
     supports_bias: bool = True
-    dispatch_cond: str | None = None
+    dispatch_cond: Optional[str] = None
 
     def __post_init__(self) -> None:
         # Set kernel selection priority
@@ -117,7 +117,7 @@ class FwdKernel:
     def get_all(cls) -> list["FwdKernel"]:
         kernels: list[FwdKernel] = []
         for aligned, dtype, (sm, sm_max) in itertools.product(
-            [True, False], DTYPES.keys(), SM_RANGES
+            [True, False], DTYPES.keys(), itertools.pairwise(SM)
         ):
             # Remove some kernels we don't use
             if dtype == "bf16" and sm < 80:
@@ -154,7 +154,7 @@ class BwdKernel:
     block_i: int
     block_j: int
     max_k: int
-    dispatch_cond: str | None = None
+    dispatch_cond: Optional[str] = None
     keys_queries_aligned_to_blocksizes: bool = False
 
     def __post_init__(self) -> None:
@@ -228,7 +228,7 @@ class BwdKernel:
         for aligned, dtype, (sm, sm_max), apply_dropout, max_k in itertools.product(
             [True, False],
             DTYPES.keys(),
-            SM_RANGES,
+            itertools.pairwise(SM),
             [True, False],
             [32, 64, 128, 2**16],
         ):
@@ -282,13 +282,12 @@ class BwdKernel:
         # Add some specialized kernels for stable diffusion BW (K=80)
         # This is the only kernel that can keep the outputs on RF on
         # Sm86/Sm89, so it's much faster than the 64x64 one
-        sm80_range = next(sm_range for sm_range in SM_RANGES if sm_range[0] == 80)
         for dtype in ["f16", "bf16"]:
             kernels.append(
                 cls(
                     aligned=True,
                     dtype=dtype,
-                    sm_range=sm80_range,
+                    sm_range=(80, SM[SM.index(80) + 1]),
                     apply_dropout=False,
                     preload_mmas=True,
                     block_i=128,
@@ -309,7 +308,7 @@ def write_decl_impl(
     family_name: str,
     impl_file: str,
     autogen_dir: Path,
-    disable_def: str | None = None,
+    disable_def: Optional[str] = None,
 ) -> None:
     cpp_file_header = """/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -353,7 +352,7 @@ def write_decl_impl(
             declarations += f"    {_call}"
         declarations += "}\n\n"
         dispatch_all += f"""
-    if (std::is_same_v<DT, {DTYPES[cat_dt]}> && {cat_sm} <= cc && cc <= {cat_sm_max}) {{
+    if (std::is_same_v<DT, {DTYPES[cat_dt]}> && {cat_sm} <= cc && cc < {cat_sm_max}) {{
         {dispatch_category_fn}(cb, cc);
     }}"""
 
@@ -379,7 +378,7 @@ void dispatch_{family_name}(T cb, int cc = 0) {{
         (autogen_dir / f"{family_name}_{f}.cu").write_text(impl_cu)
 
 
-def main(output_dir: str | None) -> None:
+def main(output_dir: Optional[str]) -> None:
     if output_dir is None:
         output_dir = Path(__file__).parent
     else:

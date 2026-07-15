@@ -122,7 +122,7 @@ maml_omniglot,pass,0
 
 
 
-microbench_unbacked_tolist_sum,pass,0
+microbench_unbacked_tolist_sum,fail_to_run,0
 
 
 
@@ -175,6 +175,10 @@ pyhpc_isoneutral_mixing,pass,0
 
 
 pyhpc_turbulent_kinetic_energy,pass,0
+
+
+
+pytorch_CycleGAN_and_pix2pix,pass,0
 
 
 

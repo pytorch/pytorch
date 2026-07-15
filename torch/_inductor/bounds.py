@@ -2,7 +2,7 @@ import logging
 import operator
 from collections.abc import Callable
 from functools import partial
-from typing import Any
+from typing import Any, Optional, Union
 
 import sympy
 from sympy import Expr
@@ -36,7 +36,7 @@ class BoundVars:
     """
 
     def __init__(self, loop_body: LoopBody) -> None:
-        def upper_bound(v: Expr | int) -> int:
+        def upper_bound(v: Union[Expr, int]) -> int:
             return bound_sympy(v).upper if isinstance(v, Expr) else v
 
         self.loop_body = loop_body
@@ -112,10 +112,7 @@ class BoundVars:
                 indirect = partial(self.set_indirect, var)
                 result[key] = indirect
             else:
-                if "scan" not in key:
-                    raise AssertionError(
-                        f"expected 'scan' in submodule key, got {key!r}"
-                    )
+                assert "scan" in key
                 result[key] = submodules[key]
 
         return result
@@ -131,15 +128,13 @@ class BoundVars:
         interp = InterpreterShim(subblock.graph, submodules)
         interp.run(V.get_ops_handler(), initial_env=env)
         output = [node for node in subblock.graph.nodes if node.target == "output"]
-        if len(output) != 1:
-            raise AssertionError(f"expected exactly 1 output node, got {len(output)}")
-        # don't bother unioning with value since the load from buffer will be
+        assert len(output) == 1
+        # dont bother unioning with value since the load from buffer will be
         # pessimistically assumed to be inf anyway
         return interp.env[output[0]]
 
     def set_indirect(self, old: Expr, new: ValueRanges[Expr]) -> ValueRanges[Expr]:
-        if not isinstance(new, ValueRanges):
-            raise AssertionError(f"expected ValueRanges, got {type(new)}")
+        assert isinstance(new, ValueRanges)
         self.replacement_vals[old] = new
         return new
 
@@ -174,7 +169,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         # many ops are unlikely to show up in optimizable indexing compute,
-        # so we don't have full coverage
+        # so we dont have full coverage
         return ValueRanges.unknown()
 
     def load(self, name: str, index: sympy.Expr) -> ValueRanges[Any]:
@@ -196,20 +191,14 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
 
     @classmethod
     def index_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
-        if not isinstance(index, ValueRanges):
-            raise AssertionError(f"expected ValueRanges, got {type(index)}")
+        assert isinstance(index, ValueRanges)
         return cls.to_dtype(index, dtype)
 
-    @classmethod
-    def value_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
-        return cls.index_expr(index, dtype)
-
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def to_dtype(
         x: Any,
         dtype: torch.dtype,
-        src_dtype: torch.dtype | None = None,
+        src_dtype: Optional[torch.dtype] = None,
         use_compute_types: bool = True,
     ) -> ValueRanges[Any]:
         x = ValueRanges.wrap(x)
@@ -248,12 +237,10 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
             return ValueRanges(cast(x.lower, dtype), cast(x.upper, dtype))
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def square(x: Any) -> ValueRanges[Any]:
         return ValueRanges.convex_min_zero_map(x, lambda y: PowByNatural(y, 2))
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def neg(x: Any) -> ValueRanges[Any]:
         return ValueRanges.decreasing_map(x, operator.neg)
 

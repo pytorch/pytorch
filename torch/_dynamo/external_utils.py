@@ -23,7 +23,7 @@ Key functionality groups:
 import functools
 import warnings
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -72,7 +72,7 @@ def wrap_inline(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
 
 def call_hook(
-    hook: Callable[..., torch.Tensor | None], *args: Any, **kwargs: Any
+    hook: Callable[..., Optional[torch.Tensor]], *args: Any, **kwargs: Any
 ) -> torch.Tensor:
     """
     Used by compiled autograd to handle hook returning None.
@@ -97,6 +97,7 @@ def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
         args, kwargs = pytree.tree_map_only(
             torch.Tensor, lambda x: x.numpy(), (args, kwargs)
         )
+        # pyrefly: ignore [invalid-param-spec]
         out = f(*args, **kwargs)
         # pyrefly: ignore [missing-attribute]
         return pytree.tree_map_only(np.ndarray, lambda x: torch.as_tensor(x), out)
@@ -128,7 +129,7 @@ def call_backward(
     backward_c_function: torch.autograd.function.BackwardCFunction,
     saved_tensors: list[torch.Tensor],
     *args: Any,
-) -> torch.Tensor | tuple[torch.Tensor, ...]:
+) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
     fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
     grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
 
@@ -177,6 +178,30 @@ def call_hook_from_backward_state(
     return getattr(bw_state, hook_name)(*args, **kwargs)
 
 
+class _ApplyBackwardHook(torch.autograd.Function):
+    """Custom autograd function that applies a hook during backward.
+
+    This is used to implement register_hook on intermediate tensors without
+    requiring compiled autograd. The hook function is captured in the context
+    and applied during the backward pass.
+    """
+
+    @staticmethod
+    # pyre-ignore[14]: Inconsistent override is expected for autograd.Function
+    def forward(
+        ctx: Any, tensor: torch.Tensor, hook_fn: Callable[..., Any]
+    ) -> torch.Tensor:  # type: ignore[override]
+        ctx.hook_fn = hook_fn
+        return tensor.view_as(tensor)
+
+    @staticmethod
+    def backward(ctx: Any, grad: torch.Tensor) -> tuple[torch.Tensor, None]:  # type: ignore[override]
+        result = ctx.hook_fn(grad)
+        if result is None:
+            result = grad
+        return result, None
+
+
 def call_module_hooks_from_backward_state(
     _: Any, result: Any, *args: Any, bw_state: Any, hooks_name: str, module_name: str
 ) -> Any:
@@ -219,7 +244,7 @@ def wrap_dunder_call_ctx_manager(self: Any, func: Callable[_P, _R]) -> Callable[
 
 # Use only on ints marked dynamic via torch.empty(0, integer)
 # Currently only way to mark ints as dynamic: https://github.com/pytorch/pytorch/issues/129623
-def unwrap_maybe_dynamic_int(x: torch.Tensor | int) -> int:
+def unwrap_maybe_dynamic_int(x: Union[torch.Tensor, int]) -> int:
     if isinstance(x, torch.Tensor):
         # x.size() is expected to be [0, dynamic_int]
         return x.size(1)
@@ -227,22 +252,12 @@ def unwrap_maybe_dynamic_int(x: torch.Tensor | int) -> int:
 
 
 def call_accumulate_grad(
-    variable: torch.Tensor,
-    variable_grad: torch.Tensor | None,
-    grad: torch.Tensor | bool,
-    has_post_hooks: bool | None = None,
-) -> torch.Tensor | None:
-    if has_post_hooks is None:
-        # Backward compatibility for graphs captured before current grad became
-        # an explicit argument.
-        has_post_hooks = bool(grad)
-        grad = variable_grad  # type: ignore[assignment]
-        variable_grad = variable.grad
+    variable: torch.Tensor, grad: torch.Tensor, has_post_hooks: bool
+) -> None:
     updated_grad = torch._dynamo.compiled_autograd.ops.AccumulateGrad(  # type: ignore[attr-defined]
-        [grad], variable, variable_grad, has_post_hooks
+        [grad], variable, variable.grad, has_post_hooks
     )
     variable.grad = updated_grad[0]
-    return variable.grad
 
 
 def wrap_inline_with_error_on_graph_break(

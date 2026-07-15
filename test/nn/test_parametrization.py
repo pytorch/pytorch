@@ -1917,7 +1917,8 @@ class TestNNParametrizationDevice(NNTestCase):
             self.assertEqual(m(input), expected_output)
 
 
-instantiate_device_type_tests(TestNNParametrizationDevice, globals())
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(TestNNParametrizationDevice, globals(), only_for=only_for)
 instantiate_parametrized_tests(TestNNParametrization)
 
 if __name__ == "__main__":

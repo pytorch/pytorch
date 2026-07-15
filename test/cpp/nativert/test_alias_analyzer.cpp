@@ -65,7 +65,7 @@ class AliasAnalyzerTests : public testing::Test {
                              srcs.end(),
                              std::string{},
                              [](std::string cur, const std::string& src) {
-                               cur.push_back(',');
+                               cur.append(",");
                                cur.append(src);
                                return cur;
                              }));

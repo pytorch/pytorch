@@ -5,7 +5,6 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed.tensor import DeviceMesh, DTensor, Shard
-from torch.distributed.tensor._redistribute import use_min_cost_redistribution_plan
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -51,8 +50,8 @@ class TestCommMode(TestCase):
                 self.model = MLPModule(device=device)
 
             def forward(self, x):
-                x = funcol.all_gather_single(x, 0, world_pg)
-                x = funcol.reduce_scatter_single(x, "sum", 0, world_pg)
+                x = funcol.all_gather_tensor(x, 0, world_pg)
+                x = funcol.reduce_scatter_tensor(x, "sum", 0, world_pg)
                 out = self.model(x)
                 return funcol.all_reduce(out, "sum", world_pg)
 
@@ -77,8 +76,8 @@ class TestCommMode(TestCase):
                 self.model = MLPModule(device=device)
 
             def forward(self, x):
-                x = funcol.all_gather_single(x, 0, world_pg)
-                x = funcol.reduce_scatter_single(x, "sum", 0, world_pg)
+                x = funcol.all_gather_tensor(x, 0, world_pg)
+                x = funcol.reduce_scatter_tensor(x, "sum", 0, world_pg)
                 out = self.model(x)
                 return funcol.all_reduce_coalesced([out], "sum", world_pg)
 
@@ -106,7 +105,7 @@ class TestCommMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
-        with comm_mode, use_min_cost_redistribution_plan():
+        with comm_mode:
             f(x_dtensor, y_dtensor)
 
         comm_counts = comm_mode.get_comm_counts()
@@ -133,13 +132,13 @@ class TestCommMode(TestCase):
 
         # tests c10d all_gather_into_tensor tracing
         with comm_mode:
-            dist.all_gather_single(all_gather_out, inp)
+            dist.all_gather_into_tensor(all_gather_out, inp)
 
         self.checksAssert(comm_mode, c10d_ops._allgather_base_, 1, 1)
 
         # tests c10d reduce_scatter tracing
         with comm_mode:
-            dist.reduce_scatter_single(inp, all_gather_out)
+            dist.reduce_scatter_tensor(inp, all_gather_out)
 
         self.checksAssert(comm_mode, c10d_ops._reduce_scatter_base_, 1, 1)
 
@@ -176,7 +175,7 @@ class TestCommMode(TestCase):
         self.checksAssert(comm_mode, c10d_ops.allgather_, 1, 1)
 
         # tests c10d allgather_coalesced_ tracing
-        output_list = [[inp.new_empty(inp.shape)] for _ in range(self.world_size)]
+        output_list = []
 
         with comm_mode:
             dist.all_gather_coalesced(output_list, [inp], None)
@@ -185,7 +184,7 @@ class TestCommMode(TestCase):
 
         # tests c10d allgather_into_tensor_coalesced_ tracing
         with comm_mode, dist._coalescing_manager():
-            dist.all_gather_single(all_gather_out, inp)
+            dist.all_gather_into_tensor(all_gather_out, inp)
 
         self.checksAssert(comm_mode, c10d_ops.allgather_into_tensor_coalesced_, 1, 1)
 
@@ -197,22 +196,19 @@ class TestCommMode(TestCase):
 
         # tests c10d reduce_scatter_
         with comm_mode:
-            dist.reduce_scatter(inp, [inp.clone() for _ in range(self.world_size)])
+            dist.reduce_scatter(all_gather_out, [inp])
 
         self.checksAssert(comm_mode, c10d_ops.reduce_scatter_, 1, 1)
 
         # tests c10d reduce_scatter_tensor_coalesced
         with comm_mode, dist._coalescing_manager():
-            dist.reduce_scatter_single(inp, all_gather_out)
+            dist.reduce_scatter_tensor(all_gather_out, inp)
 
         self.checksAssert(comm_mode, c10d_ops.reduce_scatter_tensor_coalesced_, 1, 1)
 
         # tests c10d alltoall_
         with comm_mode:
-            dist.all_to_all(
-                [torch.empty_like(inp) for _ in range(self.world_size)],
-                [inp.clone() for _ in range(self.world_size)],
-            )
+            dist.all_to_all([inp], [inp])
 
         self.checksAssert(comm_mode, c10d_ops.alltoall_, 1, 1)
 

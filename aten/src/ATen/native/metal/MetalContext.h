@@ -1,9 +1,6 @@
-#include <c10/macros/Macros.h>
-
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
+#import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
-C10_DIAGNOSTIC_POP()
 #include <string>
 
 API_AVAILABLE(ios(11.0), macos(10.13))

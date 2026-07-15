@@ -7,6 +7,7 @@ from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -34,6 +35,7 @@ class TestSubgraphChoice(TestCase):
             layout=FixedLayout(torch.device(f"{GPU_TYPE}:0"), dtype=dtype, size=shape),
         )
 
+    @skipIfXpu
     def test_subgraph_decompose_k(self):
         from torch._inductor.kernel.mm import aten_mm
         from torch._inductor.kernel.mm_common import mm_args
@@ -72,10 +74,9 @@ class TestSubgraphChoice(TestCase):
 
             # Only return decomposeK case for codegen
             choices = [choices[1]]
-            node, _ = autotune_select_algorithm(
+            return autotune_select_algorithm(
                 "test_subgraph_choice", choices, [a, b], layout
             )
-            return node
 
         a_in = torch.randn(
             mat1_shape, dtype=torch.float16, device=torch.device(f"{GPU_TYPE}:0")
@@ -94,6 +95,7 @@ class TestSubgraphChoice(TestCase):
         # Check same results of compiled result and regular torch.mm
         torch.testing.assert_close(res, a_in @ b_in, atol=1e-1, rtol=1e-1)
 
+    @skipIfXpu
     def test_subgraph_freeze_layout(self):
         from torch._inductor.kernel.mm_common import mm_args
 
@@ -117,8 +119,7 @@ class TestSubgraphChoice(TestCase):
         def _(a, b):
             _, _, _, layout, mat1, mat2 = mm_args(a, b)
             mat1_layout = mat1.layout
-            if not isinstance(mat1_layout, FlexibleLayout):
-                raise AssertionError
+            assert isinstance(mat1_layout, FlexibleLayout)
             mat1_stride = mat1_layout.stride
 
             choices = []
@@ -137,25 +138,21 @@ class TestSubgraphChoice(TestCase):
             )
 
             choice = choices[0]
-            if not isinstance(mat1.layout, FixedLayout):
-                raise AssertionError
+            assert isinstance(mat1.layout, FixedLayout)
 
             # Creating the subgraph choice should have frozen the layout
             # We ensure padding so the stride should differ
-            if mat1.layout.stride == mat1_stride:
-                raise AssertionError
+            assert mat1.layout.stride != mat1_stride
 
             for example_stride, layout_stride in zip(
                 choice.example_inputs[0].stride(), mat1.layout.stride
             ):
                 # Example inputs should have same stride as current layout
-                if example_stride != layout_stride:
-                    raise AssertionError
+                assert example_stride == layout_stride
 
-            node, _ = autotune_select_algorithm(
+            return autotune_select_algorithm(
                 "test_subgraph_choice", choices, [a, b], layout
             )
-            return node
 
         def func(mat1, mat2):
             return torch.ops.mylib.matmul_decompose_padding((mat1 + 1.0), mat2)

@@ -573,7 +573,7 @@ class LSTM(RNNBase):
             flat_weights.append(weight)
         return flat_weights
 
-    def forward(self, input, hx=None):
+    def forward(self, input, hx=None):  # noqa: F811
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         batch_sizes = None
@@ -663,6 +663,7 @@ class LSTM(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
+                # pyrefly: ignore [bad-argument-type]
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,
@@ -742,7 +743,7 @@ class GRU(RNNBase):
             flat_weights.append(weight)
         return flat_weights
 
-    def forward(self, input, hx=None):
+    def forward(self, input, hx=None):  # noqa: F811
         # Note: this is copied from the forward of GRU in https://github.com/pytorch/pytorch/blob/master/torch/nn/modules/rnn.py
         # only changed self._flat_weights to self.get_flat_weights()
         # TODO: maybe we can try inheriting from that class and define get_flat_weights
@@ -824,6 +825,7 @@ class GRU(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
+                # pyrefly: ignore [bad-argument-type]
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,

@@ -17,7 +17,7 @@ import dataclasses
 import dis
 import itertools
 import sys
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
@@ -55,13 +55,9 @@ def get_indexof(insts: list["Instruction"]) -> dict["Instruction", int]:
     Get a mapping from instruction memory address to index in instruction list.
     Additionally checks that each instruction only appears once in the list.
     """
-    # pyrefly: ignore [implicit-any]
     indexof = {}
     for i, inst in enumerate(insts):
-        if inst in indexof:
-            raise AssertionError(
-                f"duplicate instruction at index {i} in instruction list"
-            )
+        assert inst not in indexof
         indexof[inst] = i
     return indexof
 
@@ -80,10 +76,7 @@ def remove_dead_code(instructions: list["Instruction"]) -> list["Instruction"]:
             if inst.exn_tab_entry:
                 find_live_code(indexof[inst.exn_tab_entry.target])
             if inst.opcode in JUMP_OPCODES:
-                if inst.target is None:
-                    raise AssertionError(
-                        f"jump instruction {inst.opname} has no target"
-                    )
+                assert inst.target is not None
                 find_live_code(indexof[inst.target])
             if inst.opcode in TERMINAL_OPCODES:
                 return
@@ -102,23 +95,13 @@ def remove_dead_code(instructions: list["Instruction"]) -> list["Instruction"]:
                 start_idx = bisect.bisect_left(
                     live_idx, indexof[inst.exn_tab_entry.start]
                 )
-                if start_idx >= len(live_idx):
-                    raise AssertionError(
-                        "no live instruction found at or after exn_tab_entry start"
-                    )
+                assert start_idx < len(live_idx)
                 # find rightmost live instruction <= end
                 end_idx = (
                     bisect.bisect_right(live_idx, indexof[inst.exn_tab_entry.end]) - 1
                 )
-                if end_idx < 0:
-                    raise AssertionError(
-                        "no live instruction found at or before exn_tab_entry end"
-                    )
-                if not (live_idx[start_idx] <= i <= live_idx[end_idx]):
-                    raise AssertionError(
-                        f"instruction {i} not within live range "
-                        f"[{live_idx[start_idx]}, {live_idx[end_idx]}]"
-                    )
+                assert end_idx >= 0
+                assert live_idx[start_idx] <= i <= live_idx[end_idx]
                 inst.exn_tab_entry.start = instructions[live_idx[start_idx]]
                 inst.exn_tab_entry.end = instructions[live_idx[end_idx]]
 
@@ -202,10 +185,7 @@ def livevars_analysis(
             if inst.exn_tab_entry:
                 walk(may, indexof[inst.exn_tab_entry.target])
             if inst.opcode in JUMP_OPCODES:
-                if inst.target is None:
-                    raise AssertionError(
-                        f"jump instruction {inst.opname} has no target"
-                    )
+                assert inst.target is not None
                 walk(may, indexof[inst.target])
                 state = may
             if inst.opcode in TERMINAL_OPCODES:
@@ -222,8 +202,8 @@ class FixedPointBox:
 
 @dataclasses.dataclass
 class StackSize:
-    low: int | float
-    high: int | float
+    low: Union[int, float]
+    high: Union[int, float]
     fixed_point: FixedPointBox
 
     def zero(self) -> None:
@@ -246,9 +226,8 @@ class StackSize:
             self.fixed_point.value = False
 
 
-def stacksize_analysis(instructions: list["Instruction"]) -> int | float:
-    if not instructions:
-        raise AssertionError("instructions list must not be empty")
+def stacksize_analysis(instructions: list["Instruction"]) -> Union[int, float]:
+    assert instructions
     fixed_point = FixedPointBox()
     stack_sizes = {
         inst: StackSize(float("inf"), float("-inf"), fixed_point)
@@ -264,13 +243,11 @@ def stacksize_analysis(instructions: list["Instruction"]) -> int | float:
         for inst, next_inst in zip(instructions, instructions[1:] + [None]):
             stack_size = stack_sizes[inst]
             if inst.opcode not in TERMINAL_OPCODES:
-                if next_inst is None:
-                    raise AssertionError(f"missing next inst: {inst}")
+                assert next_inst is not None, f"missing next inst: {inst}"
                 eff = stack_effect(inst.opcode, inst.arg, jump=False)
                 stack_sizes[next_inst].offset_of(stack_size, eff)
             if inst.opcode in JUMP_OPCODES:
-                if inst.target is None:
-                    raise AssertionError(f"missing target: {inst}")
+                assert inst.target is not None, f"missing target: {inst}"
                 stack_sizes[inst.target].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )
@@ -283,8 +260,6 @@ def stacksize_analysis(instructions: list["Instruction"]) -> int | float:
     low = min(x.low for x in stack_sizes.values())
     high = max(x.high for x in stack_sizes.values())
 
-    if not fixed_point.value:
-        raise AssertionError("failed to reach fixed point")
-    if low < 0:
-        raise AssertionError(f"stack size analysis produced negative low value: {low}")
+    assert fixed_point.value, "failed to reach fixed point"
+    assert low >= 0
     return high

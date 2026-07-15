@@ -57,7 +57,7 @@ class TestFuser(JitTestCase):
         allowed_nodes = {'prim::Constant', 'prim::FusionGroup', 'prim::BailoutTemplate',
                          'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-                        lambda msg: f'{msg}\ngot {graph}')
+                        f'got {graph}')
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
 
     def _test_fused_abs(self, device='cpu'):
@@ -987,8 +987,7 @@ class TestFuser(JitTestCase):
             # in order for Python 2
             for g in all_backward_graphs(module):
                 if str(g) not in old_plans:
-                    if backward is not None:
-                        raise AssertionError("backward should be None")
+                    assert backward is None
                     backward = g
                     old_plans.add(str(backward))
             num_grads = 1 if i > 0 else 0

@@ -75,7 +75,7 @@ std::string miopenTypeToString(miopenDataType_t dtype) {
     default:
       std::ostringstream oss;
       oss << "(unknown data-type " << static_cast<int>(dtype) << ')';
-      return std::move(oss).str();
+      return oss.str();
   }
 }
 

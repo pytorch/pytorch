@@ -22,7 +22,7 @@ IS_WINDOWS = sys.platform == "win32"
 def _get_default_signal() -> signal.Signals:
     """Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows."""
     if IS_WINDOWS:
-        return signal.CTRL_C_EVENT  # type: ignore[attr-defined]
+        return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
     else:
         return signal.SIGTERM
 
@@ -52,7 +52,7 @@ class SubprocessHandler:
         args_str = (entrypoint, *[str(e) for e in args])
         args_str = _maybe_wrap_command_args_with_numa_binding(
             args_str,
-            device_index=local_rank_id,
+            gpu_index=local_rank_id,
             numa_options=numa_options,
         )
 

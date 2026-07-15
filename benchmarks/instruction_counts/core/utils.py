@@ -3,6 +3,7 @@ import atexit
 import re
 import shutil
 import textwrap
+from typing import Optional
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label
@@ -10,7 +11,7 @@ from core.types import Definition, FlatIntermediateDefinition, Label
 from torch.utils.benchmark.utils.common import _make_temp_dir
 
 
-_TEMPDIR: str | None = None
+_TEMPDIR: Optional[str] = None
 
 
 def get_temp_dir() -> str:

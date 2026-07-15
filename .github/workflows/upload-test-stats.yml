@@ -1,4 +1,3 @@
-# Owner(s): ["module: ci"]
 name: Upload test stats
 
 on:
@@ -10,7 +9,7 @@ on:
       - periodic
       - periodic-rocm-mi200
       - periodic-rocm-mi300
-      - periodic-rocm-mi350
+      - periodic-rocm-mi355
       - inductor
       - unstable
       - slow
@@ -19,18 +18,18 @@ on:
       - inductor-periodic
       - rocm-mi200
       - rocm-mi300
-      - rocm-mi350
+      - rocm-mi355
       - rocm-navi31
-      - rocm-nightly
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124
       - inductor-rocm-mi200
       - inductor-rocm-mi300
-      - inductor-rocm-mi350
+      - inductor-rocm-mi355
       - inductor-perf-nightly-rocm-mi300
-      - inductor-perf-nightly-rocm-mi350
+      - inductor-perf-nightly-rocm-mi355
       - mac-mps
+      - linux-aarch64
     types:
       - completed
 
@@ -39,7 +38,7 @@ jobs:
   # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
   get_workflow_conclusion:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
     steps:
@@ -135,7 +134,7 @@ jobs:
 
   check-api-rate:
     if: ${{ always() && github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - name: Get our GITHUB_TOKEN API limit usage

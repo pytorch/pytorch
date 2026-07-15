@@ -117,8 +117,8 @@ class MaxPool1d(_MaxPoolNd):
           where ``ceil_mode = True``
 
           .. math::
-              L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
-                    \times (\text{kernel\_size} - 1) - 1 + (\text{stride} - 1)}{\text{stride}}\right\rfloor + 1
+              L_{out} = \left\lceil \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                    \times (\text{kernel\_size} - 1) - 1 + (stride - 1)}{\text{stride}}\right\rceil + 1
 
         - Ensure that the last pooling starts inside the image, make :math:`L_{out} = L_{out} - 1`
           when :math:`(L_{out} - 1) * \text{stride} >= L_{in} + \text{padding}`.
@@ -1013,7 +1013,7 @@ class FractionalMaxPool3d(Module):
     Args:
         kernel_size: the size of the window to take a max over.
                      Can be a single number `k` (for a square kernel of `k x k x k`) or a tuple `(kt x kh x kw)`,
-                     `k` must be greater than 0.
+                     `k` must greater than 0.
         output_size: the target output size of the image of the form `oT x oH x oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number oH for a square image `oH x oH x oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -1058,9 +1058,7 @@ class FractionalMaxPool3d(Module):
             isinstance(kernel_size, (tuple, list))
             and not all(k > 0 for k in kernel_size)
         ):
-            raise ValueError(
-                f"kernel_size must be greater than 0, but got {kernel_size}"
-            )
+            raise ValueError(f"kernel_size must greater than 0, but got {kernel_size}")
         self.kernel_size = _triple(kernel_size)
         self.return_indices = return_indices
         self.register_buffer("_random_samples", _random_samples)
@@ -1110,8 +1108,6 @@ class _LPPoolNd(Module):
         ceil_mode: bool = False,
     ) -> None:
         super().__init__()
-        if norm_type == 0:
-            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
         self.norm_type = norm_type
         self.kernel_size = kernel_size
         self.stride = stride
@@ -1132,7 +1128,7 @@ class LPPool1d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling over absolute values
+    - At p = :math:`\infty`, one gets Max Pooling
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
     .. note:: If the sum to the power of `p` is zero, the gradient of this function is
@@ -1179,7 +1175,7 @@ class LPPool2d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling over absolute values
+    - At p = :math:`\infty`, one gets Max Pooling
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
@@ -1239,7 +1235,7 @@ class LPPool3d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling over absolute values
+    - At p = :math:`\infty`, one gets Max Pooling
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:

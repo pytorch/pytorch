@@ -2,8 +2,8 @@ import builtins
 
 import torch
 import torch.utils._pytree as pytree
-from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
@@ -25,16 +25,6 @@ class Print(HigherOrderOperator):
     3. Mixed positional and keyword arguments:
        torch._higher_order_ops.print("moo {} {y}", 1, y=2)
        Output: "moo 1 2"
-
-    4. DTensor support:
-       DTensor args are unwrapped to local tensors via to_local() (no collective).
-       Each rank prints its own local view, prefixed with [rank N].
-       For the global view of a sharded tensor, call full_tensor() before
-       passing to print.
-
-       dt = DTensor.from_local(local_shard, mesh, [Shard(0)])
-       torch._higher_order_ops.print("activations: {}", dt)
-       # Output: [rank 0] activations: tensor([0., 1.])
 
     This HOP enables printing without causing graph break.
     """
@@ -85,9 +75,9 @@ def print_proxy_torch_dispatch_mode(
     )
 
 
-@register_fake(print, skip_cache=True)
+@print.py_impl(FakeTensorMode)
 # pyre-ignore
-def print_fake_tensor_mode(format_str: str, *args: object, **kwargs: object):
+def print_fake_tensor_mode(mode, format_str: str, *args: object, **kwargs: object):
     return None
 
 
@@ -111,33 +101,6 @@ def print_impl(format_str: str, *args: object, **kwargs: object) -> None:
 
 print.fallthrough(torch._C.DispatchKey.AutogradCPU)
 print.fallthrough(torch._C.DispatchKey.AutogradCUDA)
-
-
-def _register_dtensor_impl() -> None:
-    from torch.distributed.tensor import DTensor
-
-    @print.py_impl(DTensor)  # pyrefly: ignore [missing-attribute]
-    # pyre-ignore
-    def print_dtensor(format_str: str, *args: object, **kwargs: object) -> None:
-        # Unwrap DTensors to local tensors via to_local() — no collective is
-        # introduced so there is no OOM or performance risk.  Every rank prints
-        # its own local view (including Replicate, where to_local() already
-        # holds the full tensor).
-        #
-        # The output is prefixed with [rank N] so users can identify which rank
-        # produced each line.
-        #
-        # If the user needs the global view of a sharded tensor, they can call
-        # full_tensor() explicitly before passing it to print.
-        import torch.distributed as dist
-
-        local_args = pytree.tree_map_only(DTensor, DTensor.to_local, args)
-        local_kwargs = pytree.tree_map_only(DTensor, DTensor.to_local, kwargs)
-        if dist.is_initialized() and dist.get_world_size() > 1:
-            format_str = f"[rank {dist.get_rank()}] {format_str}"
-        print(  # pyrefly: ignore [no-matching-overload]
-            format_str, *local_args, **local_kwargs
-        )
 
 
 @print.py_functionalize_impl

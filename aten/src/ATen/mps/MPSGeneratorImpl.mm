@@ -112,8 +112,7 @@ std::shared_ptr<MPSGeneratorImpl> MPSGeneratorImpl::clone() const {
 
 MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
   auto gen = new MPSGeneratorImpl();
-  gen->data_ = this->data_;
-  gen->engine_ = this->engine_;
+  gen->set_current_seed(this->data_.seed);
   return gen;
 }
 

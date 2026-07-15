@@ -34,7 +34,6 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/core/ivalue.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
-                         ../../../aten/src/ATen/cuda/CUDAContextLight.h \
                          ../../../aten/src/ATen/cudnn/Descriptors.h \
                          ../../../aten/src/ATen/cudnn/Handles.h \
                          ../../../aten/src/ATen/cudnn/Types.h \
@@ -49,9 +48,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../build/aten/src/ATen/Functions.h \
                          ../../../build/aten/src/ATen/core/TensorBody.h \
                          ../../../c10/core/Device.h \
-                         ../../../c10/core/DeviceGuard.h \
                          ../../../c10/core/DeviceType.h \
-                         ../../../c10/core/Stream.h \
                          ../../../c10/util/Half.h \
                          ../../../c10/util/ArrayRef.h \
                          ../../../c10/util/OptionalArrayRef.h \
@@ -103,8 +100,7 @@ GENERATE_XML           = YES
 # Set to NO if you do not want the Doxygen program listing included.
 # NOTE: setting to NO may result in unrecovered file relationships
 #       (which file defined which compound)
-# Setting to NO to prevent inline code from polluting documentation
-XML_PROGRAMLISTING     = NO
+XML_PROGRAMLISTING     = YES
 ################################################################################
 # Doxygen preprocessor / parser control.                                       #
 ################################################################################
@@ -133,16 +129,8 @@ EXTRACT_ALL            = YES
 EXTRACT_PACKAGE        = YES
 EXTRACT_STATIC         = YES
 CASE_SENSE_NAMES       = NO
-EXCLUDE_SYMBOLS        = caffe2::* cereal* DL* TH* cudnn* std::* torch::nested*
+EXCLUDE_SYMBOLS        = caffe2::* cereal* DL* TH* cudnn* std::*
 # EXCLUDE_SYMBOLS        = c10::* caffe2::* cereal* DL* TH* cudnn* std::*
-
-# Don't include inline source code in documentation
-INLINE_SOURCES         = NO
-# Don't include code bodies in detailed description
-SOURCE_BROWSER         = NO
-# Don't reference source files
-REFERENCES_LINK_SOURCE = NO
-VERBATIM_HEADERS       = NO
 ################################################################################
 # Docstring control / customization.                                           #
 ################################################################################
@@ -160,21 +148,10 @@ JAVADOC_AUTOBRIEF      = YES
 #      *
 #      * \endrst
 #      */
-# Or with /// style:
-#     /// \rst
-#     /// .. code-block:: cpp
-#     ///
-#     ///     int main() {
-#     ///         return 0;
-#     ///     }
-#     ///
-#     /// \endrst
-#
 # NOTE:
 #     1. \rst and \endrst must be on their own line.
-#     2. For /// comments, use leading-slashes; for /** */ use leading-asterisk
-#     3. PyTorch uses /// style comments primarily
-ALIASES                = "rst=\verbatim embed:rst:leading-slashes"
+#     2. leading-asterisk required.
+ALIASES                = "rst=\verbatim embed:rst:leading-asterisk"
 ALIASES               += "endrst=\endverbatim"
 ################################################################################
 # Warning suppression.                                                         #

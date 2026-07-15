@@ -4,6 +4,7 @@ import logging
 import math
 import random
 from collections import namedtuple
+from typing import Optional
 
 import sympy
 
@@ -316,7 +317,7 @@ class CKGemmTemplate(CKTemplate):
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: list[int] | None = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         is_batched = len(layout.size) == 3
         name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"
@@ -417,8 +418,6 @@ class CKGemmTemplate(CKTemplate):
             return None
         if op.c_element_dtype != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
             return None
-        if self.is_blocked_by_tf32_setting(op):
-            return None
         # disable the instance if layouts don't match
         if op.a_layout != torch_layout_to_ck_layout(X_meta):
             return None
@@ -511,7 +510,7 @@ class CKGemmTemplate(CKTemplate):
                         torch.cuda.get_device_properties(X_meta.device).warp_size,
                     )
                 except Exception as e:
-                    log.debug(
+                    log.debug(  # noqa: G200
                         "Failed to prefetch_stages for %s with exception %s", op.name, e
                     )
                     # be conservative here and disable the op
@@ -551,7 +550,7 @@ class CKGemmTemplate(CKTemplate):
         stages = version_to_stages.get(version)
         if stages is None:
             # This means we're at stage 2, and this requires computation
-            # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143
+            # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143 # noqa: B950
             wgp_per_cu = max(4 * warp_size // op.block_size, 1)
             full_mem_band_prefetch_stages = math.ceil(
                 32768
@@ -616,8 +615,7 @@ class CKGemmTemplate(CKTemplate):
         The primary entry point for the code rendering process used in this template.
         """
         epilogue_nodes = kwargs.get("epilogue_nodes")
-        if not (epilogue_nodes is None or 0 == len(epilogue_nodes)):
-            raise AssertionError("expected no epilogue nodes for CK GEMM template")
+        assert epilogue_nodes is None or 0 == len(epilogue_nodes)
         template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
@@ -739,8 +737,7 @@ class CKGemmTemplate(CKTemplate):
         elif op.c_elementwise_op == "PassThrough":
             epilogue = "PassThrough {}"
 
-        if epilogue is None:
-            raise AssertionError("CK GEMM epilogue is not set")
+        assert epilogue is not None, "CK GEMM epilogue is not set"
 
         size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
         if self.is_batched:
@@ -935,8 +932,7 @@ class CKGemmTemplate(CKTemplate):
         if config.rocm.use_preselected_instances and self._is_rcr_f16():
             generator = gen_gemm_ops_preselected
 
-        if generator is None:
-            raise AssertionError("expected a non-None CK GEMM ops generator")
+        assert generator is not None
 
         rops = generator()
         ops = []

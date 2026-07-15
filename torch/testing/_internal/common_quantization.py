@@ -74,7 +74,7 @@ import io
 import os
 
 import unittest
-from typing import Any
+from typing import Any, Optional, Union
 from collections.abc import Callable
 
 import numpy as np
@@ -1067,7 +1067,7 @@ class QuantizationTestCase(TestCase):
 
             def _get_underlying_op_type(
                 node: Node, gm: GraphModule
-            ) -> Callable | str:
+            ) -> Union[Callable, str]:
                 if node.op == "call_module":
                     mod = getattr(gm, node.target)
                     return type(mod)
@@ -2478,8 +2478,8 @@ class ManualEmbeddingBagLinear(nn.Module):
     def forward(
         self,
         input: torch.Tensor,
-        offsets: torch.Tensor | None = None,
-        per_sample_weights: torch.Tensor | None = None,
+        offsets: Optional[torch.Tensor] = None,
+        per_sample_weights: Optional[torch.Tensor] = None,
     ):
         x = self.emb(input, offsets, per_sample_weights)
         x = self.quant(x)
@@ -3248,239 +3248,3 @@ class TestHelperModules:
         def forward(self, x):
             x = self.relu(self.fc(x))
             return x
-
-def _static_quantized_linear_module(
-    N,
-    K,
-    bias,
-    example_input,
-    epilogue="none",
-    output_dtype=torch.float32,
-):
-    """
-    Generate a linear module using onednn.qlinear_pointwise directly
-    with static quantization parameters (no choose_qparams at runtime).
-    It is used to test fusion and lowering passes in Inductor for X86 CPU.
-    Input quantization limit is 0-127 to avoid overflow on old platforms.
-    Params:
-        N: output feature dimension
-        K: input feature dimension
-        bias: boolean flag to indicate whether linear module has bias
-        example_input: example input tensor to get scale/zero point
-        epilogue: oneDNN qlinear pointwise post op, e.g. none/relu/gelu
-        output_dtype: output dtype used by onednn.qlinear_pointwise
-    Return:
-        An instance of the quantized linear module
-    """
-    if epilogue not in ("none", "relu", "gelu"):
-        raise AssertionError(f"Unsupported epilogue: {epilogue}")
-
-    class Model(torch.nn.Module):
-        def __init__(
-            self,
-            N,
-            K,
-            bias,
-            example_input,
-            epilogue,
-            output_dtype,
-        ):
-            super().__init__()
-            self.x_scale, self.x_zp = torch.ops.quantized_decomposed.choose_qparams.tensor(
-                example_input,
-                quant_min=0,
-                quant_max=127,
-                eps=torch.finfo(torch.float32).eps,
-                dtype=torch.uint8,
-            )
-            self.x_scale, self.x_zp = self.x_scale.detach().item(), self.x_zp.detach().item()
-            self.linear = torch.nn.Linear(K, N, bias)
-            self.w_scales, self.w_zps = torch.ops.quantized_decomposed.choose_qparams_per_token(
-                self.linear.weight, dtype=torch.int8
-            )
-            self.w_scales = self.w_scales.detach().to(torch.float32).squeeze()
-            self.w_zps = self.w_zps.detach().to(torch.int64).squeeze()
-            self.qw = torch.ops.quantized_decomposed.quantize_per_channel.default(
-                self.linear.weight,
-                self.w_scales,
-                self.w_zps,
-                axis=0,
-                quant_min=-128,
-                quant_max=127,
-                dtype=torch.int8,
-            )
-
-            if bias:
-                self.b = self.linear.bias
-            else:
-                self.b = None
-
-            self.y_scale = 1.0
-            self.y_zp = 0
-            self.output_dtype = output_dtype
-            self.post_op = epilogue
-            self.unary_post_op_args = ()
-            self.post_op_algo = "none"
-
-        def forward(self, x):
-            qw_packed = torch.ops.onednn.qlinear_prepack(self.qw, None)
-            if x.is_floating_point():
-                qx = torch.ops.quantized_decomposed.quantize_per_tensor.default(
-                    x,
-                    self.x_scale,
-                    self.x_zp,
-                    quant_min=0,
-                    quant_max=255,
-                    dtype=torch.uint8,
-                )
-            else:
-                qx = x
-            return torch.ops.onednn.qlinear_pointwise.default(
-                qx,
-                self.x_scale,
-                self.x_zp,
-                qw_packed,
-                self.w_scales,
-                self.w_zps,
-                self.b,
-                self.y_scale,
-                self.y_zp,
-                self.output_dtype,
-                self.post_op,
-                self.unary_post_op_args,
-                self.post_op_algo,
-            )
-
-    return Model(N, K, bias, example_input, epilogue, output_dtype).eval()
-
-
-def _static_quantized_linear_binary_module(
-    N,
-    K,
-    bias,
-    example_input,
-    example_binary_input,
-    binary_post_op="add",
-    epilogue="none",
-    output_dtype=torch.float32,
-):
-    if epilogue not in ("none", "relu"):
-        raise AssertionError(f"Unsupported epilogue: {epilogue}")
-    if binary_post_op not in ("add", "sum"):
-        raise AssertionError(f"Unsupported binary post op: {binary_post_op}")
-
-    class Model(torch.nn.Module):
-        def __init__(
-            self,
-            N,
-            K,
-            bias,
-            example_input,
-            example_binary_input,
-            binary_post_op,
-            epilogue,
-            output_dtype,
-        ):
-            super().__init__()
-            self.x_scale, self.x_zp = torch.ops.quantized_decomposed.choose_qparams.tensor(
-                example_input,
-                quant_min=0,
-                quant_max=127,
-                eps=torch.finfo(torch.float32).eps,
-                dtype=torch.uint8,
-            )
-            self.x_scale, self.x_zp = (
-                self.x_scale.detach().item(),
-                self.x_zp.detach().item(),
-            )
-            self.linear = torch.nn.Linear(K, N, bias)
-            self.w_scales, self.w_zps = torch.ops.quantized_decomposed.choose_qparams_per_token(
-                self.linear.weight, dtype=torch.int8
-            )
-            self.w_scales = self.w_scales.detach().to(torch.float32).squeeze()
-            self.w_zps = self.w_zps.detach().to(torch.int64).squeeze()
-            self.qw = torch.ops.quantized_decomposed.quantize_per_channel.default(
-                self.linear.weight,
-                self.w_scales,
-                self.w_zps,
-                axis=0,
-                quant_min=-128,
-                quant_max=127,
-                dtype=torch.int8,
-            )
-
-            if bias:
-                self.b = self.linear.bias
-            else:
-                self.b = None
-
-            if output_dtype in (torch.uint8, torch.int8):
-                # Calibrate output quantization params from an eager reference of this binary op.
-                # This mirrors the pre-pass graphs where uint8 outputs have non-trivial y_scale/y_zp.
-                example_out = self.linear(example_input) + example_binary_input
-                qmin, qmax, qdtype = (0, 127, torch.uint8)
-                if output_dtype == torch.int8:
-                    qmin, qmax, qdtype = (-128, 127, torch.int8)
-                y_scale, y_zp = torch.ops.quantized_decomposed.choose_qparams.tensor(
-                    example_out,
-                    quant_min=qmin,
-                    quant_max=qmax,
-                    eps=torch.finfo(torch.float32).eps,
-                    dtype=qdtype,
-                )
-                self.y_scale, self.y_zp = y_scale.detach().item(), y_zp.detach().item()
-            else:
-                self.y_scale, self.y_zp = 1.0, 0
-
-            self.output_dtype = output_dtype
-            self.binary_post_op = binary_post_op
-            self.binary_alpha = 1.0
-            self.unary_post_op = epilogue
-            self.unary_post_op_args = ()
-            self.unary_post_op_algo = ""
-
-        def forward(self, x, other):
-            qw_packed = torch.ops.onednn.qlinear_prepack(self.qw, None)
-            other_scale, other_zp = 1.0, 0
-            if x.is_floating_point():
-                qx = torch.ops.quantized_decomposed.quantize_per_tensor.default(
-                    x,
-                    self.x_scale,
-                    self.x_zp,
-                    quant_min=0,
-                    quant_max=127,
-                    dtype=torch.uint8,
-                )
-            else:
-                qx = x
-            return torch.ops.onednn.qlinear_pointwise.binary(
-                qx,
-                self.x_scale,
-                self.x_zp,
-                qw_packed,
-                self.w_scales,
-                self.w_zps,
-                other,
-                self.b,
-                self.y_scale,
-                self.y_zp,
-                self.output_dtype,
-                other_scale,
-                other_zp,
-                self.binary_post_op,
-                self.binary_alpha,
-                self.unary_post_op,
-                self.unary_post_op_args,
-                self.unary_post_op_algo,
-            )
-
-    return Model(
-        N,
-        K,
-        bias,
-        example_input,
-        example_binary_input,
-        binary_post_op,
-        epilogue,
-        output_dtype,
-    ).eval()

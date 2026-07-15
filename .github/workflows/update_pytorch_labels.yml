@@ -1,4 +1,3 @@
-# Owner(s): ["module: ci"]
 name: Update PyTorch Labels in S3
 
 on:

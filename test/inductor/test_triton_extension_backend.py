@@ -2,10 +2,9 @@
 import functools
 import random
 import string
-import sys
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch._dynamo
@@ -14,15 +13,15 @@ from torch._inductor import config
 
 
 try:
-    from extension_backends.triton.device_interface import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:device_interface
+    from extension_backends.triton.device_interface import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:device_interface  # noqa: B950
         DeviceInterface,
     )
-    from extension_backends.triton.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend
+    from extension_backends.triton.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
         CPUDeviceOpOverrides,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
-    from extension_backends.triton.extension_triton_heuristics import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_triton_heuristics
+    from extension_backends.triton.extension_triton_heuristics import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_triton_heuristics  # noqa: B950
         EXTENSION_TRITON_META_FIELD,
     )
 except ImportError:
@@ -152,17 +151,6 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
         ).check("device_str='privateuseone'").run(code)
 
     def _register_custom_backend_with_heuristics(self, device):
-        path_to_ext_heuristics = str(
-            Path(__file__).parent / "extension_backends" / "triton"
-        )
-        # Add the path to sys.path in the parent process so that the
-        # ExtensionCachingAutotuner class (defined in extension_triton_heuristics)
-        # can be resolved when the compiled kernel is unpickled from the
-        # compile subprocess back into the parent process.
-        if path_to_ext_heuristics not in sys.path:
-            sys.path.append(path_to_ext_heuristics)
-            self.addCleanup(sys.path.remove, path_to_ext_heuristics)
-
         class ExtensionTritonKernel(codegen.triton.TritonKernel):
             @classmethod
             @functools.lru_cache(None)
@@ -170,8 +158,13 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
                 default_imports = super().gen_common_triton_imports()
                 custom_imports = IndentedBuffer()
                 custom_imports.splice(default_imports)
+                path_to_ext_heuristics = (
+                    Path(__file__).parent / "extension_backends" / "triton"
+                )
 
-                custom_imports.splice("""
+                custom_imports.splice(f"""
+                    import sys
+                    sys.path.append("{path_to_ext_heuristics}")
                     import extension_triton_heuristics as triton_heuristics
                 """)
                 return custom_imports
@@ -193,15 +186,13 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
             @staticmethod
             def create(
                 is_subgraph: bool,
-                subgraph_name: str | None,
-                parent_wrapper: PythonWrapperCodegen | None,
-                partition_signatures: ir.GraphPartitionSignature | None = None,
+                subgraph_name: Optional[str],
+                parent_wrapper: Optional[PythonWrapperCodegen],
+                partition_signatures: Optional[ir.GraphPartitionSignature] = None,
             ):
                 if is_subgraph:
-                    if subgraph_name is None:
-                        raise AssertionError
-                    if parent_wrapper is None:
-                        raise AssertionError
+                    assert subgraph_name is not None
+                    assert parent_wrapper is not None
                     return PythonWrapperCodegen.create(
                         subgraph_name, parent_wrapper, partition_signatures
                     )

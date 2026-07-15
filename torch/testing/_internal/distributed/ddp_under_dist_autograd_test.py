@@ -344,18 +344,14 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
 
-    def _init_process_group(self):
+    def _remote_worker_process(self, ddp_mode):
+        gLogger.info("The remote worker is running.")
         dist.init_process_group(
             backend="gloo",
             init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
-        dist.barrier()
-
-    def _remote_worker_process(self, ddp_mode):
-        gLogger.info("The remote worker is running.")
-        self._init_process_group()
 
         if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE):
             # new_group needs to be called on ranks.
@@ -374,7 +370,12 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
             rank,
             TRAINER_RANKS,
         )
-        self._init_process_group()
+        dist.init_process_group(
+            backend="gloo",
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            world_size=self.world_size,
+            rank=self.rank,
+        )
 
         gLogger.info("Waiting for shutdown signal on trainer #%s...", rank)
 
@@ -386,7 +387,12 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
     def _master_process(self, ddp_mode: DdpMode, simulate_uneven_inputs: bool):
         gLogger.info("Running the master process...")
-        self._init_process_group()
+        dist.init_process_group(
+            backend="gloo",
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
+            world_size=self.world_size,
+            rank=self.rank,
+        )
 
         remote_em_rref = rpc.remote(
             self.remote_worker_name(), RemoteEM, args=(NUM_EM_ROW, D_SPARSE)

@@ -82,14 +82,6 @@ def has_jax_tpu_backend() -> bool:
 
 
 @functools.cache
-def has_torch_tpu() -> bool:
-    """Check if torch_tpu is installed and available."""
-    # The TPU module is an autoloaded out-of-tree backend.
-    tpu_module = getattr(torch, "tpu", None)
-    return tpu_module is not None
-
-
-@functools.cache
 def has_cpu_pallas() -> bool:
     """Checks for a full Pallas-on-CPU environment."""
     return has_pallas_package()
@@ -104,7 +96,7 @@ def has_cuda_pallas() -> bool:
 @functools.cache
 def has_tpu_pallas() -> bool:
     """Checks for a full Pallas-on-TPU environment."""
-    return has_pallas_package() and has_jax_tpu_backend() and has_torch_tpu()
+    return has_pallas_package() and has_jax_tpu_backend()
 
 
 @functools.cache

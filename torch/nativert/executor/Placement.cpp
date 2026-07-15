@@ -1,7 +1,6 @@
 #include <torch/nativert/executor/Placement.h>
 
 #include <fmt/ostream.h>
-#include <algorithm>
 #include <ostream>
 
 namespace torch::nativert {

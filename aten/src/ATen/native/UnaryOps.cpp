@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
@@ -386,8 +387,7 @@ TORCH_IMPL_FUNC(polygamma_out)
 }
 
 TORCH_IMPL_FUNC(signbit_out) (const Tensor& self, const Tensor& result) {
-  auto dt = self.scalar_type();
-  if (at::isIntegralType(dt, /*includeBool=*/true) && !at::isSignedType(dt)) {
+  if (self.dtype() == at::kBool) {
     result.fill_(false);
   } else {
     signbit_stub(device_type(), *this);
@@ -592,6 +592,7 @@ Tensor real(const Tensor& self) {
 Tensor _neg_view(const Tensor& self) {
   Tensor self_ = self.alias();
   self_._set_neg(!self.is_neg());
+  namedinference::propagate_names(self_, self);
   return self_;
 }
 
@@ -652,6 +653,7 @@ Tensor resolve_conj(const Tensor& self) {
 Tensor _conj(const Tensor& self) {
   Tensor self_ = self.alias();
   self_._set_conj(!self.is_conj());
+  namedinference::propagate_names(self_, self);
   return self_;
 }
 
@@ -742,6 +744,7 @@ Tensor special_ndtr(const Tensor& self) {
   return calc_ndtr(self);
 }
 
+// FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {
     sgn_stub(device_type(), *this);
@@ -909,10 +912,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 }
 
 Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
-  TORCH_CHECK(
-    self.device() == result.device(),
-    "Expected tensors to be on the same device, but found ", self.device(), " and ", result.device()
-  );
   auto out = self.mvlgamma(p);
   TORCH_CHECK(
       at::can_cast(out.scalar_type(), result.scalar_type()),
@@ -937,7 +936,7 @@ std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   Tensor exponent = at::empty_like(self, self.options().dtype(at::kInt));
 
   at::frexp_out(mantissa, exponent, self);
-  return std::tuple<Tensor, Tensor>(std::move(mantissa), std::move(exponent));
+  return std::tuple<Tensor, Tensor>(mantissa, exponent);
 }
 
 std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,

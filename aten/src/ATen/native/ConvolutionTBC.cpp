@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <tuple>
-#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -114,8 +113,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
   auto tmp = dOutput.sum(0, false);
   dBias.copy_(tmp.sum(0));
 
-  return std::make_tuple(
-      std::move(dInput), std::move(dWeight), std::move(dBias));
+  return std::make_tuple(dInput, dWeight, dBias);
 }
 
 } // namespace at::native

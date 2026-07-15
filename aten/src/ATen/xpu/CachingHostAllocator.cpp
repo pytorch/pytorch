@@ -14,11 +14,6 @@ struct XPUCachingHostAllocatorImpl
   void allocate_host_memory(size_t size, void** ptr) override {
     *ptr = sycl::aligned_alloc_host(
         kHostAlignment, size, c10::xpu::get_device_context());
-    TORCH_CHECK(
-        *ptr != nullptr,
-        "Failed to allocate ",
-        CachingAllocator::format_size(size),
-        " of pinned host memory.");
   }
 
   void free_block(Block* block) override {
@@ -48,7 +43,8 @@ struct XPUCachingHostAllocatorImpl
   }
 
   bool stream_is_capturing(XPUStream s) const override {
-    return s.is_capturing();
+    return c10::xpu::CaptureStatus(s.queue().ext_oneapi_get_state()) ==
+        c10::xpu::CaptureStatus::Recording;
   }
 };
 

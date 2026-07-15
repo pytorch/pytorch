@@ -28,7 +28,7 @@ from .optimizer import (
 __all__ = ["RAdam", "radam"]
 
 
-class RAdam(Optimizer):
+class RAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
@@ -42,7 +42,7 @@ class RAdam(Optimizer):
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ) -> None:
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -69,7 +69,7 @@ class RAdam(Optimizer):
         }
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("foreach", None)
@@ -132,7 +132,7 @@ class RAdam(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._accelerator_graph_capture_health_check()
+        self._cuda_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -181,7 +181,7 @@ RAdam.__doc__ = (
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{input}      : \gamma \text{ (lr)}, \: \beta_1, \beta_2
                 \text{ (betas)}, \: \theta_0 \text{ (params)}, \:f(\theta) \text{ (objective)}, \:
-                \lambda \text{ (weight decay)}, \:\textit{maximize}                               \\
+                \lambda \text{ (weightdecay)}, \:\textit{maximize}                               \\
             &\hspace{13mm} \epsilon \text{ (epsilon)}, \textit{decoupled\_weight\_decay}         \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0 \leftarrow 0 \text{ ( second moment)},                                       \\
@@ -323,6 +323,7 @@ def _single_tensor_radam(
         rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
 
         def _compute_rect():
+            # pyrefly: ignore [unsupported-operation]
             return (
                 (rho_t - 4)
                 * (rho_t - 2)
@@ -337,6 +338,7 @@ def _single_tensor_radam(
             else:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
 
+            # pyrefly: ignore [unsupported-operation]
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
         # Compute the variance rectification term and update parameters accordingly

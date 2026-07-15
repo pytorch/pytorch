@@ -1,7 +1,8 @@
-from typing import Any
+# mypy: allow-untyped-defs
+from typing import Optional
 
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
@@ -28,8 +29,8 @@ class FakeTensorProp(torch.fx.Interpreter):
     """
 
     def __init__(
-        self, module: torch.fx.GraphModule, mode: FakeTensorMode | None = None
-    ) -> None:
+        self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None
+    ):
         super().__init__(module)
         if mode is None:
             mode = FakeTensorMode()
@@ -38,7 +39,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         mode.reset_nt_tensor_id_counter()
         self.seen_subgraphs: OrderedSet[str] = OrderedSet()
 
-    def run_node(self, n: Node) -> Any:
+    def run_node(self, n: Node):
         from torch.fx.experimental.symbolic_shapes import (
             compute_unbacked_bindings,
             rebind_unbacked,
@@ -79,14 +80,14 @@ class FakeTensorProp(torch.fx.Interpreter):
         result = super().run_node(n)
         rebind_unbacked(self._mode.shape_env, n, result)
 
-        def extract_val(obj: Any) -> Any:
-            if is_fake_tensor(obj):
+        def extract_val(obj):
+            if isinstance(obj, FakeTensor):
                 return snapshot_fake(obj)
             elif isinstance(obj, torch.Tensor):
                 # TODO: How is it possible that we get a non fake tensor?  We
                 # should be running under the mode...
                 return snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
-            elif isinstance(obj, (*py_sym_types, int, float, bool)):
+            elif isinstance(obj, py_sym_types):
                 return obj
             else:
                 return None
@@ -101,25 +102,13 @@ class FakeTensorProp(torch.fx.Interpreter):
 
         return result
 
-    def propagate(self, *args: object) -> Any:
+    def propagate(self, *args):
         fake_args = [
             self._mode.from_tensor(a) if isinstance(a, torch.Tensor) else a
             for a in args
         ]
         return self.propagate_dont_convert_inputs(*fake_args)
 
-    def propagate_dont_convert_inputs(self, *args: object) -> Any:
-        # In-place ops like shallow_copy_data_ can mutate fake_device on
-        # input FakeTensors during propagation. Save and restore so the
-        # caller's inputs are not permanently corrupted.
-        saved_devices = [
-            (a, a.fake_device)
-            for a in args
-            if isinstance(a, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-        ]
+    def propagate_dont_convert_inputs(self, *args):
         with self._mode:
-            try:
-                return super().run(*args)
-            finally:
-                for fake, device in saved_devices:
-                    fake.fake_device = device
+            return super().run(*args)

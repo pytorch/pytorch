@@ -106,21 +106,6 @@ using op_input_t = std::variant<
     c10::IValue,
     std::nullopt_t>;
 
-// Parsed op-argument metadata (shapes, dtypes, concrete inputs). Shared by the
-// KinetoEvent constructor and the Kineto metadata producers.
-struct OpArgData {
-  bool hasData;
-  std::vector<shape> shapes;
-  std::vector<std::string> dtypes;
-  std::vector<c10::IValue> concreteInputs;
-  std::vector<std::vector<int64_t>> shapesForKinetoEvent;
-  std::vector<shape> strides;
-};
-
-TORCH_API OpArgData parseArgData(
-    const std::vector<op_input_t>& input_shapes,
-    const std::vector<op_input_t>& concreteInputs);
-
 // ============================================================================
 // == ExtraFields =============================================================
 // ============================================================================
@@ -146,14 +131,6 @@ using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
 using kwinputs_t = std::unordered_map<std::string, c10::IValue>;
-
-// Mirrors `libkineto::GenericTraceActivity::Flow`. Used during post processing
-// to embed Kineto events into the broader profiler tree structure.
-struct Flow {
-  uint32_t id{0};
-  uint32_t type{0};
-  uint32_t start{0};
-};
 
 struct FallbackPair {
   ProfilerVoidEventStub device_event_start_ = nullptr;
@@ -202,7 +179,6 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
   std::string metadata_json_;
-  Flow flow;
 };
 
 template <>
@@ -378,6 +354,16 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::Kineto> {
+  // Mirrors `libkineto::GenericTraceActivity::Flow`. This information is used
+  // during post processing to properly embed Kineto events into the broader
+  // profiler tree structure. End users are not generally expected to use these
+  // fields directly, but they are available for debugging.
+  struct Flow {
+    uint32_t id{0};
+    uint32_t type{0};
+    uint32_t start{0};
+  };
+
   std::string name_;
   int64_t duration_ns_{0};
   uint64_t correlation_id_{0};
@@ -385,7 +371,6 @@ struct ExtraFields<EventType::Kineto> {
   Flow flow;
   std::weak_ptr<Result> linked_activity_;
   std::string metadata_json_;
-  extra_meta_t extra_meta_;
 };
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
@@ -485,20 +470,6 @@ struct KinetoObserverContext : public at::ObserverContext {
 
   Event* event_;
   FallbackPair* fallback_{nullptr};
-
-  // Generation of the global session this op entered under, snapshotted from
-  // global_callback_session at enter time. That counter bumps per new global
-  // session (not on the mid-session toggle). At exit, a match means event_ is
-  // still live so the exit finalizes it; a mismatch means the session was torn
-  // down and event_ freed, so the exit drops without touching event_.
-  uint64_t session_generation_{0};
-
-  // True if begin_op pushed an external correlation id for this op. The
-  // matching pop must run on every exit path (including teardown /
-  // stale-session early exits), or the id leaks onto the device profiling
-  // backend's per-thread correlation stack, which is not reset across profiler
-  // sessions.
-  bool pushed_correlation_id_{false};
 };
 
 constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;

@@ -3,15 +3,24 @@
 set -ex
 
 install_ubuntu() {
-  ARCH=$(uname -m)
-  VERSION=0.16.0
-  FEATURES="sccache sccache-dist"
-  echo "Downloading sccache binaries from GitHub mozilla/sccache release"
-  for feature in $FEATURES; do
-    curl --retry 3 -fsSL https://github.com/mozilla/sccache/releases/download/v${VERSION}/${feature}-v${VERSION}-${ARCH}-unknown-linux-musl.tar.gz | \
-      tar -xz -C /opt/cache/bin --strip-components=1 ${feature}-v${VERSION}-${ARCH}-unknown-linux-musl/${feature}
-    chmod a+x /opt/cache/bin/${feature}
-  done
+  echo "Installing pkg-config and libssl-dev"
+  apt-get update && apt-get install -y pkg-config libssl-dev curl
+  echo "Installing rust"
+  curl https://sh.rustup.rs -sSf | sh -s -- -y
+  echo "Checking out sccache repo"
+  git clone https://github.com/mozilla/sccache -b v0.13.0
+  cd sccache
+  echo "Patch dist build on aarch64"
+  sed -i '/all(target_os = "linux", target_arch = "x86_64"),/{ p; s/x86_64/aarch64/; }' src/bin/sccache-dist/main.rs
+  echo "Building sccache"
+  . "$HOME/.cargo/env" && cargo build --release --features="dist-client dist-server"
+  cp target/release/sccache /opt/cache/bin
+  cp target/release/sccache-dist /opt/cache/bin
+  echo "Cleaning up"
+  cd ..
+  rm -rf sccache .cargo
+  apt-get remove -y pkg-config libssl-dev
+  apt-get autoclean && apt-get clean
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
@@ -30,6 +39,7 @@ export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
 install_ubuntu
+chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues
@@ -67,15 +77,10 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-# Skip all sccache wrapping for theRock nightly: sccache PATH wrappers
-# intercept assembly (.s) compilation and fail because the assembler does not
-# produce the .d dependency file that sccache expects.
-if [ "$ROCM_VERSION" != "nightly" ]; then
-  write_sccache_stub cc
-  write_sccache_stub c++
-  write_sccache_stub gcc
-  write_sccache_stub g++
-fi
+write_sccache_stub cc
+write_sccache_stub c++
+write_sccache_stub gcc
+write_sccache_stub g++
 
 # NOTE: See specific ROCM_VERSION case below.
 if [ "x$ROCM_VERSION" = x ]; then

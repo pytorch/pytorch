@@ -89,14 +89,14 @@ class TestCase(PytorchTestCase):
         try:
             result_e = expected()
             exception_e = None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             result_e = None
             exception_e = e
 
         try:
             result_a = actual()
             exception_a = None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             result_a = None
             exception_a = e
 
@@ -106,7 +106,7 @@ class TestCase(PytorchTestCase):
             self.assertIs(
                 type(exception_e),
                 type(exception_a),
-                lambda msg: f"{msg}\n{exception_e=}\n{exception_a=}",
+                f"\n{exception_e=}\n{exception_a=}",
             )
 
         if exception_e is None:

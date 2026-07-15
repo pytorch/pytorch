@@ -400,16 +400,6 @@ Check this module for more information.
                 symIntArrayRef_ctype = NamedCType(goal.name, BaseCType(symIntArrayRefT))
                 argname = direct_solve(symIntArrayRef_ctype)
                 return f"{argname}.vec()"
-            if goal.type == BaseCType(tensorT):
-                const_ref_tensor_ctype = NamedCType(
-                    goal.name, ConstRefCType(BaseCType(tensorT))
-                )
-                return direct_solve(const_ref_tensor_ctype)
-            if goal.type == OptionalCType(BaseCType(tensorT)):
-                const_ref_optional_tensor_ctype = NamedCType(
-                    goal.name, ConstRefCType(OptionalCType(BaseCType(tensorT)))
-                )
-                return direct_solve(const_ref_optional_tensor_ctype)
             elif goal.type == OptionalCType(VectorCType(BaseCType(longT))):
                 optionalIntArrayRef_ctype = NamedCType(
                     goal.name, BaseCType(optionalIntArrayRefT)
@@ -422,7 +412,7 @@ Check this module for more information.
                 )
                 argname = direct_solve(optionalScalarRef_ctype)
                 return f"{argname}.has_value() ? ::std::make_optional({argname}) : ::std::nullopt"
-            elif goal.type == OptionalCType(BaseCType(tensorT)):
+            elif goal.type == OptionalCType(BaseCType(scalarT)):
                 optionalTensorRef_ctype = NamedCType(
                     goal.name, BaseCType(optionalTensorRefT)
                 )

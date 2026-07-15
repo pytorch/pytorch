@@ -75,13 +75,8 @@ inline void adam_math_amsgrad(
     const float beta2,
     const float weight_decay,
     const float eps,
-    const uint8_t maximize,
-    device const float* grad_scale) {
+    const uint8_t maximize) {
   T grad_ = grad;
-  if (grad_scale) {
-    grad_ = T(static_cast<float>(grad_) / *grad_scale);
-    grad = grad_;
-  }
 
   if (maximize) {
     grad = -grad;
@@ -128,13 +123,8 @@ inline void adam_math(
     const float beta2,
     const float weight_decay,
     const float eps,
-    const uint8_t maximize,
-    device const float* grad_scale) {
+    const uint8_t maximize) {
   T grad_ = grad;
-  if (grad_scale) {
-    grad_ = T(static_cast<float>(grad_) / *grad_scale);
-    grad = grad_;
-  }
 
   if (maximize) {
     grad = -grad;
@@ -177,14 +167,9 @@ kernel void fused_adam_amsgrad(
     constant float& weight_decay [[buffer(5)]],
     constant float& eps [[buffer(6)]],
     constant uint8_t& maximize [[buffer(7)]],
-    device const float* grad_scale [[buffer(8)]],
-    device const float* found_inf [[buffer(9)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tptg [[threads_per_threadgroup]]) {
-  if (found_inf && *found_inf == 1) {
-    return;
-  }
   const uint32_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
   const uint32_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
   const uint32_t chunk_offset = chunk_idx * chunk_size;
@@ -213,8 +198,7 @@ kernel void fused_adam_amsgrad(
         beta2,
         weight_decay,
         eps,
-        maximize,
-        grad_scale);
+        maximize);
   }
 }
 
@@ -228,14 +212,9 @@ kernel void fused_adam(
     constant float& weight_decay [[buffer(5)]],
     constant float& eps [[buffer(6)]],
     constant uint8_t& maximize [[buffer(7)]],
-    device const float* grad_scale [[buffer(8)]],
-    device const float* found_inf [[buffer(9)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tptg [[threads_per_threadgroup]]) {
-  if (found_inf && *found_inf == 1) {
-    return;
-  }
   const uint32_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
   const uint32_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
   const uint32_t chunk_offset = chunk_idx * chunk_size;
@@ -262,8 +241,7 @@ kernel void fused_adam(
         beta2,
         weight_decay,
         eps,
-        maximize,
-        grad_scale);
+        maximize);
   }
 }
 
@@ -286,8 +264,6 @@ kernel void fused_adam(
           constant float& weight_decay [[buffer(5)]],                         \
           constant float& eps [[buffer(6)]],                                  \
           constant uint8_t& maximize [[buffer(7)]],                           \
-          device const float* grad_scale [[buffer(8)]],                       \
-          device const float* found_inf [[buffer(9)]],                        \
           uint tid [[thread_position_in_threadgroup]],                        \
           uint tgid [[threadgroup_position_in_grid]],                         \
           uint tptg [[threads_per_threadgroup]])
@@ -343,13 +319,8 @@ inline void sgd_momentum_math(
     const float dampening,
     const uint8_t nesterov,
     const uint8_t maximize,
-    const uint8_t is_first_step,
-    device const float* grad_scale) {
+    const uint8_t is_first_step) {
   auto grad_ = grad;
-  if (grad_scale) {
-    grad_ = T(static_cast<float>(grad_) / *grad_scale);
-    grad = grad_;
-  }
   if (maximize) {
     grad_ *= T(-1.0);
   }
@@ -375,13 +346,8 @@ inline void sgd_math(
     device T& grad,
     const float weight_decay,
     const float lr,
-    const uint8_t maximize,
-    device const float* grad_scale) {
+    const uint8_t maximize) {
   auto grad_ = grad;
-  if (grad_scale) {
-    grad_ = T(static_cast<float>(grad_) / *grad_scale);
-    grad = grad_;
-  }
   if (maximize) {
     grad_ *= T(-1.0);
   }
@@ -399,14 +365,9 @@ kernel void fused_sgd(
     constant float& weight_decay [[buffer(2)]],
     constant float& lr [[buffer(3)]],
     constant uint8_t& maximize [[buffer(4)]],
-    device const float* grad_scale [[buffer(5)]],
-    device const float* found_inf [[buffer(6)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tptg [[threads_per_threadgroup]]) {
-  if (found_inf && *found_inf == 1) {
-    return;
-  }
   const uint32_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
   const uint32_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
   const uint32_t chunk_offset = chunk_idx * chunk_size;
@@ -419,12 +380,7 @@ kernel void fused_sgd(
   for (uint32_t i_start = tid; i_start < numel && i_start < chunk_size;
        i_start += tptg) {
     sgd_math<T>(
-        *(param + i_start),
-        *(grad + i_start),
-        weight_decay,
-        lr,
-        maximize,
-        grad_scale);
+        *(param + i_start), *(grad + i_start), weight_decay, lr, maximize);
   }
 }
 
@@ -439,14 +395,9 @@ kernel void fused_sgd(
     constant uint8_t& nesterov [[buffer(6)]],
     constant uint8_t& maximize [[buffer(7)]],
     constant uint8_t& is_first_step [[buffer(8)]],
-    device const float* grad_scale [[buffer(9)]],
-    device const float* found_inf [[buffer(10)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tptg [[threads_per_threadgroup]]) {
-  if (found_inf && *found_inf == 1) {
-    return;
-  }
   const uint32_t tensor_loc = metadata_args.threadgroup_to_tensor[tgid];
   const uint32_t chunk_idx = metadata_args.threadgroup_to_chunk[tgid];
   const uint32_t chunk_offset = chunk_idx * chunk_size;
@@ -470,8 +421,7 @@ kernel void fused_sgd(
         dampening,
         nesterov,
         maximize,
-        is_first_step,
-        grad_scale);
+        is_first_step);
   }
 }
 
@@ -482,8 +432,6 @@ kernel void fused_sgd(
       constant float& weight_decay [[buffer(2)]],                           \
       constant float& lr [[buffer(3)]],                                     \
       constant uint8_t& maximize [[buffer(4)]],                             \
-      device const float* grad_scale [[buffer(5)]],                         \
-      device const float* found_inf [[buffer(6)]],                          \
       uint tid [[thread_position_in_threadgroup]],                          \
       uint tgid [[threadgroup_position_in_grid]],                           \
       uint tptg [[threads_per_threadgroup]])
@@ -500,8 +448,6 @@ kernel void fused_sgd(
       constant uint8_t& nesterov [[buffer(6)]],                    \
       constant uint8_t& maximize [[buffer(7)]],                    \
       constant uint8_t& is_first_step [[buffer(8)]],               \
-      device const float* grad_scale [[buffer(9)]],                \
-      device const float* found_inf [[buffer(10)]],                \
       uint tid [[thread_position_in_threadgroup]],                 \
       uint tgid [[threadgroup_position_in_grid]],                  \
       uint tptg [[threads_per_threadgroup]])

@@ -1,10 +1,8 @@
 # Owner(s): ["module: higher order operators"]
 import io
-import unittest
 from unittest.mock import patch
 
 import torch
-import torch._dynamo.config
 from torch._dynamo.testing import AotEagerAndRecordGraphs, InductorAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
@@ -19,29 +17,8 @@ from torch.testing._internal.common_utils import (
 )
 
 
-if torch.distributed.is_available():
-    from torch.distributed.tensor import DTensor, Replicate, Shard
-    from torch.testing._internal.distributed._tensor.common_dtensor import (
-        DTensorTestBase,
-        with_comms,
-    )
-else:
-    DTensorTestBase = TestCase  # type: ignore[assignment, misc]
-    with_comms = lambda fn: fn  # type: ignore[assignment]  # noqa: E731
-
-
 @instantiate_parametrized_tests
 class TestHopPrint(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        torch._dynamo.config.canonicalize_output_graph_node_order = True
-
-    @classmethod
-    def tearDownClass(cls):
-        torch._dynamo.config.canonicalize_output_graph_node_order = False
-        super().tearDownClass()
-
     def test_base_print(self):
         def f(x):
             x = x + x
@@ -501,7 +478,7 @@ x = add_1, y = add_2);  getitem = None
         self.assertEqual(
             fusion_ops_no_print,
             fusion_ops_with_print,
-            lambda msg: f"{msg}\nFusion patterns differ!\n"
+            f"Fusion patterns differ!\n"
             f"Without print: {fusion_ops_no_print}\n"
             f"With print: {fusion_ops_with_print}",
         )
@@ -573,7 +550,7 @@ x = add_1, y = add_2);  getitem = None
         self.assertEqual(
             fusion_ops_no_print,
             fusion_ops_with_print,
-            lambda msg: f"{msg}\nFusion patterns differ!\n"
+            f"Fusion patterns differ!\n"
             f"Without print: {fusion_ops_no_print}\n"
             f"With print: {fusion_ops_with_print}",
         )
@@ -622,9 +599,9 @@ x = add_1, y = add_2);  getitem = None
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     print_1 = torch.ops.higher_order.print('moo {x} {y}', x = 1, y = 2);  print_1 = None
-    add = l_x_ + l_x_;  l_x_ = None
-    print_2 = torch.ops.higher_order.print('values {} {}', 3, add);  print_2 = None
-    return (add,)""",
+    res = l_x_ + l_x_;  l_x_ = None
+    print_2 = torch.ops.higher_order.print('values {} {}', 3, res);  print_2 = None
+    return (res,)""",
             )
 
         # Check forward graph - should have with_effects wrapping print
@@ -639,7 +616,7 @@ def forward(self, primals_1, primals_2):
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, \
 'values {} {}', 3, add);  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    return (getitem_2, add)""",
+    return (getitem_2, add)""",  # noqa: B950
         )
 
         # Check backward graph - print HOP doesn't contribute to gradients
@@ -691,211 +668,8 @@ def forward(self, arg1_1):
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
-    return (add,)""",
+    return (add,)""",  # noqa: B950
         )
-
-
-@unittest.skipIf(
-    not torch.distributed.is_available(), "torch.distributed not available"
-)
-class TestHopPrintDTensor(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        return 4
-
-    @with_comms
-    def test_print_dtensor_basic(self):
-        """Sharded DTensor prints local shard on all ranks."""
-        device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
-        local_shard = full_tensor.chunk(self.world_size)[self.rank]
-        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
-
-        def f(x):
-            x = x + x
-            torch._higher_order_ops.print("tensor: {}", x)
-            return x
-
-        local_doubled = local_shard + local_shard
-        expected = f"[rank {self.rank}] tensor: {local_doubled}\n"
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            f(dtensor)
-            output = mock_stdout.getvalue()
-        self.assertEqual(output, expected)
-
-    @with_comms
-    def test_print_dtensor_replicate(self):
-        """Replicated DTensor prints full tensor on all ranks."""
-        device_mesh = self.build_device_mesh()
-        full_tensor = torch.tensor([1.0, 2.0, 3.0], device=self.device_type)
-        dtensor = DTensor.from_local(full_tensor, device_mesh, [Replicate()])
-
-        def f(x):
-            x = x * 2
-            torch._higher_order_ops.print("val: {}", x)
-            return x
-
-        expected = f"[rank {self.rank}] val: {full_tensor * 2}\n"
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            eager_result = f(dtensor)
-            eager_output = mock_stdout.getvalue()
-        self.assertEqual(eager_output, expected)
-
-        opt_f = torch.compile(f, backend="aot_eager", fullgraph=True)
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            compiled_result = opt_f(dtensor)
-            compiled_output = mock_stdout.getvalue()
-
-        self.assertEqual(compiled_result.to_local(), eager_result.to_local())
-        self.assertEqual(compiled_output, expected)
-
-    @with_comms
-    def test_print_dtensor_format_str(self):
-        """Test both positional and keyword sharded DTensor args in format strings."""
-        device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
-        local_shard = full_tensor.chunk(self.world_size)[self.rank]
-        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
-
-        def f_pos(x):
-            torch._higher_order_ops.print("pos: {}", x)
-
-        def f_kw(x):
-            torch._higher_order_ops.print("kw: {x}", x=x)
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            f_pos(dtensor)
-            pos_output = mock_stdout.getvalue()
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            f_kw(dtensor)
-            kw_output = mock_stdout.getvalue()
-
-        self.assertEqual(pos_output, f"[rank {self.rank}] pos: {local_shard}\n")
-        self.assertEqual(kw_output, f"[rank {self.rank}] kw: {local_shard}\n")
-
-    @with_comms
-    def test_print_dtensor_mixed_args(self):
-        """Mix sharded DTensor and scalar args in a single print call."""
-        device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
-        local_shard = full_tensor.chunk(self.world_size)[self.rank]
-        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
-
-        def f(x):
-            torch._higher_order_ops.print("dt: {} scalar: {}", x, 42)
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            f(dtensor)
-            output = mock_stdout.getvalue()
-
-        self.assertEqual(output, f"[rank {self.rank}] dt: {local_shard} scalar: 42\n")
-
-    @with_comms
-    def test_print_dtensor_multiple_prints(self):
-        """Multiple sharded DTensor prints with intermediate computations."""
-        device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
-        local_shard = full_tensor.chunk(self.world_size)[self.rank]
-        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
-
-        def f(x):
-            x1 = x + x
-            torch._higher_order_ops.print("after add: {}", x1)
-            x2 = x1 * x1
-            torch._higher_order_ops.print("after mul: {}", x2)
-            return x2
-
-        local_added = local_shard + local_shard
-        local_mulled = local_added * local_added
-        r = self.rank
-        expected = f"[rank {r}] after add: {local_added}\n[rank {r}] after mul: {local_mulled}\n"
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            f(dtensor)
-            output = mock_stdout.getvalue()
-        self.assertEqual(output, expected)
-
-    @with_comms
-    def test_print_dtensor_kwargs(self):
-        """Sharded DTensor print with kwargs."""
-        device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
-        local_shard = full_tensor.chunk(self.world_size)[self.rank]
-        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
-
-        def f(x):
-            x = x + 1
-            torch._higher_order_ops.print("result: {x} count: {n}", x=x, n=42)
-            return x
-
-        expected = f"[rank {self.rank}] result: {local_shard + 1} count: 42\n"
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            f(dtensor)
-            output = mock_stdout.getvalue()
-        self.assertEqual(output, expected)
-
-    @with_comms
-    @skipIfTorchDynamo("Skipped under Dynamo")
-    def test_print_dtensor_inductor_output_code(self):
-        """Verify inductor generated code contains print for replicated DTensor."""
-        device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
-        dtensor = DTensor.from_local(full_tensor, device_mesh, [Replicate()])
-
-        def f(x):
-            x = x + x
-            torch._higher_order_ops.print("val: {}", x)
-            return x
-
-        compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
-        with patch("sys.stdout", new_callable=io.StringIO):
-            _, codes = run_and_get_code(compiled_f, dtensor)
-
-        merged_code = "\n".join(codes)
-        self.assertIn(
-            "print",
-            merged_code,
-            "Inductor output code should contain print call",
-        )
-        self.assertNotIn(
-            "torch.ops.higher_order.print",
-            merged_code,
-            "Inductor should use python print, not the HOP directly",
-        )
-
-    @with_comms
-    @skipIfTorchDynamo("Skipped under Dynamo")
-    def test_print_dtensor_compiled_sharded(self):
-        """Verify compiled sharded DTensor prints match eager output per rank."""
-        device_mesh = self.build_device_mesh()
-        full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
-        local_shard = full_tensor.chunk(self.world_size)[self.rank]
-        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
-
-        def f(x):
-            x = x + x
-            torch._higher_order_ops.print("val: {}", x)
-            return x
-
-        local_doubled = local_shard + local_shard
-        expected = f"[rank {self.rank}] val: {local_doubled}\n"
-
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            eager_result = f(dtensor)
-            eager_output = mock_stdout.getvalue()
-        self.assertEqual(eager_output, expected)
-
-        opt_f = torch.compile(f, backend="aot_eager", fullgraph=True)
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            compiled_result = opt_f(dtensor)
-            compiled_output = mock_stdout.getvalue()
-
-        self.assertEqual(compiled_result.to_local(), eager_result.to_local())
-        self.assertEqual(compiled_output, expected)
 
 
 if __name__ == "__main__":

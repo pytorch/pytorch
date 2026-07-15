@@ -17,6 +17,7 @@ def define_kineto():
             "kineto/libkineto/src/ActivityProfilerProxy.cpp",
             "kineto/libkineto/src/CuptiActivityApi.cpp",
             "kineto/libkineto/src/CuptiActivityProfiler.cpp",
+            "kineto/libkineto/src/CuptiRangeProfilerApi.cpp",
             "kineto/libkineto/src/Demangle.cpp",
             "kineto/libkineto/src/init.cpp",
             "kineto/libkineto/src/output_csv.cpp",

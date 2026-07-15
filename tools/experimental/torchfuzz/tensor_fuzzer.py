@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import random
-from typing import NamedTuple, TypeAlias
+from typing import NamedTuple, Union
 
 import torch
 
@@ -30,7 +30,8 @@ class ScalarSpec(NamedTuple):
     )
 
 
-Spec: TypeAlias = TensorSpec | ScalarSpec
+# Union type for specs
+Spec = Union[TensorSpec, ScalarSpec]
 
 
 def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
@@ -43,10 +44,31 @@ def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
     Returns:
         torch.dtype: A randomly selected PyTorch tensor data type based on template constraints
     """
-    # Import here to avoid circular imports
-    from torchfuzz.codegen import make_template
 
-    tensor_dtypes = make_template(template).supported_dtypes()
+    # Get template-specific dtypes
+    if template == "dtensor":
+        # Import here to avoid circular imports
+        from torchfuzz.codegen import DTensorFuzzTemplate
+
+        fuzz_template = DTensorFuzzTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
+    elif template == "dtensor_placements":
+        # Import here to avoid circular imports
+        from torchfuzz.codegen import DTensorFuzzPlacementsTemplate
+
+        fuzz_template = DTensorFuzzPlacementsTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
+    elif template == "unbacked":
+        # Import here to avoid circular imports
+        from torchfuzz.codegen import UnbackedFuzzTemplate
+
+        fuzz_template = UnbackedFuzzTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
+    else:
+        from torchfuzz.codegen import DefaultFuzzTemplate
+
+        fuzz_template = DefaultFuzzTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
 
     # Randomly select and return a data type
     return random.choice(tensor_dtypes)
@@ -390,12 +412,7 @@ def fuzz_tensor(
             elif dtype == torch.bool:
                 base_tensor = torch.randint(0, 2, (required_storage,), dtype=torch.bool)
             else:  # integer types
-                # torch.randint requires `low` to be within the dtype's
-                # representable range. Unsigned dtypes (uint8/16/32/64)
-                # cannot represent negative values, so clamp `low` to 0;
-                # signed dtypes keep the default of -100.
-                low = -100 if torch.iinfo(dtype).min < 0 else 0
-                base_tensor = torch.randint(low, 100, (required_storage,), dtype=dtype)
+                base_tensor = torch.randint(-100, 100, (required_storage,), dtype=dtype)
         else:
             # Use zeros (default behavior)
             base_tensor = torch.ones(required_storage, dtype=dtype)

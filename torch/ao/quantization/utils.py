@@ -241,17 +241,14 @@ def get_swapped_custom_module_class(
     custom_module, custom_module_class_mapping, qconfig
 ):
     """Get the observed/quantized custom module class that we need
-    to swap ``custom_module`` to.
-
+    to swap `custom_module` to
     Input:
-
-    - custom_module: input, can be an instance of either a float or observed custom module
-    - custom_module_class_mapping: the float to observed or observed to quantized custom module class mapping
-    - qconfig: qconfig configured for the custom module
+        custom_module: input, can be an instance of either a float or observed custom module
+        custom_module_class_mapping: the float to observed or observed to quantized custom module class mapping
+        qconfig: qconfig configured for the custom module
 
     Output:
-
-    Corresponding observed/quantized custom module class for input custom module instance.
+        corresponding observed/quantized custom module class for input custom module instance
     """
     quant_type = get_quant_type(qconfig)
     class_mapping = custom_module_class_mapping.get(quant_type, {})
@@ -736,24 +733,24 @@ def get_fqn_to_example_inputs(
 ) -> dict[str, tuple[Any, ...]]:
     """Given a model and its example inputs, return a dictionary from
     fully qualified name of submodules to example_inputs for that submodule,
-    e.g. ``{"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
-    "sub.linear1": (tensor4,), ...}``
+    e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
+          "sub.linear1": (tensor4,), ...}
 
     Used to make quantizing submodules easier now that FX Graph Mode Quantization requires
     example inputs.
 
     Also works for keyword arguments with default values, we would flatten keyword
     arguments as positional arguments and fill in the missing keyword args with default
-    values, e.g. if we have a forward function::
+    values, e.g. if we have a forward function:
+    def forward(self, x, key1=3, key2=3):
+        ...
 
-        def forward(self, x, key1=3, key2=3): ...
+    and we call it with self.submodule(x, key2=6)
+    we'll get example_inputs: (x, 3, 6)
 
-    and we call it with ``self.submodule(x, key2=6)``
-    we'll get ``example_inputs: (x, 3, 6)``
-
-    user can also override ``key1`` with positional arguments as well:
-    for ``self.submodule(x, 5, key2=6)``
-    we'll get: ``(x, 5, 6)``
+    user can also override `key1` with positional arguments as well:
+    for self.submodule(x, 5, key2=6)
+    we'll get: (x, 5, 6)
 
     variable positional arguments and variable positional keyword arguments in forward
     function are not supported currently, so please make sure no submodules is using

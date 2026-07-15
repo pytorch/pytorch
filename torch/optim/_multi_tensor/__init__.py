@@ -11,8 +11,9 @@ from functools import partialmethod
 from torch import optim
 
 
-def partialclass(cls, *args, **kwargs):
+def partialclass(cls, *args, **kwargs):  # noqa: D103
     class NewCls(cls):
+        # pyrefly: ignore [not-iterable]
         __init__ = partialmethod(cls.__init__, *args, **kwargs)
 
     return NewCls

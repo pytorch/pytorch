@@ -45,8 +45,7 @@ from torch.fx.operator_schemas import (
 from torch.fx.passes import graph_manipulation
 from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.fx._lazy_graph_module import _use_lazy_graph_module
-from torch.fx.passes.split_module import split_module, split_module_simple
+from torch.fx.passes.split_module import split_module
 from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -55,14 +54,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    TEST_Z3,
-    run_tests,
-    TestCase,
-    TEST_WITH_CROSSREF,
-)
+from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase, TEST_WITH_CROSSREF
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
 
@@ -80,7 +72,7 @@ skipIfNoMkldnn = unittest.skipIf(
 )
 
 
-def symbolic_trace_with_rewrite(root: torch.nn.Module | Callable) -> GraphModule:
+def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
     return GraphModule(
         root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
         RewritingTracer().trace(root),
@@ -109,8 +101,7 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
-        if dag.nodes[0].logical_device_ids != [1]:
-            raise AssertionError(f"expected logical_device_ids == [1], got {dag.nodes[0].logical_device_ids}")
+        assert dag.nodes[0].logical_device_ids == [1]
 
     def test_lack_of_devices(self):
         class TestModule(torch.nn.Module):
@@ -130,8 +121,7 @@ class TestFXExperimental(JitTestCase):
             ret = partitioner.partition_graph(traced, m, partitioner_config)
         except RuntimeError:
             catch_runtime_error = True
-        if not catch_runtime_error:
-            raise AssertionError("expected RuntimeError")
+        assert catch_runtime_error
 
     def test_large_node_error(self):
         class TestModule(torch.nn.Module):
@@ -162,8 +152,7 @@ class TestFXExperimental(JitTestCase):
             ret = partitioner.partition_graph(traced, m, partitioner_config)
         except RuntimeError:
             catch_runtime_error = True
-        if not catch_runtime_error:
-            raise AssertionError("expected RuntimeError")
+        assert catch_runtime_error
 
     def test_partition_node_manipulation(self):
         class TestModule(torch.nn.Module):
@@ -182,16 +171,14 @@ class TestFXExperimental(JitTestCase):
         partitioner_config = PartitionerConfig(devices)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         partition = partitioner.partitions[0]
-        if partition.used_mem_bytes != 112:
-            raise AssertionError(f"expected used_mem_bytes == 112, got {partition.used_mem_bytes}")
+        assert partition.used_mem_bytes == 112
         # Select add_2 node to remove
         selected_node = None
         for node in partition.nodes:
             if node.name == "add_2":
                 selected_node = node
         partition.remove_node(selected_node)
-        if partition.used_mem_bytes != 80:
-            raise AssertionError(f"expected used_mem_bytes == 80, got {partition.used_mem_bytes}")
+        assert partition.used_mem_bytes == 80
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -223,8 +210,7 @@ class TestFXExperimental(JitTestCase):
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
         for i, node in enumerate(dag.nodes):
-            if node.logical_device_ids != [i]:
-                raise AssertionError(f"expected logical_device_ids == [{i}], got {node.logical_device_ids}")
+            assert node.logical_device_ids == [i]
 
     def test_partition_device_mapping(self):
         class TestModule(torch.nn.Module):
@@ -253,11 +239,9 @@ class TestFXExperimental(JitTestCase):
         self.assertEqual(traced(a), module_with_submodules(a))
         for i, node in enumerate(dag.nodes):
             if i == 1:
-                if node.logical_device_ids != [1]:
-                    raise AssertionError(f"expected logical_device_ids == [1], got {node.logical_device_ids}")
+                assert node.logical_device_ids == [1]
             else:
-                if node.logical_device_ids != [0]:
-                    raise AssertionError(f"expected logical_device_ids == [0], got {node.logical_device_ids}")
+                assert node.logical_device_ids == [0]
 
     def test_sparse_nn_partition(self):
         class MyRecommendationModule(torch.nn.Module):
@@ -319,8 +303,7 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b, offset), module_with_submodules(a, b, offset))
-        if len(module_with_submodules.graph.nodes) != 24:
-            raise AssertionError(f"expected 24 nodes, got {len(module_with_submodules.graph.nodes)}")
+        assert len(module_with_submodules.graph.nodes) == 24
 
     def test_partition_latency(self):
         class TestModule(torch.nn.Module):
@@ -370,17 +353,14 @@ class TestFXExperimental(JitTestCase):
         )
         for p in partition_to_latency_mapping:
             if p.partition_id == 0:
-                if partition_to_latency_mapping[p] != (128.0, 80.0, 160.0):
-                    raise AssertionError(f"expected (128.0, 80.0, 160.0), got {partition_to_latency_mapping[p]}")
+                assert partition_to_latency_mapping[p] == (128.0, 80.0, 160.0)
             else:
-                if partition_to_latency_mapping[p] != (16.0, 32.0, 32.0):
-                    raise AssertionError(f"expected (16.0, 32.0, 32.0), got {partition_to_latency_mapping[p]}")
+                assert partition_to_latency_mapping[p] == (16.0, 32.0, 32.0)
         transfer_rate_bytes_per_sec = 2
         critical_path_latency_sec = get_latency_of_partitioned_graph(
             partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec
         )
-        if critical_path_latency_sec != 208.0:
-            raise AssertionError(f"expected 208.0, got {critical_path_latency_sec}")
+        assert critical_path_latency_sec == 208.0
 
     def test_cost_aware_partition(self):
         class MyModule(torch.nn.Module):
@@ -442,8 +422,7 @@ class TestFXExperimental(JitTestCase):
             partition_to_latency_mapping,
             partitioner_config.transfer_rate_bytes_per_sec,
         )
-        if critical_path_latency_sec != 160.0:
-            raise AssertionError(f"expected 160.0, got {critical_path_latency_sec}")
+        assert critical_path_latency_sec == 160.0
 
     def test_aot_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -482,10 +461,8 @@ class TestFXExperimental(JitTestCase):
         dag = ret.dag
         self.assertEqual(module_with_submodules(a), traced(a))
         for node in dag.nodes:
-            if node.size_bytes != 48:
-                raise AssertionError(f"expected size_bytes == 48, got {node.size_bytes}")
-            if node.logical_device_ids != [0]:
-                raise AssertionError(f"expected logical_device_ids == [0], got {node.logical_device_ids}")
+            assert node.size_bytes == 48
+            assert node.logical_device_ids == [0]
 
     def test_replace_target_nodes_with(self):
         class testModule(torch.nn.Module):
@@ -496,8 +473,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace(m)
         input1 = torch.randn(1)
         input2 = torch.randn(1)
-        if (input1 + input2) != traced(input1, input2):
-            raise AssertionError("traced output mismatch")
+        assert (input1 + input2) == traced(input1, input2)
         graph_manipulation.replace_target_nodes_with(
             fx_module=traced,
             old_op="call_function",
@@ -505,8 +481,7 @@ class TestFXExperimental(JitTestCase):
             new_op="call_function",
             new_target=operator.mul,
         )
-        if (input1 * input2) != traced(input1, input2):
-            raise AssertionError("traced output mismatch after replacement")
+        assert (input1 * input2) == traced(input1, input2)
 
     def test_saturate_host(self):
         class TestModule(torch.nn.Module):
@@ -614,7 +589,7 @@ class TestFXExperimental(JitTestCase):
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
-                assert a == b  # noqa: S101
+                assert a == b
                 return a + b
 
         m = M()
@@ -673,7 +648,7 @@ class TestFXExperimental(JitTestCase):
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
-                assert a == b, "test message"  # noqa: S101
+                assert a == b, "test message"
                 return a + b
 
         m = M()
@@ -701,7 +676,7 @@ class TestFXExperimental(JitTestCase):
     def test_call_to_assert_with_empty_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
-                assert a == b, ""  # noqa: S101
+                assert a == b, ""
                 return a + b
 
         m = M()
@@ -733,7 +708,7 @@ class TestFXExperimental(JitTestCase):
 An error message with
 terrible spacing
                 """
-                assert a == b, error_msg  # noqa: S101
+                assert a == b, error_msg
                 return a + b
 
         m = M()
@@ -762,8 +737,7 @@ terrible spacing
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
 
-    @parametrize("use_lazy", [True, False])
-    def test_subgraph_creation(self, use_lazy):
+    def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -795,10 +769,9 @@ terrible spacing
             return partition
 
         # split module in module with submodules
-        with _use_lazy_graph_module(use_lazy):
-            module_with_submodules = split_module(
-                my_module_traced, my_module, mod_partition
-            )
+        module_with_submodules = split_module(
+            my_module_traced, my_module, mod_partition
+        )
 
         # Check that test_meta_info was still on all nodes.
         submodules = dict(module_with_submodules.named_modules())
@@ -906,40 +879,6 @@ terrible spacing
                 break
         else:
             raise RuntimeError("Expected the subgraph to have an output node.")
-
-    def test_split_module_tuple_return(self):
-        from torch._inductor.compile_fx import graph_returns_tuple
-
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                a = x + y
-                return a * x
-
-        gm = torch.fx.symbolic_trace(M())
-
-        # Assign ops to different partitions so a single-output submodule exists.
-        def partition_fn(node):
-            return 0 if node.target == operator.add else 1
-
-        # Without tuple_return: single-output submodules return a bare value.
-        sp = split_module(gm, None, partition_fn)
-        self.assertTrue(
-            any(
-                not graph_returns_tuple(submod)
-                for submod in sp.children()
-            ),
-            "expected at least one non-tuple-returning submodule",
-        )
-        x, y = torch.randn(4), torch.randn(4)
-        self.assertEqual(sp(x, y), gm(x, y))
-
-        # With tuple_return: all submodules return a tuple.
-        sp_boxed = split_module(gm, None, partition_fn, tuple_return=True)
-        self.assertTrue(
-            all(graph_returns_tuple(submod) for submod in sp_boxed.children()),
-            "all submodules should return a tuple with tuple_return=True",
-        )
-        self.assertEqual(sp_boxed(x, y), gm(x, y))
 
 
     def test_split_module_kwargs_expansion(self):
@@ -1114,276 +1053,6 @@ terrible spacing
         actual = torch.compile(moe, backend=backend)(inp)
         torch.testing.assert_close(actual, expected)
 
-    def test_split_module_placeholders_before_get_attr(self):
-        # Manually construct a graph matching what torch.cond + dynamo
-        # produces: placeholder, get_attr(nn.Module), placeholder, ...
-        # Manual construction avoids dynamo/torch.compile dependency.
-        class DummyModule(torch.nn.Module):
-            def forward(self, x):
-                return x
-
-        root = torch.nn.Module()
-        root.branch = DummyModule()
-
-        graph = torch.fx.Graph()
-        ph_x = graph.placeholder("x")
-        branch = graph.get_attr("branch")
-        ph_y = graph.placeholder("y")
-        op1 = graph.call_function(torch.mul, (ph_x, branch))
-        op2 = graph.call_function(torch.add, (op1, ph_y))
-        graph.output(op2)
-
-        for node in graph.nodes:
-            node.meta = {}
-
-        gm = torch.fx.GraphModule(root, graph)
-
-        split_gm = split_module(
-            gm,
-            root_m=None,
-            split_callback=lambda node: 0,
-            keep_original_order=True,
-        )
-
-        for name, submod in split_gm.named_children():
-            seen_get_attr = False
-            for node in submod.graph.nodes:
-                if node.op == "get_attr":
-                    seen_get_attr = True
-                elif node.op == "placeholder":
-                    self.assertFalse(
-                        seen_get_attr,
-                        lambda msg: f"{msg}\nplaceholder '{node.name}' found after get_attr "
-                        f"in submodule '{name}'",
-                    )
-
-    @staticmethod
-    def _build_partition_map(graph, ops_per_partition=1):
-        """Build a node-to-partition dict assigning ops_per_partition ops per partition."""
-        node_to_partition = {}
-        counter = 0
-        for node in graph.nodes:
-            if node.op in ("placeholder", "get_attr", "output"):
-                continue
-            node_to_partition[node] = counter // ops_per_partition
-            counter += 1
-        return node_to_partition
-
-    def test_split_module_simple_basic(self):
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                a = torch.relu(x)
-                b = torch.sigmoid(a)
-                c = torch.tanh(b)
-                return c
-
-        mod = Mod()
-        x = torch.randn(3, 4)
-        expected = mod(x)
-
-        traced = torch.fx.symbolic_trace(mod)
-
-        # Split into 2 partitions: relu in 0, sigmoid+tanh in 1
-        # (first op alone, rest grouped — doesn't fit the uniform helper)
-        node_to_partition = self._build_partition_map(traced.graph, ops_per_partition=1)
-        # Merge partitions 1 and 2 into partition 1
-        for node, pid in node_to_partition.items():
-            if pid > 0:
-                node_to_partition[node] = 1
-
-        split_gm = split_module_simple(traced, node_to_partition)
-
-        # Verify structure: should have submod_0 and submod_1
-        submod_names = [name for name, _ in split_gm.named_children()]
-        self.assertEqual(sorted(submod_names), ["submod_0", "submod_1"])
-
-        # Verify correctness
-        self.assertEqual(split_gm(x), expected)
-
-    def test_split_module_simple_multi_output(self):
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                a = torch.relu(x)
-                b = torch.sigmoid(x)
-                c = a + b
-                return c
-
-        mod = Mod()
-        x = torch.randn(3, 4)
-        expected = mod(x)
-
-        traced = torch.fx.symbolic_trace(mod)
-
-        # relu and sigmoid in partition 0, add in partition 1
-        # This means partition 0 has 2 outputs (a, b)
-        node_to_partition = {}
-        for node in traced.graph.nodes:
-            if node.op in ("placeholder", "get_attr", "output"):
-                continue
-            if node.target in (torch.relu, torch.sigmoid):
-                node_to_partition[node] = 0
-            else:
-                node_to_partition[node] = 1
-
-        split_gm = split_module_simple(traced, node_to_partition)
-        self.assertEqual(split_gm(x), expected)
-
-    def test_split_module_simple_single_partition(self):
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                return torch.relu(torch.sigmoid(x))
-
-        mod = Mod()
-        x = torch.randn(3, 4)
-        expected = mod(x)
-
-        traced = torch.fx.symbolic_trace(mod)
-        node_to_partition = self._build_partition_map(traced.graph, ops_per_partition=999)
-
-        split_gm = split_module_simple(traced, node_to_partition)
-        self.assertEqual(split_gm(x), expected)
-
-    def test_split_module_simple_partition_affix(self):
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                a = torch.relu(x)
-                b = torch.sigmoid(a)
-                return b
-
-        traced = torch.fx.symbolic_trace(Mod())
-        node_to_partition = self._build_partition_map(traced.graph)
-
-        split_gm = split_module_simple(
-            traced, node_to_partition, partition_affix="pp"
-        )
-
-        submod_names = [name for name, _ in split_gm.named_children()]
-        self.assertTrue(all("pp" in name for name in submod_names))
-
-        x = torch.randn(3, 4)
-        self.assertEqual(
-            torch.fx.symbolic_trace(Mod())(x),
-            split_gm(x),
-        )
-
-    def test_split_module_simple_symint_crossing(self):
-        # Test that SymInt dependencies are propagated across partitions
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                a = torch.relu(x)
-                b = torch.sigmoid(a)
-                return b
-
-        mod = Mod()
-        inp = torch.randn(4, 8)
-        expected = mod(inp)
-
-        def backend(gm, inps):
-            node_to_part = TestFXExperimental._build_partition_map(gm.graph)
-            return split_module_simple(gm, node_to_part)
-
-        actual = torch.compile(mod, backend=backend)(inp)
-        torch.testing.assert_close(actual, expected)
-
-    def test_split_module_simple_equivalence_with_split_module(self):
-        # For simple graphs, split_module_simple should produce equivalent
-        # results to split_module
-        class Mod(torch.nn.Module):
-            def forward(self, x, y):
-                a = torch.relu(x)
-                b = torch.sigmoid(y)
-                c = a + b
-                d = torch.tanh(c)
-                return d
-
-        mod = Mod()
-        traced1 = torch.fx.symbolic_trace(mod)
-        traced2 = torch.fx.symbolic_trace(mod)
-
-        # Build partition mapping: 2 ops per partition
-        node_to_partition_simple = self._build_partition_map(traced1.graph, ops_per_partition=2)
-
-        counter = 0
-        callback_cache = {}
-
-        def split_cb(node):
-            nonlocal counter
-            if node.name not in callback_cache:
-                callback_cache[node.name] = counter // 2
-                counter += 1
-            return callback_cache[node.name]
-
-        split_gm_simple = split_module_simple(traced1, node_to_partition_simple)
-        split_gm_orig = split_module(traced2, mod, split_cb)
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        self.assertEqual(split_gm_simple(x, y), split_gm_orig(x, y))
-
-    def test_split_module_simple_dead_code(self):
-        class ModWithDeadCode(torch.nn.Module):
-            def forward(self, x):
-                output = x * 2  # we want this
-                dead_line = x + 2
-                return output
-
-        mod = ModWithDeadCode()
-        traced = torch.fx.symbolic_trace(mod)
-
-        # Split: mul in partition 1, add in partition 2
-        node_to_partition = {}
-        saw_mul = False
-        for node in traced.graph.nodes:
-            if node.op in ("placeholder", "get_attr", "output"):
-                continue
-            if node.target == operator.mul:
-                saw_mul = True
-                node_to_partition[node] = 1
-            elif not saw_mul:
-                node_to_partition[node] = 0
-            else:
-                node_to_partition[node] = 2
-
-        split = split_module_simple(traced, node_to_partition)
-        x = torch.randn((5,))
-        torch.testing.assert_close(split(x), traced(x))
-
-    def test_split_module_simple_kwargs(self):
-        class ModuleWithKwargs(torch.nn.Module):
-            def forward(self, x, **kwargs):
-                return x + kwargs["foo"]
-
-        mod = ModuleWithKwargs()
-        traced = torch.fx.symbolic_trace(mod)
-
-        seen_getitem = False
-        node_to_partition = {}
-        for node in traced.graph.nodes:
-            if node.op in ("placeholder", "get_attr", "output"):
-                continue
-            split_idx = int(seen_getitem)
-            if node.target == operator.getitem:
-                seen_getitem = True
-            node_to_partition[node] = split_idx
-
-        split = split_module_simple(traced, node_to_partition)
-        x = torch.randn(5, 3)
-        foo = torch.randn(5, 3)
-        torch.testing.assert_close(split(x, foo=foo), traced(x, foo=foo))
-
-    def test_split_module_simple_noop_graph(self):
-        # Verify split_module_simple handles a graph with no ops (just input->output)
-        def fn(x):
-            return (x,)
-
-        g = make_fx(fn, tracing_mode="fake")(torch.randn(3, 3))
-        split_gm = split_module_simple(g, {})
-
-        self.assertEqual(len(split_gm.graph.nodes), 2)
-        nodes = list(split_gm.graph.nodes)
-        self.assertEqual(nodes[0].op, "placeholder")
-        self.assertEqual(nodes[1].op, "output")
-
     def test_normalize_binary_operators(self):
         ops_to_test = {
             torch.add,
@@ -1528,10 +1197,8 @@ class {test_classname}(torch.nn.Module):
                         normalized_args2 = normalize_module(
                             traced, node.target, node.args, node.kwargs
                         )
-                        if normalized_args != normalized_args2:
-                            raise AssertionError("normalized_args mismatch")
-                        if not normalized_args:
-                            raise AssertionError("expected normalized_args to be truthy")
+                        assert normalized_args == normalized_args2
+                        assert normalized_args
                         node.args = normalized_args.args
                         node.kwargs = normalized_args.kwargs
 
@@ -1679,14 +1346,13 @@ class {test_classname}(torch.nn.Module):
         # by default, fx transform loses type annotation of getitem nodes.
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                if node.type is not None:
-                    raise AssertionError(f"expected node.type is None, got {node.type}")
+                assert node.type is None
 
         annotate_getitem_nodes(my_module_traced.graph)
 
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                self.assertIsNotNone(node.type, lambda msg: f"{msg}\nNode {node} should be annotated but is not.")
+                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
 
         my_module = MyModule2()
         my_module_traced = torch.fx.symbolic_trace(my_module)
@@ -1694,14 +1360,13 @@ class {test_classname}(torch.nn.Module):
         # by default, fx transform loses type annotation of getitem nodes.
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                if node.type is not None:
-                    raise AssertionError(f"expected node.type is None, got {node.type}")
+                assert node.type is None
 
         annotate_getitem_nodes(my_module_traced.graph)
 
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                self.assertIsNotNone(node.type, lambda msg: f"{msg}\nNode {node} should be annotated but is not.")
+                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
@@ -1851,18 +1516,13 @@ class {test_classname}(torch.nn.Module):
 
         for node in traced.graph.nodes:
             if node.op == "call_module":
-                if not hasattr(node, "attrs_for_lowering"):
-                    raise AssertionError("expected node to have attrs_for_lowering")
+                assert hasattr(node, "attrs_for_lowering")
                 para_list = attrs_for_lowering[node.attrs_for_lowering["name"]]
 
                 # node.attrs_for_lowering has an addition field of class name
-                if len(para_list) + 1 != len(node.attrs_for_lowering):
-                    raise AssertionError(
-                        f"attrs_for_lowering length mismatch: {len(para_list) + 1} != {len(node.attrs_for_lowering)}"
-                    )
+                assert len(para_list) + 1 == len(node.attrs_for_lowering)
                 for p_name in para_list:
-                    if p_name not in node.attrs_for_lowering:
-                        raise AssertionError(f"{p_name} not in node.attrs_for_lowering")
+                    assert p_name in node.attrs_for_lowering
 
     def test_merge_matmuls(self):
         """
@@ -1993,8 +1653,8 @@ class {test_classname}(torch.nn.Module):
             (numbers.Number, int),
             (numbers.Number, float),
             (int, type(torch.float)),
-            (Union[int, float], int),  # noqa: UP007
-            (Union[int, float], float),  # noqa: UP007
+            (Union[int, float], int),
+            (Union[int, float], float),
             (list[int], int),
             (list[int], create_type_hint([int, int])),
             (list[int], create_type_hint((int, int))),
@@ -2014,8 +1674,8 @@ class {test_classname}(torch.nn.Module):
             (torch.Tensor, torch.nn.Parameter),
             (list[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
             (list[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
-            (Optional[list[torch.Tensor]], list[torch.Tensor]),  # noqa: UP045
-            (Optional[list[int]], list[int]),  # noqa: UP045
+            (Optional[list[torch.Tensor]], list[torch.Tensor]),
+            (Optional[list[int]], list[int]),
         ] + [
             # pre-PEP585 signatures
             (typing.List[int], int),  # noqa: UP006
@@ -2035,8 +1695,8 @@ class {test_classname}(torch.nn.Module):
             ),
             (typing.List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),  # noqa: UP006
             (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),  # noqa: UP006
-            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),  # noqa: UP006, UP045
-            (Optional[typing.List[int]], typing.List[int]),  # noqa: UP006, UP045
+            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),  # noqa: UP006
+            (Optional[typing.List[int]], typing.List[int]),  # noqa: UP006
         ]
 
         for sig_type, arg_type in should_be_equal:
@@ -2044,7 +1704,7 @@ class {test_classname}(torch.nn.Module):
 
         should_fail = [
             (int, float),
-            (Union[int, float], str),  # noqa: UP007
+            (Union[int, float], str),
             (list[torch.Tensor], typing.List[int]),  # noqa: UP006
         ] + [
             # pre-PEP585 signatures
@@ -2145,8 +1805,7 @@ class TestNormalizeOperators(JitTestCase):
 
             def jit_infer_type(v):
                 inferred_arg_type = torch._C._jit_try_infer_type(v)
-                if not inferred_arg_type.success():
-                    raise AssertionError("expected inferred_arg_type.success()")
+                assert inferred_arg_type.success()
                 t = _torchscript_type_to_python_type(inferred_arg_type.type())
                 return t
 
@@ -2246,8 +1905,7 @@ class TestModule(torch.nn.Module):
                     normalized_args = node.normalized_arguments(
                         traced, arg_types, kwarg_types
                     )
-                    if not normalized_args:
-                        raise AssertionError("expected normalized_args to be truthy")
+                    assert normalized_args
                     node.args = normalized_args.args
                     node.kwargs = normalized_args.kwargs
             traced.recompile()
@@ -2380,7 +2038,7 @@ if TEST_Z3:
             for sympy_expr, z3_expr in test_cases:
                 result = toZ3.run(sympy_expr)
                 self.assertTrue(
-                    z3_expr.eq(result), msg=lambda msg: f"{msg}\nexpected: {z3_expr}. Got: {result}"
+                    z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
                 )
 
         def test_sat(self):
@@ -2466,7 +2124,6 @@ if TEST_Z3:
                 self.assertEqual(z3str(expr), expected)
 
 
-instantiate_parametrized_tests(TestFXExperimental)
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 
 if __name__ == "__main__":

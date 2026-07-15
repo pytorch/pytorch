@@ -1,4 +1,3 @@
-# Owner(s): ["module: rocm"]
 name: periodic-rocm-mi300
 
 on:
@@ -15,21 +14,24 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
   cancel-in-progress: true
 
-permissions:
-  id-token: write
-  contents: read
-  actions: read
+permissions: read-all
 
 jobs:
   llm-td:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
 
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
     needs: llm-td
+    permissions:
+      id-token: write
+      contents: read
 
   get-label-type:
     name: get-label-type
@@ -46,8 +48,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "mt-"
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-noble-rocm-py3.12-mi300
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |
@@ -59,6 +60,9 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_12-test:
+    permissions:
+      id-token: write
+      contents: read
     name: linux-noble-rocm-py3.12-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs:

@@ -6,7 +6,7 @@ namespace detail {
 const XLAHooksInterface& getXLAHooks() {
   auto create_impl = [] {
     // Create XLA hooks using the registry
-    auto hooks = XLAHooksRegistry()->Create("torch_xla::detail::XLAHooks");
+    auto hooks = XLAHooksRegistry()->Create("torch_xla::detail::XLAHooks", XLAHooksArgs{});
     if (hooks) {
       return hooks;
     }
@@ -18,6 +18,6 @@ const XLAHooksInterface& getXLAHooks() {
 }
 } // namespace detail
 
-C10_DEFINE_REGISTRY(XLAHooksRegistry, XLAHooksInterface)
+C10_DEFINE_REGISTRY(XLAHooksRegistry, XLAHooksInterface, XLAHooksArgs)
 
 } // namespace at

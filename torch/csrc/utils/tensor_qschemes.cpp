@@ -20,12 +20,13 @@ void initializeQSchemes() {
 
   for (const auto i : c10::irange(at::COMPILE_TIME_NUM_QSCHEMES)) {
     auto qscheme = static_cast<at::QScheme>(i);
-    THPObjectPtr qscheme_obj(THPQScheme_New(qscheme, toString(qscheme)));
-    if (PyModule_AddObjectRef(
-            torch_module, toString(qscheme).c_str(), qscheme_obj.get()) != 0) {
+    PyObject* qscheme_obj = THPQScheme_New(qscheme, toString(qscheme));
+    thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj;
+    Py_INCREF(qscheme_obj);
+    if (PyModule_AddObject(
+            torch_module, toString(qscheme).c_str(), qscheme_obj) != 0) {
       throw python_error();
     }
-    thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj.release();
   }
 }
 

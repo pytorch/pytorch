@@ -39,4 +39,7 @@ if(USE_TEST)
     )
 
     add_test(NAME alltests COMMAND ${LIBRARY_TEST})
+    add_custom_command(TARGET ${LIBRARY_TEST}
+                POST_BUILD
+                COMMAND ${CMAKE_CTEST_COMMAND} -C Release --output-on-failure --verbose)
 endif()

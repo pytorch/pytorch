@@ -47,10 +47,7 @@ class TestInput(FSDPTestContinuous):
                 if isinstance(input, list):
                     input = input[0]
                 else:
-                    if not isinstance(input, dict):
-                        raise AssertionError(
-                            f"Expected dict, got {type(input)}: {input}"
-                        )
+                    assert isinstance(input, dict), input
                     input = input["in"]
                 return self.layer(input)
 

@@ -79,7 +79,7 @@ at::Tensor async_input_mm_impl(
           cutlass::epilogue::collective::EpilogueTileAuto,
           ElementAccumulator,
           ElementAccumulator,
-          void, // Indicate there is no beta scaling to save register
+          ElementC,
           LayoutC,
           AlignmentC,
           ElementC,
@@ -151,7 +151,7 @@ at::Tensor async_input_mm_impl(
           stride_B,
       },
       {{},
-       nullptr,
+       reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),
        stride_C,
        reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),
        stride_C},

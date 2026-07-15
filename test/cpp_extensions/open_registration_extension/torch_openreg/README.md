@@ -6,7 +6,7 @@ The third-party device integration mechanism based on PrivateUse1 has become the
 
 **Note:**
 
-The goal of `OpenReg` codebase is **not to implement a fully functional, high-performance PyTorch backend**, but to serve as a **minimalist reference implementation for mechanism verification**.
+The goal of `torch_openreg` is **not to implement a fully functional, high-performance PyTorch backend**, but to serve as a **minimalist reference implementation for mechanism verification**.
 
 ### Purpose
 
@@ -17,7 +17,7 @@ The goal of `OpenReg` codebase is **not to implement a fully functional, high-pe
 ### Design Principles
 
 - **Minimality Principle**: The fundamental goal is to enable/verify all integration paths/mechanisms for a new backend to integrate to PyTorch. All functions follow a "just right" strategy to ensure the correctness of relevant integration capabilities.
-- **Authenticity Principle**: To complete the `OpenReg` integration in the same way a real accelerator backend would integrate with PyTorch.
+- **Authenticity Principle**: To complete the OpenReg integration in the same way a real accelerator backend would integrate with PyTorch.
 
 ## Directory Structure
 
@@ -35,11 +35,6 @@ torch_openreg/
 │   │   ├── OpenRegExtra.cpp
 │   │   └── OpenRegMinimal.cpp
 │   ├── CMakeLists.txt
-│   ├── profiler
-│   │   ├── OpenRegActivityProfiler.h/.cpp
-│   │   ├── OpenRegActivityProfilerSession.h/.cpp
-│   │   └── stubs
-│   │       └── openreg.cpp
 │   └── runtime
 │       ├── OpenRegDeviceAllocator.cpp
 │       ├── OpenRegDeviceAllocator.h
@@ -59,11 +54,6 @@ torch_openreg/
 ├── setup.py
 ├── third_party
 │   └── openreg
-│       ├── csrc
-│       │   ├── tracer.h/.cpp
-│       │   └── ...
-│       └── include
-│           └── openreg.h
 └── torch_openreg
     ├── csrc
     │   ├── CMakeLists.txt
@@ -111,14 +101,11 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 - `csrc/`: Core device implementation, including operator registration, runtime, etc.
   - `csrc/amp/`: AMP(Automatic Mixed Precision)
   - `csrc/aten/`: Operator registration
-    - `csrc/aten/native/`: Specific operator implementations for the `openreg` device.
+    - `csrc/aten/native/`: Specific operator implementations for the OpenReg device.
       - `csrc/aten/native/OpenRegMinimal.cpp`: The most minimal set of operator implementations (allowing for the creation of Tensors and related operations upon completion).
       - `csrc/aten/native/OpenRegExtra.cpp`: Implementations for other types of operators.
   - `csrc/runtime/`: Implementations for Host memory, device memory, Guard, Hooks, etc.
-  - `csrc/profiler/`: Profiler integration — legacy `ProfilerStubs` and Kineto `IActivityProfiler` plugin (when built with Kineto).
 - `third_party/`: A C++ library that simulates a CUDA-like device using the CPU.
-  - `third_party/openreg/csrc/tracer.h/.cpp`: Correlation-ID stack and activity-tracing enable/disable (CUPTI analog).
-  - `third_party/openreg/include/openreg.h`: C-style activity APIs (`orActivityEnableTracing`, `orActivityPushExternalCorrelationId`, etc.).
 - `torch_openreg/`: Python interface implementation (Python code and C++ Bindings).
   - `torch_openreg/csrc/`: Python C++ binding code.
   - `torch_openreg/openreg/`: Python API.
@@ -144,7 +131,7 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 
 ### Autoload
 
-When `import torch`, installed accelerators (such as `openreg`) will be automatically loaded, achieving the same experience as the built-in backends.
+When `import torch`, installed accelerators (such as `torch_openreg`) will be automatically loaded, achieving the same experience as the built-in backends.
 
 - Register the backend with Python `entry points`: See `setup` in `setup.py`
 - Add a callable function for backend initialization: See `_autoload` in `torch_openreg/__init__.py`
@@ -194,13 +181,6 @@ print(f"Device of z: {z.device}")
 ## Documentation
 
 Please refer to [this](https://docs.pytorch.org/docs/main/accelerator/index.html) for a series of documents on integrating new accelerators into PyTorch, which will be kept in sync with the `OpenReg` codebase as well.
-
-### Profiler Integration
-
-- **Fallback (operator-level)**: `ProfilerStubs` registration provides operator-level timing via `torch.autograd.profiler.profile(use_device="openreg")` (default `use_kineto=False`). See `csrc/profiler/stubs/openreg.cpp`.
-- **Kineto plugin (correlation + session wiring)**: `IActivityProfiler` registered via `REGISTER_PRIVATEUSE1_PROFILER` provides Kineto session integration and correlation-ID plumbing via `torch.profiler.profile(activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1])`. See `csrc/profiler/OpenRegActivityProfiler.cpp` and `third_party/openreg/csrc/tracer.cpp`. Requires Kineto at build time (`kineto_LIBRARY` from `find_package(Torch)`); vendors extend the stub to emit kernel events and flow links.
-
-For the full integration guide, see the [Profiler Integration](https://docs.pytorch.org/docs/main/accelerator/profiler.html) documentation.
 
 ## Future Plans
 

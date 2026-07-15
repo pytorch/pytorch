@@ -44,11 +44,6 @@ constexpr hipDataType HipDataTypeFor<BFloat16>() {
 }
 
 template <>
-constexpr hipDataType HipDataTypeFor<c10::complex<c10::BFloat16>>() {
-  return HIP_C_16BF;
-}
-
-template <>
 constexpr hipDataType HipDataTypeFor<double>() {
   return HIP_R_64F;
 }
@@ -97,16 +92,6 @@ constexpr hipDataType HipDataTypeFor<c10::Float4_e2m1fn_x2>() {
 #else
   return static_cast<hipDataType>(33);
 #endif
-}
-
-template <typename T>
-constexpr hipblasComputeType_t HipBlasComputeTypeFor() {
-  return HIPBLAS_COMPUTE_32F;
-}
-
-template <>
-constexpr hipblasComputeType_t HipBlasComputeTypeFor<double>() {
-  return HIPBLAS_COMPUTE_64F;
 }
 
 template <typename T>
@@ -190,43 +175,43 @@ int GetStrideCFromParams(const ScaledGemmParams<T>* params) {
 }
 
 template <typename T>
-at::opmath_type<T> GetAlphaFromParams(const GemmParams<T>* params) {
+float GetAlphaFromParams(const GemmParams<T>* params) {
   return params->alpha;
 }
 
 template <typename T>
-at::opmath_type<T> GetAlphaFromParams(const GemmAndBiasParams<T>* params) {
+float GetAlphaFromParams(const GemmAndBiasParams<T>* params) {
   return params->alpha;
 }
 
 template <typename T>
-at::opmath_type<T> GetAlphaFromParams(const GemmStridedBatchedParams<T>* params) {
+float GetAlphaFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->alpha;
 }
 
 template <typename T>
-at::opmath_type<T> GetAlphaFromParams(const ScaledGemmParams<T>* params) {
-  return at::opmath_type<T>{1.0};
+float GetAlphaFromParams(const ScaledGemmParams<T>* params) {
+  return 1.0;
 }
 
 template <typename T>
-at::opmath_type<T> GetBetaFromParams(const GemmParams<T>* params) {
+float GetBetaFromParams(const GemmParams<T>* params) {
   return params->beta;
 }
 
 template <typename T>
-at::opmath_type<T> GetBetaFromParams(const GemmAndBiasParams<T>* params) {
-  return at::opmath_type<T>{0.0};
+float GetBetaFromParams(const GemmAndBiasParams<T>* params) {
+  return 0.0;
 }
 
 template <typename T>
-at::opmath_type<T> GetBetaFromParams(const GemmStridedBatchedParams<T>* params) {
+float GetBetaFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->beta;
 }
 
 template <typename T>
-at::opmath_type<T> GetBetaFromParams(const ScaledGemmParams<T>* params) {
-  return at::opmath_type<T>{0.0};
+float GetBetaFromParams(const ScaledGemmParams<T>* params) {
+  return 0.0;
 }
 
 template <typename T>
@@ -482,9 +467,8 @@ class HipblasltGemmOp : public Callable<ParamsT> {
 
       TORCH_CHECK(transa_outer == opa && transb_outer == opb, "trans mismatch, shouldn't happen");
 
-      using opmath_t = at::opmath_type<CT>;
-      opmath_t alpha = GetAlphaFromParams<CT>(params);
-      opmath_t beta = GetBetaFromParams<CT>(params);
+      float alpha = GetAlphaFromParams<CT>(params);
+      float beta = GetBetaFromParams<CT>(params);
 
       hipblasLtMatrixLayout_t mat_a, mat_b, mat_c;
       if (opa == HIPBLAS_OP_N) {
@@ -521,14 +505,11 @@ class HipblasltGemmOp : public Callable<ParamsT> {
             mat_c, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_c, sizeof(stride_c)));
       }
 
-      hipblasComputeType_t computeType = HipBlasComputeTypeFor<CT>();
-      if constexpr (std::is_same_v<CT, float>) {
-        if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
-          computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
-        }
+      hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
+      if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
+        computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
       }
-      auto scale_type = HipDataTypeFor<opmath_t>();
-      HipBlasLtMatmulDescriptor matmul(computeType, scale_type);
+      HipBlasLtMatmulDescriptor matmul(computeType, HIP_R_32F);
       matmul.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSA, opa);
       matmul.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSB, opb);
 
@@ -649,11 +630,9 @@ auto GetHipBlasLtTypeStringAndOps() {
   }
 #endif
 
-  hipblasComputeType_t computeType = HipBlasComputeTypeFor<CT>();
-  if constexpr (std::is_same_v<CT, float>) {
-    if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
-      computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
-    }
+  hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
+  if (at::globalContext().allowTF32CuBLAS()) {
+    computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
   }
 
   hipblasLtHandle_t handle;

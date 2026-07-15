@@ -635,10 +635,10 @@ struct ReduceOp {
     using args_vec_t = std::array<arg_t, output_vec_size>;
     int dim_x = blockDim.x;
     args_vec_t* shared = (args_vec_t*)shared_memory;
-    if (dim_x > C10_WARP_SIZE) {
+    if (dim_x > warpSize) {
       int address_base = threadIdx.x + threadIdx.y*blockDim.x;
       shared[address_base] = value;
-      for (int offset = dim_x/2; offset >= C10_WARP_SIZE; offset >>= 1) {
+      for (int offset = dim_x/2; offset >= warpSize; offset >>= 1) {
         __syncthreads();
         if (threadIdx.x < offset && threadIdx.x + offset < blockDim.x) {
           args_vec_t other = shared[address_base + offset];
@@ -649,13 +649,14 @@ struct ReduceOp {
           shared[address_base] = value;
         }
       }
-      dim_x = C10_WARP_SIZE;
+      dim_x = warpSize;
     }
 
     __syncthreads();
     // Intra-warp reduction, fix CUDA to have offset decreasing for better numerics
     // matching Triton, etc.
-    #if defined(USE_ROCM)
+    // TODO(PaulZhang12): AMD and internal
+    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
     for (int offset = 1; offset < dim_x; offset <<= 1) {
     #else
     for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
@@ -835,9 +836,9 @@ struct ReduceOp {
           }
         }
       } else {
-#if defined(USE_ROCM) && ROCM_VERSION <= 71300
         index_t input_offset = threadIdx.y;
         index_t step = blockDim.y;
+#ifdef USE_ROCM // Prefetch loads to better hide their latency
         #define PRFCH 4
         for (; input_offset < config.ctas_per_output; input_offset += step*PRFCH) {
          arg_vec_t next[PRFCH];
@@ -854,14 +855,6 @@ struct ReduceOp {
          }
         }
 #else
-#if defined(USE_ROCM)
-        int input_offset = threadIdx.y;
-        int step = blockDim.y;
-        #pragma unroll
-#else
-        index_t input_offset = threadIdx.y;
-        index_t step = blockDim.y;
-#endif
         for (; input_offset < config.ctas_per_output; input_offset += step) {
           index_t idx = config.staging_memory_offset(input_offset);
           arg_vec_t next = reduce_buffer[idx];
@@ -976,7 +969,7 @@ inline void launch_jitted_reduce_kernel(
 
 class AccumulationBuffer {
  public:
-  AccumulationBuffer() = default;
+  AccumulationBuffer() {}
 
   AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
     out_ptr_ = (char*)out_ptr;
@@ -1124,7 +1117,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   if (iter.ndim() == 0 || reduction_on_fastest_striding_dimension) {
     // Split the input across lanes if the input is contiguous in the reduced
     // dimension. This will require reduction between threads using warp
-    // shuffle instructions and shared memory (if block_width > C10_WARP_SIZE).
+    // shuffle instructions and shared memory (if block_width > warpSize).
     config.input_mult[0] = config.split_input(block_width);
   } else {
     // Otherwise split the output across lanes in a warp.
@@ -1172,7 +1165,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // We want the minimum of ctas_per_output1 and ctas_per_output2, so that each thread can have
     // a large number of values to deal with. But we don't want values_per_thread to be larger than
     // max_values_per_thread
-    config.ctas_per_output = std::clamp<int>(ctas_per_output1, ctas_per_output3, ctas_per_output2);
+    config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
     if (config.ctas_per_output > 1) {
 #ifdef USE_ROCM
       // Set min ctas value as 64. Having more reductions (i.e less values_per_thread) seems to improve perf.

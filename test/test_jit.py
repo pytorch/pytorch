@@ -106,7 +106,7 @@ from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
     GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
     TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
-    enable_profiling_mode_for_profiling_tests, requires_mkl, set_default_dtype, num_profiled_runs, \
+    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, do_input_map, get_execution_plan, make_global, \
@@ -152,9 +152,6 @@ import unittest
 import warnings
 import zipfile
 import tracemalloc
-from torch.testing._internal.common_utils import (
-    IS_LINUX,
-)
 
 
 def canonical(graph):
@@ -168,8 +165,7 @@ def doAutodiffCheck(testname):
     if "test_t_" in testname or testname == "test_t":
         return False
 
-    if not GRAPH_EXECUTOR:
-        raise AssertionError("GRAPH_EXECUTOR is not set")
+    assert GRAPH_EXECUTOR
     if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
         return False
 
@@ -213,8 +209,7 @@ def doAutodiffCheck(testname):
     return testname not in test_exceptions
 
 
-if not GRAPH_EXECUTOR:
-    raise AssertionError("GRAPH_EXECUTOR is not set")
+assert GRAPH_EXECUTOR
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
@@ -380,8 +375,6 @@ class TestJitProfiler(JitTestCase):
             self.graph_executor_optimize_opt
         )
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/81626")
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/65521")
     def test_profiler(self):
         torch._C._set_graph_executor_optimize(False)
 
@@ -983,8 +976,7 @@ class TestJit(JitTestCase):
                 return x
 
         m = torch.jit.script(Seq())
-        if not m.graph:
-            raise AssertionError("jit was unable to compile")  # ensure jit was able to compile
+        assert m.graph  # ensure jit was able to compile
 
     def test_ModuleList(self):
         class Mod(nn.Module):
@@ -1001,8 +993,7 @@ class TestJit(JitTestCase):
                 return v
 
         m = torch.jit.script(Mod())
-        if not m.graph:
-            raise AssertionError("jit was unable to compile")  # ensure jit was able to compile
+        assert m.graph  # ensure jit was able to compile
 
     def test_disabled(self):
         torch.jit._state.disable()
@@ -1836,10 +1827,8 @@ graph(%Ra, %Rb):
                         o_ref = t(x_ref, p, train)
                         o.sum().backward()
                         o_ref.sum().backward()
-                        if not o.equal(o_ref):
-                            raise AssertionError(f"Output mismatch: {o} vs {o_ref}")
-                        if not x.grad.equal(x_ref.grad):
-                            raise AssertionError(f"Grad mismatch: {x.grad} vs {x_ref.grad}")
+                        assert o.equal(o_ref)
+                        assert x.grad.equal(x_ref.grad)
 
     @slowTest
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, 'Testing differentiable graph')
@@ -3140,7 +3129,7 @@ class TestScript(JitTestCase):
 
 
     def test_oneline_func(self):
-        def fn(x): return x
+        def fn(x): return x  # noqa: E704
 
         self.checkScript(fn, (torch.ones(2, 2), ))
 
@@ -3266,8 +3255,8 @@ class TestScript(JitTestCase):
 
     def test_no_self_arg_ignore_function(self):
         class MyModule(nn.Module):
-            @torch.jit.ignore
-            def call_np():
+            @torch.jit.ignore  # noqa: B902
+            def call_np():  # noqa: B902
                 # type: () -> int
                 return np.random.choice(2, p=[.95, .05])
 
@@ -3431,7 +3420,7 @@ class TestScript(JitTestCase):
                 super().__init__()
                 self.foo = torch.jit.Attribute(0.1, float)
                 # we should be able to use self.foo as a float here
-                assert 0.0 < self.foo  # noqa: S101
+                assert 0.0 < self.foo
         M()
 
     def test_scriptable_fn_as_attr(self):
@@ -3723,7 +3712,6 @@ def foo(x):
 
         self.assertEqual(D()(v), v + v)
 
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/119949")
     def test_tensor_subclasses(self):
         def check_subclass(x, tensor):
             template = dedent("""
@@ -3876,7 +3864,7 @@ def foo(x):
     def test_calls_in_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Type annotation should not contain calls"):
             def spooky(a):
-                # type: print("Hello") -> Tensor
+                # type: print("Hello") -> Tensor # noqa: F723
                 return a + 2
             print(torch.__file__)
             torch.jit.annotations.get_signature(spooky, None, 1, True)
@@ -4326,20 +4314,20 @@ def foo(x):
             a = SomeClass()
             a_copy = a
             a += 20
-            assert a is a_copy  # noqa: S101
+            assert a is a_copy
             b = SomeOutOfPlaceClass()
             b_copy = b
             b += 99
-            assert b is b_copy  # noqa: S101
+            assert b is b_copy
             c = [1, 2, 3]
             c_copy = c
             c *= 2
-            assert c is c_copy  # noqa: S101
+            assert c is c_copy
             c += [4, 5, 6]
             d = torch.ones(2, 2)
             d_copy = d
             d += torch.ones(2, 2)
-            assert d is d_copy  # noqa: S101
+            assert d is d_copy
             return a, b, c, d
 
         self.checkScript(fn2, [])
@@ -4642,7 +4630,6 @@ def foo(xyz):
         self.checkScript(f_grad, (x,))
         self.checkScript(f_grad, (y,))
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91493")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "shape analysis is only enabled in Legacy")
     def test_prim_grad_undefined(self):
 
@@ -5629,7 +5616,6 @@ a")
             m()
 
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91492")
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't use requires_grad information")
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Peeling is now disabled")
     def test_requires_grad_loop(self):
@@ -5886,7 +5872,7 @@ a")
                 m = x if not z else y
             while x < y > z:
                 q = x
-            assert 1 == 1, "hello"  # noqa: S101
+            assert 1 == 1, "hello"
             return x
 
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
@@ -6130,7 +6116,7 @@ a")
         self.checkScript(test_not_cast, (torch.tensor(1),))
         self.checkScript(test_not_cast, (torch.tensor(0),))
 
-        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[Tensor, Tensor\]"):
+        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
             @torch.jit.script
             def test_mult(x, y):
                 return not (x, y)
@@ -6155,7 +6141,7 @@ a")
         self.checkScript(test_cast_float, (0.,))
         self.checkScript(test_cast_float, (-1.,))
 
-        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[int, int\] to bool"):
+        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
 
             @torch.jit.script
             def test_bad_conditional(x):
@@ -6279,14 +6265,13 @@ a")
         @torch.jit.script
         def test(x, y):
             # type: (Optional[int], Optional[int]) -> int
-            assert x is not None and y is not None  # noqa: S101
+            assert x is not None and y is not None
             return x + y
 
         self.assertEqual(test(2, 2), 4)
         with self.assertRaisesRegex(Exception, ""):
             test(1, None)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91494")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the current version of Profiler doesn't profile/specialize Optionals")
     def test_optional_tensor(self):
         @torch.jit.script
@@ -6328,7 +6313,6 @@ a")
         g = torch.jit.last_executed_optimized_graph()
         self.assertIn(next(g.outputs()).type().str(), ("Tensor", "Tensor(requires_grad=1)"))
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91484")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the current version of Profiler doesn't profile/specialize Optionals")
     def test_optional_list(self):
         @torch.jit.script
@@ -7288,7 +7272,6 @@ a")
                 self.assertEqual(t1, t2, exact_dtype=False)
                 self.assertEqual(t1.device, t2.device)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91482")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
     def test_tensor_as_tensor_shape_prop(self):
         tensor_template = dedent('''
@@ -7339,7 +7322,6 @@ a")
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
             FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *, requires_grad=0, device=cpu) = aten::as_tensor").run(g)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91497")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "testing legacy behavior")
     def test_tensor_requires_grad(self):
         @torch.jit.script
@@ -7613,7 +7595,7 @@ dedent """
             self.assertEqual(
                 cu.func(),
                 scope['func'](),
-                msg=lambda msg: f"{msg}\nFailed with op: {op}, lhs: {args[0]}, rhs: {args[1]}"
+                msg=f"Failed with op: {op}, lhs: {args[0]}, rhs: {args[1]}"
             )
 
         ops = ['is', 'is not']
@@ -7672,7 +7654,7 @@ dedent """
 
         @torch.jit.script
         def foo(x: Any):
-            assert isinstance(x, Dict[str, torch.Tensor])  # noqa: S101
+            assert isinstance(x, Dict[str, torch.Tensor])
 
         foo({"1": torch.tensor(3)})
         with self.assertRaises(Exception):
@@ -7695,7 +7677,7 @@ dedent """
             self.assertEqual(
                 cu.func(inp),
                 scope['func'](inp),
-                msg=lambda msg: f"{msg}\nFailed with typ: {typ}"
+                msg=f"Failed with typ: {typ}"
             )
 
         inputs = [True, 1, 1.0, torch.tensor(1), [1, 2], (1.0,), [1, 2], 1]
@@ -7917,13 +7899,13 @@ dedent """
                 if y == 1:
                     x = 5
                     break
-                    assert 1 == 2  # noqa: S101
+                    assert 1 == 2
                 else:
                     x = x + 1
                     break
-                    assert 1 == 2  # noqa: S101
+                    assert 1 == 2
                 x = -30
-                assert 1 == 2  # noqa: S101
+                assert 1 == 2
             return x
 
         self.checkScript(assign_after_break_nested, (1,))
@@ -7994,7 +7976,7 @@ dedent """
                     break
                 a -= 1
                 break
-                assert 1 == 2  # noqa: S101
+                assert 1 == 2
                 a -= -100
             return a
 
@@ -8292,11 +8274,9 @@ dedent """
                 for n in jit_graph.nodes()
                 if isinstance(n.output().type(), torch.TensorType)
             )
-            if not isinstance(node.output().type(), torch.TensorType):
-                raise AssertionError(f"Expected TensorType, got {type(node.output().type())}")
+            assert isinstance(node.output().type(), torch.TensorType)
             t = node.t("value")
-            if not isinstance(t, torch.Tensor):
-                raise AssertionError(f"Expected torch.Tensor, got {type(t)}")
+            assert isinstance(t, torch.Tensor)
             self.assertEqual(t.dtype, dtype)
             self.assertEqual(t.item(), value)
 
@@ -9133,7 +9113,7 @@ dedent """
         self.assertTrue(imported.unpack_called.item())
         torch.testing.assert_close(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
-    @requires_mkl
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     @unittest.skipIf(True, "Skipping while landing PR stack")
     def test_torch_functional(self):
         def stft(input, n_fft):
@@ -11006,7 +10986,6 @@ dedent """
 
         self.checkScript(foo, ())
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91495")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the original version of test_rand")
     def test_rand(self):
         def test_rand():
@@ -11406,8 +11385,8 @@ dedent """
     def test_method_no_self(self):
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
             class MethodNoSelf(torch.jit.ScriptModule):
-                @torch.jit.script_method
-                def forward():
+                @torch.jit.script_method  # noqa: B902
+                def forward():  # noqa: B902
                     return torch.zeros(3, 4)
 
             MethodNoSelf()
@@ -11542,8 +11521,7 @@ dedent """
         empty_tuple_type = torch._C.TupleType([])
         g = {'Tuple' : typing.Tuple}
         python_type = eval(empty_tuple_type.annotation_str, g)
-        if python_type is not typing.Tuple[()]:
-            raise AssertionError(f"Expected Tuple[()], got {python_type}")
+        assert python_type is typing.Tuple[()]
 
     def test_tuple_str(self):
         tuple1_type = torch._C.TupleType([torch._C.StringType.get()])
@@ -11559,8 +11537,7 @@ dedent """
         none_type = torch._C.NoneType.get()
         g = {'NoneType' : type(None)}
         python_type = eval(none_type.annotation_str, g)
-        if python_type is not type(None):
-            raise AssertionError(f"Expected NoneType, got {python_type}")
+        assert python_type is type(None)
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_zip_enumerate_modulelist(self):
@@ -11764,7 +11741,7 @@ dedent """
         # i in comprehension doesn't write to function scope
         def foo():
             i = 1
-            x = [i if i != 5 else 3 for i in range(7)]
+            x = [i if i != 5 else 3 for i in range(7)]  # noqa: C416
             return i, x
 
         self.assertEqual(foo(), torch.jit.script(foo)())
@@ -12854,10 +12831,8 @@ dedent """
 
         for i, offset in enumerate(parsed_serialized_offsets):
             data = reader.get_record(str(offset))
-            if data != buffers[i]:
-                raise AssertionError(f"Record mismatch at offset {offset}: {data} != {buffers[i]}")
+            assert data == buffers[i]
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/138885")
     def test_file_reader_no_memory_leak(self):
         num_iters = 10000
         filename, _, _ = self._make_filereader_test_file()
@@ -13018,7 +12993,7 @@ dedent """
                               c   # type: Tensor
                               ):
                 # type: (int, int, int) -> Tensor
-                # type: bad type line
+                # type: bad type line  # noqa: F723
 
                 return a + b + c
 
@@ -13478,9 +13453,9 @@ dedent """
         def test_id_class_types():
             obj1 = FooTest(torch.tensor(3))
             obj2 = FooTest(torch.tensor(2))
-            assert obj1 is not obj2  # noqa: S101
-            assert id(obj1) != id(obj2)  # noqa: S101
-            assert id(obj1) != id(None)  # noqa: S101
+            assert obj1 is not obj2
+            assert id(obj1) != id(obj2)
+            assert id(obj1) != id(None)
             return True
 
         self.assertTrue(test_id_class_types())
@@ -14062,11 +14037,11 @@ dedent """
             if x:
                 if x == 2:
                     return 1
-                    assert 1 == 2  # noqa: S101
+                    assert 1 == 2
                 else:
                     if x == 3:
                         return 2
-                        assert 1 == 2  # noqa: S101
+                        assert 1 == 2
                     else:
                         a = 2
                         b = 3
@@ -14074,7 +14049,7 @@ dedent """
                 a = 4
                 b = 1
             return a + b
-            assert 1 == 2  # noqa: S101
+            assert 1 == 2
 
         for i in range(4):
             self.checkScript(complicated, (i,))
@@ -14247,11 +14222,9 @@ dedent """
                 for n in jit_graph.nodes()
                 if isinstance(n.output().type(), torch._C._GeneratorType)
             )
-            if not isinstance(node.output().type(), torch._C._GeneratorType):
-                raise AssertionError(f"Expected _GeneratorType, got {type(node.output().type())}")
+            assert isinstance(node.output().type(), torch._C._GeneratorType)
             g = node.ival("value")
-            if not isinstance(g, torch.Generator):
-                raise AssertionError(f"Expected torch.Generator, got {type(g)}")
+            assert isinstance(g, torch.Generator)
             self.assertEqual(g.initial_seed(), seed)
 
         _test_parse_generator(2024)
@@ -14339,7 +14312,7 @@ dedent """
 
     def test_assert_is_scripting_metacompile(self):
         def foo():
-            assert not torch.jit.is_scripting(), "TestErrorMsg"  # noqa: S101
+            assert not torch.jit.is_scripting(), "TestErrorMsg"
             print("hello") + 2  # will not be compiled
 
         f = torch.jit.script(foo)
@@ -14376,7 +14349,7 @@ dedent """
         self.assertEqual(out, torch.tensor(6.0))
 
     def test_namedtuple_type_inference(self):
-        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])
+        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])  # noqa: UP014
         _UnannotatedNamedTuple = namedtuple('_NamedTupleUnAnnotated', ['value'])
 
         def test_check_named_tuple_value():
@@ -14524,12 +14497,12 @@ dedent """
         # decorators. This is fixed on master but not on version 2.1.1.
         # Next version update remove noqa and add @typing.overload annotation
 
-        @torch.jit._overload
-        def test_simple(x1):
+        @torch.jit._overload  # noqa: F811
+        def test_simple(x1):  # noqa: F811
             # type: (int) -> int
             pass
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def test_simple(x1):  # noqa: F811
             # type: (float) -> float
             pass
@@ -14551,8 +14524,8 @@ dedent """
         old_func = test_simple
 
         # testing that new functions added work with caching
-        @torch.jit._overload
-        def test_simple(x1):
+        @torch.jit._overload  # noqa: F811
+        def test_simple(x1):  # noqa: F811
             # type: (str) -> str
             pass
 
@@ -14561,8 +14534,8 @@ dedent """
             return old_func("hi")
 
         # testing new function same qualified name
-        @torch.jit._overload
-        def test_simple(a, b):
+        @torch.jit._overload  # noqa: F811
+        def test_simple(a, b):  # noqa: F811
             # type: (int, int) -> int
             pass
 
@@ -14578,12 +14551,12 @@ dedent """
         # currently we take the default values have to be specified in the
         # overload as well - TODO take them from implementation and apply
         # where the type is valid.
-        @torch.jit._overload
-        def identity(x1):
+        @torch.jit._overload  # noqa: F811
+        def identity(x1):  # noqa: F811
             # type: (str) -> str
             pass
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def identity(x1):  # noqa: F811
             # type: (float) -> float
             pass
@@ -14610,12 +14583,12 @@ dedent """
         with self.assertRaisesRegex(Exception, "cannot be directly compiled"):
             torch.jit.script(identity)
 
-        @torch.jit._overload
-        def impl_compile_failure(x, y):
+        @torch.jit._overload  # noqa: F811
+        def impl_compile_failure(x, y):  # noqa: F811
             # type: (str, str) -> (str)
             pass
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def impl_compile_failure(x, y):  # noqa: F811
             # type: (int, int) -> (int)
             pass
@@ -14630,8 +14603,8 @@ dedent """
         with self.assertRaisesRegex(Exception, "Arguments for call are not valid"):
             torch.jit.script(test)
 
-        @torch.jit._overload
-        def good_overload(x=1):
+        @torch.jit._overload  # noqa: F811
+        def good_overload(x=1):  # noqa: F811
             # type: (int) -> (int)
             pass
 
@@ -14646,8 +14619,8 @@ dedent """
 
 
         with self.assertRaisesRegex(Exception, "must equal to the default parameter"):
-            @torch.jit._overload
-            def bad_default_on_overload(x, y=2):
+            @torch.jit._overload  # noqa: F811
+            def bad_default_on_overload(x, y=2):  # noqa: F811
                 # type: (int, int) -> (int)
                 pass
 
@@ -14659,12 +14632,12 @@ dedent """
             def test():
                 return bad_default_on_overload(1, 2)
 
-        @torch.jit._overload
-        def diff_default(x):
+        @torch.jit._overload  # noqa: F811
+        def diff_default(x):  # noqa: F811
             # type: (int) -> int
             pass
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def diff_default(x):  # noqa: F811
             # type: (str) -> str
             pass
@@ -14677,12 +14650,12 @@ dedent """
 
         self.assertEqual(test(), torch.jit.script(test)())
 
-        @torch.jit._overload
-        def diff_num_params(x):
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params(x):  # noqa: F811
             # type: (float) -> float
             pass
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def diff_num_params(x, y):  # noqa: F811
             # type: (int, int) -> int
             pass
@@ -14696,7 +14669,7 @@ dedent """
 
         self.assertEqual(test(), torch.jit.script(test)())
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def diff_num_params_no_annot():
             # type: () -> int
             pass
@@ -14723,9 +14696,9 @@ dedent """
                     return 0
 
         @torch.jit._overload
-        def null_overload(x: int) -> int: ...
+        def null_overload(x: int) -> int: ...  # noqa: E704
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def null_overload(x: str) -> str:  # noqa: F811
             pass
 
@@ -14740,7 +14713,7 @@ dedent """
             def forward(self, x: int):
                 pass
 
-            @torch.jit._overload_method
+            @torch.jit._overload_method  # noqa: F811
             def forward(self, x: Tensor):  # noqa: F811
                 pass
 
@@ -14768,12 +14741,12 @@ dedent """
         self.assertEqual(out2, ref_out)
 
     def test_function_overloading_isinstance(self):
-        @torch.jit._overload
-        def my_conv(x, y):
+        @torch.jit._overload  # noqa: F811
+        def my_conv(x, y):  # noqa: F811
             # type: (float, str) -> (float)
             pass
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def my_conv(x, y):  # noqa: F811
             # type: (float, float) -> (float)
             pass
@@ -14792,15 +14765,14 @@ dedent """
 
         self.checkScript(test_uses, ())
 
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/131104")
     def test_method_overloading(self):
         class Over(torch.nn.Module):
-            @torch.jit._overload_method
-            def forward(self, x):
+            @torch.jit._overload_method  # noqa: F811
+            def forward(self, x):  # noqa: F811
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 pass
 
-            @torch.jit._overload_method
+            @torch.jit._overload_method  # noqa: F811
             def forward(self, x):  # noqa: F811
                 # type: (Tensor) -> Tensor
                 pass
@@ -14829,11 +14801,11 @@ dedent """
         self.assertEqual(over(x), x + 20)
 
         class Unannotated(torch.nn.Module):
-            @torch.jit._overload_method
-            def hello(self, x):
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
                 pass
 
-            @torch.jit._overload_method
+            @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
                 # type: (int) -> (int)
                 pass
@@ -14849,12 +14821,12 @@ dedent """
             torch.jit.script(w)
 
         class CompileOverloadError(torch.nn.Module):
-            @torch.jit._overload_method
-            def hello(self, x):
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
                 # type: (str) -> (int)
                 pass
 
-            @torch.jit._overload_method
+            @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
                 # type: (int) -> (int)
                 pass
@@ -14873,12 +14845,12 @@ dedent """
         if sys.version_info < (3, 13):  # test broken in 3.13
             with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 class W3(torch.nn.Module):
-                    @torch.jit._overload_method
-                    def forward(self, x):
+                    @torch.jit._overload_method  # noqa: F811
+                    def forward(self, x):  # noqa: F811
                         # type: (int) -> int
                         pass
 
-                    @torch.jit._overload_method
+                    @torch.jit._overload_method  # noqa: F811
                     def forward(self, x):  # noqa: F811
                         # type: (Tensor) -> Tensor
                         pass
@@ -14890,7 +14862,7 @@ dedent """
                 b = torch.jit.script(a)
 
                 class W3(torch.nn.Module):
-                    def forward(self, x):
+                    def forward(self, x):  # noqa: F811
                         return x + 5 + 10
 
                 a = W3()
@@ -14908,11 +14880,11 @@ dedent """
         self.assertEqual(a(torch.tensor(1)), torch.tensor(2))
 
         class W2(torch.nn.Module):
-            @torch.jit._overload_method
-            def hello(self, x):
+            @torch.jit._overload_method  # noqa: F811
+            def hello(self, x):  # noqa: F811
                 pass
 
-            @torch.jit._overload_method
+            @torch.jit._overload_method  # noqa: F811
             def hello(self, x):  # noqa: F811
                 # type: (int) -> (int)
                 pass
@@ -15649,7 +15621,7 @@ dedent """
                 return 1
 
             @torch.jit._overload_method
-            def hi(self, x: Tensor): ...
+            def hi(self, x: Tensor): ...  # noqa: E704
 
             def hi(self, x):  # noqa: F811
                 return 2
@@ -15811,11 +15783,6 @@ dedent """
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
 
-    @unittest.skipIf(
-        os.environ.get("TORCH_SHOW_CPP_STACKTRACES") == "1",
-        "C++ stack traces are expected in the error message when "
-        "TORCH_SHOW_CPP_STACKTRACES=1, so the 'frame' assertion doesn't apply.",
-    )
     def test_conv_error(self):
         @torch.jit.script
         def fn(x, y):
@@ -16263,8 +16230,7 @@ def add_nn_module_test(*args, **kwargs):
 
 
 def post_add_test(test_name, skipTestIf, do_test, test_class):
-    if hasattr(test_class, test_name):
-        raise AssertionError('Two tests have the same name: ' + test_name)
+    assert not hasattr(test_class, test_name), 'Two tests have the same name: ' + test_name
 
     for skip in skipTestIf:
         do_test = skip(do_test)

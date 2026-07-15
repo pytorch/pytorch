@@ -1,4 +1,3 @@
-# Owner(s): ["module: ci"]
 name: Update viable/strict
 
 on:
@@ -24,7 +23,7 @@ jobs:
         with:
           repository: pytorch/pytorch
           stable-branch: viable/strict
-          requires: '[\"pull\", \"trunk\", \"lint\", \"docs-build\"]'
+          requires: '[\"pull\", \"trunk\", \"lint\",  \"linux-aarch64\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
           clickhouse-url: ${{ secrets.CLICKHOUSE_URL }}
           clickhouse-username: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}

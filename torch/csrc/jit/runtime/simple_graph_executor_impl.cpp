@@ -28,22 +28,6 @@ const ExecutionPlan& SimpleGraphExecutorImpl::getPlanFor(
   return *execution_plan_;
 }
 
-const ExecutionPlan& SimpleGraphExecutorImpl::getInputIndependentPlan() {
-  std::lock_guard<std::mutex> lock(compile_mutex);
-  return getInputIndependentPlanImpl();
-}
-
-const ExecutionPlan& SimpleGraphExecutorImpl::getInputIndependentPlanImpl() {
-  if (execution_plan_) {
-    return *execution_plan_;
-  }
-  auto copy = graph->copy();
-  runNooptPassPipeline(copy);
-  execution_plan_ = ExecutionPlan(copy, function_name_);
-
-  return *execution_plan_;
-}
-
 GraphExecutorState SimpleGraphExecutorImpl::getDebugState() {
   GraphExecutorState state;
   TORCH_INTERNAL_ASSERT(execution_plan_);

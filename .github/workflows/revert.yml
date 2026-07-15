@@ -1,4 +1,3 @@
-# Owner(s): ["module: ci"]
 name: Revert merged PR
 
 on:

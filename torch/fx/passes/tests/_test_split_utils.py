@@ -42,12 +42,10 @@ class TestMoveNonTensorNodesOnBoundary(unittest.TestCase):
             node.meta = {"type": int}  # Non-tensor type
 
         # Mock users dict (Node.users is dict[Node, None])
-        users: dict[torch.fx.Node, None] = {}
-        node.users = users
+        node.users = {}
 
         # Initialize the _input_nodes dict (Node._input_nodes is dict[Node, None])
-        input_nodes: dict[torch.fx.Node, None] = {}
-        node._input_nodes = input_nodes
+        node._input_nodes = {}
 
         return node
 

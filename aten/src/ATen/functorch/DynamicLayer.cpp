@@ -29,8 +29,7 @@ DynamicLayer::DynamicLayer(
     std::optional<RandomnessType> randomness,
     std::optional<bool> prev_grad_mode,
     std::optional<bool> prev_fwd_grad_mode,
-    std::optional<bool> functionalize_add_back_views,
-    std::optional<bool> prev_inference_mode)
+    std::optional<bool> functionalize_add_back_views)
 {
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
@@ -44,10 +43,10 @@ DynamicLayer::DynamicLayer(
       interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value());
       break;
     case TransformType::Grad:
-      interpreter_ = Interpreter::Grad(layerId, prev_grad_mode.value(), prev_inference_mode.value_or(false));
+      interpreter_ = Interpreter::Grad(layerId, prev_grad_mode.value());
       break;
     case TransformType::Jvp:
-      interpreter_ = Interpreter::Jvp(layerId, prev_fwd_grad_mode.value(), prev_inference_mode.value_or(false));
+      interpreter_ = Interpreter::Jvp(layerId, prev_fwd_grad_mode.value());
       break;
     case TransformType::Functionalize:
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -247,11 +246,10 @@ int64_t initAndPushDynamicLayer(
     std::optional<RandomnessType> randomness,
     std::optional<bool> prev_grad_mode,
     std::optional<bool> prev_fwd_grad_mode,
-    std::optional<bool> functionalize_add_back_views,
-    std::optional<bool> prev_inference_mode) {
+    std::optional<bool> functionalize_add_back_views) {
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const int64_t layerId = static_cast<int64_t>(1 + dynamicLayerStack.size());
-  DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views, prev_inference_mode);
+  DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
   // NB: this function should be called while holding the GIL to avoid races
   new_layer.interpreter().set_is_alive(true);
   pushDynamicLayer(std::move(new_layer));

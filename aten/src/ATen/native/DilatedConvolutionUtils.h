@@ -42,7 +42,6 @@ std::vector<int64_t> get_output_size(
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
   std::vector<int64_t> sizes;
-  sizes.reserve(dim);
   for (const auto index : c10::irange(dim)) {
     sizes.push_back(
         div_rtn<int64_t>(

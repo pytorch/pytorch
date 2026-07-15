@@ -66,10 +66,9 @@ struct TORCH_API XLAHooksInterface : AcceleratorHooksInterface {
 
 };
 
-// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API XLAHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(XLAHooksRegistry, XLAHooksInterface);
+TORCH_DECLARE_REGISTRY(XLAHooksRegistry, XLAHooksInterface, XLAHooksArgs);
 #define REGISTER_XLA_HOOKS(clsname) \
   C10_REGISTER_CLASS(XLAHooksRegistry, clsname, clsname)
 

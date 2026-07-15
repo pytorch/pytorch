@@ -4,7 +4,7 @@ import itertools
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import patch
 
 from ...autotune_process import TensorMeta
@@ -37,7 +37,7 @@ class ROCmTemplate(KernelTemplate):
         name: str,
         input_nodes: list[Buffer],
         layout: Layout,
-        input_reorder: list[int] | None = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         """
 
@@ -98,19 +98,17 @@ class ROCmTemplate(KernelTemplate):
             unique(self.input_nodes[idx].get_name() for idx in input_reorder)
         )
         expected_args.extend([self.output_node.get_name()])
-        if list(call_args)[: len(expected_args)] != expected_args:
-            raise AssertionError(
-                (
-                    call_args,
-                    expected_args,
-                )
-            )
+        assert list(call_args)[: len(expected_args)] == expected_args, (
+            call_args,
+            expected_args,
+        )
 
         size_args = (
             self.size_args() if hasattr(self, "size_args") else ()
         )  # subclass should define def size_args()
-        # Resolve symbolic sizes to concrete ints for benchmarking only.
-        size_args_ints = list(V.graph.sizevars.optimization_hints(size_args))
+        size_args_ints = [
+            V.graph.sizevars.size_hint(arg) for arg in size_args
+        ]  # resolve to ints for benchmarking
         # The runtime args come right after the size args
         runtime_args = self.get_runtime_arg_values(**kwargs)
         extra_args = size_args_ints + runtime_args
@@ -124,7 +122,7 @@ class ROCmTemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: ROCmTemplateBuffer,
-            epilogue_nodes: Sequence[IRNode] | None = None,
+            epilogue_nodes: Optional[Sequence[IRNode]] = None,
         ):
             kernel = ROCmTemplateKernel(
                 kernel_name="KERNEL_NAME",

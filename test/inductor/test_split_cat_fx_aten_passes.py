@@ -17,7 +17,7 @@ except Exception:
     has_fbgemm = False
 
 
-class _TestSplitCat(torch.nn.Module):
+class TestSplitCat(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -49,7 +49,7 @@ class _TestSplitCat(torch.nn.Module):
         return torch.ops.aten.cat.default([cat_1, cat_2], 1)
 
 
-class _TestSplitCatSingular(torch.nn.Module):
+class TestSplitCatSingular(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -65,7 +65,7 @@ class _TestSplitCatSingular(torch.nn.Module):
         return torch.ops.aten.cat.default([cat_1, cat_2], 1)
 
 
-class _TestSplitCatPartial(torch.nn.Module):
+class TestSplitCatPartial(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -151,7 +151,7 @@ class _TestSplitCatPartial(torch.nn.Module):
         return cat
 
 
-class _TestMoveViewAferCat(torch.nn.Module):
+class TestMoveViewAferCat(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -191,7 +191,7 @@ class _TestMoveViewAferCat(torch.nn.Module):
         return torch.cat([clone, cat_1], 1)
 
 
-class _TestSelectCat(torch.nn.Module):
+class TestSelectCat(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -226,8 +226,7 @@ class TestSplitCatAten(TestCase):
             return False
         for key1 in ref_dict:
             key2 = "_orig_mod." + key1
-            if key2 not in res_dict:
-                raise AssertionError(f"{key1} does not exist in traced module")
+            assert key2 in res_dict, f"{key1} does not exist in traced module"
             if not torch.allclose(ref_dict[key1], res_dict[key2], rtol=rtol, atol=atol):
                 return False
         return True
@@ -264,7 +263,7 @@ class TestSplitCatAten(TestCase):
             torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
             torch.randn(1024, 32, device=torch.device(device=GPU_TYPE)),
         ]
-        module = _TestSplitCat()
+        module = TestSplitCat()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
@@ -281,7 +280,7 @@ class TestSplitCatAten(TestCase):
             torch.randn(1024, 96, device=torch.device(device=GPU_TYPE)),
             torch.randn(1024, 96, device=torch.device(device=GPU_TYPE)),
         ]
-        module = _TestSplitCatPartial()
+        module = TestSplitCatPartial()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
@@ -307,7 +306,7 @@ class TestSplitCatAten(TestCase):
             torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
             torch.randn(1024, 32, device=torch.device(device=GPU_TYPE)),
         ]
-        module = _TestSplitCatSingular()
+        module = TestSplitCatSingular()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
@@ -332,7 +331,7 @@ class TestSplitCatAten(TestCase):
             torch.randn(1024, 6, 128, device=torch.device(device=GPU_TYPE)),
             torch.randn(1024, 6, 128, device=torch.device(device=GPU_TYPE)),
         ]
-        module = _TestSelectCat()
+        module = TestSelectCat()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
@@ -356,7 +355,7 @@ class TestSplitCatAten(TestCase):
         inputs = [
             torch.randn(7, 8, 96, device=torch.device(device=GPU_TYPE)),
         ]
-        module = _TestMoveViewAferCat()
+        module = TestMoveViewAferCat()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
@@ -396,7 +395,7 @@ class TestSplitCatAtenNormalizationPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["normalization_aten_pass"],
                 expected_split_norm_count,
-                msg=lambda msg: f"{msg}\nfor {fn}",
+                msg=f"for {fn}",
             )
             counters.clear()
 
