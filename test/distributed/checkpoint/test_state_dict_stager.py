@@ -482,16 +482,18 @@ class TestStateDictStager(TestCase):
         for dtype_name, original_tensor in tensors.items():
             cpu_tensor = cpu_state_dict[dtype_name]
             self.assertEqual(
-                cpu_tensor.device.type, "cpu", f"Tensor {dtype_name} should be on CPU"
+                cpu_tensor.device.type,
+                "cpu",
+                lambda msg: f"{msg}\nTensor {dtype_name} should be on CPU",
             )
             self.assertEqual(
                 cpu_tensor.dtype,
                 original_tensor.dtype,
-                f"Tensor {dtype_name} has incorrect dtype",
+                lambda msg: f"{msg}\nTensor {dtype_name} has incorrect dtype",
             )
             self.assertTrue(
                 torch.allclose(cpu_tensor, original_tensor.cpu()),
-                f"Tensor {dtype_name} has incorrect values",
+                lambda msg: f"{msg}\nTensor {dtype_name} has incorrect values",
             )
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
@@ -536,17 +538,17 @@ class TestStateDictStager(TestCase):
                     self.assertEqual(
                         cpu_tensor.device.type,
                         "cpu",
-                        f"Tensor {tensor_name} should be on CPU",
+                        lambda msg: f"{msg}\nTensor {tensor_name} should be on CPU",
                     )
                     self.assertEqual(
                         cpu_tensor.shape,
                         original_tensor.shape,
-                        f"Tensor {tensor_name} has incorrect shape",
+                        lambda msg: f"{msg}\nTensor {tensor_name} has incorrect shape",
                     )
                     self.assertEqual(
                         cpu_tensor.dtype,
                         original_tensor.dtype,
-                        f"Tensor {tensor_name} has incorrect dtype",
+                        lambda msg: f"{msg}\nTensor {tensor_name} has incorrect dtype",
                     )
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
@@ -577,7 +579,9 @@ class TestStateDictStager(TestCase):
 
         # Verify that all tensors have been correctly copied to CPU
         result, error = compare_state_dicts(state_dict, cpu_state_dict)
-        self.assertTrue(result, f"State dicts are not equivalent: {error}")
+        self.assertTrue(
+            result, lambda msg: f"{msg}\nState dicts are not equivalent: {error}"
+        )
 
         # Verify storage sharing is preserved
         # All these tensors should share the same storage
@@ -801,24 +805,24 @@ class TestStateDictStager(TestCase):
                 self.assertEqual(
                     cpu_tensor1.is_pinned(),
                     pin_memory,
-                    f"Tensor pinned status should be {pin_memory}",
+                    lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
                 )
                 self.assertEqual(
                     cpu_tensor2.is_pinned(),
                     pin_memory,
-                    f"Tensor pinned status should be {pin_memory}",
+                    lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
                 )
 
                 # Verify shared memory status
                 self.assertEqual(
                     cpu_tensor1.is_shared(),
                     share_memory,
-                    f"Tensor shared status should be {share_memory}",
+                    lambda msg: f"{msg}\nTensor shared status should be {share_memory}",
                 )
                 self.assertEqual(
                     cpu_tensor2.is_shared(),
                     share_memory,
-                    f"Tensor shared status should be {share_memory}",
+                    lambda msg: f"{msg}\nTensor shared status should be {share_memory}",
                 )
 
                 # Verify storage sharing is consistent with tensor sharing
@@ -941,7 +945,7 @@ class TestDTensorStateDictStager(DTensorTestBase):
             self.assertLess(
                 growth,
                 max_allowed,
-                f"Memory grew {growth:.0f}MB over {num_saves} saves (baseline={baseline:.0f}MB). "
+                lambda msg: f"{msg}\nMemory grew {growth:.0f}MB over {num_saves} saves (baseline={baseline:.0f}MB). "
                 f"This indicates a memory leak. Max allowed: {max_allowed:.0f}MB",
             )
 
@@ -998,7 +1002,9 @@ class TestReplicationStager(DTensorTestBase):
         def compare_tensors(actual, expected, path=""):
             if isinstance(actual, dict) and isinstance(expected, dict):
                 self.assertEqual(
-                    actual.keys(), expected.keys(), f"Keys mismatch at {path}"
+                    actual.keys(),
+                    expected.keys(),
+                    lambda msg: f"{msg}\nKeys mismatch at {path}",
                 )
                 for key in actual:
                     compare_tensors(
@@ -1008,19 +1014,28 @@ class TestReplicationStager(DTensorTestBase):
                 expected, torch.Tensor
             ):
                 self.assertEqual(
-                    actual.device.type, "cpu", f"Tensor at {path} should be on CPU"
+                    actual.device.type,
+                    "cpu",
+                    lambda msg: f"{msg}\nTensor at {path} should be on CPU",
                 )
                 self.assertEqual(
-                    actual.shape, expected.shape, f"Shape mismatch at {path}"
+                    actual.shape,
+                    expected.shape,
+                    lambda msg: f"{msg}\nShape mismatch at {path}",
                 )
                 self.assertEqual(
-                    actual.dtype, expected.dtype, f"Dtype mismatch at {path}"
+                    actual.dtype,
+                    expected.dtype,
+                    lambda msg: f"{msg}\nDtype mismatch at {path}",
                 )
                 self.assertTrue(
-                    torch.equal(actual, expected), f"Values mismatch at {path}"
+                    torch.equal(actual, expected),
+                    lambda msg: f"{msg}\nValues mismatch at {path}",
                 )
             else:
-                self.assertEqual(actual, expected, f"Value mismatch at {path}")
+                self.assertEqual(
+                    actual, expected, lambda msg: f"{msg}\nValue mismatch at {path}"
+                )
 
         compare_tensors(replicated_dict, expected_dict)
 
@@ -1136,7 +1151,7 @@ class TestReplicationStager(DTensorTestBase):
             self.assertEqual(
                 replicated_dict["rank_scalar"].item(),
                 float(partner_rank),
-                f"Rank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
+                lambda msg: f"{msg}\nRank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
             )
 
     def _create_sharded_tensor_state_dict(self, rank: int, world_size: int) -> dict:
@@ -1247,7 +1262,7 @@ class TestReplicationStager(DTensorTestBase):
             self.assertEqual(
                 replicated_dict["rank_scalar"].item(),
                 float(partner_rank),
-                f"Rank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
+                lambda msg: f"{msg}\nRank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
             )
 
     @with_comms
@@ -1395,7 +1410,7 @@ class TestReplicationStager(DTensorTestBase):
 
             self.assertTrue(
                 os.path.exists(expected_path),
-                f"Persisted file should exist at {expected_path}",
+                lambda msg: f"{msg}\nPersisted file should exist at {expected_path}",
             )
 
             # Verify the storage directory was created
@@ -1451,7 +1466,7 @@ class TestReplicationStager(DTensorTestBase):
 
             self.assertTrue(
                 os.path.exists(expected_path),
-                f"Persisted file should exist in custom directory at {expected_path}",
+                lambda msg: f"{msg}\nPersisted file should exist in custom directory at {expected_path}",
             )
 
             # Load and verify the persisted state_dict
