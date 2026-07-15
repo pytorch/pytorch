@@ -99,7 +99,10 @@ def _register_propagate_rule(
         fwd_bwd_status = handler(node, *args, **kwargs)
         if isinstance(fwd_bwd_status, PropagateStatus):
             return fwd_bwd_status
-        assert isinstance(fwd_bwd_status, (list, tuple)) and len(fwd_bwd_status) == 2
+        if not (isinstance(fwd_bwd_status, (list, tuple)) and len(fwd_bwd_status) == 2):
+            raise AssertionError(
+                f"expected (list, tuple) of len 2, got {type(fwd_bwd_status)}"
+            )
         fwd_status, bwd_status = fwd_bwd_status
         log.debug(
             "Chunking metadata propagation for %s: Fwd status %s, bwd status %s",
@@ -116,9 +119,11 @@ def _register_propagate_rule(
             return PropagateStatus.SUCCEED_WITH_CHANGE
         return PropagateStatus.SUCCEED_NO_CHANGE
 
-    assert isinstance(aten_op, (list, tuple)), f"{type(aten_op)=}"
+    if not isinstance(aten_op, (list, tuple)):
+        raise AssertionError(f"{type(aten_op)=}")
     for op in aten_op:
-        assert isinstance(op, torch._ops.OpOverload)
+        if not isinstance(op, torch._ops.OpOverload):
+            raise AssertionError(f"expected OpOverload, got {type(op)}")
         propagate_rules[op] = wrapper
     return wrapper
 
@@ -184,9 +189,8 @@ def propagate(amplifier_node: Node) -> None:
     log.debug("fwd_filter %s", fwd_filter)
     log.debug("bwd_filter %s", bwd_filter)
 
-    assert len(get_nodes_with_chunking_meta(graph)) == 0, (
-        "Expect no nodes with chunking meta yet"
-    )
+    if len(get_nodes_with_chunking_meta(graph)) != 0:
+        raise AssertionError("Expect no nodes with chunking meta yet")
 
     set_chunking_meta(amplifier_node, chunk_dim=0)
 
@@ -249,9 +253,8 @@ def propagate_single_node(
             for user in node.users:
                 _enqueue(queue, user)
     else:
-        assert status == PropagateStatus.SUCCEED_NO_CHANGE, (
-            f"status type {type(status)}, value {status}"
-        )
+        if status != PropagateStatus.SUCCEED_NO_CHANGE:
+            raise AssertionError(f"status type {type(status)}, value {status}")
 
 
 def _bool_to_status(changed: bool) -> PropagateStatus:
@@ -270,9 +273,18 @@ def propagate_addmm(addmm_node: Node) -> _HandlerRetType:
     bias_node, input_node, weight_node = addmm_node.args
 
     def propagate_addmm_fwd() -> PropagateStatus:
-        assert isinstance(bias_node, Node)
-        assert isinstance(input_node, Node)
-        assert isinstance(weight_node, Node)
+        if not isinstance(bias_node, Node):
+            raise AssertionError(
+                f"expected bias_node to be a Node, got {type(bias_node)}"
+            )
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
+        if not isinstance(weight_node, Node):
+            raise AssertionError(
+                f"expected weight_node to be a Node, got {type(weight_node)}"
+            )
         if not has_any_chunking_meta(bias_node, input_node, weight_node):
             return PropagateStatus.SUCCEED_NO_CHANGE
 
@@ -293,9 +305,18 @@ def propagate_addmm(addmm_node: Node) -> _HandlerRetType:
         return PropagateStatus.FAIL
 
     def propagate_addmm_bwd() -> PropagateStatus:
-        assert isinstance(bias_node, Node)
-        assert isinstance(input_node, Node)
-        assert isinstance(weight_node, Node)
+        if not isinstance(bias_node, Node):
+            raise AssertionError(
+                f"expected bias_node to be a Node, got {type(bias_node)}"
+            )
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
+        if not isinstance(weight_node, Node):
+            raise AssertionError(
+                f"expected weight_node to be a Node, got {type(weight_node)}"
+            )
 
         if not (meta := get_chunking_meta(addmm_node)):
             return PropagateStatus.SUCCEED_NO_CHANGE
@@ -310,8 +331,10 @@ def propagate_addmm(addmm_node: Node) -> _HandlerRetType:
             # We should chunk the bias only if it's not broadcasted
             bias_node_ft = get_fake_tensor_from_node_arg(bias_node)
             input_node_ft = get_fake_tensor_from_node_arg(input_node)
-            assert bias_node_ft is not None
-            assert input_node_ft is not None
+            if bias_node_ft is None:
+                raise AssertionError("expected bias_node_ft to not be None")
+            if input_node_ft is None:
+                raise AssertionError("expected input_node_ft to not be None")
             if bias_node_ft.ndim < input_node_ft.ndim:
                 changed |= set_chunking_meta(bias_node)
             else:
@@ -328,8 +351,14 @@ def propagate_mm(mm_node: Node) -> _HandlerRetType:
     lhs_node, rhs_node = mm_node.args[:2]
 
     def fwd() -> PropagateStatus:
-        assert isinstance(lhs_node, Node)
-        assert isinstance(rhs_node, Node)
+        if not isinstance(lhs_node, Node):
+            raise AssertionError(
+                f"expected lhs_node to be a Node, got {type(lhs_node)}"
+            )
+        if not isinstance(rhs_node, Node):
+            raise AssertionError(
+                f"expected rhs_node to be a Node, got {type(rhs_node)}"
+            )
         lhs_meta = get_chunking_meta(lhs_node)
         rhs_meta = get_chunking_meta(rhs_node)
 
@@ -338,7 +367,8 @@ def propagate_mm(mm_node: Node) -> _HandlerRetType:
 
         # only lhs is chunked
         if not has_nop_chunking_meta(lhs_node) and has_nop_chunking_meta(rhs_node):
-            assert lhs_meta is not None
+            if lhs_meta is None:
+                raise AssertionError("expected lhs_meta to not be None")
             return _bool_to_status(
                 copy_chunking_meta(mm_node, lhs_meta) | set_chunking_meta(rhs_node)
             )
@@ -357,18 +387,26 @@ def propagate_mm(mm_node: Node) -> _HandlerRetType:
         return PropagateStatus.FAIL
 
     def bwd() -> PropagateStatus:
-        assert isinstance(lhs_node, Node)
-        assert isinstance(rhs_node, Node)
+        if not isinstance(lhs_node, Node):
+            raise AssertionError(
+                f"expected lhs_node to be a Node, got {type(lhs_node)}"
+            )
+        if not isinstance(rhs_node, Node):
+            raise AssertionError(
+                f"expected rhs_node to be a Node, got {type(rhs_node)}"
+            )
         out_meta = get_chunking_meta(mm_node)
         if out_meta is None:
             return _bool_to_status(False)
 
         # first dim of a 2D output is chunked
         ft = get_fake_tensor_from_node_arg(mm_node)
-        assert ft is not None
+        if ft is None:
+            raise AssertionError("expected ft to not be None")
         if ft.ndim == 2 and out_meta.chunk_dim == 0:
             rhs_meta = get_chunking_meta(rhs_node)
-            assert ChunkingMeta.is_nop(rhs_meta)
+            if not ChunkingMeta.is_nop(rhs_meta):
+                raise AssertionError("expected rhs_meta to be a nop ChunkingMeta")
             return _bool_to_status(
                 copy_chunking_meta(lhs_node, mm_node) | set_chunking_meta(rhs_node)
             )
@@ -528,8 +566,14 @@ def propagate_reduce(reduce_node: Node) -> _HandlerRetType:
     arg_node, reduce_dims = reduce_node.args[0:2]
 
     def propagate_fwd() -> PropagateStatus:
-        assert isinstance(arg_node, Node)
-        assert isinstance(reduce_dims, (tuple, list))
+        if not isinstance(arg_node, Node):
+            raise AssertionError(
+                f"expected arg_node to be a Node, got {type(arg_node)}"
+            )
+        if not isinstance(reduce_dims, (tuple, list)):
+            raise AssertionError(
+                f"expected reduce_dims to be a tuple or list, got {type(reduce_dims)}"
+            )
         arg_meta = get_chunking_meta(arg_node)
         if arg_meta is None:
             return PropagateStatus.SUCCEED_NO_CHANGE
@@ -549,17 +593,29 @@ def propagate_reduce(reduce_node: Node) -> _HandlerRetType:
         return PropagateStatus.FAIL
 
     def propagate_bwd() -> PropagateStatus:
-        assert isinstance(arg_node, Node)
-        assert isinstance(reduce_dims, (tuple, list))
+        if not isinstance(arg_node, Node):
+            raise AssertionError(
+                f"expected arg_node to be a Node, got {type(arg_node)}"
+            )
+        if not isinstance(reduce_dims, (tuple, list)):
+            raise AssertionError(
+                f"expected reduce_dims to be a tuple or list, got {type(reduce_dims)}"
+            )
         out_meta = get_chunking_meta(reduce_node)
         if out_meta is None:
             return PropagateStatus.SUCCEED_NO_CHANGE
         if out_meta.chunk_dim is not None:
-            assert out_meta.chunk_dim not in reduce_dims
+            if out_meta.chunk_dim in reduce_dims:
+                raise AssertionError(
+                    f"expected chunk_dim {out_meta.chunk_dim} not in {reduce_dims}"
+                )
             return _bool_to_status(copy_chunking_meta(arg_node, out_meta))
 
         if out_meta.chunk_dim is None and out_meta.need_sum and len(reduce_dims) == 1:
-            assert reduce_node.target == aten.sum.dim_IntList
+            if reduce_node.target != aten.sum.dim_IntList:
+                raise AssertionError(
+                    f"expected target aten.sum.dim_IntList, got {reduce_node.target}"
+                )
             return _bool_to_status(
                 set_chunking_meta(
                     arg_node, out_meta, chunk_dim=reduce_dims[0], need_sum=False
@@ -576,8 +632,14 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
     input_node, order = permute_node.args[:2]
 
     def propagate_fwd() -> PropagateStatus:
-        assert isinstance(input_node, Node)
-        assert isinstance(order, (tuple, list))
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
+        if not isinstance(order, (tuple, list)):
+            raise AssertionError(
+                f"expected order to be a tuple or list, got {type(order)}"
+            )
         input_meta = get_chunking_meta(input_node)
         output_meta = get_chunking_meta(permute_node)
         if input_meta is None:
@@ -593,14 +655,23 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
 
         # sanity check
         if output_meta is not None:
-            assert output_meta.chunk_dim == new_chunk_dim
+            if output_meta.chunk_dim != new_chunk_dim:
+                raise AssertionError(
+                    f"expected chunk_dim {new_chunk_dim}, got {output_meta.chunk_dim}"
+                )
         return _bool_to_status(
             set_chunking_meta(permute_node, meta=input_meta, chunk_dim=new_chunk_dim)
         )
 
     def propagate_bwd() -> PropagateStatus:
-        assert isinstance(input_node, Node)
-        assert isinstance(order, (tuple, list))
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
+        if not isinstance(order, (tuple, list)):
+            raise AssertionError(
+                f"expected order to be a tuple or list, got {type(order)}"
+            )
 
         input_meta = get_chunking_meta(input_node)
         output_meta = get_chunking_meta(permute_node)
@@ -616,7 +687,10 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
 
         # sanity check
         if input_meta is not None:
-            assert input_meta.chunk_dim == new_chunk_dim
+            if input_meta.chunk_dim != new_chunk_dim:
+                raise AssertionError(
+                    f"expected chunk_dim {new_chunk_dim}, got {input_meta.chunk_dim}"
+                )
         return _bool_to_status(
             set_chunking_meta(input_node, meta=output_meta, chunk_dim=new_chunk_dim)
         )
@@ -642,8 +716,14 @@ def propagate_nop(node: Node) -> _HandlerRetType:
 @register_propagate_rule(aten.unsqueeze.default)
 def propagate_unsqueeze(unsqueeze_node: Node) -> _HandlerRetType:
     input_node, unsqueeze_dim = unsqueeze_node.args[:2]
-    assert isinstance(input_node, Node)
-    assert isinstance(unsqueeze_dim, int)
+    if not isinstance(input_node, Node):
+        raise AssertionError(
+            f"expected input_node to be a Node, got {type(input_node)}"
+        )
+    if not isinstance(unsqueeze_dim, int):
+        raise AssertionError(
+            f"expected unsqueeze_dim to be an int, got {type(unsqueeze_dim)}"
+        )
     input_ndim = get_fake_tensor_from_node_arg(input_node).ndim  # type: ignore[union-attr]
     # Normalize negative dim: unsqueeze valid range is [-(ndim+1), ndim]
     normalized_dim = (
@@ -651,7 +731,10 @@ def propagate_unsqueeze(unsqueeze_node: Node) -> _HandlerRetType:
     )
 
     def fwd() -> PropagateStatus:
-        assert isinstance(input_node, Node)
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
         input_meta = get_chunking_meta(input_node)
         if input_meta is None:
             return _bool_to_status(False)
@@ -667,7 +750,10 @@ def propagate_unsqueeze(unsqueeze_node: Node) -> _HandlerRetType:
         )
 
     def bwd() -> PropagateStatus:
-        assert isinstance(input_node, Node)
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
         output_meta = get_chunking_meta(unsqueeze_node)
         if output_meta is None:
             return _bool_to_status(False)
@@ -712,12 +798,18 @@ def _find_chunk_dim_after_reshape(
 @register_propagate_rule(aten.view.default)
 def propagate_view(view_node: Node) -> _HandlerRetType:
     input_node = view_node.args[0]
-    assert isinstance(input_node, Node)
+    if not isinstance(input_node, Node):
+        raise AssertionError(
+            f"expected input_node to be a Node, got {type(input_node)}"
+        )
     input_shape = list(get_fake_tensor_from_node_arg(input_node).shape)  # type: ignore[union-attr]
     output_shape = list(get_fake_tensor_from_node_arg(view_node).shape)  # type: ignore[union-attr]
 
     def fwd() -> PropagateStatus:
-        assert isinstance(input_node, Node)
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
         input_meta = get_chunking_meta(input_node)
         if input_meta is None:
             return _bool_to_status(False)
@@ -733,7 +825,10 @@ def propagate_view(view_node: Node) -> _HandlerRetType:
         )
 
     def bwd() -> PropagateStatus:
-        assert isinstance(input_node, Node)
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
         output_meta = get_chunking_meta(view_node)
         if output_meta is None:
             return _bool_to_status(False)
@@ -758,12 +853,17 @@ def propagate_view(view_node: Node) -> _HandlerRetType:
 )
 def propagate_expand(expand_node: Node) -> _HandlerRetType:
     input_node = expand_node.args[0]
-    assert isinstance(input_node, Node)
+    if not isinstance(input_node, Node):
+        raise AssertionError(
+            f"expected input_node to be a Node, got {type(input_node)}"
+        )
 
     input_ft = get_fake_tensor_from_node_arg(input_node)
-    assert input_ft is not None
+    if input_ft is None:
+        raise AssertionError("expected input_ft to not be None")
     output_ft = get_fake_tensor_from_node_arg(expand_node)
-    assert output_ft is not None
+    if output_ft is None:
+        raise AssertionError("expected output_ft to not be None")
     input_shape = list(input_ft.shape)
     output_shape = list(output_ft.shape)
 
@@ -782,7 +882,10 @@ def propagate_expand(expand_node: Node) -> _HandlerRetType:
         return out_dim < dim_offset or input_shape[out_dim - dim_offset] == 1
 
     def fwd() -> PropagateStatus:
-        assert isinstance(input_node, Node)
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
         input_meta = get_chunking_meta(input_node)
         if input_meta is None:
             return _bool_to_status(False)
@@ -794,7 +897,10 @@ def propagate_expand(expand_node: Node) -> _HandlerRetType:
         return _bool_to_status(copy_chunking_meta(expand_node, input_meta))
 
     def bwd() -> PropagateStatus:
-        assert isinstance(input_node, Node)
+        if not isinstance(input_node, Node):
+            raise AssertionError(
+                f"expected input_node to be a Node, got {type(input_node)}"
+            )
         output_meta = get_chunking_meta(expand_node)
         if output_meta is None:
             return _bool_to_status(False)
@@ -813,14 +919,18 @@ def propagate_expand(expand_node: Node) -> _HandlerRetType:
 )
 def propagate_sum_to_scalar(sum_node: Node) -> _HandlerRetType:
     input_node = sum_node.args[0]
-    assert isinstance(input_node, Node)
+    if not isinstance(input_node, Node):
+        raise AssertionError(
+            f"expected input_node to be a Node, got {type(input_node)}"
+        )
 
     def fwd() -> PropagateStatus:
         input_meta = get_chunking_meta(input_node)  # pyrefly: ignore[bad-argument-type]
         if has_nop_chunking_meta(input_node):  # pyrefly: ignore[bad-argument-type]
             return _bool_to_status(False)
 
-        assert input_meta is not None
+        if input_meta is None:
+            raise AssertionError("expected input_meta to not be None")
         if input_meta.chunk_dim is not None:
             changed = update_chunking_meta(sum_node, need_sum=True, chunk_by=None)
             return _bool_to_status(changed)

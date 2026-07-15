@@ -88,12 +88,16 @@ def _split_compiler_command(compiler: str) -> list[str]:
     return command
 
 
+def _compiler_command(compiler: str, *args: str) -> list[str]:
+    return [*_split_compiler_command(compiler), *args]
+
+
 @functools.cache
 def _compiler_version_string(cpp_compiler: str) -> str:
     try:
         return (
             subprocess.check_output(
-                [*_split_compiler_command(cpp_compiler), "--version"],
+                _compiler_command(cpp_compiler, "--version"),
                 stderr=subprocess.DEVNULL,
             )
             .strip()
@@ -130,7 +134,7 @@ def cpp_compiler_search(search: Sequence[str | None]) -> str:
                 )
                 with lock:
                     cxx = install_gcc_via_conda()
-            subprocess.check_output([*_split_compiler_command(cxx), "--version"])
+            subprocess.check_output(_compiler_command(cxx, "--version"))
             return cxx
         except (
             subprocess.SubprocessError,
@@ -174,9 +178,11 @@ def check_compiler_exist_windows(compiler: str) -> None:
     Check if compiler is ready, in case end user not activate MSVC environment.
     """
     try:
-        subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"Compiler: {compiler} is not found.") from exc
+        subprocess.check_output(
+            _compiler_command(compiler, "/help"), stderr=subprocess.STDOUT
+        )
+    except FileNotFoundError as e:
+        raise exc.InvalidCxxCompiler(compiler) from e
     except subprocess.SubprocessError:
         # Expected that some compiler(clang, clang++) is exist, but they not support `/help` args.
         pass
@@ -378,7 +384,7 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     """
     try:
         out = subprocess.check_output(
-            [*_split_compiler_command(compiler), "-v"],
+            _compiler_command(compiler, "-v"),
             stderr=subprocess.STDOUT,
             text=True,
         )
@@ -518,7 +524,7 @@ def batch_convert_cubins_to_obj(
             )
 
     subprocess.run(
-        [*_split_compiler_command(cpp_compiler), "-c", asm_path, "-o", obj_path],
+        _compiler_command(cpp_compiler, "-c", asm_path, "-o", obj_path),
         capture_output=True,
         text=True,
         check=True,
@@ -579,11 +585,7 @@ def _is_gcc_version_less_than(cpp_compiler: str, major: int) -> bool:
     try:
         output_msg = (
             subprocess.check_output(
-                [
-                    *_split_compiler_command(cpp_compiler),
-                    "-dumpfullversion",
-                    "-dumpversion",
-                ],
+                _compiler_command(cpp_compiler, "-dumpfullversion", "-dumpversion"),
                 stderr=subprocess.DEVNULL,
             )
             .strip()
@@ -606,7 +608,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
     try:
         result = subprocess.run(
-            [*_split_compiler_command(cpp_compiler), "/help"],
+            _compiler_command(cpp_compiler, "/help"),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
@@ -692,14 +694,14 @@ def get_compiler_version_info(compiler: str) -> str:
     env["LC_ALL"] = "C"  # Don't localize output
     try:
         version_string = subprocess.check_output(
-            [*_split_compiler_command(compiler), "-v"],
+            _compiler_command(compiler, "-v"),
             stderr=subprocess.STDOUT,
             env=env,
         ).decode(*SUBPROCESS_DECODE_ARGS)
     except Exception:
         try:
             version_string = subprocess.check_output(
-                [*_split_compiler_command(compiler), "--version"],
+                _compiler_command(compiler, "--version"),
                 stderr=subprocess.STDOUT,
                 env=env,
             ).decode(*SUBPROCESS_DECODE_ARGS)
@@ -970,7 +972,7 @@ def _get_ffast_math_flags() -> list[str]:
     if _IS_WINDOWS:
         flags = []
     else:
-        # ffast-math is equivalent to these flags as in
+        # This starts from the flags implied by -ffast-math, as in
         # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
         # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
         # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
@@ -981,12 +983,15 @@ def _get_ffast_math_flags() -> list[str]:
             "funsafe-math-optimizations",
             "ffinite-math-only",
             "fno-signed-zeros",
-            "fno-math-errno",
         ]
 
         flags.append("fno-finite-math-only")
         if not config.cpp.enable_unsafe_math_opt_flag:
             flags.append("fno-unsafe-math-optimizations")
+        # Keep errno-preserving libm semantics.  With -fno-math-errno, GCC can
+        # inline/transform libm call pairs like sin(atan(x)) in ways that do not
+        # preserve NaN values (see https://github.com/pytorch/pytorch/issues/143978).
+        flags.append("fmath-errno")
         flags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
         if is_gcc():
@@ -1195,7 +1200,12 @@ def get_cpp_options(
     if config.aot_inductor.cross_target_platform == "windows":
         passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])
         if check_mingw_win32_flavor(MINGW_GXX) == "posix":
-            passthrough_args.append("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
+            # winpthread provides clock_gettime, referenced by static libstdc++'s
+            # chrono. The driver places libstdc++ after these args, so force the
+            # symbol undefined up front to pull winpthread in regardless of order.
+            passthrough_args.append(
+                "-Wl,-u,clock_gettime -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic"
+            )
 
     return (
         definitions,
@@ -1379,20 +1389,27 @@ def _get_torch_related_args(
         if config.aot_inductor.cross_target_platform == "windows":
             aoti_shim_library = config.aot_inductor.aoti_shim_library
 
-            assert aoti_shim_library, (
-                "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
-            )
+            if not aoti_shim_library:
+                raise AssertionError(
+                    "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
+                )
             if isinstance(aoti_shim_library, str):
                 libraries.append(aoti_shim_library)
             else:
-                assert isinstance(aoti_shim_library, list)
+                if not isinstance(aoti_shim_library, list):
+                    raise AssertionError(
+                        f"expected aoti_shim_library to be a list, got {type(aoti_shim_library)}"
+                    )
                 libraries.extend(aoti_shim_library)
 
     if config.aot_inductor.cross_target_platform == "windows":
-        assert config.aot_inductor.aoti_shim_library_path, (
-            "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
-            " when 'cross_target_platform' is 'windows'.",
-        )
+        if not config.aot_inductor.aoti_shim_library_path:
+            raise AssertionError(
+                (
+                    "'config.aot_inductor.aoti_shim_library_path' must be set to the path of the AOTI shim library",
+                    " when 'cross_target_platform' is 'windows'.",
+                )
+            )
         libraries_dirs.append(config.aot_inductor.aoti_shim_library_path)
 
     if _IS_WINDOWS:
@@ -1474,7 +1491,7 @@ def homebrew_libomp() -> tuple[bool, str]:
 def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
     try:
         output = subprocess.check_output(
-            [*_split_compiler_command(cpp_compiler), "-print-file-name=bin"]
+            _compiler_command(cpp_compiler, "-print-file-name=bin")
         ).decode("utf8")
         omp_path = os.path.join(output.rstrip(), omp_name)
         if os.path.isfile(omp_path):
@@ -1489,10 +1506,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
     def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
         try:
             output = subprocess.check_output(
-                [
-                    *_split_compiler_command(cpp_compiler),
-                    f"-print-file-name={lib_name}",
-                ],
+                _compiler_command(cpp_compiler, f"-print-file-name={lib_name}"),
                 stderr=subprocess.DEVNULL,
             ).decode(*SUBPROCESS_DECODE_ARGS)
             omp_path = output.rstrip()
@@ -2041,9 +2055,15 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
 
     # Internal path needs special care, using the SDK lib path directly.
     if config.is_fbcode():
-        stub_dir = Path(build_paths.sdk_lib) / "stubs"
-        if stub_dir.is_dir() and str(stub_dir) not in lpaths:
-            lpaths.append(str(stub_dir))
+        # Add sdk_lib and its stubs/ (which hold the CUDA libs) unconditionally:
+        # an existence gate fails on the not-yet-materialized EdenFS path, and a
+        # nonexistent -L is harmless to the linker.
+        for cuda_lib_dir in (
+            build_paths.sdk_lib,
+            os.path.join(build_paths.sdk_lib, "stubs"),
+        ):
+            if cuda_lib_dir not in lpaths:
+                lpaths.append(cuda_lib_dir)
 
 
 def _transform_rocm_paths(lpaths: list[str]) -> None:
@@ -2243,7 +2263,8 @@ class CppTorchDeviceOptions(CppTorchOptions):
             # Re-order library search paths in case there are lib conflicts
             # that also live in the FBCode python lib dir.
             _, python_lib_dirs = _get_python_related_args()
-            assert len(python_lib_dirs) == 1, f"Python lib dirs: {python_lib_dirs}"
+            if len(python_lib_dirs) != 1:
+                raise AssertionError(f"Python lib dirs: {python_lib_dirs}")
             if python_lib_dirs[0] in self._libraries_dirs:
                 self._libraries_dirs.remove(python_lib_dirs[0])
                 self._libraries_dirs.append(python_lib_dirs[0])
@@ -2355,7 +2376,10 @@ class CppBuilder:
         self._precompiling = BuildOption.get_precompiling()
         self._preprocessing = BuildOption.get_preprocessing()
         # Only one of these options (if any) should be true at any given time.
-        assert sum((self._compile_only, self._precompiling, self._preprocessing)) <= 1
+        if sum((self._compile_only, self._precompiling, self._preprocessing)) > 1:
+            raise AssertionError(
+                "at most one of compile_only, precompiling, preprocessing may be set"
+            )
         self._do_link = not (
             self._compile_only or self._precompiling or self._preprocessing
         )
@@ -2363,9 +2387,8 @@ class CppBuilder:
         # MSVC produces two files when precompiling: the actual .pch file, as well as an
         # object file which must be linked into the final library.  This class assumes
         # only one output file of note, so for now we'll error out here.
-        assert not _IS_WINDOWS or not self._precompiling, (
-            "Cannot currently precompile headers on Windows!"
-        )
+        if _IS_WINDOWS and self._precompiling:
+            raise AssertionError("Cannot currently precompile headers on Windows!")
 
         if self._compile_only:
             file_ext, output_flags = self.__get_object_flags()
@@ -2402,7 +2425,10 @@ class CppBuilder:
             sources = [os.path.basename(i) for i in sources]
 
         if self._precompiling:
-            assert len(sources) == 1
+            if len(sources) != 1:
+                raise AssertionError(
+                    f"expected exactly one source when precompiling, got {len(sources)}"
+                )
             # See above; we can currently assume this is not on MSVC.
             self._sources_args = f"-x c++-header {sources[0]}"
             if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
@@ -2465,7 +2491,9 @@ class CppBuilder:
             else:
                 self._libraries_args += f"-l{lib} "
 
-        for passthrough_arg in BuildOption.get_passthrough_args():
+        for passthrough_arg in self._stage_passthrough_paths(
+            BuildOption.get_passthrough_args()
+        ):
             self._passthrough_parameters_args += f"{passthrough_arg} "
 
     def get_command_line(self) -> str:
@@ -2516,6 +2544,28 @@ class CppBuilder:
 
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
+
+    def _stage_passthrough_paths(self, args: list[str]) -> list[str]:
+        """For fbcode remote builds, treat any absolute file path that appears
+        as a passthrough arg (e.g. precompiled .so kernels passed in via
+        ``extra_flags``) the same way as a source: stage the file into the
+        remote build sandbox and rewrite the command to reference it by
+        basename. Without this the linker is handed a path that only exists on
+        the submitting host and the remote build fails to find the file."""
+        if not (config.is_fbcode() and self._use_relative_path):
+            return args
+        rewritten = []
+        for arg in args:
+            tokens = shlex.split(arg)
+            new_tokens = []
+            for tok in tokens:
+                if os.path.isabs(tok) and os.path.isfile(tok):
+                    self._orig_source_paths.append(tok)
+                    new_tokens.append(os.path.basename(tok))
+                else:
+                    new_tokens.append(tok)
+            rewritten.append(" ".join(shlex.quote(t) for t in new_tokens))
+        return rewritten
 
     def build_fbcode_re(
         self,
@@ -2669,11 +2719,13 @@ class CppBuilder:
             )
 
         if device_type == "cuda" and torch.version.hip is None:
-            from torch._inductor.codegen.cuda.compile_utils import (
-                _nvcc_arch_as_compile_option,
-            )
+            from torch._inductor.codegen.cuda import compile_utils
 
-            current_arch = _nvcc_arch_as_compile_option()
+            cuda_arch = compile_utils._aoti_cuda_target_arch()
+            cuda_gencode_flags = "\n                                ".join(
+                f"-gencode {option}"
+                for option in compile_utils._cuda_multi_arch_gencode_options(cuda_arch)
+            )
             contents += textwrap.dedent(
                 f"""
                 enable_language(CUDA)
@@ -2710,8 +2762,7 @@ class CppBuilder:
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
                         COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                -gencode arch=compute_{current_arch},code=compute_{current_arch}
-                                -gencode arch=compute_{current_arch},code=sm_{current_arch}
+                                {cuda_gencode_flags}
                         DEPENDS ${{PTX_FILE}}
                     )
 
@@ -2824,9 +2875,10 @@ class CppBuilder:
          """
         )
 
-        assert os.path.exists(cmake_path), (
-            f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
-        )
+        if not os.path.exists(cmake_path):
+            raise AssertionError(
+                f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
+            )
         with open(cmake_path, "a") as f:
             f.write(contents)
 
