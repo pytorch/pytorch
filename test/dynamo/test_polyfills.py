@@ -1,8 +1,22 @@
 # Owner(s): ["module: dynamo"]
 
+import _io
+
 import torch
 import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
+
+
+class TestTextEncoding(TestCase):
+    """Tests for the _io.text_encoding polyfill."""
+
+    def test_text_encoding(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(encoding):
+            return _io.text_encoding(encoding)
+
+        self.assertEqual(fn("utf-8"), "utf-8")
+        self.assertEqual(fn(None), _io.text_encoding(None))
 
 
 class TestGroupTensorsByDeviceAndDtype(TestCase):
