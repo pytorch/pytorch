@@ -27,7 +27,10 @@ HIP_CODES = [
 
 class TestCppWrapperHipify(TestCase):
     def test_hipify_basic_declaration(self) -> None:
-        assert len(TEST_CODES) == len(HIP_CODES)
+        if len(TEST_CODES) != len(HIP_CODES):
+            raise AssertionError(
+                f"TEST_CODES length {len(TEST_CODES)} != HIP_CODES length {len(HIP_CODES)}"
+            )
         for i in range(len(TEST_CODES)):
             result = maybe_hipify_code_wrapper(TEST_CODES[i], True)
             expected = HIP_CODES[i]
@@ -58,7 +61,8 @@ class TestCppWrapperHipify(TestCase):
                     std::string filePath,
                     const std::string &funcName,
                     uint32_t sharedMemBytes,
-                    const std::optional<std::string> &cubinDir = std::nullopt) {
+                    const std::optional<std::string> &cubinDir = std::nullopt,
+                    std::vector<hipModule_t>* loaded_modules = nullptr) {
                 if (cubinDir) {
                     std::filesystem::path p1{*cubinDir};
                     std::filesystem::path p2{filePath};
@@ -68,6 +72,9 @@ class TestCppWrapperHipify(TestCase):
                 hipModule_t mod;
                 hipFunction_t func;
                 CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
                 CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(hipFuncSetAttribute(
@@ -79,10 +86,17 @@ class TestCppWrapperHipify(TestCase):
                 return func;
             }
 
-            static inline hipFunction_t loadKernel(const void* start, const std::string &funcName, uint32_t sharedMemBytes) {
+            static inline hipFunction_t loadKernel(
+                    const void* start,
+                    const std::string &funcName,
+                    uint32_t sharedMemBytes,
+                    std::vector<hipModule_t>* loaded_modules = nullptr) {
                 hipModule_t mod;
                 hipFunction_t func;
                 CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, start));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
                 CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(hipFuncSetAttribute(
@@ -118,7 +132,10 @@ class TestCppWrapperHipify(TestCase):
         self.assertEqual(result.rstrip(), expected.rstrip())
 
     def test_hipify_cross_platform(self) -> None:
-        assert len(TEST_CODES) == len(HIP_CODES)
+        if len(TEST_CODES) != len(HIP_CODES):
+            raise AssertionError(
+                f"TEST_CODES length {len(TEST_CODES)} != HIP_CODES length {len(HIP_CODES)}"
+            )
         for i in range(len(TEST_CODES)):
             hip_result = maybe_hipify_code_wrapper(TEST_CODES[i], True)
             result = maybe_hipify_code_wrapper(TEST_CODES[i])

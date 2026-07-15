@@ -63,6 +63,7 @@ def get_extension():
         extra_compile_args["nvcc"] = [
             "-O2",
             "-DUSE_CUDA",
+            "-DTORCH_TARGET_VERSION=0x020a000000000000",
             "-DSTABLE_LIB_NAME=libtorch_agn_2_10",
         ]
         extension = CUDAExtension
@@ -96,5 +97,5 @@ setup(
         "build_ext": BuildExtension.with_options(no_python_abi_suffix=True),
         "clean": clean,
     },
-    options={"bdist_wheel": {"py_limited_api": "cp39"}},
+    options={"bdist_wheel": {"py_limited_api": "cp310"}},
 )

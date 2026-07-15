@@ -8,7 +8,6 @@
 //       reuse some of the PyTorch codegen machinery.
 #if defined(CAFFE2_BUILD_MAIN_LIB)        || \
     defined(TORCH_CUDA_BUILD_MAIN_LIB)    || \
-    defined(TORCH_HIP_BUILD_MAIN_LIB)     || \
     defined(TORCH_XPU_BUILD_MAIN_LIB)
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #endif
@@ -18,7 +17,6 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/Dispatch.h>

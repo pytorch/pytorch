@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <pybind11/chrono.h>
+#include <pybind11/stl.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
@@ -57,16 +58,23 @@ void THCPGraph_init(PyObject* module) {
           "capture_end",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))
       .def(
+          "capture_end_pre",
+          torch::wrap_pybind_function_no_gil(
+              &at::cuda::CUDAGraph::capture_end_pre))
+      .def(
+          "capture_end_post",
+          torch::wrap_pybind_function_no_gil(
+              &at::cuda::CUDAGraph::capture_end_post))
+      .def(
           "instantiate",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::instantiate))
+      .def_property_readonly(
+          "_has_graph_exec", &at::cuda::CUDAGraph::has_graph_exec)
       .def(
           "register_generator_state",
-          [](::at::cuda::CUDAGraph& self, py::handle raw_generator) {
-            auto generator = THPGenerator_Unwrap(raw_generator.ptr());
-            // We've unwrapped Python object to C++ object,
-            // so we could release GIL before calling into C++
-            py::gil_scoped_release release;
-            return self.register_generator_state(generator);
+          [](::at::cuda::CUDAGraph& self, py::handle /*raw_generator*/) {
+            TORCH_WARN_DEPRECATION(
+                "CUDAGraph.register_generator_state() is deprecated, and will be removed in a future PyTorch release. It is now a no-op and can be safely removed from your code.");
           },
           py::arg("generator"))
       .def(
@@ -79,18 +87,15 @@ void THCPGraph_init(PyObject* module) {
           "pool",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::pool))
       .def(
-          "debug_dump",
-          torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::debug_dump))
+          "pools",
+          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::pools))
+      .def(
+          "_retain_pool",
+          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::retain_pool))
       .def(
           "enable_debug_mode",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::enable_debug_mode))
-      .def(
-          "debug_dump",
-          torch::wrap_pybind_function_no_gil(
-              &::at::cuda::CUDAGraph::debug_dump),
-          py::arg("debug_path"))
       .def(
           "raw_cuda_graph",
           [](::at::cuda::CUDAGraph& self) {
@@ -112,5 +117,29 @@ void THCPGraph_init(PyObject* module) {
             // compile error.
             return reinterpret_cast<uintptr_t>(graph_exec);
           },
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def_static(
+          "get_currently_capturing_graph",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::get_currently_capturing_graph),
+          py::return_value_policy::reference)
+      .def(
+          "begin_capture_to_if_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_if_node),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
+          "begin_capture_to_while_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::begin_capture_to_while_node),
+          py::arg("scalar_cuda_pred_tensor"))
+      .def(
+          "end_capture_to_conditional_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::end_capture_to_conditional_node))
+      .def(
+          "set_conditional_handle_for_current_node",
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::set_conditional_handle_for_current_node),
+          py::arg("scalar_cuda_pred_tensor"));
 }

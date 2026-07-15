@@ -56,7 +56,7 @@ CACHE_ALIGN #define
   defined(CPU_CAPABILITY_AVX512) && (defined(__GNUC__) || defined(__GNUG__))
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #define CHECK_WITH_FMA 1
-#elif defined(CPU_CAPABILITY_SVE)
+#elif defined(CPU_CAPABILITY_SVE256)
 #define CHECK_DEQUANT_WITH_LOW_PRECISION 1
 #define CHECK_WITH_FMA 1
 #elif !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_AVX2)
@@ -863,7 +863,7 @@ public:
         }
         stream << "Expected:\n#\t" << exp << "\nActual:\n#\t" << act;
         stream << "\nFirst mismatch Index: " << index;
-        return stream.str();
+        return std::move(stream).str();
     }
 
     bool check(bool bitwise = false, bool checkWithTolerance = false, ValueType<T> toleranceEps = {}) const

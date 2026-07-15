@@ -53,16 +53,18 @@ class UnflattenTests(TestCase):
             {"constant": constant},
         )
 
-        assert pipe.num_stages == 4
+        if pipe.num_stages != 4:
+            raise AssertionError(
+                f"Expected pipe.num_stages == 4, got {pipe.num_stages}"
+            )
         orig_state_dict = mod.state_dict()
 
         # Check qualnames
         for stage_idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(stage_idx)
             for param_name, _ in stage_mod.named_parameters():
-                assert param_name in orig_state_dict, (
-                    f"{param_name} not in original state dict"
-                )
+                if param_name not in orig_state_dict:
+                    raise AssertionError(f"{param_name} not in original state dict")
         print("Param qualname test passed")
 
         # Check equivalence
@@ -70,6 +72,57 @@ class UnflattenTests(TestCase):
         out = pipe(x, constant)[0]
         torch.testing.assert_close(out, ref)
         print(f"Equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
+
+
+class UnflattenPlaceholderOrderingTests(TestCase):
+    """regression tests for https://github.com/pytorch/pytorch/issues/162898"""
+
+    def _check(self, node_ops, expected_ops):
+        from torch.distributed.pipelining._IR import _move_placeholders_to_front
+
+        g = torch.fx.Graph()
+        for i, op in enumerate(node_ops):
+            if op == "placeholder":
+                g.placeholder(f"n{i}")
+            elif op == "get_attr":
+                g.create_node("get_attr", f"submod_{i}")
+        g.output(None)
+
+        _move_placeholders_to_front(g)
+        g.lint()
+
+        result = [n.op for n in g.nodes if n.op != "output"]
+        self.assertEqual(result, expected_ops)
+
+    def test_get_attr_between_placeholders(self):
+        self._check(
+            ["placeholder", "placeholder", "get_attr", "placeholder", "placeholder"],
+            ["placeholder", "placeholder", "placeholder", "placeholder", "get_attr"],
+        )
+
+    def test_get_attr_before_all_placeholders(self):
+        self._check(
+            ["get_attr", "placeholder", "placeholder", "placeholder"],
+            ["placeholder", "placeholder", "placeholder", "get_attr"],
+        )
+
+    def test_multiple_get_attrs(self):
+        self._check(
+            ["placeholder", "get_attr", "placeholder", "get_attr", "placeholder"],
+            ["placeholder", "placeholder", "placeholder", "get_attr", "get_attr"],
+        )
+
+    def test_no_interleaving(self):
+        self._check(
+            ["placeholder", "placeholder", "placeholder", "get_attr"],
+            ["placeholder", "placeholder", "placeholder", "get_attr"],
+        )
+
+    def test_only_placeholders(self):
+        self._check(
+            ["placeholder", "placeholder", "placeholder"],
+            ["placeholder", "placeholder", "placeholder"],
+        )
 
 
 devices = ["cpu", "cuda", "hpu", "xpu"]

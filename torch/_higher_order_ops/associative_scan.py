@@ -18,6 +18,7 @@ from torch._higher_order_ops.utils import (
     first_slice_copy_with_grad,
     materialize_as_graph,
     reenter_make_fx,
+    register_fake,
     save_values_for_backward,
     saved_values,
     split_into_chunks,
@@ -25,7 +26,6 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -158,13 +158,16 @@ def associative_scan(
     Performs an inclusive scan with an associative combine function.
 
     .. warning::
-        `torch.associative_scan` is a prototype feature in PyTorch. It currently
+
+        ``torch.associative_scan`` is a prototype feature in PyTorch. It currently
         does not support autograd and you may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
-    This operator requires runtime code generation and so requires support for
-    ``torch.compile``. Further, only CUDA device codegen is supported at the moment.
+    With ``combine_mode="pointwise"``, efficient execution requires runtime code
+    generation via ``torch.compile``, and codegen is only supported on backends
+    with scan support (currently CUDA and XPU). On other devices the operator
+    still runs eagerly via the generic fallback.
 
     Args:
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
@@ -176,8 +179,9 @@ def associative_scan(
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
         combine_mode (str): A string indicating whether the ``combine_fn`` is ``pointwise`` or ``generic``, default ``pointwise``.
-            If ``combine_mode=pointwise``, ``combine_fn`` must be pure, may only contain pointwise operations
-            and ``xs`` must be CUDA tensors.
+            If ``combine_mode=pointwise``, ``combine_fn`` must be pure and may only contain pointwise
+            operations; under ``torch.compile`` ``xs`` must be on a backend with scan codegen support
+            (CUDA or XPU), otherwise the generic fallback is used.
             In all other cases ``combine_mode=generic`` should be used.
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
 
@@ -210,10 +214,6 @@ def associative_scan(
         if cm not in ["pointwise", "generic"]:
             raise ValueError(
                 f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
-            )
-        if cm == "pointwise" and not all(l.device.type in ("cuda", "xpu") for l in lxs):
-            raise ValueError(
-                "For combine_mode='pointwise', all input tensors need to be on CUDA or XPU"
             )
 
         # Checks for xs
@@ -857,10 +857,9 @@ def associative_scan_proxy_mode(mode, combine_fn, xs, additional_inputs):
     )
 
 
-@associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
-    with mode:
-        return tuple(x.clone() for x in xs)
+@register_fake(associative_scan_op, skip_cache=True)
+def assoiciative_scan_fake_tensor_mode(combine_fn, xs, additional_inputs):
+    return tuple(x.clone() for x in xs)
 
 
 @associative_scan_op.py_functionalize_impl

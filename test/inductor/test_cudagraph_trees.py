@@ -5,6 +5,7 @@ import functools
 import gc
 import importlib
 import itertools
+import os
 import re
 import sys
 import unittest
@@ -21,15 +22,19 @@ from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
-from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
-from torch._inductor.cudagraph_utils import FunctionID, PlaceholderInfo
+from torch._inductor.cudagraph_trees import (
+    AliasesPriorGraphOutput,
+    cudagraphify_impl as tree_cudagraphify_impl,
+    ExecutionState,
+)
+from torch._inductor.cudagraph_utils import PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import blas_library_context, TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -40,6 +45,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
@@ -65,6 +71,16 @@ requires_multigpu = functools.partial(
 )
 from io import StringIO
 
+from torch._library.opaque_object import CustomClassBase, register_custom_class
+
+
+class _CudagraphTestScaleFactor(CustomClassBase):
+    def __init__(self, factor):
+        self.factor = factor
+
+
+register_custom_class(_CudagraphTestScaleFactor, typ="symbolic")
+
 
 def get_compile_fn(backend):
     if backend == "cudagraphs":
@@ -77,7 +93,8 @@ def get_num_partitions(code):
     """Get the number of cudagraph partitions from generated code."""
     code = "".join(code)
     found = re.search(r"partitions=\[(.*)\]", code)
-    assert found is not None, "Could not find partitions in generated code"
+    if found is None:
+        raise AssertionError("Could not find partitions in generated code")
     partitions = found.group(1)
     return len([p for p in partitions.split(",") if p])
 
@@ -215,6 +232,33 @@ if HAS_CUDA_AND_TRITON:
             fn(*args, **kwargs)
             return fn(*args, **kwargs)
 
+        @staticmethod
+        def run_next_generation(fn, *args, **kwargs):
+            torch.compiler.cudagraph_mark_step_begin()
+            return fn(*args, **kwargs)
+
+        def replay_next_generation(self, fn, *args, **kwargs):
+            out = self.run_next_generation(fn, *args, **kwargs)
+            self.assertEqual(self.get_manager().path_state, ExecutionState.EXECUTION)
+            return out
+
+        def _iter_tensor_outputs(self, outputs):
+            if isinstance(outputs, torch.Tensor):
+                yield outputs
+                return
+            if isinstance(outputs, (list, tuple)):
+                for out in outputs:
+                    yield from self._iter_tensor_outputs(out)
+                return
+            if outputs is not None:
+                raise AssertionError(f"expected tensor output, got {type(outputs)}")
+
+        def save_live_outputs(self, live_outputs, *outputs):
+            for out in self._iter_tensor_outputs(outputs):
+                live_outputs.append((out, out.detach().clone()))
+            for out, expected in live_outputs:
+                self.assertEqual(out, expected)
+
         def num_checkpoints(self):
             return self.get_manager().debug_checkpointing_counter
 
@@ -228,6 +272,71 @@ if HAS_CUDA_AND_TRITON:
             self.run_twc(foo_opt, ones)
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
+
+        def test_multithreaded_cudagraph_trees(self):
+            import queue
+            import threading
+            import traceback
+
+            def foo(x, y):
+                return torch.sin(x) + torch.cos(y)
+
+            opt_foo = torch.compile(foo, mode="reduce-overhead")
+            num_threads = 3
+            barrier = threading.Barrier(num_threads)
+            errors = queue.Queue()
+            results = queue.Queue()
+
+            def run_once(
+                check_manager: bool, start_barrier: threading.Barrier | None = None
+            ) -> None:
+                try:
+                    x = torch.rand(4, 4, device="cuda")
+                    y = torch.rand(4, 4, device="cuda")
+                    expected = foo(x, y)
+                    if start_barrier is not None:
+                        start_barrier.wait()
+                    opt_foo(x, y)
+                    result = opt_foo(x, y)
+                    if check_manager:
+                        manager = torch._inductor.cudagraph_trees.get_manager(
+                            x.device.index, create_if_none_exists=False
+                        )
+                        self.assertIsNotNone(manager)
+                    results.put((result, expected))
+                except Exception:
+                    errors.put(traceback.format_exc())
+
+            owner_thread = threading.Thread(target=run_once, args=(True,))
+            owner_thread.start()
+            owner_thread.join()
+
+            def check_errors() -> None:
+                if not errors.empty():
+                    messages = []
+                    while not errors.empty():
+                        messages.append(errors.get())
+                    self.fail("\n".join(messages))
+
+            check_errors()
+            result, expected = results.get()
+            torch.testing.assert_close(result, expected)
+            del result, expected
+
+            def worker() -> None:
+                run_once(True, barrier)
+
+            threads = [threading.Thread(target=worker) for _ in range(num_threads)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            check_errors()
+            while not results.empty():
+                result, expected = results.get()
+                torch.testing.assert_close(result, expected)
+                del result, expected
 
         def check_rng(self):
             @torch.compile(mode="reduce-overhead")
@@ -395,6 +504,49 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(mod.buf, mod2.buf)
 
             self.assertIsNotNone(self.get_manager())
+
+        def test_input_storage_mutation_skips_cudagraphs(self):
+            class Mod(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.weight = nn.Parameter(torch.randn(4, 4, device="cuda"))
+                    self.register_buffer(
+                        "mask",
+                        torch.tril(torch.ones(4, 4, device="cuda")),
+                    )
+
+                def forward(self, x):
+                    with torch.no_grad():
+                        self.weight.data *= self.mask
+                    return x @ self.weight
+
+            torch.manual_seed(0)
+            model = Mod().eval()
+            x = torch.randn(4, 4, device="cuda")
+
+            with torch.no_grad():
+                expected = model(x)
+
+            counters.clear()
+            compiled_model = torch.compile(
+                model,
+                mode="reduce-overhead",
+                dynamic=True,
+            )
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx(), torch.no_grad():
+                actual = compiled_model(x)
+                actual_again = compiled_model(x)
+
+            self.assertEqual(expected, actual)
+            self.assertEqual(expected, actual_again)
+            FileCheck().check("skipping cudagraphs due to input storage mutation").run(
+                log_stream.getvalue()
+            )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            self.assertIsNone(self.get_manager())
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -745,8 +897,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(foo_opt(ones), foo(ones))
             # paths
             children = self.get_root_children()
-            # one root with two children
-            self.assertEqual(children, [2])
+            self.assertEqual(children, [1])
 
         def test_end_recording_early(self):
             def foo(x):
@@ -829,7 +980,7 @@ if HAS_CUDA_AND_TRITON:
                 inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                 out = foo(inp)
 
-                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
                     back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                     out.backward(back_inp)
 
@@ -858,7 +1009,7 @@ if HAS_CUDA_AND_TRITON:
                 FxGraphCache.clear()
                 AOTAutogradCache.clear()
 
-                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
                     inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                     out = foo(inp)
                     self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -871,11 +1022,9 @@ if HAS_CUDA_AND_TRITON:
                     self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
                     self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
-                    # Run backward without complex memory overlap being set
-
-                # Run the backward without complex memory overlap reason
-                # cache should miss, but cudagraphs should not run
-                # because forward skipped it
+                # Run the backward without the force-disable knob; cache should
+                # miss for the backward, but cudagraphs should not run because
+                # the forward already skipped.
                 back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                 out.backward(back_inp)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
@@ -893,7 +1042,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
             # we should not have cudagraph'd anything
-            assert self.get_manager() is None
+            if self.get_manager() is not None:
+                raise AssertionError
 
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
@@ -981,7 +1131,8 @@ if HAS_CUDA_AND_TRITON:
             out.backward(back_inp)
 
             # we should not have cudagraph'd anything
-            assert self.get_manager() is None
+            if self.get_manager() is not None:
+                raise AssertionError
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._functorch.config.patch("enable_autograd_cache", True)
@@ -1241,6 +1392,46 @@ if HAS_CUDA_AND_TRITON:
             num_partitions_overload = get_num_partitions(code)
             # 1 partition since ops using unbacked symints are excluded from graph partitions
             self.assertEqual(num_partitions_overload, 1)
+
+        # Pin graph_partition=False so the "disabling cudagraphs due to
+        # incompatible op ..." log line is actually emitted. With
+        # graph_partition=True (OSS default), incompatible ops are handled
+        # by partitioning rather than disabling cudagraphs, and the FileCheck
+        # pattern below never appears.
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_topk_skips_cudagraph_on_hip(self):
+            # rocm workaround: topk kernels fault under cudagraph trees
+            # on the 2nd replay of a recorded graph.
+            BEAM_SIZE = 64
+            VOCAB_SIZE = 512
+
+            @torch.no_grad()
+            def generate(h0):
+                scores, _ = torch.topk(h0, k=BEAM_SIZE, dim=-1)
+                return scores
+
+            compiled = torch.compile(generate, fullgraph=True, mode="reduce-overhead")
+
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
+                for _ in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    h0 = torch.randn(
+                        8,
+                        BEAM_SIZE * VOCAB_SIZE,
+                        device="cuda",
+                        dtype=torch.bfloat16,
+                    )
+                    compiled(h0)
+                    torch.cuda.synchronize()
+
+            if torch.version.hip is not None:
+                FileCheck().check(
+                    "skipping cudagraphs due to disabling cudagraphs due to "
+                    "incompatible op aten.topk.default"
+                ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
@@ -1559,7 +1750,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(len(list(node.path_live_weakrefs())), 0)
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
-        def test_aliasing_static_ref(self):
+        def _test_aliasing_static_ref(self):
             class Mod(torch.nn.Linear):
                 def forward(self, x):
                     return self.weight.T @ x, self.weight.T, self.weight[0:4]
@@ -1596,6 +1787,13 @@ if HAS_CUDA_AND_TRITON:
             else:
                 self.assertFalse(first_node.unaliased_in_all_paths[0])
                 self.assertTrue(first_node.cached_tensor_outputs[0] is None)
+
+        def test_aliasing_static_ref(self):
+            self._test_aliasing_static_ref()
+
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_aliasing_static_ref_no_graph_partition(self):
+            self._test_aliasing_static_ref()
 
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_multinomial(self):
@@ -1926,8 +2124,12 @@ if HAS_CUDA_AND_TRITON:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
-        @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
+        @unittest.skipUnless(
+            (IS_X86 or IS_ARM64) and IS_LINUX, "cpp contexts are linux x86/aarch64 only"
+        )
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
+        @blas_library_context("cublas")
+        @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
 
@@ -2229,25 +2431,6 @@ if HAS_CUDA_AND_TRITON:
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
-        def test_unstable_ptr(self):
-            import torch
-
-            @torch.compile(mode="reduce-overhead")
-            def foo(m, inp):
-                return m(inp)
-
-            def f():
-                l = []
-                m = torch.nn.Linear(20, 20).cuda()
-                for _ in range(4):
-                    inp = torch.rand([20, 20], device="cuda")
-                    foo(m, inp)
-                    m.weight.data = torch.rand([20, 20], device="cuda")
-
-            self.assertRaises(RuntimeError, f)
-
         @requires_multigpu()
         def test_manager_per_device(self):
             def test():
@@ -2299,14 +2482,582 @@ if HAS_CUDA_AND_TRITON:
             with self.assertRaises(Exception) as exc:
                 out + out
 
-            FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
+            FileCheck().check("overwritten").check("x * x * x").check(
+                "cudagraph_mark_step_begin"
+            ).check("manually clone").check("cudagraph_trees_generation_cloning").check(
+                "clone all user-visible tensors that persist"
+            ).run(repr(exc.exception))
 
             foo(inp)
 
             with self.assertRaises(Exception) as exc:
                 out2 + out2
 
-            FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
+            FileCheck().check("overwritten").check("x * x * x").check(
+                "cudagraph_mark_step_begin"
+            ).check("manually clone").check("cudagraph_trees_generation_cloning").check(
+                "clone all user-visible tensors that persist"
+            ).run(repr(exc.exception))
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        @parametrize(
+            "variant", ("default", "no_graph_partition", "no_keep_output_stride")
+        )
+        def test_clone_live_output_on_new_generation(self, variant):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            patches = {
+                "no_graph_partition": {"graph_partition": False},
+                "no_keep_output_stride": {"keep_output_stride": False},
+            }.get(variant, {})
+            with config.patch(patches):
+                inputs = [
+                    torch.randn(4, device="cuda", dtype=torch.float32) + i
+                    for i in range(4)
+                ]
+                live_outputs = []
+                free_calls = 0
+                orig_free = torch._C._free_And_Remove_DeleterFn
+
+                def spy_free(storage_ptr):
+                    nonlocal free_calls
+                    self.assertTrue(torch._C._has_Standard_Deleter(storage_ptr))
+                    free_calls += 1
+                    return orig_free(storage_ptr)
+
+                with unittest.mock.patch.object(
+                    torch._C, "_free_And_Remove_DeleterFn", spy_free
+                ):
+                    out = self.run_next_generation(foo, inputs[0])
+                    expected = out.detach().clone()
+                    old_data_ptr = out.untyped_storage().data_ptr()
+                    self.save_live_outputs(live_outputs, out)
+
+                    record_out = self.run_next_generation(foo, inputs[1])
+                    record_expected = record_out.detach().clone()
+                    record_old_data_ptr = record_out.untyped_storage().data_ptr()
+                    self.save_live_outputs(live_outputs, record_out)
+                    self.assertEqual(free_calls, 1)
+                    self.assertTrue(torch._C._has_Standard_Deleter(cdata(out)))
+
+                    replay_out = self.replay_next_generation(foo, inputs[2])
+                    node = self.curr_node()
+                    self.assertEqual(free_calls, 2)
+                    self.assertTrue(torch._C._has_Standard_Deleter(cdata(record_out)))
+                    self.assertIs(replay_out, node.cached_tensor_outputs[0])
+                    self.assertTrue(torch._C._is_cached_tensor(replay_out))
+                    replay_old_data_ptr = replay_out.untyped_storage().data_ptr()
+                    self.save_live_outputs(live_outputs, replay_out)
+                    # Exercise a second replay after cloning live outputs.
+                    next_out = self.replay_next_generation(foo, inputs[3])
+                    self.save_live_outputs(live_outputs, next_out)
+                    self.assertEqual(free_calls, 2)
+                    self.assertTrue(torch._C._has_Standard_Deleter(cdata(replay_out)))
+
+            self.assertEqual(out, expected)
+            self.assertEqual(out + out, expected + expected)
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(record_out, record_expected)
+            self.assertNotEqual(
+                record_out.untyped_storage().data_ptr(), record_old_data_ptr
+            )
+            self.assertNotEqual(
+                replay_out.untyped_storage().data_ptr(), replay_old_data_ptr
+            )
+            self.assertEqual(replay_out, inputs[2] * inputs[2] * inputs[2])
+            self.assertEqual(next_out, inputs[3] * inputs[3] * inputs[3])
+            self.assertIsNone(node.cached_tensor_outputs[0])
+            self.assertFalse(torch._C._is_cached_tensor(replay_out))
+            self.assertIsNot(out, replay_out)
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_output_keeps_cache_when_output_dead(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            inputs = [
+                torch.randn(4, device="cuda", dtype=torch.float32) + i for i in range(4)
+            ]
+            out = self.run_next_generation(foo, inputs[0])
+            del out
+
+            self.run_next_generation(foo, inputs[1])
+            replay_out = self.replay_next_generation(foo, inputs[2])
+            node = self.curr_node()
+            self.assertIs(replay_out, node.cached_tensor_outputs[0])
+            self.assertTrue(torch._C._is_cached_tensor(replay_out))
+            cached_id = id(replay_out)
+            cached_data_ptr = replay_out.untyped_storage().data_ptr()
+            del replay_out
+
+            next_out = self.replay_next_generation(foo, inputs[3])
+            self.assertIs(next_out, node.cached_tensor_outputs[0])
+            self.assertEqual(id(next_out), cached_id)
+            self.assertEqual(next_out.untyped_storage().data_ptr(), cached_data_ptr)
+            self.assertTrue(torch._C._is_cached_tensor(next_out))
+            self.assertEqual(next_out, inputs[3] * inputs[3] * inputs[3])
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_aliased_output_storage_on_new_generation(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                y = x * x
+                return y, y[1:]
+
+            inputs = [
+                torch.randn(4, 4, device="cuda", dtype=torch.float32) + i
+                for i in range(4)
+            ]
+            live_outputs = []
+            out, out_view = self.run_next_generation(foo, inputs[0])
+            expected = out.detach().clone()
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out.untyped_storage().data_ptr()
+            view_size = out_view.size()
+            view_stride = out_view.stride()
+            view_storage_offset = out_view.storage_offset()
+            self.assertEqual(cdata(out), cdata(out_view))
+            self.save_live_outputs(live_outputs, out, out_view)
+
+            record_out, record_view = self.run_next_generation(foo, inputs[1])
+            self.save_live_outputs(live_outputs, record_out, record_view)
+            replay_out, replay_view = self.replay_next_generation(foo, inputs[2])
+            self.save_live_outputs(live_outputs, replay_out, replay_view)
+            next_out, next_view = self.replay_next_generation(foo, inputs[3])
+            self.save_live_outputs(live_outputs, next_out, next_view)
+
+            self.assertEqual(out, expected)
+            self.assertEqual(out_view, expected_view)
+            self.assertEqual(cdata(out), cdata(out_view))
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(out_view.size(), view_size)
+            self.assertEqual(out_view.stride(), view_stride)
+            self.assertEqual(out_view.storage_offset(), view_storage_offset)
+            self.assertEqual(replay_out, inputs[2] * inputs[2])
+            self.assertEqual(replay_view, (inputs[2] * inputs[2])[1:])
+            self.assertEqual(next_out, inputs[3] * inputs[3])
+            self.assertEqual(next_view, (inputs[3] * inputs[3])[1:])
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_clone_live_retargets_non_user_visible_output_alias(self):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                y = x * x
+                return y, y[1:]
+
+            inputs = [
+                torch.randn(4, 4, device="cuda", dtype=torch.float32) + i
+                for i in range(4)
+            ]
+            live_outputs = []
+            foo_cg = self.cudagraphify_impl(
+                foo,
+                [inputs[0]],
+                (),
+                stack_traces=[None, None],
+                user_visible_output_idxs=(0,),
+            )
+            out, out_view = self.run_next_generation(foo_cg, [inputs[0]])
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out_view.untyped_storage().data_ptr()
+            self.save_live_outputs(live_outputs, out, out_view)
+
+            replay_out, replay_view = self.replay_next_generation(foo_cg, [inputs[1]])
+            replay_expected_view = replay_view.detach().clone()
+            replay_old_data_ptr = replay_view.untyped_storage().data_ptr()
+            self.save_live_outputs(live_outputs, replay_out, replay_view)
+            next_out, next_view = self.replay_next_generation(foo_cg, [inputs[2]])
+            self.save_live_outputs(live_outputs, next_out, next_view)
+            steady_out, steady_view = self.replay_next_generation(foo_cg, [inputs[3]])
+            self.save_live_outputs(live_outputs, steady_out, steady_view)
+
+            self.assertEqual(cdata(out), cdata(out_view))
+            self.assertEqual(out_view, expected_view)
+            self.assertNotEqual(out_view.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(cdata(replay_out), cdata(replay_view))
+            self.assertEqual(replay_view, replay_expected_view)
+            self.assertNotEqual(
+                replay_view.untyped_storage().data_ptr(), replay_old_data_ptr
+            )
+            self.assertEqual(cdata(next_out), cdata(next_view))
+            self.assertEqual(cdata(steady_out), cdata(steady_view))
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_clone_live_prior_graph_output_alias(self):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return (x * x,)
+
+            def foo2(args):
+                x = args[0]
+                args.clear()
+                return (x[1:],)
+
+            inputs = [
+                torch.randn(4, 4, device="cuda", dtype=torch.float32) + i
+                for i in range(4)
+            ]
+            live_outputs = []
+            foo_cg = self.cudagraphify_impl(foo, [inputs[0]], (), stack_traces=[None])
+            foo2_cg = self.cudagraphify_impl(
+                foo2,
+                [inputs[0]],
+                (),
+                stack_traces=[None],
+                user_visible_output_idxs=(0,),
+            )
+
+            def run_pair(x):
+                torch.compiler.cudagraph_mark_step_begin()
+                base = foo_cg([x])[0]
+                view = foo2_cg([base])[0]
+                return base, view
+
+            out, out_view = run_pair(inputs[0])
+            self.assertIsInstance(
+                self.curr_node().output_storage_alias[0], AliasesPriorGraphOutput
+            )
+
+            expected = out.detach().clone()
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out.untyped_storage().data_ptr()
+            self.save_live_outputs(live_outputs, out, out_view)
+
+            record_out, record_view = run_pair(inputs[1])
+            self.save_live_outputs(live_outputs, record_out, record_view)
+            replay_out, replay_view = run_pair(inputs[2])
+            self.save_live_outputs(live_outputs, replay_out, replay_view)
+            next_out, next_view = run_pair(inputs[3])
+            self.save_live_outputs(live_outputs, next_out, next_view)
+
+            self.assertEqual(out, expected)
+            self.assertEqual(out_view, expected_view)
+            self.assertEqual(cdata(out), cdata(out_view))
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(replay_view, replay_out[1:])
+            self.assertEqual(next_view, next_out[1:])
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_output_storage_with_only_user_view_live(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x
+
+            inputs = [
+                torch.randn(4, 4, device="cuda", dtype=torch.float32) + i
+                for i in range(4)
+            ]
+            live_outputs = []
+            out = self.run_next_generation(foo, inputs[0])
+            out_view = out[1:]
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out_view.untyped_storage().data_ptr()
+            del out
+            self.save_live_outputs(live_outputs, out_view)
+
+            record_out = self.run_next_generation(foo, inputs[1])
+            self.save_live_outputs(live_outputs, record_out)
+            replay_out = self.replay_next_generation(foo, inputs[2])
+            self.save_live_outputs(live_outputs, replay_out)
+            next_out = self.replay_next_generation(foo, inputs[3])
+            self.save_live_outputs(live_outputs, next_out)
+
+            self.assertEqual(out_view, expected_view)
+            self.assertNotEqual(out_view.untyped_storage().data_ptr(), old_data_ptr)
+            self.assertEqual(replay_out, inputs[2] * inputs[2])
+            self.assertEqual(next_out, inputs[3] * inputs[3])
+
+        def test_clone_live_output_used_as_next_generation_input(self):
+            @torch.compile(mode="reduce-overhead")
+            def step(x, bias):
+                return x * 0.99 + bias
+
+            @torch.compile(mode="reduce-overhead")
+            def producer(x):
+                return x * x + 1
+
+            @torch.compile(mode="reduce-overhead")
+            def consumer(x):
+                return x * 2 - 3
+
+            with config.patch(
+                "triton.cudagraph_trees_generation_cloning", "user_visible"
+            ):
+                live_outputs = []
+                inp = torch.randn(4, device="cuda", dtype=torch.float32)
+                biases = [
+                    torch.randn(4, device="cuda", dtype=torch.float32) * 0.01 + i
+                    for i in range(5)
+                ]
+                x = inp
+                expected = inp
+                old_data_ptr = None
+                for i in range(3):
+                    x = self.run_next_generation(step, x, biases[i])
+                    expected = expected * 0.99 + biases[i]
+                    old_data_ptr = x.untyped_storage().data_ptr()
+                    self.save_live_outputs(live_outputs, x)
+
+                out = self.replay_next_generation(step, x, biases[3])
+                expected_out = expected * 0.99 + biases[3]
+                out_data_ptr = out.untyped_storage().data_ptr()
+                self.save_live_outputs(live_outputs, out)
+                next_out = self.replay_next_generation(step, out, biases[4])
+                self.save_live_outputs(live_outputs, next_out)
+
+                self.assertEqual(x, expected)
+                self.assertNotEqual(x.untyped_storage().data_ptr(), old_data_ptr)
+                self.assertEqual(out, expected_out)
+                self.assertNotEqual(out.untyped_storage().data_ptr(), out_data_ptr)
+                self.assertEqual(next_out, expected_out * 0.99 + biases[4])
+
+                producer_inputs = [
+                    torch.randn(8, device="cuda", dtype=torch.float32) + i
+                    for i in range(5)
+                ]
+                for i in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    producer_out = producer(producer_inputs[i])
+                    producer_out_data_ptr = producer_out.untyped_storage().data_ptr()
+                    consumer_out = consumer(producer_out)
+                    self.assertEqual(
+                        producer_out.untyped_storage().data_ptr(),
+                        producer_out_data_ptr,
+                    )
+                    self.save_live_outputs(live_outputs, producer_out, consumer_out)
+
+                torch.compiler.cudagraph_mark_step_begin()
+                producer_out = producer(producer_inputs[3])
+                producer_out_data_ptr = producer_out.untyped_storage().data_ptr()
+                self.save_live_outputs(live_outputs, producer_out)
+
+                torch.compiler.cudagraph_mark_step_begin()
+                consumer_out = consumer(producer_out)
+                self.save_live_outputs(live_outputs, consumer_out)
+                self.assertNotEqual(
+                    producer_out.untyped_storage().data_ptr(), producer_out_data_ptr
+                )
+
+                torch.compiler.cudagraph_mark_step_begin()
+                self.save_live_outputs(live_outputs, producer(producer_inputs[4]))
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        @parametrize("graph_partition", (True, False))
+        def test_clone_live_output_saved_for_backward_on_mark_step(
+            self, graph_partition
+        ):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return torch.sigmoid(x)
+
+            with config.patch("graph_partition", graph_partition):
+                live_outputs = []
+                inp = torch.randn(
+                    4, device="cuda", dtype=torch.float32
+                ).requires_grad_()
+                out = self.run_next_generation(foo, inp)
+                expected = out.detach().clone()
+                expected_grad = expected * (1 - expected)
+                old_data_ptr = out.untyped_storage().data_ptr()
+                self.save_live_outputs(live_outputs, out)
+
+                inp2 = (
+                    torch.randn(4, device="cuda", dtype=torch.float32) + 1
+                ).requires_grad_()
+                out2 = self.run_next_generation(foo, inp2)
+                self.save_live_outputs(live_outputs, out2)
+                inp3 = (
+                    torch.randn(4, device="cuda", dtype=torch.float32) + 2
+                ).requires_grad_()
+                out3 = self.replay_next_generation(foo, inp3)
+                self.save_live_outputs(live_outputs, out3)
+                inp4 = (
+                    torch.randn(4, device="cuda", dtype=torch.float32) + 3
+                ).requires_grad_()
+                out4 = self.replay_next_generation(foo, inp4)
+                self.save_live_outputs(live_outputs, out4)
+
+            self.assertEqual(out, expected)
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+            out.sum().backward()
+            self.assertEqual(inp.grad, expected_grad)
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_output_saved_for_backward_with_only_user_view_live(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return torch.sigmoid(x)
+
+            live_outputs = []
+            inp = torch.randn(4, device="cuda", dtype=torch.float32).requires_grad_()
+            out = self.run_next_generation(foo, inp)
+            out_view = out[1:]
+            expected_view = out_view.detach().clone()
+            old_data_ptr = out_view.untyped_storage().data_ptr()
+            del out
+            self.save_live_outputs(live_outputs, out_view)
+
+            inp2 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 1
+            ).requires_grad_()
+            out2 = self.run_next_generation(foo, inp2)
+            self.save_live_outputs(live_outputs, out2)
+            inp3 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 2
+            ).requires_grad_()
+            out3 = self.replay_next_generation(foo, inp3)
+            self.save_live_outputs(live_outputs, out3)
+            inp4 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 3
+            ).requires_grad_()
+            out4 = self.replay_next_generation(foo, inp4)
+            self.save_live_outputs(live_outputs, out4)
+
+            self.assertEqual(out_view, expected_view)
+            self.assertNotEqual(out_view.untyped_storage().data_ptr(), old_data_ptr)
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_trees_generation_cloning", "user_visible"
+        )
+        def test_clone_live_view_output_saved_for_backward_on_mark_step(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return torch.sigmoid(x)[1:]
+
+            live_outputs = []
+            inp = torch.randn(4, device="cuda", dtype=torch.float32).requires_grad_()
+            out = self.run_next_generation(foo, inp)
+            expected = out.detach().clone()
+            old_data_ptr = out.untyped_storage().data_ptr()
+            self.save_live_outputs(live_outputs, out)
+
+            inp2 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 1
+            ).requires_grad_()
+            out2 = self.run_next_generation(foo, inp2)
+            self.save_live_outputs(live_outputs, out2)
+            inp3 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 2
+            ).requires_grad_()
+            out3 = self.replay_next_generation(foo, inp3)
+            self.save_live_outputs(live_outputs, out3)
+            inp4 = (
+                torch.randn(4, device="cuda", dtype=torch.float32) + 3
+            ).requires_grad_()
+            out4 = self.replay_next_generation(foo, inp4)
+            self.save_live_outputs(live_outputs, out4)
+
+            self.assertEqual(out, expected)
+            self.assertNotEqual(out.untyped_storage().data_ptr(), old_data_ptr)
+
+        @parametrize("generation_cloning", (None, "user_visible"))
+        def test_grad_accumulation_dealloc_error_message(self, generation_cloning):
+            model = torch.nn.Linear(10, 1, device="cuda")
+            compiled_model = torch.compile(
+                model, fullgraph=True, mode="reduce-overhead"
+            )
+
+            def run_iter():
+                torch.compiler.cudagraph_mark_step_begin()
+                x = torch.randn(
+                    (10,), dtype=torch.float32, requires_grad=True, device="cuda"
+                )
+                loss = compiled_model(x).clone().sum().clone()
+                loss.backward()
+
+            with config.patch(
+                {
+                    "triton.cudagraph_trees_generation_cloning": generation_cloning,
+                }
+            ):
+                run_iter()
+
+                with self.assertRaises(RuntimeError) as exc:
+                    run_iter()
+
+            FileCheck().check("gradient tensor output of CUDAGraphs").check(
+                "gradient accumulation"
+            ).check(".grad tensor").run(str(exc.exception))
+
+        def test_output_node_has_stack_traces_inference(self):
+            """Test that output_stack_traces on the output node provides
+            stack traces even when a post-grad pass strips them from arg nodes
+            in inference mode."""
+
+            def strip_stack_traces(graph):
+                for node in graph.nodes:
+                    if node.op not in ("placeholder", "output"):
+                        node.meta.pop("stack_trace", None)
+
+            with config.patch(post_grad_custom_post_pass=strip_stack_traces):
+
+                @torch.compile(mode="reduce-overhead")
+                def foo(x):
+                    return x * x * x
+
+                inp = torch.rand([4], device="cuda")
+                out = foo(inp).detach()
+                out2 = foo(inp).detach()
+
+                with self.assertRaises(Exception) as exc:
+                    out + out
+
+                self.assertIn("x * x * x", repr(exc.exception))
+
+        def test_output_node_has_stack_traces_training(self):
+            """Test that output_stack_traces on the output node provides
+            stack traces even when a post-grad pass strips them from arg nodes
+            in training mode (fwd/bwd graph split via partitioner)."""
+
+            def strip_stack_traces(graph):
+                for node in graph.nodes:
+                    if node.op not in ("placeholder", "output"):
+                        node.meta.pop("stack_trace", None)
+
+            with config.patch(post_grad_custom_post_pass=strip_stack_traces):
+
+                @torch.compile(mode="reduce-overhead")
+                def foo(x):
+                    return x * x * x
+
+                inp = torch.rand([4], device="cuda", requires_grad=True)
+                # Complete fwd+bwd to compile both graphs
+                torch.compiler.cudagraph_mark_step_begin()
+                foo(inp).sum().backward()
+
+                # Now trigger the dealloc error
+                torch.compiler.cudagraph_mark_step_begin()
+                out = foo(inp).detach()
+                torch.compiler.cudagraph_mark_step_begin()
+                out2 = foo(inp).detach()
+
+                with self.assertRaises(Exception) as exc:
+                    out + out
+
+                self.assertIn("x * x * x", repr(exc.exception))
 
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
         def test_conv_benchmark(self):
@@ -2442,9 +3193,12 @@ if HAS_CUDA_AND_TRITON:
             with warnings.catch_warnings(record=True) as w:
                 out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
-            FileCheck().check(
-                "Unable to hit fast path of CUDAGraphs because of pending"
-            ).run(str(w[0]))
+            # Match substring only; scan all warnings in case another warning fires first.
+            msgs = [str(x.message) for x in w]
+            self.assertTrue(
+                any("require backward" in m for m in msgs),
+                lambda msg: f"{msg}\nexpected CUDAGraph pending-backward warning; got: {msgs}",
+            )
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 
         def test_mark_step(self):
@@ -2550,7 +3304,7 @@ if HAS_CUDA_AND_TRITON:
             foo(torch.tensor([1, 0, 0], device="cuda"))
 
             if config.graph_partition:
-                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 9)
+                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 0)
             else:
                 # Without graph partitioning, cudagraphs are skipped entirely
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
@@ -2593,9 +3347,9 @@ if HAS_CUDA_AND_TRITON:
                 t = torch.rand([32], device="cuda")
                 self.assertEqual(foo(t), foo_c(t))
 
-            FileCheck().check("skipping cudagraphs due to cpp wrapper enabled").run(
-                log_stream.getvalue()
-            )
+            FileCheck().check(
+                "skipping cudagraphs due to cpp-wrapper does not support graph partition yet"
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         def test_storage_access_error(self):
@@ -2604,6 +3358,25 @@ if HAS_CUDA_AND_TRITON:
 
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
+
+        def test_clear_storage_data_ptr_access_error(self):
+            x = torch.rand([4], device="cuda")
+            storage = x.untyped_storage()
+            storage_ptr = storage.data_ptr()
+            storage_impl_ptr = storage._cdata
+
+            storage.resize_(0)
+
+            torch._C._set_storage_data_ptr_access_error_msg(
+                storage_impl_ptr, "storage is dead"
+            )
+            with self.assertRaisesRegex(Exception, "storage is dead"):
+                storage.data_ptr()
+
+            torch._C._clear_storage_data_ptr_access_error_msg(storage_impl_ptr)
+            storage.resize_(4 * x.element_size())
+            # Should not raise
+            storage.data_ptr()
 
         def test_side_stream_memory_allocation(self):
             device = f"cuda:{self.device_idx}"
@@ -2647,49 +3420,6 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(side_stream_buffer, ref_out)
 
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
-
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
-        def test_static_inputs_address_mutation_log(self):
-            class Goo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.linear = torch.nn.Linear(2, 2, device="cuda")
-
-                def forward(self, x) -> torch.Tensor:
-                    return self.linear(x)
-
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.static_tensor = torch.zeros((2, 2), device="cuda")
-                    self.goo = Goo()
-
-                def forward(self, x) -> torch.Tensor:
-                    self.static_tensor.add_(torch.ones((2, 2), device="cuda"))
-                    return self.static_tensor + x + self.goo(x)
-
-            foo = Foo()
-            foo = torch.compile(foo, mode="reduce-overhead")
-            inp = torch.rand((2, 2), device="cuda")
-
-            for _ in range(3):
-                foo(inp)
-
-            # mutates static input tensors' addresses
-            foo.static_tensor = torch.ones((2, 2), device="cuda")
-            foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
-
-            with self.assertRaisesRegex(
-                Exception,
-                r"(?s)static input data pointer changed.\n"
-                r"input name: primals_.*. data pointer changed from .* to .*. input stack trace:.*"
-                r"input name: primals_.*. data pointer changed from .* to .*. input stack trace:.*,"
-                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n",
-            ):
-                self.curr_node().run(
-                    [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp]
-                )
 
         def _run_iter(self, param, fn):
             fwd_output = fn(torch.ones(2, 2), param)
@@ -2757,7 +3487,6 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_param_inputs(self):
             # Verify that we can record multiple cudagraphs for a single
             # compiled function with param inputs
@@ -2768,7 +3497,6 @@ if HAS_CUDA_AND_TRITON:
             self.run_static_input_param_test(fn, 4)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_builtin_module(self):
             # Verify that we don't recompile when changing the param of a builtin module
             # and that we record another cudagraph
@@ -2776,7 +3504,6 @@ if HAS_CUDA_AND_TRITON:
             self._module_test(torch.nn.Linear(2, 3, device="cuda"))
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_builtin_module_buffers(self):
             # Verify that we don't recompile when changing the buffer of a builtin module
             # and that we record another cudagraph
@@ -2788,7 +3515,6 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_custom_module(self):
             # Test that we can correctly dispatch multiple graphs
             # if params of a custom module change
@@ -2805,7 +3531,6 @@ if HAS_CUDA_AND_TRITON:
             )
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_custom_module_buffer(self):
             # Test that we can correctly dispatch multiple graphs
             # if buffers of a custom module change
@@ -2829,7 +3554,6 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_child_node(self):
             # Test that we can correctly dispatch multiple graphs if a child node
             # in the tree has stable input pointers change
@@ -2848,7 +3572,6 @@ if HAS_CUDA_AND_TRITON:
             self.run_static_input_param_test(fn, 5)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_parent_node(self):
             def fn(x, p):
                 # Graph 1
@@ -2868,145 +3591,6 @@ if HAS_CUDA_AND_TRITON:
             self.run_static_input_param_test(fn, 6)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
-        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
-        def test_fallback_to_eager_if_recompiling_too_many_times(self):
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.param = torch.nn.Parameter(torch.rand([2, 2], device="cuda"))
-
-                def forward(self, x):
-                    return x * self.param
-
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.cudagraph_utils", "cudagraphs"
-            )
-            with ctx():
-                # We have 3 graphs here
-                #             None
-                #       /                           \
-                # (fwd w/ p1, Graph 0)            (bwd w/p2, Graph2)
-                # (bwd w/ p1, Graph 1)
-                # All other graphs are skipped because we hit the max recording limit
-                # (=0 for each node and function pair)
-                fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
-                for _ in range(3):
-                    fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                    fn_compiled.param.grad = None
-
-                # Change static tensor address
-                fn_compiled.param.data = torch.rand([2, 2], device="cuda")
-                fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                self.assertEqual(self.get_manager().new_graph_id().id, 3)
-
-            FileCheck().check(
-                "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input data pointer changed."
-            ).run(log_stream.getvalue())
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
-
-        @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
-        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
-        def test_fallback_to_eager_if_recompiling_too_many_times_warn_only_once(self):
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.param = torch.nn.Parameter(torch.rand([2, 2], device="cuda"))
-
-                def forward(self, x):
-                    return x * self.param
-
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.cudagraph_utils", "cudagraphs"
-            )
-            with ctx():
-                with torch.device("cuda"):
-                    # We have 3 graphs here
-                    #             None
-                    #       /                           \
-                    # (fwd w/ p1, Graph 0)            (bwd w/p2, Graph2)
-                    # (bwd w/ p1, Graph 1)
-                    # All other graphs are skipped because we hit the max recording limit
-                    # (=0 for each node and function pair)
-                    fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
-                    for _ in range(3):
-                        fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                        fn_compiled.param.grad = None
-
-                    for _ in range(5):
-                        # Change static tensor address
-                        fn_compiled.param.data = torch.rand([2, 2], device="cuda")
-                        fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                        fn_compiled.param.grad = None
-
-            FileCheck().check_count(
-                "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input data pointer changed.",
-                1,
-                exactly=True,
-            ).check_count(
-                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input data pointer changed.",
-                1,
-                exactly=True,
-            ).run(log_stream.getvalue())
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
-
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
-        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
-        def test_fallback_to_eager_if_recompiling_too_many_times_due_to_cudagraph_managed_tensor(
-            self,
-        ):
-            # By setting triton.cudagraph_support_input_mutation=True, we force re-record
-            # if cudagraph managed tensor addresses changed.
-            @torch.compile(mode="reduce-overhead")
-            def foo(x):
-                return x + 1
-
-            @torch.compile(mode="reduce-overhead")
-            def goo(x):
-                return x * 2
-
-            for _ in range(3):
-                torch.compiler.cudagraph_mark_step_begin()
-                inp = torch.rand((2, 3), device="cuda")
-                y = foo(inp)
-                z = goo(y)
-
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.cudagraph_utils", "cudagraphs"
-            )
-            with ctx():
-                torch.compiler.cudagraph_mark_step_begin()
-                x = torch.rand(2, 3, device="cuda")
-                y = foo(x)
-                y_clone = y.clone()
-                z = goo(y_clone)
-
-            # eager function should run successfully
-            for _ in range(5):
-                torch.compiler.cudagraph_mark_step_begin()
-                x = torch.rand(2, 3, device="cuda")
-                y = foo(x)
-                y_clone = y.clone()
-                z = goo(y_clone)
-
-            FileCheck().check_count(
-                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
-                "on cudagraph node 0 due to cudagraph managed tensor data pointer changed",
-                1,
-                exactly=True,
-            ).run(log_stream.getvalue())
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
-
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
         def test_not_fallback_to_eager_if_have_not_recompiling_too_many_times(self):
             def fn(x, y):
@@ -3021,7 +3605,31 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
+        def test_param_ptr_churn_does_not_count_toward_rerecord_limit(self):
+            # Distinct nn parameter pointers across calls trigger
+            # StaticInputIdxMismatch each time. Those mismatches re-record but
+            # must not count against cudagraph_unexpected_rerecord_limit, since
+            # parameter identity churn is expected under inline_inbuilt_nn_modules.
+            def fn(x, y):
+                return x * y
+
+            with torch.device("cuda"):
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                # Burn through more distinct params than the limit (1) allows
+                # if they were counted.
+                for _ in range(5):
+                    p = torch.nn.Parameter(torch.rand([2, 2]))
+                    self._assert_equal_multi_loop(p, fn, fn_compiled)
+
+            # No fallback to eager triggered by re-record limit.
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            # Counter never bumped for any (node, function).
+            for fn_to_count in self.get_manager().num_rerecord.values():
+                for count in fn_to_count.values():
+                    self.assertEqual(count, 0)
+
+        @torch._dynamo.config.patch("error_on_recompile", True)
         def test_no_rerecord_with_mark_static_address(self):
             class Mod(torch.nn.Module):
                 def __init__(self):
@@ -3053,6 +3661,456 @@ if HAS_CUDA_AND_TRITON:
                     mod.linear.bias.grad = None
                 # One forward and one backward
                 self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        def test_cudagraph_annotation_disable(self):
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
+            def helper(x):
+                return x + 1
+
+            def fn(x):
+                return helper(x)
+
+            inp = torch.randn(4, 4, device="cuda")
+            fn_compiled = torch.compile(fn, mode="reduce-overhead")
+            result = fn_compiled(inp)
+
+            self.assertEqual(result, inp + 1)
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_annotation_disable_fwd_bwd(self):
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
+            def helper(x):
+                return (x * x).sin()
+
+            def fn(x):
+                return helper(x)
+
+            inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+            fn_compiled = torch.compile(fn, mode="reduce-overhead")
+            out = fn_compiled(inp)
+            out.sum().backward()
+
+            self.assertEqual(out, inp.detach().pow(2).sin())
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_annotation_disable_bwd_only(self):
+            @torch._dynamo.override_cudagraphs(bwd=False)
+            def helper(x):
+                return (x * x).sin()
+
+            def fn(x):
+                return helper(x)
+
+            fn_compiled = torch.compile(fn, mode="reduce-overhead")
+
+            # Run forward+backward pair for cudagraph warmup and recording
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = fn_compiled(inp)
+                out.sum().backward()
+
+            self.assertEqual(out, inp.detach().pow(2).sin())
+            # Forward is eligible for cudagraphs (manager created)
+            self.assertIsNotNone(self.get_manager())
+            # One graph for forward (backward is disabled)
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        def test_cudagraph_annotation_disable_fwd_only(self):
+            @torch._dynamo.override_cudagraphs(fwd=False)
+            def helper(x):
+                return (x * x).sin()
+
+            def fn(x):
+                return helper(x)
+
+            inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+            fn_compiled = torch.compile(fn, mode="reduce-overhead")
+            out = fn_compiled(inp)
+            out.sum().backward()
+
+            self.assertEqual(out, inp.detach().pow(2).sin())
+            # fwd override also disables bwd since the BoxedBool is shared
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_annotation_graph_break_selective(self):
+            """Annotated function only disables cudagraphs for graph segments
+            that inline it. Other segments after a graph break are unaffected."""
+
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
+            def disabled_fn(x):
+                return x + 1
+
+            def model(x):
+                # g1: disabled_fn inlined -> cudagraphs OFF
+                y = disabled_fn(x)
+                torch._dynamo.graph_break()
+                # g2: no annotation -> cudagraphs ON
+                z = y * 2
+                torch._dynamo.graph_break()
+                # g3: disabled_fn inlined -> cudagraphs OFF
+                w = disabled_fn(z)
+                return w
+
+            inp = torch.randn(4, 4, device="cuda")
+            compiled = torch.compile(model, mode="reduce-overhead")
+            # Warmup + record
+            out = compiled(inp)
+            out = compiled(inp)
+
+            expected = (inp + 1) * 2 + 1
+            self.assertEqual(out, expected)
+            # Only g2 uses cudagraphs (1 graph recorded)
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        def test_cudagraph_annotation_multiple_functions(self):
+            """Multiple annotated functions each disable their containing graph."""
+
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
+            def no_cg_add(x):
+                return x + 1
+
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
+            def no_cg_mul(x):
+                return x * 3
+
+            def model(x):
+                y = no_cg_add(x)
+                torch._dynamo.graph_break()
+                z = no_cg_mul(y)
+                return z
+
+            inp = torch.randn(4, 4, device="cuda")
+            compiled = torch.compile(model, mode="reduce-overhead")
+            out = compiled(inp)
+            out = compiled(inp)
+
+            expected = (inp + 1) * 3
+            self.assertEqual(out, expected)
+            # Both segments disabled, no cudagraphs
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_annotation_deeply_nested(self):
+            """Annotation on an innermost function propagates through
+            nested inlining to disable cudagraphs for the whole graph."""
+
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
+            def inner(x):
+                return x + 1
+
+            def middle(x):
+                return inner(x) * 2
+
+            def outer(x):
+                return middle(x).sin()
+
+            def model(x):
+                return outer(x)
+
+            inp = torch.randn(4, 4, device="cuda")
+            compiled = torch.compile(model, mode="reduce-overhead")
+            out = compiled(inp)
+
+            self.assertEqual(out, ((inp + 1) * 2).sin())
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_annotation_context_manager(self):
+            """Context manager disables cudagraphs for all graphs within block,
+            including across graph breaks."""
+
+            def model(x):
+                y = x + 1  # g1: outside context, cudagraphs ON
+                torch._dynamo.graph_break()
+                with torch._dynamo.override_cudagraphs(fwd=False, bwd=False):
+                    z = y * 2  # g2: inside context, cudagraphs OFF
+                    torch._dynamo.graph_break()
+                    w = z - 1  # g3: still inside context, cudagraphs OFF
+                torch._dynamo.graph_break()
+                return w + 3  # g4: outside context, cudagraphs ON
+
+            inp = torch.randn(4, 4, device="cuda")
+            compiled = torch.compile(model, mode="reduce-overhead")
+            out = compiled(inp)
+            out = compiled(inp)
+
+            expected = ((inp + 1) * 2 - 1) + 3
+            self.assertEqual(out, expected)
+            # g1 and g4 use cudagraphs (2 graphs recorded)
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        def test_cudagraph_annotation_module_forward(self):
+            """Annotation on a module's forward method disables cudagraphs
+            when that module is called inside a compiled function."""
+
+            class MyModule(torch.nn.Module):
+                @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
+                def forward(self, x):
+                    return x + 1
+
+            mod = MyModule().cuda()
+
+            def model(x):
+                # g1: mod.forward has annotation -> cudagraphs OFF
+                y = mod(x)
+                return y * 2
+
+            inp = torch.randn(4, 4, device="cuda")
+            compiled = torch.compile(model, mode="reduce-overhead")
+            out = compiled(inp)
+            out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            self.assertIsNone(self.get_manager())
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable(self):
+            """override_cudagraphs(fwd=True, bwd=True) force-enables cudagraphs
+            even when config.triton.cudagraphs is False."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=True)
+            def helper(x):
+                return x + 1
+
+            def fn(x):
+                return helper(x)
+
+            fn_compiled = torch.compile(fn)
+
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = fn_compiled(inp)
+
+            self.assertEqual(out, inp + 1)
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_fwd_bwd(self):
+            """override_cudagraphs(fwd=True, bwd=True) force-enables cudagraphs
+            for both forward and backward when config disables them."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=True)
+            def helper(x):
+                return (x * x).sin()
+
+            def fn(x):
+                return helper(x)
+
+            fn_compiled = torch.compile(fn)
+
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = fn_compiled(inp)
+                out.sum().backward()
+
+            self.assertEqual(out, inp.detach().pow(2).sin())
+            self.assertIsNotNone(self.get_manager())
+            # One forward and one backward
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_fwd_only(self):
+            """override_cudagraphs(fwd=True) force-enables cudagraphs for
+            forward. Backward is also enabled since the BoxedBool is shared."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True)
+            def helper(x):
+                return (x * x).sin()
+
+            def fn(x):
+                return helper(x)
+
+            fn_compiled = torch.compile(fn)
+
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = fn_compiled(inp)
+                out.sum().backward()
+
+            self.assertEqual(out, inp.detach().pow(2).sin())
+            self.assertIsNotNone(self.get_manager())
+            # fwd override also enables bwd since the BoxedBool is shared
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_context_manager(self):
+            """Context manager force-enables cudagraphs for segments within
+            the block when config disables them."""
+
+            def model(x):
+                y = x + 1  # g1: no annotation, config off -> no cudagraphs
+                torch._dynamo.graph_break()
+                with torch._dynamo.override_cudagraphs(fwd=True, bwd=True):
+                    z = y * 2  # g2: annotation on -> cudagraphs
+                    torch._dynamo.graph_break()
+                    w = z - 1  # g3: annotation on -> cudagraphs
+                torch._dynamo.graph_break()
+                return w + 3  # g4: no annotation, config off -> no cudagraphs
+
+            compiled = torch.compile(model)
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+
+            expected = ((inp + 1) * 2 - 1) + 3
+            self.assertEqual(out, expected)
+            # g2 and g3 use cudagraphs (2 graphs recorded)
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_nested_callee_graph_break(self):
+            """Context manager enables cudagraphs across a graph break that
+            occurs inside a nested callee, even though the `with` block lives
+            in the caller's frame and the callee is compiled as a separate
+            frame (it cannot be inlined because it contains a graph break)."""
+
+            def callee(x):
+                y = x + 1  # segment 1 (inside override) -> cudagraphs
+                torch._dynamo.graph_break()
+                return y * 2  # segment 2 (inside override) -> cudagraphs
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=True, bwd=True):
+                    return callee(x)
+
+            compiled = torch.compile(model)
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            self.assertIsNotNone(self.get_manager())
+            # both callee segments use cudagraphs (2 graphs recorded)
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_module_forward_graph_break(self):
+            """Decorator on a module's forward enables cudagraphs for every
+            segment even when the forward contains a graph break (the forward
+            is compiled as a separate frame from its caller)."""
+
+            class MyModule(torch.nn.Module):
+                @torch._dynamo.override_cudagraphs(fwd=True, bwd=True)
+                def forward(self, x):
+                    y = x + 1  # segment 1 -> cudagraphs
+                    torch._dynamo.graph_break()
+                    return y * 2  # segment 2 -> cudagraphs
+
+            mod = MyModule().cuda()
+
+            def model(x):
+                return mod(x)
+
+            compiled = torch.compile(model)
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        def test_cudagraph_annotation_disable_nested_callee_graph_break(self):
+            """Context manager disables cudagraphs across a graph break inside a
+            nested callee compiled as a separate frame, even though the default
+            (reduce-overhead) config would otherwise record cudagraphs."""
+
+            def callee(x):
+                y = x + 1  # segment 1 (inside override) -> no cudagraphs
+                torch._dynamo.graph_break()
+                return y * 2  # segment 2 (inside override) -> no cudagraphs
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=False, bwd=False):
+                    return callee(x)
+
+            inp = torch.randn(4, 4, device="cuda")
+            compiled = torch.compile(model, mode="reduce-overhead")
+            out = compiled(inp)
+
+            self.assertEqual(out, (inp + 1) * 2)
+            # No callee segment is recorded despite reduce-overhead default.
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_annotation_disable_bwd_nested_callee_graph_break(self):
+            """Asymmetric override (fwd=True, bwd=False) propagates across a
+            graph break in a separately-compiled callee: both forward segments
+            record cudagraphs while the backward is disabled."""
+
+            def callee(x):
+                y = (x * x).sin()  # forward segment 1
+                torch._dynamo.graph_break()
+                return y + 1  # forward segment 2
+
+            def model(x):
+                with torch._dynamo.override_cudagraphs(fwd=True, bwd=False):
+                    return callee(x)
+
+            compiled = torch.compile(model, mode="reduce-overhead")
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+                out.sum().backward()
+
+            self.assertEqual(out, (inp.detach().pow(2).sin()) + 1)
+            self.assertIsNotNone(self.get_manager())
+            # Two forward segments record; backward is disabled (no bwd graphs),
+            # matching the forward-only count of the enable variant above.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        def test_cudagraph_min_partition_size_skip_small(self):
+            """Partitions with fewer kernels than the threshold are skipped."""
+
+            # Simple function with few kernels
+            def fn(x):
+                return x * 2
+
+            inp = torch.randn(4, 4, device="cuda")
+
+            # Set threshold high enough to skip this simple function
+            with torch._inductor.config.patch(
+                {"triton.cudagraph_min_partition_size": 10}
+            ):
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                for _ in range(3):
+                    out = fn_compiled(inp)
+
+            self.assertEqual(out, inp * 2)
+            # Partition was too small, so no cudagraph recorded
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_min_partition_size_allow_large(self):
+            """Partitions with enough kernels pass the threshold."""
+
+            # Function with multiple operations -> more kernels
+            def fn(x):
+                y = x * 2
+                y = y + 1
+                y = y.sin()
+                y = y.cos()
+                y = y * x
+                return y @ y
+
+            inp = torch.randn(4, 4, device="cuda")
+
+            # Set threshold low enough to allow this function
+            with torch._inductor.config.patch(
+                {"triton.cudagraph_min_partition_size": 2}
+            ):
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                for _ in range(3):
+                    out = fn_compiled(inp)
+
+            # Partition was large enough, cudagraph should be recorded
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         def test_tensor_constant_mutation(self):
             class Foo(torch.nn.Module):
@@ -3105,20 +4163,8 @@ if HAS_CUDA_AND_TRITON:
             foo.static_tensor = torch.ones((2, 2), device="cuda")
             foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
 
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                for _ in range(3):
-                    foo(inp)
-            else:
-                # Run with specific function id to avoid dynamo recompiling
-                self.get_manager().run(
-                    [
-                        foo.goo.linear.weight,
-                        foo.goo.linear.bias,
-                        foo.static_tensor,
-                        inp,
-                    ],
-                    FunctionID(0),
-                )
+            for _ in range(3):
+                foo(inp)
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
@@ -3286,6 +4332,40 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
+        @skipIfRocm
+        def test_graph_partition_max_autotune_skips_linalg_eigh(self):
+            from torch._inductor.utils import is_cudagraph_unsafe_fx_node
+
+            def f(x):
+                affinity = torch.matmul(x, x.transpose(-2, -1))
+                return torch.linalg.eigh(affinity)
+
+            gen = torch.Generator(device="cuda").manual_seed(0)
+            x = torch.randn(2, 6, 4, device="cuda", generator=gen)
+            affinity = torch.matmul(x, x.transpose(-2, -1))
+            gm = make_fx(lambda a: torch.ops.aten._linalg_eigh.default(a))(affinity)
+            eigh_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.aten._linalg_eigh.default
+            )
+            self.assertTrue(is_cudagraph_unsafe_fx_node(eigh_node))
+
+            expected = f(x)
+            compiled_f = torch.compile(f, mode="max-autotune")
+
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                for _ in range(3):
+                    actual = compiled_f(x)
+
+            self.assertEqual(actual[0], expected[0], atol=1e-4, rtol=1e-4)
+            self.assertEqual(actual[1].shape, expected[1].shape)
+            FileCheck().check(
+                "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable"
+            ).run(log_stream.getvalue())
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_log_message(self):
             def foo(x, y):
                 return (x + 1, y + 2)
@@ -3311,7 +4391,7 @@ if HAS_CUDA_AND_TRITON:
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
             FileCheck().check_count(
-                "Recording function=partition_0, cuda_graph_id=0",
+                "Recording function=partition_0, mode=INFERENCE, cuda_graph_id=0,",
                 1,
                 exactly=True,
             ).run(log_stream.getvalue())
@@ -3481,6 +4561,53 @@ if HAS_CUDA_AND_TRITON:
                 _out = f_compiled(x, y)
             self.assertEqual(self.get_manager() is None, True)
 
+        @torch._inductor.config.patch("graph_partition", False)
+        def test_view_only_cuda_graph_suppresses_empty_warning(self):
+            counters.clear()
+
+            def fn(x):
+                return x.reshape(1, -1, 4)
+
+            x = torch.randn(6, 4, device="cuda")
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                for _ in range(3):
+                    actual = compiled_fn(x)
+                    torch.cuda.synchronize()
+
+            self.assertEqual(actual, fn(x))
+            self.assertFalse(
+                any("CUDA Graph is empty" in str(w.message) for w in caught)
+            )
+            self.assertEqual(
+                counters["inductor"]["cudagraph_recorded_non_static_inputs"], 1
+            )
+            self.assertIsNotNone(self.get_manager())
+
+        @torch._inductor.config.patch("triton.slow_path_cudagraph_asserts", True)
+        def test_kernel_free_allocation_uses_cudagraph_pool(self):
+            def fn(x):
+                return torch.empty_like(x)
+
+            for graph_partition in (False, True):
+                torch._dynamo.reset()
+                x = torch.randn(6, 4, device="cuda")
+                with (
+                    torch._inductor.config.patch("graph_partition", graph_partition),
+                    warnings.catch_warnings(record=True) as caught,
+                ):
+                    warnings.simplefilter("always")
+                    compiled_fn = torch.compile(fn, fullgraph=True)
+                    for _ in range(3):
+                        actual = compiled_fn(x)
+                        torch.cuda.synchronize()
+
+                self.assertEqual(actual.shape, x.shape)
+                self.assertFalse(
+                    any("CUDA Graph is empty" in str(w.message) for w in caught)
+                )
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_forward_backward(self):
             class Mod(torch.nn.Module):
@@ -3514,6 +4641,185 @@ if HAS_CUDA_AND_TRITON:
 
             # 2 graph partitions lead to 2 fwd cudagraphs and 1 bwd cudagraphs
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_used_in_cpu_op(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(4, 4, device="cuda")
+                    self.cpu_scale = torch.nn.Parameter(torch.tensor(1.0))
+
+                def forward(self, x):
+                    y = self.linear(x)
+                    cpu_val = y.sum().cpu() * self.cpu_scale
+                    return y + cpu_val.cuda()
+
+            model = Mod()
+            x = torch.randn(4, 4, device="cuda")
+
+            compiled_model = torch.compile(model, mode="reduce-overhead")
+
+            # Verify graph_partition produces the expected partitions.
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                compiled_model(x)
+            FileCheck().check("2 cudagraphable, 1 non-cudagraphable").run(
+                log_stream.getvalue()
+            )
+
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            for _ in range(5):
+                output = compiled_model(x)
+                loss = criterion(output, torch.randint(0, 4, (4,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            eager_out = model(x)
+            compiled_out = compiled_model(x)
+            self.assertEqual(compiled_out, eager_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_as_output(self):
+            """
+            When a CPU scalar placeholder is moved to GPU by ConstructorMoverPass,
+            the forward graph's output must NOT replace the CPU placeholder with
+            the GPU copy.
+            """
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(4, 4, device="cuda")
+                    self.cpu_scale = torch.nn.Parameter(torch.tensor(1.0))
+
+                def forward(self, x):
+                    return self.linear(x) * self.cpu_scale
+
+            model = Mod()
+            x = torch.randn(4, 4, device="cuda")
+
+            compiled_model = torch.compile(model, mode="reduce-overhead")
+            compiled_model(x)
+
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            for _ in range(5):
+                output = compiled_model(x)
+                loss = criterion(output, torch.randint(0, 4, (4,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            eager_out = model(x)
+            compiled_out = compiled_model(x)
+            self.assertEqual(compiled_out, eager_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_saved_activation_not_static(self):
+            # When the forward is partitioned, saved activations produced
+            # by inline code between partitions (e.g., DeviceCopy) are
+            # NOT at fixed addresses. The backward must not mark them as
+            # static inputs, or it would re-record on every iteration.
+            # Primals (params/buffers) should still be marked static.
+            from unittest.mock import patch
+
+            from torch._inductor.utils import count_tangents, get_static_bw_input_idxs
+
+            bw_graph = None
+            orig_bw = torch._inductor.compile_fx.compile_fx_backward
+
+            def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
+                nonlocal bw_graph
+                bw_graph = gm
+                return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    a = x * 2
+                    # CPU round-trip creates a DeviceCopy partition boundary.
+                    # The .cuda() result is an activation saved for backward.
+                    b = a.cpu().cuda()
+                    c = b * b
+                    return self.linear(c)
+
+            model = Mod().cuda()
+            input_data = torch.randn(16, 16, device="cuda")
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            with patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
+                compiled_model = torch.compile(model, mode="reduce-overhead")
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            self.assertIsNotNone(bw_graph)
+            # count_tangents marks ALL saved tensors as static (old behavior)
+            all_static = list(range(count_tangents(bw_graph)))
+            # get_static_bw_input_idxs only marks primals as static
+            primal_static = get_static_bw_input_idxs(bw_graph)
+            # With a partitioned forward, only primals should be static,
+            # so primal_static should be a strict subset of all_static.
+            self.assertTrue(len(primal_static) < len(all_static))
+            for idx in primal_static:
+                self.assertIn(idx, all_static)
+
+            # Run a few more iterations to confirm stability
+            for _ in range(4):
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_no_partition_keeps_static(self):
+            # When graph_partition is enabled but the forward has no unsafe
+            # ops, forward_is_partitioned should be False and all saved
+            # tensors remain static in the backward.
+            from unittest.mock import patch
+
+            forward_partitioned = None
+            orig_bw = torch._inductor.compile_fx.compile_fx_backward
+
+            def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
+                nonlocal forward_partitioned
+                forward_partitioned = compiler_config_extra.forward_is_partitioned.value
+                return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    return self.linear(x * x + 1)
+
+            model = Mod().cuda()
+            input_data = torch.randn(16, 16, device="cuda")
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            with patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
+                compiled_model = torch.compile(model, mode="reduce-overhead")
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            self.assertFalse(forward_partitioned)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):
@@ -3559,7 +4865,7 @@ if HAS_CUDA_AND_TRITON:
                 inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                 out = foo(inp)
 
-                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                with config.patch(force_disable_cudagraph_TESTING_ONLY=True):
                     back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                     out.backward(back_inp)
 
@@ -4010,11 +5316,11 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_reorder_cpu_and_gpu_interleave(self):
-            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+            def f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu):
                 # partition 1 on cuda, no dependency
                 x_cuda0 = x_cuda + 1
                 x_cuda1 = x_cuda0 @ weight_cuda
-                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+                x_cuda2 = 2 * (x_cuda1 + bias_cuda)
 
                 # partition 2 on cpu w/ dependency on partition 1
                 y_cpu0 = y_cpu + 1
@@ -4024,7 +5330,7 @@ if HAS_CUDA_AND_TRITON:
                 # partition 3 on cuda w/o dependency
                 z_cuda0 = z_cuda + 1
                 z_cuda1 = z_cuda0 @ weight_cuda
-                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+                z_cuda2 = 2 * (z_cuda1 + bias_cuda)
 
                 # partition 4 on cpu w/o dependency
                 y_cpu2 = y_cpu + 5
@@ -4033,22 +5339,25 @@ if HAS_CUDA_AND_TRITON:
                 # partition 5 on cuda w/o dependency
                 u_cuda0 = z_cuda + 3
                 u_cuda1 = u_cuda0 @ weight_cuda
-                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+                u_cuda2 = 2 * (u_cuda1 + bias_cuda)
 
                 return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
 
             x_cuda = torch.randn(3, 3, device="cuda")
             y_cpu = torch.randn(3, 3, device="cpu")
             z_cuda = torch.randn(3, 3, device="cuda")
+            # Keep the CUDA adds pointwise so this test continues to exercise
+            # graph partition reordering instead of addmm fusion.
+            bias_cuda = torch.randn(1, 3, device="cuda")
             weight_cuda = torch.randn(3, 3, device="cuda")
             weight_cpu = torch.randn(3, 3, device="cpu")
 
-            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+            eager_out = f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu)
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
             for _ in range(3):
                 compiled_out = compiled_f(
-                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                    x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu
                 )
                 self.assertEqual(eager_out, compiled_out)
 
@@ -4189,7 +5498,8 @@ if HAS_CUDA_AND_TRITON:
                 eager_out = f(padded_tensor, original_tensor, weight)
                 for _ in range(3):
                     compiled_out = compiled_f(padded_tensor, original_tensor, weight)
-                    assert torch.allclose(eager_out, compiled_out)
+                    if not torch.allclose(eager_out, compiled_out):
+                        raise AssertionError
 
             # although custom op `create_mask` happens at the middle of function, reorder
             # moves it to the front so we only have 1 partition. This leads to 1 cudagraph
@@ -4522,6 +5832,10 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_SLOW,
+            "https://github.com/pytorch/pytorch/issues/176144",
+        )
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
         )
@@ -4655,6 +5969,311 @@ if HAS_CUDA_AND_TRITON:
             with self.assertRaises(RuntimeError):
                 f(torch.tensor(1, device="cuda"))
 
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_input_layout_symints(self):
+            """
+            Test that partition functions receive symint args derived from input
+            tensor layouts, even when the op's output shape is static.
+            Regression test for symbol_inputs being silently dropped due to
+            OrderedSet.union() (returns new set) instead of .update() (in-place).
+            """
+
+            @torch.library.custom_op(
+                "mylib::identity_unsafe",
+                mutates_args=(),
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def identity_unsafe(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @identity_unsafe.register_fake
+            def _identity_fake(x):
+                return torch.empty_like(x)
+
+            @torch.library.custom_op(
+                "mylib::pad_to_fixed",
+                mutates_args=(),
+            )
+            def pad_to_fixed(x: torch.Tensor) -> torch.Tensor:
+                n = x.shape[0]
+                result = torch.zeros(32, x.shape[1], device=x.device, dtype=x.dtype)
+                result[:n] = x
+                return result
+
+            @pad_to_fixed.register_fake
+            def _pad_fake(x):
+                return torch.empty(32, x.shape[1], device=x.device, dtype=x.dtype)
+
+            def f(x):
+                y = torch.ops.mylib.identity_unsafe(x)
+                z = torch.ops.mylib.pad_to_fixed(y)
+                return z + 1
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            def run(n):
+                x = torch.randn(n, 16, device="cuda")
+                torch._dynamo.mark_dynamic(x, 0)
+                eager_out = f(x)
+                for _ in range(3):
+                    compiled_out = compiled_f(x)
+                    self.assertEqual(eager_out, compiled_out)
+
+            run(20)
+            run(10)
+            run(25)
+
+        def test_dealloc_handles_tensor_weakrefs_stack_traces_mismatch(self):
+            """Verify dealloc_current_path_weakrefs handles tensor_weakrefs /
+            stack_traces length mismatch without asserting.
+
+            This injects the mismatch directly so the deallocation path is
+            deterministic. The fix replaces the hard assert with a warning and
+            relies on zip(), matching the existing defensive pattern for
+            outputs_weakrefs in the same function.
+            """
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            inp = torch.rand([4], device="cuda")
+
+            # First call: warmup phase creates and runs a CUDAWarmupNode.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
+
+            # Simulate the tensor_weakrefs / stack_traces length divergence.
+            node = self.curr_node()
+            self.assertEqual(len(node.tensor_weakrefs), len(node.stack_traces))
+            node.tensor_weakrefs.append(None)
+
+            # Second call: transitions warmup -> recording, which invokes
+            # try_end_curr_warmup -> dealloc_current_path_weakrefs.
+            # cudagraph_mark_step_begin ensures can_start_new_generation()
+            # returns True so dealloc is actually called.
+            # Without the fix, this would hit:
+            #   assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            # With the fix, zip() safely truncates to the shorter list.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_opaque_value_input_cudagraph(self):
+            """Opaque reference-type objects (e.g. DeviceMesh, ProcessGroup)
+            passed alongside tensors must be marked "static" so they are
+            excluded from the tensor-copy path (non_static_input_idx).
+            "Static" here just means "don't copy as a tensor", not that
+            the object is semantically immutable."""
+
+            sf = _CudagraphTestScaleFactor(3.0)
+
+            def foo(args):
+                obj = args[0]
+                x = args[1]
+                args.clear()
+                return (x * obj.factor,)
+
+            inp = torch.rand([4], device="cuda")
+            foo_cg = self.cudagraphify_impl(foo, [sf, inp], ())
+            result = foo_cg([sf, inp])
+            self.assertEqual(result[0], inp * 3.0)
+
+            result2 = foo_cg([sf, inp])
+            self.assertEqual(result2[0], inp * 3.0)
+
+    class TestCUDAGraphPolicy(TestCase):
+        def setUp(self):
+            super().setUp()
+            counters.clear()
+            self._stack = contextlib.ExitStack()
+            self._stack.enter_context(
+                config.patch(
+                    {
+                        "triton.cudagraphs": True,
+                        "triton.cudagraph_trees": True,
+                    }
+                )
+            )
+            torch._dynamo.reset()
+
+        def tearDown(self):
+            super().tearDown()
+            torch._dynamo.reset()
+            self._stack.close()
+
+        def test_policy_cudagraphify_called(self):
+            """Custom policy's cudagraphify is called instead of the default."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            calls = []
+
+            class RecordingPolicy(CUDAGraphPolicy):
+                def cudagraphify(self, model, inputs, static_input_idxs, **kwargs):
+                    calls.append(
+                        {
+                            "static_input_idxs": static_input_idxs,
+                            "device_index": kwargs.get("device_index"),
+                        }
+                    )
+                    return model
+
+            def foo(x):
+                return x * x + 1
+
+            with config.patch("cudagraph_policy", RecordingPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                compiled(x)
+                compiled(x)
+
+            self.assertGreater(len(calls), 0)
+
+        def test_should_wrap_false_skips_cudagraph(self):
+            """When should_wrap returns False, cudagraph wrapping is skipped."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            class NoWrapPolicy(CUDAGraphPolicy):
+                def should_wrap(self, compiled_graph):
+                    return False
+
+            def foo(x):
+                return x + 1
+
+            with config.patch("cudagraph_policy", NoWrapPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                result = compiled(x)
+                result = compiled(x)
+
+            self.assertEqual(result, x + 1)
+            self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+
+        def test_wrap_output_called(self):
+            """Policy's wrap_output is called in BundledOutputCodeLoadable."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            wrapped = []
+
+            class WrapPolicy(CUDAGraphPolicy):
+                def wrap_output(self, output_code):
+                    wrapped.append(type(output_code).__name__)
+                    return output_code
+
+            def foo(x):
+                return x * 2
+
+            with config.patch("cudagraph_policy", WrapPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                result = compiled(x)
+                result = compiled(x)
+
+            self.assertEqual(result, x * 2)
+            self.assertGreater(len(wrapped), 0)
+            self.assertIn("CompiledFxGraph", wrapped)
+
+        def test_default_policy_matches_builtin(self):
+            """Default CUDAGraphPolicy produces same results as no policy."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            def foo(x):
+                return x * x + x
+
+            x = torch.randn(4, device="cuda")
+
+            compiled_default = torch.compile(foo)
+            ref = compiled_default(x)
+            ref = compiled_default(x)
+
+            torch._dynamo.reset()
+
+            with config.patch("cudagraph_policy", CUDAGraphPolicy()):
+                compiled_policy = torch.compile(foo)
+                out = compiled_policy(x)
+                out = compiled_policy(x)
+
+            self.assertEqual(ref, out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_default_policy_matches_builtin_partition(self):
+            """Default CUDAGraphPolicy matches builtin when graph_partition=True."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            def foo(x):
+                return x * x + x
+
+            x = torch.randn(4, device="cuda")
+
+            compiled_default = torch.compile(foo)
+            ref = compiled_default(x)
+            ref = compiled_default(x)
+
+            torch._dynamo.reset()
+
+            with config.patch("cudagraph_policy", CUDAGraphPolicy()):
+                compiled_policy = torch.compile(foo)
+                out = compiled_policy(x)
+                out = compiled_policy(x)
+
+            self.assertEqual(ref, out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_policy_cudagraphify_partition(self):
+            """Custom policy's cudagraphify is called when graph_partition is enabled."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            calls = []
+
+            class RecordingPolicy(CUDAGraphPolicy):
+                def cudagraphify(self, model, inputs, static_input_idxs, **kwargs):
+                    calls.append(
+                        {
+                            "static_input_idxs": static_input_idxs,
+                            "device_index": kwargs.get("device_index"),
+                        }
+                    )
+                    return model
+
+            def foo(x):
+                return x * x + 1
+
+            with config.patch("cudagraph_policy", RecordingPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                compiled(x)
+                compiled(x)
+
+            self.assertGreater(len(calls), 0)
+
+        def test_should_wrap_false_with_wrap_output(self):
+            """should_wrap=False skips inner wrapping; wrap_output does outer wrapping."""
+            from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+            wrap_calls = []
+
+            class OuterOnlyPolicy(CUDAGraphPolicy):
+                def should_wrap(self, compiled_graph):
+                    return False
+
+                def wrap_output(self, output_code):
+                    wrap_calls.append(type(output_code).__name__)
+                    return output_code
+
+            def foo(x):
+                return x * x + 1
+
+            with config.patch("cudagraph_policy", OuterOnlyPolicy()):
+                compiled = torch.compile(foo)
+                x = torch.randn(4, device="cuda")
+                result = compiled(x)
+                result = compiled(x)
+
+            self.assertEqual(result, x * x + 1)
+            self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+            self.assertGreater(len(wrap_calls), 0)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
@@ -4767,9 +6386,6 @@ if HAS_CUDA_AND_TRITON:
                 new_state = old_state.clone_state()
 
                 if capture_cuda_graph:
-                    # state should be register to the graph
-                    graph.register_generator_state(new_state)
-
                     # only capturing the backward
                     with torch.cuda.graph(graph):
                         repro_perm = graphsafe_backward(generator, new_state)
@@ -4824,7 +6440,7 @@ if HAS_CUDA_AND_TRITON:
                             if isinstance(inp, torch._ops.OpOverload):
                                 op = inp
                                 break
-                        assert op is not None
+                        assert op is not None  # noqa: S101
                         if hop is run_and_save_rng_state:
                             mode.op_outputs[op].append(out[1])
                         else:
@@ -5058,6 +6674,7 @@ if HAS_CUDA_AND_TRITON:
             )
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
+    instantiate_parametrized_tests(TestCUDAGraphPolicy)
     instantiate_parametrized_tests(TestSAC)
 
     # OpInfo-based test for index/scatter ops with cudagraphs

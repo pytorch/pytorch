@@ -1,7 +1,6 @@
-# mypy: allow-untyped-defs
 import operator
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.fx
@@ -37,7 +36,7 @@ class NormalizeArgs(Transformer):
 
     def __init__(
         self, module: torch.fx.GraphModule, normalize_to_only_use_kwargs: bool = True
-    ):
+    ) -> None:
         super().__init__(module)
         self.node_map: dict[Proxy, Node] = {}
         self.normalize_to_only_use_kwargs = normalize_to_only_use_kwargs
@@ -45,7 +44,7 @@ class NormalizeArgs(Transformer):
     def run_node(self, n: Node) -> Any:
         args, kwargs = self.fetch_args_kwargs_from_env(n)
 
-        def get_type(arg):
+        def get_type(arg: object) -> Any:
             if isinstance(arg, fx.Node):
                 return n.meta.get("type")
             return type(arg)
@@ -70,9 +69,9 @@ class NormalizeArgs(Transformer):
         target: Target,
         args: tuple[Argument, ...],
         kwargs: dict[str, Any],
-        arg_types: Optional[tuple[Any, ...]] = None,
-        kwarg_types: Optional[dict[str, Any]] = None,
-    ):
+        arg_types: tuple[Any, ...] | None = None,
+        kwarg_types: dict[str, Any] | None = None,
+    ) -> Proxy:
         if not callable(target):
             raise AssertionError(f"Expected callable target, got {type(target)}")
         new_args_and_kwargs = normalize_function(
@@ -93,7 +92,7 @@ class NormalizeArgs(Transformer):
 
     def call_module(
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
-    ):
+    ) -> Proxy:
         if not isinstance(target, str):
             raise AssertionError(f"Expected str target, got {type(target)}")
         new_args_and_kwargs = normalize_module(
@@ -147,9 +146,9 @@ class NormalizeOperators(AnnotateTypesWithSchema):
 
     def call_function(
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
-    ):
+    ) -> Proxy:
         # Normalize operators according to the magic methods implemented on tensors here:
-        # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137 # noqa: B950
+        # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137
 
         if not callable(target):
             raise AssertionError(f"Expected callable target, got {type(target)}")

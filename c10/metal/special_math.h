@@ -48,9 +48,57 @@ inline float erf(T x) {
   return r;
 }
 
+/*
+ * Complementary error function.
+ * 1 - erf(x) loses all significant bits for x > ~3.9 (gh-187806), so it is
+ * used only for |x| <= 0.927734375 (erf's own branch threshold), where erf
+ * is faithfully rounded and the subtraction loses no accuracy (exact by
+ * Sterbenz for erf >= 0.5, a single rounding otherwise). Larger |x|:
+ *   erfc(a) = (1 + p(q)) / (1 + 2a) * exp(-a * a),  q = (a - 4) / (a + 4)
+ * p: degree-9 Remez fit of (1 + 2a) * exp(a * a) * erfc(a) - 1 on
+ * a in [0.927734375, 10.5] against 60-digit references; the rounding of the
+ * squared exp argument is fma-compensated. Negative x: 2 - erfc(-x), safe
+ * since erfc(-x) < 0.19 here. The scaled-rational construction follows
+ * N. Juffa's vectorizable erfcf
+ * (https://stackoverflow.com/questions/35966695) with freshly fitted
+ * coefficients. Both quotients use ::metal::fast::divide: full-precision
+ * division costs 1.2-2x in erfc-bound ops and would tighten the max error
+ * only to ~5.0 ulp. Exhaustive enumeration of fp32 inputs measures a max
+ * error of 5.6 ulp (4.0e-7 relative, M5; fast-math division rounding is
+ * GPU-dependent) over the normal output range (subnormal results flush to
+ * zero on the GPU).
+ */
 template <typename T>
 float erfc(T x) {
-  return 1.0 - erf(x);
+  const auto xf = static_cast<float>(x);
+  // required: metal::min below discards NaN
+  if (::metal::isnan(xf)) {
+    return xf;
+  }
+  const auto a = ::metal::abs(xf);
+  if (a <= 0.927734375f) {
+    return 1.0f - erf(xf);
+  }
+  // erfc underflows fp32 past 10.06; the clamp also handles +-infinity
+  const auto t = ::metal::min(a, 10.5f);
+  const auto q = ::metal::fast::divide(t - 4.0f, t + 4.0f);
+  auto p = 5.271875e-03f; // 0x1.597f62p-8
+  p = ::metal::fma(p, q, -1.6534764e-02f); // -0x1.0ee7d4p-6
+  p = ::metal::fma(p, q, 3.702093e-02f); // 0x1.2f4684p-5
+  p = ::metal::fma(p, q, -6.6275224e-02f); // -0x1.0f769cp-4
+  p = ::metal::fma(p, q, 9.375815e-02f); // 0x1.80088cp-4
+  p = ::metal::fma(p, q, -1.01042934e-01f); // -0x1.9ddf32p-4
+  p = ::metal::fma(p, q, 6.809548e-02f); // 0x1.16eb4ap-4
+  p = ::metal::fma(p, q, 1.5379757e-02f); // 0x1.f7f6cp-7
+  p = ::metal::fma(p, q, -1.396211e-01f); // -0x1.1df1aap-3
+  p = ::metal::fma(p, q, 2.3299512e-01f); // 0x1.dd2c8cp-3
+  const auto s = t * t;
+  auto e = ::metal::exp(-s);
+  // fold in the residual of the squaring: t * t = s + fma(t, t, -s) exactly
+  e = ::metal::fma(-e, ::metal::fma(t, t, -s), e);
+  const auto den = ::metal::fma(2.0f, t, 1.0f);
+  const auto r = ::metal::fast::divide(1.0f + p, den) * e;
+  return xf < 0.0f ? 2.0f - r : r;
 }
 
 template <typename T>
@@ -314,6 +362,11 @@ inline T i1e(T _x) {
 template <typename T>
 inline float log_gamma(const T);
 
+/*
+ * The gamma function approximations follow John D Cook's
+ * c++ implementation:  https://www.johndcook.com/Gamma.cpp.
+ * (BSD License)
+ */
 template <typename T>
 inline float gamma(const T x) {
   if (x < 0.001) {
@@ -533,6 +586,12 @@ inline float calc_digamma_positive_domain(float x) {
   return result + ::metal::log(x) - (0.5 / x) - y;
 }
 
+/*
+ * The digamma kernel and helper function is derived from the pytorch cpu
+ * of this function, which is itself derived from the implementation
+ * of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ */
 template <typename T0>
 inline float digamma(T0 x) {
   if (x < 0.0f) {
@@ -570,6 +629,36 @@ inline float polygamma(const int64_t order, const T0 input) {
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
   return sgn * gamma(n + 1) * zeta(n + 1, x);
+}
+
+template <typename T>
+float trigamma(T x) {
+  float sign = 1.0f;
+  float result = 0.0f;
+
+  if (x < 0.0f) {
+    sign = -1.0f;
+    auto sin_pi_x = sin(M_PI_F * x);
+    result -= (M_PI_F * M_PI_F) / (sin_pi_x * sin_pi_x);
+    x = 1.0f - x;
+  } else if (x == 0.0) {
+    return INFINITY;
+  } else if (x < 1.0) {
+    result += 1.0 / (x * x);
+    x += 1.0f;
+  }
+
+  for (int i = 0; i < 6; ++i) {
+    result += 1.0f / (x * x);
+    x += 1.0f;
+  }
+
+  const float ixx = 1.0f / (x * x);
+  result +=
+      (1.0f + 1.0f / (2.0f * x) +
+       ixx * ((1.0f / 6.0f) - ixx * ((1.0f / 30.0f) - ixx * (1.0f / 42.0f)))) /
+      x;
+  return sign * result;
 }
 
 template <typename T>
@@ -680,6 +769,19 @@ inline T logaddexp2(T a, T b) {
         ::c10::metal::log1p(::metal::pow(float(2), -::metal::abs(a0 - b0))) *
             inv_log_2);
   }
+}
+
+template <typename T>
+inline float xlogy(T x, T y) {
+  if (::metal::isnan(y)) {
+    return NAN;
+  }
+
+  if (x == 0) {
+    return x;
+  }
+
+  return x * precise::log(float(y));
 }
 
 template <typename T>
