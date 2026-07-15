@@ -502,10 +502,8 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
     @skipOps([
         # Not yet implemented on XPU
         skip('torch.ops.aten._flash_attention_forward', device_type='xpu'),
-        # stft falls back to CPU MKL FFT which doesn't support bfloat16
-        skip('stft', dtypes=[torch.bfloat16], device_type='xpu'),
-        # float step (e.g. 0.5) is truncated to 0 for integer dtypes on XPU
-        xfail('arange', dtypes=[torch.int64], device_type='xpu'),
+        # float step (e.g. 0.5) is truncated to 0 for integer dtypes on XPU - this is a known issue (4321) with the XPU implementation of arange 
+        skip('arange', dtypes=[torch.int64], device_type='xpu'),
     ])
     def test_schema_correctness(self, device, dtype, op):
         # Currently torch.equal isn't supported with torch.complex32 or torch.bcomplex32.
