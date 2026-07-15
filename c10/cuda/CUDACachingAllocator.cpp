@@ -1367,7 +1367,7 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     }
     ss << " has " << format_size(proc.usedGpuMemory) << " memory in use. ";
   }
-  return ss.str();
+  return std::move(ss).str();
 #else
   return "";
 #endif
@@ -4700,6 +4700,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     device_allocator[device]->popCompileContext();
+  }
+
+  bool supportsUserMetadata() override {
+    return true;
   }
 
   void setUserMetadata(const std::string& metadata) override {

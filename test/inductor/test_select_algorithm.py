@@ -820,7 +820,7 @@ class TestExternKernelCaller(TestCase):
                 in message
                 for message in log_context.output
             ),
-            f"Expected warning message not found in logs: {log_context.output}",
+            lambda msg: f"{msg}\nExpected warning message not found in logs: {log_context.output}",
         )
 
         expected = torch.mm(a, b)
