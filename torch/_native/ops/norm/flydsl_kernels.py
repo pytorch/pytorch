@@ -14,6 +14,7 @@ scope.
 
 from __future__ import annotations
 
+import functools
 import math
 
 import torch
@@ -53,14 +54,6 @@ def _dtype_str(dtype: torch.dtype) -> str:
         return _SUPPORTED_DTYPES[dtype]
     except KeyError as exc:
         raise TypeError(f"unsupported RMSNorm dtype for FlyDSL: {dtype}") from exc
-
-
-def _canonical_normalized_shape(normalized_shape) -> tuple[int, ...]:
-    if isinstance(normalized_shape, torch.Size):
-        return tuple(int(x) for x in normalized_shape)
-    if isinstance(normalized_shape, (tuple, list)):
-        return tuple(int(x) for x in normalized_shape)
-    return (int(normalized_shape),)
 
 
 def build_rmsnorm_module(
@@ -471,6 +464,20 @@ def _make_compile_arg(tensor: torch.Tensor):
     return flyc.from_torch_tensor(tensor).mark_shape_dynamic(0)
 
 
+@functools.cache
+def _compile_environment(device_index: int) -> tuple[str, str]:
+    """Cache process-stable FlyDSL target data outside the eager hot path.
+
+    The public override holds the input-device guard before calling this module,
+    so the first lookup observes the correct ROCm device. Environment variables
+    selecting the FlyDSL target/backend are process-start configuration, just as
+    they are for the compiled-function cache itself.
+    """
+
+    del device_index  # The device remains part of the cache key for multi-GPU use.
+    return str(get_rocm_arch()), flyc.compile_backend_name()
+
+
 @jit_cache
 def _compile_rmsnorm_fwd(
     n: int,
@@ -529,47 +536,41 @@ def _compile_rmsnorm_bwd(
 
 def rmsnorm_fwd(
     input: torch.Tensor,
-    normalized_shape,
     weight: torch.Tensor,
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run FlyDSL forward and return the ATen output/rstd pair."""
+    """Run FlyDSL forward under the device guard held by the ATen override."""
 
-    shape = _canonical_normalized_shape(normalized_shape)
-    if len(shape) != 1:
-        raise ValueError("FlyDSL RMSNorm currently requires one normalized dimension")
-
-    n = shape[0]
+    # The registered predicate has already validated a contiguous one-dimensional
+    # normalized shape, so avoid reparsing it in this per-call hot path.
+    n = input.shape[-1]
     rows_m = input.numel() // n
     input_shape = input.shape
     output = torch.empty_like(input)
+    input_2d = input.view(rows_m, n)
+    output_2d = output.view(rows_m, n)
+    rstd_flat = torch.empty(rows_m, device=input.device, dtype=torch.float32)
+    stream = torch.cuda.current_stream(input.device)
+    device_index = input.get_device()
+    arch, backend = _compile_environment(device_index)
 
-    with torch.cuda.device(input.device):
-        input_2d = input.reshape(rows_m, n)
-        output_2d = output.reshape(rows_m, n)
-        rstd_flat = torch.empty(rows_m, device=input.device, dtype=torch.float32)
-        stream = torch.cuda.current_stream(input.device)
-        device_index = input.device.index
-        if device_index is None:
-            device_index = torch.cuda.current_device()
-
-        compiled = _compile_rmsnorm_fwd(
-            n,
-            _dtype_str(input.dtype),
-            float(eps),
-            str(get_rocm_arch()),
-            flyc.compile_backend_name(),
-            device_index,
-            compile_args=(
-                input_2d,
-                weight,
-                output_2d,
-                rstd_flat,
-                rows_m,
-                stream,
-            ),
-        )
-        compiled(input_2d, weight, output_2d, rstd_flat, rows_m, stream)
+    compiled = _compile_rmsnorm_fwd(
+        n,
+        _dtype_str(input.dtype),
+        eps,
+        arch,
+        backend,
+        device_index,
+        compile_args=(
+            input_2d,
+            weight,
+            output_2d,
+            rstd_flat,
+            rows_m,
+            stream,
+        ),
+    )
+    compiled(input_2d, weight, output_2d, rstd_flat, rows_m, stream)
 
     stat_shape = list(input_shape[:-1]) + [1]
     return output, rstd_flat.view(stat_shape)
@@ -578,53 +579,37 @@ def rmsnorm_fwd(
 def rmsnorm_bwd(
     grad_out: torch.Tensor,
     input: torch.Tensor,
-    normalized_shape,
     rstd: torch.Tensor,
     weight: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run FlyDSL backward and return grad_input and grad_weight."""
+    *,
+    need_grad_weight: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Run FlyDSL backward under the device guard held by the ATen override."""
 
-    shape = _canonical_normalized_shape(normalized_shape)
-    if len(shape) != 1:
-        raise ValueError("FlyDSL RMSNorm currently requires one normalized dimension")
-
-    n = shape[0]
+    n = input.shape[-1]
     rows_m = input.numel() // n
+    input_2d = input.view(rows_m, n)
+    grad_2d = grad_out.view(rows_m, n)
+    rstd_flat = rstd.view(rows_m)
+    grad_input = torch.empty_like(input)
+    grad_input_2d = grad_input.view(rows_m, n)
 
-    with torch.cuda.device(input.device):
-        input_2d = input.reshape(rows_m, n)
-        grad_2d = grad_out.reshape(rows_m, n)
-        rstd_flat = rstd.reshape(rows_m).contiguous()
-        grad_input_2d = torch.empty_like(input_2d)
+    # The official kernel atomically accumulates dweight in fp32. Allocate
+    # uninitialized scratch and perform exactly one clear after compilation:
+    # flyc.compile may execute the kernel while tracing, so clearing before it
+    # would be redundant and caused a second zero-fill on every cache hit.
+    grad_weight_fp32 = torch.empty(n, device=input.device, dtype=torch.float32)
+    stream = torch.cuda.current_stream(input.device)
+    device_index = input.get_device()
+    arch, backend = _compile_environment(device_index)
 
-        # The kernel atomically accumulates dweight in fp32. flyc.compile may
-        # execute the kernel once while tracing, so this buffer is deliberately
-        # cleared after compilation and immediately before the measured launch.
-        grad_weight_fp32 = torch.zeros(n, device=input.device, dtype=torch.float32)
-        stream = torch.cuda.current_stream(input.device)
-        device_index = input.device.index
-        if device_index is None:
-            device_index = torch.cuda.current_device()
-
-        compiled = _compile_rmsnorm_bwd(
-            n,
-            _dtype_str(input.dtype),
-            str(get_rocm_arch()),
-            flyc.compile_backend_name(),
-            device_index,
-            compile_args=(
-                input_2d,
-                weight,
-                grad_2d,
-                rstd_flat,
-                grad_input_2d,
-                grad_weight_fp32,
-                rows_m,
-                stream,
-            ),
-        )
-        grad_weight_fp32.zero_()
-        compiled(
+    compiled = _compile_rmsnorm_bwd(
+        n,
+        _dtype_str(input.dtype),
+        arch,
+        backend,
+        device_index,
+        compile_args=(
             input_2d,
             weight,
             grad_2d,
@@ -633,10 +618,26 @@ def rmsnorm_bwd(
             grad_weight_fp32,
             rows_m,
             stream,
-        )
+        ),
+    )
+    grad_weight_fp32.zero_()
+    compiled(
+        input_2d,
+        weight,
+        grad_2d,
+        rstd_flat,
+        grad_input_2d,
+        grad_weight_fp32,
+        rows_m,
+        stream,
+    )
 
-    grad_input = grad_input_2d.reshape(input.shape)
-    grad_weight = grad_weight_fp32.to(weight.dtype).reshape(weight.shape)
+    # The official kernel's atomic output is fp32. BF16/FP16 weights require
+    # this final cast to preserve PyTorch's gradient dtype contract. Skip it
+    # when the ATen output mask says the weight gradient is not requested.
+    grad_weight = (
+        grad_weight_fp32.to(weight.dtype) if need_grad_weight else None
+    )
     return grad_input, grad_weight
 
 
@@ -645,6 +646,7 @@ def clear_rmsnorm_caches() -> None:
 
     _compile_rmsnorm_fwd.cache_clear()
     _compile_rmsnorm_bwd.cache_clear()
+    _compile_environment.cache_clear()
 
 
 def rmsnorm_cache_info() -> dict[str, object]:

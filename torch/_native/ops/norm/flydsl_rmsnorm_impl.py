@@ -4,9 +4,20 @@
 
 from __future__ import annotations
 
+import functools
+
 import torch
 
 from ... import flydsl_utils as fu
+
+
+@functools.cache
+def _kernel_entrypoints():
+    """Import FlyDSL kernels once, under the first input's device guard."""
+
+    from .flydsl_kernels import rmsnorm_bwd, rmsnorm_fwd
+
+    return rmsnorm_fwd, rmsnorm_bwd
 
 
 _SUPPORTED_HIDDEN_SIZES = frozenset(
@@ -98,9 +109,8 @@ def _fused_rms_norm_impl(
     # Import under the input device guard because the vendored builders query
     # the active ROCm architecture while initializing wave-size constants.
     with torch.cuda.device(input.device):
-        from .flydsl_kernels import rmsnorm_fwd
-
-        return rmsnorm_fwd(input, normalized_shape, weight, float(eps))
+        rmsnorm_fwd, _ = _kernel_entrypoints()
+        return rmsnorm_fwd(input, weight, float(eps))
 
 
 def _fused_rms_norm_backward_cond(
@@ -154,15 +164,20 @@ def _fused_rms_norm_backward_impl(
     if weight is None:
         raise RuntimeError("FlyDSL RMSNorm backward requires an explicit weight")
 
+    need_grad_input = bool(output_mask[0])
+    need_grad_weight = bool(output_mask[1])
     with torch.cuda.device(input.device):
-        from .flydsl_kernels import rmsnorm_bwd
-
+        _, rmsnorm_bwd = _kernel_entrypoints()
         grad_input, grad_weight = rmsnorm_bwd(
-            grad_out, input, normalized_shape, rstd, weight
+            grad_out,
+            input,
+            rstd,
+            weight,
+            need_grad_weight=need_grad_weight,
         )
     return (
-        grad_input if bool(output_mask[0]) else None,
-        grad_weight if bool(output_mask[1]) else None,
+        grad_input if need_grad_input else None,
+        grad_weight,
     )
 
 
