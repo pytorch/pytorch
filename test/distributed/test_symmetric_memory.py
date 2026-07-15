@@ -782,6 +782,9 @@ class AsyncTPTest(MultiProcContinuousTest):
                 )
 
     @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
     )

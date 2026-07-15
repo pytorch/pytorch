@@ -1075,6 +1075,10 @@ def _fused_all_gather_matmul_native_rocm(
             else:
                 _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
 
+    # Unlike the CUDA path, the backend stream is intentionally not joined back
+    # into current_stream here: the next native call re-orders backend_stream
+    # against current_stream at entry before issuing any new backend-stream work,
+    # so the closing join is redundant on ROCm and removing it is a measured win.
     current_stream.wait_stream(backend_stream)
 
     symm_mem.barrier()
