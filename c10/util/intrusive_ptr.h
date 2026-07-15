@@ -753,7 +753,8 @@ template <
     class TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>,
     class... Args>
-inline intrusive_ptr<TTarget, NullType> make_intrusive(Args&&... args) {
+[[nodiscard]] inline intrusive_ptr<TTarget, NullType> make_intrusive(
+    Args&&... args) {
   return intrusive_ptr<TTarget, NullType>::make(std::forward<Args>(args)...);
 }
 
