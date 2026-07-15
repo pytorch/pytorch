@@ -771,6 +771,7 @@ ops_unbacked_dtensor_dde = {
     skip("broadcast_to"),
     xfail("bucketize"),
     xfail("cartesian_prod"),
+    xfail("combinations"),
     xfail("constant_pad_nd"),
     xfail("cumprod"),
     xfail("diagonal_scatter"),

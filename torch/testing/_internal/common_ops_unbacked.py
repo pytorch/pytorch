@@ -24,7 +24,6 @@ ops_dde_xfail = {
     xfail("cdist"),
     xfail("cholesky"),
     xfail("chunk"),
-    xfail("combinations"),
     xfail("corrcoef"),
     xfail("cov"),
     xfail("cross"),
