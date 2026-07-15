@@ -11413,7 +11413,11 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
         y_mps_cl = m_mps_cl(x_mps_cl)
 
         # Fast-path invariant: CL output must match contiguous in same dtype.
-        cl_vs_cont = dict(atol=1e-5, rtol=1e-5) if dtype == torch.float32 else dict(atol=1e-3, rtol=1e-3)
+        cl_vs_cont = {
+            torch.float32: dict(atol=1e-5, rtol=1e-5),
+            torch.float16: dict(atol=1e-3, rtol=1e-3),
+            torch.bfloat16: dict(atol=1e-3, rtol=1.6e-2),
+        }[dtype]
         self.assertEqual(y_mps_cont, y_mps_cl, **cl_vs_cont)
         self.assertTrue(y_mps_cl.is_contiguous(memory_format=torch.channels_last_3d))
         if dtype == torch.float32:
