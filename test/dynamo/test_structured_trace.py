@@ -15,6 +15,7 @@ from contextlib import contextmanager
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch._environment
 import torch._logging.structured
 import torch.distributed as dist
 import torch.fx as fx
@@ -77,6 +78,11 @@ class StructuredTraceTestingFilter(logging.Filter):
 
     def filter(self, record):
         if "str" in record.metadata:
+            return False
+        if (
+            torch._environment.is_fbcode()
+            and record.metadata.get("artifact", {}).get("name") == "torch_version"
+        ):
             return False
         if self.match_name is not None:
             if "artifact" in record.metadata:
