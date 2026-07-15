@@ -220,6 +220,32 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_bw_gbs=608.0,
         dram_gb=32.0,
     ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/232876/\
+    # intel-data-center-gpu-max-1100/specifications.html
+    "Intel(R) Data Center GPU Max 1100": DeviceInfo(
+        # XeCore count: 56,
+        # vector/matrix engines per XeCore: 8
+        # freq: 1.55GHz
+        tops={
+            # Vector engine
+            torch.float64: 11.1,
+            torch.float32: 22.2,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 22.2,
+            # Matrix engine
+            torch.float16: 355.5,
+            torch.bfloat16: 355.5,
+            # not supported, fall back to float32 numbers
+            torch.float8_e8m0fnu: 22.2,
+            torch.float8_e4m3fnuz: 22.2,
+            torch.float8_e5m2: 22.2,
+            torch.float8_e5m2fnuz: 22.2,
+            torch.int8: 711.1,
+        },
+        dram_bw_gbs=1228.8,
+        dram_gb=48,
+    ),
 }
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
@@ -244,7 +270,9 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
     return _device_mapping.get(name.upper())
 
 
-def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
+def datasheet_tops(
+    dtype: torch.dtype, is_tf32: bool = False, device_name: str | None = None
+) -> float | None:
     """
     Get the theoretical *dense* TFLOPS of the device for a given dtype.
 
@@ -252,11 +280,17 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
     (``tops_sparsity_factor > 1``), they are divided by that factor so
     callers always receive the throughput achievable by cuBLAS/cuDNN on
     non-sparse data.
+
+    If ``device_name`` is given, the datasheet is looked up for that named
+    device instead of querying the current device. This lets callers pin a
+    device spec for deterministic, hardware-independent estimates.
     """
-    if torch.cuda.is_available():
-        name: str | None = torch.cuda.get_device_name()
+    if device_name is not None:
+        name: str | None = device_name
+    elif torch.cuda.is_available():
+        name = torch.cuda.get_device_name()
     elif torch.xpu.is_available():
-        name: str | None = torch.xpu.get_device_name()
+        name = torch.xpu.get_device_name()
     else:
         log.info("No supported device available, skipping datasheet lookup")
         return None
@@ -281,3 +315,31 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
         "torch.tf32" if dtype == torch.float32 and is_tf32 else dtype
     ]
     return tops / device_info.tops_sparsity_factor
+
+
+def datasheet_dram_bw_gbs(device_name: str | None = None) -> float | None:
+    """
+    Get the theoretical DRAM bandwidth (GB/s) of a device from the datasheet,
+    or None if the device is not present.
+
+    If ``device_name`` is given, that named device is looked up; otherwise the
+    current CUDA/XPU device is queried.
+    """
+    if device_name is None:
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name()
+        elif torch.xpu.is_available():
+            device_name = torch.xpu.get_device_name()
+        else:
+            log.info("No supported device available, skipping datasheet lookup")
+            return None
+
+    if device_name is None:
+        log.info("No device found, returning None")
+        return None
+
+    device_info = lookup_device_info(device_name)
+    if device_info is None:
+        log.info("Device %s not in datasheet, returning None", device_name)
+        return None
+    return device_info.dram_bw_gbs
