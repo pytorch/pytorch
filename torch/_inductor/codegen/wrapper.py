@@ -4666,13 +4666,8 @@ class PythonWrapperCodegen(CodeGen):
                 self.codegen_subgraph(branch, outer_inputs, name)
             self.writeline(ExitSubgraphLine(self))
 
-        # For cond, branches=[true, false] but True==1 and False==0, so reverse
-        # the list so that index 0->false branch and index 1->true branch.
-        branches = (
-            list(reversed(node.branches)) if node.is_cond else list(node.branches)
-        )
-        num_branches = len(branches)
-        for b_idx, branch in enumerate(branches):
+        num_branches = len(node.branches)
+        for b_idx, branch in enumerate(node.branches):
             if b_idx == 0:
                 keyword, condition = "if", f" {selector} == 0"
             elif b_idx < num_branches - 1:

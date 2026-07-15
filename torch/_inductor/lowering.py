@@ -8993,7 +8993,10 @@ def cond(
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.Switch.create(pred, [true_fn, false_fn], operands, is_cond=True)
+    # The branches are reordered to [false_fn, true_fn]
+    # because during codegen the pred is converted to an integer with True -> 1 and False -> 0.
+    # When iterating over the branches the false_fn is associated index 0.
+    result = ir.Switch.create(pred, [false_fn, true_fn], operands)
     return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 
