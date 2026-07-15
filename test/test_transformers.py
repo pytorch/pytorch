@@ -4371,11 +4371,11 @@ class TestSDPACudaOnly(NNTestCase):
         )
         self.assertFalse(
             torch.isnan(out).any().item(),
-            f"CK GQA seqlen_q==1 produced NaN ({msg})",
+            lambda _m: f"{_m}\nCK GQA seqlen_q==1 produced NaN ({msg})",
         )
         self.assertFalse(
             torch.isinf(out).any().item(),
-            f"CK GQA seqlen_q==1 produced Inf ({msg})",
+            lambda _m: f"{_m}\nCK GQA seqlen_q==1 produced Inf ({msg})",
         )
         self.assertEqual(out, ref.to(out.dtype), atol=2e-2, rtol=2e-2)
 
@@ -5040,7 +5040,7 @@ class TestSDPAXpuOnly(NNTestCase):
         overrideable_index = default_priority.index(SDPBackend.OVERRIDEABLE)
         math_index = default_priority.index(SDPBackend.MATH)
         self.assertTrue(overrideable_index < flash_index < math_index,
-                        f"Expected overrideable < flash < math, got {overrideable_index}, {flash_index}, {math_index}")
+                        lambda msg: f"{msg}\nExpected overrideable < flash < math, got {overrideable_index}, {flash_index}, {math_index}")
 
     def test_onednn_attention_different_dk_dv(self, device):
         dtype = torch.bfloat16
