@@ -7446,6 +7446,22 @@ class CPUReproTests(TestCase):
         )
         self.assertTrue(cuda_storage.has_exceeded_max_reads())
 
+    def test_fractional_max_pool2d_negative_kernel_issue_188226(self):
+        # https://github.com/pytorch/pytorch/issues/188226
+        # FractionalMaxPool2d with negative kernel_size creates zero-iteration
+        # reduction ranges that cause ValueRangeError in inductor's
+        # index propagation. The loop body never executes, so we should
+        # just skip constructing ValueRanges for such variables.
+        mod = torch.nn.FractionalMaxPool2d(
+            -60, output_size=(2, 2), return_indices=False
+        ).eval()
+        inp = torch.randn([2, 16, 5, 5])
+
+        def fn(x):
+            return mod(x)
+
+        self.common(fn, (inp,))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
