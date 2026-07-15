@@ -140,6 +140,18 @@ class HardwareClassification(Enum):
       Use sparingly, and only for device-specific behavior.  These replace
       ``@onlyCPU``, ``@onlyCUDA``, and similar decorators
 
+    * ``MULTI_ACCELERATOR`` – multi-device tests that work across
+      accelerator types (e.g. backend-agnostic distributed API tests).
+      FakePG distributed tests should use ``GENERIC`` instead.
+
+    * ``MULTI_ACCELERATOR_CUDA`` – multi-device tests locked to CUDA
+      (e.g. NCCL collectives, multi-GPU CUDA kernels, NVLink, and
+      peer-to-peer transfers).
+
+    * ``MULTI_ACCELERATOR_XPU`` – multi-device tests locked to XPU.
+
+    * ``MULTI_ACCELERATOR_MPS`` – multi-device tests locked to MPS.
+
     Usage::
 
         class TestFoo(TestCase):
@@ -159,6 +171,10 @@ class HardwareClassification(Enum):
     CUDA = "cuda"
     MPS = "mps"
     XPU = "xpu"
+    MULTI_ACCELERATOR = "multi_accelerator"
+    MULTI_ACCELERATOR_CUDA = "multi_accelerator_cuda"
+    MULTI_ACCELERATOR_XPU = "multi_accelerator_xpu"
+    MULTI_ACCELERATOR_MPS = "multi_accelerator_mps"
 
 
 # Set by parse_cmd_line_args() if called

@@ -105,7 +105,18 @@ try:
 except ImportError:
     # Temporary fallback for CI jobs that run the PR's test/run_test.py against a
     # previous nightly torch package that doesn't have HardwareClassification yet.
-    _HC_CHOICES = ["GENERIC", "ACCELERATOR", "CPU", "CUDA", "MPS", "XPU"]
+    _HC_CHOICES = [
+        "GENERIC",
+        "ACCELERATOR",
+        "CPU",
+        "CUDA",
+        "MPS",
+        "XPU",
+        "MULTI_ACCELERATOR",
+        "MULTI_ACCELERATOR_CUDA",
+        "MULTI_ACCELERATOR_XPU",
+        "MULTI_ACCELERATOR_MPS",
+    ]
 
 
 # Make sure to remove REPO_ROOT after import is done
