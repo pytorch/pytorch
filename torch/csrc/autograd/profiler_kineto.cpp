@@ -15,6 +15,7 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/events.h>
+#include <torch/csrc/profiler/kineto_metadata.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/observer.h>
 #include <torch/csrc/profiler/perf.h>
@@ -68,19 +69,11 @@ inline int64_t getTimeNs() {
 using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
-using torch::profiler::impl::get_record_concrete_inputs_enabled;
-using torch::profiler::impl::ivalueListToStr;
-using torch::profiler::impl::ivalueToStr;
-using torch::profiler::impl::op_input_t;
+using torch::profiler::impl::parseArgData;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
 using torch::profiler::impl::Result;
 using torch::profiler::impl::shape;
-using torch::profiler::impl::shapesToStr;
-using torch::profiler::impl::stacksToStr;
-using torch::profiler::impl::strListToStr;
-using torch::profiler::impl::TensorMetadata;
-using torch::profiler::impl::variantShapesToStr;
 
 // Helper function to check if ProfilerState is a Kineto-compatible state
 inline bool isKinetoCompatibleState(ProfilerState state) {
@@ -111,344 +104,6 @@ inline bool hasRequestedDeviceActivity(
       activities.contains(ActivityType::MTIA) ||
       activities.contains(ActivityType::HPU) ||
       activities.contains(ActivityType::PrivateUse1);
-}
-
-struct OpArgData {
-  bool hasData;
-  std::vector<shape> shapes;
-  std::vector<std::string> dtypes;
-  std::vector<c10::IValue> concreteInputs;
-  std::vector<std::vector<int64_t>> shapesForKinetoEvent;
-  std::vector<shape> strides;
-};
-
-auto parseArgData(
-    const std::vector<op_input_t>& input_shapes,
-    const std::vector<op_input_t>& concreteInputs) {
-  if (input_shapes.empty()) {
-    return OpArgData{.hasData = false};
-  }
-
-  std::vector<shape> shapes(input_shapes.size());
-  std::vector<shape> strides(input_shapes.size());
-  std::vector<std::vector<int64_t>> shapesForKinetoEvent(input_shapes.size());
-
-  std::vector<std::string> dtypes(input_shapes.size());
-  std::vector<c10::IValue> concrete_inputs_list;
-
-  for (const auto& i : c10::irange(input_shapes.size())) {
-    std::visit(
-        c10::overloaded(
-            [&](const TensorMetadata& t) {
-              shapes[i] = t.sizes_;
-              shapesForKinetoEvent[i] = t.sizes_;
-              dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
-              strides[i] = t.strides_;
-            },
-            [&](const std::vector<TensorMetadata>& l) {
-              std::vector<std::vector<int64_t>> shape;
-              shape.reserve(l.size());
-              std::vector<std::vector<int64_t>> stride;
-              stride.reserve(l.size());
-              for (const auto& t : l) {
-                shape.emplace_back(t.sizes_);
-                stride.emplace_back(t.strides_);
-              }
-              shapes[i] = shape;
-              strides[i] = stride;
-              dtypes[i] = "TensorList";
-            },
-            [&](const c10::IValue&) { dtypes[i] = "Scalar"; },
-            [&](const auto&) {}),
-        input_shapes[i]);
-  }
-
-  // If we recorded concrete inputs, then parse them
-  if (input_shapes.size() == concreteInputs.size() && !concreteInputs.empty()) {
-    concrete_inputs_list.resize(input_shapes.size());
-
-    for (const auto& i : c10::irange(input_shapes.size())) {
-      std::visit(
-          c10::overloaded(
-              [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
-              [&](const auto&) {}),
-          input_shapes[i]);
-      std::visit(
-          c10::overloaded(
-              [&](const c10::IValue& val) {
-                concrete_inputs_list[i] = val;
-                dtypes[i] = "ScalarList";
-              },
-              [&](const auto&) {}),
-          concreteInputs[i]);
-    }
-  }
-
-  return OpArgData{
-      .hasData = true,
-      .shapes = shapes,
-      .dtypes = dtypes,
-      .concreteInputs = concrete_inputs_list,
-      .shapesForKinetoEvent = shapesForKinetoEvent,
-      .strides = strides};
-}
-
-struct MetadataBase {
-  /* implicit */ MetadataBase(const std::shared_ptr<Result>& result)
-      : kinetoActivity_{result->kineto_activity_} {
-    if (std::holds_alternative<ExtraFields<EventType::Kineto>>(
-            result->extra_fields_)) {
-      // In order to add metadata we have to downcast from
-      // `libkineto::ITraceActivity` to `libkineto::GenericTraceActivity`. We
-      // know that all activities provided by PyTorch are of the correct type,
-      // however Kineto profilers can (and do) add events that inherit directly
-      // from ITraceActivity. As a result, any Result which was constructed from
-      // an event that Kineto provided is unsafe to cast.
-      if (!(SOFT_ASSERT(!hasKinetoActivity()))) {
-        result->kineto_activity_ = nullptr;
-      }
-      kinetoActivity_ = result->kineto_activity_;
-    }
-  }
-
-  void addMetadata(
-      const std::string& key,
-      const std::string& value,
-      bool quote = false) {
-    if (kinetoActivity_ && !value.empty() && value != "\"\"") {
-      torch::profiler::impl::kineto::addMetadata(
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          const_cast<torch::profiler::impl::kineto::activity_t*>(
-              kinetoActivity_),
-          key,
-          value,
-          quote);
-    }
-  }
-
-  bool hasKinetoActivity() const {
-    return kinetoActivity_ != nullptr;
-  }
-
- private:
-  const torch::profiler::impl::kineto::activity_t* kinetoActivity_{nullptr};
-};
-
-struct AddTensorboardFields : public MetadataBase {
-  AddTensorboardFields(
-      const std::shared_ptr<Result>& result,
-      KinetoEvent& kineto_event)
-      : MetadataBase(result) {
-    result->visit(*this);
-    const auto module_hierarchy = kineto_event.moduleHierarchy();
-    addMetadata("Module Hierarchy", stacksToStr(module_hierarchy.vec(), "."));
-    addMetadata("Call stack", stacksToStr(kineto_event.stack().vec(), ";"));
-
-    result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
-      this->addMetadata("Python id", std::to_string(i.id_));
-
-      std::optional<std::string> parent_id;
-      std::shared_ptr<Result> parent = result->parent_.lock();
-      while (parent && !parent_id.has_value()) {
-        parent->visit_if_base<PyExtraFieldsBase>(
-            [&](const auto& j) { parent_id = std::to_string(j.id_); });
-        parent = parent->parent_.lock();
-      }
-      this->addMetadata("Python parent id", parent_id.value_or("null"));
-      if (i.caller_.line_no_ > 0) {
-        this->addMetadata(
-            "CallFrom",
-            fmt::format("{}:{}", i.caller_.filename_.str(), i.caller_.line_no_),
-            /*quote=*/true);
-      }
-    });
-  }
-
-  void operator()(const ExtraFields<EventType::PyCall>& py_call) {
-    if (py_call.module_.has_value()) {
-      addMetadata("Python module id", std::to_string(py_call.module_->id_));
-    }
-  }
-
-  template <typename T>
-  void operator()(const T& /*unused*/) {}
-};
-
-struct AddGenericMetadata : public MetadataBase {
-  AddGenericMetadata(
-      std::shared_ptr<Result>& result,
-      const torch::profiler::impl::ProfilerConfig* config)
-      : MetadataBase(result), config_(config) {
-    result->visit(*this);
-    if (config->experimental_config.verbose) {
-      result->visit_if_base<PyExtraFieldsBase>(
-          [&, this](const auto& i) -> void {
-            this->addMetadata("Python thread", std::to_string(i.python_tid_));
-          });
-    }
-  }
-
-  void operator()(ExtraFields<EventType::TorchOp>& op_event) {
-    const auto arg_data =
-        parseArgData(op_event.inputs_, op_event.concrete_inputs_);
-
-    if (arg_data.hasData) {
-      if (get_record_concrete_inputs_enabled()) {
-        addMetadata("Input Dims", variantShapesToStr(arg_data.shapes));
-      } else {
-        addMetadata("Input Dims", shapesToStr(arg_data.shapesForKinetoEvent));
-      }
-      addMetadata("Input Strides", variantShapesToStr(arg_data.strides));
-      addMetadata("Input type", strListToStr(arg_data.dtypes));
-      if (!arg_data.concreteInputs.empty()) {
-        addMetadata(
-            "Concrete Inputs", ivalueListToStr(arg_data.concreteInputs));
-      }
-    }
-
-    // Add metadata for kwinputs if exist
-    for (const auto& [key, val] : op_event.kwinputs_) {
-      if (key == "stream" && !val.isInt()) {
-        LOG(WARNING) << "Inputted stream is not an int for op: "
-                     << op_event.name_ << " skipping";
-        continue;
-      }
-
-      // Until needed, let's limit the kwargs to only ints, doubles, strings,
-      // bools, and list of strings
-      bool isValidType =
-          val.isInt() || val.isDouble() || val.isString() || val.isBool();
-      bool isStringList = false;
-
-      if (!isValidType && val.isList()) {
-        // Check if it's a list of strings
-        auto list = val.toListRef();
-        isStringList = std::ranges::all_of(
-            list, [](const c10::IValue& item) { return item.isString(); });
-      }
-
-      if (!isValidType && !isStringList) {
-        LOG(WARNING)
-            << "Inputted kwarg: " << key
-            << " is not an int, double, string, bool, or list of strings for op: "
-            << op_event.name_ << " skipping";
-        continue;
-      }
-
-      if (isStringList) {
-        // For list of strings, use ivalueListToStr
-        auto list = val.toListRef();
-        std::vector<c10::IValue> stringList(list.begin(), list.end());
-        addMetadata(key, ivalueListToStr(stringList));
-      } else {
-        bool isString = val.isString();
-        addMetadata(key, ivalueToStr(val, isString));
-      }
-    }
-    // Add extra metadata if any
-    for (const auto& [key, val] : op_event.extra_meta_) {
-      addMetadata(key, val);
-    }
-
-    if (config_ && !config_->experimental_config.performance_events.empty()) {
-      auto& event_names = config_->experimental_config.performance_events;
-      for (const auto i : c10::irange(op_event.perf_event_counters_->size())) {
-        addMetadata(
-            event_names[i],
-            std::to_string((*op_event.perf_event_counters_)[i]));
-      }
-    }
-
-    // add information about an associated forward op, if a sequence number
-    // is available (e.g. during training)
-    if (op_event.sequence_number_ >= 0) {
-      addMetadata("Fwd thread id", std::to_string(op_event.forward_tid_));
-      addMetadata("Sequence number", std::to_string(op_event.sequence_number_));
-    }
-    addMetadata(
-        "Record function id", std::to_string(op_event.record_function_id_));
-  }
-
-  void operator()(ExtraFields<EventType::Backend>& backend_event) {
-    if (!backend_event.backend_.empty()) {
-      addMetadata("Backend", "\"" + backend_event.backend_ + "\"");
-    }
-  }
-
-  void operator()(const ExtraFields<EventType::Allocation>& alloc) {
-    addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
-    addMetadata("Device Id", std::to_string(alloc.device_index_));
-    addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(alloc.ptr_)));
-    addMetadata("Bytes", std::to_string(alloc.alloc_size_));
-    addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
-    addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
-  }
-
-  void operator()(const ExtraFields<EventType::OutOfMemory>& alloc) {
-    addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
-    addMetadata("Device Id", std::to_string(alloc.device_index_));
-    addMetadata("Bytes", std::to_string(alloc.alloc_size_));
-    addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
-    addMetadata("Total Reserved", std::to_string(alloc.total_reserved_));
-  }
-
-  template <typename T>
-  void operator()(const T& /*unused*/) {}
-
- private:
-  /* To get names of the performance events */
-  const torch::profiler::impl::ProfilerConfig* config_;
-};
-
-// Lightweight metadata pass for trace_only mode: annotates Kineto activities
-// with the same metadata as materializeOpEvents but without creating
-// KinetoEvent wrappers or building eventTree.
-void addTraceMetadata(
-    std::vector<std::shared_ptr<Result>>& events,
-    const torch::profiler::impl::ProfilerConfig& config,
-    int64_t trace_end_ns) {
-  for (auto& e : events) {
-    // Unfinished events automatically have end time set to trace end time
-    if (!e->finished_) {
-      e->visit(c10::overloaded(
-          [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
-            i.end_time_ns_ = trace_end_ns;
-          },
-          [](auto&) {}));
-    }
-
-    if (!e->kineto_activity_) {
-      continue;
-    }
-    AddGenericMetadata add_generic(e, &config);
-
-    // Subset of AddTensorboardFields that doesn't require KinetoEvent or
-    // parent chain (no python_stack_, no Python parent id).
-    MetadataBase tb(e);
-    e->visit(c10::overloaded(
-        [&](const ExtraFields<EventType::TorchOp>& i) {
-          tb.addMetadata("Module Hierarchy", stacksToStr(i.jit_modules_, "."));
-          tb.addMetadata("Call stack", stacksToStr(i.jit_stack_, ";"));
-        },
-        [&](const ExtraFields<EventType::Backend>& i) {
-          tb.addMetadata("Module Hierarchy", stacksToStr(i.jit_modules_, "."));
-          tb.addMetadata("Call stack", stacksToStr(i.jit_stack_, ";"));
-        },
-        [](const auto&) {}));
-    e->visit_if_base<PyExtraFieldsBase>([&](const auto& i) {
-      tb.addMetadata("Python id", std::to_string(i.id_));
-    });
-    e->visit(c10::overloaded(
-        [&](const ExtraFields<EventType::PyCall>& py_call) {
-          if (py_call.module_.has_value()) {
-            tb.addMetadata(
-                "Python module id", std::to_string(py_call.module_->id_));
-          }
-        },
-        [](const auto&) {}));
-
-    e->kineto_activity_ = nullptr;
-  }
 }
 
 struct KinetoThreadLocalState : public ProfilerStateBase {
@@ -585,8 +240,10 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
           [](auto&) {}));
 
       kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
-      AddTensorboardFields add_tb(e, kinetoEvents.back());
-      AddGenericMetadata add_generic(e, &config_);
+      KinetoEvent& kineto_event = kinetoEvents.back();
+      addTensorboardFields(
+          e, kineto_event.moduleHierarchy(), kineto_event.stack());
+      addGenericMetadata(e, &config_);
 
       // It is not safe to use the activity after post processing.
       e->kineto_activity_ = nullptr;
@@ -602,40 +259,70 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   post_process_t eventPostProcessCb;
 };
 
-// A reusable, dynamically-counted completion latch for the global
-// RecordFunction callback path (KINETO_ONDEMAND, or KINETO with
-// profile_all_threads). Those callbacks fire on every thread and touch the
-// profiler state while disableProfiler() finalizes and frees it on another
-// thread. While the latch is active, each in-flight callback enter()s before
-// touching the state and exit()s after; teardown calls drain(), which closes
-// the latch to new callbacks and blocks until the in-flight count reaches
-// zero, so finalize never races a live callback. The enter()/isActive()
-// re-check is a handshake: a callback that joined before teardown is always
-// waited for, while one arriving after bails without touching the state.
+// Coordinates one global RecordFunction callback session (KINETO_ONDEMAND, or
+// KINETO with profile_all_threads) against teardown. Those callbacks fire on
+// every thread and touch the profiler state while disableProfiler() finalizes
+// and frees it on another thread.
 //
-// Note that we cannot use a std::latch. A std::latch fixes its count at
+// While the session is active, each callback invocation brackets only its own
+// short critical section - getGlobal() plus the RecordQueue access - with
+// enter()/exit(). Teardown calls drain(), which closes the session to new
+// callbacks and blocks until the in-flight count reaches zero, so finalize
+// never races a live critical section.
+//
+// The enter()/isActive() re-check is a handshake: a callback that joined before
+// teardown is always waited for, while one arriving after bails without
+// touching the state.
+//
+// Bracketing only the critical section (not the op body) is what keeps drain()
+// from deadlocking against the GIL, but it lets an op enter under one session
+// and exit after that session is torn down (its RecordQueue and event freed). A
+// per-session generation (see generation()), stamped on each callback's
+// ObserverContext, closes that gap: onFunctionExitGlobal drops a straddling
+// exit on generation mismatch instead of dereferencing the freed event.
+//
+// The drain counter is not a std::latch: a std::latch fixes its count at
 // construction, cannot be incremented afterward, and is single-use. Here the
-// number of in-flight callbacks is unknown up front, grows dynamically as
-// ops dispatch, and the latch must be re-armed for every enable/disable
-// cycle, none of which std::latch supports. The counter stays lock-free on
-// the per-op hot path; the mutex/cv are touched only on the teardown handoff.
+// number of in-flight callbacks is unknown up front, grows dynamically as ops
+// dispatch, and the session must be re-armed for every enable/disable cycle,
+// none of which std::latch supports. The counter stays lock-free on the per-op
+// hot path; the mutex/cv are touched only on the teardown handoff.
 //
 // Because we coordinate across threads that can call it at any arbitrary time,
 // this object must have static lifetime.
-class DynamicCompletionLatch {
+class GlobalCallbackSession {
  public:
-  DynamicCompletionLatch() = default;
+  GlobalCallbackSession() = default;
+  ~GlobalCallbackSession() = default;
 
-  // We should have only a single, static instance of this object.
-  DynamicCompletionLatch(const DynamicCompletionLatch&) = delete;
-  DynamicCompletionLatch& operator=(const DynamicCompletionLatch&) = delete;
+  // Single, static instance only: neither copyable nor movable.
+  GlobalCallbackSession(const GlobalCallbackSession&) = delete;
+  GlobalCallbackSession& operator=(const GlobalCallbackSession&) = delete;
+  GlobalCallbackSession(GlobalCallbackSession&&) = delete;
+  GlobalCallbackSession& operator=(GlobalCallbackSession&&) = delete;
 
-  // Open the latch (at enableProfiler time) so callbacks begin participating.
-  void activate() {
+  // Open the session (at enableProfiler time) so callbacks begin participating.
+  // On a true enable a fresh RecordQueue was just installed, so bump the
+  // session generation first: callbacks in the new session stamp the new value
+  // and a straddling exit from the prior session detects the mismatch. The
+  // mid-session dynamic collection toggle re-arms the same RecordQueue and
+  // passes false; bumping there would wrongly drop end-events for ops that
+  // straddle the toggle.
+  void activate(bool new_session) {
+    if (new_session) {
+      generation_.fetch_add(1);
+    }
     active_.store(true);
   }
 
-  // Whether the latch is open; that is, teardown has not begun.
+  // Session generation, stamped into each callback's ObserverContext at enter
+  // and re-checked at exit. A mismatch means the stamping session was torn down
+  // (its RecordQueue and event freed), so the exit drops itself.
+  uint64_t generation() const {
+    return generation_.load();
+  }
+
+  // Whether the session is open; that is, teardown has not begun.
   bool isActive() const {
     return active_.load();
   }
@@ -646,7 +333,7 @@ class DynamicCompletionLatch {
     in_flight_.fetch_add(1);
   }
 
-  // Deregister an in-flight callback. When this is the last one and the latch
+  // Deregister an in-flight callback. When this is the last one and the session
   // has been closed (drain() in progress), wake the waiting teardown thread.
   // During normal profiling this is a single lock-free decrement.
   void exit() {
@@ -656,17 +343,19 @@ class DynamicCompletionLatch {
     }
   }
 
-  // Close the latch to new callbacks and block until all in-flight ones have
-  // exited; returns true once drained (also returns true if the latch was never
-  // opened -- purely thread-local profiling). Closing is fused with the wait,
-  // so the latch cannot be closed without waiting out in-flight callbacks.
+  // Close the session to new callbacks and block until all in-flight ones have
+  // exited; returns true once drained (also returns true if the session was
+  // never opened; it remained purely thread-local profiling). Closing is fused
+  // with the wait, so the session cannot be closed without waiting out
+  // in-flight callbacks.
   //
   // Returns false if the drain does not complete within kDrainTimeout. A normal
-  // drain takes microseconds (the in-flight window is a single op, enter() ->
-  // op -> exit()), so a multi-second wait means a callback's thread is wedged,
-  // dead, or deadlocked on a resource this thread holds. The caller must then
-  // leave the state installed: freeing it under a live callback would
-  // reintroduce the use-after-free this latch exists to prevent.
+  // drain takes microseconds (the in-flight window is just a callback's
+  // getGlobal() + RecordQueue critical section, never an op body), so a
+  // multi-second wait means a callback's thread was killed or wedged inside
+  // that critical section. The caller must then leave the state installed:
+  // freeing it under a live callback would reintroduce the use-after-free this
+  // session guards against.
   bool drain() {
     if (!active_.exchange(false)) {
       return true;
@@ -683,31 +372,37 @@ class DynamicCompletionLatch {
 
   std::atomic<bool> active_{false};
   std::atomic<int64_t> in_flight_{0};
+  std::atomic<uint64_t> generation_{0};
   std::mutex mutex_;
   std::condition_variable cv_; // guarded by mutex_
 };
 
-DynamicCompletionLatch global_callback_latch;
+GlobalCallbackSession global_callback_session;
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
   // Fast bail once teardown has begun, before taking an in-flight ref, so the
   // drain in disableProfiler() always converges.
-  if (!global_callback_latch.isActive()) {
+  if (!global_callback_session.isActive()) {
     return nullptr;
   }
-  global_callback_latch.enter();
-  // Release the ref on any early return or exception, unless ownership is
-  // handed to onFunctionExitGlobal by releasing the guard below.
+
+  global_callback_session.enter();
+
+  // Release the ref when this function returns (success or early bail), so the
+  // in-flight window is just this enter's getGlobal() + begin_op() critical
+  // section.
   auto in_flight_guard =
-      c10::make_scope_exit([] { global_callback_latch.exit(); });
+      c10::make_scope_exit([] { global_callback_session.exit(); });
+
   // Re-check after the increment. This is the handshake that makes teardown
   // safe: if disableProfiler() cleared active concurrently, its drain is
-  // guaranteed to observe our increment and wait iff we still observe active
-  // true here.
-  if (!global_callback_latch.isActive()) {
+  // guaranteed to observe our increment and wait if and only if we still
+  // observe active true here.
+  if (!global_callback_session.isActive()) {
     return nullptr;
   }
+
   std::shared_ptr<KinetoThreadLocalState> state_ptr =
       KinetoThreadLocalState::getGlobal();
   if (!state_ptr) {
@@ -715,8 +410,10 @@ std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
   }
   auto ctx = state_ptr->recordQueue.getSubqueue()->begin_op(fn);
   if (ctx) {
-    // The in-flight ref is now owned by the matching onFunctionExitGlobal.
-    in_flight_guard.release();
+    // Stamp the current session so a straddling exit (begin_op here, exit after
+    // this session is torn down) drops itself on mismatch instead of writing
+    // through a freed event_.
+    ctx->session_generation_ = global_callback_session.generation();
   }
   return ctx;
 }
@@ -769,43 +466,85 @@ void onFunctionExitImpl(
     torch::profiler::impl::privateuse1Stubs()->record(
         nullptr, &fallback->device_event_end_, nullptr);
   }
+}
 
-  if (!config.experimental_config.disable_external_correlation) {
-    if (fn.scope() == at::RecordScope::USER_SCOPE) {
-      torch::profiler::impl::kineto::popUserCorrelationId();
-    } else {
-      torch::profiler::impl::kineto::popCorrelationId();
-    }
+// Pop the external correlation id that begin_op pushed for this op, if any.
+// Must run on every onFunctionExit path, including the teardown and
+// stale-session early exits that skip event finalization: the correlation stack
+// lives in the device profiling backend (per thread) and is not reset across
+// profiler sessions, so a skipped pop leaks. Safe on those paths because it
+// touches only that stack, never the possibly-freed event_.
+void maybePopCorrelationId(
+    const at::RecordFunction& fn,
+    at::ObserverContext* ctx_ptr) {
+  auto* kineto_ctx =
+      static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
+  if (kineto_ctx == nullptr || !kineto_ctx->pushed_correlation_id_) {
+    return;
+  }
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::popUserCorrelationId();
+  } else {
+    torch::profiler::impl::kineto::popCorrelationId();
   }
 }
 
 void onFunctionExitGlobal(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
-  // Release the in-flight ref taken in onFunctionEnterGlobal on every exit
-  // path, but only for ops that produced a context. Ops whose enter bailed
-  // (null context) never took a ref.
-  auto in_flight_guard = c10::make_scope_exit([&] {
-    if (ctx_ptr != nullptr) {
-      global_callback_latch.exit();
-    }
-  });
-  // An op whose enter bailed took no ref and must not touch the state here,
-  // since a concurrent disableProfiler() may already be tearing it down.
   if (ctx_ptr == nullptr) {
+    // Enter bailed (teardown in progress, or no state): no ref was taken and
+    // there is nothing to finalize.
     return;
   }
+
+  // Balance the correlation id pushed at begin_op on every path below,
+  // including the teardown and stale-session early exits that skip event
+  // finalization.
+  auto correlation_guard =
+      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
+
+  // Take this exit's own in-flight ref, paired here because
+  // onFunctionEnterGlobal no longer hands one off. It covers only this exit's
+  // getGlobal() + RecordQueue write, never the op body, so the drain cannot
+  // block on it.
+  global_callback_session.enter();
+  auto in_flight_guard =
+      c10::make_scope_exit([] { global_callback_session.exit(); });
+
+  // Re-check after the increment, mirroring onFunctionEnterGlobal: if teardown
+  // began concurrently the queue may already be finalized/freed, so skip the
+  // write (the event keeps its start and gets no end).
+  if (!global_callback_session.isActive()) {
+    return;
+  }
+
   std::shared_ptr<KinetoThreadLocalState> state_ptr =
       KinetoThreadLocalState::getGlobal();
   if (!state_ptr) {
     return;
   }
+
+  // If the session generations don't match, that means this op entered under an
+  // earlier session that has since been torn down, freeing its RecordQueue and
+  // event_. In that case, we don't need to do any exit cleanup.
+  auto* kineto_ctx =
+      static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
+  if (kineto_ctx->session_generation_ != global_callback_session.generation()) {
+    return;
+  }
+
   onFunctionExitImpl(*state_ptr, fn, ctx_ptr);
 }
 
 void onFunctionExitTLS(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
+  // Balance the correlation id pushed at begin_op even when the TLS state is
+  // gone by exit (early return below), for the same reason as
+  // onFunctionExitGlobal.
+  auto correlation_guard =
+      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
   KinetoThreadLocalState* state_ptr = KinetoThreadLocalState::getTLS();
   if (!state_ptr) {
     return;
@@ -814,7 +553,8 @@ void onFunctionExitTLS(
 }
 
 void pushGlobalProfilingCallbacks(
-    const std::unordered_set<at::RecordScope>& scopes) {
+    const std::unordered_set<at::RecordScope>& scopes,
+    bool new_session) {
   std::shared_ptr<KinetoThreadLocalState> state_ptr =
       KinetoThreadLocalState::getGlobal();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
@@ -822,13 +562,12 @@ void pushGlobalProfilingCallbacks(
       at::RecordFunctionCallback(onFunctionEnterGlobal, onFunctionExitGlobal)
           .needsInputs(state_ptr->config().report_input_shapes)
           .scopes(scopes);
-  // Arm the drain gate before the global callback can fire on any thread.
+
+  // Arm the drain gate before the global callback and fire on any thread. If
+  // this a new profiling session, also bump the session generation.
   // disableProfiler() relies on this to know it must drain in-flight callbacks.
-  // Do not reset in_flight here: it is already zero once the previous
-  // disableProfiler() drained it, and this function is also called by the
-  // dynamic collection toggle mid-session, where a concurrent in-flight
-  // callback may still hold a reference that must not be discarded.
-  global_callback_latch.activate();
+  global_callback_session.activate(new_session);
+
   state_ptr->setCallbackHandle(at::addGlobalCallback(recordFunctionCallback));
 }
 
@@ -947,7 +686,8 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
   if (global_state) {
     if (enable) {
       auto scopes = profiler_state_info_ptr->scopes;
-      pushGlobalProfilingCallbacks(scopes);
+      // Mid-session re-arm on the same RecordQueue: do not bump the generation.
+      pushGlobalProfilingCallbacks(scopes, /*new_session=*/false);
     } else {
       global_state->removeCallback();
     }
@@ -1096,8 +836,9 @@ void enableProfiler(
   KinetoThreadLocalState::push(state_ptr);
 
   if (has_cpu) {
-    config.pushGlobalCallbacks() ? pushGlobalProfilingCallbacks(scopes)
-                                 : pushTLSProfilingCallbacks(scopes);
+    config.pushGlobalCallbacks()
+        ? pushGlobalProfilingCallbacks(scopes, /*new_session=*/true)
+        : pushTLSProfilingCallbacks(scopes);
   }
 
   if (!config.global()) {
@@ -1106,9 +847,9 @@ void enableProfiler(
 
   if (has_cpu) {
     auto state_info_ptr = std::make_shared<ProfilerStateInfo>();
-    state_info_ptr->state_ptr = state_ptr;
+    state_info_ptr->state_ptr = std::move(state_ptr);
     state_info_ptr->scopes = scopes;
-    profiler_state_info_ptr = state_info_ptr;
+    profiler_state_info_ptr = std::move(state_info_ptr);
   }
 }
 
@@ -1144,7 +885,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   // for in-flight ones to finish before popping and finalizing the state, else
   // a worker thread can mutate the record queue while finalizeTrace() reads
   // and frees it.
-  if (!global_callback_latch.drain()) {
+  if (!global_callback_session.drain()) {
     // The drain timed out: an in-flight global callback is wedged or dead, so
     // we cannot finalize (reading the queue would race the live callback and
     // reintroduce the use-after-free). We still pop the state and remove the

@@ -34,21 +34,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
 
   wheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
+    runs-on: "windows.12xlarge"
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -59,7 +49,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_10-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.10"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -89,7 +79,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_11-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.11"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -119,7 +109,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_12-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.12"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -149,7 +139,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_13-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.13"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -179,7 +169,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_14-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -209,7 +199,7 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_14t-cpu"
-            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.23.1.3; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+            pytorch_extra_install_requirements: "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | nvidia-cudnn-cu13==9.24.0.43; platform_system == 'Linux' | nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
           - desired_python: "3.14t"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
@@ -338,7 +328,7 @@ jobs:
   wheel-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, wheel-build]
+    needs: [wheel-build]
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 360
     strategy:
@@ -350,181 +340,181 @@ jobs:
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_10-cpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.10"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_10-cuda12_6"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.10"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_10-cuda13_0"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.10"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_10-cuda13_2"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.10"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
             build_name: "wheel-py3_10-xpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_11-cpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.11"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_11-cuda12_6"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.11"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_11-cuda13_0"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.11"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_11-cuda13_2"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.11"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
             build_name: "wheel-py3_11-xpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.12"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_12-cpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.12"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_12-cuda12_6"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.12"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_12-cuda13_0"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.12"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_12-cuda13_2"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.12"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
             build_name: "wheel-py3_12-xpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.13"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_13-cpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.13"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_13-cuda12_6"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.13"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_13-cuda13_0"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.13"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_13-cuda13_2"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.13"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
             build_name: "wheel-py3_13-xpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.14"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_14-cpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.14"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_14-cuda12_6"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.14"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_14-cuda13_0"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.14"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_14-cuda13_2"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.14"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
             build_name: "wheel-py3_14-xpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.14t"
             desired_cuda: "cpu"
             gpu_arch_version: ""
             gpu_arch_type: "cpu"
             build_name: "wheel-py3_14t-cpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
           - desired_python: "3.14t"
             desired_cuda: "cu126"
             gpu_arch_version: "12.6"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_14t-cuda12_6"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.14t"
             desired_cuda: "cu130"
             gpu_arch_version: "13.0"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_14t-cuda13_0"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.14t"
             desired_cuda: "cu132"
             gpu_arch_version: "13.2"
             gpu_arch_type: "cuda"
             build_name: "wheel-py3_14t-cuda13_2"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
+            runs_on: "windows.g4dn.xlarge"
           - desired_python: "3.14t"
             desired_cuda: "xpu"
             gpu_arch_version: ""
             gpu_arch_type: "xpu"
             build_name: "wheel-py3_14t-xpu"
-            runs_on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+            runs_on: "windows.4xlarge"
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
@@ -803,8 +793,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-      - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: "linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
@@ -864,8 +853,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-      - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: "linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu126
@@ -926,8 +914,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-      - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: "linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu130
@@ -988,8 +975,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-build
-      - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: "linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu132
