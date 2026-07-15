@@ -118,22 +118,6 @@ class LoadPlan:
     planner_data: Any = None
 
 
-# These are transmitted between ranks via the c10d object collectives (which
-# deserialize with weights_only=True by default) during save/load plan exchange.
-torch.serialization.add_safe_globals(
-    [
-        WriteItemType,
-        LoadItemType,
-        BytesIOWriteData,
-        TensorWriteData,
-        WriteItem,
-        ReadItem,
-        SavePlan,
-        LoadPlan,
-    ]
-)
-
-
 class SavePlanner(abc.ABC):
     """
     Abstract class defining the protocol used by save_state_dict to plan the save process.

@@ -262,6 +262,3 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
         if shard_sizes == chunk_shard_sizes and shard_offsets == chunk_shard_offsets:
             return chunk_spec
     return EnumerableShardingSpec(shards_metadata)
-
-
-torch.serialization.add_safe_globals([EnumerableShardingSpec])

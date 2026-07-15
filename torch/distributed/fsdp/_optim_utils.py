@@ -117,9 +117,6 @@ class _OptimStateKey(NamedTuple):
     is_fsdp_managed: bool
 
 
-torch.serialization.add_safe_globals([_PosDimTensorInfo, _OptimStateKey])
-
-
 def _unflatten_optim_state(
     fsdp_param_info: FSDPParamInfo,
     flat_param_state: dict[str, Any],
@@ -338,7 +335,7 @@ def _broadcast_processed_state(
             lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),  # type: ignore[union-attr]
             optim_state,
         )
-    dist.broadcast_object_list(objects, src=0, group=group, weights_only=True)
+    dist.broadcast_object_list(objects, src=0, group=group)
     if dist.get_rank(group) == 0:
         return optim_state
     else:
@@ -1175,7 +1172,7 @@ def _check_missing_keys_on_rank(
     dist.all_reduce(num_missing, group=group)
     if num_missing.item() > 0:
         obj_list = [None for _ in range(dist.get_world_size(group))]
-        dist.all_gather_object(obj_list, missing_keys, group=group, weights_only=True)
+        dist.all_gather_object(obj_list, missing_keys, group=group)
         error_msg = (
             "FSDP currently requires each rank to have at least the "
             "optimizer states needed by rank 0's optimizer but some ranks "
@@ -1234,16 +1231,14 @@ def _map_param_key_to_optim_keys(
         all_keys: list[list[_OptimStateKey]] = [
             [] for _ in range(dist.get_world_size(group))
         ]
-        dist.all_gather_object(
-            all_keys, all_optim_state_keys, group=group, weights_only=True
-        )
+        dist.all_gather_object(all_keys, all_optim_state_keys, group=group)
         merge_all_optim_state_keys = [*chain.from_iterable(all_keys)]
         all_optim_state_keys = sorted(set(merge_all_optim_state_keys))
     else:
         key_obj_list: list[list[_OptimStateKey] | None] = (
             [all_optim_state_keys] if rank == 0 else [None]
         )
-        dist.broadcast_object_list(key_obj_list, src=0, group=group, weights_only=True)
+        dist.broadcast_object_list(key_obj_list, src=0, group=group)
         if key_obj_list[0] is None:
             raise AssertionError(
                 f"Expected key_obj_list[0] to be not None, got {key_obj_list[0]}"
@@ -1308,9 +1303,6 @@ class StateInfo:
     non_tensors: dict[str, Any]
 
 
-torch.serialization.add_safe_globals([StateInfo])
-
-
 def _allgather_state_info(
     fsdp_state: _FSDPState,
     input_states: dict[str, Any],
@@ -1344,7 +1336,6 @@ def _allgather_state_info(
         gathered_state_info,
         processed_state_dict,
         group=fsdp_state.process_group,
-        weights_only=True,
     )
     return gathered_state_info
 
