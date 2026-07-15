@@ -1166,14 +1166,14 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         full 32-lane fragment to the generated TensorSSA reduce; keep the
         extreme tile_n configs as regression sentinels for that geometry.
         """
+        from torch._inductor.heuristics.template.flex_gemm import (
+            candidate_gemm_configs_for_device,
+            gemm_config_key,
+        )
         from torch._inductor.kernel.flex_gemm.constraints import (
             validate_flex_gemm_local_reduce_config,
         )
         from torch._inductor.kernel.flex_gemm.runtime import gemm_epilogue
-        from torch._inductor.template_heuristics.flex_gemm import (
-            candidate_gemm_configs_for_device,
-            gemm_config_key,
-        )
 
         m, n, k, group = 128, 256, 64, 32
         a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
