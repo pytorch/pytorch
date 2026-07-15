@@ -858,6 +858,10 @@ def run_joint_graph_passes_on_hops(
     recursive partitioning of nested regions is left to downstream passes.
     """
     from torch._higher_order_ops import invoke_subgraph
+    from torch._higher_order_ops.invoke_subgraph import (
+        get_backward_nested_region_config,
+        NestedCompileRegionOptions,
+    )
 
     def num_outputs(mod: torch.fx.GraphModule) -> int:
         return len(mod.graph.find_nodes(op="output")[0].args[0])
@@ -1233,6 +1237,18 @@ def run_joint_graph_passes_on_hops(
             # inputs for the new partitioned backward graph. For the forward
             # graph, it was fine because the input signature remains same.
             new_bw_node.meta.pop("eager_input_vals", None)
+
+            # When the region sets backward-specific inductor config, compile the
+            # partitioned backward under it; the forward keeps its own config.
+            fw_region_config = fw_node.meta.get("custom", {}).get(
+                "nested_region_config"
+            )
+            if (
+                isinstance(fw_region_config, NestedCompileRegionOptions)
+                and fw_region_config.bw_inductor_config_patches is not None
+            ):
+                bw_region_config = get_backward_nested_region_config(fw_region_config)
+                new_bw_hop_gm.meta["nested_region_config"] = bw_region_config
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
