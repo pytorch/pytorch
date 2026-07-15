@@ -176,7 +176,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
           : needs_neg                              ? "copy_neg"
           : needs_conj                             ? "copy_conj"
                                                    : "copy_identity";
-      lib.exec_unary_kernel_raw(std::string(name),
+      lib.exec_unary_kernel_raw(name,
                                 sourceBuffer,
                                 static_cast<uint32_t>(storage_byte_offset),
                                 src.scalar_type(),
