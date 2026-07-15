@@ -17,8 +17,8 @@
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/PyBackend.hpp>
-#include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/py/PyBackend.hpp>
+#include <torch/csrc/distributed/c10d/py/PyProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 #include <torch/csrc/utils/pyobject_preservation.h>
 
