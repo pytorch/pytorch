@@ -42,8 +42,21 @@ except ImportError:
     HAS_ORIGAMI = False
 
 
-if IS_ROCM:
-    torch.set_float32_matmul_precision("highest")
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    if IS_ROCM:
+        torch.set_float32_matmul_precision("highest")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
 
 
 @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
