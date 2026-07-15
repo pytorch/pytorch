@@ -10,6 +10,7 @@ from torch.testing._internal.autocast_test_lists import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyMPS,
 )
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -300,145 +301,21 @@ class TestAutocastDevice(TestCase):
             loss = res.mean()
             loss.backward()
 
-
-@unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
-class TestAutocastMPS(TestCase):
-    def test_mps_autocast_error_message(self):
+    @onlyMPS
+    def test_mps_autocast_error_message(self, device):
         with self.assertWarnsRegex(
             UserWarning,
             "MPS Autocast only supports dtypes of torch.bfloat16, torch.float16 currently.",
         ):
             with torch.autocast(device_type="mps", dtype=torch.float32):
                 _ = torch.ones(10)
-
-    def test_mps_autocast_bfloat16_supported(self):
+    @onlyMPS
+    def test_mps_autocast_bfloat16_supported(self, device):
         with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
-            x = torch.randn(2, 3, device="mps")
-            y = torch.randn(3, 3, device="mps")
+            x = torch.randn(2, 3, device=device)
+            y = torch.randn(3, 3, device=device)
             result = torch.mm(x, y)
             self.assertEqual(result.dtype, torch.bfloat16)
-
-
-def _test_autocast_nograd_caching_issue_158232_impl(self, device, dtype):
-    """
-    Regression test for issue #158232: autocast + no_grad incompatibility
-    """
-    model = torch.nn.Linear(2, 2).to(device)
-    inp = torch.randn(8, 2, device=device)
-
-    with torch.autocast(device, dtype=dtype, enabled=True):
-        # First forward pass in no_grad context (e.g., shape inference)
-        with torch.no_grad():
-            out1 = model(inp)
-            self.assertFalse(
-                out1.requires_grad, "Output in no_grad should not require grad"
-            )
-
-        # Second forward pass with gradients enabled (e.g., training)
-        out2 = model(inp)
-        self.assertTrue(
-            out2.requires_grad,
-            "Output should require gradients after exiting no_grad",
-        )
-        self.assertIsNotNone(
-            out2.grad_fn, "Output should have grad_fn after exiting no_grad"
-        )
-
-        # Backward pass should work
-        loss = out2.mean()
-        loss.backward()
-
-    # Verify gradients were computed
-    self.assertIsNotNone(model.weight.grad)
-    self.assertIsNotNone(model.bias.grad)
-
-
-def _test_autocast_inference_mode_interaction_impl(self, device, dtype):
-    """
-    Test that autocast works correctly with torch.inference_mode()
-    """
-    model = torch.nn.Linear(2, 2).to(device)
-    inp = torch.randn(8, 2, device=device)
-
-    # Test 1: inference_mode inside autocast
-    with torch.autocast(device, dtype=dtype, enabled=True):
-        torch.clear_autocast_cache()
-        with torch.inference_mode():
-            out1 = model(inp)
-            self.assertFalse(out1.requires_grad)
-            self.assertEqual(out1.dtype, dtype)
-
-        # After exiting inference_mode, gradients should work
-        out2 = model(inp)
-        self.assertTrue(out2.requires_grad)
-        out2.mean().backward()
-
-    # Test 2: autocast inside inference_mode
-    with torch.inference_mode():
-        with torch.autocast(device, dtype=dtype, enabled=True):
-            out = model(inp)
-            self.assertFalse(out.requires_grad)
-            self.assertEqual(out.dtype, dtype)
-
-
-def _test_autocast_caching_still_works_with_gradients_impl(self, device, dtype):
-    """
-    Verify that autocast caching still functions correctly when gradients ARE enabled.
-    """
-    model = torch.nn.Linear(2, 2).to(device)
-    inp = torch.randn(8, 2, device=device)
-
-    with torch.autocast(device, dtype=dtype, enabled=True):
-        # Multiple forward passes with gradients enabled
-        out1 = model(inp)
-        out2 = model(inp)
-        out3 = model(inp)
-
-        # All should have gradients
-        self.assertTrue(out1.requires_grad)
-        self.assertTrue(out2.requires_grad)
-        self.assertTrue(out3.requires_grad)
-
-        # All should have grad_fn
-        self.assertIsNotNone(out1.grad_fn)
-        self.assertIsNotNone(out2.grad_fn)
-        self.assertIsNotNone(out3.grad_fn)
-
-        # Backward should work on all
-        out1.mean().backward(retain_graph=True)
-        out2.mean().backward(retain_graph=True)
-        out3.mean().backward()
-
-
-def _test_autocast_mixed_grad_contexts_impl(self, device, dtype):
-    """
-    Test complex nesting of gradient contexts within autocast.
-    """
-    model = torch.nn.Linear(2, 2).to(device)
-    inp = torch.randn(8, 2, device=device)
-
-    with torch.autocast(device, dtype=dtype, enabled=True):
-        # Pass 1: no_grad
-        with torch.no_grad():
-            out1 = model(inp)
-            self.assertFalse(out1.requires_grad)
-
-        # Pass 2: gradients enabled
-        out2 = model(inp)
-        self.assertTrue(out2.requires_grad)
-
-        # Pass 3: no_grad again
-        with torch.no_grad():
-            out3 = model(inp)
-            self.assertFalse(out3.requires_grad)
-
-        # Pass 4: gradients enabled again
-        out4 = model(inp)
-        self.assertTrue(out4.requires_grad)
-
-        # Backward on gradient-enabled outputs
-        (out2.mean() + out4.mean()).backward()
-
 
 class TestTorchAutocast(TestCase):
     def test_autocast_fast_dtype(self):
@@ -475,19 +352,113 @@ class TestTorchAutocast(TestCase):
 class TestTorchAutocastDevice(TestCase):
     def test_autocast_nograd_caching_issue_158232(self, device):
         dtype = torch.get_autocast_dtype(device_type=device)
-        _test_autocast_nograd_caching_issue_158232_impl(self, device, dtype)
+        model = torch.nn.Linear(2, 2).to(device)
+        inp = torch.randn(8, 2, device=device)
+
+        with torch.autocast(device, dtype=dtype, enabled=True):
+            # First forward pass in no_grad context (e.g., shape inference)
+            with torch.no_grad():
+                out1 = model(inp)
+                self.assertFalse(
+                    out1.requires_grad, "Output in no_grad should not require grad"
+                )
+
+            # Second forward pass with gradients enabled (e.g., training)
+            out2 = model(inp)
+            self.assertTrue(
+                out2.requires_grad,
+                "Output should require gradients after exiting no_grad",
+            )
+            self.assertIsNotNone(
+                out2.grad_fn, "Output should have grad_fn after exiting no_grad"
+            )
+
+            # Backward pass should work
+            loss = out2.mean()
+            loss.backward()
+
+        # Verify gradients were computed
+        self.assertIsNotNone(model.weight.grad)
+        self.assertIsNotNone(model.bias.grad)
 
     def test_autocast_inference_mode_interaction(self, device):
         dtype = torch.get_autocast_dtype(device_type=device)
-        _test_autocast_inference_mode_interaction_impl(self, device, dtype)
+        model = torch.nn.Linear(2, 2).to(device)
+        inp = torch.randn(8, 2, device=device)
+
+        # Test 1: inference_mode inside autocast
+        with torch.autocast(device, dtype=dtype, enabled=True):
+            torch.clear_autocast_cache()
+            with torch.inference_mode():
+                out1 = model(inp)
+                self.assertFalse(out1.requires_grad)
+                self.assertEqual(out1.dtype, dtype)
+
+            # After exiting inference_mode, gradients should work
+            out2 = model(inp)
+            self.assertTrue(out2.requires_grad)
+            out2.mean().backward()
+
+        # Test 2: autocast inside inference_mode
+        with torch.inference_mode():
+            with torch.autocast(device, dtype=dtype, enabled=True):
+                out = model(inp)
+                self.assertFalse(out.requires_grad)
+                self.assertEqual(out.dtype, dtype)
+
 
     def test_autocast_caching_still_works_with_gradients(self, device):
         dtype = torch.get_autocast_dtype(device_type=device)
-        _test_autocast_caching_still_works_with_gradients_impl(self, device, dtype)
+        model = torch.nn.Linear(2, 2).to(device)
+        inp = torch.randn(8, 2, device=device)
+
+        with torch.autocast(device, dtype=dtype, enabled=True):
+            # Multiple forward passes with gradients enabled
+            out1 = model(inp)
+            out2 = model(inp)
+            out3 = model(inp)
+
+            # All should have gradients
+            self.assertTrue(out1.requires_grad)
+            self.assertTrue(out2.requires_grad)
+            self.assertTrue(out3.requires_grad)
+
+            # All should have grad_fn
+            self.assertIsNotNone(out1.grad_fn)
+            self.assertIsNotNone(out2.grad_fn)
+            self.assertIsNotNone(out3.grad_fn)
+
+            # Backward should work on all
+            out1.mean().backward(retain_graph=True)
+            out2.mean().backward(retain_graph=True)
+            out3.mean().backward()
 
     def test_autocast_mixed_grad_contexts(self, device):
         dtype = torch.get_autocast_dtype(device_type=device)
-        _test_autocast_mixed_grad_contexts_impl(self, device, dtype)
+        model = torch.nn.Linear(2, 2).to(device)
+        inp = torch.randn(8, 2, device=device)
+
+        with torch.autocast(device, dtype=dtype, enabled=True):
+            # Pass 1: no_grad
+            with torch.no_grad():
+                out1 = model(inp)
+                self.assertFalse(out1.requires_grad)
+
+            # Pass 2: gradients enabled
+            out2 = model(inp)
+            self.assertTrue(out2.requires_grad)
+
+            # Pass 3: no_grad again
+            with torch.no_grad():
+                out3 = model(inp)
+                self.assertFalse(out3.requires_grad)
+
+            # Pass 4: gradients enabled again
+            out4 = model(inp)
+            self.assertTrue(out4.requires_grad)
+
+            # Backward on gradient-enabled outputs
+            (out2.mean() + out4.mean()).backward()
 
 
 instantiate_device_type_tests(TestAutocastDevice, globals(), allow_mps=True)
