@@ -524,6 +524,23 @@ print(t.is_pinned())
         with self.assertRaisesRegex(ValueError, "Invalid memory size"):
             torch.cuda.memory.caching_allocator_alloc(-1024)
 
+    def test_memory_metadata_supported(self):
+        # The native caching allocator records user metadata; cudaMallocAsync
+        # (and pluggable allocators) do not.
+        self.assertEqual(
+            torch._C._cuda_memoryMetadataSupported(), not TEST_CUDAMALLOCASYNC
+        )
+
+    def test_memory_metadata_unsupported_backend_is_noop(self):
+        if torch._C._cuda_memoryMetadataSupported():
+            self.skipTest("backend supports user metadata")
+        # On backends without metadata support, set is a best-effort no-op
+        # (warns once) and get always returns ""; neither raises.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            torch.cuda.memory._set_memory_metadata("metadata test")
+        self.assertEqual(torch.cuda.memory._get_memory_metadata(), "")
+
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()
@@ -642,7 +659,7 @@ print(t.is_pinned())
             if TEST_CUDAMALLOCASYNC
             else "Tried to allocate"
         )
-        size = int(available_memory * 0.5)
+        size = int(available_memory * 0.51)
         a = torch.empty(size, dtype=torch.int8, device="cuda")
         with self.assertRaisesRegex(RuntimeError, oom_regex):
             b = torch.empty(size, dtype=torch.int8, device="cuda")
@@ -923,7 +940,7 @@ print(t.is_pinned())
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
+            if gcn_arch in ["gfx942", "gfx950", "gfx1250"]:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -1106,6 +1123,13 @@ print(t.is_pinned())
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cublaslt_prefer_grouped_gemm_get_set(self):
+        orig = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+        self.assertEqual(torch._C._get_cublaslt_prefer_grouped_gemm(), orig)
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = not orig
+        self.assertEqual(torch._C._get_cublaslt_prefer_grouped_gemm(), not orig)
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = orig
 
     def test_float32_matmul_precision_get_set(self):
         orig = torch.get_float32_matmul_precision()
@@ -1714,6 +1738,28 @@ print(t.is_pinned())
         self.assertEqual(src_prev_stream, torch.cuda.current_stream())
         self.assertEqual(dst_prev_stream, torch.cuda.current_stream(dst_device))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_event_elapsed_time_restores_device_on_error(self):
+        # The device-generic event path (torch.Event -> CUDAGuardImpl::elapsedTime)
+        # temporarily switches to the event's device to call cudaEventElapsedTime.
+        # A cross-device elapsed_time raises inside that switched region; the
+        # current device must still be restored on the throwing path. Regression
+        # test for the RAII restore in c10::cuda::impl::CUDAGuardImpl.
+        torch.cuda.set_device(0)
+        e0 = torch.Event(enable_timing=True)
+        e1 = torch.Event(enable_timing=True)
+        e0.record(torch.Stream(0))
+        e1.record(torch.Stream(1))
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(torch.cuda.current_device(), 0)
+
+        # device_index of elapsedTime is e1's device (1); the cross-device call
+        # switches to device 1 and then raises.
+        with self.assertRaises(RuntimeError):
+            e1.elapsed_time(e0)
+        self.assertEqual(torch.cuda.current_device(), 0)
+
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
         x = torch.arange(0, 10).view((2, 5))
@@ -1914,6 +1960,69 @@ except RuntimeError as e:
         ]
         self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
 
+    @unittest.skipIf(
+        not TEST_CUDAMALLOCASYNC, "requires the cudaMallocAsync allocator backend"
+    )
+    @serialTest()
+    def test_cudamallocasync_trim_on_oom_retry(self):
+        # The fix under test: when the cudaMallocAsync allocator cannot fit an
+        # allocation it normally raises OutOfMemoryError; the fix first releases the
+        # pool's freed-but-cached backing to the OS and tries once more. We build an
+        # allocation that only succeeds if that retry runs -- it OOMs before the fix
+        # and succeeds after.
+        #
+        # The trick is to make memory that is freed but not yet reusable at the
+        # moment of the allocation:
+        #   1. Fill the GPU with a "wall" we keep alive, so almost nothing is free.
+        #   2. On a side stream, keep the stream busy, then allocate A and free it.
+        #      A's free is queued behind the busy work and has not run, so A is
+        #      released by us but not yet reusable by the allocator.
+        #   3. Ask for B (larger than A). Little is free and A is unusable, so the
+        #      first attempt fails; the fix then syncs the stream (running A's free),
+        #      trims the pool, retries, and B fits (a recovery is logged). Without
+        #      the fix the allocation raises OutOfMemoryError and the test fails.
+        dev = torch.cuda.current_device()
+        # Neutralize any inherited per-process memory fraction: a fractional cap
+        # would raise a *preemptive* OOM before cudaMallocAsync ever fails, which is
+        # a different path than the trim-and-retry this test targets.
+        orig_fraction = torch.cuda.get_per_process_memory_fraction(dev)
+        torch.cuda.set_per_process_memory_fraction(1.0, dev)
+        torch.cuda.empty_cache()  # start from a clean, predictable amount of free memory
+        torch.cuda.synchronize()
+        free, _ = torch.cuda.mem_get_info(dev)
+        if free < 16 * 1024**3:
+            self.skipTest("insufficient free CUDA memory for the trim-on-OOM repro")
+
+        # wall + A reserve 0.92; with A unusable only ~0.08 is free, so B (0.15)
+        # fails, and reclaiming A's 0.10 lets the retry fit.
+        wall_size = int(free * 0.82)
+        a_size = int(free * 0.10)
+        b_size = int(free * 0.15)
+
+        wall = torch.empty(wall_size, dtype=torch.int8, device=dev)  # keep most memory
+        s1 = torch.cuda.Stream()
+        b = None
+        try:
+            with torch.cuda.stream(s1):
+                a = torch.empty(a_size, dtype=torch.int8, device=dev)
+                # Keep the stream busy so A's free stays queued (pending, not yet
+                # reclaimable) when B is requested. The sleep must still be running
+                # when the host reaches B; if it finished first, A's free would run
+                # and B would simply reuse it. 1s comfortably covers the host's
+                # sub-ms trip to B even on a loaded machine.
+                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                del a
+                gc.collect()  # free A, but its release is queued behind the busy work
+                # Pre-fix this raises OutOfMemoryError; the fix trims and retries.
+                b = torch.empty(b_size, dtype=torch.int8, device=dev)
+                torch.cuda.synchronize()
+            # Reaching here without OutOfMemoryError means the trim-and-retry ran.
+            self.assertIsNotNone(b)
+        finally:
+            del wall, b
+            torch.cuda.empty_cache()
+            torch.cuda.set_per_process_memory_fraction(orig_fraction, dev)
+
     @slowTest
     def test_multinomial_invalid_probs_cuda(self):
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -1.0, 1.0])
@@ -1950,7 +2059,7 @@ if __name__ == '__main__':
         is_hip_assert = is_hip_assert or "HSA_STATUS_ERROR_EXCEPTION" in stderr
         self.assertTrue(
             is_cuda_assert or is_hip_assert,
-            f"Expected device assert error in stderr, got: {stderr}",
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
 
     @slowTest
@@ -5754,7 +5863,7 @@ class TestCudaAllocator(TestCase):
                     self.assertGreater(
                         len(device_trace),
                         0,
-                        f"Trace should not be empty for skip_actions={skip_actions}",
+                        lambda msg: f"{msg}\nTrace should not be empty for skip_actions={skip_actions}",
                     )
 
                     if skip_actions:
@@ -5765,14 +5874,14 @@ class TestCudaAllocator(TestCase):
                             self.assertNotIn(
                                 sa,
                                 all_actions,
-                                f"Action {sa} should be skipped with skip_actions={skip_actions}",
+                                lambda msg: f"{msg}\nAction {sa} should be skipped with skip_actions={skip_actions}",
                             )
                         # Check that we have actions that are NOT in the skip list
                         non_skipped_actions = all_actions - set(skip_actions)
                         self.assertGreater(
                             len(non_skipped_actions),
                             0,
-                            f"Should have non-skipped actions for skip_actions={skip_actions}",
+                            lambda msg: f"{msg}\nShould have non-skipped actions for skip_actions={skip_actions}",
                         )
 
                 finally:
@@ -7791,7 +7900,7 @@ class TestMemPool(TestCase):
         self.assertLess(
             blocks_no_split,
             blocks_split,
-            f"Expected no_split pool to have fewer blocks, "
+            lambda msg: f"{msg}\nExpected no_split pool to have fewer blocks, "
             f"but got {blocks_no_split} vs {blocks_split}",
         )
 
@@ -8692,7 +8801,7 @@ class TestMemPool(TestCase):
 
                 self.assertFalse(
                     oom,
-                    f"[{label}] OOM even though the default pool had "
+                    lambda msg: f"{msg}\n[{label}] OOM even though the default pool had "
                     f"{fill_size // MB} MiB of freeable cached blocks "
                     "-- release_cached_blocks was likely skipped",
                 )
@@ -10012,9 +10121,13 @@ class TestCompileKernel(TestCase):
 
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
-            max_smem = (
-                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
-            )
+            gcn_arch = get_device_properties().gcnArchName.split(":", 1)[0]
+            if gcn_arch == "gfx1250":
+                max_smem = 320 * 1024
+            elif gcn_arch == "gfx950":
+                max_smem = 160 * 1024
+            else:
+                max_smem = 65536
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
         excessive_shared_mem = max_smem * 2
@@ -10443,7 +10556,7 @@ class TestCudaDeviceParametrized(TestCase):
             # This writes allows wait_for_cpu to proceed
             # This is an atomic store at system scope according to this rule:
             # "the scope is thread_scope_system and it is a load or store that affects a naturally-aligned object of sizes 1, 2, 4, 8, or 16 bytes on mapped memory"
-            # https://nvidia.github.io/cccl/libcudacxx/extended_api/memory_model.html#atomicity
+            # https://github.com/NVIDIA/cccl/blob/main/docs/libcudacxx/extended_api/memory_model.rst
 
             # Note that every CPU store is implicitly system scope,
             # even if we don't use C++ atomics like this:
