@@ -2,6 +2,8 @@
 import copy
 import unittest
 
+import pytest
+
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.ilp_utils import (
@@ -35,6 +37,13 @@ except ImportError:
     sac_milp = None  # type: ignore[assignment]
 
 
+# TODO(multigpu-marker): These tests are single-process but their AC-decision
+# assertions depend on RuntimeEstimator's roofline runtime estimates, which read
+# the live GPU's peak FLOPS / DRAM bandwidth -- so they fail when the runner GPU
+# differs (e.g. L4 vs T4). Temporarily marked multigpu to keep them on the
+# original multi-GPU box until the runtime estimator is pinned to a fixed device
+# spec (torch/_inductor/analysis/device_info.py) to make them hardware-independent.
+@pytest.mark.multigpu
 class TestSACILP(TestCase):
     def setUp(self):
         super().setUp()
@@ -175,12 +184,16 @@ class TestSACILP(TestCase):
         expected_ac_candidates = {f"Transformer.layers.{i}" for i in range(4)}
         self.assertTrue(
             set(ac_decisions.keys()).issubset(expected_ac_candidates),
-            f"Unexpected AC modules: "
+            lambda msg: f"{msg}\nUnexpected AC modules: "
             f"{set(ac_decisions.keys()) - expected_ac_candidates}",
         )
         for fqn, ratio in ac_decisions.items():
-            self.assertGreater(ratio, 0, f"discard ratio for {fqn} should be > 0")
-            self.assertLessEqual(ratio, 1, f"discard ratio for {fqn} should be <= 1")
+            self.assertGreater(
+                ratio, 0, lambda msg: f"{msg}\ndiscard ratio for {fqn} should be > 0"
+            )
+            self.assertLessEqual(
+                ratio, 1, lambda msg: f"{msg}\ndiscard ratio for {fqn} should be <= 1"
+            )
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")

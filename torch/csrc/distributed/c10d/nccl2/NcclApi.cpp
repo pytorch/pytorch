@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <fmt/core.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
@@ -52,7 +54,9 @@ ncclResult_t DefaultNcclApi::commAbort(ncclComm_t comm) {
 
 ncclResult_t DefaultNcclApi::commRevoke(ncclComm_t comm) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+// RCCL advertises NCCL_VERSION_CODE >= 2.28 but does not provide
+// ncclCommRevoke; on ROCm fall through to the unsupported path.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
   return ncclCommRevoke(comm, 0);
 #else
   std::ignore = comm;
@@ -458,3 +462,5 @@ ncclResult_t DefaultNcclApi::waitSignal(
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL

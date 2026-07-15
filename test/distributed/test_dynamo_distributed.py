@@ -2479,7 +2479,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                     ]:
                         self.assertFalse(
                             name in node.name,
-                            f"FSDP module {name} should not be registered as attributes",
+                            lambda msg: f"{msg}\nFSDP module {name} should not be registered as attributes",
                         )
             return gm
 

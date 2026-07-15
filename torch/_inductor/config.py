@@ -415,6 +415,13 @@ mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
 
+# Decompose DTensor Shard(dim) -> Shard(other_dim) all-to-all into explicit
+# layout ops plus _c10d_functional.all_to_all_single/wait_tensor. This is
+# experimental and intentionally opt-in.
+decompose_shard_dim_alltoall = (
+    os.environ.get("TORCHINDUCTOR_DECOMPOSE_SHARD_DIM_ALLTOALL", "0") == "1"
+)
+
 # passes (in execution order) for increasing overlap between compute and communication
 # for built-in passes, use string name; for user-defined passes, pass in the function handle
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
@@ -1161,6 +1168,15 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
+# The compile-worker sidecar runs a watchdog that, every N seconds, reports any
+# compile job still running after N seconds back to the parent, which emits it as
+# a structured-trace artifact (viewable in tlparse). This leaves a breadcrumb for
+# a stuck/slow worker that would otherwise wedge silently (the parent just blocks
+# reading the result pipe). Read in the sidecar. 0 disables the watchdog.
+compile_worker_watchdog_interval_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL", 60)
+)
+
 # Log per-operation runtime estimates for TLParse analysis.
 log_tlparse: bool = Config(
     env_name_force="LOG_TLPARSE",
@@ -1351,6 +1367,10 @@ class aten_distributed_optimizations:
     # Multiplier on the empirical saturation model's output.
     # With the empirical profiles this should be 1.0; kept for manual tuning.
     pre_bucketing_fsdp_collectives_saturation_calibration_multiplier: float = 1.0
+
+    # Direct-input NVLS multicast + Copy Engine variant. Requires NVSwitch /
+    # NVLink SHARP and uses cudaMemcpyAsync to the multicast pointer.
+    low_contention_all_gather_ce_multicast: bool = False
 
     # Decompose collective patterns when mathematically equivalent local
     # computation exists. See torch/_inductor/fx_passes/decomp_comms.py.
@@ -1842,16 +1862,28 @@ class cpp:
     use_two_step_variance_threshold = 1024
 
 
+def tlx_mode_from_env() -> Literal["allow", "force"] | None:
+    # Only the explicit values "allow"/"force" enable torchTLX. Any other
+    # value -- unset, empty, a typo, or a legacy "default" -- maps to None so
+    # TLX stays off. See the "Knob" section of the torchTLX README under
+    # third-party/triton/.../tlx/language/tlx/inductor/README.md.
+    mode = os.environ.get("TORCHINDUCTOR_TLX_MODE")
+    if mode in ("allow", "force"):
+        return cast("Literal['allow', 'force']", mode)
+    return None
+
+
 class triton:
     """
     Config specific to codegen/triton.py
     """
 
-    # No-op unless fbtriton (a Triton fork) is installed
-    tlx_mode: Literal["default", "allow", "force"] = cast(
-        Literal["default", "allow", "force"],
-        os.environ.get("TORCHINDUCTOR_TLX_MODE", "default"),
-    )
+    # torchTLX enablement. None (the default) means TLX is never considered
+    # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
+    # "force" uses only TLX templates plus forced epilogue fusion. Also a
+    # no-op unless the active Triton is the fbtriton fork (the integration
+    # import in template_heuristics/tlx.py fails cleanly otherwise).
+    tlx_mode: Literal["allow", "force"] | None = tlx_mode_from_env()
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
