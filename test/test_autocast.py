@@ -1,6 +1,5 @@
 # Owner(s): ["module: unknown"]
 
-import unittest
 
 import torch
 from torch.testing._internal.autocast_test_lists import (
@@ -309,6 +308,7 @@ class TestAutocastDevice(TestCase):
         ):
             with torch.autocast(device_type="mps", dtype=torch.float32):
                 _ = torch.ones(10)
+
     @onlyMPS
     def test_mps_autocast_bfloat16_supported(self, device):
         with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
@@ -316,6 +316,7 @@ class TestAutocastDevice(TestCase):
             y = torch.randn(3, 3, device=device)
             result = torch.mm(x, y)
             self.assertEqual(result.dtype, torch.bfloat16)
+
 
 class TestTorchAutocast(TestCase):
     def test_autocast_fast_dtype(self):
@@ -405,7 +406,6 @@ class TestTorchAutocastDevice(TestCase):
                 out = model(inp)
                 self.assertFalse(out.requires_grad)
                 self.assertEqual(out.dtype, dtype)
-
 
     def test_autocast_caching_still_works_with_gradients(self, device):
         dtype = torch.get_autocast_dtype(device_type=device)
