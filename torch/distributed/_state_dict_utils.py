@@ -61,7 +61,7 @@ def _all_gather_sharded_tensor(
         dtype=local_tensor.dtype,
         device=pg_device,
     )
-    dist.all_gather_into_tensor(tensor, local_tensor, group=pg)
+    dist.all_gather_single(tensor, local_tensor, group=pg)
 
     tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
     return tensor
@@ -534,6 +534,9 @@ class _TensorInfo(NamedTuple):
     dtype: torch.dtype
 
 
+torch.serialization.add_safe_globals([_TensorInfo])
+
+
 def _broadcast_tensors(
     full_state_dict: dict[str, Any],
     local_state_dict: dict[str, Any],
@@ -659,7 +662,7 @@ def _broadcast_state_dict(
                 ret[key] = _TensorInfo(value.size(), value.dtype)
 
     broadcast_list = [ret]
-    dist.broadcast_object_list(broadcast_list, src=0, group=pg)
+    dist.broadcast_object_list(broadcast_list, src=0, group=pg, weights_only=True)
     ret = broadcast_list[0]
     # Gather values
     keys = []

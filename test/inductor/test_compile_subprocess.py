@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
+    skipIfRocm,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -65,7 +66,7 @@ test_failures = {
     # TypeError: cannot pickle 'generator' object
     "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_remove_noop_slice": TestFailure(
-        ("xpu", "cuda"),
+        ("cuda",),
         is_skip=(TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)) or not TEST_WITH_ROCM,
     ),
     "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
@@ -115,6 +116,8 @@ class TestSubprocess(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157788")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157724")
     @requires_gpu()
     @requires_triton()
     @unittest.skipIf(
@@ -193,9 +196,11 @@ class TestSubprocess(TestCase):
         # Warmup
         baseline(x, y)
 
-        self.assertGreater(
-            do_bench(lambda: baseline(x, y)), do_bench(lambda: optimized(x, y))
-        )
+        # Skip the perf assertion to avoid flakiness on XPU.
+        if GPU_TYPE != "xpu":
+            self.assertGreater(
+                do_bench(lambda: baseline(x, y)), do_bench(lambda: optimized(x, y))
+            )
         self.assertTrue("'max_autotune': True" in source_codes[-1])
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)

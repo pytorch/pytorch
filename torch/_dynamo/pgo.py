@@ -48,7 +48,7 @@ from torch.utils._ordered_set import OrderedSet
 if TYPE_CHECKING:
     import types
 
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
 
 
@@ -423,8 +423,15 @@ class FrameStateSizeEntry:
         return self
 
 
+# Transmitted between ranks inside LocalState by the compiler collective
+# (all_gather_object deserializes with weights_only=True by default).
+torch.serialization.add_safe_globals(
+    [InferStride, AutoUnset, AutoDynamic, FrameStateSizeEntry]
+)
+
+
 def update_automatic_dynamic(
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     name: str,
     entry: FrameStateSizeEntry,
     *,
@@ -540,7 +547,7 @@ def update_automatic_dynamic(
 
 
 def process_automatic_dynamic(
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     name: str,
     entry: FrameStateSizeEntry,
     *,
@@ -787,7 +794,7 @@ class PGOCacheArtifact(CacheArtifact):
         update the key to use the new MAST job's name and version.
         """
         if not original_key.startswith("mast:"):
-            # if original_key is overridden, then dont change it
+            # if original_key is overridden, then don't change it
             return original_key
         if (new_key := get_cache_key()) is not None:
             return new_key

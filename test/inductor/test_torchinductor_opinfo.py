@@ -37,6 +37,8 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
+    isRocmArchAnyOf,
+    MI200_ARCH,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -55,7 +57,7 @@ from torch.testing._internal.inductor_utils import (
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_leaves, tree_map
 
 
 try:
@@ -229,17 +231,10 @@ inductor_skips["cuda"] = {
 if not SM80OrLater:
     inductor_skips["cuda"]["bfloat16"] = {b8, f16, f32, f64, i32, i64}
 
-if TEST_WITH_ROCM:
-    # Tensors are not alike
-    inductor_skips["cuda"]["logcumsumexp"] = {f32}
-    inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
-
 inductor_skips["xpu"] = {
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
-# torch-xpu-ops: #2956
-inductor_skips["xpu"]["lu"] = {f32}
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
 inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
@@ -247,15 +242,11 @@ inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
     "_upsample_bilinear2d_aa": {f32, f64},
-    "cholesky": {f32, f64},
     "complex": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
-    ("normal", "in_place"): {f16, f32, f64},
-    ("normal", "number_mean"): {f16, f32, f64},
-    "normal": {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
@@ -268,11 +259,7 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
-    "cholesky": {f32, f64},
-    ("normal", "in_place"): {f16, f32, f64},
-    ("normal", "number_mean"): {f16, f32, f64},
-    "normal": {f16, f32, f64},
-    "sparse.sampled_addmm": {f32, f64},
+    "sparse.sampled_addmm": {f32, f64, f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {
@@ -287,11 +274,7 @@ inductor_expected_failures_single_sample["cuda"] = {
 
 inductor_expected_failures_single_sample["xpu"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
-    "cholesky": {f32, f64},
-    ("normal", "in_place"): {f16, f32, f64},
-    ("normal", "number_mean"): {f16, f32, f64},
-    "normal": {f16, f32, f64},
-    "sparse.sampled_addmm": {f32, f64},
+    "sparse.sampled_addmm": {f32, f64, f16},
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
@@ -389,6 +372,7 @@ inductor_override_kwargs["cpu"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     ("nn.functional.multilabel_soft_margin_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.002,
@@ -426,6 +410,7 @@ inductor_override_kwargs["cuda"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     ("cross", f16): {"reference_in_float": True},
     ("linalg.cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
@@ -544,6 +529,7 @@ inductor_override_kwargs["xpu"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "nn.functional.rrelu": {"check_gradient": False},
     # XPU
     ("cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
@@ -1214,6 +1200,24 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
 
 @wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._test_config_stack = contextlib.ExitStack()
+        cls._test_config_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._test_config_stack.close()
+        super().tearDownClass()
+
     def tearDown(self):
         torch._dynamo.reset()
 
@@ -1239,8 +1243,6 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
-    @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
-    @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
     @torch._inductor.config.patch("shape_padding", False)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
@@ -1302,6 +1304,25 @@ class TestInductorOpInfo(TestCase):
         overridden_kwargs.update(
             inductor_override_kwargs.get(device_type, {}).get((op_name, dtype), {})
         )
+        if (
+            TEST_WITH_ROCM
+            and device_type == GPU_TYPE
+            and op_name == "addmm"
+            and dtype is f16
+            and isRocmArchAnyOf(MI200_ARCH)
+        ):
+            # MI200 eager backward routes FP16 GEMMs through the rocBLAS
+            # alt-impl to preserve denormals while inductor's compiled GEMM does
+            # not, so the two diverge at FP16 scale. See:
+            # https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html#reduced-precision-fp16-and-bf16-gemms-and-convolutions-on-amd-instinct-mi200-devices
+            # Checked at runtime, not in inductor_override_kwargs, because the
+            # arch query would force import-time HIP init that this module
+            # otherwise avoids. reference_in_float=True (the eager FP32
+            # reference) is inherited from the ("addmm", f16) cuda entry above.
+            # Observed rel diff is ~9 * eps; use ~2e-2 for headroom across
+            # samples and rocBLAS solver versions. Set atol explicitly since
+            # PyTorch requires rtol/atol overrides to be paired.
+            overridden_kwargs.update({"rtol": 2e-2, "atol": 1e-3})
         func = op.get_op()
 
         def fn(*args, **kwargs):
@@ -1314,7 +1335,7 @@ class TestInductorOpInfo(TestCase):
             # not exercised in test_ops_gradients atm.  The problem is not
             # complex32 per-se (which is supported by data movement only ops)
             # but that when we do backwards we expect other ops like add to work
-            and dtype != torch.complex32
+            and dtype not in (torch.complex32, torch.bcomplex32)
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
         extra = _inductor_extra_samples(op_name, device, dtype, requires_grad)
@@ -1436,8 +1457,13 @@ class TestInductorOpInfo(TestCase):
 
                         # skip checking gradient on CPU for now
                         if device_type == GPU_TYPE:
+                            # Only check gradients if there are input tensors requiring gradients
+                            has_grad_inputs = any(
+                                getattr(x, "requires_grad", False)
+                                for x in tree_leaves((args, kwargs))
+                            )
                             adjusted_kwargs.update(
-                                check_gradient=requires_grad,
+                                check_gradient=requires_grad and has_grad_inputs,
                                 output_process_fn_grad=sample_input.output_process_fn_grad,
                             )
                         else:
