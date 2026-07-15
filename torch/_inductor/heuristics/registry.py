@@ -148,15 +148,7 @@ def get_registered_heuristic_class(
 class CodegenConfigHeuristics:
     """Base class for codegen heuristics (pointwise, reduction, etc.)."""
 
-    def get_configs(
-        self,
-        size_hints: dict[str, int],
-        bs: int,
-        triton_config_fn: Any,
-        hinted_configs: list[Any],
-        tile_hint: Any | None = None,
-        inductor_meta: dict[str, Any] | None = None,
-    ) -> list[Any]:
+    def get_configs(self, *args: Any, **kwargs: Any) -> list[Any]:
         raise NotImplementedError
 
 
@@ -207,6 +199,12 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
         return _HEURISTIC_CACHE[cache_key]
 
     heuristic_class = _lookup(name, device_type, None)
+
+    if heuristic_class is None:
+        # Lazily import codegen heuristics to trigger registration
+        import torch._inductor.heuristics.triton_codegen  # noqa: F401
+
+        heuristic_class = _lookup(name, device_type, None)
 
     if heuristic_class is None:
         raise ValueError(
