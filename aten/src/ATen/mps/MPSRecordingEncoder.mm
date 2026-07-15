@@ -79,6 +79,13 @@
   [_inner setBytes:bytes length:length atIndex:index];
 }
 
+- (void)setThreadgroupMemoryLength:(NSUInteger)length atIndex:(NSUInteger)index {
+  if (_pending) {
+    _pending->threadgroupMem.push_back({static_cast<size_t>(length), static_cast<unsigned>(index)});
+  }
+  [_inner setThreadgroupMemoryLength:length atIndex:index];
+}
+
 - (void)dispatchThreads:(MTLSize)threadsPerGrid threadsPerThreadgroup:(MTLSize)threadsPerThreadgroup {
   if (_pending) {
     _pending->gridX = threadsPerGrid.width;

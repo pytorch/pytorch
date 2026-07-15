@@ -202,6 +202,23 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
       }
       [blitEncoder endEncoding];
 
+      // Record the blit so replay() re-issues it. Ops like cat (contiguous) and
+      // copy_ encode through here rather than executeMPSGraph or the recording
+      // compute encoder, so without this they would be silently dropped on
+      // replay. Buffers are retained here and released in releaseCapturedStep().
+      if (_captureMode) {
+        CapturedStep step;
+        step.kind = CapturedStep::Kind::BlitCopy;
+        step.blitSrc = (__bridge void*)srcBuffer;
+        step.blitDst = (__bridge void*)dstBuffer;
+        [srcBuffer retain];
+        [dstBuffer retain];
+        step.blitLength = length;
+        step.blitSrcOffset = srcOffset;
+        step.blitDstOffset = dstOffset;
+        _capturedSteps.push_back(std::move(step));
+      }
+
       // profilerId has a value only if copy profiling is enabled
       if (profileId) {
         getMPSProfiler().endProfileCopy(profileId, syncType);
@@ -363,6 +380,9 @@ void MPSStream::releaseCapturedStep(CapturedStep& step) {
   if (step.kind == CapturedStep::Kind::MPSGraph) {
     [(__bridge NSArray*)step.inputsArray release];
     [(__bridge NSArray*)step.resultsArray release];
+  } else if (step.kind == CapturedStep::Kind::BlitCopy) {
+    [(__bridge id<MTLBuffer>)step.blitSrc release];
+    [(__bridge id<MTLBuffer>)step.blitDst release];
   } else if (step.metalKernel) {
     for (auto& b : step.metalKernel->buffers) {
       [(__bridge id<MTLBuffer>)b.buffer release];
@@ -396,6 +416,26 @@ void MPSStream::replay() {
         NSArray<MPSGraphTensorData*>* ins = (__bridge NSArray*)step.inputsArray;
         NSArray<MPSGraphTensorData*>* outs = (__bridge NSArray*)step.resultsArray;
         [exe encodeToCommandBuffer:commandBuffer() inputsArray:ins resultsArray:outs executionDescriptor:nil];
+      } else if (step.kind == CapturedStep::Kind::BlitCopy) {
+        endKernelCoalescing(); // End compute encoder before blit encoding
+        id<MTLBuffer> srcBuffer = (__bridge id<MTLBuffer>)step.blitSrc;
+        id<MTLBuffer> dstBuffer = (__bridge id<MTLBuffer>)step.blitDst;
+        id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
+        // Match the 2GB-chunked copy in MPSStream::copy (see #124335).
+        constexpr size_t max_copy_size = 0x80000000; // 2GB
+        size_t bytes_copied = 0;
+        size_t bytes_remains = step.blitLength;
+        while (bytes_remains > 0) {
+          NSUInteger bytes_to_copy = std::min(max_copy_size, bytes_remains);
+          [blitEncoder copyFromBuffer:srcBuffer
+                         sourceOffset:(NSUInteger)step.blitSrcOffset + bytes_copied
+                             toBuffer:dstBuffer
+                    destinationOffset:(NSUInteger)step.blitDstOffset + bytes_copied
+                                 size:bytes_to_copy];
+          bytes_copied += bytes_to_copy;
+          bytes_remains -= bytes_to_copy;
+        }
+        [blitEncoder endEncoding];
       } else {
         auto& mk = *step.metalKernel;
         auto enc = commandEncoder();
@@ -416,6 +456,9 @@ void MPSStream::replay() {
         }
         for (auto& b : mk.bytes) {
           [enc setBytes:b.data.data() length:b.data.size() atIndex:b.index];
+        }
+        for (auto& tm : mk.threadgroupMem) {
+          [enc setThreadgroupMemoryLength:tm.length atIndex:tm.index];
         }
         auto gridSize = MTLSizeMake(mk.gridX, mk.gridY, mk.gridZ);
         auto tgSize = MTLSizeMake(mk.tgX, mk.tgY, mk.tgZ);

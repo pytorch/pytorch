@@ -119,6 +119,20 @@ class TORCH_API MPSStream {
     return _captureMode.load(std::memory_order_acquire);
   }
 
+  // Fail loud when an op that cannot be captured runs inside a capture block.
+  // Ops that encode opaque MPS kernels (e.g. MPSMatrix* via
+  // encodeToCommandBuffer:) or fall back to CPU are not recorded as
+  // CapturedSteps, so replay would silently drop them and produce wrong
+  // results, the worst failure mode for users. Such ops call this so capture
+  // raises a clear error instead.
+  void assertCapturable(const char* op) const {
+    TORCH_CHECK(!captureMode(),
+                op,
+                " is not supported inside torch.mps.metal_graph_capture(): it uses a path "
+                "(opaque MPS kernel encode or CPU fallback) that cannot be captured for replay. "
+                "Run it outside the capture block.");
+  }
+
   size_t capturedStepCount() const {
     return _capturedSteps.size();
   }
@@ -135,8 +149,13 @@ class TORCH_API MPSStream {
       std::vector<uint8_t> data;
       unsigned index;
     };
+    struct ThreadgroupMemBinding {
+      size_t length;
+      unsigned index;
+    };
     std::vector<BufferBinding> buffers;
     std::vector<BytesBinding> bytes;
+    std::vector<ThreadgroupMemBinding> threadgroupMem;
     uint64_t gridX = 0, gridY = 0, gridZ = 0;
     uint64_t tgX = 0, tgY = 0, tgZ = 0;
     bool useThreadgroups = false; // true = dispatchThreadgroups, false = dispatchThreads
@@ -189,7 +208,7 @@ class TORCH_API MPSStream {
   // data in-place (via .copy_()) between replay calls to supply new batches.
 
   struct CapturedStep {
-    enum class Kind { MPSGraph, MetalKernel };
+    enum class Kind { MPSGraph, MetalKernel, BlitCopy };
     Kind kind = Kind::MPSGraph;
     // MPSGraph fields
     void* exe = nullptr; // MPSGraphExecutable*, borrowed from _graphExecutableCache
@@ -202,6 +221,12 @@ class TORCH_API MPSStream {
 #endif
     // Metal kernel fields
     std::unique_ptr<CapturedMetalKernel> metalKernel;
+    // Blit copy fields (buffer-to-buffer copy recorded from MPSStream::copy).
+    void* blitSrc = nullptr; // id<MTLBuffer>, retained
+    void* blitDst = nullptr; // id<MTLBuffer>, retained
+    size_t blitLength = 0;
+    size_t blitSrcOffset = 0;
+    size_t blitDstOffset = 0;
   };
   std::atomic<bool> _captureMode{false};
   std::vector<CapturedStep> _capturedSteps;

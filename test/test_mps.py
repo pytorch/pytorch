@@ -16895,6 +16895,57 @@ class TestGraphCapture(TestCaseMPS):
             torch._C._mps_metalGraphCaptureBegin()
         torch._C._mps_metalGraphCaptureReset()
 
+    def test_blit_op_captured(self):
+        # cat (contiguous) encodes through MPSStream::copy (a blit), not the
+        # compute encoder or MPSGraph. It must be recorded and replay correctly.
+        a = torch.randn(64, 128, device="mps")
+        b = torch.randn(64, 128, device="mps")
+        ref = torch.cat([a, b], dim=0).clone()
+        with torch.mps.metal_graph_capture():
+            out = torch.cat([a, b], dim=0)
+        torch.mps.synchronize()
+        a.copy_(torch.randn_like(a))
+        b.copy_(torch.randn_like(b))
+        torch.mps.metal_graph_replay()
+        self.assertEqual(out, torch.cat([a, b], dim=0))
+        torch._C._mps_metalGraphCaptureReset()
+
+    def test_threadgroup_memory_kernel_captured(self):
+        # Batched small eigh uses the on-GPU jacobi kernel, which binds dynamic
+        # threadgroup memory via setThreadgroupMemoryLength:. That binding must
+        # be recorded, or replay runs with a zero-length threadgroup buffer.
+        def make(seed):
+            g = torch.randn(8, 64, 64, device="mps")
+            return (g + g.transpose(-1, -2)) / 2
+        s = make(0)
+        with torch.mps.metal_graph_capture():
+            out = torch.linalg.eigh(s).eigenvalues
+        torch.mps.synchronize()
+        s2 = make(1)
+        s.copy_(s2)
+        torch.mps.metal_graph_replay()
+        self.assertEqual(out, torch.linalg.eigh(s2).eigenvalues, atol=1e-2, rtol=1e-2)
+        torch._C._mps_metalGraphCaptureReset()
+
+    def test_uncapturable_op_fails_loud(self):
+        # Ops that fall back to CPU (single-matrix eigh) or encode opaque MPS
+        # kernels (solve_triangular via MPSMatrix) are not recorded on the
+        # capture step list. Capturing them must raise, not silently produce
+        # wrong results on replay.
+        sm = torch.randn(64, 64, device="mps")
+        sm = (sm + sm.t()) / 2
+        with self.assertRaisesRegex(RuntimeError, "metal_graph_capture"):
+            with torch.mps.metal_graph_capture():
+                torch.linalg.eigh(sm)
+        torch._C._mps_metalGraphCaptureReset()
+
+        tri = torch.tril(torch.randn(128, 128, device="mps")) + 5 * torch.eye(128, device="mps")
+        rhs = torch.randn(128, 64, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "metal_graph_capture"):
+            with torch.mps.metal_graph_capture():
+                torch.linalg.solve_triangular(tri, rhs, upper=False)
+        torch._C._mps_metalGraphCaptureReset()
+
     def test_f16_capture(self):
         # f16 tensors must be captured and replayed correctly.
         d = 32

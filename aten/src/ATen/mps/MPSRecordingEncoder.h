@@ -7,7 +7,8 @@
 
 // Proxy that wraps id<MTLComputeCommandEncoder> during graph capture.
 // Intercepts setComputePipelineState:, setBuffer:offset:atIndex:,
-// setBytes:length:atIndex:, dispatchThreads:threadsPerThreadgroup:, and
+// setBytes:length:atIndex:, setThreadgroupMemoryLength:atIndex:,
+// dispatchThreads:threadsPerThreadgroup:, and
 // dispatchThreadgroups:threadsPerThreadgroup: to record Metal kernel state.
 // All other selectors are forwarded to the real encoder via
 // forwardingTargetForSelector:.
@@ -21,6 +22,7 @@
 - (void)setComputePipelineState:(id<MTLComputePipelineState>)state;
 - (void)setBuffer:(id<MTLBuffer>)buffer offset:(NSUInteger)offset atIndex:(NSUInteger)index;
 - (void)setBytes:(const void*)bytes length:(NSUInteger)length atIndex:(NSUInteger)index;
+- (void)setThreadgroupMemoryLength:(NSUInteger)length atIndex:(NSUInteger)index;
 - (void)dispatchThreads:(MTLSize)threadsPerGrid threadsPerThreadgroup:(MTLSize)threadsPerThreadgroup;
 - (void)dispatchThreadgroups:(MTLSize)threadgroupsPerGrid threadsPerThreadgroup:(MTLSize)threadsPerThreadgroup;
 
