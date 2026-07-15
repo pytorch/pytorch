@@ -2509,16 +2509,20 @@ class CppBuilder:
                     # linker record a bare-basename DT_NEEDED entry, because
                     # the staged kernel .so files carry no DT_SONAME. That
                     # basename is unresolvable when the wrapper .so is later
-                    # dlopen'd from the inductor cache, so record the original
-                    # directory as an rpath the runtime loader can search.
+                    # dlopen'd, so add rpath entries the runtime loader can
+                    # search: $ORIGIN for a kernel .so co-staged next to the
+                    # wrapper, and the kernel .so's original directory as a
+                    # fallback when it is loaded from its cache location.
                     if self._do_link and tok.endswith(".so"):
                         rpath_dirs.add(os.path.dirname(tok))
                     new_tokens.append(os.path.basename(tok))
                 else:
                     new_tokens.append(tok)
             rewritten.append(" ".join(shlex.quote(t) for t in new_tokens))
-        for rpath_dir in rpath_dirs:
-            rewritten.append(f"-Wl,-rpath,{shlex.quote(rpath_dir)}")
+        if rpath_dirs:
+            rewritten.append("-Wl,-rpath," + shlex.quote("$ORIGIN"))
+            for rpath_dir in rpath_dirs:
+                rewritten.append(f"-Wl,-rpath,{shlex.quote(rpath_dir)}")
         return rewritten
 
     def build_fbcode_re(
