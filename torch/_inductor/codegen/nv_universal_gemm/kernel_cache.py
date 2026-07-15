@@ -437,20 +437,33 @@ def _fake_epilogue_metadata(epilogue_args: Any) -> Any:
     from cutlass.operators.metadata import EpilogueMetadata
     from cutlass.operators.utils.tensor import TensorWrapper
 
+    from .nv_universal_gemm_utils import cutlass_dtype_to_torch
+
+    def _meta_like(t: torch.Tensor) -> torch.Tensor:
+        return torch.empty_strided(t.shape, t.stride(), dtype=t.dtype, device="meta")
+
     fake_kwargs = {}
     for name, val in epilogue_args.tensors.items():
-        tensor = (
-            getattr(val, "runtime_tensor", val)
-            if isinstance(val, TensorWrapper)
-            else val
-        )
-        fake_kwargs[name] = (
-            torch.empty_strided(
-                tensor.shape, tensor.stride(), dtype=tensor.dtype, device="meta"
+        # Build a storage-free meta tensor with the same shape/stride/dtype.
+        # A TensorWrapper built from a fake tensor (the subprocess-precompile
+        # path) has no runtime tensor -- its `.runtime_tensor` property raises
+        # ValueError -- so read `_runtime_tensor` directly (None when fake) and
+        # fall back to the wrapper's own shape/stride and its cutlass dtype.
+        if isinstance(val, torch.Tensor):
+            fake_kwargs[name] = _meta_like(val)
+        elif isinstance(val, TensorWrapper) and isinstance(
+            val._runtime_tensor, torch.Tensor
+        ):
+            fake_kwargs[name] = _meta_like(val._runtime_tensor)
+        elif (
+            isinstance(val, TensorWrapper)
+            and (dtype := cutlass_dtype_to_torch(val.dtype)) is not None
+        ):
+            fake_kwargs[name] = torch.empty_strided(
+                tuple(val.shape), tuple(val.stride), dtype=dtype, device="meta"
             )
-            if isinstance(tensor, torch.Tensor)
-            else tensor
-        )
+        else:
+            fake_kwargs[name] = val
     fake_args = EpilogueArguments(epilogue_args.epilogue_fn, **fake_kwargs)
     accum = epilogue_args.traced_epilogue.example_inputs["accum"]
     fake_args.trace(accum.shape, accum.element)
