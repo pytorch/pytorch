@@ -4650,6 +4650,9 @@ class PythonWrapperCodegen(CodeGen):
             # move the Tensor selector to host; always as int so the branch loop
             # can use uniform index comparisons (cond: True==1, False==0)
             selector = f"int({selector}.item())"
+        else:
+            # ShapeAsConstantBuffer yields a Python bool/int expression; Wrap in int().
+            selector = f"int({selector})"
 
         self.writeline(f"{name} = [None] * {len(node.outputs)}")
 

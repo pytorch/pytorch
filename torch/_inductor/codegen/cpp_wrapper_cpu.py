@@ -2828,8 +2828,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
                 self.used_switch_selector.add(selector_var)
         else:
-            # the selector is not a Tensor: SymBool/bool or SymInt/int
-            selector_var = node.selector.codegen_reference()
+            # ShapeAsConstantBuffer yields a C++ bool/int expression; Cast to int64_t.
+            selector_var = f"static_cast<int64_t>({node.selector.codegen_reference()})"
 
         def _emit_branch(header: str, branch) -> None:
             self.writeline(header)
