@@ -550,6 +550,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/socket.cpp",
     "torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.cpp",
+    "torch/csrc/distributed/c10d/watchdog/Watchdog.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
@@ -1075,6 +1076,7 @@ libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/python_callback_work.cpp",
+    "torch/csrc/distributed/c10d/watchdog/init.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [

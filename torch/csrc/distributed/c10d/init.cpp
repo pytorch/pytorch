@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <torch/csrc/distributed/c10d/watchdog/init.hpp>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -4753,6 +4754,8 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           "set_status",
           &::c10d::control_plane::Response::setStatus,
           py::arg("status"));
+
+  ::c10d::watchdog::initWatchdogBindings(torch_C_m);
 
   Py_RETURN_TRUE;
 }

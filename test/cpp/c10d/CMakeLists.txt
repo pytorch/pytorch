@@ -50,6 +50,7 @@ if(USE_ROCM)
 
 else()
   c10d_add_test(BackoffTest.cpp LINK_LIBRARIES torch_cpu gtest_main INSTALL_TEST OFF)
+  c10d_add_test(WatchdogTest.cpp LINK_LIBRARIES torch_cpu gtest_main INSTALL_TEST OFF)
   c10d_add_test(FileStoreTest.cpp LINK_LIBRARIES torch_cpu gtest_main INSTALL_TEST ${INSTALL_TEST})
   c10d_add_test(TCPStoreTest.cpp LINK_LIBRARIES torch_cpu gtest_main INSTALL_TEST ${INSTALL_TEST})
   if(NOT WIN32)
