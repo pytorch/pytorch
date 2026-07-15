@@ -21,6 +21,7 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
+from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp._flat_param import _FSDP_USE_UNSAFE_SETATTR
 from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
 from torch.distributed.fsdp.wrap import (
@@ -568,6 +569,67 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                     _optim.step()
                     _optim.zero_grad()
                 self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_summon_full_params_offload_to_cpu_on_cpu_model(self):
+        """
+        Tests ``summon_full_params(offload_to_cpu=True)`` when the FSDP compute
+        device is already CPU. There, the unsharded ``FlatParameter`` is already
+        on CPU, so ``to_cpu()`` must skip freeing the unsharded storage that
+        ``flat_param`` and its views alias; otherwise the summoned parameters
+        read freed memory.
+        """
+        gloo_pg = dist.new_group(backend="gloo")
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                ],
+                "use_orig_params": [False, True],
+                "writeback": [False, True],
+            },
+            self._test_summon_full_params_offload_to_cpu_on_cpu_model,
+            gloo_pg,
+        )
+
+    def _test_summon_full_params_offload_to_cpu_on_cpu_model(
+        self,
+        gloo_pg,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+        writeback: bool,
+    ):
+        torch.manual_seed(42)
+        ref_model = MyModel()
+        ref_params = dict(ref_model.named_parameters())
+        model = FSDP(
+            deepcopy(ref_model),
+            sharding_strategy=sharding_strategy,
+            auto_wrap_policy=always_wrap_policy,
+            process_group=gloo_pg,
+            device_id=torch.device("cpu"),
+            use_orig_params=use_orig_params,
+        )
+        cpu = torch.device("cpu")
+        with FSDP.summon_full_params(model, offload_to_cpu=True, writeback=writeback):
+            summoned = dict(model.named_parameters())
+            self.assertEqual(len(summoned), len(ref_params))
+            for name, param in summoned.items():
+                self.assertEqual(param.device, cpu)
+                self.assertEqual(param, ref_params[clean_tensor_name(name)])
+            if writeback:
+                with torch.no_grad():
+                    for param in model.parameters():
+                        param.add_(1.0)
+        for param in model.parameters():
+            self.assertEqual(param.device, cpu)
+        # Re-summon to confirm the exit path resharded correctly and that the
+        # in-place edit was (not) persisted according to `writeback`.
+        delta = 1.0 if writeback else 0.0
+        with FSDP.summon_full_params(model, offload_to_cpu=True):
+            for name, param in model.named_parameters():
+                self.assertEqual(param, ref_params[clean_tensor_name(name)] + delta)
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):
