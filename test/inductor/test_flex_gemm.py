@@ -2190,6 +2190,47 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("wrapper", ("squeeze", "view"))
+    def test_mm_tuple_aux_physical_local_reduce_supports_wrapped_finalize(
+        self, wrapper
+    ):
+        m = 128
+        n = 128
+        group = 64
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m, -1, group)
+            reduced = x.sum(-1, keepdim=True)
+            reduced = (
+                reduced.squeeze(-1)
+                if wrapper == "squeeze"
+                else reduced.view(m, n // group)
+            )
+            return acc.relu(), reduced + 1.0
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(m, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, n, device="cuda", dtype=torch.bfloat16)
+        (actual, aux), (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
+        FileCheck().check("local_reduce_combine_fn").check(
+            "local_reduce_finalize_fn"
+        ).run(code)
+        self.assertLocalReduceAuxCode(code, group, callbacks=True)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_tuple_aux_rejects_composite_physical_local_reductions(self):
         m = 128
         n = 128
@@ -2316,6 +2357,53 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         actual, aux = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_local_m_reduce_tuned_internal_transpose(self):
+        m = 128
+        n = 192
+        k = 64
+        group = 16
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            return acc.relu(), x.sum(1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b.mT),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(n, k, device="cuda", dtype=torch.bfloat16)
+
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            validate_flex_gemm_local_reduce_config,
+        )
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+
+        configs = tuple(
+            config
+            for config in flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                a.device
+            )
+            if validate_flex_gemm_local_reduce_config(config, group, 0)
+        )[:2]
+        self.assertEqual(len(configs), 2)
+        with mock.patch(
+            "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=configs,
+        ):
+            actual, aux = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+        self.assertLocalReduceAuxMatches(actual, aux, a, b.mT, epilogue_fn)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")

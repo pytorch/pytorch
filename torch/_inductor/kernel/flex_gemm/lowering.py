@@ -171,6 +171,23 @@ def flex_gemm_local_reduce_metas(
     return (local_reduce.store.node.meta["val"],)
 
 
+def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
+    """Rebuild a logical view for Python-backed template benchmarks."""
+    from torch._inductor.select_algorithm import (
+        AlgorithmSelectorCache,
+        get_strides_with_layout_constraints,
+    )
+    from torch._inductor.virtualized import V
+
+    value = AlgorithmSelectorCache.benchmark_example_value(node)
+    base = value if value._base is None else value._base
+    sizevars = V.graph.sizevars
+    sizes = sizevars.optimization_hints(node.get_size())
+    strides = sizevars.optimization_hints(get_strides_with_layout_constraints(node))
+    offset = sizevars.optimization_hint(node.get_layout().offset)
+    return torch.as_strided(base, sizes, strides, offset)
+
+
 def flex_gemm_config_keys_for_local_reduce(
     device,
     m: int,
@@ -377,8 +394,17 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         )
         if error is not None:
             raise error
+    input_gen_fns = {
+        index: flex_gemm_autotune_view_input
+        for index, input_node in enumerate(input_nodes)
+        if isinstance(input_node, ir.ReinterpretView)
+    }
     result, _ = autotune_select_algorithm(
-        "flex_gemm_epilogue", choices, input_nodes, layout
+        "flex_gemm_epilogue",
+        choices,
+        input_nodes,
+        layout,
+        input_gen_fns=input_gen_fns or None,
     )
     return flex_gemm_ordered_outputs(
         result,
