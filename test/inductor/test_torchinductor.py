@@ -2442,11 +2442,12 @@ class CommonTemplate:
             fn, (torch.rand((14923), dtype=torch.float16),), atol=atol, rtol=rtol
         )
 
-    @unittest.skip(
-        "Disabled due to CI failures (GPUTests variant); see "
-        "https://github.com/pytorch/pytorch/issues/189707"
-    )
     def test_split_cumsum(self):
+        if self.device == GPU_TYPE:
+            self.skipTest(
+                "Disabled on GPU due to CI failures; see "
+                "https://github.com/pytorch/pytorch/issues/189707"
+            )
         def fn(a):
             return torch.cumsum(a, -1)
 
@@ -2492,11 +2493,12 @@ class CommonTemplate:
     # Triton CPU generates a split scan that uses tl.debug_barrier, which is
     # not yet implemented in Triton CPU.
     @xfail_if_triton_cpu
-    @unittest.skip(
-        "Disabled due to CI failures (GPUTests variant); see "
-        "https://github.com/pytorch/pytorch/issues/189708"
-    )
     def test_consecutive_split_cumsum(self):
+        if self.device == GPU_TYPE:
+            self.skipTest(
+                "Disabled on GPU due to CI failures; see "
+                "https://github.com/pytorch/pytorch/issues/189708"
+            )
         def fn(a, b):
             a = a.view(-1)
             b = b.view(-1)
@@ -4443,11 +4445,12 @@ for dtype in (torch.int32, torch.int64):
 
     @skip_if_halide  # only 32-bit indexing
     @largeTensorTest("2GB", inductor=True)
-    @unittest.skip(
-        "Disabled due to CI failures (GPUTests variant); see "
-        "https://github.com/pytorch/pytorch/issues/189709"
-    )
     def test_large_strided_reduction(self):
+        if self.device == GPU_TYPE:
+            self.skipTest(
+                "Disabled on GPU due to CI failures; see "
+                "https://github.com/pytorch/pytorch/issues/189709"
+            )
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
         def fn(a):
@@ -4804,11 +4807,12 @@ for dtype in (torch.int32, torch.int64):
 
     @skip_if_cpu
     @skip_if_not_triton
-    @unittest.skip(
-        "Disabled due to CI failures (GPUTests variant); see "
-        "https://github.com/pytorch/pytorch/issues/189711"
-    )
     def test_vmap_dot_decomposes_bmm(self):
+        if self.device == GPU_TYPE:
+            self.skipTest(
+                "Disabled on GPU due to CI failures; see "
+                "https://github.com/pytorch/pytorch/issues/189711"
+            )
         def dot_based(a, b):
             return torch.dot(a, b) + torch.dot(a, b)
 
@@ -13234,11 +13238,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (t1,))
 
     @requires_cuda
-    @unittest.skip(
-        "Disabled due to CI failures (GPUTests variant); see "
-        "https://github.com/pytorch/pytorch/issues/189710"
-    )
     def test_max_min_bool(self):
+        if self.device == GPU_TYPE:
+            self.skipTest(
+                "Disabled on GPU due to CI failures; see "
+                "https://github.com/pytorch/pytorch/issues/189710"
+            )
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
         # and https://github.com/pytorch/pytorch/issues/184893
         # max/min on boolean tensors returned incorrect indices on Triton and CPU.
