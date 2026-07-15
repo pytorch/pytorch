@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <cstdlib>
@@ -202,6 +204,17 @@ void ProcessGroupNCCL::abort() {
     abortNcclComm();
   }
   comm_state_ = CommState::ERROR;
+}
+
+::c10d::ErrorType ProcessGroupNCCL::getError() {
+  switch (comm_state_.load()) {
+    case CommState::TIMEOUT:
+      return ::c10d::ErrorType::TIMEOUT;
+    case CommState::ERROR:
+      return ::c10d::ErrorType::COMM_ERROR;
+    default:
+      return ::c10d::ErrorType::SUCCESS;
+  }
 }
 
 void ProcessGroupNCCL::finalize() {
@@ -1454,9 +1467,11 @@ NCCLException::NCCLException(
     const std::string& message,
     ncclResult_t result,
     ncclComm_t comm)
-    : message_(
-          message + ": " + nccl_api.getErrorString(result) +
-          " \nNCCL Last Error: " + nccl_api.getLastError(comm)),
+    : message_(fmt::format(
+          "{}: {} \nNCCL Last Error: {}",
+          message,
+          nccl_api.getErrorString(result),
+          nccl_api.getLastError(comm))),
       result_(result) {}
 
 const char* NCCLException::what() const noexcept {
@@ -1464,3 +1479,5 @@ const char* NCCLException::what() const noexcept {
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
