@@ -252,12 +252,8 @@ bool try_mps_gemv(const Tensor& A,
     return false;
   }
   const auto matrix = resolve_matrix(m_is_one ? B : A);
-  // The kernels index device memory with 32-bit signed ints in the fast path
-  // (e.g. k*ld + n). Operands whose largest offset does not fit, including an
-  // output with more than 2**31 elements, dispatch 64-bit-index variants.
-  // Check K separately because a stride-zero expanded operand can have a
-  // representable maximum offset but still require a 64-bit loop bound.
-  const bool idx64 = K >= std::numeric_limits<int32_t>::max() || !offsetsFitIn<int32_t>(A, B, out) ||
+  // Dispatch 64-bit-index variants when numel or storage offsets exceed int32.
+  const bool idx64 = !offsetsFitIn<int32_t>(A, B, out) ||
       (bias.has_value() && !offsetsFitIn<int32_t>(*bias));
   const GemvPolicy policy = GemvPolicy::current();
   dispatch_gemv(A, B, out, bias, matrix, alpha, beta, epi, policy, m_is_one, outlen, idx64);
