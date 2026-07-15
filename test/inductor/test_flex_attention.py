@@ -8067,7 +8067,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps
+    @skip_on_mps
     def test_block_mask_check_does_not_specialize_backed_dynamic_length(self, device):
         def mask_mod(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
