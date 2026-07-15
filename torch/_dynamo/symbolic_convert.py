@@ -2875,14 +2875,10 @@ class InstructionTranslatorBase(
             if isinstance(raised_exception, FakeTensorObservedException):
                 from .exc import format_graph_break_message
 
-                curr = self.exn_vt_stack.get_raised_exception()
-                raw_msg = ""
-                if isinstance(curr, variables.ExceptionVariable) and curr.args:
-                    raw_msg = curr.args[0].as_python_constant()
                 msg = format_graph_break_message(
                     "RuntimeError when making fake tensor call",
                     "",
-                    raw_msg,
+                    str(raised_exception),
                     [*graph_break_hints.USER_ERROR],
                 )
                 e = exc.TorchRuntimeError(

@@ -4203,9 +4203,7 @@ def _get_fake_value_impl(
         try:
             raise_observed_exception(RuntimeError, tx, args=[msg])
         except ObservedException as e:
-            raise FakeTensorObservedException(
-                *e.args, real_stack=e.real_stack
-            ) from None
+            raise FakeTensorObservedException(msg, real_stack=e.real_stack) from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
