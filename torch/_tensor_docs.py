@@ -2512,7 +2512,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
+    index (Tensor): indices of :attr:`self` to accumulate into,
         should have dtype either `torch.int64` or `torch.int32`
     source (FloatTensor): the tensor containing values to accumulate
     reduce (str): the reduction operation to apply
@@ -3794,15 +3794,6 @@ put(input, index, source, accumulate=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.put_`.
 `input` corresponds to `self` in :meth:`torch.Tensor.put_`.
-""",
-)
-
-add_docstr_all(
-    "qr",
-    r"""
-qr(some=True) -> (Tensor, Tensor)
-
-See :func:`torch.qr`
 """,
 )
 
@@ -6770,7 +6761,7 @@ If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 
 .. warning::
-    The use of :func:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
+    The use of :attr:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
     is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
     to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
     the dimensions of a tensor.
