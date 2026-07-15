@@ -583,11 +583,21 @@ class TestSetTritonLibdevicePath(TestCase):
         """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "knobs.nvidia.libdevice_path mismatch in fbcode CI environment; "
+        "matches sibling test_libdevice_path_* disables",
+    )
     @config.patch({"compile_threads": 1, "eager_numerics.use_pytorch_libdevice": True})
     def test_libdevice_path_no_subprocess(self):
         """Test libdevice path is set with compile_threads=1 (no subprocess)."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "knobs.nvidia.libdevice_path mismatch in fbcode CI environment; "
+        "matches sibling test_libdevice_path_* disables",
+    )
     @config.patch("eager_numerics.use_pytorch_libdevice", True)
     def test_libdevice_path_default_threads(self):
         """Test libdevice path is set with default compile_threads (subprocess)."""
