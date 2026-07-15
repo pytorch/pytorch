@@ -34,13 +34,13 @@ static PyObject* THPDevice_repr(THPDevice* self) {
     oss << ", index=" << static_cast<uint16_t>(self->device.index());
   }
   oss << ')';
-  return THPUtils_packString(oss.str().c_str());
+  return THPUtils_packString(std::move(oss).str().c_str());
 }
 
 static PyObject* THPDevice_str(THPDevice* self) {
   std::ostringstream oss;
   oss << self->device;
-  return THPUtils_packString(oss.str().c_str());
+  return THPUtils_packString(std::move(oss).str().c_str());
 }
 
 static PyObject* THPDevice_pynew(
@@ -89,7 +89,7 @@ static PyObject* THPDevice_type(THPDevice* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   std::ostringstream oss;
   oss << self->device.type();
-  return THPUtils_packString(oss.str().c_str());
+  return THPUtils_packString(std::move(oss).str().c_str());
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -162,7 +162,7 @@ static PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
     args = THPObjectPtr{Py_BuildValue(
         "(si)", oss.str().c_str(), static_cast<int>(self->device.index()))};
   } else {
-    args = THPObjectPtr{Py_BuildValue("(s)", oss.str().c_str())};
+    args = THPObjectPtr{Py_BuildValue("(s)", std::move(oss).str().c_str())};
   }
   if (!args)
     throw python_error();
