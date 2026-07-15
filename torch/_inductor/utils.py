@@ -1398,14 +1398,21 @@ def unload_xpu_triton_pyds() -> None:
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
                             # pyrefly: ignore [missing-attribute]
-                            result.kernel.run.mod.__del__()
+                            run = result.kernel.run
+                            if hasattr(run, "mod"):
+                                run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
     if "triton.runtime.driver" in sys.modules:
-        mod = sys.modules["triton.runtime.driver"]
-        del type(mod.driver.active.utils).instance
-        del mod.driver.active.utils
+        driver_mod = sys.modules["triton.runtime.driver"]
+        if hasattr(driver_mod.driver.active, "utils"):
+            utils_cls = type(driver_mod.driver.active.utils)
+            if hasattr(utils_cls, "instance"):
+                del utils_cls.instance
+            elif hasattr(utils_cls, "_instance"):
+                utils_cls._instance = None
+            del driver_mod.driver.active.utils
 
     gc.collect()
 
