@@ -161,6 +161,21 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
 
+    def test_module_random_random_fullgraph(self):
+        # random.random is a C builtin method bound to the module-global
+        # Random instance (unlike randint/randrange/uniform, which are Python
+        # methods); it must still route through the RandomValueSource path
+        # rather than graph-breaking on a skipped builtin.
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return (x + 1) * random.random()
+
+        res = []
+        for _ in range(5):
+            res.append(fn(torch.ones(2)))
+        for i in range(1, 5):
+            self.assertFalse(same(res[i - 1], res[i]))
+
     def test_random_call_with_while_loop(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=3)
@@ -308,6 +323,26 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(picks), 4)
         self.assertEqual(len(set(picks)), 4)
         self.assertTrue(all(p in "abcdefghij" for p in picks))
+
+    def test_random_module_seed_shuffle(self):
+        # Module-level random.seed is bound to the global random.Random instance
+        # and must trace under fullgraph rather than graph-breaking on a skipped
+        # function. A seed() inside the compiled region makes the subsequent
+        # shuffle deterministic, matching the CPython test_sort
+        # TestOptimizedCompares pattern (seed(0) then shuffle).
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            items = list(range(10))
+            random.seed(0)
+            random.shuffle(items)
+            return items, x + 1
+
+        compiled_items, _ = fn(torch.zeros(2))
+
+        expected = list(range(10))
+        random.seed(0)
+        random.shuffle(expected)
+        self.assertEqual(compiled_items, expected)
 
     def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash
@@ -576,7 +611,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(20)
         torch._dynamo.mark_dynamic(x, 0)
 
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             y = x * 2
             comptime.graph_break()
@@ -971,7 +1006,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
                 return x * 2
 
         main_model = TestModel()
-        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)
+        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)  # noqa: UNSPECIFIED_BACKEND
 
         x1 = torch.rand(3, 5, 4, 8)
         x2 = torch.rand(1, 5, 4, 8)
@@ -1014,7 +1049,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
                 return x * 2
 
         main_model = TestModel()
-        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)
+        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)  # noqa: UNSPECIFIED_BACKEND
 
         x1 = torch.rand(3, 5, 4, 8).to(memory_format=torch.channels_last)
         x2 = torch.rand(1, 5, 4, 8).to(memory_format=torch.channels_last)
@@ -1048,7 +1083,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
         with ctx():
             for key in [1.0, 2.0, 3.0]:
-                model = torch.compile(Module(key))
+                model = torch.compile(Module(key))  # noqa: UNSPECIFIED_BACKEND
                 model(x)
 
         guard_log = log_stream.getvalue()

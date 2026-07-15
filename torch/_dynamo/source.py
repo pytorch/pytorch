@@ -817,10 +817,24 @@ class NonSerializableSetGetItemSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        value = utils.set_getitem(
+            self.base.get_value(globals, locals, cache), self.index
+        )
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         # set ordering might not be stable
-        return f"list({{0}})[{_esc_str(self.index, apply_repr=True)}]"
+        return f"___set_getitem({{0}}, {_esc_str(self.index, apply_repr=True)})"
 
     def is_dict_key(self) -> bool:
         return False
@@ -1086,11 +1100,6 @@ class ImportSource(Source):
 
     module_name: str
 
-    def __post_init__(self) -> None:
-        from .guards import GuardBuilder, install_guard
-
-        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
-
     @functools.cached_property
     def _name_template(self) -> str:
         return f"__import__('{self.module_name}')"
@@ -1188,6 +1197,30 @@ class CallMethodItemSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         return "{0}.item()"
+
+
+@dataclass_with_cached_hash(frozen=True)
+class ContextVarGetSource(ChainedSource):
+    has_default: bool = False
+    default_value: Any = None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        def load_get_method():
+            codegen(self.base)
+            codegen.extend_output(codegen.create_load_attrs("get"))
+
+        codegen.add_push_null(load_get_method)
+        if self.has_default:
+            codegen.append_output(codegen.create_load_const(self.default_value))
+            codegen.extend_output(create_call_function(1, False))
+        else:
+            codegen.extend_output(create_call_function(0, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        if self.has_default:
+            return f"{{0}}.get({_esc_str(self.default_value, apply_repr=True)})"
+        return "{0}.get()"
 
 
 # This is a synthetic source that is associated with the singleton
