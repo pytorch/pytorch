@@ -24,14 +24,13 @@ LOCAL_REDUCE_FINALIZE_KEY_SUFFIX: Final = ":local_reduce_finalize"
 # group; cross-warp M stitching needs the two-phase/replay path used by
 # compressed aux reductions. Axis-1 feeds whose groups fit in one TensorSSA
 # fragment lower as plain generated TensorSSA without a feed plan.
-MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 32
-MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS = 32
+LOCAL_REDUCE_FRAGMENT_WIDTH = 32
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
 LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only same-warp axis-0 "
-    f"groups <= {MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP}"
+    f"groups <= {LOCAL_REDUCE_FRAGMENT_WIDTH}"
 )
 LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR = (
     "FlexGEMM local-reduce feed-main for axis-1 groups larger than one "
@@ -236,17 +235,18 @@ def validate_local_reduce_tensorssa_group_size(axis: int, group: int) -> None:
     if group <= 1:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_GROUP_SIZE_ERROR)
     validate_local_reduce_group_axis(group, axis)
-    if group > 32 and group % 32 != 0:
+    if group > LOCAL_REDUCE_FRAGMENT_WIDTH and group % LOCAL_REDUCE_FRAGMENT_WIDTH != 0:
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_MULTIPLE_ERROR)
-    if group <= 32 and 32 % group != 0:
+    if (
+        group <= LOCAL_REDUCE_FRAGMENT_WIDTH
+        and LOCAL_REDUCE_FRAGMENT_WIDTH % group != 0
+    ):
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_DIVISIBLE_ERROR)
 
 
 def local_reduce_needs_physical_callbacks(axis: int, group: int) -> bool:
     """Return whether QuACK must merge TensorSSA partials outside the fragment path."""
-    return (
-        axis == 0 or group > MAX_TENSORSSA_LOCAL_REDUCE_GROUP_WITHOUT_PHYSICAL_CALLBACKS
-    )
+    return axis == 0 or group > LOCAL_REDUCE_FRAGMENT_WIDTH
 
 
 def validate_local_reduce_runtime_dense_mm(ndim: int) -> None:
@@ -287,7 +287,7 @@ def validate_local_reduce_feed_main_capability(axis: int, group: int) -> None:
     """
     if axis != 0:
         raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR)
-    if group > MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP:
+    if group > LOCAL_REDUCE_FRAGMENT_WIDTH:
         raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR)
 
 
@@ -331,11 +331,11 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
     if tile % group != 0:
         return False
     match group:
-        case _ if group <= 32:
-            return 32 % group == 0 and group < tile
+        case _ if group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+            return LOCAL_REDUCE_FRAGMENT_WIDTH % group == 0 and group < tile
         case _:
             return (
-                group % 32 == 0
+                group % LOCAL_REDUCE_FRAGMENT_WIDTH == 0
                 and group <= tile
                 and config.tile_m == 128
                 and config.cluster_m == 1
