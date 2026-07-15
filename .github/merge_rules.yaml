@@ -205,8 +205,8 @@
   - c10/metal/**
   approved_by:
   - malfet
-  - DenisVieriu97
   - kurtamohler
+  - jhavukainen
 
   mandatory_checks_name:
   - EasyCLA
@@ -466,6 +466,18 @@
   - Lint
   - pull
 
+- name: Higher order operators
+  patterns:
+  - torch/_higher_order_ops/**
+  - torch/_dynamo/variables/higher_order_ops.py
+  - docs/source/higher_order_ops/**
+  approved_by:
+  - bohnstingl
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Dynamo
   patterns:
   - torch/_dynamo/**
@@ -481,6 +493,7 @@
   - guilhermeleobas
   - rtimpe
   - trichmo
+  - hameerabbasi
   mandatory_checks_name:
   - EasyCLA
   - Lint
