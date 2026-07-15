@@ -10819,11 +10819,15 @@ class Switch(ExternKernel):
 
         if not isinstance(fx_operands, Sequence):
             raise AssertionError(type(fx_operands))
+        # Build fake_operands from FX nodes' metadata
+        # For FX Nodes, get the fake tensor from meta["val"]
+        # For non-Nodes (e.g., symbolic integers from sym_size lowering), pass directly
         fake_operands: list[Any] = []
         for fx_op in fx_operands:
             if isinstance(fx_op, Node):
                 fake_operands.append(fx_op.meta["val"])
             else:
+                # Symbolic integer or constant - pass directly
                 fake_operands.append(fx_op)
         fake_outputs = V.graph.current_node.meta["val"]
 
@@ -10847,6 +10851,7 @@ class Switch(ExternKernel):
 
         for subgraph in branches:
             if subgraph.graph is None:
+                # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
                     example_inputs=fake_operands,
@@ -10854,6 +10859,9 @@ class Switch(ExternKernel):
                 )
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
+                    # Force subgraph outputs to have the expected strides from
+                    # FakeTensor metadata. This ensures both branches produce
+                    # outputs with consistent strides.
                     subgraph.graph.graph_outputs = _require_exact_strides(
                         subgraph.graph.graph_outputs, fake_outputs
                     )
@@ -10885,7 +10893,10 @@ class Switch(ExternKernel):
                 if r_o.get_layout().offset != b_o.get_layout().offset:
                     raise AssertionError((i, r_o, b_o))
 
-        # Determine device from operands; fall back to selector tensor's device.
+        # Determine device from operands and predicate
+        # The predicate can be on a different device (e.g., CPU for control flow)
+        # while the data operands and outputs should be on the compute device, so
+        # using predicate device as a fallback.
         device = next(
             o.get_device()
             for o in operands + [selector]
@@ -10922,6 +10933,8 @@ class Switch(ExternKernel):
                 switch,
                 [(list, i)],
             )
+            # as the true and false outputs are equivalent,
+            # we can use either of them here as a "template"
             for i, (output, merged_output) in enumerate(
                 zip(ref_outputs, V.graph.current_node.meta["val"])
             )
@@ -10940,6 +10953,7 @@ class Switch(ExternKernel):
             )
             mutated_operand_indices |= OrderedSet(branch_mutated)
 
+        # Create MutationOutput for each mutated operand (for scheduler dependencies)
         switch.mutation_outputs = [
             MutationOutput(operands[idx].layout, operands[idx], switch)  # type: ignore[union-attr]
             for idx in sorted(mutated_operand_indices)

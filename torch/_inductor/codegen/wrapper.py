@@ -4665,7 +4665,9 @@ class PythonWrapperCodegen(CodeGen):
 
         # For cond, branches=[true, false] but True==1 and False==0, so reverse
         # the list so that index 0->false branch and index 1->true branch.
-        branches = list(reversed(node.branches)) if node.is_cond else list(node.branches)
+        branches = (
+            list(reversed(node.branches)) if node.is_cond else list(node.branches)
+        )
         num_branches = len(branches)
         for b_idx, branch in enumerate(branches):
             if b_idx == 0:
