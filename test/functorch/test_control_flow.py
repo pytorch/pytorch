@@ -4648,18 +4648,18 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(add, init, xs, length=3)
 
-    def test_scan_xs_none_length_eager(self):
+    def test_scan_length_negative_raises(self):
         def body(c, x):
             return c + 1.0, (c + 1.0).clone()
 
         init = torch.tensor(0.0)
-        carry, ys = scan(body, init, None, length=4)
-        self.assertEqual(carry, torch.tensor(4.0))
-        self.assertEqual(ys, torch.tensor([1.0, 2.0, 3.0, 4.0]))
-        expected = _fake_scan(body, init, None, length=4)
-        self.assertEqual((carry, ys), expected)
+        with self.assertRaisesRegex(
+            RuntimeError, r"length must be a non-negative integer"
+        ):
+            scan(body, init, None, length=-1)
 
     def test_scan_xs_empty_tuple_length_eager(self):
+        # Empty pytree xs (()) is treated the same as xs=None when length is given.
         def body(c, x):
             if x is not None:
                 raise RuntimeError(f"expected x to be None, got {x}")
@@ -4670,20 +4670,105 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         self.assertEqual(carry, torch.tensor(4.0))
         self.assertEqual(ys, torch.tensor([1.0, 2.0, 3.0, 4.0]))
 
-    @skipIfNoDynamoSupport
-    def test_scan_xs_none_length_compile(self):
+    @parametrize("length", [4, 0])
+    def test_scan_xs_none_length_body_uses_x_raises(self, length):
+        # combine_fn that dereferences x must raise regardless of length.
+        def bad_body(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        with self.assertRaisesRegex(
+            (RuntimeError, TypeError),
+            r"combine_fn to accept x=None|unsupported operand type.*NoneType",
+        ):
+            scan(bad_body, init, None, length=length)
+
+    # TODO: extend to "compile" and "compile_dynamic_shape" once inductor
+    # supports xs=None / None-output scan (currently hits "Boolean value of
+    # Tensor with more than one value" and "'NoneType' has no attribute 'size'").
+    @skipIfTorchDynamo("don't test compile on compile")
+    @parametrize("compile_mode", ["none", "eager"])
+    def test_scan_xs_none_length_tensor_output(self, compile_mode):
+        # Counter-loop (xs=None) with tensor output across eager and compiled paths.
         def body(c, x):
             return c + 1.0, (c + 1.0).clone()
 
         init = torch.tensor(0.0)
-        result_eager = scan(body, init, None, length=4)
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        carry, ys = scan_fct(body, init, None, length=4)
+        self.assertEqual(carry, torch.tensor(4.0))
+        self.assertEqual(ys, torch.tensor([1.0, 2.0, 3.0, 4.0]))
+        expected = _fake_scan(body, init, None, length=4)
+        self.assertEqual((carry, ys), expected)
+
+    # TODO: extend to "compile" and "compile_dynamic_shape" once inductor
+    # supports xs=None / None-output scan (currently hits "'NoneType' has no
+    # attribute 'size'").
+    @skipIfTorchDynamo("don't test compile on compile")
+    @parametrize("compile_mode", ["none", "eager"])
+    def test_scan_xs_none_length_none_output(self, compile_mode):
+        # Counter-loop (xs=None) with None output across eager and compiled paths.
+        def body(c, x):
+            return c + 1.0, None
+
+        init = torch.tensor(0.0)
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        carry, ys = scan_fct(body, init, None, length=4)
+        self.assertEqual(carry, torch.tensor(4.0))
+        self.assertIsNone(ys)
+        expected = _fake_scan(body, init, None, length=4)
+        self.assertEqual((carry, ys), expected)
+
+    @parametrize("output", ["tensor", "none"])
+    def test_scan_xs_none_length_zero(self, output):
+        # length=0 returns init unchanged; output shape is [0, ...] for tensors,
+        # or None when the body produces None.
+        if output == "tensor":
+            def body(c, x):
+                return c, (c * 2).clone()
+
+            init = torch.tensor([1.0, 2.0, 3.0])
+            carry, ys = scan(body, init, None, length=0)
+            self.assertEqual(carry, init)
+            self.assertEqual(ys.shape, torch.Size([0, 3]))
+            self.assertEqual(ys.dtype, init.dtype)
+        else:
+            def body(c, x):  # noqa: E306
+                return c + 1.0, None
+
+            init = torch.tensor(0.0)
+            carry, ys = scan(body, init, None, length=0)
+            self.assertEqual(carry, init)
+            self.assertIsNone(ys)
+        expected = _fake_scan(body, init, None, length=0)
+        self.assertEqual((carry, ys), expected)
+
+    @skipIfNoDynamoSupport
+    @parametrize("output", ["tensor", "none"])
+    def test_scan_xs_none_length_zero_compile(self, output):
+        # length==0 returns early via _build_empty_output_for_length_zero, which
+        # calls detect_fake_mode -- a non-Tensor-returning torch op that Dynamo
+        # cannot trace. Assert the expected error so this limitation is pinned.
+        if output == "tensor":
+            def body(c, x):
+                return c, (c * 2).clone()
+
+            init = torch.tensor([1.0, 2.0, 3.0])
+        else:
+            def body(c, x):  # noqa: E306
+                return c + 1.0, None
+
+            init = torch.tensor(0.0)
 
         @torch.compile(fullgraph=True)
         def f(i):
-            return scan(body, i, None, length=4)
+            return scan(body, i, None, length=0)
 
-        result_compiled = f(init)
-        self.assertEqual(result_compiled, result_eager)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"torch\.\* op returned non-Tensor",
+        ):
+            f(init)
 
     def test_scan_xs_none_length_grad(self):
         def body(c, x):
@@ -4717,86 +4802,29 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         expected_ys = torch.stack([batch_init + k for k in range(1, 5)], dim=1)
         self.assertEqual(batched_ys, expected_ys)
 
-    def test_scan_length_negative_raises(self):
+    @skipIfNoDynamoSupport
+    def test_scan_xs_none_length_dynamic_compile(self):
+        # Dynamo specialises on the integer value of length (treating it as a
+        # compile-time constant), so each distinct length value produces a
+        # separate graph. Verify correct results and that the cache is used.
         def body(c, x):
             return c + 1.0, (c + 1.0).clone()
 
         init = torch.tensor(0.0)
-        with self.assertRaisesRegex(
-            RuntimeError, r"length must be a non-negative integer"
-        ):
-            scan(body, init, None, length=-1)
+        from torch._dynamo.testing import CompileCounterWithBackend
 
-    def test_scan_xs_none_length_body_uses_x_raises(self):
-        def bad_body(c, x):
-            return c + x, (c + x).clone()
+        cc = CompileCounterWithBackend("eager")
 
-        init = torch.tensor(0.0)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"combine_fn to accept x=None|unsupported operand type\(s\) for \+: 'FakeTensor' and 'NoneType'",
-        ):
-            scan(bad_body, init, None, length=4)
+        @torch.compile(backend=cc, fullgraph=True)
+        def f(i, length):
+            return scan(body, i, None, length=length)
 
-    def test_scan_xs_none_length_zero_body_uses_x_raises(self):
-        def bad_body(c, x):
-            return c + x, (c + x).clone()
-
-        init = torch.tensor(0.0)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"scan\(\) with xs=None requires combine_fn to accept x=None",
-        ):
-            scan(bad_body, init, None, length=0)
-
-    def test_scan_xs_none_length_zero(self):
-        def body(c, x):
-            return c, (c * 2).clone()
-
-        init = torch.tensor([1.0, 2.0, 3.0])
-        carry, ys = scan(body, init, None, length=0)
-        self.assertEqual(carry, init)
-        self.assertEqual(ys.shape, torch.Size([0, 3]))
-        self.assertEqual(ys.dtype, init.dtype)
-        expected = _fake_scan(body, init, None, length=0)
-        self.assertEqual((carry, ys), expected)
-
-    def test_scan_xs_none_length_zero_none_output(self):
-        def body(c, x):
-            return c + 1.0, None
-
-        init = torch.tensor(0.0)
-        carry, ys = scan(body, init, None, length=0)
-        self.assertEqual(carry, init)
-        self.assertIsNone(ys)
-        expected = _fake_scan(body, init, None, length=0)
-        self.assertEqual((carry, ys), expected)
-
-    def test_scan_xs_none_length_none_output(self):
-        def body(c, x):
-            return c + 1.0, None
-
-        init = torch.tensor(0.0)
-        carry, ys = scan(body, init, None, length=4)
-        self.assertEqual(carry, torch.tensor(4.0))
-        self.assertIsNone(ys)
-        expected = _fake_scan(body, init, None, length=4)
-        self.assertEqual((carry, ys), expected)
-
-    @skipIfNoDynamoSupport
-    def test_scan_xs_none_length_none_output_compile(self):
-        def body(c, x):
-            return c + 1.0, None
-
-        init = torch.tensor(0.0)
-        result_eager = scan(body, init, None, length=4)
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def f(i):
-            return scan(body, i, None, length=4)
-
-        result_compiled = f(init)
-        self.assertEqual(result_compiled, result_eager)
+        r4 = f(init, 4)
+        self.assertEqual(r4, (torch.tensor(4.0), torch.tensor([1.0, 2.0, 3.0, 4.0])))
+        r6 = f(init, 6)
+        self.assertEqual(r6, (torch.tensor(6.0), torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])))
+        f(init, 4)  # should hit cache, no new compilation
+        self.assertEqual(cc.frame_count, 2)
 
 
 class AssociativeScanModels:

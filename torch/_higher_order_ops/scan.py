@@ -33,8 +33,9 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
     validate_subgraph_args_types,
 )
+from torch._guards import detect_fake_mode
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -82,24 +83,22 @@ def _build_empty_output_for_length_zero(
     combine_fn: Callable, init: pytree.PyTree
 ) -> pytree.PyTree:
     """Probe combine_fn(init, None) to learn the output structure for length==0."""
-    try:
-        _, sample_y = combine_fn(init, None)
-    except Exception as e:
-        raise RuntimeError(
-            "scan() with xs=None requires combine_fn to accept x=None. "
-            f"Got error when calling combine_fn(init, None): {e}"
-        ) from e
-    sample_y_leaves, sample_y_spec = pytree.tree_flatten(sample_y)
-    empty_outs = pytree.tree_unflatten(
-        [
-            torch.empty([0] + list(leaf.shape), dtype=leaf.dtype, device=leaf.device)
-            if isinstance(leaf, torch.Tensor)
-            else leaf
-            for leaf in sample_y_leaves
-        ],
-        sample_y_spec,
+    fake_mode = detect_fake_mode(pytree.tree_leaves(init)) or FakeTensorMode()
+    with fake_mode:
+        fake_init = pytree.tree_map(
+            lambda t: fake_mode.from_tensor(t)
+            if isinstance(t, torch.Tensor) and not isinstance(t, FakeTensor)
+            else t,
+            init,
+        )
+        _, sample_y = combine_fn(fake_init, None)
+        # _, sample_y = combine_fn(init, None)
+    return pytree.tree_map(
+        lambda l: torch.empty([0] + list(l.shape), dtype=l.dtype, device=l.device)
+        if isinstance(l, torch.Tensor)
+        else l,
+        sample_y,
     )
-    return empty_outs
 
 
 def scan(
@@ -141,10 +140,12 @@ def scan(
     Kwargs:
         dim (int): the dimension to scan over, default 0.
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
-        length (int or None): Number of scan iterations. When ``xs`` has leaves, ``length`` must equal
-            ``xs.shape[dim]`` and is used only as a consistency check. When ``xs`` has no leaves (``None``
-            or empty pytree), ``length`` drives the number of iterations and ``combine_fn`` receives
-            ``x=None`` each step. Default ``None``.
+        length (int or None): Optional number of scan iterations, default ``None``.
+            When ``xs`` has tensor leaves, ``length`` is optional; if given it must equal
+            ``xs.shape[dim]`` and serves only as a consistency check (no constraint when
+            ``length`` is ``None``). When ``xs`` has no leaves (``None`` or empty pytree),
+            ``length`` drives the number of iterations and ``combine_fn`` receives
+            ``x=None`` each step.
 
     Returns:
         final_carry (torch.Tensor or pytree with tensor leaves),
@@ -205,6 +206,7 @@ def scan(
         return init, []
 
     def _validate_input(cfn, lxs, linit, d, r):
+        # Basic arguments check
         if not callable(cfn):
             raise RuntimeError(f"Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
@@ -212,12 +214,14 @@ def scan(
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
 
+        # Checks for init
         if len(linit) == 0:
             raise RuntimeError("scan() operator requires init leaves.")
         for x in linit:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All init leaves must be a Tensor but got {x}")
 
+        # Checks for xs
         for x in lxs:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
@@ -423,9 +427,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         for leaf_idx, leaf in enumerate(y_leaves):
             if isinstance(leaf, torch.Tensor):
                 stacked = torch.stack([flat_y[leaf_idx] for flat_y in flat_ys])
-                results.append(
-                    torch.movedim(stacked, 0, dim) if dim < stacked.ndim else stacked
-                )
+                results.append(stacked)
             else:
                 results.append(leaf)
 
