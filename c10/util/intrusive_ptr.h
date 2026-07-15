@@ -1206,7 +1206,7 @@ inline void decref(intrusive_ptr_target* self) {
 }
 
 template <typename T>
-inline T* make_weak(T* self) {
+[[nodiscard]] inline T* make_weak(T* self) {
   // NB: 'this' is a strong pointer, but we return a weak pointer
   auto ptr = c10::intrusive_ptr<T>::reclaim(self);
   c10::weak_intrusive_ptr<T> wptr(ptr);
@@ -1214,7 +1214,7 @@ inline T* make_weak(T* self) {
   return wptr.release();
 }
 
-inline uint32_t use_count(intrusive_ptr_target* self) {
+[[nodiscard]] inline uint32_t use_count(intrusive_ptr_target* self) {
   auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
   auto r = ptr.use_count();
   ptr.release();
