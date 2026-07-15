@@ -291,6 +291,58 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             res = torch.compile(f, backend="inductor")(*inputs)
             self.assertTrue(torch.allclose(res, f(*inputs)))
 
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
+    def test_inductor_preserves_effect_order_across_kernel_types(self):
+        # Two ORDERED-effectful ops must keep program order even when they lower
+        # to different inductor kernel types (op_a -> FallbackKernel, op_b ->
+        # _CollectiveKernel).
+        import torch.utils._pytree as pytree
+        from torch._inductor import ir
+        from torch._inductor.lowering import lowerings, register_lowering
+        from torch._inductor.utils import run_and_get_code
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::op_a", "(Tensor x) -> ()", lib=lib)
+            torch.library.define("mylib::op_b", "(Tensor x) -> Tensor", lib=lib)
+            lib.impl("op_a", lambda x: None, "CompositeExplicitAutograd")
+            lib.impl("op_a", lambda x: None, "Meta")
+            lib.impl("op_b", lambda x: x + 1, "CompositeExplicitAutograd")
+            lib.impl("op_b", lambda x: torch.empty_like(x), "Meta")
+            torch.library._register_effectful_op("mylib::op_a", _EffectType.ORDERED)
+            torch.library._register_effectful_op("mylib::op_b", _EffectType.ORDERED)
+
+            op_b = torch.ops.mylib.op_b.default
+
+            def op_b_lowering(*args):
+                return pytree.tree_map(
+                    lambda t: ir.TensorBox.create(t) if isinstance(t, ir.IRNode) else t,
+                    ir._CollectiveKernel.create_out_of_place(op_b, *args),
+                )
+
+            register_lowering(op_b)(op_b_lowering)
+            try:
+
+                def f(x):
+                    torch.ops.mylib.op_a(x)
+                    y = torch.ops.mylib.op_b(x)
+                    return y * 10
+
+                torch._dynamo.reset()
+                _, (code,) = run_and_get_code(
+                    torch.compile(f, fullgraph=True, backend="inductor"),
+                    torch.ones(8),
+                )
+                # op_a must be emitted before op_b; a dropped ordering dep lets
+                # the scheduler reorder op_b ahead of op_a.
+                pos_a = code.find("op_a")
+                pos_b = code.find("op_b")
+                self.assertNotEqual(pos_a, -1, "op_a missing from generated code")
+                self.assertNotEqual(pos_b, -1, "op_b missing from generated code")
+                self.assertLess(pos_a, pos_b, "op_a must be emitted before op_b")
+            finally:
+                del lowerings[op_b]
+
     def test_compile_aot_eager_requires_grad(self):
         def f(x):
             torch.ops.aten._print("moo")
