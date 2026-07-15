@@ -278,9 +278,9 @@ using namespace mpp::tensor_ops;
 
 template <int X, int Y, int Z>
 struct StaticInt3 {
-  static constexpr int x = X;
-  static constexpr int y = Y;
-  static constexpr int z = Z;
+  static constexpr constant int x = X;
+  static constexpr constant int y = Y;
+  static constexpr constant int z = Z;
 };
 
 // One 2D convolution per (batch, output-depth) slice; the KD loop accumulates
