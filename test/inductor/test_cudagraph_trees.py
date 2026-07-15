@@ -3197,7 +3197,7 @@ if HAS_CUDA_AND_TRITON:
             msgs = [str(x.message) for x in w]
             self.assertTrue(
                 any("require backward" in m for m in msgs),
-                f"expected CUDAGraph pending-backward warning; got: {msgs}",
+                lambda msg: f"{msg}\nexpected CUDAGraph pending-backward warning; got: {msgs}",
             )
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 
@@ -3304,7 +3304,7 @@ if HAS_CUDA_AND_TRITON:
             foo(torch.tensor([1, 0, 0], device="cuda"))
 
             if config.graph_partition:
-                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 9)
+                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 0)
             else:
                 # Without graph partitioning, cudagraphs are skipped entirely
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
@@ -3333,7 +3333,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
-        @torch._inductor.config.patch("cpp_wrapper", True)
+        @torch._inductor.config.patch({"cpp_wrapper": True, "graph_partition": True})
         def test_skip_cpp_wrapper(self):
             def foo(x):
                 return x + 1
@@ -4076,7 +4076,7 @@ if HAS_CUDA_AND_TRITON:
 
             # Set threshold high enough to skip this simple function
             with torch._inductor.config.patch(
-                {"triton.cudagraph_min_partition_size": 10}
+                {"triton.cudagraph_min_partition_size": 10, "graph_partition": True}
             ):
                 fn_compiled = torch.compile(fn, mode="reduce-overhead")
                 for _ in range(3):

@@ -96,6 +96,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
     skipIfHpu,
@@ -1910,7 +1911,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             b = max((1, 2), (3, 4))
             return a, b
 
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         result = opt_fn()
         self.assertEqual(result, ((1, 2), (3, 4)))
 
@@ -10166,6 +10167,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(RuntimeError):
             fn(torch.tensor([9, 0]))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_sym_min_simplifies_with_checked_upper_bound(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            x0, _ = x.tolist()
+            torch._check(x0 <= 5)
+            if torch.sym_min(x0, 5) == x0:
+                return torch.tensor(True)
+            return torch.tensor(False)
+
+        self.assertEqual(fn(torch.tensor([3, 5])), torch.tensor(True))
+
     def test_unbacked_2d_expand(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="eager")
         def func(a, b):
@@ -10210,7 +10223,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         )
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(y, 0)
-        opt = torch.compile(fn, fullgraph=True)
+        opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         opt(*inputs)
         with self.assertRaises(RuntimeError):
             inputs = (
@@ -10815,6 +10828,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         torch.compile(my_dyn_fn, backend=counter)(x012)
         self.assertEqual(counter.frame_count, 3)
 
+    @recover_orig_fp32_precision
     def test_recompile_on_global_state_change(self):
         last_state = []
         cnt = 0
@@ -15655,7 +15669,7 @@ fn
     @unittest.expectedFailure
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_return_obj___build_class__(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn(t):
             # class is created with an EphemeralSource and
             # UserDefinedClassVariable has no `reconstruct` method
@@ -16372,7 +16386,7 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
             torch._dynamo.exc.Unsupported,
             r"requires_grad_\(\)(.|\n)*\.detach\(\)",
         ):
-            torch.compile(fn, fullgraph=True)(x)
+            torch.compile(fn, fullgraph=True)(x)  # noqa: UNSPECIFIED_BACKEND
 
         # Without fullgraph, falls back to eager and is correct
         result = torch.compile(fn, backend="eager")(x)
@@ -16392,7 +16406,7 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
             torch._dynamo.exc.Unsupported,
             r"requires_grad_\(\)(.|\n)*\.detach\(\)",
         ):
-            torch.compile(fn, fullgraph=True)(x)
+            torch.compile(fn, fullgraph=True)(x)  # noqa: UNSPECIFIED_BACKEND
 
         # Without fullgraph, falls back to eager and is correct
         result = torch.compile(fn, backend="eager")(x)

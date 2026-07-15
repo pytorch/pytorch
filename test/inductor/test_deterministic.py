@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     skipIfRocm,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -48,6 +49,7 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181336")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -141,7 +143,7 @@ class DeterministicTest(TestCase):
             ref = out_full[:size].contiguous()
             self.assertTrue(
                 torch.equal(ref, out),
-                f"persistent reduction diverged at size={size} (FULL={FULL})",
+                lambda msg: f"{msg}\npersistent reduction diverged at size={size} (FULL={FULL})",
             )
             size //= 2
 
@@ -218,7 +220,7 @@ class DeterministicTest(TestCase):
             self.assertTrue(
                 "The result is bitwise equivalent to the previously saved result"
                 in out.stdout.decode(),
-                f"stdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}",
+                lambda msg: f"{msg}\nstdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}",
             )
 
 
