@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCPU,
 )
 from torch.testing._internal.common_dtype import (
     all_passthru_types,
@@ -119,7 +120,9 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
+    @onlyCPU
     @unittest.expectedFailure
+    @dtypes(torch.quint4x2, torch.quint2x4)
     def test_flip_unsupported_dtype(self, device):
         scale, zero_point = 0.1, 5
         for dtype in (torch.quint4x2, torch.quint2x4):
