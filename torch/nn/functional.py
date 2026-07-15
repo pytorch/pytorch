@@ -3323,7 +3323,7 @@ def gaussian_nll_loss(
             in the input (heteroscedastic), or a single one (homoscedastic),
             or a positive scalar value to be used for all expectations.
         full (bool, optional): Whether to include the constant term in the loss calculation. Default: ``False``.
-        eps (float, optional): Value added to var, for stability. Default: 1e-6.
+        eps (float, optional): Value used to clamp ``var`` to a minimum, for stability. Default: 1e-6.
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output is the average of all batch member losses,
