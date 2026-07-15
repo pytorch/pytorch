@@ -507,18 +507,13 @@ def _nvgemm_run(
     aux_tensors: tuple = (),
     swap_ab: bool = False,
 ):
-    swap_ab_final_out = None
     if swap_ab and len(input_tensors) >= 4:
         a, b, sa, sb = input_tensors[:4]
         input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
-        # Kernel computes (N, M) but the caller expects (M, N): write into a
-        # contiguous (N, M) temp and transpose-copy back after the run.
-        import torch
-
-        swap_ab_final_out = out
-        out = torch.empty(
-            out.shape[1], out.shape[0], dtype=out.dtype, device=out.device
-        )
+        # Swapped GEMM computes (N, M) = out.t(); write it zero-copy into a
+        # transposed (column-major) view of the real (M, N) output -- no temp
+        # buffer / copy (the kernel handles column-major C).
+        out = out.t()
     from cutlass.operators.artifact import CompiledArtifact
 
     from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
@@ -596,8 +591,6 @@ def _nvgemm_run(
         workspace=workspace,
         assume_supported_args=True,
     )
-    if swap_ab_final_out is not None:
-        swap_ab_final_out.copy_(out.t())
 
 
 # Patch both the canonical definition (integration_utils.mma) for callers that

@@ -133,17 +133,14 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         _ensure_fp4_dtype_registered()
 
         # For swap_ab, transpose mat_a/mat_b and swap scales before creating
-        # GemmArguments. The kernel computes (N, M) but the caller expects
-        # (M, N): write into a contiguous (N, M) temp and transpose-copy back
-        # after the run.
-        swap_ab_final_out = None
+        # GemmArguments. The swapped GEMM computes (N, M) = out.t(); write it
+        # zero-copy into a transposed (column-major) view of the real (M, N)
+        # output, so no temp buffer / copy is needed (the kernel handles a
+        # column-major C via its out-layout detection).
         if self.swap_ab and len(input_tensors) >= 4:
             a, b, sa, sb = input_tensors[:4]
             input_tensors = (b.t(), a.t(), sb, sa) + input_tensors[4:]
-            swap_ab_final_out = out
-            out = torch.empty(
-                out.shape[1], out.shape[0], dtype=out.dtype, device=out.device
-            )
+            out = out.t()
 
         helper_kwargs: dict[str, Any] = {}
         if self.variant == GemmVariant.SCALED_GEMM:
@@ -231,8 +228,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
                 workspace=workspace,
                 assume_supported_args=True,
             )
-            if swap_ab_final_out is not None:
-                swap_ab_final_out.copy_(out.t())
 
         return run_kernel
 
