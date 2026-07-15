@@ -221,7 +221,10 @@ def _warn_nvmath_unavailable_once() -> None:
     if _nvmath_warned:
         return
     _nvmath_warned = True
-    reason = _unavailable_reason(_NVMATH_DEPS)
+    reason = (
+        _unavailable_reason(_NVMATH_DEPS)
+        or "cuBLASLt lacks cublasLtGroupedMatrixLayoutCreate"
+    )
     warnings.warn(
         f"_foreach_mm: nvmath cublasLt grouped GEMM unavailable ({reason}), "
         f"using slower fallback.",

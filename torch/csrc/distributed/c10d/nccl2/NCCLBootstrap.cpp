@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <ATen/cuda/CUDAContext.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -29,11 +31,11 @@ NCCLBootstrap::NCCLBootstrap(
     std::shared_ptr<CudaApi> cuda_api,
     std::chrono::milliseconds timeout)
     : timeout_(timeout),
-      store_(store),
+      store_(std::move(store)),
       created_internal_store_(false),
       device_(device),
-      nccl_api_(nccl_api),
-      cuda_api_(cuda_api) {
+      nccl_api_(std::move(nccl_api)),
+      cuda_api_(std::move(cuda_api)) {
   // Rank/size come from the c10d Backend ctor. Upstream torchcomms queried
   // these from TORCHCOMM_RANK/SIZE env (query_ranksize); under c10d they are
   // known explicitly, so we use them directly.
@@ -318,3 +320,5 @@ ncclComm_t NCCLBootstrap::createNcclComm(
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
