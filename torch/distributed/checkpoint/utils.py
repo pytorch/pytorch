@@ -47,7 +47,7 @@ def _all_gather_keys(
     keys = list(local_dict.keys())
     gathered_keys: list[list[str]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
 
-    dist.all_gather_object(gathered_keys, keys, group=group, weights_only=True)
+    dist.all_gather_object(gathered_keys, keys, group=group)
     return set(itertools.chain.from_iterable(gathered_keys))
 
 
@@ -120,7 +120,6 @@ class _DistWrapper:
                 object_list=object_list,
                 group=self.group,
                 src=self.global_coordinator_rank,
-                weights_only=True,
             )
         return cast(T, object_list[0])
 
@@ -138,7 +137,6 @@ class _DistWrapper:
                 object_gather_list=gather_objs if self.is_coordinator else None,
                 dst=self.global_coordinator_rank,
                 group=self.group,
-                weights_only=True,
             )
             result = gather_objs
         else:
@@ -151,7 +149,7 @@ class _DistWrapper:
             gather_objs = cast(list[T], [None] * dist.get_world_size(self.group))
 
             dist.all_gather_object(
-                object_list=gather_objs, obj=object, group=self.group, weights_only=True
+                object_list=gather_objs, obj=object, group=self.group
             )
         else:
             gather_objs = [object]
@@ -166,7 +164,6 @@ class _DistWrapper:
                 scatter_object_input_list=object_list if self.is_coordinator else None,
                 src=self.global_coordinator_rank,
                 group=self.group,
-                weights_only=True,
             )
 
             local_reply = gather_result[0]

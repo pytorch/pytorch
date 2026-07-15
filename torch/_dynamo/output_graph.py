@@ -2538,7 +2538,10 @@ class OutputGraph(OutputGraphCommon):
                             raise AssertionError(
                                 "cur_tx.post_prune_cell_and_freevars must be set for nested frames"
                             )
-                        cg(cur_tx.post_prune_cell_and_freevars[cell])
+                        var = cur_tx.post_prune_cell_and_freevars[cell]
+                        if isinstance(var, NullVariable):
+                            raise AssertionError("Can't codegen null cell")
+                        cg(var)
                 cg.append_output(create_build_tuple(len(freevars)))
                 cur_tx = cur_tx.parent
                 tx_cnt += 1
@@ -2726,9 +2729,7 @@ class OutputGraph(OutputGraphCommon):
             ):
                 all_states: list[Any] = [None] * compile_pg.size()
 
-                dist.all_gather_object(
-                    all_states, ds.local_state, group=compile_pg, weights_only=True
-                )
+                dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
 
                 ds.all_states = all_states
             # Clear speculation log, because are tracing may diverge due to

@@ -17,8 +17,10 @@
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/py/PyBackend.hpp>
+#include <torch/csrc/distributed/c10d/py/PyProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
+#include <torch/csrc/utils/pyobject_preservation.h>
 
 #ifdef USE_C10D_GLOO
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
@@ -2748,15 +2750,23 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::Device& device,
                  const ::c10d::ProcessGroup::BackendType& backendType,
-                 const std::optional<c10::intrusive_ptr<::c10d::Backend>>&
-                     backend) {
+                 py::object backend_obj) {
+                std::optional<c10::intrusive_ptr<::c10d::Backend>> backend;
+                if (!backend_obj.is_none()) {
+                  backend =
+                      backend_obj.cast<c10::intrusive_ptr<::c10d::Backend>>();
+                  auto* pyobj =
+                      torch::utils::PyObjectPreservation::get_or_init(
+                          **backend,
+                          [&]() { return Py_NewRef(backend_obj.ptr()); });
+                  Py_DECREF(pyobj);
+                }
+                py::gil_scoped_release nogil{};
                 self->setBackend(device.type(), backendType, backend);
               },
               py::arg("device"),
               py::arg("backend_type"),
-              py::arg("backend") =
-                  std::optional<c10::intrusive_ptr<::c10d::Backend>>(),
-              py::call_guard<py::gil_scoped_release>())
+              py::arg("backend") = py::none())
           .def(
               "get_backend",
               [](const py::object& self, const c10::Device& device) {
@@ -2963,8 +2973,18 @@ Arguments:
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
   // and should be removed once all tests are transitioned
   auto backend =
-      py::class_<::c10d::Backend, c10::intrusive_ptr<::c10d::Backend>>(
-          module, "Backend")
+      intrusive_ptr_no_gil_destructor_trampoline_class_<
+          ::c10d::Backend,
+          ::c10d::PyBackend>(module, "Backend")
+          .def(
+              py::init(
+                  [](int rank,
+                     int size) -> c10::intrusive_ptr<::c10d::Backend> {
+                    py::gil_scoped_release nogil{};
+                    return c10::make_intrusive<::c10d::PyBackend>(rank, size);
+                  }),
+              py::arg("rank"),
+              py::arg("size"))
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
@@ -3423,7 +3443,77 @@ Arguments:
 
             Returns:
               A dictionary containing the memory statistics.
-            )");
+            )")
+          .def(
+              "allreduce_sparse",
+              &::c10d::Backend::allreduce_sparse,
+              py::arg("tensors"),
+              py::arg("opts") = ::c10d::AllreduceOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "all_gather_single_coalesced",
+              &::c10d::Backend::all_gather_single_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "reduce_scatter_single_coalesced",
+              &::c10d::Backend::reduce_scatter_single_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_register_on_completion_hook",
+              [](const c10::intrusive_ptr<::c10d::Backend>& self,
+                 py::object hook) {
+                self->registerOnCompletionHook(
+                    [hookWrapper =
+                         ::c10d::PythonOnCompletionHook(std::move(hook))](
+                        const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
+                      hookWrapper(workInfo);
+                    });
+              },
+              py::arg("hook"),
+              py::call_guard<py::gil_scoped_acquire>())
+          .def(
+              "_wait_for_pending_works",
+              &::c10d::Backend::waitForPendingWorks,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_enable_collectives_timing",
+              &::c10d::Backend::enableCollectivesTiming,
+              py::call_guard<py::gil_scoped_acquire>())
+          .def(
+              "split",
+              &::c10d::Backend::split,
+              py::arg("store"),
+              py::arg("ranks"),
+              py::arg("opts"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "merge",
+              &::c10d::Backend::merge,
+              py::arg("store"),
+              py::arg("opts"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_group_uid",
+              &::c10d::Backend::setGroupUid,
+              py::arg("pg_uid"),
+              py::call_guard<py::gil_scoped_release>())
+          .def_property(
+              "bound_device_id",
+              &::c10d::Backend::getBoundDeviceId,
+              &::c10d::Backend::setBoundDeviceId)
+          .def_property_readonly("options", &::c10d::Backend::getBackendOptions)
+          .def(
+              "get_error",
+              &::c10d::Backend::getError,
+              py::call_guard<py::gil_scoped_release>());
 
   // base Backend::Options binding
   // TODO: Maybe we can consider how to merge this with
