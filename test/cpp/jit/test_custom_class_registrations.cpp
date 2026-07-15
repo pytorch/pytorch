@@ -318,7 +318,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
       std::stringstream err;
       err << "Expected " << input_names_.size() << " inputs, but got "
           << inputs.size() << '!';
-      throw std::runtime_error(err.str());
+      throw std::runtime_error(std::move(err).str());
     }
     for (size_t i = 0; i < inputs.size(); ++i) {
       environment[input_names_[i]] = inputs[i];
@@ -341,7 +341,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
         } else {
           std::stringstream err;
           err << "Instruction referenced unknown value " << input_name << '!';
-          throw std::runtime_error(err.str());
+          throw std::runtime_error(std::move(err).str());
         }
       }
 
@@ -361,7 +361,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
       } else {
         std::stringstream err;
         err << "Unknown operator " << op << '!';
-        throw std::runtime_error(err.str());
+        throw std::runtime_error(std::move(err).str());
       }
 
       // Write back result into environment
@@ -607,7 +607,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
               }
             }
             ss << ']';
-            return ss.str();
+            return std::move(ss).str();
           });
   // clang-format off
         // The following will fail with a static assert telling you you have to

@@ -420,7 +420,7 @@ def _templated_ring_attention(
 
     sdpa_merger = _SDPAMerger(_cp_options.convert_to_f32, seq_dim=seq_dim)
 
-    rest: list[Any]
+    saved_rest: list[Any] | None = None
     out: torch.Tensor
     logsumexp: torch.Tensor
 
@@ -479,10 +479,13 @@ def _templated_ring_attention(
             is_causal=is_causal_behavior.value,
             **kwargs,
         )
+        if saved_rest is None:
+            saved_rest = rest
         sdpa_merger.step(out, logsumexp, partial)
 
-    # pyrefly: ignore [unbound-name]
-    return *sdpa_merger.results(), *rest
+    if saved_rest is None:
+        raise AssertionError("No SDPA op was executed in ring attention forward")
+    return *sdpa_merger.results(), *saved_rest
 
 
 def _templated_ring_attention_backward(
@@ -569,6 +572,13 @@ def _templated_ring_attention_backward(
                 )
 
             kwargs[grad_out_name] = dout
+            iter_kwargs = kwargs
+            if _cp_options.enable_load_balance and i > 0:
+                iter_kwargs = dict(kwargs)
+                if "max_q" in iter_kwargs:
+                    iter_kwargs["max_q"] = q.shape[seq_dim]
+                if "max_k" in iter_kwargs:
+                    iter_kwargs["max_k"] = k.shape[seq_dim]
             # See https://github.com/pytorch/pytorch/blob/release/2.4/aten/src/ATen/native/native_functions.yaml#L14695
             # for the SDPA kernel definitions.
             grad_query_, grad_key_, grad_value_, *rest = op(
@@ -578,7 +588,7 @@ def _templated_ring_attention_backward(
                 out=out_,
                 logsumexp=lse,
                 is_causal=is_causal_behavior.value,
-                **kwargs,
+                **iter_kwargs,
             )
         else:
             grad_query_ = torch.zeros_like(query, dtype=accum_dtype)

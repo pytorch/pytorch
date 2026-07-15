@@ -4,6 +4,7 @@ import math
 from typing import NamedTuple, Tuple, Optional, Callable, Type
 
 from torch import Tensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 
 import cutlass
 import cutlass.cute as cute
@@ -14,7 +15,6 @@ from cutlass.cute.nvgpu import warp
 
 from .compile_utils import make_fake_tensor as fake_tensor
 from .cute_dsl_utils import (
-    ensure_varlen_n_supported,
     mlir_namedtuple,
     get_device_capacity,
     get_max_active_clusters,
@@ -23,20 +23,13 @@ from .cute_dsl_utils import (
 from .epi_composable import ComposableEpiMixin
 from .epi_ops import (
     ColVecLoad,
-    GroupedColVecReduce,
-    GroupedRowVecReduce,
     RowVecLoad,
     RowVecTupleLoad,
     ColVecTupleLoad,
+    GroupedLocalReduce,
     Scalar,
-    TileLoad,
     TileTupleLoad,
     TileStore,
-    colvec_reduce_accumulate,
-    grouped_colvec_reduce_accumulate,
-    grouped_colvec_reduce_accumulate_amax_abs,
-    grouped_rowvec_reduce_accumulate,
-    grouped_rowvec_reduce_value,
 )
 from .gemm_sm80 import GemmSm80
 from .gemm_sm90 import GemmSm90
@@ -45,7 +38,6 @@ from .gemm_sm120 import GemmSm120
 from .gemm_default_epi import GemmDefaultEpiMixin
 from .gemm_tvm_ffi_utils import (
     get_major,
-    perm3d,
     perm3d_single,
     make_scheduler_args,
     make_varlen_args,
@@ -63,6 +55,63 @@ from .activation import act_fn_map, gate_fn_map
 from .rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_seed
 
 
+_tensor_epilogue_fns: dict[str, Callable] = {}
+_local_reduce_combine_fns: dict[str, Callable] = {}
+_local_reduce_finalize_fns: dict[str, Callable] = {}
+
+
+def power_of_2_divisibility(value: int, max_divisibility: int) -> int:
+    value = abs(int(value))
+    if value == 0:
+        return max_divisibility
+    divisibility = 1
+    while divisibility * 2 <= max_divisibility and value % (divisibility * 2) == 0:
+        divisibility *= 2
+    return divisibility
+
+
+def tensor_stride_divisibility(
+    tensor: Tensor | None,
+    dtype: Type[cutlass.Numeric],
+    leading_dim: int,
+) -> int:
+    """Return the strongest 16-byte-capped layout contract true for a tensor."""
+    if tensor is None:
+        return 1
+    max_divisibility = div_for_dtype(dtype)
+    divisibility = max_divisibility
+    for dim, stride in enumerate(tensor.stride()):
+        if dim != leading_dim:
+            divisibility = min(
+                divisibility, power_of_2_divisibility(stride, max_divisibility)
+            )
+    if is_fake_tensor(tensor) or tensor.is_meta:
+        # AOT inputs have no real pointer; reuse this contract only when the
+        # runtime tensor has the allocator-backed base alignment assumed here.
+        return divisibility
+    element_bytes = max(dtype.width // 8, 1)
+    return min(
+        divisibility,
+        power_of_2_divisibility(tensor.data_ptr() // element_bytes, max_divisibility),
+    )
+
+
+def register_tensor_epilogue_fn(
+    tensor_epilogue_key: str, tensor_epilogue_fn: Callable
+) -> None:
+    _tensor_epilogue_fns[tensor_epilogue_key] = tensor_epilogue_fn
+
+
+def register_local_reduce_fns(
+    combine_key: str,
+    combine_fn: Callable,
+    finalize_key: str,
+    finalize_fn: Callable,
+) -> None:
+    _local_reduce_combine_fns[combine_key] = combine_fn
+    _local_reduce_finalize_fns[finalize_key] = finalize_fn
+
+
 class GemmActMixin(ComposableEpiMixin):
     _epi_ops = (
         Scalar("alpha"),
@@ -73,23 +122,17 @@ class GemmActMixin(ComposableEpiMixin):
         RowVecTupleLoad("mTensorEpilogueRowVecBroadcasts"),
         ColVecTupleLoad("mTensorEpilogueColVecBroadcasts"),
         TileTupleLoad("mTensorEpilogueTiles"),
-        GroupedColVecReduce("mColVecReduce"),
-        GroupedRowVecReduce("mRowVecReduce"),
+        GroupedLocalReduce("mLocalReduce"),
         TileStore("mAuxOut"),
     )
     _extra_param_fields = (
         ("act_fn", cutlass.Constexpr, None),
         ("tensor_epilogue_fn", cutlass.Constexpr, None),
-        ("tensor_epilogue_uses_c", cutlass.Constexpr, False),
-        ("tensor_epilogue_returns_aux", cutlass.Constexpr, False),
         ("tensor_epilogue_arg_kinds", cutlass.Constexpr, ()),
-        ("local_reduce_feeds_main", cutlass.Constexpr, False),
-        ("local_reduce_source_from_epilogue", cutlass.Constexpr, False),
+        ("tensor_epilogue_returns_aux", cutlass.Constexpr, False),
+        ("tensor_epilogue_returns_local_reduce", cutlass.Constexpr, False),
         ("local_reduce_group", cutlass.Constexpr, 0),
-        ("local_reduce_dim", cutlass.Constexpr, 1),
-        ("local_reduce_op", cutlass.Constexpr, 0),
-        ("local_reduce_scale", cutlass.Constexpr, 1.0),
-        ("local_reduce_max_power", cutlass.Constexpr, 8),
+        ("local_reduce_axis", cutlass.Constexpr, 1),
     )
 
     @mlir_namedtuple
@@ -97,16 +140,13 @@ class GemmActMixin(ComposableEpiMixin):
         mAuxOut: cute.Tensor
         act_fn: cutlass.Constexpr[Optional[Callable]] = None
         tensor_epilogue_fn: cutlass.Constexpr[Optional[Callable]] = None
-        tensor_epilogue_uses_c: cutlass.Constexpr[bool] = False
-        tensor_epilogue_returns_aux: cutlass.Constexpr[bool] = False
         tensor_epilogue_arg_kinds: cutlass.Constexpr[tuple] = ()
-        local_reduce_feeds_main: cutlass.Constexpr[bool] = False
-        local_reduce_source_from_epilogue: cutlass.Constexpr[bool] = False
+        tensor_epilogue_returns_aux: cutlass.Constexpr[bool] = False
+        tensor_epilogue_returns_local_reduce: cutlass.Constexpr[bool] = False
         local_reduce_group: cutlass.Constexpr[int] = 0
-        local_reduce_dim: cutlass.Constexpr[int] = 1
-        local_reduce_op: cutlass.Constexpr[int] = 0
-        local_reduce_scale: cutlass.Constexpr[float] = 1.0
-        local_reduce_max_power: cutlass.Constexpr[int] = 8
+        local_reduce_axis: cutlass.Constexpr[int] = 1
+        local_reduce_combine_fn: cutlass.Constexpr[Optional[Callable]] = None
+        local_reduce_finalize_fn: cutlass.Constexpr[Optional[Callable]] = None
         alpha: Optional[Float32 | cute.Tensor] = None
         beta: Optional[Float32 | cute.Tensor] = None
         mRowVecBroadcast: Optional[cute.Tensor] = None
@@ -114,8 +154,7 @@ class GemmActMixin(ComposableEpiMixin):
         mTensorEpilogueRowVecBroadcasts: Optional[tuple[cute.Tensor, ...]] = None
         mTensorEpilogueColVecBroadcasts: Optional[tuple[cute.Tensor, ...]] = None
         mTensorEpilogueTiles: Optional[tuple[cute.Tensor, ...]] = None
-        mColVecReduce: Optional[cute.Tensor] = None
-        mRowVecReduce: Optional[cute.Tensor] = None
+        mLocalReduce: Optional[cute.Tensor] = None
         rounding_mode: cutlass.Constexpr[int] = RoundingMode.RN
         sr_seed: Optional[Int32 | cute.Tensor] = None
 
@@ -123,29 +162,25 @@ class GemmActMixin(ComposableEpiMixin):
 
     def epi_to_underlying_arguments(self, args: EpilogueArguments, *, loc=None, ip=None):
         self.rounding_mode = args.rounding_mode
-        self.aux_out_dtype = args.mAuxOut.element_type
-        self.aux_out_layout = cutlass.utils.LayoutEnum.from_tensor(args.mAuxOut)
+        if isinstance(args.mAuxOut, tuple):
+            self.aux_out_dtypes = tuple(tensor.element_type for tensor in args.mAuxOut)
+            self.aux_out_layouts = tuple(
+                cutlass.utils.LayoutEnum.from_tensor(tensor) for tensor in args.mAuxOut
+            )
+        else:
+            self.aux_out_dtype = args.mAuxOut.element_type
+            self.aux_out_layout = cutlass.utils.LayoutEnum.from_tensor(args.mAuxOut)
         self.cta_tile_shape_aux_out_mn = self.cta_tile_shape_mnk[:2]
         d = self._epi_ops_to_params_dict(args)
         d["act_fn"] = args.act_fn
         d["tensor_epilogue_fn"] = args.tensor_epilogue_fn
-        d["tensor_epilogue_uses_c"] = args.tensor_epilogue_uses_c
-        d["tensor_epilogue_returns_aux"] = args.tensor_epilogue_returns_aux
         d["tensor_epilogue_arg_kinds"] = args.tensor_epilogue_arg_kinds
-        d["local_reduce_feeds_main"] = args.local_reduce_feeds_main
-        d["local_reduce_source_from_epilogue"] = args.local_reduce_source_from_epilogue
+        d["tensor_epilogue_returns_aux"] = args.tensor_epilogue_returns_aux
+        d["tensor_epilogue_returns_local_reduce"] = args.tensor_epilogue_returns_local_reduce
         d["local_reduce_group"] = args.local_reduce_group
-        d["local_reduce_dim"] = args.local_reduce_dim
-        d["local_reduce_op"] = args.local_reduce_op
-        d["local_reduce_scale"] = args.local_reduce_scale
-        d["local_reduce_max_power"] = args.local_reduce_max_power
-        self.local_reduce_feeds_main = args.local_reduce_feeds_main
-        self.local_reduce_source_from_epilogue = args.local_reduce_source_from_epilogue
+        d["local_reduce_axis"] = args.local_reduce_axis
         self.local_reduce_group = args.local_reduce_group
-        self.local_reduce_dim = args.local_reduce_dim
-        self.local_reduce_op = args.local_reduce_op
-        self.local_reduce_scale = args.local_reduce_scale
-        self.local_reduce_max_power = args.local_reduce_max_power
+        self.local_reduce_axis = args.local_reduce_axis
         for key in ("mRowVecBroadcast", "mColVecBroadcast"):
             if key in self.concat_layout and key in d:
                 d[key] = layout_utils.concat_to_interleave(d[key], 1)
@@ -154,23 +189,36 @@ class GemmActMixin(ComposableEpiMixin):
     # epi_get_tma_atoms, epi_smem_bytes, epi_get_smem_struct,
     # epi_get_smem_tensors are all inherited from ComposableEpiMixin via _epi_ops.
 
-    def epi_make_aux_out_copy_atom_r2s(self, params, tiled_copy_t2r):
+    def epi_make_aux_out_copy_atom_r2s(self, params, tiled_copy_t2r, index=None):
         """Build the register-to-shared copy atom used by aux outputs."""
+        aux_out_layout = (
+            self.aux_out_layouts[index] if index is not None else self.aux_out_layout
+        )
+        aux_out_dtype = self.aux_out_dtypes[index] if index is not None else self.aux_out_dtype
+        epi_tile_mAuxOut = (
+            params.epi_tile_mAuxOut[index]
+            if index is not None
+            else params.epi_tile_mAuxOut
+        )
         if self.arch == 100:
             return sm100_utils.get_smem_store_op(
-                self.aux_out_layout, self.aux_out_dtype, self.acc_dtype, tiled_copy_t2r
+                aux_out_layout, aux_out_dtype, self.acc_dtype, tiled_copy_t2r
             )
         else:
             return copy_utils.get_smem_store_atom(
-                self.aux_out_dtype,
-                transpose=self.aux_out_layout != cutlass.utils.LayoutEnum.ROW_MAJOR,
-                major_mode_size=cute.size(params.epi_tile_mAuxOut, mode=[1])
+                aux_out_dtype,
+                transpose=aux_out_layout != cutlass.utils.LayoutEnum.ROW_MAJOR,
+                major_mode_size=cute.size(epi_tile_mAuxOut, mode=[1])
                 // self.atom_layout_mnk[1],
             )
 
-    def epi_make_aux_out_tiled_copy_r2s(self, params, tiled_copy_r2s, tiled_copy_t2r):
+    def epi_make_aux_out_tiled_copy_r2s(
+        self, params, tiled_copy_r2s, tiled_copy_t2r, index=None
+    ):
         """Build the register-to-shared tiled copy used by aux outputs."""
-        copy_atom_aux_out_r2s = self.epi_make_aux_out_copy_atom_r2s(params, tiled_copy_t2r)
+        copy_atom_aux_out_r2s = self.epi_make_aux_out_copy_atom_r2s(
+            params, tiled_copy_t2r, index
+        )
         return cute.make_tiled_copy_S(copy_atom_aux_out_r2s, tiled_copy_r2s)
 
     def epi_setup_aux_out(
@@ -190,6 +238,26 @@ class GemmActMixin(ComposableEpiMixin):
         if getattr(params, "mAuxOut", None) is None:
             return None
         sAuxOut = epi_smem_tensors["mAuxOut"]
+        if isinstance(params.mAuxOut, tuple):
+            contexts = []
+            batch_idx = tile_coord_mnkl[3]
+            for i, aux_out in enumerate(params.mAuxOut):
+                tiled_copy_aux_out_r2s = self.epi_make_aux_out_tiled_copy_r2s(
+                    params, tiled_copy_r2s, tiled_copy_t2r, i
+                )
+                tRS_sAuxOut = tiled_copy_aux_out_r2s.get_slice(tidx).partition_D(
+                    sAuxOut[i]
+                )
+                copy_aux_out, _, _ = self.epilog_gmem_copy_and_partition(
+                    params.tma_atom_mAuxOut[i],
+                    varlen_manager.offset_batch_epi(aux_out, batch_idx),
+                    self.cta_tile_shape_aux_out_mn,
+                    params.epi_tile_mAuxOut[i],
+                    sAuxOut[i],
+                    tile_coord_mnkl,
+                )
+                contexts.append((tiled_copy_aux_out_r2s, tRS_sAuxOut, copy_aux_out))
+            return tuple(contexts)
         tiled_copy_aux_out_r2s = self.epi_make_aux_out_tiled_copy_r2s(
             params, tiled_copy_r2s, tiled_copy_t2r
         )
@@ -203,29 +271,67 @@ class GemmActMixin(ComposableEpiMixin):
             sAuxOut,
             tile_coord_mnkl,
         )
-        return tiled_copy_aux_out_r2s, tRS_sAuxOut, copy_aux_out
+        return ((tiled_copy_aux_out_r2s, tRS_sAuxOut, copy_aux_out),)
+
+    @cute.jit
+    def epi_convert_one_aux_out(
+        self,
+        tRS_rAuxOut,
+        aux_out_dtype: cutlass.Constexpr,
+        sr_seed,
+        tidx,
+        tile_coord_mnkl,
+        num_prev_subtiles,
+        epi_idx,
+    ):
+        if const_expr(
+            self.rounding_mode == RoundingMode.RS
+            and tRS_rAuxOut.element_type == cutlass.Float32
+            and aux_out_dtype == cutlass.BFloat16
+        ):
+            from cutlass.cute.tensor import TensorSSA
+
+            seed = epilogue_aux_out_sr_seed(
+                sr_seed, tile_coord_mnkl, num_prev_subtiles + epi_idx
+            )
+            tRS_rAuxOut_out = cute.make_rmem_tensor_like(tRS_rAuxOut, aux_out_dtype)
+            src_vec = tRS_rAuxOut.load()
+            raw_vec = convert_f32_to_bf16_sr(src_vec, seed, tidx)
+            tRS_rAuxOut_out.store(TensorSSA(raw_vec, src_vec.shape, aux_out_dtype))
+        else:
+            tRS_rAuxOut_out = cute.make_rmem_tensor_like(tRS_rAuxOut, aux_out_dtype)
+            tRS_rAuxOut_out.store(tRS_rAuxOut.load().to(aux_out_dtype))
+        return tRS_rAuxOut_out
 
     @cute.jit
     def epi_convert_aux_out(
         self, tRS_rAuxOut, sr_seed, tidx, tile_coord_mnkl, num_prev_subtiles, epi_idx
     ):
-        """Convert aux output from acc_dtype to aux_out_dtype. Override for custom postprocessing."""
-        if const_expr(
-            self.rounding_mode == RoundingMode.RS
-            and tRS_rAuxOut.element_type == cutlass.Float32
-            and self.aux_out_dtype == cutlass.BFloat16
-        ):
-            from cutlass.cute.tensor import TensorSSA
-
-            seed = epilogue_aux_out_sr_seed(sr_seed, tile_coord_mnkl, num_prev_subtiles + epi_idx)
-            tRS_rAuxOut_out = cute.make_rmem_tensor_like(tRS_rAuxOut, self.aux_out_dtype)
-            src_vec = tRS_rAuxOut.load()
-            raw_vec = convert_f32_to_bf16_sr(src_vec, seed, tidx)
-            tRS_rAuxOut_out.store(TensorSSA(raw_vec, src_vec.shape, self.aux_out_dtype))
-        else:
-            tRS_rAuxOut_out = cute.make_rmem_tensor_like(tRS_rAuxOut, self.aux_out_dtype)
-            tRS_rAuxOut_out.store(tRS_rAuxOut.load().to(self.aux_out_dtype))
-        return tRS_rAuxOut_out
+        """Convert aux outputs from acc_dtype to their output dtypes."""
+        if const_expr(isinstance(tRS_rAuxOut, tuple)):
+            result = []
+            for i, aux_out in enumerate(tRS_rAuxOut):
+                result.append(
+                    self.epi_convert_one_aux_out(
+                        aux_out,
+                        self.aux_out_dtypes[i],
+                        sr_seed,
+                        tidx,
+                        tile_coord_mnkl,
+                        num_prev_subtiles,
+                        epi_idx,
+                    )
+                )
+            return tuple(result)
+        return self.epi_convert_one_aux_out(
+            tRS_rAuxOut,
+            self.aux_out_dtype,
+            sr_seed,
+            tidx,
+            tile_coord_mnkl,
+            num_prev_subtiles,
+            epi_idx,
+        )
 
     @cute.jit
     def epi_visit_subtile(
@@ -235,54 +341,12 @@ class GemmActMixin(ComposableEpiMixin):
         tRS_rD: cute.Tensor,
         tRS_rC: Optional[cute.Tensor] = None,
     ) -> Optional[cute.Tensor]:
-        tDrColVecReduce = epi_loop_tensors.get("mColVecReduce")
-        tDrRowVecReduce = epi_loop_tensors.get("mRowVecReduce")
-        if const_expr(tDrRowVecReduce is not None and not params.local_reduce_source_from_epilogue):
-            if const_expr(params.local_reduce_feeds_main and params.local_reduce_dim == 0):
-                tDrRowVecReduceVal = grouped_rowvec_reduce_value(self, tRS_rD, tDrRowVecReduce)
-                for i in cutlass.range(cute.size(tRS_rD), unroll_full=True):
-                    tRS_rD[i] /= tDrRowVecReduceVal[i]
-            else:
-                grouped_rowvec_reduce_accumulate(self, tDrRowVecReduce, tRS_rD)
-        if const_expr(tDrColVecReduce is not None and not params.local_reduce_source_from_epilogue):
-            if const_expr(params.local_reduce_group != 0 and params.local_reduce_group < self.cta_tile_shape_mnk[1]):
-                if const_expr(
-                    params.local_reduce_op == 1
-                    or params.local_reduce_op == 2
-                    or params.local_reduce_op == 3
-                ):
-                    grouped_colvec_reduce_accumulate_amax_abs(
-                        self, tDrColVecReduce, tRS_rD
-                    )
-                else:
-                    grouped_colvec_reduce_accumulate(self, tDrColVecReduce, tRS_rD)
-            else:
-                if const_expr(
-                    params.local_reduce_op == 1
-                    or params.local_reduce_op == 2
-                    or params.local_reduce_op == 3
-                ):
-                    colvec_reduce_accumulate(
-                        self,
-                        tDrColVecReduce,
-                        tRS_rD,
-                        transform_fn=lambda x: cute.arch.fmax(x, -x),
-                    )
-                else:
-                    colvec_reduce_accumulate(self, tDrColVecReduce, tRS_rD)
-            if const_expr(params.local_reduce_feeds_main):
-                if const_expr(self.arch != 100):
-                    for i in cutlass.range(cute.size(tDrColVecReduce), unroll_full=True):
-                        tRS_rD[i] /= tDrColVecReduce[i]
-                else:
-                    for i in cutlass.range(cute.size(tRS_rD), unroll_full=True):
-                        tRS_rD[i] /= tDrColVecReduce[i]
-        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_uses_c):
+        if const_expr(params.tensor_epilogue_fn is None or not params.tensor_epilogue_arg_kinds):
             GemmDefaultEpiMixin.epi_visit_subtile(self, params, epi_loop_tensors, tRS_rD, tRS_rC)
         if const_expr(params.tensor_epilogue_fn is not None):
             tRS_rEpilogueIn = cute.make_rmem_tensor_like(tRS_rD, self.acc_dtype)
             tRS_rEpilogueIn.store(tRS_rD.load())
-            if const_expr(params.tensor_epilogue_uses_c):
+            if const_expr(params.tensor_epilogue_arg_kinds):
                 tDrRowVecs = epi_loop_tensors.get("mTensorEpilogueRowVecBroadcasts")
                 tDrColVecs = epi_loop_tensors.get("mTensorEpilogueColVecBroadcasts")
                 tRsTileAuxes = epi_loop_tensors.get("mTensorEpilogueTiles")
@@ -291,68 +355,48 @@ class GemmActMixin(ComposableEpiMixin):
                 col_arg_index = 0
                 tile_arg_index = 0
                 for arg_kind in params.tensor_epilogue_arg_kinds:
-                    tRS_rEpilogueAux = cute.make_rmem_tensor_like(tRS_rD, self.acc_dtype)
                     if const_expr(arg_kind == 1):
-                        tRS_rEpilogueAux.store(tRsTileAuxes[tile_arg_index].load().to(self.acc_dtype))
+                        epilogue_aux = tRsTileAuxes[tile_arg_index]
                         tile_arg_index += 1
                     elif const_expr(arg_kind == 2):
-                        tRS_rEpilogueAux.store(tDrRowVecs[row_arg_index].load().to(self.acc_dtype))
+                        epilogue_aux = tDrRowVecs[row_arg_index]
                         row_arg_index += 1
                     else:
-                        tRS_rEpilogueAux.store(tDrColVecs[col_arg_index].load().to(self.acc_dtype))
+                        epilogue_aux = tDrColVecs[col_arg_index]
                         col_arg_index += 1
+                    tRS_rEpilogueAux = cute.make_rmem_tensor_like(
+                        tRS_rD, epilogue_aux.element_type
+                    )
+                    tRS_rEpilogueAux.store(epilogue_aux.load())
                     epilogue_aux_values.append(tRS_rEpilogueAux.load())
                 epilogue_result = params.tensor_epilogue_fn(
                     tRS_rEpilogueIn.load(), *tuple(epilogue_aux_values)
                 )
             else:
                 epilogue_result = params.tensor_epilogue_fn(tRS_rEpilogueIn.load())
-            if const_expr(params.local_reduce_source_from_epilogue):
+            if const_expr(params.tensor_epilogue_returns_aux):
                 tRS_rD.store(epilogue_result[0])
-                tRS_rLocalReduceSource = cute.make_rmem_tensor(
-                    epilogue_result[1].shape, self.acc_dtype
-                )
-                tRS_rLocalReduceSource.store(epilogue_result[1])
-                if const_expr(tDrColVecReduce is not None):
-                    if const_expr(params.local_reduce_group != 0 and params.local_reduce_group < self.cta_tile_shape_mnk[1]):
-                        if const_expr(
-                            params.local_reduce_op == 1
-                            or params.local_reduce_op == 2
-                            or params.local_reduce_op == 3
-                        ):
-                            grouped_colvec_reduce_accumulate_amax_abs(
-                                self, tDrColVecReduce, tRS_rLocalReduceSource
-                            )
-                        else:
-                            grouped_colvec_reduce_accumulate(
-                                self, tDrColVecReduce, tRS_rLocalReduceSource
-                            )
-                    else:
-                        if const_expr(
-                            params.local_reduce_op == 1
-                            or params.local_reduce_op == 2
-                            or params.local_reduce_op == 3
-                        ):
-                            colvec_reduce_accumulate(
-                                self,
-                                tDrColVecReduce,
-                                tRS_rLocalReduceSource,
-                                transform_fn=lambda x: cute.arch.fmax(x, -x),
-                            )
-                        else:
-                            colvec_reduce_accumulate(
-                                self, tDrColVecReduce, tRS_rLocalReduceSource
-                            )
+                aux_results = []
+                for i, _ in enumerate(params.mAuxOut):
+                    aux_result = epilogue_result[i + 1]
+                    tRS_rAuxOut = cute.make_rmem_tensor(
+                        aux_result.shape,
+                        aux_result.element_type,
+                    )
+                    tRS_rAuxOut.store(aux_result)
+                    aux_results.append(tRS_rAuxOut)
+                if const_expr(params.tensor_epilogue_returns_local_reduce):
+                    tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
+                    tDrLocalReduce.store(epilogue_result[len(params.mAuxOut) + 1])
+                tRS_rAuxOut = tuple(aux_results)
+            elif const_expr(params.tensor_epilogue_returns_local_reduce):
+                tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
+                tRS_rD.store(epilogue_result[0])
+                tDrLocalReduce.store(epilogue_result[1])
                 tRS_rAuxOut = cute.make_rmem_tensor(
                     epilogue_result[0].shape, self.acc_dtype
                 )
                 tRS_rAuxOut.store(epilogue_result[0])
-            elif const_expr(params.tensor_epilogue_returns_aux):
-                tRS_rD.store(epilogue_result[0])
-                tRS_rAuxOut = cute.make_rmem_tensor(
-                    epilogue_result[1].shape, self.acc_dtype
-                )
-                tRS_rAuxOut.store(epilogue_result[1])
             else:
                 tRS_rAuxOut = cute.make_rmem_tensor(
                     epilogue_result.shape, self.acc_dtype
@@ -395,93 +439,6 @@ def _gated_epi_tile_fn(gemm, epi_tile):
         return (epi_tile[0], cute.recast_layout(2, 1, epi_tile[1]))
     return (epi_tile[0], epi_tile[1] // 2)
 
-
-def _grouped_n_contract_epi_tile(epi_tile, group):
-    if isinstance(epi_tile[1], cute.Layout):
-        return (epi_tile[0], cute.recast_layout(group, 1, epi_tile[1]))
-    return (epi_tile[0], epi_tile[1] // group)
-
-
-def _grouped_n_contract_epi_tile_fn(gemm, epi_tile):
-    return _grouped_n_contract_epi_tile(epi_tile, 2)
-
-
-def _grouped_n_contract4_epi_tile_fn(gemm, epi_tile):
-    return _grouped_n_contract_epi_tile(epi_tile, 4)
-
-
-class GemmGroupedNContractMixin(GemmActMixin):
-    grouped_n_contract_group = 2
-    _epi_ops = (
-        Scalar("alpha"),
-        Scalar("beta"),
-        Scalar("sr_seed", dtype=Int32),
-        RowVecLoad("mRowVecBroadcast"),
-        ColVecLoad("mColVecBroadcast"),
-        GroupedColVecReduce("mColVecReduce"),
-        GroupedRowVecReduce("mRowVecReduce"),
-        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract_epi_tile_fn),
-    )
-
-    def epi_to_underlying_arguments(
-        self, args: GemmActMixin.EpilogueArguments, *, loc=None, ip=None
-    ):
-        if self.grouped_n_contract_group != 2 and self.arch != 100:
-            raise NotImplementedError(
-                "grouped_n_contract groups larger than 2 are currently validated only on SM100"
-            )
-        params = super().epi_to_underlying_arguments(args, loc=loc, ip=ip)
-        self.cta_tile_shape_aux_out_mn = (
-            self.cta_tile_shape_mnk[0],
-            self.cta_tile_shape_mnk[1] // self.grouped_n_contract_group,
-        )
-        return params
-
-    @cute.jit
-    def epi_convert_aux_out(
-        self, tRS_rAuxOut, sr_seed, tidx, tile_coord_mnkl, num_prev_subtiles, epi_idx
-    ):
-        tRS_rAuxOut_out = GemmActMixin.epi_convert_aux_out(
-            self, tRS_rAuxOut, sr_seed, tidx, tile_coord_mnkl, num_prev_subtiles, epi_idx
-        )
-        if const_expr(
-            self.grouped_n_contract_group == 2
-            and self.arch in (90, 120)
-            and self.aux_out_dtype.width == 16
-        ):
-            # Half-N contracted stores use the same b16 register permutation as gated stores.
-            permute_gated_Cregs_b16(tRS_rAuxOut_out)
-        return tRS_rAuxOut_out
-
-
-class GemmGroupedNContractSm80(GemmGroupedNContractMixin, GemmSm80):
-    pass
-
-
-class GemmGroupedNContractSm90(GemmGroupedNContractMixin, GemmSm90):
-    pass
-
-
-class GemmGroupedNContractSm100(GemmGroupedNContractMixin, GemmSm100):
-    pass
-
-
-class GemmGroupedNContractSm120(GemmGroupedNContractMixin, GemmSm120):
-    pass
-
-
-class GemmGroupedNContract4Sm100(GemmGroupedNContractMixin, GemmSm100):
-    grouped_n_contract_group = 4
-    _epi_ops = (
-        Scalar("alpha"),
-        Scalar("beta"),
-        Scalar("sr_seed", dtype=Int32),
-        RowVecLoad("mRowVecBroadcast"),
-        ColVecLoad("mColVecBroadcast"),
-        GroupedColVecReduce("mColVecReduce"),
-        GroupedRowVecReduce("mRowVecReduce"),
-        TileStore("mAuxOut", epi_tile_fn=_grouped_n_contract4_epi_tile_fn),
-    )
 
 
 class GemmGatedMixin(GemmActMixin):
@@ -614,46 +571,40 @@ def _compile_gemm_act(
     b_dtype,
     d_dtype,
     c_dtype,
-    postact_dtype,
+    postact_dtypes,
     a_major,
     b_major,
     d_major,
     c_major,
-    postact_major,
+    postact_majors,
     tile_shape_mn,
     cluster_shape_mnk,
     pingpong,
     persistent,
     is_dynamic_persistent,
     activation,
-    tensor_epilogue_fn,
     tensor_epilogue_key,
-    tensor_epilogue_uses_c,
-    tensor_epilogue_returns_aux,
     tensor_epilogue_arg_kinds,
+    tensor_epilogue_returns_aux,
+    tensor_epilogue_returns_local_reduce,
     tensor_epilogue_rowvec_dtypes,
     tensor_epilogue_colvec_dtypes,
     tensor_epilogue_colvec_ndims,
     tensor_epilogue_tile_dtypes,
     tensor_epilogue_tile_majors,
+    local_reduce_dtype,
+    local_reduce_ndim,
+    local_reduce_group,
+    local_reduce_axis,
+    local_reduce_stride_divisibility,
+    local_reduce_combine_key,
+    local_reduce_finalize_key,
     alpha_mode,
     beta_mode,
     rowvec_dtype,
     colvec_dtype,
     colvec_ndim,
-    local_reduce_dtype,
-    local_reduce_ndim,
-    local_reduce_feeds_main,
-    local_reduce_source_from_epilogue,
-    local_reduce_group,
-    local_reduce_dim,
-    local_reduce_op,
-    local_reduce_scale,
-    local_reduce_max_power,
-    main_output_transform_group,
     varlen_m,
-    varlen_k,
-    varlen_n,
     gather_A,
     concat_layout,
     device_capacity,
@@ -677,25 +628,10 @@ def _compile_gemm_act(
             11: GemmGatedSm100,
             12: GemmGatedSm120,
         },
-        "grouped_n_contract": {
-            8: GemmGroupedNContractSm80,
-            9: GemmGroupedNContractSm90,
-            10: GemmGroupedNContractSm100,
-            11: GemmGroupedNContractSm100,
-            12: GemmGroupedNContractSm120,
-        },
     }
     GemmCls = sm_to_cls[gemm_cls_name][device_capacity[0]]
-    if gemm_cls_name == "grouped_n_contract" and main_output_transform_group != 2:
-        if device_capacity[0] != 10:
-            raise NotImplementedError(
-                "grouped_n_contract groups larger than 2 are currently validated only on SM100"
-            )
-        GemmCls = {4: GemmGroupedNContract4Sm100}.get(main_output_transform_group)
-        if GemmCls is None:
-            raise NotImplementedError(
-                f"unsupported grouped_n_contract group={main_output_transform_group}"
-            )
+    postact_dtype = postact_dtypes[0]
+    postact_major = postact_majors[0]
     pa_leading = 1 if postact_major == "n" else 0
     mA, mB, mD, mC, m, n, k, l = make_fake_gemm_tensors(
         a_dtype,
@@ -707,15 +643,26 @@ def _compile_gemm_act(
         d_major,
         c_major,
         varlen_m=varlen_m,
-        varlen_k=varlen_k,
-        varlen_n=varlen_n,
         gather_A=gather_A,
     )
-    pa_n = cute.sym_int() if gemm_cls_name in ("gated", "grouped_n_contract") else n
-    div_pa = div_for_dtype(postact_dtype)
-    pa_leading_dim = 1 if gemm_cls_name in ("gated", "grouped_n_contract") else pa_leading
-    pa_shape = (m, pa_n) if varlen_m or varlen_n else (m, pa_n, l)
-    mAuxOut = fake_tensor(postact_dtype, pa_shape, leading_dim=pa_leading_dim, divisibility=div_pa)
+    pa_n = cute.sym_int() if gemm_cls_name == "gated" else n
+    pa_shape = (m, pa_n) if varlen_m else (m, pa_n, l)
+    if tensor_epilogue_returns_aux:
+        mAuxOut = tuple(
+            fake_tensor(
+                dtype,
+                pa_shape,
+                leading_dim=1 if major == "n" else 0,
+                divisibility=div_for_dtype(dtype),
+            )
+            for dtype, major in zip(postact_dtypes, postact_majors)
+        )
+    else:
+        div_pa = div_for_dtype(postact_dtype)
+        pa_leading_dim = 1 if gemm_cls_name == "gated" else pa_leading
+        mAuxOut = fake_tensor(
+            postact_dtype, pa_shape, leading_dim=pa_leading_dim, divisibility=div_pa
+        )
 
     mRowVec = fake_tensor(rowvec_dtype, (l, n), leading_dim=1, divisibility=4)
     mTensorEpilogueRowVecs = tuple(
@@ -746,42 +693,42 @@ def _compile_gemm_act(
         )
         for dtype, ndim in zip(tensor_epilogue_colvec_dtypes, tensor_epilogue_colvec_ndims)
     ) or None
-    if local_reduce_ndim == 3 and local_reduce_dim == 1:
-        mColVecReduce = fake_tensor(
-            local_reduce_dtype,
-            (l, m, cute.sym_int()),
-            leading_dim=2,
-            divisibility=1,
+    if local_reduce_dtype is not None and local_reduce_axis == 0:
+        local_reduce_shape = (
+            (l, cute.sym_int(), n) if local_reduce_ndim == 3 else (cute.sym_int(), n)
         )
-        mRowVecReduce = None
-    elif local_reduce_ndim == 2 and local_reduce_dim == 1:
-        mColVecReduce = fake_tensor(
-            local_reduce_dtype,
-            (m, cute.sym_int()),
-            leading_dim=1,
-            divisibility=1,
-        )
-        mRowVecReduce = None
-    elif local_reduce_ndim == 3 and local_reduce_dim == 0:
-        mColVecReduce = None
-        mRowVecReduce = fake_tensor(
-            local_reduce_dtype,
-            (l, cute.sym_int(), n),
-            leading_dim=2,
-            divisibility=1,
-        )
-    elif local_reduce_ndim == 2 and local_reduce_dim == 0:
-        mColVecReduce = None
-        mRowVecReduce = fake_tensor(
-            local_reduce_dtype,
-            (cute.sym_int(), n),
-            leading_dim=1,
-            divisibility=1,
+    elif local_reduce_dtype is not None:
+        local_reduce_shape = (
+            (l, m, cute.sym_int()) if local_reduce_ndim == 3 else (m, cute.sym_int())
         )
     else:
-        mColVecReduce = None
-        mRowVecReduce = None
+        local_reduce_shape = None
+    if local_reduce_dtype is None:
+        mLocalReduce = None
+    else:
+        local_reduce_leading_dim = 2 if local_reduce_ndim == 3 else 1
+        mLocalReduce = fake_tensor(
+            local_reduce_dtype,
+            local_reduce_shape,
+            leading_dim=local_reduce_leading_dim,
+            divisibility=local_reduce_stride_divisibility,
+        )
 
+    tensor_epilogue_fn = (
+        _tensor_epilogue_fns[tensor_epilogue_key]
+        if tensor_epilogue_key is not None and activation is None
+        else None
+    )
+    local_reduce_combine_fn = (
+        _local_reduce_combine_fns[local_reduce_combine_key]
+        if local_reduce_combine_key is not None
+        else None
+    )
+    local_reduce_finalize_fn = (
+        _local_reduce_finalize_fns[local_reduce_finalize_key]
+        if local_reduce_finalize_key is not None
+        else None
+    )
     act_fn = None if tensor_epilogue_fn is not None else (
         act_fn_map[activation] if gemm_cls_name == "act" else gate_fn_map[activation]
     )
@@ -795,19 +742,16 @@ def _compile_gemm_act(
             return make_ptr(dtype, 0, cute.AddressSpace.gmem, assumed_align=4)
 
     epi_args = GemmCls.EpilogueArguments(
-        mAuxOut,
-        act_fn,
-        tensor_epilogue_fn,
-        tensor_epilogue_uses_c,
-        tensor_epilogue_returns_aux,
-        tensor_epilogue_arg_kinds,
-        local_reduce_feeds_main,
-        local_reduce_source_from_epilogue,
-        local_reduce_group,
-        local_reduce_dim,
-        local_reduce_op,
-        local_reduce_scale,
-        local_reduce_max_power,
+        mAuxOut=mAuxOut,
+        act_fn=act_fn,
+        tensor_epilogue_fn=tensor_epilogue_fn,
+        tensor_epilogue_arg_kinds=tensor_epilogue_arg_kinds,
+        tensor_epilogue_returns_aux=tensor_epilogue_returns_aux,
+        tensor_epilogue_returns_local_reduce=tensor_epilogue_returns_local_reduce,
+        local_reduce_group=local_reduce_group,
+        local_reduce_axis=local_reduce_axis,
+        local_reduce_combine_fn=local_reduce_combine_fn,
+        local_reduce_finalize_fn=local_reduce_finalize_fn,
         alpha=fake_scalar(alpha_mode, Float32),
         beta=fake_scalar(beta_mode, Float32),
         mRowVecBroadcast=mRowVec,
@@ -815,8 +759,7 @@ def _compile_gemm_act(
         mTensorEpilogueRowVecBroadcasts=mTensorEpilogueRowVecs,
         mTensorEpilogueColVecBroadcasts=mTensorEpilogueColVecs,
         mTensorEpilogueTiles=mTensorEpilogueTiles,
-        mColVecReduce=mColVecReduce,
-        mRowVecReduce=mRowVecReduce,
+        mLocalReduce=mLocalReduce,
         rounding_mode=rounding_mode,
         sr_seed=fake_scalar(sr_seed_mode),
     )
@@ -824,11 +767,7 @@ def _compile_gemm_act(
         (is_dynamic_persistent and device_capacity[0] == 9), False, l
     )
     varlen_args = make_fake_varlen_args(
-        varlen_m,
-        varlen_k,
-        gather_A,
-        m if varlen_m else (k if varlen_k else None),
-        varlen_n=varlen_n,
+        varlen_m, False, gather_A, m if varlen_m else None
     )
     return compile_gemm_kernel(
         GemmCls,
@@ -857,7 +796,7 @@ def gemm_act(
     B: Tensor,  # (l, n, k)
     D: Optional[Tensor],  # (l, m, n) or (total_m, n) if varlen_m
     C: Optional[Tensor],  # (l, m, n) or (total_m, n) if varlen_m
-    PostAct: Tensor,  # (l, m, n) or (total_m, n//2) if gated
+    PostAct: Tensor | tuple[Tensor, ...],  # tensor epilogues pass same-shape aux outputs as a tuple
     tile_count_semaphore: Optional[Tensor],  # (1,)
     activation: Optional[str],
     tile_M: int,
@@ -872,86 +811,96 @@ def gemm_act(
     rowvec_bias: Optional[Tensor] = None,  # (l, n)
     colvec_bias: Optional[Tensor] = None,  # (l, m), or (total_m,) if varlen_m
     cu_seqlens_m: Optional[Tensor] = None,  # (l+1,) cumulative sum of m values for variable length
-    cu_seqlens_k: Optional[Tensor] = None,  # (l+1,) cumulative sum of k values for variable length
-    cu_seqlens_n: Optional[Tensor] = None,  # (l+1,) cumulative sum of n values for variable length
-    A_idx: Optional[Tensor] = None,  # (total_m,) or (total_k,) if gather_A with varlen
+    A_idx: Optional[Tensor] = None,  # (total_m,) if gather_A with varlen_m
     rounding_mode: int = RoundingMode.RN,
     sr_seed: int | Tensor = 0,
     use_tma_gather: bool = False,
     concat_layout: tuple | None = None,
     tensor_epilogue_fn: Optional[Callable] = None,
     tensor_epilogue_key: Optional[str] = None,
-    tensor_epilogue_uses_c: bool = False,
     tensor_epilogue_returns_aux: bool = False,
+    tensor_epilogue_returns_local_reduce: bool = False,
     tensor_epilogue_arg_kinds: tuple[str, ...] = (),
     tensor_epilogue_rowvec_biases: tuple[Tensor, ...] = (),
     tensor_epilogue_colvec_biases: tuple[Tensor, ...] = (),
     tensor_epilogue_tile_biases: tuple[Tensor, ...] = (),
+    local_reduce_out: Optional[Tensor] = None,
+    local_reduce_group: int = 0,
+    local_reduce_axis: int = 1,
+    local_reduce_combine_key: Optional[str] = None,
+    local_reduce_finalize_key: Optional[str] = None,
     alpha: float | Tensor = 1.0,
     beta: float | Tensor = 1.0,
-    local_reduce_out: Optional[Tensor] = None,
-    local_reduce_feeds_main: bool = False,
-    local_reduce_source_from_epilogue: bool = False,
-    local_reduce_group: int = 0,
-    local_reduce_dim: int = 1,
-    local_reduce_op: str = "sum",
-    local_reduce_scale: float = 1.0,
-    local_reduce_max_power: int = 8,
-    main_output_transform_group: int | None = None,
+    device_capacity_override: tuple[int, int] | None = None,
 ) -> None:
+    """Run GEMM with an optional generated tensor epilogue and local reduction.
+
+    Local reductions group the logical GEMM output ``[L, M, N]``. Axis 0 groups
+    M and writes ``local_reduce_out`` with shape ``[L, M / group, N]``; axis 1
+    groups N and writes ``[L, M, N / group]``. ``local_reduce_group`` must be
+    positive, divide the selected dimension, and fit the selected GEMM tile.
+    ``local_reduce_out`` is always 3-D at this QuACK boundary.
+
+    When ``tensor_epilogue_returns_local_reduce`` is true, the generated tensor
+    epilogue's final return value, after the main result and any same-shape aux
+    results, supplies the grouped reduction. The flag and ``local_reduce_out``
+    must be provided together, and a tensor epilogue function or registry key is
+    required.
+
+    ``local_reduce_combine_key`` and ``local_reduce_finalize_key`` identify
+    CuTeDSL callbacks registered with ``register_local_reduce_fns``. The binary
+    combine callback merges two physical partial values using the reduction
+    operation. The unary finalize callback transforms the fully combined value
+    before conversion and storage. Both keys are required whenever the grouped
+    reduction needs physical lane, warp, or fragment combining; they may be
+    omitted when the tensor epilogue returns an already-complete TensorSSA group.
+
+    Returns:
+        None. Results are written to the supplied output tensors.
+    """
     if tensor_epilogue_fn is not None:
         assert activation is None, "tensor_epilogue_fn and activation are mutually exclusive"
-        if main_output_transform_group is not None:
-            if main_output_transform_group not in (2, 4):
-                raise NotImplementedError(
-                    "grouped_n_contract currently supports only groups 2 and 4"
-                )
-            gemm_cls_name = "grouped_n_contract"
-        else:
-            gemm_cls_name = "act"
+        tensor_epilogue_key = (
+            tensor_epilogue_key
+            if tensor_epilogue_key is not None
+            else repr(tensor_epilogue_fn)
+        )
+        register_tensor_epilogue_fn(tensor_epilogue_key, tensor_epilogue_fn)
+        gemm_cls_name = "act"
     elif activation in gate_fn_map:
         gemm_cls_name = "gated"
     else:
         assert activation in act_fn_map, f"Unsupported activation {activation}"
         gemm_cls_name = "act"
 
+    if tensor_epilogue_returns_aux:
+        if not isinstance(PostAct, tuple):
+            raise RuntimeError("tensor epilogue aux outputs must be passed as a tuple")
+        postact_tensors = PostAct
+    else:
+        postact_tensors = (PostAct,)
     varlen_m = cu_seqlens_m is not None
-    varlen_k = cu_seqlens_k is not None
-    varlen_n = cu_seqlens_n is not None
-    assert sum((varlen_m, varlen_k, varlen_n)) <= 1, "Only one of cu_seqlens_m, cu_seqlens_k, and cu_seqlens_n"
     gather_A = A_idx is not None
     if varlen_m:
         assert persistent, "varlen_m requires persistent=True"
         assert A.stride(-1) == 1, "varlen_m requires A to be k-major"
         if D is not None:
             assert D.stride(-1) == 1, "varlen_m requires D to be n-major"
-        assert PostAct.stride(-1) == 1, "varlen_m requires PostAct to be n-major"
-    if varlen_k:
-        assert A.stride(-2) == 1, "varlen_k requires A to be m-major"
-        assert B.stride(-2) == 1, "varlen_k requires B to be n-major"
-    if varlen_n:
-        ensure_varlen_n_supported(A)
-        assert persistent, "varlen_n requires persistent=True"
-        assert A.stride(-1) == 1, "varlen_n requires public A to be k-major"
-        assert B.stride(-2) == 1, "varlen_n requires B to be n-major after transpose"
-        if D is not None:
-            assert D.stride(-1) == 1, "varlen_n requires D to be n-major"
-        assert PostAct.stride(-1) == 1, "varlen_n requires PostAct to be n-major"
-        assert A_idx is None, "gather_A is not supported with varlen_n"
-        assert C is None and beta == 1.0, "C/beta are not supported with varlen_n"
-        assert rowvec_bias is None and colvec_bias is None, "biases are not supported with varlen_n"
-        assert not tensor_epilogue_rowvec_biases and not tensor_epilogue_colvec_biases
-        assert not tensor_epilogue_tile_biases, "tile epilogue args are not supported with varlen_n"
-        assert local_reduce_out is None, "local reductions are not supported with varlen_n"
-        assert main_output_transform_group is None, "shape-changing epilogues are not supported with varlen_n"
+        assert all(
+            tensor.stride(-1) == 1 for tensor in postact_tensors
+        ), "varlen_m requires PostAct to be n-major"
     if gather_A:
-        assert varlen_m or varlen_k, "gather_A requires varlen"
+        assert varlen_m, "gather_A requires varlen_m"
         assert cluster_N == 1, "gather_A requires cluster_N=1"
 
-    A_p, B_p, D_p, C_p = perm3d(
-        A, B, D, C, varlen_m=varlen_m, varlen_k=varlen_k, varlen_n=varlen_n
-    )
-    PostAct_p = PostAct if varlen_n else perm3d_single(PostAct, varlen_m)
+    A_p = perm3d_single(A, varlen_m)
+    B_p = perm3d_single(B)
+    D_p = perm3d_single(D, varlen_m)
+    C_p = perm3d_single(C, varlen_m)
+    if tensor_epilogue_returns_aux:
+        PostAct_p = tuple(perm3d_single(tensor, varlen_m) for tensor in postact_tensors)
+    else:
+        PostAct_p = perm3d_single(PostAct, varlen_m)
     tensor_epilogue_tile_biases_p = tuple(
         perm3d_single(tensor, varlen_m) for tensor in tensor_epilogue_tile_biases
     )
@@ -960,31 +909,48 @@ def gemm_act(
     b_major = get_major(B_p, "n", "k")
     d_major = get_major(D_p, "m", "n") if D_p is not None else None
     c_major = get_major(C_p, "m", "n") if C_p is not None else None
-    postact_major = get_major(PostAct_p, "m", "n")
+    postact_majors = (
+        tuple(get_major(tensor, "m", "n") for tensor in PostAct_p)
+        if isinstance(PostAct_p, tuple)
+        else (get_major(PostAct_p, "m", "n"),)
+    )
 
     a_dtype = torch2cute_dtype_map[A.dtype]
     b_dtype = torch2cute_dtype_map[B.dtype]
     d_dtype = torch2cute_dtype_map[D.dtype] if D is not None else None
     c_dtype = torch2cute_dtype_map[C.dtype] if C is not None else None
-    postact_dtype = torch2cute_dtype_map[PostAct.dtype]
+    postact_dtypes = (
+        tuple(torch2cute_dtype_map[tensor.dtype] for tensor in PostAct)
+        if isinstance(PostAct, tuple)
+        else (torch2cute_dtype_map[PostAct.dtype],)
+    )
     if not set(tensor_epilogue_arg_kinds) <= {"tile", "row", "col"}:
         raise NotImplementedError(
             f"QUACK tensor epilogues support only tile/row/col aux tensors, got {tensor_epilogue_arg_kinds}"
+        )
+    expected_tensor_epilogue_arg_counts = {
+        "row": len(tensor_epilogue_rowvec_biases),
+        "col": len(tensor_epilogue_colvec_biases),
+        "tile": len(tensor_epilogue_tile_biases),
+    }
+    actual_tensor_epilogue_arg_counts = {
+        kind: tensor_epilogue_arg_kinds.count(kind)
+        for kind in expected_tensor_epilogue_arg_counts
+    }
+    if actual_tensor_epilogue_arg_counts != expected_tensor_epilogue_arg_counts:
+        raise RuntimeError(
+            "tensor_epilogue_arg_kinds must match row/col/tile tensor epilogue args"
         )
     tensor_epilogue_arg_kind_codes = tuple(
         {"tile": 1, "row": 2, "col": 3}[kind] for kind in tensor_epilogue_arg_kinds
     )
     colvec_ndim = colvec_bias.ndim if colvec_bias is not None else 0
-    local_reduce_ndim = local_reduce_out.ndim if local_reduce_out is not None else 0
-    local_reduce_op_code = {
-        "sum": 0,
-        "amax_abs": 1,
-        "mx_e8m0_scale": 2,
-        "nvfp4_e4m3_scale": 3,
-        "copy": 4,
-    }[local_reduce_op]
 
-    device_capacity = get_device_capacity(A.device)
+    device_capacity = (
+        device_capacity_override
+        if device_capacity_override is not None
+        else get_device_capacity(A.device)
+    )
     assert device_capacity[0] in [8, 9, 10, 11, 12], (
         "Only SM8x, SM90, SM100, SM110, and SM120 are supported"
     )
@@ -1001,52 +967,84 @@ def gemm_act(
     )
     alpha_mode = 2 if isinstance(alpha, Tensor) else (1 if alpha != 1.0 else 0)
     beta_mode = 2 if isinstance(beta, Tensor) else (1 if beta != 1.0 else 0)
+    if tensor_epilogue_arg_kinds and (C is not None or alpha_mode != 0 or beta_mode != 0):
+        raise NotImplementedError(
+            "QUACK tensor epilogue aux args cannot be combined with C/alpha/beta yet"
+        )
+    if tensor_epilogue_returns_local_reduce != (local_reduce_out is not None):
+        raise RuntimeError(
+            "tensor_epilogue_returns_local_reduce requires local_reduce_out and vice versa"
+        )
+    if local_reduce_out is not None and tensor_epilogue_fn is None and tensor_epilogue_key is None:
+        raise RuntimeError("local_reduce_out requires tensor_epilogue_fn")
+    if local_reduce_out is not None:
+        if local_reduce_group <= 0:
+            raise RuntimeError("local_reduce_group must be positive")
+        if local_reduce_axis not in (0, 1):
+            raise RuntimeError("local_reduce_axis must be 0 or 1")
+        if local_reduce_axis == 0 and (
+            local_reduce_combine_key is None or local_reduce_finalize_key is None
+        ):
+            raise RuntimeError(
+                "local_reduce_axis=0 requires generated local-reduce callback keys"
+            )
+        if local_reduce_out.ndim != 3:
+            raise NotImplementedError("QUACK local_reduce_out must be 3-D")
     concat_layout = tuple(sorted(concat_layout)) if concat_layout else ()
+    local_reduce_dtype = (
+        torch2cute_dtype_map[local_reduce_out.dtype]
+        if local_reduce_out is not None
+        else None
+    )
+    local_reduce_leading_dim = (
+        2 if local_reduce_out is not None and local_reduce_out.ndim == 3 else 1
+    )
+    local_reduce_stride_divisibility = (
+        tensor_stride_divisibility(
+            local_reduce_out, local_reduce_dtype, local_reduce_leading_dim
+        )
+        if local_reduce_out is not None
+        else 1
+    )
     compiled_fn = _compile_gemm_act(
         a_dtype,
         b_dtype,
         d_dtype,
         c_dtype,
-        postact_dtype,
+        postact_dtypes,
         a_major,
         b_major,
         d_major,
         c_major,
-        postact_major,
+        postact_majors,
         (tile_M, tile_N, tile_K) if tile_K is not None else (tile_M, tile_N),
         (cluster_M, cluster_N, 1),
         pingpong,
         persistent,
         is_dynamic_persistent,
         activation,
-        tensor_epilogue_fn,
-        tensor_epilogue_key if tensor_epilogue_key is not None else repr(tensor_epilogue_fn),
-        tensor_epilogue_uses_c,
-        tensor_epilogue_returns_aux,
+        tensor_epilogue_key,
         tensor_epilogue_arg_kind_codes,
+        tensor_epilogue_returns_aux,
+        tensor_epilogue_returns_local_reduce,
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_rowvec_biases),
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_colvec_biases),
         tuple(tensor.ndim for tensor in tensor_epilogue_colvec_biases),
         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_tile_biases_p),
         tuple(get_major(tensor, "m", "n") for tensor in tensor_epilogue_tile_biases_p),
+        local_reduce_dtype,
+        local_reduce_out.ndim if local_reduce_out is not None else 0,
+        local_reduce_group,
+        local_reduce_axis,
+        local_reduce_stride_divisibility,
+        local_reduce_combine_key,
+        local_reduce_finalize_key,
         alpha_mode,
         beta_mode,
         torch2cute_dtype_map[rowvec_bias.dtype] if rowvec_bias is not None else None,
         torch2cute_dtype_map[colvec_bias.dtype] if colvec_bias is not None else None,
         colvec_ndim,
-        torch2cute_dtype_map[local_reduce_out.dtype] if local_reduce_out is not None else None,
-        local_reduce_ndim,
-        local_reduce_feeds_main,
-        local_reduce_source_from_epilogue,
-        local_reduce_group,
-        local_reduce_dim,
-        local_reduce_op_code,
-        local_reduce_scale,
-        local_reduce_max_power,
-        0 if main_output_transform_group is None else main_output_transform_group,
         varlen_m,
-        varlen_k,
-        varlen_n,
         gather_A,
         concat_layout,
         device_capacity,
@@ -1072,19 +1070,16 @@ def gemm_act(
             return scalar.data_ptr()
 
     epi_args = GemmActMixin.EpilogueArguments(
-        PostAct_p,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        mAuxOut=PostAct_p,
+        act_fn=None,
+        tensor_epilogue_fn=None,
+        tensor_epilogue_arg_kinds=None,
+        tensor_epilogue_returns_aux=None,
+        tensor_epilogue_returns_local_reduce=None,
+        local_reduce_group=None,
+        local_reduce_axis=None,
+        local_reduce_combine_fn=None,
+        local_reduce_finalize_fn=None,
         alpha=scalar_arg(alpha, alpha_mode, Float32),
         beta=scalar_arg(beta, beta_mode, Float32),
         mRowVecBroadcast=rowvec_bias,
@@ -1092,8 +1087,7 @@ def gemm_act(
         mTensorEpilogueRowVecBroadcasts=tensor_epilogue_rowvec_biases or None,
         mTensorEpilogueColVecBroadcasts=tensor_epilogue_colvec_biases or None,
         mTensorEpilogueTiles=tensor_epilogue_tile_biases_p or None,
-        mColVecReduce=local_reduce_out if local_reduce_dim == 1 else None,
-        mRowVecReduce=local_reduce_out if local_reduce_dim == 0 else None,
+        mLocalReduce=local_reduce_out,
         rounding_mode=None,  # Constexpr, pass None at call time
         sr_seed=scalar_arg(sr_seed, sr_seed_mode),
     )
@@ -1102,9 +1096,7 @@ def gemm_act(
         max_swizzle_size,
         tile_count_semaphore,
     )
-    varlen_args = make_varlen_args(
-        cu_seqlens_m, cu_seqlens_k, A_idx, cu_seqlens_n=cu_seqlens_n
-    )
+    varlen_args = make_varlen_args(cu_seqlens_m, None, A_idx)
 
     if device_capacity[0] in [10, 11]:
         compiled_fn(A_p, B_p, D_p, C_p, epi_args, scheduler_args, varlen_args, None, None, None)

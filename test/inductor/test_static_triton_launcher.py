@@ -4,6 +4,7 @@ import os
 import random
 import tempfile
 import weakref
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
@@ -22,6 +23,10 @@ from torch._inductor.runtime.triton_compat import (
     triton,
 )
 from torch._inductor.runtime.triton_helpers import libdevice
+from torch._inductor.runtime.triton_heuristics import (
+    CachingAutotuner,
+    StaticTritonCompileResult,
+)
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
@@ -75,6 +80,78 @@ class TestStaticTritonLauncherUnit(TestCase):
         launcher.close()
         self.assertIsNone(launcher.function)
         self.assertIsNone(launcher.module)
+
+    def test_fast_launcher_keeps_kernel_owner_alive(self):
+        """
+        _build_fast_launcher bakes kernel.function into a _FastCudaLauncher and
+        replaces the "runner" global, dropping the launcher's only reference to
+        the owning kernel. It must retain the owner so the kernel (and its
+        loaded module) cannot be collected/unloaded while the fast launcher is
+        still callable.
+        """
+        import types
+
+        class FakeFastLauncher:
+            def __init__(self, func, num_warps, shared, arg_tys, n_scratch):
+                self.func = func
+
+        kernel = object.__new__(StaticallyLaunchedCudaKernel)
+        kernel.function = 0xF00D
+        kernel.num_warps = 4
+        kernel.shared = 0
+        kernel.arg_tys = "O"
+        kernel.has_global_scratch = False
+        kernel.has_profile_scratch = False
+
+        launcher_globals = {"runner": kernel.run}
+
+        def _launcher_body(grid_0, grid_1, grid_2, stream, *args):
+            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
+
+        launcher = types.FunctionType(
+            _launcher_body.__code__, launcher_globals, "launcher"
+        )
+        launcher._is_static = True
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+
+        with mock.patch("torch._C._FastCudaLauncher", FakeFastLauncher, create=True):
+            fast_launcher = autotuner._build_fast_launcher(launcher)
+
+        self.assertIsNotNone(fast_launcher)
+        self.assertIs(fast_launcher._static_kernel_owner, kernel)
+        self.assertNotIn(kernel.run, fast_launcher.__globals__.values())
+
+        owner_ref = weakref.ref(kernel)
+        del kernel, launcher, launcher_globals
+        gc.collect()
+        # Only fast_launcher._static_kernel_owner keeps the kernel alive now.
+        self.assertIsNotNone(owner_ref())
+
+        del fast_launcher
+        gc.collect()
+        self.assertIsNone(owner_ref())
+
+    @staticmethod
+    def _autotuner_with_static_cubin(cubin_raw):
+        autotuner = object.__new__(CachingAutotuner)
+        result = object.__new__(StaticTritonCompileResult)
+        result.kernel = SimpleNamespace(cubin_raw=cubin_raw)
+        autotuner.compile_results = [result]
+        return autotuner, result
+
+    def test_prepare_for_caching_drops_cubin_raw_by_default(self):
+        autotuner, result = self._autotuner_with_static_cubin(b"cubin")
+        autotuner.prepare_for_caching()
+        self.assertIsNone(result.kernel.cubin_raw)
+
+    @torch._inductor.config.patch("keep_static_cubin_raw", True)
+    def test_prepare_for_caching_keeps_cubin_raw_when_configured(self):
+        autotuner, result = self._autotuner_with_static_cubin(b"cubin")
+        autotuner.prepare_for_caching()
+        self.assertEqual(result.kernel.cubin_raw, b"cubin")
 
 
 @requires_gpu_and_triton
