@@ -1930,7 +1930,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
     @skipIfRocm
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
         # Nice shapes
@@ -1989,6 +1989,7 @@ class TestFP8Matmul(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @onlyOn(["cuda", "xpu"])
     @parametrize("test_case_name", [
         "a_eye_b_eye",
         "a_ones_b_ones",
@@ -2032,6 +2033,9 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
         if recipe == "mxfp4" and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if "xpu" in device:
+            if fast_accum:
+                raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
         M, K, N = mkn
         if recipe == "nvfp4" and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
@@ -2228,7 +2232,7 @@ class TestFP8Matmul(TestCase):
         C_ref = A_ref @ B_ref.t()
 
         # convert to swizzled format
-        if not torch.version.hip:
+        if not torch.version.hip and "xpu" not in device:
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
@@ -2248,6 +2252,7 @@ class TestFP8Matmul(TestCase):
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @skipXPU
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     def test_passed_swizzle_arrays(self, device) -> None:
         # Ensure that incorrectly-sized swizzle arrays are caught
@@ -2372,6 +2377,8 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
+        if "xpu" in device:
+            raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
         if recipe == "mxfp4" and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
@@ -2622,6 +2629,7 @@ class TestFP8Matmul(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @skipXPU
     def test_blockwise_mxfp8_compile(self, device) -> None:
 
         M, K, N = 128, 128, 128
@@ -2651,6 +2659,7 @@ class TestFP8Matmul(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @skipXPU
     def test_blockwise_nvfp4_compile(self, device) -> None:
 
         M, K, N = 128, 128, 128
