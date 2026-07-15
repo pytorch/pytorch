@@ -77,7 +77,7 @@ struct NVSHMEMAllocation {
 
   // nvshmem_free is collective. Storage destruction is not, so the allocator
   // defers actual frees to rank-synchronized allocation boundaries.
-  
+
   ~NVSHMEMAllocation() = default;
 };
 
