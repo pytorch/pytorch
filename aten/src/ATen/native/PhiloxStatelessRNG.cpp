@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/StatelessPhilox4x32.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/TransformationHelper.h>
@@ -248,7 +249,18 @@ Tensor _philox_key_fold_in_cpu(const Tensor& key, int64_t data) {
   return output;
 }
 
-Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double high) {
+Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double high, bool portable) {
+  if (!portable) {
+    TORCH_CHECK(key.dim() == 1 && key.size(0) == 2,
+        "_philox_uniform_: portable=False does not support batched keys");
+    auto key_contig = key.contiguous();
+    const uint64_t* key_data = key_contig.const_data_ptr<uint64_t>();
+    auto gen = at::detail::createCPUGenerator(
+        key_data[0] ^ (key_data[1] * 0x9E3779B97F4A7C15ULL));
+    self.uniform_(low, high, gen);
+    return self;
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
     auto sample_func = []() {
@@ -280,7 +292,18 @@ Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double
   return self;
 }
 
-Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double stddev) {
+Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double stddev, bool portable) {
+  if (!portable) {
+    TORCH_CHECK(key.dim() == 1 && key.size(0) == 2,
+        "_philox_normal_: portable=False does not support batched keys");
+    auto key_contig = key.contiguous();
+    const uint64_t* key_data = key_contig.const_data_ptr<uint64_t>();
+    auto gen = at::detail::createCPUGenerator(
+        key_data[0] ^ (key_data[1] * 0x9E3779B97F4A7C15ULL));
+    self.normal_(mean, stddev, gen);
+    return self;
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
     using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;

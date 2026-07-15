@@ -8,6 +8,10 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/core/TransformationHelper.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/DistributionTemplates.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <curand_kernel.h>
 #include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -255,10 +259,99 @@ void philox_distribution_kernel(
   }
 }
 
+// -- Non-portable fast path --------------------------------------------------
+//
+// Uses PyTorch's distribution_nullary_kernel with PhiloxCudaState pointing
+// directly at the key's device memory. Only supports single (non-batched) keys.
+
+Tensor& philox_nonportable_uniform(
+    Tensor& self, const Tensor& key, double low, double high) {
+  at::cuda::CUDAGuard device_guard(key.device());
+
+  PhiloxCudaState philox_state;
+  philox_state.seed_.ptr = reinterpret_cast<int64_t*>(key.data_ptr<uint64_t>());
+  philox_state.offset_.ptr = reinterpret_cast<int64_t*>(key.data_ptr<uint64_t>() + 1);
+  philox_state.offset_intragraph_ = 0;
+  philox_state.captured_ = true;
+
+  auto iter = TensorIterator::borrowing_nullary_op(self);
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_cuda", [&] {
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto range = static_cast<opmath_t>(high - low);
+    auto from = static_cast<scalar_t>(low);
+    auto to = static_cast<scalar_t>(high);
+    if (std::is_same_v<scalar_t, double>) {
+      distribution_nullary_kernel<scalar_t, opmath_t, double2>(
+          iter, philox_state,
+          [] __device__ (curandStatePhilox4_32_10_t* state) -> double2 {
+            return curand_uniform2_double(state);
+          },
+          [range, from, to] __device__ (opmath_t rand) {
+            auto value = static_cast<scalar_t>(rand * range + from);
+            return value == to ? from : value;
+          });
+    } else {
+      distribution_nullary_kernel<scalar_t, opmath_t, float4>(
+          iter, philox_state,
+          [] __device__ (curandStatePhilox4_32_10_t* state) -> float4 {
+            return curand_uniform4(state);
+          },
+          [range, from, to] __device__ (opmath_t rand) {
+            auto value = static_cast<scalar_t>(rand * range + from);
+            return value == to ? from : value;
+          });
+    }
+  });
+  return self;
+}
+
+Tensor& philox_nonportable_normal(
+    Tensor& self, const Tensor& key, double mean, double stddev) {
+  at::cuda::CUDAGuard device_guard(key.device());
+
+  PhiloxCudaState philox_state;
+  philox_state.seed_.ptr = reinterpret_cast<int64_t*>(key.data_ptr<uint64_t>());
+  philox_state.offset_.ptr = reinterpret_cast<int64_t*>(key.data_ptr<uint64_t>() + 1);
+  philox_state.offset_intragraph_ = 0;
+  philox_state.captured_ = true;
+
+  auto iter = TensorIterator::borrowing_nullary_op(self);
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "_philox_normal_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto fmean = static_cast<accscalar_t>(mean);
+    auto fstd = static_cast<accscalar_t>(stddev);
+    if (std::is_same_v<scalar_t, double>) {
+      distribution_nullary_kernel<scalar_t, accscalar_t, double2>(
+          iter, philox_state,
+          [] __device__ (curandStatePhilox4_32_10_t* state) -> double2 {
+            return curand_normal2_double(state);
+          },
+          [fmean, fstd] __device__ (accscalar_t rand) {
+            return static_cast<scalar_t>(rand * fstd + fmean);
+          });
+    } else {
+      distribution_nullary_kernel<scalar_t, accscalar_t, float4>(
+          iter, philox_state,
+          [] __device__ (curandStatePhilox4_32_10_t* state) -> float4 {
+            return curand_normal4(state);
+          },
+          [fmean, fstd] __device__ (accscalar_t rand) {
+            return static_cast<scalar_t>(rand * fstd + fmean);
+          });
+    }
+  });
+  return self;
+}
+
 } // anonymous namespace
 
 Tensor& _philox_uniform_cuda_(
-    Tensor& self, const Tensor& key, double low, double high) {
+    Tensor& self, const Tensor& key, double low, double high, bool portable) {
+  if (!portable) {
+    TORCH_CHECK(key.dim() == 1 && key.size(0) == 2,
+        "_philox_uniform_: portable=False does not support batched keys");
+    return philox_nonportable_uniform(self, key, low, high);
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
     auto sample_func = []() {
@@ -291,7 +384,12 @@ Tensor& _philox_uniform_cuda_(
 }
 
 Tensor& _philox_normal_cuda_(
-    Tensor& self, const Tensor& key, double mean, double stddev) {
+    Tensor& self, const Tensor& key, double mean, double stddev, bool portable) {
+  if (!portable) {
+    TORCH_CHECK(key.dim() == 1 && key.size(0) == 2,
+        "_philox_normal_: portable=False does not support batched keys");
+    return philox_nonportable_normal(self, key, mean, stddev);
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
     using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
