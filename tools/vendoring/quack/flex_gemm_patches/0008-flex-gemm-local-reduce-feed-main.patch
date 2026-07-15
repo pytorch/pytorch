@@ -1,11 +1,23 @@
 diff --git a/epi_ops.py b/epi_ops.py
-index 26fe87e..79b69de 100644
+index 2823b01..4ba550f 100644
 --- a/epi_ops.py
 +++ b/epi_ops.py
-@@ -1141,8 +1141,46 @@ class VecReduce(EpiOp):
+@@ -1141,8 +1141,58 @@ class VecReduce(EpiOp):
          return result
 
 
++class _GroupedLocalReduceParams(NamedTuple):
++    tensor: object
++    combine_fn: object
++    finalize_fn: object
++    feeds_main: bool
++
++
++class _GroupedLocalReduceFeedState(NamedTuple):
++    lane_layout_MN: object
++    local_reduce: object | None
++
++
 +@cute.jit
 +def grouped_rowvec_reduce_value(gemm, tRS_rInput, row_state, combine_fn, finalize_fn):
 +    """Return same-warp grouped-M reductions broadcast to every row lane.
@@ -17,7 +29,7 @@ index 26fe87e..79b69de 100644
 +    result = None
 +    if const_expr(row_state is not None):
 +        group = const_expr(gemm.local_reduce_group)
-+        lane_layout_MN = row_state[0]
++        lane_layout_MN = row_state.lane_layout_MN
 +        lanes_in_M = cute.size(lane_layout_MN, mode=[0])
 +        lanes_in_N = cute.size(lane_layout_MN, mode=[1])
 +        assert group <= lanes_in_M
@@ -50,7 +62,12 @@ index 26fe87e..79b69de 100644
 
      dim = 0
      epi_m_major_preference = -1
-@@ -1175,6 +1213,7 @@ class GroupedLocalReduce(VecReduce):
+@@ -1171,10 +1221,11 @@ class GroupedLocalReduce(VecReduce):
+
+     def to_params(self, gemm, args):
+         return {
+-            self.name: (
++            self.name: _GroupedLocalReduceParams(
                  getattr(args, self.name),
                  args.local_reduce_combine_fn,
                  args.local_reduce_finalize_fn,
@@ -58,7 +75,7 @@ index 26fe87e..79b69de 100644
              )
          }
 
-@@ -1188,17 +1227,43 @@ class GroupedLocalReduce(VecReduce):
+@@ -1188,17 +1239,42 @@ class GroupedLocalReduce(VecReduce):
              tile = tile_N if const_expr(axis == 1) else tile_M
              assert group != 0 and group <= tile
              assert tile % group == 0
@@ -67,24 +84,20 @@ index 26fe87e..79b69de 100644
 -                cute.make_rmem_tensor(vec_mma_layout, Float32)
 -            ).layout
 -            result = (cute.make_rmem_tensor(tDrReduce_layout, Float32), smem_tensor)
-+            if const_expr(param[3]):
++            if const_expr(param.feeds_main):
 +                assert axis == 0
 +                tiled_copy = ctx.tiled_copy_t2r if ctx.tiled_copy_t2r is not None else ctx.tiled_copy_r2s
 +                lane_layout_MN, _ = _get_lane_warp_layouts(
 +                    tiled_copy, ctx.tiled_copy_t2r is None
 +                )
-+                if const_expr(param[0] is None):
-+                    result = (lane_layout_MN,)
-+                else:
++                local_reduce = None
++                if const_expr(param.tensor is not None):
 +                    vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
 +                    tDrReduce_layout = ctx.partition_for_epilogue_fn(
 +                        cute.make_rmem_tensor(vec_mma_layout, Float32)
 +                    ).layout
-+                    result = (
-+                        lane_layout_MN,
-+                        cute.make_rmem_tensor(tDrReduce_layout, Float32),
-+                        smem_tensor,
-+                    )
++                    local_reduce = cute.make_rmem_tensor(tDrReduce_layout, Float32)
++                result = _GroupedLocalReduceFeedState(lane_layout_MN, local_reduce)
 +            else:
 +                vec_mma_layout = cute.make_layout((ctx.tile_M, ctx.tile_N))
 +                tDrReduce_layout = ctx.partition_for_epilogue_fn(
@@ -98,36 +111,42 @@ index 26fe87e..79b69de 100644
          result = None
          if const_expr(state is not None):
 +            if const_expr(gemm.local_reduce_feeds_main):
-+                if const_expr(len(state) == 1):
++                if const_expr(state.local_reduce is None):
 +                    return state
-+                tDrReduce = state[1]
-+                tDrReduce_cur = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
++                tDrReduce_cur = state.local_reduce[
++                    None, None, None, epi_coord[0], epi_coord[1]
++                ]
 +                cute.filter_zeros(tDrReduce_cur).fill(0.0)
-+                return (state[0], tDrReduce_cur)
++                return _GroupedLocalReduceFeedState(
++                    state.lane_layout_MN, tDrReduce_cur
++                )
              tDrReduce = state[0]
              result = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
              cute.filter_zeros(result).fill(0.0)
-@@ -1219,12 +1284,14 @@ class GroupedLocalReduce(VecReduce):
+@@ -1219,12 +1295,14 @@ class GroupedLocalReduce(VecReduce):
          tidx,
      ):
          if const_expr(param is not None):
-+            if const_expr(param[3] and param[0] is None):
+-            param_tensor = param[0]
+-            combine_fn = const_expr(param[1])
+-            finalize_fn = const_expr(param[2])
++            if const_expr(param.feeds_main and param.tensor is None):
 +                return
-             param_tensor = param[0]
-             combine_fn = const_expr(param[1])
-             finalize_fn = const_expr(param[2])
++            param_tensor = param.tensor
++            combine_fn = const_expr(param.combine_fn)
++            finalize_fn = const_expr(param.finalize_fn)
              group = const_expr(gemm.local_reduce_group)
              axis = const_expr(gemm.local_reduce_axis)
 -            tDrReduce = state[0]
-+            tDrReduce = state[1] if const_expr(param[3]) else state[0]
++            tDrReduce = state.local_reduce if const_expr(param.feeds_main) else state[0]
              tDrReduce_cur = tDrReduce[None, None, None, epi_coord[0], epi_coord[1]]
              tiled_copy = tiled_copy_t2r if tiled_copy_t2r is not None else tiled_copy_r2s
              partition_for_epilogue_fn = partial(
 diff --git a/gemm_act.py b/gemm_act.py
-index 692b821..7b482fc 100644
+index 155093a..f5a1057 100644
 --- a/gemm_act.py
 +++ b/gemm_act.py
-@@ -28,6 +28,7 @@ from .epi_ops import (
+@@ -29,6 +29,7 @@ from quack.epi_ops import (
      EpiSmemBytes,
      GroupedLocalReduce,
      Scalar,
@@ -135,16 +154,16 @@ index 692b821..7b482fc 100644
      TileTupleLoad,
      TileStore,
  )
-@@ -58,6 +59,8 @@ from .rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_out_sr_
+@@ -59,6 +60,8 @@ from quack.rounding import RoundingMode, convert_f32_to_bf16_sr, epilogue_aux_ou
  _tensor_epilogue_fns: dict[str, Callable] = {}
  _local_reduce_combine_fns: dict[str, Callable] = {}
  _local_reduce_finalize_fns: dict[str, Callable] = {}
 +# Feed-main must fit within grouped_rowvec_reduce_value's lane-layout M extent.
-+MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP = 32
++LOCAL_REDUCE_FRAGMENT_WIDTH = 32
 
 
- def register_tensor_epilogue_fn(
-@@ -95,6 +98,7 @@ class GemmActMixin(ComposableEpiMixin):
+ def power_of_2_divisibility(value: int, max_divisibility: int) -> int:
+@@ -132,6 +135,7 @@ class GemmActMixin(ComposableEpiMixin):
          ("tensor_epilogue_arg_kinds", cutlass.Constexpr, ()),
          ("tensor_epilogue_returns_aux", cutlass.Constexpr, False),
          ("tensor_epilogue_returns_local_reduce", cutlass.Constexpr, False),
@@ -152,7 +171,7 @@ index 692b821..7b482fc 100644
          ("local_reduce_group", cutlass.Constexpr, 0),
          ("local_reduce_axis", cutlass.Constexpr, 1),
      )
-@@ -107,6 +111,7 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -144,6 +148,7 @@ class GemmActMixin(ComposableEpiMixin):
          tensor_epilogue_arg_kinds: cutlass.Constexpr[tuple] = ()
          tensor_epilogue_returns_aux: cutlass.Constexpr[bool] = False
          tensor_epilogue_returns_local_reduce: cutlass.Constexpr[bool] = False
@@ -160,7 +179,7 @@ index 692b821..7b482fc 100644
          local_reduce_group: cutlass.Constexpr[int] = 0
          local_reduce_axis: cutlass.Constexpr[int] = 1
          local_reduce_combine_fn: cutlass.Constexpr[Optional[Callable]] = None
-@@ -124,6 +129,16 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -161,6 +166,16 @@ class GemmActMixin(ComposableEpiMixin):
 
      # EpilogueParams auto-generated from _epi_ops + _extra_param_fields
 
@@ -177,7 +196,7 @@ index 692b821..7b482fc 100644
      def epi_to_underlying_arguments(self, args: EpilogueArguments, *, loc=None, ip=None):
          self.rounding_mode = args.rounding_mode
          if isinstance(args.mAuxOut, tuple):
-@@ -141,8 +156,10 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -178,8 +193,10 @@ class GemmActMixin(ComposableEpiMixin):
          d["tensor_epilogue_arg_kinds"] = args.tensor_epilogue_arg_kinds
          d["tensor_epilogue_returns_aux"] = args.tensor_epilogue_returns_aux
          d["tensor_epilogue_returns_local_reduce"] = args.tensor_epilogue_returns_local_reduce
@@ -188,15 +207,24 @@ index 692b821..7b482fc 100644
          self.local_reduce_group = args.local_reduce_group
          self.local_reduce_axis = args.local_reduce_axis
          for key in ("mRowVecBroadcast", "mColVecBroadcast"):
-@@ -319,16 +336,24 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -193,7 +210,7 @@ class GemmActMixin(ComposableEpiMixin):
+         if (
+             args.mLocalReduce is not None
+             and args.local_reduce_axis == 0
+-            and args.local_reduce_group > 32
++            and args.local_reduce_group > LOCAL_REDUCE_FRAGMENT_WIDTH
+         ):
+             smem_warps = max((warp_shape_mnk[0] if warp_shape_mnk is not None else 1) - 1, 0)
+             result += EpiSmemBytes(
+@@ -356,16 +373,24 @@ class GemmActMixin(ComposableEpiMixin):
          tRS_rD: cute.Tensor,
          tRS_rC: Optional[cute.Tensor] = None,
      ) -> Optional[cute.Tensor]:
 +        tDrLocalReduceValue = None
 +        if const_expr(params.local_reduce_feeds_main):
 +            tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
-+            combine_fn = const_expr(params.mLocalReduce[1])
-+            finalize_fn = const_expr(params.mLocalReduce[2])
++            combine_fn = const_expr(params.mLocalReduce.combine_fn)
++            finalize_fn = const_expr(params.mLocalReduce.finalize_fn)
 +            tDrLocalReduceValue = grouped_rowvec_reduce_value(
 +                self, tRS_rD, tDrLocalReduce, combine_fn, finalize_fn
 +            )
@@ -214,7 +242,7 @@ index 692b821..7b482fc 100644
                  row_arg_index = 0
                  col_arg_index = 0
                  tile_arg_index = 0
-@@ -347,11 +372,11 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -384,11 +409,11 @@ class GemmActMixin(ComposableEpiMixin):
                      )
                      tRS_rEpilogueAux.store(epilogue_aux.load())
                      epilogue_aux_values.append(tRS_rEpilogueAux.load())
@@ -231,22 +259,22 @@ index 692b821..7b482fc 100644
              if const_expr(params.tensor_epilogue_returns_aux):
                  tRS_rD.store(epilogue_result[0])
                  aux_results = []
-@@ -365,10 +390,14 @@ class GemmActMixin(ComposableEpiMixin):
+@@ -402,10 +427,14 @@ class GemmActMixin(ComposableEpiMixin):
                      aux_results.append(tRS_rAuxOut)
                  if const_expr(params.tensor_epilogue_returns_local_reduce):
                      tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
 +                    if const_expr(params.local_reduce_feeds_main):
-+                        tDrLocalReduce = tDrLocalReduce[1]
++                        tDrLocalReduce = tDrLocalReduce.local_reduce
                      tDrLocalReduce.store(epilogue_result[len(params.mAuxOut) + 1])
                  tRS_rAuxOut = tuple(aux_results)
              elif const_expr(params.tensor_epilogue_returns_local_reduce):
                  tDrLocalReduce = epi_loop_tensors.get("mLocalReduce")
 +                if const_expr(params.local_reduce_feeds_main):
-+                    tDrLocalReduce = tDrLocalReduce[1]
++                    tDrLocalReduce = tDrLocalReduce.local_reduce
                  tRS_rD.store(epilogue_result[0])
                  tDrLocalReduce.store(epilogue_result[1])
                  tRS_rAuxOut = cute.make_rmem_tensor(
-@@ -565,6 +594,7 @@ def _compile_gemm_act(
+@@ -602,6 +631,7 @@ def _compile_gemm_act(
      tensor_epilogue_arg_kinds,
      tensor_epilogue_returns_aux,
      tensor_epilogue_returns_local_reduce,
@@ -254,7 +282,8 @@ index 692b821..7b482fc 100644
      tensor_epilogue_rowvec_dtypes,
      tensor_epilogue_colvec_dtypes,
      tensor_epilogue_colvec_ndims,
-@@ -711,5 +742,8 @@ def _compile_gemm_act(
+@@ -718,7 +748,10 @@ def _compile_gemm_act(
+         )
      else:
          local_reduce_shape = None
 -    if local_reduce_dtype is None:
@@ -264,7 +293,8 @@ index 692b821..7b482fc 100644
 +    ):
          mLocalReduce = None
      else:
-@@ -725,6 +756,7 @@ def _compile_gemm_act(
+         local_reduce_leading_dim = 2 if local_reduce_ndim == 3 else 1
+@@ -763,6 +796,7 @@ def _compile_gemm_act(
          tensor_epilogue_arg_kinds=tensor_epilogue_arg_kinds,
          tensor_epilogue_returns_aux=tensor_epilogue_returns_aux,
          tensor_epilogue_returns_local_reduce=tensor_epilogue_returns_local_reduce,
@@ -272,7 +302,7 @@ index 692b821..7b482fc 100644
          local_reduce_group=local_reduce_group,
          local_reduce_axis=local_reduce_axis,
          local_reduce_combine_fn=local_reduce_combine_fn,
-@@ -797,6 +829,7 @@ def gemm_act(
+@@ -835,6 +869,7 @@ def gemm_act(
      tensor_epilogue_key: Optional[str] = None,
      tensor_epilogue_returns_aux: bool = False,
      tensor_epilogue_returns_local_reduce: bool = False,
@@ -280,7 +310,21 @@ index 692b821..7b482fc 100644
      tensor_epilogue_arg_kinds: tuple[str, ...] = (),
      tensor_epilogue_rowvec_biases: tuple[Tensor, ...] = (),
      tensor_epilogue_colvec_biases: tuple[Tensor, ...] = (),
-@@ -919,14 +952,35 @@ def gemm_act(
+@@ -862,6 +897,13 @@ def gemm_act(
+     must be provided together, and a tensor epilogue function or registry key is
+     required.
+
++    ``local_reduce_feeds_main`` instead reduces the accumulator, broadcasts the
++    finalized group value to its member rows, and appends it as the final input
++    to the tensor epilogue. It does not request an output store by itself. This
++    mode requires a tensor epilogue and both callback keys, and currently accepts
++    only axis-0 groups that fit within one warp. The callback omission described
++    below applies only to store-only reductions.
++
+     ``local_reduce_combine_key`` and ``local_reduce_finalize_key`` identify
+     CuTeDSL callbacks registered with ``register_local_reduce_fns``. The binary
+     combine callback merges two physical partial values using the reduction
+@@ -982,14 +1024,43 @@ def gemm_act(
      )
      alpha_mode = 2 if isinstance(alpha, Tensor) else (1 if alpha != 1.0 else 0)
      beta_mode = 2 if isinstance(beta, Tensor) else (1 if beta != 1.0 else 0)
@@ -302,10 +346,10 @@ index 692b821..7b482fc 100644
 +            raise NotImplementedError("local_reduce_feeds_main currently supports only axis 0")
 +        if local_reduce_group <= 0:
 +            raise RuntimeError("local_reduce_group must be positive")
-+        if local_reduce_group > MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP:
++        if local_reduce_group > LOCAL_REDUCE_FRAGMENT_WIDTH:
 +            raise NotImplementedError(
 +                "local_reduce_feeds_main currently supports only same-warp axis-0 "
-+                f"groups <= {MAX_SAME_WARP_LOCAL_REDUCE_FEED_MAIN_GROUP}"
++                f"groups <= {LOCAL_REDUCE_FRAGMENT_WIDTH}"
 +            )
 +        if tensor_epilogue_fn is None and tensor_epilogue_key is None:
 +            raise RuntimeError(
@@ -315,10 +359,18 @@ index 692b821..7b482fc 100644
 +            raise RuntimeError(
 +                "local_reduce_feeds_main requires generated local-reduce callback keys"
 +            )
++        if LOCAL_REDUCE_FRAGMENT_WIDTH % local_reduce_group != 0:
++            raise RuntimeError(
++                "local_reduce_group must divide TensorSSA fragment width 32"
++            )
++        if A.shape[-2] % local_reduce_group != 0:
++            raise RuntimeError(
++                "local_reduce_group must divide the selected GEMM output dimension"
++            )
      if local_reduce_out is not None and tensor_epilogue_fn is None and tensor_epilogue_key is None:
          raise RuntimeError("local_reduce_out requires tensor_epilogue_fn")
      if local_reduce_out is not None:
-@@ -946,7 +1000,7 @@ def gemm_act(
+@@ -1009,7 +1080,7 @@ def gemm_act(
      local_reduce_dtype = (
          torch2cute_dtype_map[local_reduce_out.dtype]
          if local_reduce_out is not None
@@ -327,7 +379,7 @@ index 692b821..7b482fc 100644
      )
      local_reduce_leading_dim = (
          2 if local_reduce_out is not None and local_reduce_out.ndim == 3 else 1
-@@ -964,12 +1018,13 @@ def gemm_act(
+@@ -1042,6 +1113,7 @@ def gemm_act(
          tensor_epilogue_arg_kind_codes,
          tensor_epilogue_returns_aux,
          tensor_epilogue_returns_local_reduce,
@@ -335,13 +387,7 @@ index 692b821..7b482fc 100644
          tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_rowvec_biases),
          tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_colvec_biases),
          tuple(tensor.ndim for tensor in tensor_epilogue_colvec_biases),
-         tuple(torch2cute_dtype_map[tensor.dtype] for tensor in tensor_epilogue_tile_biases_p),
-         tuple(get_major(tensor, "m", "n") for tensor in tensor_epilogue_tile_biases_p),
-         local_reduce_dtype,
-         local_reduce_out.ndim if local_reduce_out is not None else 0,
-         local_reduce_group,
-         local_reduce_axis,
-@@ -1012,6 +1071,7 @@ def gemm_act(
+@@ -1091,6 +1163,7 @@ def gemm_act(
          tensor_epilogue_arg_kinds=None,
          tensor_epilogue_returns_aux=None,
          tensor_epilogue_returns_local_reduce=None,
@@ -349,22 +395,3 @@ index 692b821..7b482fc 100644
          local_reduce_group=None,
          local_reduce_axis=None,
          local_reduce_combine_fn=None,
-
-diff --git a/gemm_act.py b/gemm_act.py
-index 9b1966e..27d1380 100644
---- a/gemm_act.py
-+++ b/gemm_act.py
-@@ -897,6 +897,13 @@ def gemm_act(
-     must be provided together, and a tensor epilogue function or registry key is
-     required.
-
-+    ``local_reduce_feeds_main`` instead reduces the accumulator, broadcasts the
-+    finalized group value to its member rows, and appends it as the final input
-+    to the tensor epilogue. It does not request an output store by itself. This
-+    mode requires a tensor epilogue and both callback keys, and currently accepts
-+    only axis-0 groups that fit within one warp. The callback omission described
-+    below applies only to store-only reductions.
-+
-     ``local_reduce_combine_key`` and ``local_reduce_finalize_key`` identify
-     CuTeDSL callbacks registered with ``register_local_reduce_fns``. The binary
-     combine callback merges two physical partial values using the reduction
