@@ -1695,6 +1695,7 @@ def reference_inputs_like_fns(op, device, dtype, requires_grad, **kwargs):
 def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+    make_target_tensor = partial(torch.tensor, device=device, dtype=torch.long, requires_grad=False)
 
     inputs = (
         ([], make_target([], low=0, high=1), {}),
@@ -1703,6 +1704,8 @@ def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, 
         ([M, S], make_target([M, S], low=0, high=S), {"reduction": "none"}),
         ([M, S], make_target([M, S], low=0, high=S), {"reduction": "mean"}),
         ([M, S], make_target([M, S], low=0, high=S), {"reduction": "sum"}),
+        # labels after the first -1 are ignored; exercises the padded-slot path
+        ([5], make_target_tensor([0, 1, -1, -1, -1]), {}),
     )
 
     for shape, target, kwargs in inputs:
