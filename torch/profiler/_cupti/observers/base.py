@@ -103,9 +103,9 @@ class CuptiMonitorObserver:
         # Degrade gracefully (available == False) if the monitor can't be reached or
         # registration fails (CUPTI subscribe rejected, libcupti lacks v2)
         try:
-            from torch.profiler._cupti.monitor import instance
+            from torch.profiler._cupti.monitor import CuptiMonitor
 
-            self._monitor = instance()
+            self._monitor = CuptiMonitor()
             self._obs = self._monitor.register(activities, self._on_activities)
         except Exception:
             self._obs = None
