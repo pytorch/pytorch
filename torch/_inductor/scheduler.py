@@ -14,6 +14,7 @@ import os
 import pprint
 import sys
 import textwrap
+import threading
 import time
 import traceback
 import typing
@@ -2076,14 +2077,23 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> float | None:
     return ms
 
 
+# Thread-local hook used by fuse_or_err to capture fusion-rejection reasons
+# during the fusion pass. None unless a fuse_or_err region is present.
+_fuse_or_err_capture = threading.local()
+
+
 @dataclasses.dataclass(slots=True)
 class WhyNoFuse:
+    node1: BaseSchedulerNode
+    node2: BaseSchedulerNode
     name1: str
     name2: str
     reason: str
     args: tuple[Any, ...]
 
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
+        self.node1 = node1
+        self.node2 = node2
         self.name1 = node1.get_name()
         self.name2 = node2.get_name()
 
@@ -2091,6 +2101,11 @@ class WhyNoFuse:
         self.reason = reason
         self.args = args
         fusion_log.debug(self)
+        # fuse_or_err captures rejection reasons during the real fusion pass so
+        # it can surface an accurate explanation if a required region splits.
+        hook = getattr(_fuse_or_err_capture, "hook", None)
+        if hook is not None:
+            hook(self.node1, self.node2, str(self))
 
     def __str__(self) -> str:
         return f"cannot fuse {self.name1} with {self.name2}: " + (
@@ -4246,7 +4261,21 @@ class Scheduler:
         self.user_obj_idx_to_stream_idx: dict[int, int] = {}
         self._populate_stream_assignments()
 
-        self.nodes = self.fuse_nodes(self.nodes)
+        # When a fuse_or_err region is present, capture fusion-rejection reasons
+        # during the fusion pass so a required region that splits can be
+        # explained accurately (see _verify_fuse_or_err_groups).
+        self._fuse_or_err_region_ops: OrderedSet[str] = OrderedSet()
+        for group in V.graph.fuse_or_err_groups:
+            self._fuse_or_err_region_ops |= group.op_names
+        self._fuse_or_err_no_fuse_reasons: list[
+            tuple[OrderedSet[str], OrderedSet[str], str]
+        ] = []
+        if self._fuse_or_err_region_ops:
+            _fuse_or_err_capture.hook = self._record_no_fuse_reason
+        try:
+            self.nodes = self.fuse_nodes(self.nodes)
+        finally:
+            _fuse_or_err_capture.hook = None
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
@@ -6121,14 +6150,47 @@ class Scheduler:
                     targets.add(str(origin.target))
         return list(targets)
 
+    def _record_no_fuse_reason(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, message: str
+    ) -> None:
+        # Called from WhyNoFuse during the fusion pass. Keep only rejections that
+        # touch a fuse_or_err region so this stays bounded.
+        ops1 = node1.get_operation_names()
+        ops2 = node2.get_operation_names()
+        if self._fuse_or_err_region_ops.isdisjoint(ops1 | ops2):
+            return
+        self._fuse_or_err_no_fuse_reasons.append((ops1, ops2, message))
+
     def _fuse_or_err_reason(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> str:
-        # Read-only, best-effort explanation of why two kernels did not fuse. We
-        # deliberately do NOT re-run can_fuse here: can_fuse can commit
-        # speculative loop mutations (kept when it returns True), which would
-        # corrupt the finalized schedule on the fbcode warn-and-continue path.
-        # Reconfiguring the global fusion_log is also not concurrency-safe.
+        # Prefer the exact reason(s) captured from the real fusion pass: find
+        # recorded rejections between an op of node1 and an op of node2 (the
+        # candidate nodes at rejection time are subsets of these final nodes).
+        a_ops = node1.get_operation_names()
+        b_ops = node2.get_operation_names()
+
+        def subset(xs: OrderedSet[str], ys: OrderedSet[str]) -> bool:
+            return all(x in ys for x in xs)
+
+        captured = [
+            msg
+            for ops1, ops2, msg in self._fuse_or_err_no_fuse_reasons
+            if (subset(ops1, a_ops) and subset(ops2, b_ops))
+            or (subset(ops1, b_ops) and subset(ops2, a_ops))
+        ]
+        if captured:
+            return "; ".join(OrderedSet(captured))
+        return self._fuse_or_err_reason_heuristic(node1, node2)
+
+    def _fuse_or_err_reason_heuristic(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> str:
+        # Fallback when no reason was captured (e.g. a benchmark-based decline,
+        # which does not go through WhyNoFuse). Read-only, best-effort. We
+        # deliberately do NOT re-run can_fuse here: it can commit speculative
+        # loop mutations (kept when it returns True), which would corrupt the
+        # finalized schedule on the fbcode warn-and-continue path.
         def is_extern(n: BaseSchedulerNode) -> bool:
             return any(
                 isinstance(sub, (ExternKernelSchedulerNode, NopKernelSchedulerNode))

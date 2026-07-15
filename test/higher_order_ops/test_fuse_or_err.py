@@ -222,6 +222,31 @@ class TestFuseOrErr(TestCase):
         self.assertEqual(ref, res)
 
     @requires_gpu
+    def test_surfaces_exact_captured_reason(self):
+        # When a data-sharing region pair is rejected during fusion, the error
+        # surfaces the exact WhyNoFuse reason captured from the fusion pass
+        # (starts with "cannot fuse"), not the fallback heuristic. We force the
+        # rejection with no_fuse_buffer_names, a real anti-fusion hook.
+        from torch._inductor import config as inductor_config
+        from torch._inductor.virtualized import V
+
+        def prefuse(nodes):
+            for n in nodes:
+                for b in n.get_buffer_names():
+                    V.graph.no_fuse_buffer_names.add(b)
+            return nodes
+
+        def fn(a):
+            return fuse_or_err(lambda x: x.sum(1, keepdim=True) + x)(a)
+
+        a = torch.randn(128, 128, device=GPU_TYPE)
+        with inductor_config.patch(_pre_fusion_custom_pass=prefuse):
+            with self.assertRaisesRegex(
+                RuntimeError, r"cannot fuse .* explicit disabled"
+            ):
+                torch.compile(fn, backend="inductor", fullgraph=True)(a)
+
+    @requires_gpu
     def test_zero_kernel_region_passes(self):
         # "at most one kernel": a region that materializes no kernel trivially
         # passes.
