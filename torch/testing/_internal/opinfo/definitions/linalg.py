@@ -1637,7 +1637,6 @@ op_db: list[OpInfo] = [
         skips=(
             # we skip gradient checks for this suite as they are tested in
             # variant_test_name='grad_oriented'
-            DecorateInfo(unittest.skip("Skipped!"), "TestFwdGradients"),
             # The values for attribute 'shape' do not match
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
             DecorateInfo(
