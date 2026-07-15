@@ -1888,6 +1888,8 @@ weight_mgr.add_tensor_match_guard(
     list(model[0].weight.stride()),
     "L['self']._modules['child']._modules['0']._parameters['weight']",
     ["check_tensor(weight)"],
+    type(model[0].weight),
+    torch._C._dispatch_keys(model[0].weight),
 )
 
 f_locals = {"self": container}
@@ -2001,6 +2003,8 @@ cached_mgr.add_tensor_match_guard(
     list(model.other_tensor.stride()),
     "L['self']._modules['child']._modules['leaf'].other_tensor",
     ["check_tensor(cached)"],
+    type(model.other_tensor),
+    torch._C._dispatch_keys(model.other_tensor),
 )
 
 f_locals = {"self": container}
@@ -2097,6 +2101,8 @@ cached_mgr.add_tensor_match_guard(
     list(model._cached_tensor.stride()),
     "L['self']._modules['child']._modules['leaf']._cached_tensor",
     ["check_tensor(cached)"],
+    type(model._cached_tensor),
+    torch._C._dispatch_keys(model._cached_tensor),
 )
 
 f_locals = {"self": container}
@@ -2204,6 +2210,8 @@ scale_mgr.add_tensor_match_guard(
     list(model.scale.stride()),
     "L['self']._modules['child']._modules['leaf'].scale",
     ["check_tensor(scale)"],
+    type(model.scale),
+    torch._C._dispatch_keys(model.scale),
 )
 
 f_locals = {"self": container}
