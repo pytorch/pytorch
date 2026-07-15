@@ -12,10 +12,6 @@ inputs:
   custom-tag-prefix:
     description: Custom tag prefix for the docker image
     required: false
-  buildkit-addr:
-    description: Address of the remote BuildKit builder.
-    required: false
-    default: 'tcp://buildkitd-amd64.buildkit:1234'
   docker-repository:
     description: Target registry/repository for the published image.
     required: false
@@ -40,11 +36,15 @@ runs:
       shell: bash
       run: |
         set -ex
+        case "${RUNNER_ARCH}" in
+          ARM64) buildkit_addr="tcp://buildkitd-arm64.buildkit:1234" ;;
+          *)     buildkit_addr="tcp://buildkitd-amd64.buildkit:1234" ;;
+        esac
         docker buildx create \
           --name remote-buildkit \
           --driver remote \
           --use \
-          "${{ inputs.buildkit-addr }}"
+          "${buildkit_addr}"
 
     - name: Build (and, on push, publish) via remote BuildKit
       env:
