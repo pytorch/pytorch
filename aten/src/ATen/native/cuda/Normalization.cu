@@ -704,6 +704,10 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda(const Tensor& self, cons
   const Tensor& running_mean = *running_mean_maybe_owned;
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
+  TORCH_CHECK(mean.dim() == 2,
+      "batch_norm_gather_stats: expected mean to be 2-dimensional (world_size, num_features), but got mean of sizes ",
+      mean.sizes());
+
   std::vector<int64_t> counts(mean.size(0), count);
   Tensor counts_ = at::from_blob((void*)counts.data(), {(int64_t)counts.size()}, self.options().dtype(at::kLong).device(at::kCPU));
   counts_ = counts_.to(self.device()).to(running_mean.defined() ? running_mean.dtype() : self.dtype());
@@ -718,6 +722,17 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(
   const Tensor& running_mean = *running_mean_maybe_owned;
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
+  // batch_norm_reduce_statistics_kernel derives both of its loop bounds from mean alone, then
+  // indexes invstd and counts with them, so any disagreement is an out-of-bounds read.
+  TORCH_CHECK(mean.dim() == 2,
+      "batch_norm_gather_stats_with_counts: expected mean to be 2-dimensional (world_size, num_features), but got mean of sizes ",
+      mean.sizes());
+  TORCH_CHECK(invstd.sizes() == mean.sizes(),
+      "batch_norm_gather_stats_with_counts: expected invstd to have the same shape as mean (",
+      mean.sizes(), "), but got invstd of sizes ", invstd.sizes());
+  TORCH_CHECK(counts.numel() >= mean.size(0),
+      "batch_norm_gather_stats_with_counts: expected counts to have at least one element per entry in mean's first dimension (",
+      mean.size(0), "), but got ", counts.numel(), " elements");
 
   auto scalar_type = running_mean.defined() ? running_mean.scalar_type() : self.scalar_type();
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "batch_norm_update_stats_cuda", [&] {
