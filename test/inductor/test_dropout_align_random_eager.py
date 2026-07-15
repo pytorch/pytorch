@@ -2,6 +2,7 @@
 
 import struct
 import time
+import unittest
 
 import pytest
 
@@ -428,31 +429,22 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # Primitive random fns: rand / randn / randint -> mark as XFAIL
     # ───────────────────────────────────────────────────────────
+    @unittest.expectedFailure
     @requires_gpu()
-    @pytest.mark.xfail(
-        reason="primitive torch.rand parity is tracked as future work",
-        strict=False,
-    )
     def test_primitive_rand_parity(self):
         device = torch.device(GPU_TYPE)
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("rand", device, shape)
 
+    @unittest.expectedFailure
     @requires_gpu()
-    @pytest.mark.xfail(
-        reason="primitive torch.randn parity is tracked as future work",
-        strict=False,
-    )
     def test_primitive_randn_parity(self):
         device = torch.device(GPU_TYPE)
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("randn", device, shape)
 
+    @unittest.expectedFailure
     @requires_gpu()
-    @pytest.mark.xfail(
-        reason="primitive torch.randint parity is tracked as future work",
-        strict=False,
-    )
     def test_primitive_randint_parity(self):
         device = torch.device(GPU_TYPE)
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
