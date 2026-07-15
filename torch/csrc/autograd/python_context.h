@@ -5,7 +5,9 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
 
+#include <cstdint>
 #include <utility>
 
 namespace torch::autograd {
@@ -29,11 +31,14 @@ inline bool is_context_origin_thread() {
     return false;
   }
 
-  auto origin_id = PyLong_AsUnsignedLong(py_origin_thread_id);
-  if (origin_id == static_cast<unsigned long>(-1) && PyErr_Occurred()) {
-    throw_persisted_python_error();
+  uint64_t origin_id = 0;
+  try {
+    origin_id = THPUtils_unpackUInt64(py_origin_thread_id);
+  } catch (python_error& err) {
+    err.persist();
+    throw;
   }
-  return origin_id == PyThread_get_thread_ident();
+  return origin_id == static_cast<uint64_t>(PyThread_get_thread_ident());
 }
 
 inline THPObjectPtr call_with_context(PyObject* callable, PyObject* args) {
