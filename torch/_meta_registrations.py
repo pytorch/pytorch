@@ -6541,12 +6541,12 @@ def meta__scaled_dot_product_attention_math_for_mps(
     q_prefix, k_prefix, v_prefix = query.shape[:-3], key.shape[:-3], value.shape[:-3]
     prefix = list(torch.broadcast_shapes(q_prefix, k_prefix, v_prefix))
     qh, kh, vh = query.size(-3), key.size(-3), value.size(-3)
-    num_head = qh if enable_gqa else torch.broadcast_shapes((qh,), (kh,), (vh,))[0]
+    num_heads = qh if enable_gqa else torch.broadcast_shapes((qh,), (kh,), (vh,))[0]
 
     # sdpa_vector_2pass_mps and sdpa_vector_fast_mps are intentionally left out.
     # See https://github.com/pytorch/pytorch/issues/177603 for additional context.
-    out = query.new_empty(prefix + [num_head, query.size(-2), value.size(-1)])
-    attn = query.new_empty(prefix + [num_head, query.size(-2), key.size(-2)])
+    out = query.new_empty(prefix + [num_heads, query.size(-2), value.size(-1)])
+    attn = query.new_empty(prefix + [num_heads, query.size(-2), key.size(-2)])
     return out, attn
 
 
