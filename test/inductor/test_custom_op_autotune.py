@@ -100,7 +100,7 @@ class TestCustomOpAutoTune(TestCase):
             # Basic sanity checks
             self.assertTrue(
                 torch.isfinite(result).all(),
-                f"{op_name} {name} produced non-finite values",
+                lambda msg: f"{msg}\n{op_name} {name} produced non-finite values",
             )
 
         # Verify numerical equivalence
@@ -629,10 +629,10 @@ class TestCustomOpAutoTune(TestCase):
         cuda_graph_benchmark_called = False
         original_benchmark_gpu_with_cuda_graph = torch._inductor.runtime.benchmarking.Benchmarker.benchmark_gpu_with_cuda_graph
 
-        def patched_benchmark_gpu_with_cuda_graph(self, fn):
+        def patched_benchmark_gpu_with_cuda_graph(self, fn, *args, **kwargs):
             nonlocal cuda_graph_benchmark_called
             cuda_graph_benchmark_called = True
-            return original_benchmark_gpu_with_cuda_graph(self, fn)
+            return original_benchmark_gpu_with_cuda_graph(self, fn, *args, **kwargs)
 
         torch._dynamo.reset()
         with config.patch(max_autotune=True, fx_graph_cache=False):
@@ -895,7 +895,9 @@ class TestCustomOpAutoTune(TestCase):
         # Verify we got concrete integers during benchmarking (not symbolic)
         unique_shapes = sorted(set(shapes_seen))
         for shape in unique_shapes:
-            self.assertIsInstance(shape, int, f"Expected int, got {type(shape)}")
+            self.assertIsInstance(
+                shape, int, lambda msg: f"{msg}\nExpected int, got {type(shape)}"
+            )
 
         # Verify we hit all 3 ranges during autotuning
         ranges_hit = set()
@@ -1443,7 +1445,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
 
         # Create test tensors and establish baseline with some mm activity
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
@@ -1488,7 +1490,7 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch.cuda._clear_cublas_workspaces()
+        torch._C._cuda_clearCublasWorkspaces()
 
         # Create test tensors
         a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
