@@ -316,9 +316,14 @@ kernel void index_reduce(
     source_offset += dim_idx * params.source_strides[dim];
 
     if (dim == params.reduce_dim) {
-      uint32_t self_dim_idx =
-          static_cast<uint32_t>(index[dim_idx * params.index_stride]);
-      self_offset += self_dim_idx * params.self_strides[dim];
+      // Clamp keeps the access in bounds; out-of-range indices are reported
+      // separately by the index_check_bounds pass, which invalidates the
+      // result.
+      long idx = clamp(
+          long(index[dim_idx * params.index_stride]),
+          0L,
+          long(params.self_sizes[dim]) - 1);
+      self_offset += static_cast<uint32_t>(idx) * params.self_strides[dim];
     } else {
       self_offset += dim_idx * params.self_strides[dim];
     }
@@ -437,10 +442,11 @@ kernel void index_check_bounds(
     device IT* index [[buffer(0)]],
     constant uint& index_stride [[buffer(1)]],
     constant long& dim_size [[buffer(2)]],
-    device ErrorMessages* error_buf [[buffer(3)]],
+    constant long& lower_bound [[buffer(3)]],
+    device ErrorMessages* error_buf [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   long idx = index[tid * index_stride];
-  if (idx < 0 || idx >= dim_size) {
+  if (idx < lower_bound || idx >= dim_size) {
     TORCH_REPORT_ERROR(
         error_buf,
         "index ",
@@ -455,12 +461,14 @@ template [[host_name("index_check_bounds_int")]] kernel void index_check_bounds<
     device int*,
     constant uint&,
     constant long&,
+    constant long&,
     device ErrorMessages*,
     uint);
 template [[host_name("index_check_bounds_long")]] kernel void index_check_bounds<
     long>(
     device long*,
     constant uint&,
+    constant long&,
     constant long&,
     device ErrorMessages*,
     uint);
@@ -647,7 +655,9 @@ kernel void index_copy_dense(
   OffsetT after = gid.x;
   OffsetT i = gid.y;
   OffsetT before = gid.z;
-  OffsetT idx = indices[i];
+  // Clamp keeps the access in bounds; out-of-range indices are reported
+  // separately by the index_check_bounds pass, which invalidates the result.
+  OffsetT idx = OffsetT(clamp(long(indices[i]), 0L, long(dim_size) - 1));
   output[(before * OffsetT(dim_size) + idx) * OffsetT(inner) + after] =
       source[(before * OffsetT(indices_numel) + i) * OffsetT(inner) + after];
 }
@@ -669,10 +679,11 @@ kernel void index_copy_strided(
     uint thread_index [[thread_position_in_grid]]) {
   OffsetT j = OffsetT(thread_index) % OffsetT(slice_numel);
   OffsetT i = OffsetT(thread_index) / OffsetT(slice_numel);
-  OffsetT idx = indices[i * OffsetT(indices_stride)];
-  if (idx < 0) {
-    idx += OffsetT(dim_size);
-  }
+  // Clamp keeps the access in bounds; out-of-range indices (including
+  // negative ones, which index_copy_ rejects) are reported separately by the
+  // index_check_bounds pass, which invalidates the result.
+  OffsetT idx = OffsetT(clamp(
+      long(indices[i * OffsetT(indices_stride)]), 0L, long(dim_size) - 1));
   OffsetT slice_pos[max_ndim];
   pos_from_thread_index(j, slice_pos, slice_sizes, slice_ndim);
   OffsetT out_offset =
@@ -705,6 +716,10 @@ kernel void index_fill_dense(
   if (idx < 0) {
     idx += dim_size;
   }
+  // Clamp keeps the access in bounds; indices outside [-dim_size, dim_size)
+  // are reported separately by the index_check_bounds pass, which invalidates
+  // the result.
+  idx = clamp(idx, 0L, dim_size - 1);
   long before = j / dim_stride;
   long after = j % dim_stride;
   output[before * (dim_size * dim_stride) + idx * dim_stride + after] =
@@ -733,6 +748,10 @@ kernel void index_fill_strided(
   if (idx < 0) {
     idx += dim_size;
   }
+  // Clamp keeps the access in bounds; indices outside [-dim_size, dim_size)
+  // are reported separately by the index_check_bounds pass, which invalidates
+  // the result.
+  idx = clamp(idx, 0L, dim_size - 1);
   int slice_pos[max_ndim];
   pos_from_thread_index(int(j), slice_pos, slice_sizes, slice_ndim);
   long out_offset = offset_from_coord(slice_pos, slice_out_strides, slice_ndim);
@@ -762,6 +781,10 @@ kernel void index_fill_set_mask(
   long idx = indices[thread_index * indices_stride];
   if (idx < 0)
     idx += dim_size;
+  // Clamp keeps the mask write in bounds; indices outside
+  // [-dim_size, dim_size) are reported separately by the index_check_bounds
+  // pass, which invalidates the result.
+  idx = clamp(idx, 0L, dim_size - 1);
   mask[idx] = true;
 }
 
