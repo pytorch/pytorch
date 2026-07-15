@@ -64,6 +64,10 @@ body:
       description: |
         Please run the following and paste the output below.
         ```sh
+        curl -sL https://raw.githubusercontent.com/pytorch/pytorch/main/torch/utils/collect_env.py | python3
+        ```
+        Or, if you prefer to inspect the script first:
+        ```sh
         curl -OL https://raw.githubusercontent.com/pytorch/pytorch/main/torch/utils/collect_env.py
         # For security purposes, please check the contents of collect_env.py before running it.
         python3 collect_env.py

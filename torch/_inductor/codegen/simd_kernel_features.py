@@ -5,14 +5,14 @@ import dataclasses
 import functools
 import itertools
 import typing
-from typing import Any, Optional, Union
+from typing import Any
 
 import sympy
 
 import torch
 
 from ...utils._ordered_set import OrderedSet
-from ...utils._sympy.functions import FloorDiv, ModularIndexing
+from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
@@ -39,7 +39,7 @@ class NodeScheduleMarker:
         return False
 
 
-NodeScheduleEntry = Union[SchedulerNode, type[NodeScheduleMarker]]
+NodeScheduleEntry = SchedulerNode | type[NodeScheduleMarker]
 
 
 class DisableReduction(NodeScheduleMarker):
@@ -82,7 +82,7 @@ class SIMDKernelFeatures:
         node_schedule: list[NodeScheduleEntry],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr = sympy.S.One,
-        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
+        coalesce_analysis: CoalesceVarAnalysis | None = None,
     ):
         self.node_schedule = node_schedule
         # numel excludes reduction_numel
@@ -146,11 +146,82 @@ class SIMDKernelFeatures:
         from .simd import SIMDScheduling
 
         if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
+            # Fused address expressions can overflow int32 even when
+            # numel/storage_size are within range, so check them directly.
+            if self.any_index_expr_overflows_int32():
+                return torch.int64
             return torch.int32
         return torch.int64
 
+    @cache_on_self
+    def any_index_expr_overflows_int32(self) -> bool:
+        """Return True if any MemoryDep addressing expression can overflow int32.
+
+        Two complementary checks are applied to each index:
+
+        - Constant offset: the index evaluated at the origin (every loop
+          variable set to 0) must lie within [-2**31, 2**31 - 1]. This is cheap
+          and independent of loop-var ranges, so it also covers deps whose sizes
+          are symbolic.
+        - Variable-scaled bound: the index bounded over the actual iteration
+          range of every loop variable must not exceed 2**31 - 1. This catches
+          overflow such as the `V * x0` synthesized when unrolled chunked-loop
+          slices are stitched into one pointwise kernel (`V` a per-chunk stride,
+          `x0` spanning the fused numel); unlike a `numel * max_stride` proxy it
+          is exact, since a stride on a size-1 dim multiplies an empty range and
+          drops out. Deps with a symbolic loop-var size, or whose bound is
+          unknown/indirect (infinite), are skipped here and left to the
+          constant-offset and per-buffer storage-size checks.
+        """
+        from torch.utils._sympy.numbers import int_oo
+        from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+
+        int32_max = sympy.Integer(2**31 - 1)
+        int32_min = sympy.Integer(-(2**31))
+        for node in self.scheduler_nodes():
+            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes):
+                if not isinstance(dep, MemoryDep):
+                    continue
+                index = dep.index
+                if not isinstance(index, sympy.Expr):
+                    continue
+
+                # Constant offset (index at the origin).
+                try:
+                    const_part = index.subs(
+                        {s: sympy.Integer(0) for s in index.free_symbols}
+                    )
+                    if isinstance(const_part, sympy.Expr) and (
+                        const_part > int32_max or const_part < int32_min
+                    ):
+                        return True
+                except (ZeroDivisionError, TypeError, ValueError):
+                    pass
+
+                # Variable-scaled bound over concrete loop-var ranges. A
+                # ValueRanges bound must be concrete, so skip a dep with any
+                # symbolic loop-var size.
+                sizes = dep.size
+                if any(getattr(s, "free_symbols", None) for s in sizes):
+                    continue
+                try:
+                    var_ranges = {
+                        var: ValueRanges(0, max(int(size) - 1, 0))
+                        for var, size in zip(dep.var_names, sizes)
+                    }
+                    upper = bound_sympy(index, var_ranges).upper
+                    if (
+                        isinstance(upper, sympy.Expr)
+                        and not upper.has(int_oo, sympy.oo)
+                        and upper > int32_max
+                    ):
+                        return True
+                except (ZeroDivisionError, TypeError, ValueError):
+                    continue
+        return False
+
     def get_reduction_hint(
-        self, tiling_scores: Optional[dict[str, int]] = None
+        self, tiling_scores: dict[str, int] | None = None
     ) -> ReductionHint:
         reductions = self.reduction_nodes()
         if len(reductions) > 0:
@@ -220,7 +291,8 @@ class SIMDKernelFeatures:
 
     @staticmethod
     def reduction_hint(node: Any) -> ReductionHint:
-        assert node.is_reduction()
+        if not node.is_reduction():
+            raise AssertionError("expected node to be a reduction")
         if node.node.data.reduction_hint != ReductionHint.INNER and all(
             dep.is_contiguous()
             for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
@@ -230,7 +302,7 @@ class SIMDKernelFeatures:
             return node.node.data.reduction_hint
 
     def memory_stats(
-        self, groups_dict: Optional[dict[str, sympy.Expr]] = None
+        self, groups_dict: dict[str, sympy.Expr] | None = None
     ) -> MemoryStats:
         """Analysis to generate features that can be used in heuristics"""
         if groups_dict is None:
@@ -297,7 +369,8 @@ class MemoryEstimator:
                 self.kernel_sizes = kernel_size_inside_loop
                 self.loops.append(MemoryEstimate())
                 continue
-            assert isinstance(node, SchedulerNode)
+            if not isinstance(node, SchedulerNode):
+                raise AssertionError(f"expected SchedulerNode, got {type(node)}")
             rw = extract_loop_body_with_args(
                 node._body,
                 SIMDKernel.map_kernel_groups_to_node_sizes(
@@ -369,7 +442,11 @@ class MemoryEstimator:
         return False
 
     def set_ranges(self, *lengths: list[list[sympy.Expr]]) -> list[list[sympy.Expr]]:
-        assert len(self.kernel_sizes) == len(lengths)
+        if len(self.kernel_sizes) != len(lengths):
+            raise AssertionError(
+                f"expected len(kernel_sizes) == len(lengths), got "
+                f"{len(self.kernel_sizes)} != {len(lengths)}"
+            )
         return [
             self.make_flat_range(sym, numel, length)
             for sym, numel, length in zip(self.symbols, self.kernel_sizes, lengths)
@@ -508,8 +585,16 @@ class StatsForReadsOrWrites:
     bytes_non_contiguous: sympy.Expr = sympy.S.Zero
 
     def __add__(self, other: typing.Self) -> StatsForReadsOrWrites:
-        assert len(self.dim) == len(other.dim)
-        assert len(self.loop) == len(other.loop)
+        if len(self.dim) != len(other.dim):
+            raise AssertionError(
+                f"expected len(self.dim) == len(other.dim), got "
+                f"{len(self.dim)} != {len(other.dim)}"
+            )
+        if len(self.loop) != len(other.loop):
+            raise AssertionError(
+                f"expected len(self.loop) == len(other.loop), got "
+                f"{len(self.loop)} != {len(other.loop)}"
+            )
         return StatsForReadsOrWrites(
             dim=[a + b for a, b in zip(self.dim, other.dim)],
             loop=[a + b for a, b in zip(self.loop, other.loop)],
@@ -541,7 +626,8 @@ class StatsForReadsOrWrites:
         for dep_group in loop_deps:
             result.loop.append(loop_stats := StatsForLoop())
             for name, deps in dep_group.items():
-                assert deps
+                if not deps:
+                    raise AssertionError(f"expected non-empty deps for {name}")
                 contiguous_or_broadcast = [True] * ndim
                 numel = sympy.S.Zero
                 itemsize = V.graph.get_dtype(name).itemsize
@@ -568,7 +654,7 @@ class StatsForReadsOrWrites:
                     numel += dep.get_numel()
                 if len(deps) > 1:
                     # can't read more elements than exist in the buffer
-                    numel = sympy.Min(numel, V.graph.get_numel(name))
+                    numel = Min(numel, V.graph.get_numel(name))
                 nbytes = numel * itemsize
                 for i in range(ndim):
                     if contiguous_or_broadcast[i]:

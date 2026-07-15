@@ -1,11 +1,10 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
-import functools
 import logging
 import warnings
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -21,8 +20,8 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
+    create_fn_remove_none,
     fill_none_with_masks,
-    filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
     save_values_for_backward,
@@ -94,15 +93,16 @@ cond_op = CondOp()
 
 @exposed_in("torch")
 def cond(
-    pred: Union[bool, int, float, torch.Tensor],
+    pred: bool | int | float | torch.Tensor,
     true_fn: Callable,
     false_fn: Callable,
-    operands: Union[tuple, list] = (),
+    operands: tuple | list = (),
 ) -> Any:
     r"""
     Conditionally applies `true_fn` or `false_fn`.
 
     .. warning::
+
         `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types.
         Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
@@ -162,9 +162,33 @@ def cond(
           - The function must return a tensor with the same metadata, e.g. shape,
             dtype, etc.
 
-          - The function cannot have in-place mutations on inputs or global variables.
+          - The function cannot have in-place mutations on global variables.
             (Note: in-place tensor operations such as `add_` for intermediate results
             are allowed in a branch)
+
+          - The function can perform in-place mutations on its input tensors during inference (i.e.,
+            when `torch.is_grad_enabled()` is False).
+            Note: When using `torch.compile()` with a non-constant predicate, the outputs will always
+            be new tensors that do not share object identity with the original inputs.
+
+            Example::
+
+                def true_fn(x):
+                    return x.sin_()
+
+
+                def false_fn(x):
+                    return x + 1
+
+
+                def f(x):
+                    return cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+
+                x = torch.ones(4)
+                with torch.no_grad():
+                    result = torch.compile(f)(x)
+                assert result is not x  # result is a new tensor, not the original x
 
     """
     if torch.compiler.is_dynamo_compiling():
@@ -173,7 +197,7 @@ def cond(
     if isinstance(pred, (bool, int, float)):
         # This is the non-strict export case. Strict export and torch.compile are
         # handled above in dynamo.
-        if torch.compiler.is_compiling():
+        if torch.compiler.is_exporting():
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
@@ -216,12 +240,9 @@ def cond(
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
-    from torch._higher_order_ops.utils import setup_compilation_env
+    from torch._higher_order_ops.utils import _hop_compile_and_call
 
-    with setup_compilation_env() as backend:
-        return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
-            pred, true_fn, false_fn, operands
-        )
+    return _hop_compile_and_call(_cond_op_wrapper, (pred, true_fn, false_fn, operands))
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
@@ -325,31 +346,17 @@ class CondAutogradOp(torch.autograd.Function):
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
-
-        grads_tensor_masks = []
-
-        def create_fn_remove_none(fn):
-            @functools.wraps(fn)
-            def wrapped(*args):
-                nonlocal grads_tensor_masks
-
-                true_outputs = fn(*args)
-                grads_tensor_masks = [
-                    bool(isinstance(out, torch.Tensor)) for out in true_outputs
-                ]
-                return filter_with_masks(true_outputs, grads_tensor_masks)
-
-            return wrapped
-
+        true_wrapped, grads_tensor_masks = create_fn_remove_none(ctx._true_bw_fn)
         true_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._true_bw_fn),
+            true_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
+        false_wrapped, _ = create_fn_remove_none(ctx._false_bw_fn)
         false_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._false_bw_fn),
+            false_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
@@ -427,8 +434,8 @@ def check_tensor_meta_match(
 
 
 def _merge_output(
-    a: Optional[Union[torch.Tensor, int]],
-    b: Optional[Union[torch.Tensor, int]],
+    a: torch.Tensor | int | None,
+    b: torch.Tensor | int | None,
     mode: FakeTensorMode,
 ):
     from torch.fx.experimental.symbolic_shapes import (
@@ -506,9 +513,9 @@ def _merge_output(
         u2 has range [5, 8]
         u3 has range [5, 7]
     """
-    merged_size: list[Union[int, torch.SymInt]] = []
+    merged_size: list[int | torch.SymInt] = []
 
-    def _has_unbacked_symbols(s: Union[int, torch.SymInt]) -> bool:
+    def _has_unbacked_symbols(s: int | torch.SymInt) -> bool:
         if isinstance(s, int):
             return False
         else:
@@ -584,19 +591,19 @@ def _merge_output(
         b_ex_size: torch.Size,
         a_ex_stride: tuple[int, ...],
         b_ex_stride: tuple[int, ...],
-        merged_size: list[Union[int, torch.SymInt]],
-    ) -> list[Union[int, torch.SymInt]]:
+        merged_size: list[int | torch.SymInt],
+    ) -> list[int | torch.SymInt]:
         from torch._inductor.ir import get_stride_order
 
         a_sorted_stride_idx = get_stride_order(a_ex_stride, mode.shape_env)
         b_sorted_stride_idx = get_stride_order(b_ex_stride, mode.shape_env)
 
-        a_stride_li: list[Optional[tuple[Union[int, torch.SymInt], int]]] = [
-            None
-        ] * len(a_ex_stride)
-        b_stride_li: list[Optional[tuple[Union[int, torch.SymInt], int]]] = [
-            None
-        ] * len(b_ex_stride)
+        a_stride_li: list[tuple[int | torch.SymInt, int] | None] = [None] * len(
+            a_ex_stride
+        )
+        b_stride_li: list[tuple[int | torch.SymInt, int] | None] = [None] * len(
+            b_ex_stride
+        )
         for i, idx in enumerate(a_sorted_stride_idx):
             a_stride_li[idx] = (a_ex_stride[i], -i)
         for i, idx in enumerate(b_sorted_stride_idx):
@@ -618,14 +625,14 @@ def _merge_output(
                     f"Consider using contiguous() to make the two branches have the same contiguousness."
                 )
 
-        def _maybe_expr(s: Union[int, torch.SymInt]):
+        def _maybe_expr(s: int | torch.SymInt):
             if isinstance(s, int):
                 return s
             return s.node.expr
 
-        a_stride_expr: dict[Any, Union[int, torch.SymInt]] = {}
-        b_stride_expr: dict[Any, Union[int, torch.SymInt]] = {}
-        merged_strides: list[Union[int, torch.SymInt]] = [None] * len(a_ex_stride)  # type: ignore[list-item]
+        a_stride_expr: dict[Any, int | torch.SymInt] = {}
+        b_stride_expr: dict[Any, int | torch.SymInt] = {}
+        merged_strides: list[int | torch.SymInt] = [None] * len(a_ex_stride)  # type: ignore[list-item]
         for a_pair, b_pair in zip(a_stride_li, b_stride_li):
             if a_pair is None or b_pair is None:
                 raise AssertionError(
@@ -675,7 +682,7 @@ def _merge_output(
             b_stride_expr[_maybe_expr(b_val * b_ex_size[i])] = nxt_merged_stride_expr
         return merged_strides
 
-    merged_stride: list[Union[int, torch.SymInt]] = _bound_stride(
+    merged_stride: list[int | torch.SymInt] = _bound_stride(
         a.size(), b.size(), a.stride(), b.stride(), merged_size
     )
 
@@ -687,7 +694,22 @@ def _merge_output(
 
 @cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
+    from torch._higher_order_ops.auto_functionalize import (
+        can_auto_functionalize,
+        do_auto_functionalize_v2,
+    )
+    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+
+    hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
+    # For now, we only support auto-functionalization for cond when using python
+    # functionalization mode
+    if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        return do_auto_functionalize_v2(
+            ctx.mode,
+            hop_instance,
+            tuple(pytree.tree_flatten((pred, true_fn, false_fn, inputs))[0]),
+            {},
+        )
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)

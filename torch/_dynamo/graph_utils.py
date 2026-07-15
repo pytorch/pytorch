@@ -1,5 +1,4 @@
-from collections import deque
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.fx import Graph, map_arg, Node
@@ -35,51 +34,53 @@ def _get_flat_args_unique(
 def _detect_cycles(
     graph: Graph, node_to_additional_deps: dict[Node, OrderedSet[Node]]
 ) -> str:
-    current_path: deque[Node] = deque()
-    current_path_set: set[Node] = set()
-    pending: deque[tuple[Node, Node]] = deque()
+    # States: 0=Unvisited, 1=Visiting, 2=Visited(Safe)
+    state: dict[Node, int] = {}
 
-    def add_to_current_path(node: Node) -> None:
-        current_path.append(node)
-        current_path_set.add(node)
+    for root in reversed(graph.nodes):
+        if root in state:
+            continue
 
-    def pop_current_path() -> None:
-        node = current_path.pop()
-        current_path_set.remove(node)
+        # Stack holds (current_node, children_iterator).
+        # Using an iterator allows us to pause and resume processing a node's children.
+        stack = [(root, iter(_get_flat_args_unique(root, node_to_additional_deps)))]
+        state[root] = 1  # Visiting
 
-    def current_path_head() -> Node:
-        return current_path[-1]
+        while stack:
+            parent, children = stack[-1]
 
-    for origin in graph.find_nodes(op="output"):
-        current_path.clear()
-        current_path_set.clear()
-        add_to_current_path(origin)
-        for child in _get_flat_args_unique(origin, node_to_additional_deps):
-            pending.append((child, origin))
+            try:
+                child = next(children)
 
-        while pending:
-            cur_node, parent = pending.pop()
+                if not isinstance(child, Node):
+                    continue
 
-            # handle backtracking
-            while current_path and current_path_head() != parent:
-                pop_current_path()
+                child_state = state.get(child, 0)
 
-            if not isinstance(cur_node, Node):
-                continue
+                if child_state == 1:
+                    # Back-edge: child is on the current DFS path -> cycle
+                    cycle_path = [node for node, _ in stack] + [child]
+                    return f"cycle detected in path: {cycle_path}"
 
-            if cur_node in current_path_set:
-                current_path.append(cur_node)
-                return f"cycle detected in path: {current_path}"
+                if child_state == 0:
+                    state[child] = 1
+                    stack.append(
+                        (
+                            child,
+                            iter(_get_flat_args_unique(child, node_to_additional_deps)),
+                        )
+                    )
+                # child_state == 2 means already verified safe; skip.
 
-            add_to_current_path(cur_node)
-
-            for child in _get_flat_args_unique(cur_node, node_to_additional_deps):
-                pending.append((child, cur_node))
+            except StopIteration:
+                # All children processed — mark safe and pop.
+                stack.pop()
+                state[parent] = 2
 
     return "no cycle detected"
 
 
-def _graph_device_type(graph: Optional[Graph]) -> str:
+def _graph_device_type(graph: Graph | None) -> str:
     if graph is None:
         return "cpu"
 

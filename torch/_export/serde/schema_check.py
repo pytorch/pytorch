@@ -1,11 +1,11 @@
-# mypy: allow-untyped-defs
 import dataclasses
 import hashlib
 import inspect
 import re
+import types
 import typing
 from enum import IntEnum
-from typing import Annotated, Any, ForwardRef, Optional, Union
+from typing import Annotated, Any, ForwardRef, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -15,7 +15,7 @@ class SchemaUpdateError(Exception):
     pass
 
 
-def _check(x, msg):
+def _check(x: object, msg: str) -> None:
     if not x:
         raise SchemaUpdateError(msg)
 
@@ -35,9 +35,9 @@ _THRIFT_TYPE_MAP = {
 }
 
 
-def _staged_schema():
+def _staged_schema() -> tuple[dict[str, Any], str, str]:
     yaml_ret: dict[str, Any] = {}
-    defs = {}
+    defs: dict[str, Any] = {}
     cpp_enum_defs: dict[str, str] = {}
     cpp_class_defs: dict[str, str] = {}
     cpp_type_decls: list[str] = []
@@ -45,8 +45,10 @@ def _staged_schema():
     thrift_enum_defs: list[str] = []
     thrift_type_defs: dict[str, str] = {}
 
-    def _handle_aggregate(ty) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-        def dump_type(t, level: int) -> tuple[str, str, str]:
+    def _handle_aggregate(
+        ty: type[Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        def dump_type(t: Any, level: int) -> tuple[str, str, str]:
             if getattr(t, "__name__", None) in cpp_enum_defs:
                 return t.__name__, "int64_t", t.__name__
             elif t in _CPP_TYPE_MAP:
@@ -81,7 +83,7 @@ def _staged_schema():
                         "map<",
                         ">",
                     )
-                elif o == Union:
+                elif o is Union or o is types.UnionType:
                     if level != 0:
                         raise AssertionError(
                             f"Optional is only supported at the top level, got level={level}"
@@ -114,7 +116,7 @@ def _staged_schema():
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
-        def dump_cpp_value(v) -> str:
+        def dump_cpp_value(v: object) -> str:
             if v is None:
                 return "std::nullopt"
             elif v is True:
@@ -134,14 +136,17 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> tuple[dict[str, Any], str, Optional[str], str, int]:
+        def dump_field(
+            f: dataclasses.Field[Any],
+        ) -> tuple[dict[str, Any], str, str | None, str, int]:
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
-            cpp_default: Optional[str] = None
+            cpp_default: str | None = None
             if typing.get_origin(f.type) is not Annotated:
                 raise AssertionError(
                     f"Field {f.name} must be annotated with an integer id."
                 )
+            # pyrefly: ignore[missing-attribute]  # TODO f.type is an Annotated alias at runtime, not str
             thrift_id = f.type.__metadata__[0]
             if type(thrift_id) is not int:
                 raise AssertionError(
@@ -164,6 +169,21 @@ def _staged_schema():
                         f"Optional field {ty.__name__}.{f.name} must have default value to be None."
                     )
 
+                # Skip emitting "= {}" for non-primitive types whose
+                # default-construction already yields the same empty value
+                # (containers, strings, classes). Emitting it would trigger
+                # readability-redundant-member-init. Keep it for primitives
+                # (int64_t, bool, F64) which require explicit value-init.
+                if cpp_default == "{}" and cpp_type not in ("int64_t", "bool", "F64"):
+                    cpp_default = None
+            elif cpp_type in ("int64_t", "bool", "F64"):
+                # Value-initialize primitive/enum members (enums map to int64_t)
+                # to satisfy cppcoreguidelines-pro-type-member-init. Non-primitive
+                # types (std::string, containers, classes) default-construct
+                # themselves; emitting "= {}" for those would trigger
+                # readability-redundant-member-init.
+                cpp_default = "{}"
+
             return ret, cpp_type, cpp_default, thrift_type, thrift_id
 
         yaml_ret = {}
@@ -182,7 +202,7 @@ def _staged_schema():
             thrift_ids.add(thrift_id)
         return yaml_ret, cpp_ret, thrift_ret
 
-    def _handle_int_enum(name, ty):
+    def _handle_int_enum(name: str, ty: type[IntEnum]) -> None:
         yaml_ret[name] = {"kind": "enum", "fields": {x.name: x.value for x in ty}}
         cpp_enum_defs[name] = f"""
 enum class {name} {{
@@ -210,7 +230,7 @@ enum {name} {{
 """
         )
 
-    def _handle_struct(name, ty):
+    def _handle_struct(name: str, ty: type[Any]) -> None:
         fields, cpp_fields, thrift_fields = _handle_aggregate(ty)
         yaml_ret[name] = {"kind": "struct", "fields": fields}
         field_decls = "\n".join(
@@ -218,7 +238,7 @@ enum {name} {{
             for name, f in cpp_fields.items()
         )
 
-        def accessor(name, ty):
+        def accessor(name: str, ty: str) -> str:
             type_name = fields[name]["type"]
             if type_name in cpp_enum_defs:
                 return f"""
@@ -235,14 +255,15 @@ enum {name} {{
     return {name};
   }}
 
-  void set_{name}({ty} def) {{
-    {name} = std::move(def);
+  template <typename U>
+  void set_{name}(U&& def) {{
+    {name} = std::forward<U>(def);
   }}
 """
 
         to_json_decl = f"void to_json(nlohmann::json& nlohmann_json_j, const {name}& nlohmann_json_t)"
         to_json_def = f"""{{
-{chr(10).join([f'  nlohmann_json_j["{name}"] = nlohmann_json_t.{name};' for name, f in cpp_fields.items()])}
+{chr(10).join([f'  nlohmann_json_j["{name}"] = nlohmann_json_t.{name};' for name in cpp_fields])}
 }}
 """
         from_json_decl = f"void from_json(const nlohmann::json& nlohmann_json_j, {name}& nlohmann_json_t)"
@@ -253,7 +274,7 @@ enum {name} {{
             chr(10).join(
                 [
                     f'  nlohmann_json_t.{name} = nlohmann_json_j.value("{name}", nlohmann_json_default_obj.{name});'
-                    for name, f in cpp_fields.items()
+                    for name in cpp_fields
                 ]
             )
         }
@@ -279,18 +300,19 @@ struct {name} {{
 {chr(10).join(f"  {f['thrift_id']}: {f['thrift_type']} {n};" for n, f in thrift_fields.items())}
 }}"""
 
-    def _handle_union(name, ty):
+    def _handle_union(name: str, ty: type[Any]) -> None:
         fields, cpp_fields, thrift_fields = _handle_aggregate(ty)
         yaml_ret[name] = {"kind": "union", "fields": fields}
 
-        def accessor(name, ty, idx):
+        def accessor(name: str, ty: str, idx: int) -> str:
             return f"""
   const {ty}& get_{name}() const {{
     return std::get<{idx + 1}>(variant_);
   }}
 
-  void set_{name}({ty} def) {{
-    variant_.emplace<{idx + 1}>(std::move(def));
+  template <typename U>
+  void set_{name}(U&& def) {{
+    variant_.emplace<{idx + 1}>(std::forward<U>(def));
     tag_ = Tag::{name.upper()};
   }}
 """
@@ -328,7 +350,7 @@ class {name} {{
 
  private:
   std::variant<Void, {", ".join(f["cpp_type"] for f in cpp_fields.values())}> variant_;
-  Tag tag_;
+  Tag tag_{{}};
 
  public:
   Tag tag() const {{
@@ -394,6 +416,9 @@ union {name} {{
                 raise AssertionError(
                     f"expected SCHEMA_VERSION or TREESPEC_VERSION, got {name}"
                 )
+        elif isinstance(value, dict):
+            # Skip mapping dictionaries used for codegen
+            pass
         else:
             raise AssertionError(f"Unknown variable {name}: {value}")
 
@@ -452,8 +477,7 @@ struct adl_serializer<std::optional<T>> {{
 }};
 NLOHMANN_JSON_NAMESPACE_END
 
-namespace torch {{
-namespace _export {{
+namespace torch::_export {{
 
 template <typename T>
 class ForwardRef {{
@@ -461,9 +485,9 @@ class ForwardRef {{
 
  public:
   ForwardRef(): ptr_(std::make_unique<T>()) {{}}
-  ForwardRef(ForwardRef<T>&&);
+  ForwardRef(ForwardRef<T>&&) noexcept;
   ForwardRef(const ForwardRef<T>& other): ptr_(std::make_unique<T>(*other.ptr_)) {{}}
-  ForwardRef<T>& operator=(ForwardRef<T>&&);
+  ForwardRef<T>& operator=(ForwardRef<T>&&) noexcept;
   ForwardRef<T>& operator=(const ForwardRef<T>& other) {{
     ptr_ = std::make_unique<T>(*other.ptr_);
     return *this;
@@ -506,7 +530,7 @@ class F64 {{
   }}
 
  private:
-  double value_;
+  double value_{{}};
 }};
 
 inline void to_json(nlohmann::json& j, const F64& f) {{
@@ -538,11 +562,10 @@ inline void from_json(const nlohmann::json& j, F64& f) {{
 {"".join(dict(sorted(cpp_class_defs.items(), key=lambda x: class_ordering[x[0]])).values())}
 {chr(10).join(cpp_json_defs)}
 
-template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) = default;
-template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) = default;
+template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) noexcept = default;
+template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) noexcept = default;
 template <typename T> ForwardRef<T>::~ForwardRef() = default;
-}} // namespace _export
-}} // namespace torch
+}} // namespace torch::_export
 """
     thrift_schema = f"""
 namespace py3 torch._export
@@ -553,7 +576,9 @@ namespace cpp2 torch._export.schema
     return yaml_ret, cpp_header, thrift_schema
 
 
-def _diff_schema(dst, src):
+def _diff_schema(
+    dst: dict[str, Any], src: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
     additions = {key: src[key] for key in src.keys() - dst.keys()}
     subtractions = {key: dst[key] for key in dst.keys() - src.keys()}
 
@@ -623,8 +648,122 @@ def _diff_schema(dst, src):
     return additions, subtractions
 
 
-def _hash_content(s: str):
+def _hash_content(s: str) -> str:
     return hashlib.sha256(s.strip().encode("utf-8")).hexdigest()
+
+
+def _generate_enum_converters() -> str:
+    """Generate C++ converter functions from serialized enum values to c10 enums."""
+
+    def validate_mapping(
+        enum_class: type[IntEnum],
+        mapping: dict[int, str],
+        enum_name: str,
+        skip_values: set[int],
+    ) -> None:
+        """Validate that all enum values have corresponding c10 mappings."""
+        for member in enum_class:
+            if member.value in skip_values:
+                continue
+            if member.value not in mapping:
+                raise SchemaUpdateError(
+                    f"{enum_name}.{member.name} (value={member.value}) is missing "
+                    f"from {enum_name.upper()}_TO_C10 mapping in schema.py. "
+                    f"Please add the mapping to the c10 enum name."
+                )
+
+    # Validate that all enum values have mappings (except UNKNOWN values)
+    validate_mapping(
+        schema.ScalarType,
+        schema.SCALAR_TYPE_TO_C10,
+        "ScalarType",
+        {schema.ScalarType.UNKNOWN},
+    )
+    validate_mapping(
+        schema.Layout,
+        schema.LAYOUT_TO_C10,
+        "Layout",
+        {schema.Layout.Unknown},
+    )
+    validate_mapping(
+        schema.MemoryFormat,
+        schema.MEMORY_FORMAT_TO_C10,
+        "MemoryFormat",
+        {schema.MemoryFormat.Unknown},
+    )
+
+    def generate_converter(
+        name: str,
+        c10_type: str,
+        mapping: dict[int, str],
+        max_value: int,
+    ) -> str:
+        lines: list[str] = []
+        for i in range(max_value + 1):
+            if i in mapping:
+                lines.append(
+                    f"      static_cast<int>(c10::{c10_type}::{mapping[i]}), // {i}"
+                )
+            else:
+                lines.append(f"      kInvalid, // {i}")
+
+        return f"""
+inline c10::{c10_type} convertSerialized{name}(int serialized_value) {{
+  constexpr int kInvalid = -1;
+  constexpr int k{name}Map[] = {{
+{chr(10).join(lines)}
+  }};
+  constexpr int kMapSize = sizeof(k{name}Map) / sizeof(k{name}Map[0]);
+
+  TORCH_CHECK(
+      serialized_value >= 0 && serialized_value < kMapSize,
+      "Serialized {name} value out of range: ",
+      serialized_value);
+  int result = k{name}Map[serialized_value];
+  TORCH_CHECK(
+      result != kInvalid,
+      "Invalid serialized {name} value: ",
+      serialized_value);
+  return static_cast<c10::{c10_type}>(result);
+}}
+"""
+
+    scalar_type_converter = generate_converter(
+        "ScalarType",
+        "ScalarType",
+        schema.SCALAR_TYPE_TO_C10,
+        max(schema.SCALAR_TYPE_TO_C10.keys()),
+    )
+    layout_converter = generate_converter(
+        "Layout",
+        "Layout",
+        schema.LAYOUT_TO_C10,
+        max(schema.LAYOUT_TO_C10.keys()),
+    )
+    memory_format_converter = generate_converter(
+        "MemoryFormat",
+        "MemoryFormat",
+        schema.MEMORY_FORMAT_TO_C10,
+        max(schema.MEMORY_FORMAT_TO_C10.keys()),
+    )
+
+    return f"""
+#pragma once
+
+#include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
+
+// Converter functions from serialized enum values (torch._export.serde.schema)
+// to c10 enums. The serialized format has different enum values than c10.
+
+namespace torch::aot_inductor {{
+{scalar_type_converter}
+{layout_converter}
+{memory_format_converter}
+}} // namespace torch::aot_inductor
+"""
 
 
 @dataclasses.dataclass
@@ -635,19 +774,22 @@ class _Commit:
     additions: dict[str, Any]
     subtractions: dict[str, Any]
     base: dict[str, Any]
-    checksum_head: Optional[str]
+    checksum_head: str | None
     cpp_header: str
     cpp_header_path: str
-    thrift_checksum_head: Optional[str]
-    thrift_checksum_real: Optional[str]
+    enum_converter_header: str
+    enum_converter_header_path: str
+    thrift_checksum_head: str | None
+    thrift_checksum_real: str | None
     thrift_checksum_next: str
     thrift_schema: str
     thrift_schema_path: str
 
 
-def update_schema():
+def update_schema() -> _Commit:
     import importlib.resources
 
+    dst: dict[str, Any]
     # pyrefly: ignore [bad-argument-type]
     if importlib.resources.is_resource(__package__, "schema.yaml"):
         # pyrefly: ignore [bad-argument-type]
@@ -691,6 +833,7 @@ def update_schema():
         dst = {"SCHEMA_VERSION": None, "TREESPEC_VERSION": None}
 
     src, cpp_header, thrift_schema = _staged_schema()
+    enum_converter_header = _generate_enum_converters()
     additions, subtractions = _diff_schema(dst, src)
     # pyrefly: ignore [missing-attribute]
     yaml_path = __package__.replace(".", "/") + "/schema.yaml"
@@ -716,6 +859,9 @@ def update_schema():
         checksum_head=checksum_head,
         cpp_header=cpp_header,
         cpp_header_path=torch_prefix + "csrc/utils/generated_serialization_types.h",
+        enum_converter_header=enum_converter_header,
+        enum_converter_header_path=torch_prefix
+        + "csrc/inductor/aoti_torch/generated_enum_converters.h",
         thrift_checksum_head=thrift_checksum_head,
         thrift_checksum_real=thrift_checksum_real,
         thrift_checksum_next=_hash_content(thrift_schema),
@@ -724,8 +870,8 @@ def update_schema():
     )
 
 
-def check(commit: _Commit, force_unsafe: bool = False):
-    next_version = None
+def check(commit: _Commit, force_unsafe: bool = False) -> tuple[list[int] | None, str]:
+    next_version: list[int] | None = None
     reason = ""
     # Step 1: Detect major schema updates.
     if len(commit.additions) > 0:
@@ -759,7 +905,7 @@ def check(commit: _Commit, force_unsafe: bool = False):
             for k, v in commit.additions.items():
                 for f in v["fields"]:
                     reason += (
-                        f"Field {k}.{f} is added to schema.py as an compatible change "
+                        f"Field {k}.{f} is added to schema.py as a compatible change "
                         + "which still requires minor version bump.\n"
                     )
             next_version = [
@@ -770,7 +916,7 @@ def check(commit: _Commit, force_unsafe: bool = False):
             for k, v in commit.subtractions.items():
                 for f in v["fields"]:
                     reason += (
-                        f"Field {k}.{f} is removed from schema.py as an compatible change "
+                        f"Field {k}.{f} is removed from schema.py as a compatible change "
                         + "which still requires minor version bump.\n"
                     )
             next_version = [

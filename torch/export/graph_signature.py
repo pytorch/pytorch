@@ -2,10 +2,10 @@
 import dataclasses
 from collections.abc import Collection, Mapping
 from enum import auto, Enum
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import get_opaque_type_name, is_opaque_type
+from torch._library.opaque_object import get_opaque_type_name, is_custom_class
 from torch._subclasses.fake_tensor import is_fake
 
 
@@ -67,15 +67,15 @@ class ConstantArgument:
     value: int | float | bool | str | None
 
 
-ArgumentSpec = Union[
-    TensorArgument,
-    SymIntArgument,
-    SymFloatArgument,
-    SymBoolArgument,
-    ConstantArgument,
-    CustomObjArgument,
-    TokenArgument,
-]
+ArgumentSpec = (
+    TensorArgument
+    | SymIntArgument
+    | SymFloatArgument
+    | SymBoolArgument
+    | ConstantArgument
+    | CustomObjArgument
+    | TokenArgument
+)
 
 
 class InputKind(Enum):
@@ -345,7 +345,7 @@ class ExportGraphSignature:
             elif isinstance(s.arg, ConstantArgument):
                 user_inputs.append(s.arg.value)
             else:
-                raise RuntimeError(f"{s.arg} is not a valid user inputs")
+                raise RuntimeError(f"{s.arg} is not a valid user input")
         return tuple(user_inputs)
 
     # Graph node names of pytree-flattened outputs of original program
@@ -619,7 +619,7 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
         return CustomObjArgument(
             name=node.name, class_fqn=val.script_class_name, fake_val=val
         )
-    elif is_opaque_type(type(val)):
+    elif is_custom_class(type(val)):
         return CustomObjArgument(
             name=node.name, class_fqn=get_opaque_type_name(type(val)), fake_val=val
         )

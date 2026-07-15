@@ -59,7 +59,10 @@ struct orStream {
   }
 
   ~orStream() {
-    stop_flag.store(true);
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+      stop_flag.store(true);
+    }
     cv.notify_one();
     worker.join();
   }

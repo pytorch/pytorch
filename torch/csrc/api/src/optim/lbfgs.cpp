@@ -179,7 +179,7 @@ std::tuple<double, Tensor> LBFGS::_directional_evaluate(
   }
   auto flat_grad = _gather_flat_grad();
   _set_param(x);
-  return std::make_tuple(loss, flat_grad);
+  return std::make_tuple(loss, std::move(flat_grad));
 }
 
 static double _cubic_interpolate(
@@ -212,7 +212,7 @@ static double _cubic_interpolate(
     } else {
       min_pos = x1 - ((x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2)));
     }
-    return std::min(std::max(min_pos, xmin_bound), xmax_bound);
+    return std::clamp(min_pos, xmin_bound, xmax_bound);
   } else {
     return (xmin_bound + xmax_bound) / 2;
   }

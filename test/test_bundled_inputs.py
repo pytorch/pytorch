@@ -4,7 +4,6 @@
 
 import io
 import textwrap
-from typing import Optional
 
 import torch
 import torch.utils.bundled_inputs
@@ -333,8 +332,8 @@ class TestBundledInputs(TestCase):
         class MyModel(torch.nn.Module):
             def forward(
                 self,
-                arg1: Optional[dict[str, torch.Tensor]],
-                arg2: Optional[list[torch.Tensor]],
+                arg1: dict[str, torch.Tensor] | None,
+                arg2: list[torch.Tensor] | None,
                 arg3: torch.Tensor,
             ):
                 if arg1 is None:
@@ -360,7 +359,10 @@ class TestBundledInputs(TestCase):
 
         def condensed(t):
             ret = torch.empty_like(t).flatten()[0].clone().expand(t.shape)
-            assert ret.storage().size() == 1
+            if ret.storage().size() != 1:
+                raise AssertionError(
+                    f"storage size must be 1, got {ret.storage().size()}"
+                )
             # ret.storage()[0] = 0
             return ret
 

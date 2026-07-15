@@ -1,6 +1,8 @@
 #include <ATen/Context.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -146,8 +148,7 @@ at::CallbackHandle _initCompileContexts() {
               -> std::unique_ptr<at::ObserverContext> {
             std::string functionName = fn.name();
             const std::string functionNamePrefix = "Torch-Compiled Region";
-            if (functionName.compare(
-                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+            if (functionName.starts_with(functionNamePrefix)) {
               c10::cuda::CUDACachingAllocator::pushCompileContext(functionName);
             }
             return nullptr;
@@ -155,8 +156,7 @@ at::CallbackHandle _initCompileContexts() {
           [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
             std::string functionName = fn.name();
             const std::string functionNamePrefix = "Torch-Compiled Region";
-            if (functionName.compare(
-                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
+            if (functionName.starts_with(functionNamePrefix)) {
               c10::cuda::CUDACachingAllocator::popCompileContext();
             }
           })
@@ -200,7 +200,12 @@ void _record_memory_history(
     bool clearHistory,
     bool compileContext,
     bool globalRecordAnnotations,
-    const std::vector<std::string>& skip_actions) {
+    const std::vector<std::string>& skip_actions,
+    bool record_pinned_host_memory,
+    bool record_cuda) {
+  TORCH_CHECK(
+      !record_pinned_host_memory || enabled,
+      "record_pinned_host_memory requires memory history recording to be enabled");
   c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -217,13 +222,21 @@ void _record_memory_history(
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
+  bool cuda_enabled = enabled && record_cuda;
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled,
+      cuda_enabled,
       recorder,
       trace_alloc_max_entries,
       when,
       clearHistory,
       skip_actions);
+
+  bool host_enabled = enabled && record_pinned_host_memory;
+  auto* host_alloc = at::getHostAllocator(at::kCUDA);
+  if (host_alloc && (host_enabled || host_alloc->is_history_enabled())) {
+    host_alloc->record_history(
+        host_enabled, recorder, trace_alloc_max_entries, when, clearHistory);
+  }
 }
 
 static void checkOptionIn(
@@ -242,7 +255,12 @@ void _record_memory_history(
     bool clearHistory,
     bool compileContext,
     bool globalRecordAnnotations,
-    const std::vector<std::string>& skip_actions) {
+    const std::vector<std::string>& skip_actions,
+    bool record_pinned_host_memory,
+    bool record_cuda) {
+  TORCH_CHECK(
+      !record_pinned_host_memory || enabled.has_value(),
+      "record_pinned_host_memory requires memory history recording to be enabled");
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -278,13 +296,16 @@ void _record_memory_history(
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   setRecordFunctionCallbacks(
       enabled.has_value(), compileContext, globalRecordAnnotations);
+  bool cuda_enabled = enabled.has_value() && record_cuda;
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(),
-      recorder,
-      max_entries,
-      when,
-      clearHistory,
-      skip_actions);
+      cuda_enabled, recorder, max_entries, when, clearHistory, skip_actions);
+
+  bool host_enabled = enabled.has_value() && record_pinned_host_memory;
+  auto* host_alloc = at::getHostAllocator(at::kCUDA);
+  if (host_alloc && (host_enabled || host_alloc->is_history_enabled())) {
+    host_alloc->record_history(
+        host_enabled, recorder, max_entries, when, clearHistory);
+  }
 }
 
 std::string _memory_snapshot_pickled() {
@@ -309,11 +330,13 @@ std::string _memory_snapshot_pickled() {
   IValue name_s = "name";
   IValue line_s = "line";
   IValue frames_s = "frames";
+  IValue forward_frames_s = "forward_frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
   IValue compile_contexts_s = "compile_context";
   IValue user_metadata_s = "user_metadata";
+  IValue pool_id_s = "pool_id";
 
   auto empty_frames = new_list();
 
@@ -420,25 +443,30 @@ std::string _memory_snapshot_pickled() {
     TORCH_CHECK(false, "unreachable");
   };
 
+  auto traceEntryToDict = [&](const TraceEntry& te) {
+    auto trace_entry = new_dict();
+    trace_entry.insert(action_s, action_to_str(te.action_));
+    trace_entry.insert(
+        TraceEntry::OOM == te.action_ ? device_free_s : addr_s,
+        static_cast<int64_t>(te.addr_));
+    trace_entry.insert(size_s, (int64_t)te.size_);
+    trace_entry.insert(stream_s, int64_t(te.stream_));
+    trace_entry.insert(compile_contexts_s, te.compile_context_);
+    trace_entry.insert(user_metadata_s, te.user_metadata_);
+    if (te.context_) {
+      auto sc = getCapturedTracebackFromContext(te.context_);
+      frame_tracebacks.push_back(sc);
+      frame_dict.push_back(trace_entry);
+    }
+    trace_entry.insert(time_us_s, te.time_.t_);
+    trace_entry.insert(pool_id_s, std::tuple<int64_t, int64_t>(te.mempool_));
+    return trace_entry;
+  };
+
   for (const auto& traceInfo : snapshot.device_traces) {
     auto trace = new_list();
     for (const auto& te : traceInfo) {
-      auto trace_entry = new_dict();
-      trace_entry.insert(action_s, action_to_str(te.action_));
-      trace_entry.insert(
-          TraceEntry::OOM == te.action_ ? device_free_s : addr_s,
-          static_cast<int64_t>(te.addr_));
-      trace_entry.insert(size_s, (int64_t)te.size_);
-      trace_entry.insert(stream_s, int64_t(te.stream_));
-      trace_entry.insert(compile_contexts_s, te.compile_context_);
-      trace_entry.insert(user_metadata_s, te.user_metadata_);
-      if (te.context_) {
-        auto sc = getCapturedTracebackFromContext(te.context_);
-        frame_tracebacks.push_back(sc);
-        frame_dict.push_back(trace_entry);
-      }
-      trace_entry.insert(time_us_s, te.time_.t_);
-      trace.push_back(trace_entry);
+      trace.push_back(traceEntryToDict(te));
     }
     traces.push_back(trace);
   }
@@ -465,6 +493,8 @@ std::string _memory_snapshot_pickled() {
   IValue roundup_power2_divisions_s = "roundup_power2_divisions";
   IValue graph_capture_record_stream_reuse_s =
       "graph_capture_record_stream_reuse";
+  IValue max_round_threshold_s = "max_round_threshold";
+  IValue max_cached_size_s = "max_cached_size";
 
   allocator_settings.insert(
       last_allocator_settings_s,
@@ -488,6 +518,11 @@ std::string _memory_snapshot_pickled() {
   allocator_settings.insert(
       graph_capture_record_stream_reuse_s,
       snapshot.config_metadata.graph_capture_record_stream_reuse);
+  allocator_settings.insert(
+      max_round_threshold_s,
+      int64_t(snapshot.config_metadata.max_round_threshold));
+  allocator_settings.insert(
+      max_cached_size_s, int64_t(snapshot.config_metadata.max_cached_size));
   unsigned int roundup_key = 1;
   auto roundup_settings = new_dict();
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {
@@ -497,15 +532,75 @@ std::string _memory_snapshot_pickled() {
   }
   allocator_settings.insert(roundup_power2_divisions_s, roundup_settings);
 
+  // Collect host allocator data
+  auto* host_alloc = at::getHostAllocator(at::kCUDA);
+  if (host_alloc && host_alloc->is_history_enabled()) {
+    snapshot.host_traces = host_alloc->get_traces();
+    snapshot.host_segments = host_alloc->get_segments();
+  }
+
+  auto host_segments = new_list();
+  for (const auto& seg : snapshot.host_segments) {
+    auto segmentDict = new_dict();
+    segmentDict.insert(device_s, -1);
+    segmentDict.insert(address_s, static_cast<int64_t>(seg.address));
+    segmentDict.insert(total_size_s, static_cast<int64_t>(seg.size));
+    segmentDict.insert(
+        allocated_size_s, static_cast<int64_t>(seg.allocated ? seg.size : 0));
+    segmentDict.insert(
+        active_size_s, static_cast<int64_t>(seg.active ? seg.size : 0));
+    segmentDict.insert(requested_size_s, static_cast<int64_t>(seg.size));
+    segmentDict.insert(stream_s, int64_t(0));
+    segmentDict.insert(segment_type_s, small_s);
+    segmentDict.insert(
+        segment_pool_id,
+        std::tuple<int64_t, int64_t>(seg.owner_private_pool_id));
+    segmentDict.insert(is_expandable_s, false);
+    add_frame_key(segmentDict, seg.context_when_allocated);
+
+    auto blockDict = new_dict();
+    blockDict.insert(address_s, static_cast<int64_t>(seg.address));
+    blockDict.insert(size_s, static_cast<int64_t>(seg.size));
+    blockDict.insert(requested_size_s, static_cast<int64_t>(seg.size));
+    blockDict.insert(
+        state_s,
+        (seg.allocated ? active_allocated_s
+                       : (seg.active ? active_pending_free_s : inactive_s)));
+    add_frame_key(blockDict, seg.context_when_allocated);
+
+    auto blocks = new_list();
+    blocks.push_back(blockDict);
+    segmentDict.insert(blocks_s, blocks);
+    host_segments.push_back(segmentDict);
+  }
+
+  auto host_traces = new_list();
+  for (const auto& te : snapshot.host_traces) {
+    host_traces.push_back(traceEntryToDict(te));
+  }
+
   auto result = new_dict();
   result.insert("segments", segments);
   result.insert("device_traces", traces);
   result.insert("allocator_settings", allocator_settings);
   result.insert("external_annotations", external_annotations);
+  result.insert("host_segments", host_segments);
+  result.insert("host_traces", host_traces);
 
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {
     frame_dict.at(i).insert(frames_s, frames.at(i));
+
+    // Add forward frames if available
+    auto* tb = frame_tracebacks.at(i);
+    const auto& forward_tb = tb->forward_traceback();
+    if (forward_tb.has_value() && !forward_tb->empty()) {
+      auto forward_list = new_list();
+      for (const auto& frame_str : *forward_tb) {
+        forward_list.push_back(IValue(frame_str));
+      }
+      frame_dict.at(i).insert(forward_frames_s, forward_list);
+    }
   }
 
   return write_pickle(result);

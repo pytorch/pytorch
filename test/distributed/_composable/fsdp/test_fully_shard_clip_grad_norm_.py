@@ -2,7 +2,6 @@
 
 import copy
 import functools
-from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -32,14 +31,14 @@ device_type = torch.device(get_devtype())
 class _TestClipGradNormBase(FSDPTest):
     def _test_clip_grad_norm(
         self,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int],
+        max_norm: float | int,
+        norm_type: float | int,
         ref_model: nn.Module,
         ref_optim: torch.optim.Optimizer,
         model: nn.Module,
         optim: torch.optim.Optimizer,
         inp: torch.Tensor,
-        dp_mesh: Optional[DeviceMesh] = None,
+        dp_mesh: DeviceMesh | None = None,
     ):
         vector_norm_fn = functools.partial(torch.linalg.vector_norm, ord=norm_type)
         dp_mesh = dp_mesh or init_device_mesh(device_type.type, (self.world_size,))

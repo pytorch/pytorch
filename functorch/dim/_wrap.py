@@ -5,7 +5,7 @@ Python implementation of function wrapping functionality for functorch.dim.
 from __future__ import annotations
 
 import functools
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.utils._pytree import tree_map
@@ -216,11 +216,11 @@ def patched_dim_method(wrapper: WrappedOperator, *args: Any, **kwargs: Any) -> A
 
 def _wrap(
     orig: Callable,
-    dim_offset: Optional[int] = None,
-    keepdim_offset: Optional[int] = None,
-    dim_name: Optional[str] = None,
-    single_dim: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    dim_offset: int | None = None,
+    keepdim_offset: int | None = None,
+    dim_name: str | None = None,
+    single_dim: bool | None = None,
+    reduce: bool | None = None,
 ) -> Callable:
     """
     Wrap a PyTorch function to support first-class dimensions.
@@ -254,7 +254,7 @@ def call_torch_function(
     func: Callable,
     types: tuple,
     args: tuple = (),
-    kwargs: Optional[dict] = None,
+    kwargs: dict | None = None,
 ) -> Any:
     """
     Handle __torch_function__ calls for wrapped operators.

@@ -49,6 +49,8 @@ test_python_mps() {
 test_python_openreg() {
   setup_test_python
 
+  git submodule update --init --depth 1 third_party/googletest
+
   time python test/run_test.py --openreg --verbose
 
   assert_git_not_dirty
@@ -105,7 +107,7 @@ test_custom_backend() {
   pushd test/custom_backend
   rm -rf build && mkdir build
   pushd build
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
   CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
@@ -126,7 +128,7 @@ test_custom_script_ops() {
   # Build the custom operator library.
   rm -rf build && mkdir build
   pushd build
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
   CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
@@ -146,7 +148,7 @@ test_jit_hooks() {
   # Build the custom operator library.
   rm -rf build && mkdir build
   pushd build
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
   CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd

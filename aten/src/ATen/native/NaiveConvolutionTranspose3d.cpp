@@ -6,6 +6,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/vol2col.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -936,7 +937,8 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
         1);
   }
 
-  return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
+  return std::tuple<Tensor, Tensor, Tensor>(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose3d_backward_stub, &slow_conv_transpose3d_backward_cpu)

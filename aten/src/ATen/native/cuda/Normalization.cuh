@@ -8,8 +8,10 @@
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <c10/macros/Macros.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -53,7 +55,7 @@ __device__ __forceinline__ int getMSB(int val) {
 template <typename scalar_t, typename accscalar_t>
 struct Float2 {
   accscalar_t v1, v2;
-  __device__ Float2() {}
+  __device__ Float2() = default;
   __device__ Float2(scalar_t v1, scalar_t v2) : v1(static_cast<accscalar_t>(v1)), v2(static_cast<accscalar_t>(v2)) {}
   __device__ Float2(int v) : v1(static_cast<accscalar_t>(v)), v2(static_cast<accscalar_t>(v)) {}
   __device__ Float2& operator+=(const Float2& a) {
@@ -133,7 +135,7 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
     }
 #endif
   }
-  __shared__ scalar_t shared[C10_WARP_SIZE];
+  __shared__ scalar_t shared[C10_WARP_SIZE_UPPER_BOUND];
   SumReduceOp<scalar_t> reduce_op;
   sum = cuda_utils::BlockReduce<scalar_t, SumReduceOp<scalar_t>, cuda_utils::Block2D>(sum, reduce_op, 0, shared);
   if (threadIdx.x == 0 && threadIdx.y == 0) {
@@ -287,7 +289,7 @@ __global__ void batch_norm_collect_statistics_kernel(
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_mean,
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_transformed_var) {
 
-  __shared__ int shared_n[2 * 2 * C10_WARP_SIZE + C10_WARP_SIZE];
+  __shared__ int shared_n[2 * 2 * C10_WARP_SIZE_UPPER_BOUND + C10_WARP_SIZE_UPPER_BOUND];
 
   int plane = blockIdx.x;
   int N = input.size(0) * input.size(2);
@@ -685,7 +687,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
      save_mean, save_invstd, train, epsilon);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  return std::make_tuple(grad_input_, grad_weight_, grad_bias_);
+  return std::make_tuple(
+      std::move(grad_input_), std::move(grad_weight_), std::move(grad_bias_));
 }
 
 template<typename scalar_t, typename index_t, typename VarTransform>
@@ -749,7 +752,7 @@ void batch_norm_elemt_cuda_template(const Tensor& output_, const Tensor& input_,
 
   // The input_transform kernel is pointwise, but we need to balance reading parameters (save_var/mean,
   // weight/bias) - which we only do once and have a for loop afterwards - with having many threads and blocks
-  // and good occupancy. Quiet likely, we could go with even more blocks than 1024.
+  // and good occupancy. Quite likely, we could go with even more blocks than 1024.
   // The various planes are independent, so we use blocks for them.
   int tf = std::max<int>(getNumThreads(input.size(2)/4),
                          std::min<int>(getNumThreads(input.size(2)), 64));
@@ -802,7 +805,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
       (mean, invstd, save_mean, save_invstd, running_mean, running_var, epsilon, momentum, counts);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  return std::make_tuple(save_mean_, save_invstd_);
+  return std::make_tuple(std::move(save_mean_), std::move(save_invstd_));
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
@@ -862,7 +865,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
     (input, grad_output, mean, invstd, sum_dy, sum_dy_xmu, grad_weight, grad_bias);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  return std::make_tuple(sum_dy_, sum_dy_xmu_, grad_weight_, grad_bias_);
+  return std::make_tuple(
+      std::move(sum_dy_),
+      std::move(sum_dy_xmu_),
+      std::move(grad_weight_),
+      std::move(grad_bias_));
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
@@ -1063,12 +1070,22 @@ batch_norm_collect_statistics_channels_last_kernel(
     address_base = c_offset + blockIdx.y * stride;
     // write data to staging_data;
     if (threadIdx.y == 0 && c_offset < stride) {
+#ifndef USE_ROCM
       staging_mean[address_base] = mean_th;
       staging_m2n[address_base] = m2_th;
       staging_count[address_base] = count_th;
+#else
+      // In architectures with split caches, global fences are costly.
+      // Here we preempt need for fences by committing stores to global memory.
+      cmtdStore<accscalar_t, false>((void*)&staging_mean[address_base], mean_th);
+      cmtdStore<accscalar_t, false>((void*)&staging_m2n[address_base], m2_th);
+      cmtdStore((void*)&staging_count[address_base], count_th);
+#endif
     }
 
+#ifndef USE_ROCM
     __threadfence();
+#endif
     __syncthreads(); // ensuring writes to staging_ is visible to all blocks
 
     __shared__ bool is_last_block_done;
@@ -1288,11 +1305,20 @@ __global__ void batch_norm_backward_reduce_channels_last_kernel(
     address_base = c_offset + blockIdx.y * stride;
     // write data to staging_data;
     if (threadIdx.y == 0 && c_offset < stride) {
+#ifndef USE_ROCM
       staging_sum_dy[address_base] = sum_dy_th;
       staging_sum_dy_xmu[address_base] = sum_dy_xmu_th;
+#else
+      // In architectures with split caches, global fences are costly.
+      // Here we preempt need for fences by committing stores to global memory.
+      cmtdStore<accscalar_t, false>((void*)&staging_sum_dy[address_base], sum_dy_th);
+      cmtdStore((void*)&staging_sum_dy_xmu[address_base], sum_dy_xmu_th);
+#endif
     }
 
+#ifndef USE_ROCM
     __threadfence();
+#endif
     __syncthreads(); // ensuring writes to staging_ is visible to all blocks
 
     __shared__ bool is_last_block_done;
@@ -1639,7 +1665,11 @@ batch_norm_backward_reduce_cuda_channels_last_template(const at::Tensor& grad_ou
     });
   }
 
-  return std::make_tuple(sumn_dy, sum_dy_xmu, grad_weight, grad_bias);
+  return std::make_tuple(
+      std::move(sumn_dy),
+      std::move(sum_dy_xmu),
+      std::move(grad_weight),
+      std::move(grad_bias));
 }
 
 at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(

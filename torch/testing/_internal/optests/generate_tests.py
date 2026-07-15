@@ -11,7 +11,7 @@ import tempfile
 import threading
 import unittest
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch._dynamo
@@ -50,8 +50,8 @@ def safe_schema_check(
     kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
-    rtol: Optional[float] = None,
-    atol: Optional[float] = None,
+    rtol: float | None = None,
+    atol: float | None = None,
 ) -> Any:
     if copy_inputs:
         args, kwargs = deepcopy_tensors((args, kwargs))
@@ -68,8 +68,8 @@ def safe_autograd_registration_check(
     kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
-    rtol: Optional[float] = None,
-    atol: Optional[float] = None,
+    rtol: float | None = None,
+    atol: float | None = None,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return
@@ -89,8 +89,8 @@ def safe_fake_check(
     kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
-    rtol: Optional[float] = None,
-    atol: Optional[float] = None,
+    rtol: float | None = None,
+    atol: float | None = None,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
@@ -106,16 +106,16 @@ def safe_aot_autograd_check(
     dynamic: bool,
     *,
     copy_inputs: bool = True,
-    rtol: Optional[float] = None,
-    atol: Optional[float] = None,
+    rtol: float | None = None,
+    atol: float | None = None,
 ) -> Any:
-    # NB: copy_inputs does nothing for aot_autograd_check: it always needs to copy
-    # inputs.
+    # NB: the copy_inputs argument to this wrapper is ignored: safe AOT checks
+    # always need to copy inputs because they run func(*args, **kwargs) multiple
+    # times.
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
 
     def func(*args, **kwargs):
-        args, kwargs = pytree.tree_map_only(torch.Tensor, torch.clone, (args, kwargs))
         return op(*args, **kwargs)
 
     # aot_autograd_check runs func(*args, **kwargs) multiple times
@@ -133,6 +133,7 @@ def safe_aot_autograd_check(
         dynamic,
         check_gradients="auto",
         assert_equals_fn=assert_equals_fn,
+        copy_inputs=True,
     )
 
 
@@ -178,8 +179,8 @@ DEPRECATED_DEFAULT_TEST_UTILS = DEFAULT_TEST_UTILS + [
 def generate_opcheck_tests(
     testcase: Any,
     namespaces: list[str],
-    failures_dict_path: Optional[str] = None,
-    additional_decorators: Optional[dict[str, Callable]] = None,
+    failures_dict_path: str | None = None,
+    additional_decorators: dict[str, Callable] | None = None,
     test_utils: list[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate
@@ -649,14 +650,14 @@ def should_print_better_repro() -> None:
 
 
 def opcheck(
-    op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
+    op: torch._ops.OpOverload | torch._ops.OpOverloadPacket | CustomOpDef,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
     *,
-    test_utils: Union[str, Sequence[str]] = DEFAULT_TEST_UTILS,
+    test_utils: str | Sequence[str] = DEFAULT_TEST_UTILS,
     raise_exception: bool = True,
-    rtol: Optional[float] = None,
-    atol: Optional[float] = None,
+    rtol: float | None = None,
+    atol: float | None = None,
 ) -> dict[str, str]:
     """See torch.library.opcheck for docstring"""
 
@@ -817,7 +818,7 @@ class FailuresDict:
                     )
         return FailuresDict(path, dct["data"])
 
-    def _save(self, to_str=False) -> Optional[str]:
+    def _save(self, to_str=False) -> str | None:
         to_dump = {
             "_description": DESCRIPTION,
             "data": self.data,
@@ -849,7 +850,7 @@ class FailuresDict:
         test_name: str,
         status: str,
         *,
-        comment: Optional[str] = None,
+        comment: str | None = None,
     ):
         if qualname not in self.data:
             self.data[qualname] = {}

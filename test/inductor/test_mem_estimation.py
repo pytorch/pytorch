@@ -4,7 +4,6 @@ import functools
 import weakref
 from collections import Counter
 from collections.abc import Callable
-from typing import Optional
 
 import torch
 from torch._inductor.fx_passes.memory_estimator import (
@@ -29,7 +28,7 @@ def device_filter(device):
 
 
 class FakeTensorMemoryProfilerMode(TorchDispatchMode):
-    def __init__(self, device_filter: Optional[Callable[[torch.device], bool]] = None):
+    def __init__(self, device_filter: Callable[[torch.device], bool] | None = None):
         # counter of storage ids to live references
         self.storage_count: dict[int, int] = Counter()
         # live fake tensors
@@ -275,9 +274,10 @@ class TestMemoryTracker(InductorTestCase):
             # Alternative schedule: change which operation is the last use of zeros
             # Original: zeros_like, add, sum (zeros freed after sum)
             # Alternative: zeros_like, sum, add (zeros freed after add)
-            assert len(compute_nodes) == 5, (
-                f"Expected 3 compute nodes, got {len(compute_nodes)}"
-            )
+            if len(compute_nodes) != 5:
+                raise AssertionError(
+                    f"Expected 3 compute nodes, got {len(compute_nodes)}"
+                )
             reordered_nodes = [
                 compute_nodes[0],  # zeros_like: zeros = torch.zeros_like(primals_1)
                 compute_nodes[2],  # sum: sum_result = zeros.sum() (zeros still alive)

@@ -10,7 +10,6 @@ import sys
 import tempfile
 import unittest
 from functools import partial
-from typing import Optional
 
 import numpy as np
 
@@ -73,7 +72,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.opinfo.definitions.nested import _sample_njts, njt_op_db
 from torch.utils._pytree import tree_flatten, tree_map_only
-from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+from torch.utils.checkpoint import checkpoint
 
 
 # Tests are ported from pytorch/nestedtensor.
@@ -129,7 +128,8 @@ def random_nt_noncontiguous_pair(ragged_sizes, device="cpu", dtype=torch.float16
 def noncontiguous_to_padded_tensor(input, shape=None):
     tensors = input.unbind()
     ntensors = len(tensors)
-    assert ntensors > 0
+    if ntensors <= 0:
+        raise AssertionError(f"Expected ntensors > 0, got {ntensors}")
     if shape is None:
         shape = []
         for size in tensors[0].shape:
@@ -164,14 +164,22 @@ def random_nt(
     if min_dims is None:
         min_dims = tuple([0] * len(max_dims))
 
-    assert len(max_dims) == len(min_dims)
+    if len(max_dims) != len(min_dims):
+        raise AssertionError(
+            f"Expected len(max_dims) == len(min_dims), "
+            f"got {len(max_dims)} vs {len(min_dims)}"
+        )
     for min_dim, max_dim in zip(min_dims, max_dims):
-        assert max_dim > min_dim, "random_nt: max_dim must be greater than min_dim"
-        assert min_dim >= 0, "random_nt: min_dim must be non-negative"
+        if max_dim <= min_dim:
+            raise AssertionError("random_nt: max_dim must be greater than min_dim")
+        if min_dim < 0:
+            raise AssertionError("random_nt: min_dim must be non-negative")
         if require_non_empty:
-            assert not (min_dim == 0 and max_dim == 1), (
-                "random_nt: zero cannot be the only possible value if require_non_empty is True"
-            )
+            if min_dim == 0 and max_dim == 1:
+                raise AssertionError(
+                    "random_nt: zero cannot be the only possible value "
+                    "if require_non_empty is True"
+                )
 
     if require_non_empty:
         # Select a random idx that will be required to be non-empty
@@ -220,8 +228,14 @@ def random_nt_from_dims(
 def random_nt_from_similar(other, dims=None):
     if dims is None:
         return torch.randn_like(other)
-    assert len(dims) == other.dim()
-    assert dims[0] == -1 or dims[0] == other.size(0)
+    if len(dims) != other.dim():
+        raise AssertionError(
+            f"Expected len(dims) == other.dim(), got {len(dims)} vs {other.dim()}"
+        )
+    if not (dims[0] == -1 or dims[0] == other.size(0)):
+        raise AssertionError(
+            f"Expected dims[0] == -1 or dims[0] == other.size(0), got {dims[0]}"
+        )
 
     ret_sizes = []
     for t in other.unbind():
@@ -544,17 +558,20 @@ class TestNestedTensor(NestedTensorTestCase):
     def test_is_contiguous(self):
         # Test empty case
         nt_empty = torch.nested.nested_tensor([])
-        assert nt_empty.is_contiguous()
+        if not nt_empty.is_contiguous():
+            raise AssertionError("Expected nt_empty to be contiguous")
         self.assertEqual(nt_empty, nt_empty.contiguous())
 
         nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
 
         # Test contiguous case
-        assert nt_contiguous.is_contiguous()
+        if not nt_contiguous.is_contiguous():
+            raise AssertionError("Expected nt_contiguous to be contiguous")
         self.assertEqual(nt_contiguous, nt_contiguous.contiguous())
 
         # Test non_contiguous case
-        assert not nt_noncontiguous.is_contiguous()
+        if nt_noncontiguous.is_contiguous():
+            raise AssertionError("Expected nt_noncontiguous to not be contiguous")
         self.assertEqual(nt_contiguous, nt_noncontiguous.contiguous())
 
         # Test querying by memory_format
@@ -1431,10 +1448,11 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         b = torch.randn(5, 4, device=device)
         nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
 
-        # Guard CUDA tensors
-        if "cuda" in device:
+        # Non-CPU devices don't use POSIX shared memory
+        if device != "cpu":
             result = nt.share_memory_()
             self.assertIs(result, nt)
+            self.assertTrue(nt.is_shared())
             return
 
         result = nt.share_memory_()
@@ -3035,7 +3053,8 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
         # Create empty on same device as original nested tensor
         nt_empty = torch.empty_like(nt)
-        assert nt.is_same_size(nt_empty)
+        if not nt.is_same_size(nt_empty):
+            raise AssertionError("Expected nt and nt_empty to have the same size")
         self.assertEqual(nt.dtype, nt_empty.dtype)
         self.assertEqual(nt.device, nt_empty.device)
         self.assertEqual(nt.layout, nt_empty.layout)
@@ -3064,22 +3083,34 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         # Test noncontiguous tensor does not fail to copy
         nt_cont, nt_noncont = random_nt_noncontiguous_pair((2, 3, 6, 7))
         nt_empty = torch.empty_like(nt_cont)
-        assert nt_cont.is_same_size(nt_empty)
+        if not nt_cont.is_same_size(nt_empty):
+            raise AssertionError("Expected nt_cont and nt_empty to have the same size")
         nt_empty_non_contig = torch.empty_like(nt_noncont)
-        assert nt_noncont.is_same_size(nt_empty_non_contig)
+        if not nt_noncont.is_same_size(nt_empty_non_contig):
+            raise AssertionError(
+                "Expected nt_noncont and nt_empty_non_contig to have the same size"
+            )
 
         # Test the contiguous memory format option
         nt_empty_contig = torch.empty_like(
             nt_cont, memory_format=torch.contiguous_format
         )
-        assert nt_cont.is_same_size(nt_empty_contig)
-        assert nt_empty_contig.is_contiguous()
+        if not nt_cont.is_same_size(nt_empty_contig):
+            raise AssertionError(
+                "Expected nt_cont and nt_empty_contig to have the same size"
+            )
+        if not nt_empty_contig.is_contiguous():
+            raise AssertionError("Expected nt_empty_contig to be contiguous")
 
         nt_empty_non_contig = torch.empty_like(
             nt_noncont, memory_format=torch.contiguous_format
         )
-        assert nt_noncont.is_same_size(nt_empty_non_contig)
-        assert nt_empty_non_contig.is_contiguous()
+        if not nt_noncont.is_same_size(nt_empty_non_contig):
+            raise AssertionError(
+                "Expected nt_noncont and nt_empty_non_contig to have the same size"
+            )
+        if not nt_empty_non_contig.is_contiguous():
+            raise AssertionError("Expected nt_empty_non_contig to be contiguous")
 
         # Test other memory formats fail
         self.assertRaises(
@@ -3167,12 +3198,14 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
     def test_set_requires_grad_from_list(self, device):
         nt = self._create_nested_tensor_from_list(device)
         nt.requires_grad_()
-        assert nt.requires_grad
+        if not nt.requires_grad:
+            raise AssertionError("Expected nt.requires_grad to be True")
 
     def test_set_requires_grad_from_mask(self, device):
         nt = self._create_nested_tensor_from_mask(device)
         nt.requires_grad_()
-        assert nt.requires_grad
+        if not nt.requires_grad:
+            raise AssertionError("Expected nt.requires_grad to be True")
 
     def test_backward_for_add_op(self, device):
         nt_1 = self._create_nested_tensor_from_mask(device)
@@ -3181,8 +3214,10 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
         nt_1.requires_grad_()
         c = nt_1 + nt_2
 
-        assert nt_1.requires_grad
-        assert c.requires_grad
+        if not nt_1.requires_grad:
+            raise AssertionError("Expected nt_1.requires_grad to be True")
+        if not c.requires_grad:
+            raise AssertionError("Expected c.requires_grad to be True")
         grad_output = self._create_nested_tensor_from_mask(device)
         c.backward(grad_output)
 
@@ -3198,9 +3233,12 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
         nt_2.requires_grad_()
         c = nt_1 - nt_2
 
-        assert nt_1.requires_grad
-        assert nt_2.requires_grad
-        assert c.requires_grad
+        if not nt_1.requires_grad:
+            raise AssertionError("Expected nt_1.requires_grad to be True")
+        if not nt_2.requires_grad:
+            raise AssertionError("Expected nt_2.requires_grad to be True")
+        if not c.requires_grad:
+            raise AssertionError("Expected c.requires_grad to be True")
         grad_output = self._create_nested_tensor_from_mask(device)
         c.backward(grad_output)
 
@@ -3278,7 +3316,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             # This implicitly tests to_padded_tensor grads
             return torch.nested.to_padded_tensor(nt, 0)
 
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for nested_tensor_from_mask")
 
     def test_nested_tensor_from_padded(self, device):
         nested_size = torch.tensor([[1, 2], [2, 2]])
@@ -3294,7 +3333,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(nt, 0)
 
         data = (padded_tensor, nested_size)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for nested_tensor_from_padded")
 
     def test_nested_tensor_from_padded_fused(self, device):
         nested_size = torch.tensor([[1, 8], [2, 8]])
@@ -3310,7 +3350,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(nt, 0)
 
         data = (padded_tensor, nested_size)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for nested_tensor_from_padded_fused")
 
     def test_nested_tensor_from_list(self, device):
         a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
@@ -3323,7 +3364,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(c, 0)
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for nested_tensor_from_list")
 
     @parametrize("layout", [torch.strided, torch.jagged], name_fn=layout_name)
     def test_dropout_backward(self, layout):
@@ -3357,7 +3399,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(result, 0.0)
 
         data = (a, b, c, d)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        if not torch.autograd.gradcheck(grad_test_func, inputs=data):
+            raise AssertionError("gradcheck failed for nested_tensor_bmm")
 
     @tf32_on_and_off(0.008)
     def test_nested_tensor_bmm_backward(self, device):
@@ -3396,7 +3439,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(result, 0.0)
 
         data = (a, b, c, d)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+        if not torch.autograd.gradcheck(grad_test_func, inputs=data):
+            raise AssertionError("gradcheck failed for nested_tensor_matmul")
 
     def test_nested_tensor_matmul_backward(self, device):
         nt0 = torch.nested.nested_tensor(
@@ -3431,7 +3475,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(result, 0.0)
 
         data = (a, b)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data, eps=1e-3)
+        if not torch.autograd.gradcheck(grad_test_func, inputs=data, eps=1e-3):
+            raise AssertionError("gradcheck failed for nested_tensor_transpose")
 
     def test_nested_tensor_transpose_backward(self, device):
         nt = torch.nested.nested_tensor(
@@ -3459,7 +3504,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(result, 0.0)
 
         data = (a, b)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data, eps=1e-3)
+        if not torch.autograd.gradcheck(grad_test_func, inputs=data, eps=1e-3):
+            raise AssertionError("gradcheck failed for nested_tensor_reshape")
 
     def test_nested_tensor_reshape_backward(self):
         nt = torch.nested.nested_tensor(
@@ -3504,7 +3550,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             result = nt.squeeze(-1)
             return torch.nested.to_padded_tensor(result, 0.0)
 
-        assert torch.autograd.gradcheck(grad_test_func, inputs=(a, b), eps=1e-3)
+        if not torch.autograd.gradcheck(grad_test_func, inputs=(a, b), eps=1e-3):
+            raise AssertionError("gradcheck failed for nested_tensor_squeeze")
 
     def test_nested_tensor_unsqueeze_backward(self, device):
         nt = torch.nested.nested_tensor(
@@ -3531,7 +3578,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             result = nt.unsqueeze(-1)
             return torch.nested.to_padded_tensor(result, 0.0)
 
-        assert torch.autograd.gradcheck(grad_test_func, inputs=(a, b), eps=1e-3)
+        if not torch.autograd.gradcheck(grad_test_func, inputs=(a, b), eps=1e-3):
+            raise AssertionError("gradcheck failed for nested_tensor_unsqueeze")
 
     def test_nested_tensor_linear(self, device):
         a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
@@ -3550,11 +3598,15 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(d, 0)
 
         data = (a, b, c, weight, bias)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for nested_tensor_linear with bias")
 
         # Test linear with no bias added
         data = (a, b, c, weight)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError(
+                "gradcheck failed for nested_tensor_linear without bias"
+            )
 
     def test_nested_tensor_linear_plus_transpose(self, device):
         a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
@@ -3574,11 +3626,17 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(d, 0)
 
         data = (a, b, c, weight, bias)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError(
+                "gradcheck failed for nested_tensor_linear_plus_transpose with bias"
+            )
 
         # Test linear with no bias added
         data = (a, b, c, weight)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError(
+                "gradcheck failed for nested_tensor_linear_plus_transpose without bias"
+            )
 
     def test_nested_tensor_softmax(self, device):
         a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
@@ -3593,7 +3651,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
 
         # softmax over last dim
         data = (a, b, c, -1)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for nested_tensor_softmax")
 
     def test_nested_tensor_linear_backward(self, device):
         a = torch.randn(1, 2, requires_grad=False, device=device)
@@ -3608,12 +3667,17 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
 
         out.backward(out.clone())
 
-        assert weight.grad is not None
-        assert bias.grad is not None
+        if weight.grad is None:
+            raise AssertionError("Expected weight.grad to not be None")
+        if bias.grad is None:
+            raise AssertionError("Expected bias.grad to not be None")
 
-        assert a.grad is None
-        assert b.grad is None
-        assert c.grad is None
+        if a.grad is not None:
+            raise AssertionError("Expected a.grad to be None")
+        if b.grad is not None:
+            raise AssertionError("Expected b.grad to be None")
+        if c.grad is not None:
+            raise AssertionError("Expected c.grad to be None")
 
     def test_values_grad_with_broadcast(self, device):
         a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
@@ -3626,7 +3690,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return buffer.sum()
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for values_grad_with_broadcast")
 
     def test_to_buffer_series_ops_grad_with_broadcast(self, device):
         a = torch.randn(1, 1, 2, requires_grad=True, dtype=torch.float64, device=device)
@@ -3640,7 +3705,10 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return buffer.exp()
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError(
+                "gradcheck failed for to_buffer_series_ops_grad_with_broadcast"
+            )
 
     def test_unbind_flow_through(self, device):
         a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
@@ -3656,7 +3724,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return d
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for unbind_flow_through")
 
     def test_split_with_sizes_flow_through(self, device):
         a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64, device=device)
@@ -3672,7 +3741,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return d
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for split_with_sizes_flow_through")
 
     def test_indexing_backward(self, device):
         x0 = torch.randn((2, 5))
@@ -3700,7 +3770,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return out
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for masked_fill_backward")
 
     def test_gelu_backward(self, device):
         a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
@@ -3713,7 +3784,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(nt_gelu, 0)
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for gelu_backward")
 
     def test_relu_backward(self, device):
         a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
@@ -3726,7 +3798,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(nt_relu, 0)
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for relu_backward")
 
     def test_selu_backward(self, device):
         a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
@@ -3739,7 +3812,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(nt_relu, 0)
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for selu_backward")
 
     def test_abs_backward(self, device):
         a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
@@ -3752,7 +3826,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(nt_abs, 0)
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for abs_backward")
 
     # Previously would error when input NT doesn't require grad
     # NotImplementedError: Cannot access storage of UndefinedTensorImpl
@@ -3779,7 +3854,10 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(out, 0)
 
         data = (a, b)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError(
+                "gradcheck failed for accumulate_grad_different_strides"
+            )
 
     # https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
@@ -3804,7 +3882,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(nt_layer_norm, 0)
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for layer_norm_backward")
 
     # https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
@@ -3830,7 +3909,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             return torch.nested.to_padded_tensor(nt_layer_norm, 0)
 
         data = (a, b, c)
-        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+        if not gradcheck(grad_test_func, inputs=data, check_batched_grad=False):
+            raise AssertionError("gradcheck failed for layer_norm_backward_5d")
 
 
 # Found in torch/testing/_comparison.py
@@ -3855,7 +3935,7 @@ def get_atol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
 def get_tolerances(
     true_value: torch.Tensor,
     computed_value: torch.Tensor,
-    fudge_factor: Optional[float] = None,
+    fudge_factor: float | None = None,
 ) -> tuple[float, float]:
     """Returns the absolute and relative tolerances for comparing two tensors."""
     fudge_factor = fudge_factor if fudge_factor is not None else 1.0
@@ -4070,6 +4150,15 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(nt.shape, (3, nested_int, 3))
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
+
+        values = torch.randn(2, 8, 3, device=device)
+        offsets = torch.tensor([1, 4, 7], device=device)
+        lengths = torch.tensor([2, 3], device=device)
+        nt_holes = torch.nested.nested_tensor_from_jagged(
+            values, offsets, lengths=lengths, jagged_dim=2
+        )
+        self.assertEqual(nt_holes.numel(), 30)
+        self.assertEqual(torch.ops.aten.sym_numel.default(nt_holes), 30)
 
     @parametrize("nt_dim", [3, 4, 5])
     def test_linear(self, device, nt_dim):
@@ -4479,11 +4568,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             chunks = nt.chunk(3, dim=-1)
             return chunks[0].values().sum()
 
-        assert gradcheck(
+        if not gradcheck(
             grad_test_func,
             inputs=(values, offsets),
             check_batched_grad=False,
-        )
+        ):
+            raise AssertionError("gradcheck failed for chunk gradcheck")
 
         # chunk on batch dim
         chunks = nt.chunk(NUM_CHUNKS, dim=0)
@@ -4847,7 +4937,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
             self.assertFalse(
                 out_actual.is_nested,
-                f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
+                lambda msg: f"{msg}\n{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
             )  # output is a dense tensor
             self.assertEqual(out_actual, out_expected)
 
@@ -5119,7 +5209,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
                 self.assertFalse(
                     out_actual.is_nested,
-                    f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
+                    lambda msg: f"{msg}\n{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
                 )  # output is a dense tensor
                 self.assertEqual(out_actual, out_expected)
 
@@ -5973,7 +6063,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             t = torch.tensor(3.0, requires_grad=requires_grad)
         else:
             t = torch.randn(*(3 for _ in range(dim)), requires_grad=requires_grad)
-        assert t.dim() == dim
+        if t.dim() != dim:
+            raise AssertionError(f"Expected t.dim() == {dim}, got {t.dim()}")
 
         if dim < 2:
             # 0-1 dim tensors can't be converted to NTs
@@ -6360,11 +6451,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             nt_3 = torch.cat([nt_1, nt_2], dim=-1)
             return nt_3.values()
 
-        assert gradcheck(
+        if not gradcheck(
             grad_test_func,
             inputs=(values_1, values_2, offsets),
             check_batched_grad=False,
-        )
+        ):
+            raise AssertionError("gradcheck failed for cat gradcheck")
 
     def test_is_contiguous(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -6391,11 +6483,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         )
 
         # Test contiguous case
-        assert nt_contiguous.is_contiguous()
+        if not nt_contiguous.is_contiguous():
+            raise AssertionError("Expected nt_contiguous to be contiguous")
 
         # Test narrow case
-        assert not nt_noncontiguous.is_contiguous()
-        assert nt_contiguous_narrow.is_contiguous()
+        if nt_noncontiguous.is_contiguous():
+            raise AssertionError("Expected nt_noncontiguous to not be contiguous")
+        if not nt_contiguous_narrow.is_contiguous():
+            raise AssertionError("Expected nt_contiguous_narrow to be contiguous")
 
         # Test querying by memory_format
         self.assertTrue(
@@ -6621,6 +6716,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/175482")
     def test_index_put_error(self, device):
         import subprocess
 
@@ -7040,7 +7136,8 @@ torch.cuda.synchronize()
             with torch.nn.attention.sdpa_kernel(
                 torch.nn.attention.SDPBackend.CUDNN_ATTENTION
             ):
-                check_forward_backward()
+                with self.assertRaisesRegex(RuntimeError, "No viable backend"):
+                    check_forward_backward(skip_backward=True)
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
@@ -7390,22 +7487,6 @@ torch.cuda.synchronize()
             return convert_nt_to_jagged(nt).sum()
 
         checkpoint(fn, values, offsets, use_reentrant=False).backward()
-        self.assertIsNotNone(values.grad)
-
-        context_fn = partial(
-            create_selective_checkpoint_contexts, [torch.ops.aten.cumsum.default]
-        )
-
-        values.grad = None
-
-        def fn(values, lengths):
-            offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
-            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
-            return convert_nt_to_jagged(nt).sum()
-
-        checkpoint(
-            fn, values, lengths, use_reentrant=False, context_fn=context_fn
-        ).backward()
         self.assertIsNotNone(values.grad)
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
@@ -8086,6 +8167,92 @@ torch.cuda.synchronize()
                 self.assertFalse(any(d == 3 for d in buffer_dims))
 
     @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test manually invokes __torch_function__")
+    def test_torch_function_metadata_fast_path_exact_callables(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 3, device=device, dtype=dtype),
+                torch.randn(4, 3, device=device, dtype=dtype),
+            ],
+            layout=torch.jagged,
+        )
+
+        self.assertEqual(nt.size(), torch.Size(nt._size))
+        self.assertEqual(nt.size(0), nt._size[0])
+        self.assertEqual(nt.size(dim=2), nt._size[2])
+        self.assertEqual(nt.stride(), nt._strides)
+        self.assertEqual(nt.stride(2), nt._strides[2])
+        self.assertEqual(nt.dim(), len(nt._size))
+        self.assertEqual(nt.shape, torch.Size(nt._size))
+        self.assertEqual(nt.ndim, len(nt._size))
+
+        def size(t):
+            raise RuntimeError("fake size called")
+
+        def stride(t):
+            raise RuntimeError("fake stride called")
+
+        def dim(t):
+            raise RuntimeError("fake dim called")
+
+        class FakeDescriptor:
+            def __init__(self, name):
+                self.__name__ = name
+
+        class FakeDescriptorGet:
+            __name__ = "__get__"
+
+            def __init__(self, name):
+                self.__self__ = FakeDescriptor(name)
+
+            def __call__(self, t):
+                raise RuntimeError("fake descriptor called")
+
+        for func in (
+            size,
+            stride,
+            dim,
+            FakeDescriptorGet("shape"),
+            FakeDescriptorGet("ndim"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "fake .* called"):
+                type(nt).__torch_function__(func, (type(nt),), (nt,), {})
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test inspects Dynamo guards")
+    def test_compile_jagged_mean_omits_outer_size_stride_guards(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 3, device=device, dtype=dtype),
+                torch.randn(4, 3, device=device, dtype=dtype),
+            ],
+            layout=torch.jagged,
+        )
+
+        def f(nt):
+            padded = torch.ops.aten._jagged_to_padded_dense_forward(
+                nt.values(),
+                [nt.offsets()],
+                max_lengths=[4],
+            )
+            return torch.sum(padded, dim=1) / nt.offsets().diff().unsqueeze(1)
+
+        explanation = torch._dynamo.explain(f)(nt)
+        guard_code = [
+            code for guard in explanation.out_guards for code in (guard.code_list or [])
+        ]
+
+        self.assertTrue(any("L['nt']._values.size()" in code for code in guard_code))
+        self.assertFalse(
+            any("L['nt'].size()" in code for code in guard_code),
+            "\n".join(guard_code),
+        )
+        self.assertFalse(
+            any("L['nt'].stride()" in code for code in guard_code),
+            "\n".join(guard_code),
+        )
+
+    @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
@@ -8208,6 +8375,39 @@ torch.cuda.synchronize()
         self.assertEqual(nt.shape[:-1], output.shape[:-1])
         for nt_component, output_component in zip(nt.unbind(), output.unbind()):
             self.assertEqual(nt_component.shape, output_component.shape)
+
+    @skipIfTorchDynamo("compiles internally")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @dtypes(torch.float32)
+    @parametrize("scalar_input", ["self", "other"])
+    def test_where_scalar_broadcast_on_in_graph_constructed_njt(
+        self, device, dtype, scalar_input
+    ):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+            ],
+            layout=torch.jagged,
+            device=device,
+            dtype=dtype,
+        )
+
+        values = nt._values.detach().clone()
+        offsets = nt._offsets.detach().clone()
+
+        def f(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            condition = nt > 0.0
+            if scalar_input == "self":
+                return torch.where(condition, 1, torch.zeros_like(nt))
+            return torch.where(condition, torch.ones_like(nt), 0)
+
+        expected = f(values, offsets)
+        output = torch.compile(f, fullgraph=True)(values, offsets)
+        self.assertEqual(output, expected)
 
 
 # The following lists specify skips and xfails for particular SampleInputs. Note that
@@ -8684,6 +8884,11 @@ BACKWARD_SKIPS_AND_XFAILS = [
         ),
         name="unimplemented_masked_fill",
     ),
+    XFailRule(
+        sample_match_fn=lambda device, sample: "(T, NT)" in sample.name,
+        op_match_fn=lambda device, op: op.full_name == "nextafter",
+        name="nextafter_backward_not_implemented",
+    ),
 ]
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
@@ -8699,7 +8904,7 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     # clone() -> preserve format on an non-contiguous NJT with holes currently uses
     # unbind(), leading to data-dependent expression. Should be fixed via torch._check()
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
+        error_type=(torch._dynamo.exc.Unsupported, torch._dynamo.exc.UserError),
         # Ne(u1, u0) (unhinted: Ne(u1, u0)).  (Size-like symbols: u1, u0)
         error_msg="Could not guard on data-dependent expression",
         op_match_fn=lambda device, op: (op.full_name == "clone"),

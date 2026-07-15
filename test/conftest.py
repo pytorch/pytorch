@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import pytest
 from _pytest.config import Config, filename_arg
@@ -33,6 +33,11 @@ except ImportError:
 
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
+
+    from torch.testing._internal.common_distributed import (
+        MultiProcContinuousTest,
+        MultiProcessTestCase,
+    )
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
@@ -89,11 +94,55 @@ def pytest_addoption(parser: Parser) -> None:
         "Emit XML for schema: one of legacy|xunit1|xunit2",
         default="xunit2",
     )
+    parser.addoption(
+        "--hw-classification",
+        nargs="+",
+        default=None,
+        metavar="SCOPE",
+        dest="hw_classification",
+        type=str.upper,
+        help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
+    )
     shard_addoptions(parser)
+
+
+class HardwareClassificationPytestPlugin:
+    """Pytest plugin to filter collected tests by hw_classification."""
+
+    def __init__(self, hw_classification):
+        self.hw_classification = self._resolve_hw_classification(hw_classification)
+
+    @staticmethod
+    def _resolve_hw_classification(hw_classification):
+        if hw_classification is None:
+            return None
+        # Temporary workaround needed until HardwareClassification makes it into a
+        # nightly because main / PR's tests are sometimes run against the previous
+        # day's nightly which won't have this class.
+        try:
+            from torch.testing._internal.common_utils import HardwareClassification
+        except ImportError:
+            return None
+        return {HardwareClassification[name] for name in hw_classification}
+
+    def pytest_collection_modifyitems(self, items):
+        if self.hw_classification is None:
+            return
+        import torch.testing._internal.common_utils as _cu
+
+        filtered = []
+        _cu.filter_by_hw_classification(
+            items,
+            self.hw_classification,
+            get_class=lambda item: getattr(item, "cls", None),
+            on_match=filtered.append,
+        )
+        items[:] = filtered
 
 
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
+
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):
@@ -116,6 +165,11 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
         config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
+    if config.getoption("hw_classification"):
+        config.pluginmanager.register(
+            HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
+            "hw_classification_plugin",
+        )
 
 
 def pytest_unconfigure(config: Config) -> None:
@@ -170,7 +224,7 @@ class LogXMLReruns(LogXML):
         else:
             if report.longrepr is None:
                 raise AssertionError("Expected report.longrepr to not be None")
-            reprcrash: Optional[ReprFileLocation] = getattr(
+            reprcrash: ReprFileLocation | None = getattr(
                 report.longrepr, "reprcrash", None
             )
             if reprcrash is not None:
@@ -191,8 +245,8 @@ class LogXMLReruns(LogXML):
                 reason = f"{report.nodeid}: {_get_raw_skip_reason(report)}"
                 report.longrepr = (fspath, lineno, reason)
 
-    def node_reporter(self, report: Union[TestReport, str]) -> _NodeReporterReruns:
-        nodeid: Union[str, TestReport] = getattr(report, "nodeid", report)
+    def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
+        nodeid: str | TestReport = getattr(report, "nodeid", report)
         # Local hack to handle xdist report order.
         workernode = getattr(report, "node", None)
 
@@ -233,7 +287,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
+def pytest_pycollect_makemodule(module_path, parent) -> Module:
     if parent.config.getoption("--use-main-module"):
         mod = Module.from_parent(parent, path=module_path)
         mod._getobj = MethodType(lambda x: sys.modules["__main__"], mod)
@@ -304,6 +358,45 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     items.extend(filtered_items)
 
 
+def _spawns_multiple_processes(
+    cls: type | None,
+) -> TypeGuard["type[MultiProcessTestCase | MultiProcContinuousTest] | None"]:
+    """
+    A distributed test needs multiple GPUs iff its class spawns multiple
+    processes. This is encoded by the base class: MultiProcessTestCase and
+    MultiProcContinuousTest fork `world_size` subprocesses, one per GPU. Plain
+    TestCase and MultiThreadedTestCase run in a single process (one GPU).
+
+    Returns True (needs multiple GPUs) on any ambiguity, so we never route a
+    process-spawning test to a single-GPU runner.
+    """
+    if cls is None:
+        return True
+    import torch.distributed as dist
+
+    if not dist.is_available():
+        # Distributed wasn't built: no test can spawn processes, so nothing is
+        # multigpu and the single-GPU config runs everything.
+        return False
+    from torch.testing._internal.common_distributed import (
+        MultiProcContinuousTest,
+        MultiProcessTestCase,
+    )
+
+    return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
+
+
+def pytest_itemcollected(item: Any) -> None:
+    """
+    Auto-apply the `multigpu` marker based on the resolved test class. Runs
+    per-item during collection, before pytest applies `-m` deselection, so the
+    distributed CI configs can partition a file into multigpu and `not
+    multigpu` halves without touching the test source.
+    """
+    if _spawns_multiple_processes(getattr(item, "cls", None)):
+        item.add_marker("multigpu")
+
+
 class StepcurrentPlugin:
     # Modified fromo _pytest/stepwise.py in order to save the currently running
     # test instead of the last failed test
@@ -315,7 +408,7 @@ class StepcurrentPlugin:
         self.cache: pytest.Cache = config.cache
         directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
         self.lastrun_location = f"{directory}/lastrun"
-        self.lastrun: Optional[str] = self.cache.get(self.lastrun_location, None)
+        self.lastrun: str | None = self.cache.get(self.lastrun_location, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
@@ -351,7 +444,7 @@ class StepcurrentPlugin:
                 del items[1:]
             config.hook.pytest_deselected(items=deselected)
 
-    def pytest_report_collectionfinish(self) -> Optional[str]:
+    def pytest_report_collectionfinish(self) -> str | None:
         if self.config.getoption("verbose") >= 0 and self.report_status:
             return f"stepcurrent: {self.report_status}"
         return None
