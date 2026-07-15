@@ -424,9 +424,13 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       return;
     }
 
-    std::erase_if(symm_mems_, [&](const auto& entry) {
-      return entry.first.first == ptr;
-    });
+    for (auto it = symm_mems_.begin(); it != symm_mems_.end();) {
+      if (it->first.first == ptr) {
+        it = symm_mems_.erase(it);
+      } else {
+        ++it;
+      }
+    }
 
     // nvshmem_free is collective, but tensor storage destruction is not.
     // Queue this allocation and drain it at a future collective alloc boundary.
