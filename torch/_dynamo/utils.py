@@ -151,7 +151,7 @@ try:
 
         # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
-    from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+    from torch._subclasses.fake_tensor import is_fake
 except ImportError:
     pass
 
@@ -3577,9 +3577,9 @@ def same(
             raise AssertionError(f"elements mismatch {set(ref)} == {set(res)}")
         return True
     elif isinstance(ref, (torch.Tensor, float)):
-        if isinstance(ref, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(ref):
             raise AssertionError("ref should not be a FakeTensor")
-        if isinstance(res, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(res):
             raise AssertionError("res should not be a FakeTensor")
 
         def to_tensor(t: Any) -> torch.Tensor:
@@ -3896,6 +3896,8 @@ def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> An
 
 
 def ensure_graph_fake(e: Any, tx: InstructionTranslatorBase) -> Any:
+    from torch._subclasses.fake_tensor import maybe_get_fake_mode
+
     if maybe_get_fake_mode(e) is not tx.fake_mode:
         raise AssertionError(
             f"Expected fake mode of e to be tx.fake_mode, got {maybe_get_fake_mode(e)} vs {tx.fake_mode}"
@@ -4799,7 +4801,9 @@ def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str] | None:
 
 
 def defake(x: Any) -> Any:
-    if not isinstance(x, FakeTensor):
+    from torch._subclasses.fake_tensor import is_fake_tensor
+
+    if not is_fake_tensor(x):
         return x
     size: torch._prims_common.ShapeType
     stride: torch._prims_common.StrideType
@@ -5617,6 +5621,21 @@ def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
 
 def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
     return torch._C.Event(*args, **kwargs)
+
+
+class FrameState(enum.Enum):
+    FRAME_CREATED = -3
+    FRAME_SUSPENDED = -2
+    FRAME_SUSPENDED_YIELD_FROM = -1
+    FRAME_EXECUTING = 0
+    FRAME_COMPLETED = 1
+    FRAME_CLEARED = 4
+
+
+class PySendResult(enum.Enum):
+    PYGEN_RETURN = 0
+    PYGEN_ERROR = -1
+    PYGEN_NEXT = 1
 
 
 class CompileTimeInstructionCounter:
