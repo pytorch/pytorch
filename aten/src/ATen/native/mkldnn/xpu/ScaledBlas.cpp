@@ -1182,13 +1182,29 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
   auto scale_recipe_b_enum = convert_int_to_enum<ScalingType>(scale_recipe_b);
   auto swizzle_b_enum = convert_int_to_enum<SwizzleType>(swizzle_b);
 
-  // XPU does not support swizzle. Accept empty (not specified) or NO_SWIZZLE.
+  // XPU does not support swizzle. swizzle_a/swizzle_b may be omitted (empty)
+  // by Python callers (F.scaled_mm defaults swizzle to None); treat that as
+  // NO_SWIZZLE. Otherwise they must match the recipe count and be all
+  // NO_SWIZZLE.
   TORCH_CHECK_VALUE(
       (swizzle_a_enum.empty() ||
-       swizzle_a_enum[0] == at::blas::SwizzleType::NO_SWIZZLE) &&
+       swizzle_a_enum.size() == scale_recipe_a_enum.size()) &&
           (swizzle_b_enum.empty() ||
-           swizzle_b_enum[0] == at::blas::SwizzleType::NO_SWIZZLE),
-      "XPU does not support swizzle yet.");
+           swizzle_b_enum.size() == scale_recipe_b_enum.size()),
+      "swizzle_a/swizzle_b must be empty or match the number of scale recipes, got ",
+      swizzle_a_enum.size(),
+      " and ",
+      swizzle_b_enum.size());
+  for (auto s : swizzle_a_enum) {
+    TORCH_CHECK_VALUE(
+        s == SwizzleType::NO_SWIZZLE,
+        "For XPU MX/NVFP4 gemm, scale_a swizzle entries must all be NO_SWIZZLE");
+  }
+  for (auto s : swizzle_b_enum) {
+    TORCH_CHECK_VALUE(
+        s == SwizzleType::NO_SWIZZLE,
+        "For XPU MX/NVFP4 gemm, scale_b swizzle entries must all be NO_SWIZZLE");
+  }
 
   // at this point we can start working out what we want to be doing
   // Try to do as few steps as possible.
