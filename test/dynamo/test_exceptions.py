@@ -54,6 +54,11 @@ class CustomRuntimeErrorWithRepr(RuntimeError):
         return "custom repr"
 
 
+class CustomRuntimeErrorWithStr(RuntimeError):
+    def __str__(self):
+        return "custom str"
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):
@@ -196,6 +201,30 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             TypeError, "range expected at most 3 arguments, got 6"
         ):
             opt_fn(torch.ones(1))
+
+    def test_raise_non_exception_type_error(self):
+        # PyExceptionClass_Check must reject non-exception builtins: they are
+        # BuiltinVariables but not BaseException subclasses.
+        def fn(x):
+            try:
+                raise int
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_raise_from_non_exception_type_error(self):
+        def fn(x):
+            try:
+                raise ValueError("v") from dict
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_builtin_arg_count_type_errors(self):
         def check(fn):
@@ -1079,7 +1108,9 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             return t.cos()
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(Unsupported, "Observed exception"):
+        with self.assertRaisesRegex(
+            TorchRuntimeError, "RuntimeError when making fake tensor call"
+        ):
             opt_fn(torch.randn(2, 3))
         self.assertEqual(str_calls, [])
 
@@ -1096,11 +1127,15 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 t.expand_as(torch.randn(2))
             return t.cos()
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            TorchRuntimeError, "RuntimeError when making fake tensor call"
-        ):
-            opt_fn(torch.randn(2, 3))
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), opt_fn(t))
+
+        self.assertEqual(len(backend.graphs), 1)
+        node_targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertNotIn("expand_as", node_targets)
+        self.assertIn("cos", node_targets)
 
     def test_fake_tensor_runtime_error_in_with_inside_try_except(self):
         backend = EagerAndRecordGraphs()
@@ -1406,6 +1441,77 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(v.__context__, ValueError)
         self.assertIsInstance(v.__cause__, RuntimeError)
 
+    def test_reconstruct_AttributeError(self):
+        sentinel = object()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return t.sin(), AttributeError("boom", name="myattr", obj=sentinel)
+
+        t = torch.randn(2)
+        y, v = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, AttributeError)
+        self.assertEqual(v.args, ("boom",))
+        self.assertEqual(v.name, "myattr")
+        self.assertIs(v.obj, sentinel)
+
+    def test_reconstruct_AttributeError_from_getattr(self):
+        class Foo:
+            bar = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            obj = Foo()
+            try:
+                obj.missing
+            except AttributeError as e:
+                return t.sin(), e
+
+        t = torch.randn(2)
+        y, v = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, AttributeError)
+        self.assertEqual(v.name, "missing")
+
+    def test_reconstruct_NameError(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return t.sin(), NameError("boom", name="myvar")
+
+        t = torch.randn(2)
+        y, v = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, NameError)
+        self.assertEqual(v.args, ("boom",))
+        self.assertEqual(v.name, "myvar")
+
+    def test_reconstruct_NameError_from_undefined(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                undefined_name
+            except NameError as e:
+                return t.sin(), e
+
+        t = torch.randn(2)
+        y, v = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, NameError)
+        self.assertEqual(v.name, "undefined_name")
+
+    def test_reconstruct_StopIteration(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return t.sin(), StopIteration(42)
+
+        t = torch.randn(2)
+        y, v = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, StopIteration)
+        self.assertEqual(v.args, (42,))
+        self.assertEqual(v.value, 42)
+
     def test_raise_GeneratorExit(self):
         # GeneratorExit does not inherit from Exception
         @torch.compile(backend="eager", fullgraph=True)
@@ -1685,6 +1791,20 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, t.sin())
         self.assertEqual(s, "test error")
         self.assertEqual(r, "ValueError('test error')")
+
+    def test_str_user_defined_exception_custom_str(self):
+        def fn(t):
+            try:
+                raise CustomRuntimeErrorWithStr("arg")
+            except CustomRuntimeErrorWithStr as e:
+                return t.sin(), str(e)
+
+        t = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        y, s = opt_fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(s, "custom str")
+        self.assertEqual(fn(t), opt_fn(t))
 
     def test_str_repr_exception_multi_args(self):
         @torch.compile(backend="eager", fullgraph=True)

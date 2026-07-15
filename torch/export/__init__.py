@@ -115,7 +115,9 @@ def export(
 
         dynamic_shapes:
          An optional argument where the type should either be:
-         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         1) a dict from argument names of ``f`` to their dynamic shape specifications.
+         For a variadic ``**kwargs`` argument, the dict may use the actual keyword names
+         passed to ``f``, unless a keyword name collides with another input name.
          2) a tuple that specifies dynamic shape specifications for each input in original order.
          If you are specifying dynamism on keyword args, you will need to pass them in the order that
          is defined in the original function signature.
@@ -134,7 +136,7 @@ def export(
          This is a newer unbacked unified API across compile, pre-compile,
          export, etc., and is the recommended way to specify dynamic
          shapes for export going forward. It is the same spec API exposed
-         via ``shapes_spec=`` in :func:`torch.compile`.
+         via ``dynamic_shapes=`` in :func:`torch.compile`.
 
          The keys of ``ParamsSpec`` are **parameter names of the callable
          being traced** (for an ``nn.Module``, the parameters of
@@ -213,6 +215,12 @@ def export(
             "Maybe try converting your ScriptModule to an ExportedProgram "
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
+
+    # If ``mod.forward`` carries an ``@dynamic_spec(...)`` decorator, the
+    # attached ``ShapesSpec`` is used as ``dynamic_shapes``. Passing both raises.
+    from torch.fx.experimental.dynamic_spec import _resolve_dynamic_shapes
+
+    dynamic_shapes = _resolve_dynamic_shapes(mod, dynamic_shapes)
 
     try:
         return _export(

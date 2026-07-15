@@ -47,6 +47,7 @@ from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -97,10 +98,11 @@ from .functions import (
     bind_args_cached,
     ClosureConversionError,
     NestedUserFunctionVariable,
+    UserFunctionVariable,
 )
 from .lists import ListVariable, TupleVariable
 from .object_protocol import vt_is_iterable
-from .script_object import TorchScriptObjectVariable
+from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -122,8 +124,8 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
+    from torch._custom_class_base import CustomClassBase
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._opaque_base import OpaqueBase
     from torch.utils._pytree import TreeSpec
 
 
@@ -131,6 +133,27 @@ V = TypeVar("V")
 T = TypeVar("T")
 
 log = logging.getLogger(__name__)
+
+
+def _is_supported_out_tensor_layout(
+    fake_out: torch.Tensor, *, false_if_dde: bool
+) -> bool:
+    # Functionalization can preserve standard dense memory formats, but not
+    # arbitrary non-contiguous view strides.
+    return (
+        torch._prims_common.is_contiguous(fake_out, false_if_dde=false_if_dde)
+        or torch._prims_common.is_contiguous_for_memory_format(
+            fake_out,
+            memory_format=torch.channels_last,
+            false_if_dde=false_if_dde,
+        )
+        or torch._prims_common.is_contiguous_for_memory_format(
+            fake_out,
+            memory_format=torch.channels_last_3d,
+            false_if_dde=false_if_dde,
+        )
+    )
+
 
 supported_ctx_manager_classes = dict.fromkeys(
     [
@@ -190,6 +213,8 @@ constant_fold_functions = [
     torch._C._get_cublas_allow_tf32,
     torch._C._is_any_autocast_enabled,
     torch.accelerator.is_available,
+    torch.backends.mps.is_available.__wrapped__,  # type: ignore[attr-defined]
+    torch.backends.mps.is_built,
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
@@ -205,6 +230,8 @@ constant_fold_functions = [
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
     torch.autograd._is_checkpoint_valid,
+    torch.mps.is_available,
+    torch.mtia.is_available,
     torch.xpu.get_device_properties,
     torch.xpu.is_available,
 ] + constant_fold_functions_need_guards
@@ -367,7 +394,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
     grad_fns: set[torch.autograd.graph.Node] = set()
 
-    plain_tensors: list[torch.SymInt | torch.Tensor | int | OpaqueBase] = []
+    plain_tensors: list[torch.SymInt | torch.Tensor | int | CustomClassBase] = []
     # Get all plain tensors (handles nested subclasses)
     if is_traceable_wrapper_subclass(tensor):
         get_plain_tensors(tensor, out=plain_tensors)
@@ -410,7 +437,7 @@ def _collect_tensors_with_sources(
             raise AssertionError(
                 f"Expected fake_tensor to be a torch.Tensor, got {type(fake_tensor)}"
             )
-        if isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor):
+        if is_fake_tensor(fake_tensor):
             pass
         elif is_traceable_wrapper_subclass(fake_tensor):
             # For tensor subclasses (e.g. DTensor), verify the inner tensors
@@ -421,11 +448,7 @@ def _collect_tensors_with_sources(
                 fake_tensor,  # pyrefly: ignore[bad-argument-type]
                 out=plain,  # pyrefly: ignore[bad-argument-type]
             )
-            if not all(
-                isinstance(t, torch._subclasses.fake_tensor.FakeTensor)
-                for t in plain
-                if isinstance(t, torch.Tensor)
-            ):
+            if not all(is_fake_tensor(t) for t in plain if isinstance(t, torch.Tensor)):
                 raise AssertionError(
                     f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"
                 )
@@ -599,7 +622,7 @@ class BaseTorchVariable(VariableTracker):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
     def richcompare_impl(
@@ -985,7 +1008,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # This should only be done if the example_value is a FakeTensor.
                 # However, if tensor subclasses are present,
                 # it is reasonable for Python to remain in the dispatch key set.
-                if isinstance(example_value, torch._subclasses.FakeTensor):
+                if torch._subclasses.fake_tensor.is_fake_tensor(example_value):
                     dks = (
                         dks
                         - torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
@@ -1031,7 +1054,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     raise AssertionError(
                         "Expected first argument to accumulate_grad_ to be a tensor"
                     )
-                variable_grad = variable.var_getattr(tx, "grad")
+                variable_grad = variable.getattro_impl(tx, "grad")
                 updated_grad = tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.accumulate_grad),
                     [variable, variable_grad, new_grad],
@@ -1720,10 +1743,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            # Decompose via addcmul_ so tensor weights (e.g. 0-dim tensor
-            # from tensor betas in Adam) stay in tensor arguments instead of
-            # hitting float() in the native lerp_scalar lowering.
-            if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
+            # Decompose via addcmul_ only when the weight is a tensor, so
+            # tensor weights (e.g. 0-dim tensor from tensor betas in Adam) stay
+            # in tensor arguments instead of hitting float() in the native
+            # lerp_scalar lowering.  Python scalar weights can use the native
+            # foreach op directly, avoiding extra full-size weight tensors.
+            if (
+                config.enable_dynamo_decompositions
+                and len(args) == 3
+                and args[2].is_tensor()
+                and not kwargs
+            ):
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
                     list(args),
@@ -1831,7 +1861,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     if not (
                         args[0].is_python_constant()
                         or (
-                            isinstance(args[0], TorchScriptObjectVariable)
+                            isinstance(args[0], CustomClassObjectVariable)
                             and args[  # pyrefly: ignore[missing-attribute]
                                 0
                             ].value.script_class_name  # pyrefly: ignore[missing-attribute]
@@ -1861,9 +1891,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
 
                 def get_arg_value(arg: VariableTracker) -> Any:
-                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # CustomClassObjectVariable for ProcessGroup doesn't support
                     # as_python_constant(), so extract real_obj directly
-                    if isinstance(arg, TorchScriptObjectVariable):
+                    if isinstance(arg, CustomClassObjectVariable):
                         return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
                     return arg.as_python_constant()
 
@@ -2344,8 +2374,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
+            torch_source = ImportSource("torch")
+            install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             new_source = AttrSource(
-                ImportSource("torch"),
+                torch_source,
                 module.__name__.rsplit(".", maxsplit=1)[-1],
             )
             return VariableTracker.build(tx, module, new_source)
@@ -2528,46 +2560,68 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
             message_eager = None
-            message_graph_proxy = None
+            message_graph_arg = None
+            # Realize a possible LazyVariableTracker so the exact-type checks
+            # below see the underlying VariableTracker rather than the wrapper.
             if message_vt is not None:
-                if not isinstance(message_vt, NestedUserFunctionVariable):
+                message_vt = message_vt.realize()
+            match message_vt:
+                case None:
+                    pass
+                case NestedUserFunctionVariable() | UserFunctionVariable() if type(
+                    message_vt
+                ) in (NestedUserFunctionVariable, UserFunctionVariable):
+                    # These report is_python_constant() True (as_python_constant
+                    # returns the underlying fn), so this arm must precede the
+                    # constant arm below. Restrict to exact types: other
+                    # function-VT subclasses (e.g. bound methods, whose
+                    # get_function drops the receiver) cannot be faithfully
+                    # reconstructed as a zero-arg message callable, so they fall
+                    # through to the graph-break arm.
+                    try:
+                        message_eager = message_vt.get_function()
+                    except ClosureConversionError:
+                        unimplemented(
+                            gb_type="Can't convert torch._check*() message closure",
+                            context=str(message_vt),
+                            explanation=(
+                                "The message argument of torch._check*() must be a function "
+                                "whose closure variables are Python constants."
+                            ),
+                            hints=[
+                                "Remove closure variables that reference non-constant values, e.g. "
+                                "remove references to tensor `x` in `lambda: f'{x} failed check'`",
+                                *graph_break_hints.SUPPORTABLE,
+                            ],
+                        )
+
+                    message_graph_arg = tx.output.register_static_attr_and_return_proxy(
+                        "_check_message", message_eager
+                    )
+                case _ if message_vt.is_python_constant():
+                    # Mirror eager torch._check, which accepts any constant and
+                    # stringifies it; None means "use the default message".
+                    message_eager = message_vt.as_python_constant()
+                    if message_eager is not None:
+                        message_graph_arg = str(message_eager)
+                case _:
                     unimplemented(
                         gb_type="Can't extract message from torch._check*()",
                         context=str(message_vt),
                         explanation=(
-                            "The message argument of torch._check*() must be a function "
-                            "defined within the torch.compile region."
+                            "The message argument of torch._check*() must be a string, None, "
+                            "or a function."
                         ),
                         hints=[
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                try:
-                    message_eager = message_vt.get_function()
-                except ClosureConversionError:
-                    unimplemented(
-                        gb_type="Can't convert torch._check*() message closure",
-                        context=str(message_vt),
-                        explanation=(
-                            "The message argument of torch._check*() must be a function "
-                            "whose closure variables are Python constants."
-                        ),
-                        hints=[
-                            "Remove closure variables that reference non-constant values, e.g. "
-                            "remove references to tensor `x` in `lambda: f'{x} failed check'`",
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
-
-                message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
-                    "_check_message", message_eager
-                )
 
             if predicate_vt.is_python_constant():
                 if predicate_vt.as_python_constant():
                     return ConstantVariable.create(None)
                 msg = (
-                    message_eager()
+                    str(message_eager() if callable(message_eager) else message_eager)
                     if message_eager is not None
                     else ("Expected cond to be True, but got False.")
                 )
@@ -2576,10 +2630,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             predicate_proxy = predicate_vt.as_proxy()
 
             proxy_args: tuple[Any, ...]
-            if message_graph_proxy is None:
+            if message_graph_arg is None:
                 proxy_args = (predicate_proxy,)
             else:
-                proxy_args = (predicate_proxy, message_graph_proxy)
+                proxy_args = (predicate_proxy, message_graph_arg)
 
             return wrap_fx_proxy(
                 tx=tx,
@@ -2687,8 +2741,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx,
                     f"{fn.__name__} takes exactly one argument ({len(args)} given)",
                 )
+            torch_source = ImportSource("torch")
+            install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             current_device_source = CallFunctionNoArgsSource(
-                AttrSource(AttrSource(ImportSource("torch"), "cuda"), "current_device")
+                AttrSource(AttrSource(torch_source, "cuda"), "current_device")
             )
             install_guard(current_device_source.make_guard(GuardBuilder.EQUALS_MATCH))
             arg = args[0].as_python_constant()
@@ -3041,7 +3097,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         strict=True,
                     )
                 )
-                return ConstDictVariable(items, dict)
+                return ConstDictVariable(items)
             return result
 
         @register(torch._functorch.eager_transforms._autograd_grad)
@@ -3107,6 +3163,22 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return None
 
         return handlers
+
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        source = self.source and AttrSource(self.source, name)
+        try:
+            member = getattr(self.value, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+            raise
+
+        if isinstance(
+            member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+        ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
+            return TorchInGraphFunctionVariable(member, source=source)
+        return variables.GetAttrVariable(self, name, source=source)
 
     def call_function(
         self,
@@ -3338,7 +3410,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                                 *graph_break_hints.SUPPORTABLE,
                             ],
                         )
-                    if not torch._prims_common.is_contiguous(fake_out):
+                    if not _is_supported_out_tensor_layout(
+                        fake_out, false_if_dde=False
+                    ):
                         # It's difficult to handle strides correctly in functionalization
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented(
@@ -3373,7 +3447,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                if not torch._prims_common.is_contiguous_or_false(fake_out):
+                if not _is_supported_out_tensor_layout(fake_out, false_if_dde=True):
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented(
@@ -3580,6 +3654,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             torch._dynamo.exc.Unsupported,
             # From `flat_apply` assert on output type.
             torch._dynamo.exc.TorchRuntimeError,
+            # From fake tensor eval in _get_fake_value_impl.
+            torch._dynamo.exc.FakeTensorObservedException,
         ):
             unimplemented(
                 gb_type="Unsupported output type for nonstrict_trace-ed function",
@@ -3904,9 +3980,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
-            shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
-            dtype = data.var_getattr(tx, "dtype").as_python_constant()
-            device = data.var_getattr(tx, "device").as_python_constant()
+            shape = tuple(data.getattro_impl(tx, "shape").as_python_constant())
+            dtype = data.getattro_impl(tx, "dtype").as_python_constant()
+            device = data.getattro_impl(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented(
                 gb_type="`torch.nn.Parameter` with non-constant Tensor attributes",

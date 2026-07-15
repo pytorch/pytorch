@@ -316,7 +316,7 @@ static void writeJsonNode(
 static std::string timeString(const std::time_t timepoint) {
   std::ostringstream oss;
   oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X"); // NOLINT
-  return oss.str();
+  return std::move(oss).str();
 }
 
 static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
@@ -633,7 +633,7 @@ static void handleKernelBackendInfo(
   }
 }
 
-// Additional attributes for commounication collectives
+// Additional attributes for communication collectives
 inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   std::vector<std::string> attrs;
 
@@ -806,7 +806,7 @@ static std::string json_str_escape(const std::string& str) {
       ostream << ch;
     }
   }
-  return ostream.str();
+  return std::move(ostream).str();
 }
 
 static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
