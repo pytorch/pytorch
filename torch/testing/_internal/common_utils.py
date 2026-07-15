@@ -114,6 +114,53 @@ class ProfilingMode(Enum):
     SIMPLE = 2
     PROFILING = 3
 
+class HardwareClassification(Enum):
+    """Hardware classification metadata for test classes.
+
+    Test classes declare a ``hw_classification`` class attribute to indicate
+    the kind of hardware their tests require.  When ``--hw-classification``
+    is passed, only tests whose classification matches one of the requested
+    values are executed.  When the flag is not specified, all test discovery
+    and execution paths remain unchanged.
+
+    Currently there are three hardware classification categories:
+
+    * ``GENERIC`` – tests that exercise shared, device-agnostic logic
+      (e.g. Dynamo dispatcher, FX passes, and other framework internals
+      that do not depend on a particular accelerator).  These test classes
+      typically do **not** use
+      :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
+
+    * ``ACCELERATOR`` – tests that verify behavior which must hold
+      across every accelerator (e.g. operator semantics, memory profiling).
+      These test classes **are** instantiated via
+      :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
+
+    * ``CPU``, ``CUDA``, ``MPS``, ``XPU`` – tests tied to a specific device.
+      Use sparingly, and only for device-specific behavior.  These replace
+      ``@onlyCPU``, ``@onlyCUDA``, and similar decorators
+
+    Usage::
+
+        class TestFoo(TestCase):
+            hw_classification = HardwareClassification.GENERIC
+
+            def test_bar(self):
+                ...
+
+    Run only GENERIC and ACCELERATOR tests:
+
+        python test/test_torch.py --hw-classification GENERIC ACCELERATOR
+
+    """
+    GENERIC = "generic"
+    ACCELERATOR = "accelerator"
+    CPU = "cpu"
+    CUDA = "cuda"
+    MPS = "mps"
+    XPU = "xpu"
+
+
 # Set by parse_cmd_line_args() if called
 DISABLED_TESTS_FILE = ""
 GRAPH_EXECUTOR : ProfilingMode | None = None
@@ -130,6 +177,67 @@ TEST_IN_SUBPROCESS = False
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
+HW_CLASSIFICATION : set[HardwareClassification] | None = None
+
+
+def get_hw_classification(
+    test_case_cls: type[unittest.TestCase],
+) -> HardwareClassification | None:
+    requirement = getattr(test_case_cls, "hw_classification", None)
+    if requirement is None:
+        return None
+
+    if not isinstance(requirement, HardwareClassification):
+        raise TypeError(
+            f"{test_case_cls.__module__}.{test_case_cls.__name__}."
+            "hw_classification must be a HardwareClassification"
+        )
+
+    return requirement
+
+
+def filter_by_hw_classification(
+    items: Iterable[Any],
+    requirement: set[HardwareClassification],
+    get_class: Callable[[Any], type | None],
+    *,
+    on_match: Callable[[Any], None],
+) -> None:
+    """Filter items by hardware classification and print a summary.
+
+    For each item, `get_class` extracts the associated test class. Items whose
+    hardware classification is in `requirement` are passed to `on_match`, if
+    provided. Prints a summary of matched, mismatched, unclassified, and
+    classless items.
+    """
+    total = 0
+    passed = 0
+    no_class = 0
+    unclassified = 0
+    for item in items:
+        total += 1
+        cls = get_class(item)
+        if cls is None:
+            no_class += 1
+            continue
+        classification = get_hw_classification(cls)
+        if classification is None:
+            unclassified += 1
+        elif classification in requirement:
+            passed += 1
+            on_match(item)
+
+    mismatched = total - passed - unclassified - no_class
+    parts = [
+        f"HW classification mode active ({[e.name for e in requirement]}):",
+        f"total={total}, passed={passed},",
+        f"unclassified={unclassified},",
+    ]
+    if no_class > 0:
+        parts.append(f"no_class={no_class},")
+    parts.append(f"mismatched={mismatched}")
+    print(" ".join(parts))
+
 
 def is_navi3_arch():
     if torch.cuda.is_available():
@@ -1006,6 +1114,7 @@ def parse_cmd_line_args():
     global TEST_SAVE_XML
     global UNITTEST_ARGS
     global USE_PYTEST
+    global HW_CLASSIFICATION
 
     is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
     parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
@@ -1027,6 +1136,7 @@ def parse_cmd_line_args():
     parser.add_argument('--rerun-disabled-tests', action='store_true')
     parser.add_argument('--pytest-single-test', type=str, nargs=1)
     parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--hw-classification', nargs='+', choices=[e.name for e in HardwareClassification], type=str.upper, default=None)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
     def run_unittest_help(argv):
@@ -1062,6 +1172,11 @@ def parse_cmd_line_args():
     TEST_SAVE_XML = args.save_xml
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
+    HW_CLASSIFICATION = (
+        {HardwareClassification[name] for name in args.hw_classification}
+        if args.hw_classification is not None
+        else None
+    )
     if not getattr(expecttest, "ACCEPT", False):
         expecttest.ACCEPT = args.accept
     UNITTEST_ARGS = [sys.argv[0]] + remaining
@@ -1267,6 +1382,57 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
     return test_collector_plugin.tests
 
 
+class HardwareClassificationTestLoader(unittest.TestLoader):
+    """Unittest TestLoader that filters loaded tests by hw_classification."""
+    def __init__(self, hw_classification):
+        super().__init__()
+        self.hw_classification = hw_classification
+
+    @staticmethod
+    def iter_test_cases_recursively(
+        suite_or_case: unittest.TestSuite | unittest.TestCase,
+    ) -> Iterator[unittest.TestCase]:
+        if isinstance(suite_or_case, unittest.TestCase):
+            yield suite_or_case
+            return
+
+        _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
+        for element in suite_or_case:
+            yield from _iter(element)
+
+    def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
+        if self.hw_classification is None:
+            return tests
+
+        filtered_suite = unittest.TestSuite()
+        _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
+        filter_by_hw_classification(
+            _iter(tests),
+            self.hw_classification,
+            get_class=lambda tc: tc.__class__,
+            on_match=filtered_suite.addTest,
+        )
+        return filtered_suite
+
+    def loadTestsFromModule(self, module, *args, pattern=None, **kwargs):
+        suite = super().loadTestsFromModule(
+            module, *args, pattern=pattern, **kwargs
+        )
+        return self.get_filtered_suite(suite)
+
+    def loadTestsFromName(self, name, module=None, *args, **kwargs):
+        suite = super().loadTestsFromName(name, module, *args, **kwargs)
+        # _FailedTest has no hw_classification attribute, so
+        # get_filtered_suite would count it as unclassified and drop it
+        # silently. But the original unittest behavior is to surface the
+        # error when the test runs (e.g. "test not found" for a typo).
+        # Pass it through unfiltered to preserve that error.
+        tests = list(suite)
+        if tests and isinstance(tests[0], unittest.loader._FailedTest):
+            return suite
+        return self.get_filtered_suite(suite)
+
+
 def run_tests(argv=None):
     parse_cmd_line_args()
     if argv is None:
@@ -1300,6 +1466,10 @@ def run_tests(argv=None):
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
+    testLoader = unittest.loader.defaultTestLoader
+    if HW_CLASSIFICATION is not None:
+        testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION)
+
     if SHOWLOCALS:
         argv = [
             argv[0],
@@ -1308,6 +1478,7 @@ def run_tests(argv=None):
         ]
 
     if TEST_IN_SUBPROCESS:
+        suite = testLoader.loadTestsFromModule(__main__)
         other_args = []
         if DISABLED_TESTS_FILE:
             other_args.append("--import-disabled-tests")
@@ -1319,6 +1490,8 @@ def run_tests(argv=None):
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
             other_args += ['--save-xml', TEST_SAVE_XML]
+        if HW_CLASSIFICATION is not None:
+            other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1359,6 +1532,7 @@ def run_tests(argv=None):
             )
 
     elif RUN_PARALLEL > 1:
+        suite = testLoader.loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
@@ -1372,6 +1546,8 @@ def run_tests(argv=None):
             raise AssertionError("Some test shards have failed")
     elif USE_PYTEST:
         pytest_args = argv + ["--use-main-module"]
+        if HW_CLASSIFICATION is not None:
+            pytest_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
         test_report_path = ""
         if TEST_SAVE_XML:
             test_report_path = get_report_path(pytest=True)
@@ -1423,13 +1599,13 @@ def run_tests(argv=None):
         unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+            resultclass=XMLTestResultVerbose), testLoader=testLoader)
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
-            if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
+            if not unittest.main(exit=False, argv=argv, testLoader=testLoader).result.wasSuccessful():
                 sys.exit(-1)
     else:
-        unittest.main(argv=argv)
+        unittest.main(argv=argv, testLoader=testLoader)
 
 IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
