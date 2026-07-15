@@ -52,8 +52,6 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     _cute_arg,
     _cute_call,
-    _cute_op_name,
-    _keepdim_and_broadcast,
     _local_reduce_store_arg,
     FlexGemmPhysicalReduction,
     grouped_tensor_layout,
@@ -1031,37 +1029,6 @@ class FlexGemmEpilogueEmitter:
             return
         self.env[node] = lowered_reduce
 
-    def lower_mx_scale(self, node: torch.fx.Node) -> bool:
-        """Lower compact MX scale encoding before broadcasting the stored value."""
-        if (
-            self.feed_main is not None
-            or not is_shape_preserving_pointwise_node(node)
-            or _cute_op_name(node.target) != "mx_e8m0_scale"
-            or not node.args
-            or not isinstance(node.args[0], torch.fx.Node)
-        ):
-            return False
-        reduction = reduction_from_node(node.args[0])
-        if (
-            reduction is None
-            or not isinstance(reduction[0], torch.fx.Node)
-            or reduction[0] not in self.grouped_tensors
-        ):
-            return False
-        node_args = tuple(_cute_arg(arg, self.env) for arg in node.args)
-        node_kwargs = {
-            key: _cute_arg(value, self.env) for key, value in node.kwargs.items()
-        }
-        self.env[node] = _cute_call(node.target, node_args, node_kwargs)
-        reduction_input = reduction[0]
-        _, self.store_sources[node] = _keepdim_and_broadcast(
-            self.kernel,
-            self.env[node],
-            self.grouped_tensors[reduction_input],
-            _cute_arg(reduction_input, self.env),
-        )
-        return True
-
     def lower_pointwise_store(self, node: torch.fx.Node) -> bool:
         """Lower pointwise expressions that consume a compressed store value."""
         if (
@@ -1191,7 +1158,7 @@ class FlexGemmEpilogueEmitter:
             if physical_finalize is not None:
                 self.env[node] = physical_finalize
                 return
-        if self.lower_mx_scale(node) or self.lower_pointwise_store(node):
+        if self.lower_pointwise_store(node):
             return
         node_args = tuple(_cute_arg(arg, self.env) for arg in node.args)
         node_kwargs = {

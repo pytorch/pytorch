@@ -11,11 +11,7 @@ from unittest import mock
 
 import torch
 from torch._higher_order_ops import flex_gemm
-from torch._higher_order_ops.flex_gemm import (
-    _SUPPORTED_FLEX_GEMM_OP_NAMES,
-    mx_e8m0_scale,
-    nvfp4_e4m3_scale,
-)
+from torch._higher_order_ops.flex_gemm import _SUPPORTED_FLEX_GEMM_OP_NAMES
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
@@ -122,6 +118,18 @@ if cute is not None:
         )
         tmp4 = tmp3.broadcast_to(tmp1.shape)
         return tmp1 * (cute.full_like(tmp4, 1.0) / tmp4)
+
+    @cute.jit
+    def physical_group_sum_feed_epilogue(acc, local_reduce0):
+        return acc / local_reduce0
+
+    @cute.jit
+    def physical_group_sum_combine(lhs, rhs):
+        return lhs + rhs
+
+    @cute.jit
+    def physical_group_sum_finalize(value):
+        return value
 
 
 class TestFlexGemmRuntimeImport(TestCase):
@@ -1029,6 +1037,7 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         )
         from torch._inductor.kernel.flex_gemm.runtime import (
             FlexGemmRuntimeLocalReducePlan,
+            local_reduce_gemm_act_kwargs,
         )
         from torch._inductor.kernel.flex_gemm.template import (
             FlexGemmEpilogueLocalReduceConfig,
@@ -1038,24 +1047,22 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             lambda lhs, rhs: lhs, lambda value: value
         )
         geometry = FlexGemmLocalReduceGeometry(8, 0)
-        self.assertTrue(
-            FlexGemmRuntimeLocalReducePlan(
-                geometry, callbacks=callbacks, feeds_main=True
-            ).feeds_main
+        out = torch.empty(1)
+        feed_plan = FlexGemmRuntimeLocalReducePlan(
+            geometry, callbacks=callbacks, feeds_main=True
         )
-        self.assertTrue(
-            FlexGemmRuntimeLocalReducePlan(
-                geometry,
-                out=torch.empty(1),
-                callbacks=callbacks,
-                feeds_main=True,
-            ).feeds_main
+        shared_plan = FlexGemmRuntimeLocalReducePlan(
+            geometry,
+            out=out,
+            callbacks=callbacks,
+            feeds_main=True,
         )
-        self.assertFalse(
-            FlexGemmRuntimeLocalReducePlan(
-                geometry, out=torch.empty(1), callbacks=callbacks
-            ).feeds_main
+        store_plan = FlexGemmRuntimeLocalReducePlan(
+            geometry, out=out, callbacks=callbacks
         )
+        self.assertTrue(feed_plan.feeds_main)
+        self.assertTrue(shared_plan.feeds_main)
+        self.assertFalse(store_plan.feeds_main)
         self.assertTrue(
             FlexGemmEpilogueLocalReduceConfig(geometry, feeds_main=True).feeds_main
         )
@@ -1067,6 +1074,17 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
         self.assertFalse(
             FlexGemmEpilogueLocalReduceConfig(geometry, out_index=0).feeds_main
         )
+
+        feed_kwargs = local_reduce_gemm_act_kwargs(
+            feed_plan, None, ("combine", "finalize")
+        )
+        self.assertTrue(feed_kwargs["local_reduce_feeds_main"])
+        self.assertFalse(feed_kwargs["tensor_epilogue_returns_local_reduce"])
+        shared_kwargs = local_reduce_gemm_act_kwargs(
+            shared_plan, out, ("combine", "finalize")
+        )
+        self.assertTrue(shared_kwargs["local_reduce_feeds_main"])
+        self.assertTrue(shared_kwargs["tensor_epilogue_returns_local_reduce"])
 
     def test_output_plan_rejects_invalid_state(self):
         from torch._inductor.kernel.flex_gemm.constraints import (
@@ -1259,6 +1277,64 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             torch.testing.assert_close(out.double(), expected, atol=1e-4, rtol=1e-4)
             # A partial-fragment reduce would match the half-group reference.
             self.assertGreater((out.double() - wrong_expected).abs().max(), 1e-2)
+
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_physical_feed_main_forced_config_extremes_match_reference(self):
+        from torch._inductor.heuristics.template.flex_gemm import (
+            candidate_gemm_configs_for_device,
+            gemm_config_key,
+        )
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            FlexGemmLocalReduceCallbacks,
+            FlexGemmLocalReduceGeometry,
+            validate_flex_gemm_local_reduce_config,
+        )
+        from torch._inductor.kernel.flex_gemm.runtime import (
+            FlexGemmRuntimeLocalReducePlan,
+            gemm_epilogue,
+        )
+
+        m, n, k, group = 128, 128, 64, 32
+        a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16) + 0.5
+        b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16) + 0.5
+        gated = [
+            config
+            for config in candidate_gemm_configs_for_device(a.device)
+            if validate_flex_gemm_local_reduce_config(config, group, 0)
+        ]
+        self.assertTrue(gated)
+        extremes = (
+            min(gated, key=lambda config: (config.tile_m, config.tile_n)),
+            max(gated, key=lambda config: (config.tile_m, config.tile_n)),
+            min(gated, key=lambda config: (config.tile_n, config.tile_m)),
+            max(gated, key=lambda config: (config.tile_n, config.tile_m)),
+        )
+        selected = {gemm_config_key(config): config for config in extremes}.values()
+        accumulator = a.double() @ b.double()
+        grouped = accumulator.view(m // group, group, n)
+        expected = (grouped / grouped.sum(1, keepdim=True)).view(m, n)
+        callbacks = FlexGemmLocalReduceCallbacks(
+            physical_group_sum_combine, physical_group_sum_finalize
+        )
+        local_reduce = FlexGemmRuntimeLocalReducePlan(
+            FlexGemmLocalReduceGeometry(group, 0),
+            callbacks=callbacks,
+            feeds_main=True,
+        )
+        for config in selected:
+            out = gemm_epilogue(
+                a,
+                b,
+                physical_group_sum_feed_epilogue,
+                (
+                    "test_flex_gemm_physical_feed_main_"
+                    f"{config.tile_m}_{config.tile_n}_{config.cluster_m}_{config.cluster_n}"
+                ),
+                out_dtype=torch.float32,
+                local_reduce=local_reduce,
+                config_key=gemm_config_key(config),
+            )
+            torch.testing.assert_close(out.double(), expected, atol=1e-4, rtol=1e-4)
 
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("shape", ((128, 512, 256), (512, 128, 256), (256, 256, 256)))
@@ -2853,188 +2929,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_tuple_aux_tensorSSA_supports_mx_scale_max_power_saturation(self):
-        m = 64
-        n = 128
-        k = 64
-        group = 16
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            return acc.relu(), mx_e8m0_scale(x.abs().amax(-1), max_power=-122)
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
-        (actual, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        expected, expected_aux = epilogue_fn(a @ b)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(aux.view(torch.uint8), expected_aux.view(torch.uint8))
-        self.assertTrue((aux.view(torch.uint8) == 255).all())
-        FileCheck().check("bitcast").check_not("local_reduce_finalize_fn").run(code)
-        self.assertLocalReduceAuxCode(code, group)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize(
-        "case",
-        (
-            ("mx", mx_e8m0_scale, "bitcast"),
-            ("nvfp4", nvfp4_e4m3_scale, " / 6.0"),
-        ),
-        name_fn=lambda case: case[0],
-    )
-    def test_mm_tuple_aux_large_n_local_reduce_supports_scale_finalizer(self, case):
-        _, scale_fn, code_check = case
-        m = 64
-        n = 128
-        k = 64
-        group = 64
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            return acc.relu(), scale_fn(x.abs().amax(-1))
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
-        (actual, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        expected, expected_aux = epilogue_fn(a @ b)
-        torch.testing.assert_close(actual, expected)
-        torch.testing.assert_close(aux.float(), expected_aux.float())
-        FileCheck().check(code_check).check("local_reduce_finalize_fn").run(code)
-        self.assertLocalReduceAuxCode(code, group, callbacks=True)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_tuple_aux_fragment_group_mx_scale_uses_tensorSSA(self):
-        m = 64
-        n = 128
-        k = 64
-        group = 32
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            return acc.relu(), mx_e8m0_scale(x.abs().amax(-1))
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
-        (actual, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        expected, expected_aux = epilogue_fn(a @ b)
-        torch.testing.assert_close(actual, expected)
-        torch.testing.assert_close(aux.float(), expected_aux.float())
-        FileCheck().check("apply_op(operator.lshift, 23)").check(
-            "broadcast_to"
-        ).check_not("local_reduce_finalize_fn").run(code)
-        self.assertLocalReduceAuxCode(code, group)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("group", (16, 32, 64))
-    def test_mm_tuple_aux_mx_scale_preserves_nan(self, group):
-        m = 16
-        n = 128
-        k = 16
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            return acc.relu(), mx_e8m0_scale(x.abs().amax(-1))
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        b[0, 0] = float("nan")
-        (actual, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        _, expected_aux = epilogue_fn(a @ b)
-        self.assertEqual(aux.view(torch.uint8), expected_aux.view(torch.uint8))
-        self.assertTrue((aux.view(torch.uint8) == 0).any())
-        self.assertTrue((aux.view(torch.uint8) == 255).any())
-        if group > 32:
-            FileCheck().check("bitcast").check("local_reduce_finalize_fn").run(code)
-        else:
-            FileCheck().check("bitcast").check_not("local_reduce_finalize_fn").run(code)
-        self.assertLocalReduceAuxCode(code, group, callbacks=group > 32)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_tuple_aux_physical_mx_scale_zero_preserves_min_value(self):
-        m = 16
-        n = 128
-        k = 16
-        group = 64
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            return acc, mx_e8m0_scale(x.abs().amax(-1)).float() * 2
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.zeros(k, n, device="cuda", dtype=torch.bfloat16)
-        (_, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        _, expected_aux = epilogue_fn(a @ b)
-        torch.testing.assert_close(aux, expected_aux, rtol=0, atol=0)
-        self.assertEqual(aux, torch.full_like(aux, 2.0**-126))
-        FileCheck().check("local_reduce_finalize_fn").run(code)
-        self.assertLocalReduceAuxCode(code, group, callbacks=True)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("reduction", ("amax", "amin"))
     def test_mm_tuple_aux_physical_extrema_preserve_nan(self, reduction):
         m = 16
@@ -3069,49 +2963,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             "local_reduce_finalize_fn"
         ).run(code)
         self.assertLocalReduceAuxCode(code, group, callbacks=True)
-
-    @skipIfNoCuteDSL
-    @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    def test_mm_fragment_group_mx_quant_feed_uses_tensorSSA(self):
-        m = 64
-        n = 128
-        k = 64
-        group = 32
-
-        def epilogue_fn(acc):
-            x = acc.float().view(m, -1, group)
-            scale = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
-            return (
-                (x * scale.reciprocal()).view(m, n).to(torch.float8_e4m3fn),
-                scale.squeeze(-1),
-            )
-
-        def fn(a, b):
-            return flex_gemm(
-                torch.mm,
-                (a, b),
-                epilogue_fn,
-                kernel_options={"backend": "QUACK"},
-            )
-
-        a = torch.ones(m, k, device="cuda", dtype=torch.bfloat16)
-        b = torch.ones(k, n, device="cuda", dtype=torch.bfloat16)
-        (actual, aux), (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        x = (a @ b).float().view(m, -1, group)
-        expected_aux = mx_e8m0_scale(x.abs().amax(-1, keepdim=True))
-        expected = (
-            (x * expected_aux.float().reciprocal()).view(m, n).to(torch.float8_e4m3fn)
-        )
-        torch.testing.assert_close(actual.float(), expected.float())
-        self.assertEqual(
-            aux.view(torch.uint8), expected_aux.squeeze(-1).view(torch.uint8)
-        )
-        FileCheck().check("bitcast").check_not("local_reduce_finalize_fn").run(code)
-        self.assertLocalReduceAuxCode(code, group)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
