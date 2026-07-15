@@ -690,7 +690,7 @@ struct TORCH_API TensorType : public SharedType {
       at::IntArrayRef strides) const {
     auto cloned = clone();
     auto ssizes = SymbolicShape(sizes);
-    cloned->sizes_ = ssizes;
+    cloned->sizes_ = std::move(ssizes);
     cloned->strides_ = computeStrideProps(sizes, strides);
     return cloned;
   }
@@ -726,7 +726,7 @@ struct TORCH_API TensorType : public SharedType {
     auto strides = computeStrideProps(
         *concrete_sizes,
         contiguousStridesOf(*concrete_sizes));
-    cloned->strides_ = strides;
+    cloned->strides_ = std::move(strides);
     return cloned;
   }
 
