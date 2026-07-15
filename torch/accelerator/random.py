@@ -223,18 +223,9 @@ def get_rng_offset(device: _device_t = None) -> int:
     .. warning::
         This function eagerly initializes the accelerator runtime.
     """
-    device_index = _get_device_index(device) if device is not None else None
-
-    def cb() -> int:
-        idx = (
-            device_index
-            if device_index is not None
-            else torch.accelerator.current_device_index()
-        )
-        default_generator = torch._C._accelerator_getDefaultGenerator(idx)
-        return default_generator.get_offset()
-
-    return _lazy_call(cb)
+    device_index = _get_device_index(device, optional=True)
+    default_generator = torch._C._accelerator_getDefaultGenerator(device_index)
+    return default_generator.get_offset()
 
 
 def set_rng_offset(offset: int, device: _device_t = None) -> None:
