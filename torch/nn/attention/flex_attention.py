@@ -20,10 +20,7 @@ import torch
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
-from torch.fx.experimental.symbolic_shapes import (
-    has_free_unbacked_symbols,
-    statically_known_true,
-)
+from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import (
     GetAttrKey,
@@ -109,21 +106,20 @@ def _validate_block_mask_shape(
         torch._check(kv_len >= block_mask_kv_len, _BLOCK_MASK_TOO_LARGE_ERROR)
         return
 
-    # Case 2: Dynamo-backed lengths keep upper bounds but avoid equality guards.
-    if torch.compiler.is_dynamo_compiling():
-        torch._check(q_len <= block_mask_q_len, _BLOCK_MASK_TOO_SMALL_ERROR)
-        torch._check(kv_len <= block_mask_kv_len, _BLOCK_MASK_TOO_SMALL_ERROR)
-        return
-
-    # Case 3: eager/non-Dynamo callers still validate statically known mismatches.
-    if statically_known_true(q_len > block_mask_q_len) or statically_known_true(
-        kv_len > block_mask_kv_len
-    ):
+    # Case 2: backed lengths use regular validation so Dynamo can generalize equality.
+    if q_len > block_mask_q_len or kv_len > block_mask_kv_len:
         raise RuntimeError(_BLOCK_MASK_TOO_SMALL_ERROR)
-    if statically_known_true(q_len < block_mask_q_len) or statically_known_true(
-        kv_len < block_mask_kv_len
-    ):
+    if q_len < block_mask_q_len or kv_len < block_mask_kv_len:
         raise RuntimeError(_BLOCK_MASK_TOO_LARGE_ERROR)
+
+    if q_len != block_mask_q_len:
+        raise AssertionError(
+            f"query.size(-2) ({q_len}) != block_mask_q_len ({block_mask_q_len})"
+        )
+    if kv_len != block_mask_kv_len:
+        raise AssertionError(
+            f"key.size(-2) ({kv_len}) != block_mask_kv_len ({block_mask_kv_len})"
+        )
 
 
 __all__ = [
