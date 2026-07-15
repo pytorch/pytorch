@@ -978,6 +978,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/dynamo/stackref_bridge.c",
     "torch/csrc/functorch/init.cpp",
+    "torch/csrc/functorch/python_aot_autograd.cpp",
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",

@@ -442,7 +442,8 @@ class TestAOTCompileToPython(TestCase):
         with torch.autocast("cpu", dtype=torch.bfloat16):
             src, _cache = compile_to_python(gm, pb)
         _assert_composed(self, src)
-        self.assertIn("_DisableAutocast_", src)
+        self.assertIn("_CompiledFnCallSpec((), False, True, True, (), ())", src)
+        self.assertNotIn("_DisableAutocast_", src)
         with torch.no_grad():
             out = _exec(src)(pb)[0]
         with torch.no_grad(), torch.autocast("cpu", dtype=torch.bfloat16):
@@ -479,10 +480,7 @@ class TestAOTCompileToPython(TestCase):
         self.assertIn("return _runtime_wrapper(", src)
         self.assertNotIn("_orchestration", src)  # redundant alias removed
         self.assertNotIn("_exec_wrapper", src)
-        # Pin the deliberate drop of the first-invocation context / profiler prologue:
-        # the orchestration is invoked with contextlib.nullcontext + a no-op in those two
-        # positional slots. A future change re-threading a real context here would fail.
-        self.assertIn(", contextlib.nullcontext, lambda: None,", src)
+        self.assertNotIn("_on_before_call_", src)
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
 
@@ -834,8 +832,7 @@ class TestAOTComposeGuards(TestCase):
     # only fire if AOTAutograd's codegen drifts, so drive them directly with hand-built
     # GeneratedSource objects rather than waiting for an upstream regression.
     _ORCH_SRC = (
-        "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):\n"
-        "    return _compiled_fn_(args)\n"
+        "def _runtime_wrapper(_compiled_fn_, args):\n    return _compiled_fn_(args)\n"
     )
     _CHAIN_SRC = "def inner_fn(args):\n    return compiled_fn(args)\n"
 
@@ -859,13 +856,13 @@ class TestAOTComposeGuards(TestCase):
             )
 
     def test_orchestration_extra_kwonly_param_rejected(self):
-        # The 4 positional params are intact but a keyword-only param is added. The standalone
+        # The positional params are intact but a keyword-only param is added. The standalone
         # call is purely positional, so a kw-only-with-default would be silently dropped; the
         # guard must compare the FULL signature and reject this, not just the positional list.
         kwonly_orch = GeneratedSource(
             "runtime_wrapper_orchestration",
             "_runtime_wrapper",
-            "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args, "
+            "def _runtime_wrapper(_compiled_fn_, args, "
             "*, new_flag=None):\n    return _compiled_fn_(args)\n",
             {},
             lambda: None,
@@ -929,8 +926,7 @@ class TestAOTComposeGuards(TestCase):
         orch = GeneratedSource(
             "runtime_wrapper_orchestration",
             "_runtime_wrapper",
-            "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):\n"
-            "    return [_baked]\n",
+            "def _runtime_wrapper(_compiled_fn_, args):\n    return [_baked]\n",
             {"_baked": torch.randn(4)},
             lambda: None,
         )
@@ -949,8 +945,7 @@ class TestAOTComposeGuards(TestCase):
         orch = GeneratedSource(
             "runtime_wrapper_orchestration",
             "_runtime_wrapper",
-            "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):\n"
-            "    return [_baked]\n",
+            "def _runtime_wrapper(_compiled_fn_, args):\n    return [_baked]\n",
             {"_baked": baked},
             lambda: None,
         )

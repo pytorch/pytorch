@@ -28,6 +28,17 @@ class TestCodegenRuntimeWrapper(TestCase):
         super().setUp()
         torch._dynamo.reset()
 
+    def assertCallCompiledFnIsFirstStatement(self, source):
+        # For runtime overhead, everything before the compiled function call must
+        # stay in C++; FlexAttention cares about time to first kernel launch.
+        lines = [line for line in source.splitlines() if line.strip()]
+        self.assertGreaterEqual(len(lines), 2)
+        self.assertEqual(lines[0], "def _runtime_wrapper(_compiled_fn_, args):")
+        self.assertEqual(
+            lines[1],
+            "    orig_inputs, all_outs = _call_compiled_fn_(_call_spec_, _compiled_fn_, args)",
+        )
+
     def test_inference_simple(self):
         """
         Simple inference: no mutations, no aliases. Generated code should
@@ -45,8 +56,10 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(out, x * 2)
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("orig_inputs = {}", source)
-        self.assertIn("torch._C._set_grad_enabled(False)", source)
+        self.assertCallCompiledFnIsFirstStatement(source)
+        self.assertIn("orig_inputs, all_outs = _call_compiled_fn_", source)
+        self.assertIn("_call_spec_", source)
+        self.assertIn("_call_compiled_fn_", source)
         self.assertNotIn("_force_view_tracking_", source)
         self.assertNotIn("_is_view_replay_enabled", source)
         self.assertNotIn("_set_view_replay_enabled", source)
@@ -54,7 +67,7 @@ class TestCodegenRuntimeWrapper(TestCase):
     def test_training_simple(self):
         """
         Simple training path: no mutations. Generated code should use
-        the training path (enable_grad + view replay tracking).
+        call_compiled_fn to prepare state and invoke the compiled function.
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
@@ -71,16 +84,17 @@ class TestCodegenRuntimeWrapper(TestCase):
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
-        self.assertIn("if not prev_view_replay_enabled:", source)
-        self.assertIn("torch.enable_grad()", source)
+        self.assertCallCompiledFnIsFirstStatement(source)
+        self.assertIn("_call_spec_", source)
+        self.assertIn("_call_compiled_fn_", source)
+        self.assertNotIn("torch.enable_grad()", source)
 
     def test_training_with_detach_indices(self):
         """
         Training path with a non-leaf input whose gradient is None in
         the backward graph. The input must be detached before calling
-        the joint graph to avoid "backward through graph a second time"
-        errors. Generated code should contain inline detach calls.
+        the joint graph. Generated code should pass args to call_compiled_fn
+        so it can copy and detach selected inputs.
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
             y_base = torch.randn(4, requires_grad=True)
@@ -98,8 +112,13 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIsNotNone(x.grad)
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn(".detach()", source)
-        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
+        self.assertIn("_call_spec_", source)
+        self.assertIn(
+            "orig_inputs, all_outs = _call_compiled_fn_(_call_spec_, _compiled_fn_, args)",
+            source,
+        )
+        self.assertNotIn("args_", source)
+        self.assertNotIn(".detach()", source)
 
     def test_inference_with_mutation(self):
         """
@@ -123,7 +142,8 @@ class TestCodegenRuntimeWrapper(TestCase):
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("_increment_version_", source)
+        self.assertIn("_call_compiled_fn_", source)
+        self.assertNotIn("_increment_version_", source)
 
     def test_inference_with_output_alias(self):
         """
@@ -145,7 +165,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("_replay_aliases_", source)
-        self.assertIn("orig_inputs = {0: args[0]}", source)
+        self.assertIn("orig_inputs, all_outs = _call_compiled_fn_", source)
 
     def test_inference_with_mutation_and_alias(self):
         """
@@ -216,7 +236,8 @@ class TestCodegenRuntimeWrapper(TestCase):
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("_increment_version_", source)
+        self.assertIn("_call_compiled_fn_", source)
+        self.assertNotIn("_increment_version_", source)
 
     def test_output_arity_validation_baked(self):
         """
@@ -289,7 +310,7 @@ class TestCodegenRuntimeWrapper(TestCase):
     def test_inference_disable_amp(self):
         """
         Inference path with autocast active at compile time. Generated code
-        should wrap the compiled fn call in _DisableAutocast_.
+        should use the call_compiled_fn path.
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
@@ -302,14 +323,15 @@ class TestCodegenRuntimeWrapper(TestCase):
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("_DisableAutocast_", source)
-        self.assertIn("torch._C._set_grad_enabled(False)", source)
+        self.assertIn("_call_spec_", source)
+        self.assertIn("_call_compiled_fn_", source)
+        self.assertNotIn("_DisableAutocast_", source)
+        self.assertNotIn("torch._C._set_grad_enabled(False)", source)
 
     def test_training_disable_amp(self):
         """
         Training path with autocast active at compile time. Generated code
-        should use _DisableAutocast_ alongside view replay tracking and
-        enable_grad.
+        should use the same call_compiled_fn path as regular training.
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
@@ -325,8 +347,9 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(x.grad, torch.full((4,), 2.0))
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("_DisableAutocast_", source)
-        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
+        self.assertIn("_call_spec_", source)
+        self.assertIn("_call_compiled_fn_", source)
+        self.assertNotIn("_DisableAutocast_", source)
 
     def test_dynamic_dims(self):
         """
@@ -397,9 +420,8 @@ class TestCodegenRuntimeWrapper(TestCase):
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("_increment_version_", source)
-        for i in range(5):
-            self.assertIn(f"args[{i}]", source)
+        self.assertIn("_call_compiled_fn_", source)
+        self.assertNotIn("_increment_version_", source)
 
     def test_multiple_output_aliases_different_inputs(self):
         """
@@ -424,15 +446,14 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("_replay_aliases_", source)
-        self.assertIn("0: args[0]", source)
-        self.assertIn("1: args[1]", source)
+        self.assertIn("orig_inputs, all_outs = _call_compiled_fn_", source)
 
     def test_first_invocation_ctx_threaded_through_codegen(self):
         """
-        The codegen'd wrapper receives _first_ctx_ (a _FirstInvocationContext)
-        as a parameter and wraps compiled fn execution in it. On first call,
-        this activates _AnalyzeCustomOpInputOutputMode which checks custom op
-        aliasing. Verify the mode fires on first call and not on second.
+        runtime_wrapper owns _FirstInvocationContext and wraps the codegen'd
+        wrapper in it on first call. This activates
+        _AnalyzeCustomOpInputOutputMode, which checks custom op aliasing.
+        Verify the mode fires on first call and not on second.
         """
         with torch.library._scoped_library("test_rw", "FRAGMENT") as lib:
             lib.define("alias_op(Tensor x) -> Tensor")
@@ -491,6 +512,65 @@ class TestCodegenRuntimeWrapper(TestCase):
         source = captured[0]
         self.assertIn(".requires_grad", source)
         self.assertIn(".copy_(", source)
+
+
+class TestAOTAutogradCallCompiledFn(TestCase):
+    def test_direct_helper_handles_training_pre_call_work(self):
+        call_compiled_fn = torch._C._aot_autograd_call_compiled_fn
+        call_spec = torch._C._CompiledFnCallSpec((1,), True, False, False, (0,), (0,))
+
+        x = torch.randn(2, requires_grad=True)
+        y_base = torch.randn(2, requires_grad=True)
+        y = y_base * 2
+        args = [x, y]
+
+        prev_view_replay_enabled = torch._C._is_view_replay_enabled()
+        torch._C._set_view_replay_enabled(False)
+        try:
+            x_version = x._version
+            seen = {}
+
+            def compiled_fn(call_args):
+                seen["same_args_list"] = call_args is args
+                self.assertTrue(torch.is_grad_enabled())
+                self.assertTrue(torch._C._is_view_replay_enabled())
+                self.assertIs(call_args[0], x)
+                self.assertIsNot(call_args[1], y)
+                self.assertFalse(call_args[1].requires_grad)
+                self.assertEqual(call_args[1], y)
+                return [call_args[0] + 1]
+
+            with torch.no_grad():
+                orig_inputs, all_outs = call_compiled_fn(call_spec, compiled_fn, args)
+
+            self.assertFalse(seen["same_args_list"])
+            self.assertIs(orig_inputs[0], x)
+            self.assertEqual(all_outs[0], x + 1)
+            self.assertEqual(x._version, x_version + 1)
+            self.assertFalse(torch._C._is_view_replay_enabled())
+        finally:
+            torch._C._set_view_replay_enabled(prev_view_replay_enabled)
+
+    def test_direct_helper_handles_inference_pre_call_work(self):
+        call_compiled_fn = torch._C._aot_autograd_call_compiled_fn
+        call_spec = torch._C._CompiledFnCallSpec((), False, True, False, (), ())
+        x = torch.randn(2)
+
+        def compiled_fn(call_args):
+            self.assertFalse(torch.is_grad_enabled())
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            self.assertIs(call_args[0], x)
+            return [call_args[0] + 1]
+
+        with torch.enable_grad(), torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertTrue(torch.is_grad_enabled())
+            self.assertTrue(torch.is_autocast_enabled("cpu"))
+            orig_inputs, all_outs = call_compiled_fn(call_spec, compiled_fn, [x])
+            self.assertTrue(torch.is_grad_enabled())
+            self.assertTrue(torch.is_autocast_enabled("cpu"))
+
+        self.assertEqual(orig_inputs, {})
+        self.assertEqual(all_outs[0], x + 1)
 
 
 if __name__ == "__main__":
