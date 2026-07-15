@@ -35,7 +35,6 @@ Notes:
 """
 
 import warnings
-from functools import cache
 from typing import Literal
 
 import torch
@@ -50,13 +49,14 @@ _NVMATH_DEPS = [
     ("nvmath-python", "nvmath.bindings"),
 ]
 
-# Minimum cuBLASLt version that exposes grouped-GEMM layout APIs
-# (cublasLtGroupedMatrixLayoutCreate). CUDA 13.2 ships cuBLASLt 13.2.
-_MIN_CUBLASLT_VERSION = 13200
+# cublasLtGroupedMatrixLayoutCreate, used by the nvmath grouped GEMM path, was
+# introduced in cuBLAS 13.2.0 (CUDA 13.1) and is experimental as of that release.
+# This is the cuBLAS library version (not toolkit version) encoded as 10000*major + 100*minor + patch.
+_MIN_CUBLASLT_GROUPED_GEMM_VERSION = 130200
 
 
 def _check_nvmath_cublaslt() -> bool:
-    return nvmath_utils.check_cublaslt_version(_MIN_CUBLASLT_VERSION)
+    return nvmath_utils.check_cublaslt_version(_MIN_CUBLASLT_GROUPED_GEMM_VERSION)
 
 
 def _k_n_16_byte_aligned(a: torch.Tensor, b: torch.Tensor, elem_size: int) -> bool:
