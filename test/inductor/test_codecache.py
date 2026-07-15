@@ -3631,6 +3631,24 @@ class TestFxGraphCacheHashing(TestCase):
                 require_shape_env=False,
             ).validate()
 
+        # A callable hidden inside a list value (e.g.
+        # _fuse_ddp_communication_passes) is uncacheable too.
+        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
+            CacheabilityValidator(
+                self._nested_region_gm(
+                    {"_fuse_ddp_communication_passes": [custom_pass]}
+                ),
+                require_shape_env=False,
+            ).validate()
+
+        # A list of non-callables stays cacheable.
+        CacheabilityValidator(
+            self._nested_region_gm(
+                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
+            ),
+            require_shape_env=False,
+        ).validate()
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_check_for_hop_skips_constants(self):
         graph = torch.fx.Graph()
