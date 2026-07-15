@@ -1,5 +1,7 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#ifdef USE_C10D_NCCL
+
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/distributed/c10d/nccl2/CudaApi.hpp>
 
@@ -196,7 +198,14 @@ cudaError_t DefaultCudaApi::eventRecordWithFlags(
     cudaEvent_t event,
     cudaStream_t stream,
     unsigned int flags) {
+#if !defined(USE_ROCM) || ROCM_VERSION >= 70000
   return cudaEventRecordWithFlags(event, stream, flags);
+#else
+  // hipEventRecordWithFlags is unavailable before ROCm 7.0; the flags variant
+  // has no equivalent, so fall back to the plain record.
+  (void)flags;
+  return cudaEventRecord(event, stream);
+#endif
 }
 
 cudaError_t DefaultCudaApi::eventQuery(cudaEvent_t event) {
@@ -208,3 +217,5 @@ const char* DefaultCudaApi::getErrorString(cudaError_t error) {
 }
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL
