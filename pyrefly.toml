@@ -101,7 +101,6 @@ ignore-missing-imports = [
     "usort.*",
     "cutlass.*",
     "cutlass_library.*",
-    "cutlass_api.*",
     "deeplearning.*",
     "einops.*",
     "libfb.*",

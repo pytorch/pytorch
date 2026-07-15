@@ -2,7 +2,7 @@
 """
 NVIDIA Universal GEMM kernel code generation.
 
-This module generates Python code that calls cutlass_api to execute GEMM operations.
+This module generates Python code that calls `cutlass.operators` kernels.
 The runtime helpers (_nvgemm_run, _nvgemm_precompile, etc.) are imported by the
 generated wrapper at runtime, keeping the generated code thin.
 """
@@ -22,6 +22,12 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.codegen.cutlass.python_evt import _ACCUMULATOR_ARG_NAME
+from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import (
+    get_arguments_module,
+    get_artifact_module,
+    get_provider_submodule,
+    provider_module_names,
+)
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
 )
@@ -138,7 +144,7 @@ class CUDAContextMetadata:
 
     @staticmethod
     def from_kernel(kernel, device) -> CUDAContextMetadata:
-        """Build from a cutlass_api Kernel and torch device in the main process."""
+        """Build from a CUTLASS operator kernel and torch device in the main process."""
         import torch
 
         mac = None
@@ -147,7 +153,9 @@ class CUDAContextMetadata:
                 getattr(kernel, "impl", None), "cluster_shape_mn", None
             )
             if cluster_shape is not None:
-                from cutlass_api.providers.cutedsl.utils import get_max_active_clusters
+                get_max_active_clusters = get_provider_submodule(
+                    "cutedsl.utils"
+                ).get_max_active_clusters
 
                 mac = get_max_active_clusters(cluster_shape)
         except Exception:
@@ -168,7 +176,7 @@ def _patch_max_active_clusters(max_active_clusters):
     def mac_fn(*a, **kw):
         return max_active_clusters
 
-    for mod_name in _MAX_ACTIVE_CLUSTERS_MODULES:
+    for mod_name in provider_module_names(_MAX_ACTIVE_CLUSTERS_MODULE_NAMES):
         try:
             m = importlib.import_module(mod_name)
         except ImportError:
@@ -269,7 +277,7 @@ def _worker_nvgemm_autotuning_precompile(
         )
 
         if was_compiled:
-            obj = _unwrap_efc_compiled_obj(artifact.compiled_obj)
+            obj = artifact.compiled_obj
             disk_cache_set(
                 disk_fn_cache,
                 kernel_name,
@@ -317,7 +325,7 @@ def _create_gemm_arguments(
     swizzle_mode_b: Any | None = None,
     epilogue: Any | None = None,
 ):
-    import cutlass_api
+    arguments = get_arguments_module()
 
     if epilogue is not None and variant_name != "GEMM":
         raise NotImplementedError(
@@ -327,7 +335,7 @@ def _create_gemm_arguments(
     match variant_name:
         case "GROUPED_GEMM":
             a, b, offsets = input_tensors
-            return cutlass_api.arguments.GroupedGemmArguments(
+            return arguments.GroupedGemmArguments(
                 a,
                 b,
                 out,
@@ -336,12 +344,10 @@ def _create_gemm_arguments(
             )
 
         case "SCALED_GEMM":
-            from cutlass_api.arguments import ScaledTensor
-
             a, b, scale_a, scale_b = input_tensors
-            scaled_a = ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
-            scaled_b = ScaledTensor(b, scale_b, scale_mode_b, swizzle_mode_b)
-            return cutlass_api.arguments.GemmArguments(
+            scaled_a = arguments.ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
+            scaled_b = arguments.ScaledTensor(b, scale_b, scale_mode_b, swizzle_mode_b)
+            return arguments.GemmArguments(
                 scaled_a,
                 scaled_b,
                 out,
@@ -353,7 +359,7 @@ def _create_gemm_arguments(
             kwargs: dict[str, Any] = {"accumulator_type": accumulator_type}
             if epilogue is not None:
                 kwargs["epilogue"] = epilogue
-            return cutlass_api.arguments.GemmArguments(a, b, out, **kwargs)
+            return arguments.GemmArguments(a, b, out, **kwargs)
 
         case _:
             raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
@@ -404,71 +410,11 @@ def _create_gemm_cache_key(
     return cache_key
 
 
-def _unwrap_efc_compiled_obj(compiled_obj):
-    """Extract the inner JIT function from an EFC closure for disk serialization."""
-    if hasattr(compiled_obj, "__closure__") and compiled_obj.__closure__:
-        inner = compiled_obj.__closure__[0].cell_contents
-        if hasattr(inner, "export_to_c"):
-            return inner
+def _use_disk_cached_compiled_obj(compiled_obj, kernel):
+    """Return a reusable cached object, or None when the kernel must recompile."""
+    if hasattr(kernel, "impl") and hasattr(kernel.impl, "efc"):
+        return None
     return compiled_obj
-
-
-def _init_efc_jit(kernel, epilogue_args):
-    """Lightweight EFC JIT init from epilogue args, without a full kernel.compile().
-
-    EFC.compile() calls analyze_epilogue_with_arguments() then creates the JIT
-    object. We replicate just those two steps so that disk-cached artifacts can
-    be rewrapped without recompiling the CuTe DSL kernel.
-    """
-    from cutlass_api.providers.cutedsl.evt.common_efc import EFC
-    from cutlass_api.utils import TensorWrapper
-
-    efc = kernel.impl.efc
-    params = [
-        e.compile_time_tensor if isinstance(e, TensorWrapper) else e
-        for e in epilogue_args.parameters
-    ]
-    efc.analyze_epilogue_with_arguments(params)
-    efc.jit = EFC.JIT(efc, efc.epilogue_parameter_names)
-
-
-def _rewrap_efc_compiled_obj(compiled_fn, kernel, epilogue_args=None):
-    """Reconstruct the EFC wrapped_launch closure from a loaded JIT function.
-
-    When epilogue_args is provided and efc.jit is missing, performs a
-    lightweight initialization (analyze + JIT creation) so that
-    disk-cached EFC artifacts can be reused without a full recompile.
-    Falls back to returning None (triggering recompile) only when
-    epilogue_args is not available.
-    """
-    if not hasattr(kernel, "impl") or not hasattr(kernel.impl, "efc"):
-        return compiled_fn
-    if not hasattr(kernel.impl.efc, "jit"):
-        if epilogue_args is not None:
-            _init_efc_jit(kernel, epilogue_args)
-        else:
-            return None
-
-    from cutlass_api.providers.cutedsl.gemm.sm100_static_persistent_efc import (
-        KernelOperand,
-        TensorWrapper,
-    )
-
-    def wrapped_launch(a_tensor, b_tensor, stream, *supplemental_args):
-        runtime_args = [
-            e.runtime_tensor
-            if isinstance(e, TensorWrapper)
-            else (e.tensor.runtime_tensor if isinstance(e, KernelOperand) else e)
-            for e in supplemental_args
-        ]
-        return compiled_fn(
-            a_tensor,
-            b_tensor,
-            stream,
-            kernel.impl.efc.jit.pack_arguments(*runtime_args),
-        )
-
-    return wrapped_launch
 
 
 def _nvgemm_run(
@@ -490,9 +436,9 @@ def _nvgemm_run(
     has_epilogue: bool = False,
     aux_tensors: tuple = (),
 ):
-    from cutlass_api.artifact import CompiledArtifact
-
     from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
+
+    CompiledArtifact = get_artifact_module().CompiledArtifact
 
     cache_key = _create_gemm_cache_key(
         input_tensors,
@@ -513,7 +459,7 @@ def _nvgemm_run(
             epilogue=epilogue_args,
             **(variant_kwargs or {}),
         )
-        kernel = artifact.kernel_obj
+        kernel = artifact.operator_obj
     else:
 
         def disk_fallback(kernel):
@@ -525,11 +471,7 @@ def _nvgemm_run(
                 dev_idx,
             )
             if compiled_fn is not None:
-                compiled_fn = _rewrap_efc_compiled_obj(
-                    compiled_fn,
-                    kernel,
-                    epilogue_args=epilogue_args,
-                )
+                compiled_fn = _use_disk_cached_compiled_obj(compiled_fn, kernel)
             if compiled_fn is not None:
                 return CompiledArtifact(compiled_fn, kernel)
             return None
@@ -552,7 +494,7 @@ def _nvgemm_run(
                 module_path,
                 disk_config_key,
                 cache_key,
-                _unwrap_efc_compiled_obj(artifact.compiled_obj),
+                artifact.compiled_obj,
                 dev_idx,
             )
 
@@ -567,12 +509,12 @@ def _nvgemm_run(
     )
 
 
-_MAX_ACTIVE_CLUSTERS_MODULES = [
-    "cutlass_api.providers.cutedsl.utils",
-    "cutlass_api.providers.cutedsl.gemm.sm100_static_persistent",
-    "cutlass_api.providers.cutedsl.gemm.sm100_static_persistent_efc",
-    "cutlass_api.providers.cutedsl.gemm.sm100_dense_blockscaled_static_persistent",
-    "cutlass_api.providers.cutedsl.gemm.sm100_contiguous_offset_2d3d_dense_gemm",
+_MAX_ACTIVE_CLUSTERS_MODULE_NAMES = [
+    "cutedsl.utils",
+    "cutedsl.gemm.sm100_static_persistent",
+    "cutedsl.gemm.sm100_static_persistent_efc",
+    "cutedsl.gemm.sm100_dense_blockscaled_static_persistent",
+    "cutedsl.gemm.sm100_contiguous_offset_2d3d_dense_gemm",
 ]
 
 
@@ -596,8 +538,8 @@ def _nvgemm_precompile(
 ):
     """Precompile an NVGEMM kernel in a subprocess for parallel compilation.
 
-    Precompiles only the base (non-EFC) kernel. EFC kernels produce
-    closure-wrapped artifacts that can't be serialized to disk cache.
+    Precompiles only the base (non-EFC) kernel. EFC compiled artifacts cannot
+    currently be reused from the disk cache.
     """
     import torch
     from torch._inductor.runtime.cutedsl_cache import disk_cache_set
@@ -606,8 +548,8 @@ def _nvgemm_precompile(
     if max_active_clusters is None:
         return
 
-    # cutlass_api queries device occupancy while compiling. In async-compile
-    # workers forked from a CUDA-initialized parent, skip precompile.
+    # CUTLASS queries device occupancy while compiling. Skip precompile in an
+    # async-compile worker forked from a CUDA-initialized parent.
     if torch.cuda._is_in_bad_fork():
         return
 
@@ -746,7 +688,7 @@ class NVUniversalGemmKernel(Kernel):
 
         # Build variant_kwargs dict expression for SCALED_GEMM
         variant_kwargs_expr = "None"
-        variant_extra_imports = ""
+        needs_library_import = False
         if self.variant.name == "SCALED_GEMM":
             sma, swza, smb, swzb = _get_scaled_gemm_modes(
                 self.scale_type_a,
@@ -754,9 +696,7 @@ class NVUniversalGemmKernel(Kernel):
                 self.scale_type_b,
                 self.swizzle_type_b,
             )
-            variant_extra_imports = (
-                "from cutlass_api.library import ScaleMode, ScaleSwizzleMode"
-            )
+            needs_library_import = True
             variant_kwargs_expr = (
                 "{"
                 f'"scale_mode_a": ScaleMode.{sma.name}, '
@@ -778,15 +718,28 @@ class NVUniversalGemmKernel(Kernel):
             code.writeline("_nvgemm_run,")
             code.writeline("_nvgemm_precompile,")
         code.writeline(")")
-        code.writeline("from torch._inductor.utils import _ensure_fp4_dtype_registered")
-        code.writeline("_ensure_fp4_dtype_registered()")
-        if variant_extra_imports:
-            code.writeline(variant_extra_imports)
+        code.writeline(
+            "from torch._inductor.codegen.nv_universal_gemm.cutlass_ops import ("
+        )
+        with code.indent():
+            code.writeline("ensure_fp4_dtype_registered,")
+            if needs_library_import:
+                code.writeline("get_library_module,")
+            if has_epilogue:
+                code.writeline("get_arguments_module,")
+        code.writeline(")")
+        code.writeline("ensure_fp4_dtype_registered()")
+        if needs_library_import:
+            code.writeline("_cutlass_library = get_library_module()")
+            code.writeline("ScaleMode = _cutlass_library.ScaleMode")
+            code.writeline("ScaleSwizzleMode = _cutlass_library.ScaleSwizzleMode")
         if has_epilogue:
-            code.writeline("from cutlass_api.arguments import EpilogueArguments")
+            code.writeline(
+                "EpilogueArguments = get_arguments_module().EpilogueArguments"
+            )
         code.writeline("")
 
-        # -- Epilogue function definition (must be module-level for cutlass_api) --
+        # -- Epilogue function definition (must be module-level for CUTLASS) --
         epilogue_fn_code = self.epilogue_fn_code
         if has_epilogue and epilogue_fn_code is not None:
             code.splice(epilogue_fn_code, strip=True)
