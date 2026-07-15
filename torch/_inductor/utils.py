@@ -1313,6 +1313,8 @@ FORBIDDEN_CUDAGRAPH_OPS = frozenset(
         "run_and_save_rng_state",
         "run_with_rng_state",
         "aten._local_scalar_dense",
+        # cuSOLVER-backed linalg.eigh is not CUDA graph capturable.
+        "aten._linalg_eigh.default",
         # Technically, it's not necessary to ban this, because an
         # assert_scalar with constant arguments can be validly run
         # with CUDA graphs, but the operator is also pointless with
@@ -1396,14 +1398,21 @@ def unload_xpu_triton_pyds() -> None:
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
                             # pyrefly: ignore [missing-attribute]
-                            result.kernel.run.mod.__del__()
+                            run = result.kernel.run
+                            if hasattr(run, "mod"):
+                                run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
     if "triton.runtime.driver" in sys.modules:
-        mod = sys.modules["triton.runtime.driver"]
-        del type(mod.driver.active.utils).instance
-        del mod.driver.active.utils
+        driver_mod = sys.modules["triton.runtime.driver"]
+        if hasattr(driver_mod.driver.active, "utils"):
+            utils_cls = type(driver_mod.driver.active.utils)
+            if hasattr(utils_cls, "instance"):
+                del utils_cls.instance
+            elif hasattr(utils_cls, "_instance"):
+                utils_cls._instance = None
+            del driver_mod.driver.active.utils
 
     gc.collect()
 
@@ -3233,7 +3242,17 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
 
 @functools.cache
-def get_gpu_dram_gbps() -> int:
+def get_gpu_dram_gbps() -> float:
+    """
+    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
+    then fall back to the inaccurate triton estimation.
+    """
+    from .analysis.device_info import datasheet_dram_bw_gbs
+
+    ds_bw = datasheet_dram_bw_gbs()
+    if ds_bw is not None:
+        return ds_bw
+
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
@@ -4832,8 +4851,15 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
 # Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
 def load_template(name: str, template_dir: Path) -> str:
     """Load a template file and return its content."""
-    with open(template_dir / f"{name}.py.jinja") as f:
-        return f.read()
+    path = template_dir / f"{name}.py.jinja"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except UnicodeDecodeError as e:
+        # Name the offending file: a bare UnicodeDecodeError hides which
+        # template is malformed, which is easy to misdiagnose when it surfaces
+        # deep inside kernel lowering.
+        raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:
@@ -4900,16 +4926,13 @@ def is_collective_op(op_name: str) -> bool:
 
 @lru_cache
 def tlx_only_cuda_options() -> list[str]:
-    if config.is_fbcode():
-        try:
-            from torch._inductor.fb.tlx_templates.registry import tlx_only_cuda_options
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
 
-            return tlx_only_cuda_options
+        return tlx_only_cuda_options
 
-        except ImportError:
-            return []
-
-    else:
+    except ImportError:
         return []
 
 
