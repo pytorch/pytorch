@@ -1558,7 +1558,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self.assertLessEqual(
             copy_count_cached,
             copy_count_uncached,
-            f"Expected caching to produce <= copy_ ops (got {copy_count_cached}) "
+            lambda msg: f"{msg}\nExpected caching to produce <= copy_ ops (got {copy_count_cached}) "
             f"vs no caching ({copy_count_uncached})",
         )
 
