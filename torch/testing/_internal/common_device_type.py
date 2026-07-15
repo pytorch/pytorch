@@ -1771,12 +1771,20 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
             # an additional array of the same size as the input.
             if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
                 size_bytes *= 2
-            # Prefer DeviceTypeTestBase.has_sufficient_memory hook when available.
-            has_sufficient_memory = getattr(self, "has_sufficient_memory", None)
-            if callable(has_sufficient_memory):
-                if not has_sufficient_memory(size_bytes):
-                    raise unittest.SkipTest(f"Insufficient {_device} memory")
-            elif not _has_sufficient_memory(_device, size_bytes):
+            # When device is explicitly given for a *different* device type
+            # (e.g. device="cpu" on a CUDA test class), skip the class hook
+            # and use the generic helper directly.
+            if device is not None and device != getattr(self, "device_type", None):
+                ok = _has_sufficient_memory(_device, size_bytes)
+            else:
+                # Try the class hook first (e.g. CUDATestBase.has_sufficient_memory),
+                # falling back to the generic _has_sufficient_memory helper.
+                check_fn = getattr(self, "has_sufficient_memory", None)
+                if callable(check_fn):
+                    ok = check_fn(size_bytes)
+                else:
+                    ok = _has_sufficient_memory(_device, size_bytes)
+            if not ok:
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
 
             return fn(self, *args, **kwargs)
