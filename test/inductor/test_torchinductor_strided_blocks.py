@@ -397,6 +397,9 @@ class CommonTemplate:
             atol = None
             rtol = None
 
+        # This count is shared by copy_tests across the block-pointer and
+        # tensor-descriptor backends (both CPU and CUDA); every variant emits
+        # 4 descriptors here, so do not lower it to match a single backend.
         self._run_and_compare(
             forward,
             *args,
