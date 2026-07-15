@@ -3798,15 +3798,6 @@ Out-of-place version of :meth:`torch.Tensor.put_`.
 )
 
 add_docstr_all(
-    "qr",
-    r"""
-qr(some=True) -> (Tensor, Tensor)
-
-See :func:`torch.qr`
-""",
-)
-
-add_docstr_all(
     "qscheme",
     r"""
 qscheme() -> torch.qscheme
@@ -6770,7 +6761,7 @@ If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 
 .. warning::
-    The use of :func:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
+    The use of :attr:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
     is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
     to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
     the dimensions of a tensor.

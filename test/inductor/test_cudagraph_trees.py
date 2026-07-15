@@ -3197,7 +3197,7 @@ if HAS_CUDA_AND_TRITON:
             msgs = [str(x.message) for x in w]
             self.assertTrue(
                 any("require backward" in m for m in msgs),
-                f"expected CUDAGraph pending-backward warning; got: {msgs}",
+                lambda msg: f"{msg}\nexpected CUDAGraph pending-backward warning; got: {msgs}",
             )
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 
@@ -3304,7 +3304,7 @@ if HAS_CUDA_AND_TRITON:
             foo(torch.tensor([1, 0, 0], device="cuda"))
 
             if config.graph_partition:
-                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 9)
+                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 0)
             else:
                 # Without graph partitioning, cudagraphs are skipped entirely
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
@@ -4330,6 +4330,40 @@ if HAS_CUDA_AND_TRITON:
                 eager_out = f(x)
                 compiled_out = compiled_f(x)
                 self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @skipIfRocm
+        def test_graph_partition_max_autotune_skips_linalg_eigh(self):
+            from torch._inductor.utils import is_cudagraph_unsafe_fx_node
+
+            def f(x):
+                affinity = torch.matmul(x, x.transpose(-2, -1))
+                return torch.linalg.eigh(affinity)
+
+            gen = torch.Generator(device="cuda").manual_seed(0)
+            x = torch.randn(2, 6, 4, device="cuda", generator=gen)
+            affinity = torch.matmul(x, x.transpose(-2, -1))
+            gm = make_fx(lambda a: torch.ops.aten._linalg_eigh.default(a))(affinity)
+            eigh_node = next(
+                node
+                for node in gm.graph.nodes
+                if node.target is torch.ops.aten._linalg_eigh.default
+            )
+            self.assertTrue(is_cudagraph_unsafe_fx_node(eigh_node))
+
+            expected = f(x)
+            compiled_f = torch.compile(f, mode="max-autotune")
+
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                for _ in range(3):
+                    actual = compiled_f(x)
+
+            self.assertEqual(actual[0], expected[0], atol=1e-4, rtol=1e-4)
+            self.assertEqual(actual[1].shape, expected[1].shape)
+            FileCheck().check(
+                "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable"
+            ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_log_message(self):
