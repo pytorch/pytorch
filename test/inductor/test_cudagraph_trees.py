@@ -3334,6 +3334,7 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         @torch._inductor.config.patch("cpp_wrapper", True)
+        @torch._inductor.config.patch("graph_partition", True)
         def test_skip_cpp_wrapper(self):
             def foo(x):
                 return x + 1
@@ -4065,6 +4066,7 @@ if HAS_CUDA_AND_TRITON:
             # matching the forward-only count of the enable variant above.
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @torch._inductor.config.patch("graph_partition", True)
         def test_cudagraph_min_partition_size_skip_small(self):
             """Partitions with fewer kernels than the threshold are skipped."""
 
