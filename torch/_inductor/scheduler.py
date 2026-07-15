@@ -8910,12 +8910,31 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
+    def _ir_node_cudagraph_skip_reason(self, ir_node: ir.Operation) -> str | None:
+        """
+        IR-node-level reason an operation cannot be captured in a cudagraph, or
+        None. Shared by should_partition's per-node path and the invoke_subgraph
+        body check (which sees the body's IR operations, not scheduler nodes).
+        """
+        if isinstance(ir_node, ir.DeviceCopy):
+            return "DeviceCopy ops"
+        if isinstance(ir_node, ir.Conditional):
+            return "Conditional ops"
+        if getattr(ir_node, "unbacked_bindings", None):
+            return "unbacked binding ops"
+        if is_cudagraph_unsafe_op(ir_node):
+            return "CUDAGraph-unsafe custom ops"
+        return None
+
     def _invoke_subgraph_body_cudagraph_skip_reason(
         self, invoke_subgraph: ir.InvokeSubgraph
     ) -> str | None:
         """
-        Reason the region body cannot be captured as one cudagraph partition
-        (non-GPU or cudagraph-unsafe op), or None if it is safe.
+        Reason the region body cannot be captured as one cudagraph partition, or
+        None if it is safe. The body is codegened as a unit, so the per-node
+        cudagraph-safety checks should_partition would apply are run here over the
+        body's IR operations. Scheduler-node-level checks that need a scheduled
+        node (cudagraph-unsafe unbacked symint uses) are not replicated.
         """
         subgraph = invoke_subgraph.subgraph
         if subgraph is None or subgraph.graph is None:
@@ -8924,9 +8943,12 @@ class Scheduler:
         for device in body.device_types:
             if not is_gpu(device):
                 return f"invoke_subgraph body has non-GPU ({device}) ops"
+        skip_dynamic = config.triton.cudagraph_skip_dynamic_graphs
         for op in body.operations:
-            if is_cudagraph_unsafe_op(op):
-                return "invoke_subgraph body has a CUDAGraph-unsafe op"
+            if reason := self._ir_node_cudagraph_skip_reason(op):
+                return f"invoke_subgraph body has {reason}"
+            if skip_dynamic and op.get_free_symbol_uses():
+                return "invoke_subgraph body has dynamic shape ops"
         return None
 
     def should_partition(self, node: BaseSchedulerNode) -> str | None:
@@ -9003,17 +9025,8 @@ class Scheduler:
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
-        if isinstance(node.node, ir.DeviceCopy):
-            return "DeviceCopy ops"
-
-        if isinstance(node.node, ir.Conditional):
-            return "Conditional ops"
-
-        if getattr(node.node, "unbacked_bindings", None):
-            return "unbacked binding ops"
-
-        if is_cudagraph_unsafe_op(node.node):
-            return "CUDAGraph-unsafe custom ops"
+        if reason := self._ir_node_cudagraph_skip_reason(node.node):
+            return reason
 
         if reason := self._uses_cudagraph_unsafe_unbacked_symint(node):
             return reason

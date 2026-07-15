@@ -142,10 +142,11 @@ from .virtualized import V
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from torch._inductor.output_code import _StrideExprStr
+    from torch._inductor.output_code import _StrideExprStr, CompiledFnRunner
     from torch._ops import OpOverload
     from torch.export.pt2_archive._package_weights import Weights
 
+    from .codecache import CacheInfo
     from .ir import ExternKernelNode
 
 
@@ -554,8 +555,15 @@ def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
             subgraph.meta.setdefault("nested_region_config", nested_config)
 
 
-def _any_subgraph_enables_cudagraphs(gm: GraphModule) -> bool:
-    """True if any invoke_subgraph region opts into triton.cudagraphs."""
+def _iter_subgraph_cudagraph_patches(
+    gm: GraphModule,
+) -> Generator[tuple[torch.fx.Node, dict[str, Any]], None, None]:
+    """Yield (invoke_subgraph node, its inductor_config_patches) for each region.
+
+    Single source of truth for reading a region's config: it lives on
+    node.meta["custom"]["nested_region_config"] and is mirrored onto the subgraph
+    module's meta, which the scheduler reads via ir.Subgraph.inductor_config_patches.
+    """
     for mod in gm.modules():
         if not isinstance(mod, GraphModule):
             continue
@@ -563,10 +571,17 @@ def _any_subgraph_enables_cudagraphs(gm: GraphModule) -> bool:
             op="call_function", target=torch.ops.higher_order.invoke_subgraph
         ):
             nested_config = node.meta.get("custom", {}).get("nested_region_config")
-            patches = getattr(nested_config, "inductor_config_patches", None)
-            if patches and patches.get("triton.cudagraphs"):
-                return True
-    return False
+            patches = nested_config.inductor_config_patches if nested_config else None
+            if patches:
+                yield node, patches
+
+
+def _any_subgraph_enables_cudagraphs(gm: GraphModule) -> bool:
+    """True if any invoke_subgraph region opts into triton.cudagraphs."""
+    return any(
+        patches.get("triton.cudagraphs")
+        for _, patches in _iter_subgraph_cudagraph_patches(gm)
+    )
 
 
 def _any_subgraph_cudagraph_pref_differs(
@@ -577,18 +592,11 @@ def _any_subgraph_cudagraph_pref_differs(
     differs from the enclosing graph's, so it must be isolated into its own
     partition (to capture or exclude it).
     """
-    for mod in gm.modules():
-        if not isinstance(mod, GraphModule):
-            continue
-        for node in mod.graph.find_nodes(
-            op="call_function", target=torch.ops.higher_order.invoke_subgraph
-        ):
-            nested_config = node.meta.get("custom", {}).get("nested_region_config")
-            patches = getattr(nested_config, "inductor_config_patches", None)
-            if patches is not None and "triton.cudagraphs" in patches:
-                if bool(patches["triton.cudagraphs"]) != outer_cudagraphs:
-                    return True
-    return False
+    return any(
+        "triton.cudagraphs" in patches
+        and bool(patches["triton.cudagraphs"]) != outer_cudagraphs
+        for _, patches in _iter_subgraph_cudagraph_patches(gm)
+    )
 
 
 def _recursive_pre_grad_passes(
@@ -1085,7 +1093,7 @@ def _compile_fx_inner(
 
         mb_compiled_graph: OutputCode | None = None
         key_info = None
-        cache_info = None
+        cache_info: CacheInfo | None = None
         remote_cache = None
         constants = CompiledFxGraphConstantsWithGm(gm)
         # TODO: this time will be slightly inconsistent with the one computed
@@ -1274,7 +1282,7 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
-        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
+        cache_event_metadata = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
             metadata=cache_event_metadata,
@@ -1701,7 +1709,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-                    compiled_fn_runner = None
+                    compiled_fn_runner: CompiledFnRunner | None = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -2645,8 +2653,11 @@ def create_compiler_config_extra(
     enable_region_graph_partition = False
     if not config.graph_partition:
         inner_gm = gm if isinstance(gm, GraphModule) else getattr(gm, "gm", None)
+        # Compare against the resolved top-level decision (config + annotation),
+        # not raw config.triton.cudagraphs, so a region agreeing with an
+        # annotation-forced outer decision is not needlessly isolated.
         if inner_gm is not None and _any_subgraph_cudagraph_pref_differs(
-            inner_gm, config.triton.cudagraphs
+            inner_gm, patch_config_for_cudagraphs
         ):
             enable_region_graph_partition = True
 
@@ -2870,6 +2881,23 @@ def compile_fx_backward(
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
+        # A nested region in the backward may opt into cudagraphs (via
+        # bw_inductor_config_patches) even when the top level is off. The
+        # forward-derived compiler_config_extra cannot account for this because
+        # the backward regions do not exist yet when it is computed, so re-derive
+        # the per-region decision from the backward graph: enable the runtime
+        # cudagraph decision and isolate the region into its own graph partition.
+        # Resolved top-level backward decision, before any region opt-in bump.
+        outer_cudagraphs = cudagraphs.value
+        if not cudagraphs.value and _any_subgraph_enables_cudagraphs(gm):
+            cudagraphs = BoxedBool(True)
+        bw_region_graph_partition_ctx = (
+            config.patch("graph_partition", True)
+            if not config.graph_partition
+            and _any_subgraph_cudagraph_pref_differs(gm, outer_cudagraphs)
+            else contextlib.nullcontext()
+        )
+
         # When the forward was partitioned, saved activations from inline
         # code between partitions are NOT at fixed addresses. Only mark
         # primals (params/buffers) as static.
@@ -2886,6 +2914,7 @@ def compile_fx_backward(
             cudagraph_annotation_context(
                 cudagraphs, compiler_config_extra.patch_config_for_cudagraphs
             ),
+            bw_region_graph_partition_ctx,
         ):
             return inner_compile(
                 gm,
