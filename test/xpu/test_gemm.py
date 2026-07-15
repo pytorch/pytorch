@@ -26,7 +26,6 @@ from torch.testing._internal.common_quantization import (
     _dynamically_quantize_per_channel,
 )
 from torch.testing._internal.common_utils import (
-    DeterministicGuard,
     iter_indices,
     parametrize,
     run_tests,
@@ -155,6 +154,8 @@ class TestBasicGEMM(TestCase):
             f(t, m, v, alpha=alpha, beta=beta, out=res2, use_gelu=True)
         else:
             f(t, m, v, alpha=alpha, beta=beta, out=res2)
+        m.to(numpy_dtype).cpu().numpy()
+        v.to(numpy_dtype).cpu().numpy()
         res3 = alpha * (
             m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy()
         )
@@ -168,17 +169,10 @@ class TestBasicGEMM(TestCase):
             res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
             res3 = res3_t.to(numpy_dtype).cpu().numpy()
         else:
-            if activation is not None:
-                raise AssertionError(f"unsupported activation {activation}")
+            assert activation is None, f"unsupported activation {activation}"
         res3 = torch.from_numpy(res3).to(dtype)
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
-
-        # Test inplace versions if they exist.
-        if hasattr(t, f.__name__ + "_"):
-            out_tensor = torch.broadcast_to(t, res1.shape).clone()
-            getattr(out_tensor, f.__name__ + "_")(m, v, alpha=alpha, beta=beta)
-            self.assertEqual(res1, out_tensor)
 
     def _test_addmm_impl(self, func, activation, device, dtype):
         M = torch.randn(10, 25, device="cpu", dtype=torch.float32).to(dtype).to(device)
@@ -243,13 +237,13 @@ class TestBasicGEMM(TestCase):
                     activation=activation,
                 )
 
-    @precisionOverride({torch.float: 1e-4, torch.half: 1e-1})
+    @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
     @dtypes(torch.float32, torch.half, torch.double, torch.complex64)
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
-    @precisionOverride({torch.float: 1e-4, torch.half: 1e-1})
+    @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
     @dtypes(torch.float, torch.half, torch.double)
     def test_addmm_badmm_scalar_tnesor_input(self, device, dtype):
         input = torch.tensor(1).to(device=device, dtype=dtype)
@@ -314,42 +308,6 @@ class TestBasicGEMM(TestCase):
         t = torch.full((50,), math.nan, device=device).to(dtype)
         for m, v in itertools.product(ms, vs):
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
-
-    @dtypes(torch.complex64, torch.complex128, torch.float64)
-    def test_blas_alpha_beta_empty(self, device, dtype):
-        value = 11
-        input = torch.full((2,), value, dtype=dtype, device=device)
-        mat = torch.ones((2, 0), dtype=dtype, device=device)
-        vec = torch.ones((0,), dtype=dtype, device=device)
-        out = torch.empty((2,), dtype=dtype, device=device)
-        if dtype.is_complex:
-            alpha = 6 + 7j
-            beta = 3 + 4j
-        else:
-            alpha = 6
-            beta = 3
-        self.assertEqual(
-            torch.full((2,), beta * value, dtype=dtype, device=device),
-            torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta),
-        )
-        self.assertEqual(
-            torch.full((2,), beta * value, dtype=dtype, device=device),
-            torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out),
-        )
-
-        input = torch.full((2, 3), value, dtype=dtype, device=device)
-        mat2 = torch.ones((0, 3), dtype=dtype, device=device)
-        out = torch.empty((2, 3), dtype=dtype, device=device)
-        self.assertEqual(
-            torch.full((2, 3), beta * value, dtype=dtype, device=device),
-            torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta),
-        )
-        self.assertEqual(
-            torch.full((2, 3), beta * value, dtype=dtype, device=device),
-            torch.addmm(
-                input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out
-            ),
-        )
 
     @dtypes(
         torch.half,
@@ -679,7 +637,7 @@ class TestBasicGEMM(TestCase):
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
-    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5, torch.float64: 1e-6})
     @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half, torch.complex64)
     @tf32_on_and_off(0.01)
     def test_baddbmm(self, device, dtype):
@@ -905,15 +863,6 @@ class TestBasicGEMM(TestCase):
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
 
-    @parametrize("shape", [513, 767])
-    @dtypes(torch.bfloat16, torch.half, torch.float, torch.double)
-    def test_matmul_deterministic_mode(self, device, shape, dtype):
-        with DeterministicGuard(True):
-            inp = torch.randn(shape, shape, device=device, dtype=dtype)
-            first = torch.matmul(inp, inp)
-            for _ in range(10):
-                self.assertEqual(first, torch.matmul(inp, inp), atol=0.0, rtol=0.0)
-
     @dtypes(
         torch.int16,
         torch.int32,
@@ -958,6 +907,7 @@ class TestBasicGEMM(TestCase):
                 y = torch.baddbmm(input, mat1, mat2, beta=0.0, out=out)
                 self.assertEqual(y_ref, y)
 
+    @precisionOverride({torch.double: 1e-6})
     @dtypes(torch.float, torch.double)
     @tf32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
@@ -980,19 +930,9 @@ class TestBasicGEMM(TestCase):
                         RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2)
                     )
 
-    @dtypes(torch.float)
-    def test_addmm_expanded_errors(self, device, dtype):
-        mat1 = torch.randn(3, 3, device=device, dtype=dtype)
-        mat2 = torch.randn(3, 3, device=device, dtype=dtype)
-        self_ = torch.randn(3, 3, device=device, dtype=dtype)
-        self.assertRaisesRegex(
-            RuntimeError,
-            "must be greater or equal to the number of dimensions",
-            lambda: torch.addmm(self_.unsqueeze(0), mat1, mat2),
-        )
-
     @precisionOverride(
         {
+            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,
@@ -1007,6 +947,7 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
+            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,
@@ -1053,35 +994,9 @@ class TestBasicGEMM(TestCase):
         ):
             _test(row_major, incx, incy, lda_tail)
 
-    @dtypes(torch.double, torch.float32, torch.bfloat16, torch.half)
-    @tf32_on_and_off()
-    def test_addmv_out_noncontiguous_preserves_strides(self, device, dtype):
-        M, K = 5, 3
-        mat = torch.randn(M, K, device=device, dtype=dtype)
-        vec = torch.randn(K, device=device, dtype=dtype)
-        bias = torch.randn(M, device=device, dtype=dtype)
-
-        expected = torch.addmv(bias, mat, vec)
-
-        # Create a noncontiguous output tensor (stride != 1)
-        out = make_tensor((M,), device=device, dtype=dtype, noncontiguous=True)
-        original_stride = out.stride()
-        original_ptr = out.data_ptr()
-
-        torch.addmv(bias, mat, vec, out=out)
-
-        self.assertEqual(out, expected)
-        self.assertEqual(
-            out.stride(),
-            original_stride,
-            "addmv out= must preserve noncontiguous strides",
-        )
-        self.assertEqual(
-            out.data_ptr(), original_ptr, "addmv out= must not reallocate storage"
-        )
-
     @precisionOverride(
         {
+            torch.double: 1e-8,
             torch.float: 1e-4,
             torch.bfloat16: 0.6,
             torch.half: 1e-1,
@@ -1255,15 +1170,13 @@ class TestBasicGEMM(TestCase):
                 self.assertEqual(
                     answer,
                     expected,
-                    msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
+                    msg=f"{x.shape} x {y.shape} = {answer.shape}",
                     atol=k * 5e-5,
                     rtol=1e-4,
                 )
             else:
                 self.assertEqual(
-                    answer,
-                    expected,
-                    msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
+                    answer, expected, msg=f"{x.shape} x {y.shape} = {answer.shape}"
                 )
 
         # test x @ y
@@ -1284,10 +1197,8 @@ class TestBasicGEMM(TestCase):
         Generates sequences of tuples (x, y) of with size(x) = x_dim and
         size(y) <= y_dim that are compatible wrt. matmul
         """
-        if x_dim < 1:
-            raise AssertionError(f"Expected x_dim >= 1, got {x_dim}")
-        if y_dim < 2:
-            raise AssertionError(f"Expected y_dim >= 2, got {y_dim}")
+        assert x_dim >= 1
+        assert y_dim >= 2
         x = x_dim
         for y in range(1, y_dim + 1):
             for batch, mn in product(
@@ -1365,44 +1276,30 @@ class TestBasicGEMM(TestCase):
 
     def _group_quantize_tensor(self, w, n_bit=4, q_group_size=16):
         # w [k, n] = [32, 48]
-        if w.dim() != 2:
-            raise AssertionError(f"Expected w.dim() == 2, got {w.dim()}")
+        assert w.dim() == 2
         # w [n, k] = [48, 32]
         w = w.transpose(0, 1).contiguous()
-        if q_group_size <= 1:
-            raise AssertionError(f"Expected q_group_size > 1, got {q_group_size}")
-        if w.shape[-1] % q_group_size != 0:
-            raise AssertionError(
-                f"Expected w.shape[-1] % q_group_size == 0, "
-                f"got {w.shape[-1]} % {q_group_size} = {w.shape[-1] % q_group_size}"
-            )
+        assert q_group_size > 1
+        assert w.shape[-1] % q_group_size == 0
 
         # to_quant: [n * k / group_size, group_size]
         to_quant = w.reshape(-1, q_group_size)
-        nan_count = torch.isnan(to_quant).sum()
-        if nan_count != 0:
-            raise AssertionError(f"Expected no NaNs in to_quant, got {nan_count}")
+        assert torch.isnan(to_quant).sum() == 0
 
         max_val = to_quant.amax(dim=1, keepdim=True)
         min_val = to_quant.amin(dim=1, keepdim=True)
         max_int = 2**n_bit - 1
         min_int = 0
         scales = (max_val - min_val).clamp(min=1e-6) / max_int
-        nan_count = torch.isnan(scales).sum()
-        if nan_count != 0:
-            raise AssertionError(f"Expected no NaNs in scales, got {nan_count}")
+        assert torch.isnan(scales).sum() == 0
 
         zeros = min_int - min_val.div(scales).round()
         zeros = torch.clamp(zeros, min_int, max_int)
         zeros = zeros.to(torch.int8)
-        nan_count = torch.isnan(zeros).sum()
-        if nan_count != 0:
-            raise AssertionError(f"Expected no NaNs in zeros, got {nan_count}")
+        assert torch.isnan(zeros).sum() == 0
 
         out = to_quant.div(scales).add(zeros).round().clamp_(min_int, max_int)
-        nan_count = torch.isnan(out).sum()
-        if nan_count != 0:
-            raise AssertionError(f"Expected no NaNs in out, got {nan_count}")
+        assert torch.isnan(out).sum() == 0
 
         # [n, k]
         out = out.to(dtype=torch.int32).reshape(w.shape)

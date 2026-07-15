@@ -46,8 +46,10 @@ if TYPE_CHECKING:
 #
 #  - Function Schema (source of truth)
 #
-#      aten::zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None,
-#                  Device? device=None, bool? pin_memory=None) -> Tensor
+#      aten::empty.names(int[] size, *, Dimname[]? names,
+#                        ScalarType? dtype=None, Layout? layout=None,
+#                        Device? device=None, bool? pin_memory=None,
+#                        MemoryFormat? memory_format=None) -> Tensor
 #
 #  - Python Signature
 #
@@ -55,7 +57,8 @@ if TYPE_CHECKING:
 #    Note: TensorOptions fields are reordered and the additional
 #    'requires_grad' field is added:
 #
-#      zeros(IntArrayRef size, *, ScalarType dtype=None,
+#      empty(IntArrayRef size, *, DimnameList? names,
+#            MemoryFormat? memory_format=None, ScalarType dtype=None,
 #            Layout layout=torch.strided, Device device=None,
 #            bool pin_memory=False, bool requires_grad=False)
 #
@@ -64,10 +67,12 @@ if TYPE_CHECKING:
 #    It's used to generate C++ lambda formals & dispatch call.
 #    Note: the scattered TensorOptions fields are packed into 'options'.
 #
-#      auto dispatch_zeros =
-#          [](IntArrayRef size, const TensorOptions & options) -> Tensor {
+#      auto dispatch_empty =
+#          [](IntArrayRef size, std::optional<DimnameList> names,
+#             const TensorOptions & options,
+#             std::optional<MemoryFormat> memory_format) -> Tensor {
 #          pybind11::gil_scoped_release no_gil;
-#          return torch::zeros(size, options);
+#          return torch::empty(size, names, options, memory_format);
 #      };
 #
 #  - Binding between Python Arguments and C++ Arguments
@@ -78,31 +83,41 @@ if TYPE_CHECKING:
 #            Python Args               Cpp Args       Binding Exprs
 #     -----------------------------------------------------------------
 #         0: size                      size           '_r.intlist(0)'
-#         1: dtype         -----+
-#         2: layout            +--> options        'options' [special packing]
-#         3: device           /
-#         4: pin_memory      /
-#         5: requires_grad -+
+#         1: names                     names          'names' [special init]
+#         2: memory_format -------+
+#         3: dtype         -----+-|--> options        'options' [special packing]
+#         4: layout            /  |
+#         5: device           /   +--> memory_format  '_r.memoryformatOptional(2)'
+#         6: pin_memory      /
+#         7: requires_grad -+
 #
 #    So the full dispatch expression would look like:
 #
-#      dispatch_zeros(_r.intlist(0), options)
+#      dispatch_empty(_r.intlist(0), names, options,
+#                     _r.memoryformatOptional(2))
+#
+#    Where does 'names' come from? It involves special local init:
+#
+#      auto __names = _r.toDimnameListOptional(1);
+#      std::optional<DimnameList> names =
+#          __names ? std::make_optional(DimnameList(__names.value()))
+#                  : std::nullopt;
 #
 #    Where does 'options' come from? It involves special local init
 #    for TensorOptions. Note that Python side has the additional
 #    'requires_grad' field:
 #
 #      const auto options = TensorOptions()
-#          .dtype(_r.scalartype(1))
-#          .device(_r.device(3))
-#          .layout(_r.layoutOptional(2))
-#          .requires_grad(_r.toBool(5))
-#          .pinned_memory(_r.toBool(4));
+#          .dtype(_r.scalartype(3))
+#          .device(_r.device(5))
+#          .layout(_r.layoutOptional(4))
+#          .requires_grad(_r.toBool(7))
+#          .pinned_memory(_r.toBool(6));
 #
 #    In some other cases one Python Argument can map to multiple C++
 #    Arguments. For example:
 #
-#     aten::max.dim(Tensor self, int dim, bool keepdim=False)
+#     aten::max.names_dim(Tensor self, Dimname dim, bool keepdim=False)
 #       -> (Tensor values, Tensor indices)
 #
 #            Python Args               Cpp Args          Binding Exprs
@@ -110,7 +125,7 @@ if TYPE_CHECKING:
 #                               +----> max               'out[0]'
 #                              /-----> max_values        'out[1]
 #         0: input            /        self              '_r.tensor(0)'
-#         1: dim             /         dim               '_r.toInt64(1)'
+#         1: dim             /         dim               '_r.dimname(1)'
 #         2: keepdim        /          keepdim           '_r.toBool(2)'
 #         3: out      -----+           [local init] out  '_r.tensorlist_n<2>(3)'
 #
@@ -273,8 +288,8 @@ class PythonArgument:
             name += "_"
 
         # pyi merges the _out and functional variants into the same signature, with an optional out arg
-        if name == "out" and not deprecated:
-            type_str = _append_optional_pyi(type_str)
+        if name == "out" and type_str == "Tensor" and not deprecated:
+            type_str = f"{type_str} | None".replace(" | None | None", " | None")
 
         # pyi deprecated signatures don't get defaults for their out arg
         treat_as_no_default = (
@@ -455,6 +470,8 @@ class PythonSignature:
 
         # Below are the major changes in vararg vs. regular pyi signatures
         # vararg signatures also omit the asterix
+        if not isinstance(vararg_type, ListType):
+            raise AssertionError(f"Expected ListType, got {type(vararg_type)}")
         schema_formals[0] = (
             "*" + args[0].name + ": " + argument_type_str_pyi(vararg_type.elem)
         )
@@ -680,6 +697,7 @@ def argument_type_str(
             BaseTy.Device,
             BaseTy.DeviceIndex,
             BaseTy.MemoryFormat,
+            BaseTy.Dimname,
             BaseTy.Stream,
             BaseTy.SymInt,
         ]:
@@ -713,6 +731,8 @@ def argument_type_str(
                 return "c10::List<::std::optional<Tensor>>"
             else:
                 return "const c10::List<::std::optional<Tensor>> &"
+        elif str(t.elem) == "Dimname":
+            return f"DimnameList[{size}]" if size is not None else "DimnameList"
         elem = argument_type_str(t.elem, simple_type=simple_type, symint=symint)
         return f"ArrayRef<{elem}>"
 
@@ -913,11 +933,6 @@ def structseq_fieldnames(returns: tuple[Return, ...]) -> list[str]:
         return [str(r.name) for r in returns]
 
 
-def _append_optional_pyi(type_str: str) -> str:
-    # Append `| None`, avoiding a doubled `| None` if the type is already optional.
-    return f"{type_str} | None".replace(" | None | None", " | None")
-
-
 def argument_type_str_pyi(t: Type) -> str:
     add_optional = False
     if isinstance(t, OptionalType):
@@ -935,7 +950,7 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.str:
             ret = "str"
         elif t.name == BaseTy.Scalar:
-            ret = "Number | _complex | PySymType"
+            ret = "Number | _complex"
         elif t.name == BaseTy.ScalarType:
             ret = "_dtype"
         elif t.name == BaseTy.bool:
@@ -948,6 +963,8 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = "DeviceLikeType | None"
         elif t.name == BaseTy.MemoryFormat:
             ret = "memory_format"
+        elif t.name == BaseTy.Dimname:
+            ret = "str | EllipsisType | None"
         elif t.name == BaseTy.Storage:
             ret = "Storage | UntypedStorage"
         elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Stream]:
@@ -958,17 +975,14 @@ def argument_type_str_pyi(t: Type) -> str:
         if str(t.elem) == "int":
             ret = "_int | _size" if t.size is not None else "_size"
         elif t.is_tensor_like():
-            # Tensor?[] translates to tuple[Tensor | None, ...] | list[Tensor | None] | None
-            # Tensor[] translates to tuple[Tensor, ...] | list[Tensor]
-            if isinstance(t.elem, OptionalType):
-                add_optional = True
-                elem_str = "Tensor | None"
-            else:
-                elem_str = "Tensor"
+            # TODO: this doesn't seem right...
+            # Tensor?[] currently translates to tuple[Tensor, ...] | list[Tensor] | None
+            # It should probably translate to   tuple[Tensor | None, ...] | list[Tensor | None]
+            add_optional = True
             ret = (
-                f"Tensor | tuple[{elem_str}, ...] | list[{elem_str}]"
+                "Tensor | tuple[Tensor, ...] | list[Tensor]"
                 if t.size is not None
-                else f"tuple[{elem_str}, ...] | list[{elem_str}]"
+                else "tuple[Tensor, ...] | list[Tensor]"
             )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
@@ -983,7 +997,7 @@ def argument_type_str_pyi(t: Type) -> str:
         raise RuntimeError(f"unrecognized type {repr(t)}")
 
     if add_optional:
-        ret = _append_optional_pyi(ret)
+        ret = f"{ret} | None".replace(" | None | None", " | None")
 
     return ret
 
@@ -994,11 +1008,13 @@ def return_type_str_pyi(t: Type) -> str:
 
     if isinstance(t, OptionalType):
         inner = return_type_str_pyi(t.elem)
-        return _append_optional_pyi(inner)
+        return f"{inner} | None".replace(" | None | None", " | None")
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Device:
             return "_device"
+        elif t.name == BaseTy.Dimname:
+            return "str | None"
         else:
             return argument_type_str_pyi(t)
 
@@ -1109,9 +1125,9 @@ def returns_str_pyi(signature: PythonSignature) -> str:
 # For multi-output case it can keep using reference type because the
 # PythonArgParser output has been unpacked to local variables, e.g.:
 #
-#   // aten::max.dim_max(Tensor self, int dim, bool keepdim=False, *,
+#   // aten::max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *,
 #   //     Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
-#   [](Tensor & max, Tensor & max_values, const Tensor & self, int64_t dim, bool keepdim) -> std::tuple<Tensor,Tensor>
+#   [](Tensor & max, Tensor & max_values, const Tensor & self, Dimname dim, bool keepdim) -> std::tuple<Tensor,Tensor>
 #
 # For deprecated python signature, it should follow deprecated python arg order.
 # TODO: This is to keep same byte-for-byte result as the old codegen - maybe unnecessary?
@@ -1298,6 +1314,7 @@ def arg_parser_unpack_method(
             BaseTy.Stream,
             BaseTy.Storage,
             BaseTy.Scalar,
+            BaseTy.Dimname,
         ]:
             # These unpack methods line up with their schema names
             return t.name.name.lower()
@@ -1327,6 +1344,8 @@ def arg_parser_unpack_method(
             return "optionalTensor"
         elif str(t.elem) == "Generator":
             return "generator"
+        elif str(t.elem) == "Dimname[]":
+            return "toDimnameListOptional"
         elif not has_default_init and default in (
             None,
             "None",
@@ -1349,6 +1368,9 @@ def arg_parser_unpack_method(
             return f"tensorlist_n<{t.size}>" if t.size is not None else "tensorlist"
         elif str(t.elem) == "Tensor?":
             return "list_of_optional_tensors"
+        elif str(t.elem) == "Dimname":
+            # accept definite size
+            return "dimnamelist"
         elif str(t.elem) == "int":
             # accept definite size
             return "intlist"
@@ -1442,6 +1464,19 @@ def dispatch_lambda_exprs(
             )
             for i, out_arg in enumerate(a.outputs):
                 lambda_args_exprs[out_arg.name] = f"out[{i}]"
+        elif str(a.type) == "Dimname[]?":
+            # [old codegen]
+            # TODO: make this part of something more general, or get rid of it.
+            # optional<ArrayRef<T>> are special. The PythonArgParser returns an
+            # optional<vector<T>>, which cannot be implicitly converted to
+            # optional<ArrayRef<T>>. One needs to unwrap the optional and rewrap.
+            inits.extend(
+                [
+                    f"auto __{name} = {arg_parser_expr};",
+                    f"::std::optional<DimnameList> {name} = __{name} ? ::std::make_optional(DimnameList(__{name}.value())) : ::std::nullopt;",  # noqa: B950
+                ]
+            )
+            lambda_args_exprs[name] = name
         else:
             # default case - directly using PythonArgParser output expr
             lambda_args_exprs[name] = arg_parser_expr
@@ -1469,16 +1504,6 @@ def dispatch_lambda_exprs(
                 f"{f.func}: incomplete tensor options args: {tensor_options_args_names}"
             )
 
-        maybe_initialize_device = (
-            """\
-if (!at::impl::tensor_has_dispatch(self)) {
-  torch::utils::maybe_initialize_device(options);
-}
-"""
-            if ps.method
-            else "torch::utils::maybe_initialize_device(options);\n"
-        )
-
         inits.append(
             f"""\
 const auto options = TensorOptions()
@@ -1487,7 +1512,7 @@ const auto options = TensorOptions()
     .layout({arg_parser_outputs["layout"].expr})
     .requires_grad({arg_parser_outputs["requires_grad"].expr})
     .pinned_memory({arg_parser_outputs["pin_memory"].expr});
-{maybe_initialize_device}\
+torch::utils::maybe_initialize_device(options);
 """
         )
         lambda_args_exprs["options"] = "options"

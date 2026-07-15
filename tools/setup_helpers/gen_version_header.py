@@ -1,3 +1,7 @@
+# Ideally, there would be a way in Bazel to parse version.txt
+# and use the version numbers from there as substitutions for
+# an expand_template action. Since there isn't, this silly script exists.
+
 from __future__ import annotations
 
 import argparse
@@ -61,7 +65,8 @@ def main(args: argparse.Namespace) -> None:
 
     with open(args.template_path) as input:
         with open(args.output_path, "w") as output:
-            output.writelines(apply_replacements(replacements, line) for line in input)
+            for line in input:
+                output.write(apply_replacements(replacements, line))
 
 
 if __name__ == "__main__":

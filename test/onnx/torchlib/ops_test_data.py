@@ -1,4 +1,5 @@
 # Owner(s): ["module: onnx"]
+# flake8: noqa: B950
 """Test op correctness by comparing with PyTorch results.
 
 ## Usage
@@ -38,7 +39,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import functools
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import Self
 
 import numpy as np
@@ -70,9 +71,9 @@ class TorchLibOpInfo:
     # The torchlib ONNX Function to test
     op: Callable[..., Any]
     # The input wrangler function to adjust the input to fit the aten signature
-    input_wrangler: (
-        Callable[[list[Any], dict[str, Any]], tuple[list[Any], dict[str, Any]]] | None
-    ) = None
+    input_wrangler: Optional[
+        Callable[[list[Any], dict[str, Any]], tuple[list[Any], dict[str, Any]]]
+    ] = None
     # Whether the op is non-deterministic
     nondeterministic: bool = False
     # Whether to compare the shape only for the output[index]
@@ -112,11 +113,11 @@ class TorchLibOpInfo:
         variant_name: str = "",
         *,
         reason: str,
-        dtypes: Collection[torch.dtype] | None = None,
-        device_type: str | None = None,
-        matcher: Callable[[Any], Any] | None = None,
+        dtypes: Optional[Collection[torch.dtype]] = None,
+        device_type: Optional[str] = None,
+        matcher: Optional[Callable[[Any], Any]] = None,
         enabled_if: bool = True,
-        test_class_name: str | None = None,
+        test_class_name: Optional[str] = None,
     ) -> Self:
         """Skips an OpInfo test.
 
@@ -150,11 +151,11 @@ class TorchLibOpInfo:
         variant_name: str = "",
         *,
         reason: str,
-        dtypes: Collection[torch.dtype] | None = None,
-        device_type: str | None = None,
-        matcher: Callable[[Any], Any] | None = None,
+        dtypes: Optional[Collection[torch.dtype]] = None,
+        device_type: Optional[str] = None,
+        matcher: Optional[Callable[[Any], Any]] = None,
         enabled_if: bool = True,
-        test_class_name: str | None = None,
+        test_class_name: Optional[str] = None,
     ) -> Self:
         """Expects an OpInfo test to fail.
 
@@ -709,7 +710,7 @@ ops_test_common.duplicate_opinfo_for_prims(OPS_DB, "special.zeta", "zeta")
 OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_SUBTESTS)
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
-if not TESTED_OPS.issubset(ALL_OPS_IN_DB):
-    raise AssertionError(f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB")
-if not NONDETERMINISTIC_OPS.issubset(TESTED_OPS):
-    raise AssertionError(f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS")
+assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
+assert NONDETERMINISTIC_OPS.issubset(TESTED_OPS), (
+    f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS"
+)

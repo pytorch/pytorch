@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 # Defined in torch/csrc/jit/python/python_tree_views.cpp
 
@@ -32,7 +32,7 @@ class Ident(TreeView):
     def name(self) -> str: ...
 
 class Param(TreeView):
-    def __init__(self, type: Any | None, name: Ident, kwarg_only: bool) -> None: ...
+    def __init__(self, type: Optional[Any], name: Ident, kwarg_only: bool) -> None: ...
 
 class Attribute(TreeView):
     def __init__(self, name: Ident, value: Any) -> None: ...
@@ -55,11 +55,11 @@ class Def(TreeView):
 
 class Property(TreeView):
     def __init__(
-        self, r: SourceRange, name: Ident, getter: Def, setter: Def | None
+        self, r: SourceRange, name: Ident, getter: Def, setter: Optional[Def]
     ) -> None: ...
     def name(self) -> Ident: ...
     def getter_name(self) -> str: ...
-    def setter_name(self) -> Ident | None: ...
+    def setter_name(self) -> Optional[Ident]: ...
 
 class ClassDef(TreeView):
     def __init__(
@@ -68,31 +68,33 @@ class ClassDef(TreeView):
 
 class Decl(TreeView):
     def __init__(
-        self, r: SourceRange, params: list[Param], return_type: Expr | None
+        self, r: SourceRange, params: list[Param], return_type: Optional[Expr]
     ) -> None: ...
 
 class Delete(Stmt):
     def __init__(self, range: SourceRange, targets: list[Expr]) -> None: ...
 
 class WithItem(Expr):
-    def __init__(self, range: SourceRange, target: Expr, var: Any | None) -> None: ...
+    def __init__(
+        self, range: SourceRange, target: Expr, var: Optional[Any]
+    ) -> None: ...
 
 class Assign(Stmt):
     def __init__(
-        self, lhs: list[Expr], rhs: Expr, type: Expr | None = None
+        self, lhs: list[Expr], rhs: Expr, type: Optional[Expr] = None
     ) -> None: ...
 
 class AugAssign(Stmt):
     def __init__(self, lhs: Expr, kind_str: str, rhs: Expr) -> None: ...
 
 class Return(Stmt):
-    def __init__(self, range: SourceRange, value: Expr | None) -> None: ...
+    def __init__(self, range: SourceRange, value: Optional[Expr]) -> None: ...
 
 class Raise(Stmt):
     def __init__(self, range: SourceRange, expr: Expr) -> None: ...
 
 class Assert(Stmt):
-    def __init__(self, range: SourceRange, test: Expr, msg: Expr | None) -> None: ...
+    def __init__(self, range: SourceRange, test: Expr, msg: Optional[Expr]) -> None: ...
 
 class Pass(Stmt):
     def __init__(self, range: SourceRange) -> None: ...
@@ -188,9 +190,9 @@ class SliceExpr(Expr):
     def __init__(
         self,
         range: SourceRange,
-        lower: Expr | None,
-        upper: Expr | None,
-        step: Expr | None,
+        lower: Optional[Expr],
+        upper: Optional[Expr],
+        step: Optional[Expr],
     ) -> None: ...
 
 class Starred(Expr):

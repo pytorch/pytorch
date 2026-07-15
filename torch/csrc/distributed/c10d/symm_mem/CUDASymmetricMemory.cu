@@ -1,7 +1,6 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
-#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -10,7 +9,6 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/env.h>
 #include <c10/util/error.h>
 
 #include <sys/socket.h>
@@ -81,8 +79,7 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
     size_t buffer_size,
     int local_device_idx,
     int rank,
-    int world_size,
-    std::string group_name)
+    int world_size)
     : alloc_refs_(std::move(alloc_refs)),
       buffers_(std::move(buffers)),
       signal_pads_(std::move(signal_pads)),
@@ -91,8 +88,7 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
       buffer_size_(buffer_size),
       local_device_idx_(local_device_idx),
       rank_(rank),
-      world_size_(world_size),
-      group_name_(std::move(group_name)) {
+      world_size_(world_size) {
   const size_t arr_size = sizeof(void*) * world_size_;
   buffers_dev_ = reinterpret_cast<void**>(
       c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
@@ -156,23 +152,65 @@ size_t CUDASymmetricMemory::get_offset() {
   return offset_;
 }
 
+void check_channel(int channel, int world_size) {
+  TORCH_CHECK(
+      channel >= 0,
+      "channel for barrier(), put_signal() and wait_signal() ",
+      "must be greater than 0 (got ",
+      channel,
+      ")");
+  const size_t num_channels = c10d::symmetric_memory::get_signal_pad_size() /
+      sizeof(uint32_t) * world_size;
+  TORCH_CHECK(
+      static_cast<size_t>(channel) < num_channels,
+      "The maximum supported channel for barrier(), put_signal() and wait_signal() is ",
+      num_channels - 1,
+      " (got ",
+      channel,
+      ")");
+}
+
+static __global__ void barrier_kernel(
+    uint32_t** signal_pads,
+    int channel,
+    int rank,
+    int world_size,
+    size_t timeout_ms) {
+  if (threadIdx.x < world_size) {
+    auto target_rank = threadIdx.x;
+    if (target_rank == rank) {
+      return;
+    }
+    auto put_success = try_put_signal<std::memory_order_release>(
+        signal_pads[target_rank] + world_size * channel + rank, timeout_ms);
+    if (!put_success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::barrier: rank %d failed to send signal "
+          "to rank %d on channel %d after %lu microseconds\n",
+          rank,
+          target_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+    auto wait_success = try_wait_signal<std::memory_order_acquire>(
+        signal_pads[rank] + world_size * channel + target_rank, timeout_ms);
+    if (!wait_success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::barrier: rank %d failed to receive signal "
+          "from rank %d on channel %d after %lu microseconds\n",
+          rank,
+          target_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+  }
+}
+
 void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
-  check_channel(channel, world_size_, get_signal_pad_size());
-  auto pg = c10d::resolve_process_group(pai_->group_name_);
-  RECORD_PARAM_COMMS(
-      static_cast<int64_t>(0),
-      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
-      rank_,
-      "symm_mem::barrier",
-      0,
-      0,
-      at::kByte,
-      std::vector<int64_t>(),
-      std::vector<int64_t>(),
-      -1,
-      -1,
-      world_size_);
-  c10::cuda::CUDAGuard device_guard(local_device_idx_);
+  check_channel(channel, world_size_);
+  c10::cuda::CUDAGuard guard(local_device_idx_);
   barrier_kernel<<<
       1,
       max(at::cuda::warp_size(), world_size_),
@@ -213,22 +251,8 @@ void CUDASymmetricMemory::put_signal(
     int dst_rank,
     int channel,
     size_t timeout_ms) {
-  check_channel(channel, world_size_, get_signal_pad_size());
-  auto pg = c10d::resolve_process_group(pai_->group_name_);
-  RECORD_PARAM_COMMS(
-      static_cast<int64_t>(0),
-      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
-      rank_,
-      "symm_mem::put_signal",
-      0,
-      0,
-      at::kByte,
-      std::vector<int64_t>(),
-      std::vector<int64_t>(),
-      -1,
-      -1,
-      world_size_);
-  c10::cuda::CUDAGuard device_guard(local_device_idx_);
+  check_channel(channel, world_size_);
+  c10::cuda::CUDAGuard guard(local_device_idx_);
   put_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -275,22 +299,8 @@ void CUDASymmetricMemory::wait_signal(
     int src_rank,
     int channel,
     size_t timeout_ms) {
-  check_channel(channel, world_size_, get_signal_pad_size());
-  auto pg = c10d::resolve_process_group(pai_->group_name_);
-  RECORD_PARAM_COMMS(
-      static_cast<int64_t>(0),
-      std::make_tuple(pg->getGroupName(), pg->getGroupDesc()),
-      rank_,
-      "symm_mem::wait_signal",
-      0,
-      0,
-      at::kByte,
-      std::vector<int64_t>(),
-      std::vector<int64_t>(),
-      -1,
-      -1,
-      world_size_);
-  c10::cuda::CUDAGuard device_guard(local_device_idx_);
+  check_channel(channel, world_size_);
+  c10::cuda::CUDAGuard guard(local_device_idx_);
   wait_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -367,16 +377,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
     prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
   }
 
-  auto driver_api = c10::cuda::DriverAPI::get();
-  int rdma_flag = 0;
-  C10_CUDA_DRIVER_CHECK(driver_api->cuDeviceGetAttribute_(
-      &rdma_flag,
-      CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED,
-      device_idx));
-  if (rdma_flag)
-    prop.allocFlags.gpuDirectRDMACapable = 1;
-
   size_t granularity;
+  auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemGetAllocationGranularity_(
       &granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
   block_size = at::round_up(block_size, granularity);
@@ -451,24 +453,8 @@ struct RendezvousRequest {
   size_t buffer_size;
   size_t signal_pad_offset;
   bool has_multicast_support;
-  int clique_id;
   char hostname[HOST_NAME_MAX + 1];
 };
-
-static std::string import_err_msg(
-    int rank,
-    int peer,
-    const std::vector<RendezvousRequest>& reqs) {
-  std::ostringstream oss;
-  oss << ". Rank " << rank << " (host: " << reqs[rank].hostname
-      << ", device: " << reqs[rank].device_idx << ", fabric_info: {"
-      << at::cuda::get_nvml_fabric_info(reqs[rank].device_idx)
-      << "}) failed to import memory from rank " << peer
-      << " (host: " << reqs[peer].hostname
-      << ", device: " << reqs[peer].device_idx << ", NCCL_MNNVL_CLIQUE_ID: "
-      << c10::utils::get_env("NCCL_MNNVL_CLIQUE_ID").value_or("unset") << ").";
-  return std::move(oss).str();
-}
 
 void validate_rendezvous_requests(
     const std::vector<RendezvousRequest>& reqs,
@@ -480,8 +466,7 @@ void validate_rendezvous_requests(
   // Use (hostname, device_idx) pair to uniquely identify each allocation.
   std::set<std::pair<std::string, int>> device_host_pairs;
   for (auto req : reqs) {
-    device_host_pairs.insert(
-        std::make_pair(std::string(req.hostname), req.device_idx));
+    device_host_pairs.insert(std::make_pair(std::string(req.hostname), req.device_idx));
   }
   if (!allow_overlapping_devices() &&
       device_host_pairs.size() < (size_t)world_size) {
@@ -499,35 +484,6 @@ void validate_rendezvous_requests(
   }
 }
 
-// All ranks must be in the same NVLink domain (same clique_id). Detect
-// mismatches early before the import fails with an opaque CUDA error.
-static void validate_nvlink_fabric_support(
-    const std::vector<RendezvousRequest>& reqs,
-    int world_size) {
-  std::unordered_set<int> clique_ids;
-  for (const auto& req : reqs) {
-    if (req.clique_id >= 0) {
-      clique_ids.insert(req.clique_id);
-    }
-  }
-  if (clique_ids.size() > 1) {
-    std::ostringstream oss;
-    oss << "CUDASymmetricMemory::rendezvous: "
-        << "ranks have mismatched NVLink clique_ids. "
-        << "All ranks using fabric handles must be in the same NVLink domain. "
-        << "Per-rank info: ";
-    for (int r = 0; r < world_size; ++r) {
-      if (r > 0) {
-        oss << ", ";
-      }
-      oss << "rank " << r << " (host: " << reqs[r].hostname
-          << ", device: " << reqs[r].device_idx
-          << ", clique_id: " << reqs[r].clique_id << ')';
-    }
-    TORCH_CHECK(false, std::move(oss).str());
-  }
-}
-
 static bool check_group_multicast_support(
     const std::vector<RendezvousRequest>& reqs) {
   std::vector<size_t> ranks_with_multicast_support;
@@ -541,7 +497,7 @@ static bool check_group_multicast_support(
   } else {
     // We don't expect this to happen. But we want to let the user to know if
     // this happens.
-    if (!ranks_with_multicast_support.empty()) {
+    if (ranks_with_multicast_support.size() != 0) {
       LOG(WARNING)
           << "Only a subset of ranks in the group has multicast support: "
           << ranks_with_multicast_support << " (world_size=" << reqs.size()
@@ -722,20 +678,11 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       .block_size = block->block_size,
       .buffer_size = block->buffer_size,
       .signal_pad_offset = block->signal_pad_offset,
-      .has_multicast_support = device_has_multicast_support(block->device_idx),
-      .clique_id = at::cuda::get_fabric_clique_id(block->device_idx)};
+      .has_multicast_support = device_has_multicast_support(block->device_idx)};
 
   // Populate hostname field for host identification
   gethostname(local_req.hostname, sizeof(local_req.hostname));
-  // At large rank counts, TCPStore gets overloaded during the metadata
-  // exchange. When PG rendezvous is enabled, route the metadata exchange
-  // through the process group's NCCL allgather instead.
-  bool use_pg = group->hasBackendForDeviceType(c10::DeviceType::CUDA) &&
-      group->getBackend(c10::DeviceType::CUDA)->getUsePgForSymmMemRendezvous();
-  std::vector<RendezvousRequest> reqs = use_pg
-      ? pg_all_gather(group, block->device_idx, local_req)
-      : storeExchange.all_gather(store, rank, world_size, local_req);
-  validate_nvlink_fabric_support(reqs, world_size);
+  auto reqs = storeExchange.all_gather(store, rank, world_size, local_req);
   validate_rendezvous_requests(reqs, world_size);
 
   std::vector<int> pids(world_size);
@@ -747,9 +694,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   if constexpr (!use_fabric_handle) {
     imported_handles = ipc_channel.all_gather_fds(rank, pids, block_handle);
   } else {
-    imported_handles = use_pg
-        ? pg_all_gather(group, block->device_idx, block_handle)
-        : storeExchange.all_gather(store, rank, world_size, block_handle);
+    imported_handles =
+        storeExchange.all_gather(store, rank, world_size, block_handle);
   }
 
   std::vector<HandleType> handles(world_size);
@@ -769,19 +715,15 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     // note how in one case it's directly imported_handles[r] and in another
     // &(imported_handles[r]) so can't do with just type definitions
     if constexpr (!use_fabric_handle) {
-      C10_CUDA_DRIVER_CHECK_MSG(
-          driver_api->cuMemImportFromShareableHandle_(
-              &handles[r],
-              (void*)(uintptr_t)imported_handles[r],
-              CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
-          import_err_msg(rank, r, reqs));
+      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
+          &handles[r],
+          (void*)(uintptr_t)imported_handles[r],
+          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
     } else {
-      C10_CUDA_DRIVER_CHECK_MSG(
-          driver_api->cuMemImportFromShareableHandle_(
-              &handles[r],
-              (void*)&(imported_handles[r]),
-              CU_MEM_HANDLE_TYPE_FABRIC),
-          import_err_msg(rank, r, reqs));
+      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
+          &handles[r],
+          (void*)&(imported_handles[r]),
+          CU_MEM_HANDLE_TYPE_FABRIC));
     }
 #elif defined(USE_ROCM)
     C10_CUDA_CHECK(hipMemImportFromShareableHandle(
@@ -843,8 +785,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       block->buffer_size,
       block->device_idx,
       rank,
-      world_size,
-      group_name);
+      world_size);
 
   return pai;
 }
@@ -945,10 +886,6 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void
   }
 
   return alloc_it->second;
-}
-
-bool CUDASymmetricMemoryAllocator::has_allocation(void* ptr) {
-  return find_block(ptr) != nullptr;
 }
 
 struct RegisterCUDASymmetricMemoryAllocator {

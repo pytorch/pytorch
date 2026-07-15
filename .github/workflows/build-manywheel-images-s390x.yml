@@ -1,4 +1,3 @@
-# Owner(s): ["module: POWER"]
 name: Build manywheel docker images for s390x
 
 on:

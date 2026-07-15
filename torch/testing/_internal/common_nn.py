@@ -24,7 +24,7 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Any
+from typing import Union, Any
 from collections.abc import Callable
 from collections.abc import Sequence
 
@@ -110,9 +110,7 @@ module_tests = [
         input_size=(4, 10),
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
         with_tf32=True,
-        # See no_bias variant below for rationale; same K=10 shape, seed-
-        # dependent realization near the AMD XF32 envelope (issue #155216).
-        tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
+        tf32_precision=0.005,
         default_dtype=torch.double,
     ),
     dict(
@@ -123,10 +121,9 @@ module_tests = [
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()),
         with_tf32=True,
-        # AMD XF32 at K=10 sits right at the 0.005 envelope (ideal 5.2e-3;
-        # ideal NV-TF32 2.3e-3). ROCm tolerance relaxed to cover the
-        # seed-dependent realization; see https://github.com/jeffdaily/tf32_analysis.
-        tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
+        tf32_precision=0.005,
+        # ROCM: skipping tf32 test on gfx94 archs due to tolerance issue.
+        test_cuda=not (TEST_WITH_ROCM and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName),
         default_dtype=torch.double,
     ),
     dict(
@@ -511,7 +508,7 @@ def nllloss_no_reduce_test():
 
 def nllloss_no_reduce_ignore_index_test():
     t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
-    kwargs: dict[str, int | str] = {'ignore_index': 2, 'reduction': 'none'}
+    kwargs: dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -614,7 +611,7 @@ def nllloss2d_no_reduce_test():
 
 def nllloss2d_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
-    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss2d_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -671,7 +668,7 @@ def nlllossNd_no_reduce_test():
 
 def nlllossNd_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5, 2, 2).mul(3).floor().long())
-    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLossNd_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -2847,29 +2844,6 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
         )
 
 
-def linear_cross_entropy_loss_reference(input, linear_weight, target,
-                                        linear_bias=None,
-                                        weight=None,
-                                        ignore_index=None,
-                                        reduction='mean',
-                                        label_smoothing=0.0):
-    num_classes = linear_weight.shape[0]
-    out_features = linear_weight.shape[1:-1]
-    in_features = linear_weight.shape[-1]
-    num_batches = input.shape[:-1]
-    logits = F.linear(
-        input,
-        linear_weight.reshape((-1, in_features)),
-        linear_bias.reshape(-1) if linear_bias is not None else None,
-    ).reshape((*num_batches, num_classes, *out_features))
-    ignore_index = ignore_index if ignore_index is not None else -100
-    return F.cross_entropy(
-        logits, target, weight=weight,
-        reduction=reduction, ignore_index=ignore_index,
-        label_smoothing=label_smoothing
-    )
-
-
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
                       reduction='mean'):
 
@@ -3112,8 +3086,7 @@ loss_reference_fns: dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
-    'CrossEntropyLoss': cross_entropy_loss_reference,
-    'LinearCrossEntropyLoss': linear_cross_entropy_loss_reference,
+    'CrossEntropyLoss': cross_entropy_loss_reference
 }
 
 
@@ -3258,7 +3231,7 @@ class NNTestCase(TestCase):
     @abstractmethod
     def _backward(self, module: nn.Module,
                   input: _TensorOrTensors, output: torch.Tensor,
-                  grad_output: torch.Tensor | Sequence[torch.Tensor],
+                  grad_output: Union[torch.Tensor, Sequence[torch.Tensor]],
                   create_graph: bool = False):
         raise NotImplementedError
 
@@ -3318,7 +3291,7 @@ class NNTestCase(TestCase):
 
             if jacobian_input:
                 for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input), strict=True):
-                    jacobian_x[:, i] = d_x.reshape(-1)
+                    jacobian_x[:, i] = d_x.contiguous().view(-1)
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
@@ -3377,7 +3350,7 @@ class TestBase:
                 if name in {'constructor_args', 'extra_args'}:
                     kwargs[name] = ()
                 else:
-                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or its size!")
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 

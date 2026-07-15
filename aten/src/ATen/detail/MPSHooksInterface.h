@@ -66,9 +66,6 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual size_t getRecommendedMaxMemory() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual size_t getMaxBufferLength() const {
-    return 0;
-  }
   virtual void setMemoryFraction(double /*ratio*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
@@ -114,10 +111,9 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   #undef FAIL_MPSHOOKS_FUNC
 };
 
-// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API MPSHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface);
+TORCH_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface, MPSHooksArgs);
 #define REGISTER_MPS_HOOKS(clsname) \
   C10_REGISTER_CLASS(MPSHooksRegistry, clsname, clsname)
 

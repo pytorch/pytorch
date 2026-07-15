@@ -144,16 +144,22 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
       "expected total dims >= 2, but got total dims = ",
       total_dims);
 
-  // Validate range first so out-of-range dims raise IndexError, then normalize
-  // before checking for duplicates (e.g. [1, -1] on a 2D tensor).
-  const auto dim0 = maybe_wrap_dim(dims[0], total_dims);
-  const auto dim1 = maybe_wrap_dim(dims[1], total_dims);
-
   TORCH_CHECK(
-      dim0 != dim1,
+      dims[0] != dims[1] && std::abs(dims[0] - dims[1]) != total_dims,
       "expected rotation dims to be different, but got dim0 = ",
       dims[0],
       " and dim1 = ",
+      dims[1]);
+
+  // check range of dims
+  TORCH_CHECK(
+      dims[0] < total_dims && dims[0] >= -total_dims,
+      "Rotation dim0 out of range, dim0 = ",
+      dims[0]);
+
+  TORCH_CHECK(
+      dims[1] < total_dims && dims[1] >= -total_dims,
+      "Rotation dim1 out of range, dim1 = ",
       dims[1]);
 
   // handle modulo with negative k
@@ -161,11 +167,11 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
 
   switch (k) {
     case 1:
-      return self.flip({dim1}).transpose_(dim0, dim1);
+      return self.flip({dims[1]}).transpose_(dims[0], dims[1]);
     case 2:
-      return self.flip({dim0, dim1});
+      return self.flip(dims);
     case 3:
-      return self.flip({dim0}).transpose_(dim0, dim1);
+      return self.flip({dims[0]}).transpose_(dims[0], dims[1]);
     default:
       return self.clone(at::MemoryFormat::Contiguous);
   }

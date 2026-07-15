@@ -1,10 +1,7 @@
-from __future__ import annotations
-
-import argparse  # noqa: TC003
+import argparse
 import logging
 
 from cli.lib.common.cli_helper import register_targets, RichHelp, TargetSpec
-from cli.lib.core.torchtitan.torchtitan_test import TorchtitanTestRunner
 from cli.lib.core.vllm.vllm_test import VllmTestRunner
 
 
@@ -16,11 +13,8 @@ _TARGETS: dict[str, TargetSpec] = {
     "vllm": {
         "runner": VllmTestRunner,
         "help": "test vLLM with pytorch main",
-    },
-    "torchtitan": {
-        "runner": TorchtitanTestRunner,
-        "help": "test torchtitan with pytorch main",
-    },
+    }
+    # add yours ...
 }
 
 

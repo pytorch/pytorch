@@ -1,8 +1,4 @@
-#include <c10/macros/Macros.h>
-
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
-C10_DIAGNOSTIC_POP()
 
 @protocol PTMetalCommandBuffer<NSObject>
 @optional

@@ -31,13 +31,13 @@ dependencies {
 
 ##### Nightly
 
-Nightly(snapshots) builds are published every night from `master` branch to the [Sonatype Central snapshots repository](https://central.sonatype.com/repository/maven-snapshots/)
+Nightly(snapshots) builds are published every night from `master` branch to [nexus sonatype snapshots repository](https://oss.sonatype.org/#nexus-search;quick~pytorch_android)
 
 To use them repository must be specified explicitly:
 ```groovy
 repositories {
     maven {
-        url "https://central.sonatype.com/repository/maven-snapshots/"
+        url "https://oss.sonatype.org/content/repositories/snapshots"
     }
 }
 

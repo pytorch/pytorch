@@ -10,7 +10,6 @@ import builtins
 import collections
 import contextlib
 import enum
-import functools
 import inspect
 import io
 import pickle
@@ -377,7 +376,8 @@ def get_closure(fn):
 # annotations on `eg``, but starting in Python 4.0, they will represented as
 # strings and no longer present. Furthermore, since the body of `eg` does
 # not reference those names, they do not appear in the list of closed over
-# variables. We anticipate
+# variables. In Python 2.x, type annotations are in comments, leading to a
+# similar situation where their definitions are not available. We anticipate
 # that most users will not run into this issue because their modules and
 # functions will be defined at a global scope like MyGlobalClass. In cases
 # where they are not, it is possible to work around issues by declaring the
@@ -409,7 +409,6 @@ def createResolutionCallbackFromClosure(fn) -> Callable[[str], Any]:
     return createResolutionCallbackFromEnv(closure_lookup())
 
 
-@functools.cache
 def can_compile_class(cls) -> bool:
     # If any of the functions on a type don't have a code object, this type can't
     # be compiled and is probably a builtin / bound from C
@@ -673,7 +672,7 @@ class FunctionModifiers:
     UNUSED = "unused (ignored and replaced with raising of an exception)"
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
-    DEFAULT = "default (compile if called from an exported function / forward)"
+    DEFAULT = "default (compile if called from a exported function / forward)"
     COPY_TO_SCRIPT_WRAPPER = (
         "if this method is not scripted, copy the python method onto the scripted model"
     )
@@ -1044,7 +1043,7 @@ def _check_overload_body(func):
         raise RuntimeError(msg)
 
 
-def _overload(func: Callable[_P, _R]) -> Callable[_P, _R]:
+def _overload(func):
     _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_fns
@@ -1097,25 +1096,8 @@ _overloaded_methods: dict[str, dict[str, list[Callable]]] = {}  # noqa: T484
 _overloaded_method_class_fileno: dict[tuple[str, str], int] = {}
 
 
-def _overload_method(func: Callable[_P, _R]) -> Callable[_P, _R]:
-    try:
-        _check_overload_body(func)
-    except IndentationError:
-        # CPython 3.13.8 has a bug (https://github.com/python/cpython/issues/139783)
-        # where inspect.getsourcelines() returns truncated source when a decorator
-        # is followed by a comment, causing ast.parse() to fail with IndentationError.
-        # Fixed in 3.13.9. Swallow the error on affected versions; re-raise otherwise.
-        if sys.version_info[:3] == (3, 13, 8):
-            import warnings
-
-            warnings.warn(
-                "Skipping overload body check due to a known CPython 3.13.8 bug "
-                "(https://github.com/python/cpython/issues/139783). "
-                "Consider upgrading to Python 3.13.9+.",
-                stacklevel=2,
-            )
-        else:
-            raise
+def _overload_method(func):
+    _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_methods
     class_name_map = _overloaded_methods.get(qual_name)
@@ -1379,7 +1361,8 @@ def _disable_emit_hooks():
         torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
-def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:
+def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
+    # noqa: F841
     def __enter__(self) -> None:
         self.hooks = torch._C._jit_get_emit_hooks()
         torch._C._jit_set_emit_hooks(None, None)

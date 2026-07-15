@@ -14,7 +14,7 @@ from pathlib import Path
 
 # String representing the host platform (e.g. Linux, Darwin).
 HOST_PLATFORM = platform.system()
-HOST_PLATFORM_ARCH = platform.system() + "-" + platform.machine()
+HOST_PLATFORM_ARCH = platform.system() + "-" + platform.processor()
 
 # PyTorch directory root
 try:
@@ -55,6 +55,7 @@ def report_download_progress(
     Pretty printer for file download progress.
     """
     if file_size != -1:
+        # pyrefly: ignore [no-matching-overload]
         percent = min(1, (chunk_number * chunk_size) / file_size)
         bar = "#" * int(64 * percent)
         sys.stdout.write(f"\r0% |{bar:<64}| {int(percent * 100)}%")
@@ -198,11 +199,8 @@ if __name__ == "__main__":
         config = json.load(f)
     config = config[args.linter]
 
-    # Allow processor specific binaries for platform (e.g. Intel/M1 for macOS, x86_64/aarch64 for Linux)
-    # Try arch-specific first, then fall back to generic platform
-    host_platform = (
-        HOST_PLATFORM_ARCH if HOST_PLATFORM_ARCH in config else HOST_PLATFORM
-    )
+    # Allow processor specific binaries for platform (namely Intel and M1 binaries for MacOS)
+    host_platform = HOST_PLATFORM if HOST_PLATFORM in config else HOST_PLATFORM_ARCH
     # If the host platform is not in platform_to_hash, it is unsupported.
     if host_platform not in config:
         logging.error("Unsupported platform: %s/%s", HOST_PLATFORM, HOST_PLATFORM_ARCH)

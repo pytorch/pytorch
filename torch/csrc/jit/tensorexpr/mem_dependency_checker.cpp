@@ -963,7 +963,7 @@ void MemDependencyChecker::visit(const CondPtr& v) {
   mergeScope(trueScope, enclosingScope, false);
   mergeScope(falseScope, enclosingScope, false);
 
-  // Merge the enclosing scope into its parent.
+  // Merge the enclosing scope into it's parent.
   mergeScope(enclosingScope, enclosingScope->parent, false);
 
   currentScope_ = enclosingScope;
@@ -1006,7 +1006,7 @@ void MemDependencyChecker::visit(const IfThenElsePtr& v) {
   mergeScope(trueScope, enclosingScope, false);
   mergeScope(falseScope, enclosingScope, false);
 
-  currentScope_ = std::move(enclosingScope);
+  currentScope_ = enclosingScope;
 }
 
 void MemDependencyChecker::visit(const CompareSelectPtr& v) {
@@ -1043,7 +1043,7 @@ void MemDependencyChecker::visit(const CompareSelectPtr& v) {
   mergeScope(trueScope, enclosingScope, false);
   mergeScope(falseScope, enclosingScope, false);
 
-  currentScope_ = std::move(enclosingScope);
+  currentScope_ = enclosingScope;
 }
 
 // Inserts accesses for a map of buffers (ie. for inputs and outputs).

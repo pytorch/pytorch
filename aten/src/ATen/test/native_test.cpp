@@ -253,9 +253,6 @@ void test(TensorOptions T, TensorOptions AccT) {
 }
 
 TEST(TestNative, NativeTestCPU) {
-#if defined(__aarch64__)
-  GTEST_SKIP() << "Known failure on AArch64 (label is too far / stack test mismatch)";
-#endif
   manual_seed(123);
 
   test(at::device(kCPU).dtype(kFloat),

@@ -87,11 +87,6 @@ struct TORCH_API GraphExecutor {
   const ExecutionPlan& getPlanFor(
       Stack& inputs,
       std::optional<size_t> remaining_bailout_depth = std::nullopt);
-  // Returns an optimized execution plan without requiring input arguments.
-  // Runs input-independent optimization passes (e.g. inlining, constant
-  // propagation, peephole, CSE) but skips profiling-based specializations
-  // that require runtime type/shape information.
-  const ExecutionPlan& getInputIndependentPlan();
   GraphExecutorState getDebugState();
 
   void debugFlushCompilationCache();

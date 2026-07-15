@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
+from typing import Union
+
 import torch
 
 from . import _is_tensorpipe_available, constants as rpc_contants
 
 
-DeviceType = int | str | torch.device
+DeviceType = Union[int, str, torch.device]
 
 __all__ = ["TensorPipeRpcBackendOptions"]
 

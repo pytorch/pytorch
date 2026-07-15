@@ -142,6 +142,7 @@ class _WeakRefInfo:
         self.size = size
         self.element_size = element_size
         self.reftype = reftype
+        # pyrefly: ignore [read-only]
         self.device = device
         self.mem_consumed = self._calculate_mem_consumed()
 
@@ -418,14 +419,12 @@ class MemTracker(TorchDispatchMode):
             dev_snap[_TOTAL_KEY] -= winfo.mem_consumed
             maybe_zero = True
         elif u_type == _UpdateType.REF:
-            if old_reftype is None:
-                raise AssertionError
+            assert old_reftype is not None
             # Adjust memory consumption between two reference types within the same device.
             dev_snap[old_reftype] -= winfo.mem_consumed
             dev_snap[winfo.reftype] += winfo.mem_consumed
         elif u_type == _UpdateType.SIZE:
-            if old_mem_consumed is None:
-                raise AssertionError
+            assert old_mem_consumed is not None
             # Adjust the memory consumed for a reference type due to a change in size.
             change = winfo.mem_consumed - old_mem_consumed
             dev_snap[winfo.reftype] += change
@@ -647,8 +646,7 @@ class MemTracker(TorchDispatchMode):
         #         used multiple times in the same iteration, which we allow and track.
         # For Case 1 and 3, we also initialize the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
         mod_name = self._mod_tracker.get_known_fqn(module)
-        if mod_name is None:
-            raise AssertionError
+        assert mod_name is not None
         if module not in self.memory_tracking:
             mod_stats = _ModMemStats(mod_name)
             param_mem, buffer_mem = self._track_module_params_and_buffers(
@@ -794,7 +792,7 @@ class MemTracker(TorchDispatchMode):
         This method should be called before the ``MemTracker`` is used. Any tensors that are not module parameters, buffers,
         gradients activations, or optimizer states will be categorized as ``Other``. If you want them categorized with a
         custom name, please file a GitHub issue. Any tensors created outside the MemTracker and not supplied to this
-        method will not be tracked by ``MemTracker``.
+        method will not be be tracked by ``MemTracker``.
 
         Args:
             *external (Union[nn.Module, optim.Optimizer, torch.Tensor]): The external modules, optimizers, and
@@ -880,9 +878,6 @@ class MemTracker(TorchDispatchMode):
 
     def __enter__(self) -> "MemTracker":
         if self._depth == 0:
-            # None in eager, a FakeTensorMode instance in SAC.  Used in
-            # __torch_dispatch__ to skip DTensor propagation ops.
-            self._fake_mode_on_entry = active_fake_mode()
             self._register_global_optimizer_hook()
             self._mod_tracker.register_user_hooks(
                 self._pre_fw_hook,
@@ -924,33 +919,20 @@ class MemTracker(TorchDispatchMode):
         ):
             # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
             # a new tensor which does not happen in eager mode, when a wait_tensor is called.
-            # pyrefly: ignore [bad-index]
+            # pyrefly: ignore [bad-index, index-error]
             res = args[0]
         else:
             res = func(*args, **kwargs or {})
-        # DTensor sharding propagation may use a nested FakeTensorMode to
-        # compute output metadata (shapes, placements).  The real memory
-        # usage comes from the local op on shard data, which
-        # runs outside DTensor's fake mode.  We use identity comparison
-        # against the fake mode at tracker entry to skip propagation ops
-        # while still tracking local ops in both eager and SAC contexts.
-        #   - Eager (entry mode is None): real ops have no fake mode
-        #     (None is None), DTensor propagation ops are skipped (B is not None).
-        #   - SAC (entry mode is A): SAC ops run under mode A (A is A),
-        #     DTensor propagation ops are skipped (B is not A).
-        if active_fake_mode() is self._fake_mode_on_entry:
-            # If we are tracking an optimizer state, we use the optimizer reference type.
-            # If we are in backward region and not in AC region, we use the backward reference type.
-            # Else we use the forward reference type.
-            if self._in_opt:
-                reftype = _MemRefType.OPT
-            elif self._mod_tracker.is_bw and not self._in_ac:
-                reftype = _MemRefType.TEMP
-            else:
-                reftype = _MemRefType.ACT
-            tree_map_only(torch.Tensor, partial(self._track, reftype), res)
-            peak_state = (
-                _ModState.PEAK_BW if self._mod_tracker.is_bw else _ModState.PEAK_FW
-            )
-            self._update_peak_stats(peak_state)
+        # If we are tracking an optimizer state, we use the optimizer reference type.
+        # If we are in backward region and not in AC region, we use the backward reference type.
+        # Else we use the forward reference type.
+        if self._in_opt:
+            reftype = _MemRefType.OPT
+        elif self._mod_tracker.is_bw and not self._in_ac:
+            reftype = _MemRefType.TEMP
+        else:
+            reftype = _MemRefType.ACT
+        tree_map_only(torch.Tensor, partial(self._track, reftype), res)
+        peak_state = _ModState.PEAK_BW if self._mod_tracker.is_bw else _ModState.PEAK_FW
+        self._update_peak_stats(peak_state)
         return res

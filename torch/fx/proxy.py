@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import copy
 import dis
@@ -7,17 +9,15 @@ import logging
 import operator
 import sys
 import traceback
-import types
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, cast, TypeVar
-from typing_extensions import Never
+from typing import Any, Optional, TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._C import _fx_map_arg as map_arg
-from torch._library.opaque_object import is_opaque_constant_type
+from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import getArtifactLogger
 from torch.utils._pytree import tree_map_
 from torch.utils._traceback import CapturedTraceback
@@ -117,7 +117,7 @@ class Scope:
 
     """
 
-    def __init__(self, module_path: str, module_type: Any) -> None:
+    def __init__(self, module_path: str, module_type: Any):
         super().__init__()
         self.module_path = module_path
         self.module_type = module_type
@@ -134,7 +134,7 @@ class ScopeContextManager:
         self,
         scope: Scope,
         current_scope: Scope,
-    ) -> None:
+    ):
         super().__init__()
         # Keep a copy of prev scope to restore on exit
         self._prev_scope = copy.copy(scope)
@@ -144,10 +144,10 @@ class ScopeContextManager:
         # Save a reference so we can restore it
         self._scope = scope
 
-    def __enter__(self) -> Scope:
+    def __enter__(self):
         return self._scope
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *args):
         self._scope.module_path = self._prev_scope.module_path
         self._scope.module_type = self._prev_scope.module_type
         return
@@ -167,19 +167,6 @@ _COPY_META_FIELDS = [
     "custom",
     "partitioner_tag",
 ]
-
-
-# Set of (filename, co_name) pairs registered as user-code anchors. Frames
-# matching any entry are preserved by ``_filter_traceback_frames`` when
-# ``_record_forward_stack_traces_only`` is True. Populated via
-# ``_register_stack_trace_anchor`` (e.g. by ``annotate_fn``).
-_STACK_TRACE_ANCHORS: set[tuple[str, str]] = set()
-
-
-def _register_stack_trace_anchor(fn: Callable[..., Any]) -> None:
-    code = getattr(fn, "__code__", None)
-    if code is not None:
-        _STACK_TRACE_ANCHORS.add((code.co_filename, code.co_name))
 
 
 @compatibility(is_backward_compatible=True)
@@ -218,8 +205,8 @@ class TracerBase:
         target: Target,
         args: tuple[Argument, ...],
         kwargs: dict[str, Argument],
-        name: str | None = None,
-        type_expr: Any | None = None,
+        name: Optional[str] = None,
+        type_expr: Optional[Any] = None,
     ) -> Node:
         """
         Inserts a graph node given target, args, kwargs, and name.
@@ -230,11 +217,10 @@ class TracerBase:
         """
 
         if kind == "call_function" and self.check_mutable_operations:
-            target_fn = cast(Callable[..., Any], target)
-            check_for_mutable_operation(target_fn, args, kwargs)
+            check_for_mutable_operation(target, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-        # TODO node_name_to_scope will be deprecated in favor of
+        # TODO node_name_to_scope will be depreciated in favor of
         # node.meta['nn_module_stack']
         self.node_name_to_scope[node.name] = (
             self.scope.module_path,
@@ -251,7 +237,6 @@ class TracerBase:
 
                 if fx_traceback.GRADIENT_ACC_SPECIAL_STACK in stack_trace:
                     node.meta["is_gradient_acc"] = True
-                    node.meta["autograd_backward"] = True
 
             # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
             # If other meta fields are needed, they can be added here
@@ -269,16 +254,13 @@ class TracerBase:
             # See Note [Functionalization View Replay Annotation]
             # Overriding some node meta with the original node meta of the
             # regenerated node.
-            replay_node: Node | None = fx_traceback.get_current_replay_node()
+            replay_node: Node = fx_traceback.get_current_replay_node()
             if replay_node is not None:
                 node.meta["is_functional_regenerated"] = True
                 if "custom" in replay_node.meta:
                     node.meta["custom"] = replay_node.meta.get("custom")
                 if "stack_trace" in replay_node.meta:
                     node.stack_trace = replay_node.meta.get("stack_trace")
-
-            if current_meta.get("autograd_backward", False):
-                node.meta["autograd_backward"] = True
 
         elif self.module_stack:
             node.meta["nn_module_stack"] = copy.copy(self.module_stack)
@@ -298,7 +280,7 @@ class TracerBase:
     ) -> traceback.StackSummary:
         # This method can be overridden to customize the frame filtering logic
         # for the recorded stack trace
-        user_frames: list[traceback.FrameSummary] = []
+        user_frames = []
         if self._record_forward_stack_traces_only:
             user_frames = [
                 frame
@@ -306,7 +288,6 @@ class TracerBase:
                 if (
                     frame.name == "forward"
                     or frame.filename.endswith("torch/__init__.py")
-                    or (frame.filename, frame.name) in _STACK_TRACE_ANCHORS
                 )
             ]
         else:
@@ -320,7 +301,7 @@ class TracerBase:
             # Not having a "forward" call in the stacktrace implies the
             # stacktrace will probably be irrelevant
             if first_forward == -1:
-                user_frames: list[traceback.FrameSummary] = []
+                user_frames = []
 
         from torch.fx.experimental.symbolic_shapes import uninteresting_files
 
@@ -343,10 +324,11 @@ class TracerBase:
         target: Target,
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
-        name: str | None = None,
-        type_expr: Any | None = None,
-        proxy_factory_fn: Callable[[Node], "Proxy"] | None = None,
-    ) -> "Proxy":
+        name: Optional[str] = None,
+        type_expr: Optional[Any] = None,
+        # fix noqa when updating bc tests
+        proxy_factory_fn: Callable[[Node], "Proxy"] = None,  # noqa: RUF013
+    ):
         """
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.
@@ -373,7 +355,7 @@ class TracerBase:
 
         return proxy
 
-    def _find_user_frame(self) -> types.FrameType | None:
+    def _find_user_frame(self):
         """
         Find the Python stack frame executing the user code during
         symbolic tracing.
@@ -458,16 +440,16 @@ class TracerBase:
             )
 
         elif isinstance(a, range):
-            return range(  # pyrefly: ignore[no-matching-overload]
-                self.create_arg(a.start),  # pyrefly: ignore[bad-argument-type]
-                self.create_arg(a.stop),  # pyrefly: ignore[bad-argument-type]
-                self.create_arg(a.step),  # pyrefly: ignore[bad-argument-type]
+            return range(
+                self.create_arg(a.start),
+                self.create_arg(a.stop),
+                self.create_arg(a.step),
             )
 
         elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
-            return a  # pyrefly: ignore[bad-return]
+            return a
 
-        elif is_opaque_constant_type(type(a)):
+        elif is_opaque_value_type(type(a)):
             return a
 
         elif is_dataclass(a):
@@ -478,7 +460,7 @@ class TracerBase:
             return self.create_node("call_function", a.__class__, (), kwargs)
 
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
-            return a  # pyrefly: ignore[bad-return]
+            return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")
 
@@ -494,7 +476,7 @@ class TracerBase:
         )
 
     @compatibility(is_backward_compatible=True)
-    def iter(self, obj: "Proxy") -> Iterator:  # pyrefly: ignore[implicit-any]
+    def iter(self, obj: "Proxy") -> Iterator:
         """Called when a proxy object is being iterated over, such as
         when used in control flow.  Normally we don't know what to do because
         we don't know the value of the proxy, but a custom tracer can attach more
@@ -512,15 +494,15 @@ class TracerBase:
         )
 
     @compatibility(is_backward_compatible=True)
-    def keys(self, obj: "Proxy") -> "Proxy":
-        """Called when a proxy object has the keys() method called.
+    def keys(self, obj: "Proxy") -> Any:
+        """Called when a proxy object is has the keys() method called.
         This is what happens when ** is called on a proxy. This should return an
-        iterator if ** is supposed to work in your custom tracer.
+        iterator it ** is suppose to work in your custom tracer.
         """
         return Attribute(obj, "keys")()
 
 
-def _get_seq_nr(node_name: str = "") -> int | None:
+def _get_seq_nr(node_name: str = ""):
     """
     Returns the seq_nr node meta for the current proxy node that we're creating.
     The seq_nr number in node meta is related to but not the same as the "sequence number"
@@ -565,7 +547,7 @@ def _get_seq_nr(node_name: str = "") -> int | None:
         # See Note [Functionalization View Replay Annotation]
         # Overriding some node meta with the original node meta of the
         # regenerated node.
-        replay_node: Node | None = fx_traceback.get_current_replay_node()
+        replay_node: Node = fx_traceback.get_current_replay_node()
         if replay_node is not None:
             if "seq_nr" in replay_node.meta:
                 annotation_log.debug("%s: seq_nr from replay_node", node_name)
@@ -577,16 +559,16 @@ def _get_seq_nr(node_name: str = "") -> int | None:
 # used in Proxy object when just appending to the graph while not tracing.
 @compatibility(is_backward_compatible=True)
 class GraphAppendingTracer(TracerBase):
-    def __init__(self, graph: Graph) -> None:
+    def __init__(self, graph: Graph):
         super().__init__()
         self.graph = graph
         self.scope = Scope("", None)
-        self.module_stack: OrderedDict[str, tuple[str, Any]] = collections.OrderedDict()
-        self.node_name_to_scope: dict[str, tuple[str, type]] = {}
+        self.module_stack = collections.OrderedDict()
+        self.node_name_to_scope = {}
 
 
 @compatibility(is_backward_compatible=False)
-def assert_fn(x: object) -> None:
+def assert_fn(x):
     if not x:
         raise AssertionError("Assertion failed")
 
@@ -627,7 +609,7 @@ class Proxy:
     """
 
     @compatibility(is_backward_compatible=True)
-    def __init__(self, node: Node, tracer: "TracerBase | None" = None) -> None:
+    def __init__(self, node: Node, tracer: "Optional[TracerBase]" = None):
         if tracer is None:
             # This allows you to create a Proxy object around a raw Node
             tracer = GraphAppendingTracer(node.graph)
@@ -637,21 +619,21 @@ class Proxy:
     def __repr__(self) -> str:
         return f"Proxy({self.node.name})"
 
-    def __getattr__(self, k: str) -> "Attribute":
+    def __getattr__(self, k) -> "Attribute":
         # note: not added to the graph yet, if this is a method call
         # we peephole optimize to the method invocation
         return Attribute(self, k)
 
-    def __getstate__(self) -> dict[str, Any]:
+    def __getstate__(self) -> dict:
         return self.__dict__
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> "Proxy":
+    def __deepcopy__(self, memo) -> dict:
         # We have to explicitly override this method, because otherwise deepcopy
         # will go to __getattr__(self, "__deepcopy__") and return a
         # Attribute(__deepcopy__), and may go into an infinite loop in some cases.
         import copy
 
-        new_dict: dict[str, Any] = {}
+        new_dict = {}
         for k, v in self.__dict__.items():
             try:
                 new_obj = copy.deepcopy(v, memo)
@@ -673,11 +655,11 @@ class Proxy:
             new_proxy.__dict__[k] = v
         return new_proxy
 
-    def __setstate__(self, d: dict[str, Any]) -> None:
+    def __setstate__(self, d):
         # This is called when being unpickled/loaded.
         self.__dict__ = d
 
-    def __call__(self, *args: Any, **kwargs: Any) -> "Proxy":
+    def __call__(self, *args, **kwargs) -> "Proxy":
         return self.tracer.create_proxy(
             "call_method", "__call__", (self,) + args, kwargs
         )
@@ -704,7 +686,7 @@ class Proxy:
 
         return self.tracer.iter(self)
 
-    def __abs__(self) -> "Proxy":
+    def __abs__(self):
         return self.tracer.create_proxy("call_function", operator.abs, (self,), {})
 
     def __bool__(self) -> bool:
@@ -743,10 +725,10 @@ class Proxy:
         return self.tracer.to_bool(self)
 
     @compatibility(is_backward_compatible=True)
-    def keys(self) -> "Proxy":
+    def keys(self):
         return self.tracer.keys(self)
 
-    def __len__(self) -> int:
+    def __len__(self):
         raise RuntimeError(
             "'len' is not supported in symbolic tracing by default. If you want "
             "this call to be recorded, please call torch.fx.wrap('len') at "
@@ -754,19 +736,13 @@ class Proxy:
         )
 
     @classmethod
-    def __torch_function__(
-        cls,
-        orig_method: Callable[..., Any],
-        types: tuple[type, ...],
-        args: tuple[Any, ...] | None = None,
-        kwargs: dict[str, Any] | None = None,
-    ) -> "Proxy":
+    def __torch_function__(cls, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
-        tracers: dict[TracerBase, None] = {}
+        tracers: dict[Any, None] = {}
 
-        def find_tracer(a: Any) -> None:
+        def find_tracer(a):
             if isinstance(a, cls):
                 tracers[a.tracer] = None
 
@@ -813,8 +789,8 @@ class MetaProxy(Proxy):
     """
 
     def __init__(
-        self, node: Node, tracer: "TracerBase | None" = None, fake_mode: Any = None
-    ) -> None:
+        self, node: Node, tracer: "Optional[TracerBase]" = None, fake_mode=None
+    ):
         super().__init__(node, tracer)
         self.fake_mode = fake_mode
 
@@ -822,13 +798,7 @@ class MetaProxy(Proxy):
         return f"MetaProxy({self.node.name})"
 
     @classmethod
-    def __torch_function__(
-        cls,
-        orig_method: Callable[..., Any],
-        types: tuple[type, ...],
-        args: tuple[Any, ...] | None = None,
-        kwargs: dict[str, Any] | None = None,
-    ) -> "MetaProxy":
+    def __torch_function__(cls, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
@@ -855,14 +825,14 @@ class MetaProxy(Proxy):
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):
     @compatibility(is_backward_compatible=True)
-    def __init__(self, root: Proxy, attr: str) -> None:
+    def __init__(self, root: Proxy, attr: str):
         self.root = root
         self.attr = attr
         self.tracer = root.tracer
-        self._node: Node | None = None
+        self._node: Optional[Node] = None
 
     @property
-    def node(self) -> Node:  # pyrefly: ignore[bad-override]
+    def node(self):
         # the node for attributes is added lazily, since most will just be method calls
         # which do not rely on the getitem call
         if self._node is None:
@@ -871,7 +841,7 @@ class Attribute(Proxy):
             ).node
         return self._node
 
-    def __call__(self, *args: Any, **kwargs: Any) -> "Proxy":
+    def __call__(self, *args, **kwargs):
         return self.tracer.create_proxy(
             "call_method", self.attr, (self.root,) + args, kwargs
         )
@@ -885,9 +855,7 @@ class ParameterProxy(Proxy):
     so that conditional tests on these attributes will not throw exception during tracing
     """
 
-    def __init__(
-        self, tracer: TracerBase, node: Node, name: str, param: torch.nn.Parameter
-    ) -> None:
+    def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
         if not isinstance(param, torch.nn.Parameter):
             raise AssertionError(f"Expected Parameter, got {type(param)}")
@@ -898,30 +866,30 @@ class ParameterProxy(Proxy):
         return f"ParameterProxy({self.name})"
 
     @property
-    def shape(self) -> torch.Size:
+    def shape(self):
         return self.param.shape
 
-    def size(self) -> torch.Size:
+    def size(self):
         return self.param.size()
 
-    def dim(self) -> int:
+    def dim(self):
         return self.param.dim()
 
     @property
-    def ndim(self) -> int:
+    def ndim(self):
         return self.param.ndim
 
-    def numel(self) -> int:
+    def numel(self):
         return self.param.numel()
 
-    def nelement(self) -> int:
+    def nelement(self):
         return self.param.nelement()
 
 
 for method in magic_methods:
 
-    def _scope(method: str) -> None:
-        def impl(*args: Any, **kwargs: Any) -> "Proxy":
+    def _scope(method):
+        def impl(*args, **kwargs):
             tracer = args[0].tracer
             target = getattr(operator, method)
             return tracer.create_proxy("call_function", target, args, kwargs)
@@ -933,10 +901,10 @@ for method in magic_methods:
     _scope(method)
 
 
-def _define_reflectable(orig_method_name: str) -> None:
+def _define_reflectable(orig_method_name):
     method_name = f"__r{orig_method_name.strip('_')}__"
 
-    def impl(self: "Proxy", rhs: Any) -> "Proxy":
+    def impl(self, rhs):
         target = getattr(operator, orig_method_name)
         return self.tracer.create_proxy("call_function", target, (rhs, self), {})
 
@@ -949,15 +917,15 @@ for orig_method_name in reflectable_magic_methods:
     _define_reflectable(orig_method_name)
 
 
-def _no_nodes_error(arg: Argument) -> Never:
+def _no_nodes_error(arg):
     raise RuntimeError(
         "Keys for dictionaries used as an argument cannot contain a "
         f"Node. Got key: {arg}"
     )
 
 
-def _create_arg_dict(self: TracerBase, a: dict[Any, Any]) -> dict[Any, Argument]:
-    r: dict[Any, Argument] = {}
+def _create_arg_dict(self, a):
+    r = {}
     for k, v in a.items():
         if not isinstance(k, str):
             # Check for invalid dict keys. We do not want a Proxy to appear

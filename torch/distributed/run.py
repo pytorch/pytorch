@@ -380,7 +380,7 @@ utility
 
     if __name__ == "__main__":
         main()
-"""
+"""  # noqa: E501
 
 import os
 import sys
@@ -622,8 +622,7 @@ def get_args_parser() -> ArgumentParser:
         type=int,
         action=env,
         default=0,
-        help="Rank of the node for multi-node distributed training. It is only used for static "
-        "rendezvous (i.e., when ``--rdzv-backend=static``).",
+        help="Rank of the node for multi-node distributed training.",
     )
     parser.add_argument(
         "--master-addr",
@@ -639,11 +638,11 @@ def get_args_parser() -> ArgumentParser:
     parser.add_argument(
         "--master-port",
         "--master_port",
-        default=None,
+        default=29500,
         type=int,
         action=env,
         help="Port on the master node (rank 0) to be used for communication during distributed "
-        "training. It is only used for static rendezvous. Defaults to 29500.",
+        "training. It is only used for static rendezvous.",
     )
     parser.add_argument(
         "--local-addr",
@@ -684,17 +683,6 @@ def get_args_parser() -> ArgumentParser:
         help="Comma-separated list of signals to handle and forward to subprocesses. "
         "Default: SIGTERM,SIGINT,SIGHUP,SIGQUIT. "
         "Common additional signals: SIGUSR1,SIGUSR2 (used in SLURM environments).",
-    )
-
-    parser.add_argument(
-        "--shutdown-timeout",
-        "--shutdown_timeout",
-        action=env,
-        type=int,
-        default=None,
-        help="Time in seconds to wait for graceful shutdown of worker processes before "
-        "sending SIGKILL. If not specified, uses TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment "
-        "variable or defaults to 30 seconds.",
     )
 
     parser.add_argument(
@@ -748,7 +736,7 @@ def determine_local_world_size(nproc_per_node: str):
         return int(nproc_per_node)
     except ValueError as e:
         if nproc_per_node == "cpu":
-            num_proc = torch._utils.cpu_count()
+            num_proc = os.cpu_count()
             device_type = "cpu"
         elif nproc_per_node == "gpu":
             if not torch.cuda.is_available():
@@ -770,7 +758,7 @@ def determine_local_world_size(nproc_per_node: str):
                 num_proc = torch.accelerator.device_count()
                 device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
             else:
-                num_proc = torch._utils.cpu_count()
+                num_proc = os.cpu_count()
                 device_type = "cpu"
         else:
             raise ValueError(
@@ -829,7 +817,7 @@ def _get_logs_specs_class(logs_specs_name: str | None) -> type[LogsSpecs]:
             )
 
         logger.info(
-            "Using logs_spec '%s' mapped to %s", logs_specs_name, logs_specs_cls
+            "Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls)
         )
     else:
         logs_specs_cls = DefaultLogsSpecs
@@ -855,17 +843,6 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
         logger.warning(
             "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
             "is not specified."
-        )
-
-    if (
-        hasattr(args, "node_rank")
-        and args.node_rank != 0
-        and args.rdzv_backend != "static"
-    ):
-        logger.warning(
-            "node_rank is only used for static rdzv_backend. It will be ignored "
-            "for rdzv_backend=%s.",
-            args.rdzv_backend,
         )
 
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
@@ -938,7 +915,6 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
         duplicate_stdout_filters=args.duplicate_stdout_filters,
         duplicate_stderr_filters=args.duplicate_stderr_filters,
         virtual_local_rank=args.virtual_local_rank,
-        shutdown_timeout=args.shutdown_timeout,
     )
 
     with_python = not args.no_python
@@ -1000,20 +976,6 @@ def run(args):
             args.rdzv_endpoint,
             args.rdzv_id,
         )
-    elif (
-        args.rdzv_backend == "static"
-        and not args.rdzv_endpoint
-        and args.master_port is None
-    ):
-        _, max_nodes = parse_min_max_nnodes(args.nnodes)
-        if max_nodes == 1:
-            args.rdzv_backend = "c10d"
-            args.rdzv_endpoint = "localhost:0"
-            args.rdzv_id = str(uuid.uuid4())
-
-    # master_port is only used for the static rendezvous backend, not c10d
-    if args.master_port is None:
-        args.master_port = 29500
 
     config, cmd, cmd_args = config_from_args(args)
     elastic_launch(

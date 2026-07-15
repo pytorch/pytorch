@@ -46,10 +46,12 @@ class NCCLTestBase {
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts =
         c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
     opts->timeout = pgTimeout_;
+#ifdef NCCL_HAS_COMM_SPLIT
     if (split_from) {
       opts->split_from = *split_from;
       opts->split_color = ++color_;
     }
+#endif
     pg_ = c10::make_intrusive<::c10d::ProcessGroupNCCL>(
         store_, rank, size, std::move(opts));
   }
@@ -326,7 +328,7 @@ class AllgatherBaseNCCLTest : public NCCLTest {
     // contains at least one element otherwise wouldn't run.
     // this is a flattened allgather, hence one rank contributes
     // only 1 tensor, regardless of number of devices
-    return pg_->all_gather_single(output_tensor_, tensors_[0]);
+    return pg_->_allgather_base(output_tensor_, tensors_[0]);
   }
 
   at::Tensor getOutputTensor() {
@@ -381,7 +383,7 @@ class ReduceScatterBaseNCCLTest : public NCCLTest {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     launchDeviceSleep();
-    return pg_->reduce_scatter_single(output_tensor_, input_tensor_);
+    return pg_->_reduce_scatter_base(output_tensor_, input_tensor_);
   }
 
   at::Tensor getOutputTensor() {
@@ -666,6 +668,14 @@ void testReduceScatter(const std::string& path, int rank, int size) {
   }
 }
 
+void testSequenceNumInit(const std::string& path, int rank, int size) {
+  NCCLTest test(path, rank, size);
+  test.initialize(rank, size);
+  test.getProcessGroup()->setSequenceNumberForGroup();
+  auto seqNum = test.getProcessGroup()->getSequenceNumberForGroup();
+  EXPECT_EQ(seqNum, 0);
+}
+
 void testSplittingCommunicator(const std::string& path, int rank, int size) {
   auto test1 = BroadcastNCCLTest(path, rank, size);
   test1.initialize(rank, size);
@@ -823,6 +833,13 @@ TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
     return;
   }
   multiThreadRun(testReduceScatter);
+}
+
+TEST_F(ProcessGroupNCCLTest, testSequenceNumInit) {
+  if (skipTest()) {
+    return;
+  }
+  multiThreadRun(testSequenceNumInit);
 }
 
 TEST_F(ProcessGroupNCCLTest, testReduceScatterBase) {

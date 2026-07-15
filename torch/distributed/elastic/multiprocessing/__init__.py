@@ -66,7 +66,7 @@ implementations of the parent :class:`api.PContext` class.
 from collections.abc import Callable
 from typing import Optional, Union
 
-from torch.distributed.elastic.multiprocessing.api import (
+from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     _validate_full_rank,
     DefaultLogsSpecs,
     LogsDest,

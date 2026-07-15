@@ -1,4 +1,3 @@
-# Owner(s): ["module: ci"]
 name: Upload test stats intermediate
 
 on:

@@ -87,7 +87,7 @@ def should_run_test(
             log_test_reason(file_type, touched_file, test, options)
             return True
         elif file_type in ["TORCH", "CAFFE2", "TEST"]:
-            parts = _split_path(os.path.splitext(touched_file)[0])
+            parts = os.path.splitext(touched_file)[0].split(os.sep)
             touched_module = ".".join(parts)
             # test/ path does not have a "test." namespace
             if touched_module.startswith("test."):
@@ -116,8 +116,8 @@ def test_impact_of_file(filename: str) -> str:
         NONE - known to have no effect on test outcome
         CI - CI configuration files
     """
-    parts = _split_path(filename)
-    if parts[0] in [".jenkins", ".ci"]:
+    parts = filename.split(os.sep)
+    if parts[0] in [".jenkins", ".circleci", ".ci"]:
         return "CI"
     if parts[0] in ["docs", "scripts", "CODEOWNERS", "README.md"]:
         return "NONE"
@@ -132,10 +132,6 @@ def test_impact_of_file(filename: str) -> str:
             return "TEST"
 
     return "UNKNOWN"
-
-
-def _split_path(filename: str) -> list[str]:
-    return filename.replace("\\", "/").split("/")
 
 
 def log_test_reason(file_type: str, filename: str, test: str, options: Any) -> None:

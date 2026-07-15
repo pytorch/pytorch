@@ -11,21 +11,6 @@ from torch._dynamo import bytecode_analysis, bytecode_transformation
 from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312
 
 
-def coalesced_co_lines(code):
-    # co_lines() entries are not guaranteed to be maximally coalesced: our
-    # linetable assembler can emit adjacent entries with the same line number
-    # (e.g. around EXTENDED_ARG) that CPython's compiler would fold into one.
-    # This is a benign encoding difference (co_positions is unaffected), so
-    # merge contiguous same-line entries before comparing.
-    result = []
-    for start, end, lineno in code.co_lines():
-        if result and result[-1][2] == lineno and result[-1][1] == start:
-            result[-1] = (result[-1][0], end, lineno)
-        else:
-            result.append((start, end, lineno))
-    return result
-
-
 class BytecodeTests(torch._dynamo.test_case.TestCase):
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
@@ -48,7 +33,10 @@ class BytecodeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
             self.assertEqual(p1, p2)
-        self.assertEqual(coalesced_co_lines(fn.__code__), coalesced_co_lines(result[1]))
+        # TODO co_lnotab is deprecated in 3.12 and will be removed in 3.14
+        # In 3.11+,. it is computed lazily from other linetable attributes (e.g. co_linetable),
+        # so we do not set this attribute ourselves.
+        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @skipIfNotPy311
     def test_linetable_311_writer2(self):
@@ -89,7 +77,7 @@ def fn():
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
             self.assertEqual(p1, p2)
-        self.assertEqual(coalesced_co_lines(fn.__code__), coalesced_co_lines(result[1]))
+        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @unittest.skipIf(
         sys.version_info >= (3, 11),
@@ -424,11 +412,7 @@ def fn():
             self.assertIsNone(inst.starts_line)
             if inst.opname.startswith("LOAD"):
                 self.assertNotIn(inst.argval, varname_map)
-                if inst.opname not in (
-                    "LOAD_GLOBAL",
-                    "LOAD_ATTR",
-                    "LOAD_COMMON_CONSTANT",
-                ):
+                if inst.opname not in ("LOAD_GLOBAL", "LOAD_ATTR"):
                     self.assertIsNone(inst.arg)
             self.assertFalse(inst.opname.startswith("RETURN"))
 
@@ -592,7 +576,7 @@ class BytecodeHookTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(hook)
         try:
-            opt_fn = torch.compile(fn, backend="eager")
+            opt_fn = torch.compile(fn)
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
         finally:

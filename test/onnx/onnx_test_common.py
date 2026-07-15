@@ -8,7 +8,7 @@ import io
 import os
 import unittest
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from typing import Any
+from typing import Any, Optional, Union
 
 import numpy as np
 import onnxruntime
@@ -24,11 +24,11 @@ from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
 
-_NumericType = Number | torch.Tensor | np.ndarray
-_ModelType = torch.nn.Module | Callable | torch_export.ExportedProgram
-_InputArgsType = (
-    torch.Tensor | int | float | bool | Sequence[Any] | Mapping[str, Any] | None
-)
+_NumericType = Union[Number, torch.Tensor, np.ndarray]
+_ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+_InputArgsType = Optional[
+    Union[torch.Tensor, int, float, bool, Sequence[Any], Mapping[str, Any]]
+]
 _OutputsType = Sequence[_NumericType]
 
 onnx_model_dir = os.path.join(
@@ -157,7 +157,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
 
 def run_ort(
-    onnx_model: str | torch.onnx.ONNXProgram,
+    onnx_model: Union[str, torch.onnx.ONNXProgram],
     pytorch_inputs: Sequence[_InputArgsType],
 ) -> _OutputsType:
     """Run ORT on the given ONNX model and inputs
@@ -268,13 +268,13 @@ class DecorateMeta:
     op_name: str
     variant_name: str
     decorator: Callable
-    opsets: Collection[int | Callable[[int], bool]] | None
-    dtypes: Collection[torch.dtype] | None
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]]
+    dtypes: Optional[Collection[torch.dtype]]
     reason: str
     test_behavior: str
-    matcher: Callable[[Any], bool] | None = None
+    matcher: Optional[Callable[[Any], bool]] = None
     enabled_if: bool = True
-    model_type: pytorch_test_common.TorchModelType | None = None
+    model_type: Optional[pytorch_test_common.TorchModelType] = None
 
     def contains_opset(self, opset: int) -> bool:
         if self.opsets is None:
@@ -290,11 +290,11 @@ def xfail(
     variant_name: str = "",
     *,
     reason: str,
-    opsets: Collection[int | Callable[[int], bool]] | None = None,
-    dtypes: Collection[torch.dtype] | None = None,
-    matcher: Callable[[Any], bool] | None = None,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], bool]] = None,
     enabled_if: bool = True,
-    model_type: pytorch_test_common.TorchModelType | None = None,
+    model_type: Optional[pytorch_test_common.TorchModelType] = None,
 ):
     """Expects a OpInfo test to fail.
 
@@ -328,11 +328,11 @@ def skip(
     variant_name: str = "",
     *,
     reason: str,
-    opsets: Collection[int | Callable[[int], bool]] | None = None,
-    dtypes: Collection[torch.dtype] | None = None,
-    matcher: Callable[[Any], Any] | None = None,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], Any]] = None,
     enabled_if: bool = True,
-    model_type: pytorch_test_common.TorchModelType | None = None,
+    model_type: Optional[pytorch_test_common.TorchModelType] = None,
 ):
     """Skips a test case in OpInfo that we don't care about.
 
@@ -368,10 +368,10 @@ def skip_slow(
     variant_name: str = "",
     *,
     reason: str,
-    opsets: Collection[int | Callable[[int], bool]] | None = None,
-    dtypes: Collection[torch.dtype] | None = None,
-    matcher: Callable[[Any], Any] | None = None,
-    model_type: pytorch_test_common.TorchModelType | None = None,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], Any]] = None,
+    model_type: Optional[pytorch_test_common.TorchModelType] = None,
 ):
     """Skips a test case in OpInfo that is too slow.
 
@@ -423,16 +423,14 @@ def add_decorate_info(
             # Skip does not apply to this opset
             continue
         opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
-        if opinfo is None:
-            raise AssertionError(
-                f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
-            )
-        if decorate_meta.model_type is not None:
-            raise AssertionError(
-                f"Tested op: {decorate_meta.op_name} in wrong position! "
-                "If model_type needs to be specified, it should be "
-                "put under SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE."
-            )
+        assert opinfo is not None, (
+            f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        )
+        assert decorate_meta.model_type is None, (
+            f"Tested op: {decorate_meta.op_name} in wrong position! "
+            "If model_type needs to be specified, it should be "
+            "put under SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE."
+        )
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,
@@ -470,28 +468,28 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
 
 
 def reason_onnx_script_does_not_support(
-    operator: str, dtypes: Sequence[str] | None = None
+    operator: str, dtypes: Optional[Sequence[str]] = None
 ) -> str:
     """Formats the reason: ONNX script doesn't support the given dtypes."""
     return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX script"
 
 
 def reason_onnx_runtime_does_not_support(
-    operator: str, dtypes: Sequence[str] | None = None
+    operator: str, dtypes: Optional[Sequence[str]] = None
 ) -> str:
     """Formats the reason: ONNX Runtime doesn't support the given dtypes."""
     return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX Runtime"
 
 
 def reason_onnx_does_not_support(
-    operator: str, dtypes: Sequence[str] | None = None
+    operator: str, dtypes: Optional[Sequence[str]] = None
 ) -> str:
     """Formats the reason: ONNX doesn't support the given dtypes."""
     return f"{operator} on {dtypes or 'certain dtypes'} not supported by the ONNX Spec"
 
 
 def reason_dynamo_does_not_support(
-    operator: str, dtypes: Sequence[str] | None = None
+    operator: str, dtypes: Optional[Sequence[str]] = None
 ) -> str:
     """Formats the reason: Dynamo doesn't support the given dtypes."""
     return (
@@ -511,7 +509,7 @@ def reason_flaky() -> str:
 
 @contextlib.contextmanager
 def normal_xfail_skip_test_behaviors(
-    test_behavior: str | None = None, reason: str | None = None
+    test_behavior: Optional[str] = None, reason: Optional[str] = None
 ):
     """This context manager is used to handle the different behaviors of xfail and skip.
 

@@ -3,7 +3,6 @@
 import functools
 import os
 import sys
-import unittest
 import warnings
 from collections import namedtuple
 from contextlib import nullcontext
@@ -21,7 +20,6 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp._flat_param import _FSDP_USE_UNSAFE_SETATTR
 from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
 from torch.distributed.fsdp.wrap import (
@@ -45,7 +43,6 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -111,10 +108,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
             devices = {
                 p.device for p in module.parameters() if isinstance(p, FlatParameter)
             }
-            if not (len(devices) > 0):
-                raise AssertionError(
-                    f"Expected at least one device, but got {len(devices)}"
-                )
+            assert len(devices) > 0
             self.assertEqual(1, len(devices))
             found_device = devices.pop()
             if use_index and not isinstance(device_id, torch.device):
@@ -225,14 +219,8 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                 opt.step()
                 grads.append(x.grad)
                 opt.zero_grad()
-            if not torch.allclose(losses[0], losses[1]):
-                raise AssertionError(
-                    f"Expected losses to be close: {losses[0]} vs {losses[1]}"
-                )
-            if not torch.allclose(grads[0], grads[1]):
-                raise AssertionError(
-                    f"Expected grads to be close: {grads[0]} vs {grads[1]}"
-                )
+            assert torch.allclose(losses[0], losses[1])
+            assert torch.allclose(grads[0], grads[1])
             losses.clear()
             grads.clear()
 
@@ -244,10 +232,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                 y = torch.randint(low=0, high=9, size=(8,), device=device_type)
                 fsdp_loss = fsdp_model(x, y)
                 ddp_loss = ddp_model(x, y)
-                if not torch.allclose(fsdp_loss, ddp_loss):
-                    raise AssertionError(
-                        f"Expected fsdp_loss and ddp_loss to be close: {fsdp_loss} vs {ddp_loss}"
-                    )
+                assert torch.allclose(fsdp_loss, ddp_loss)
 
         fsdp_model.train()
         ddp_model.train()
@@ -264,14 +249,8 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                 opt.step()
                 grads.append(x.grad)
                 opt.zero_grad()
-            if not torch.allclose(losses[0], losses[1]):
-                raise AssertionError(
-                    f"Expected losses to be close: {losses[0]} vs {losses[1]}"
-                )
-            if not torch.allclose(grads[0], grads[1]):
-                raise AssertionError(
-                    f"Expected grads to be close: {grads[0]} vs {grads[1]}"
-                )
+            assert torch.allclose(losses[0], losses[1])
+            assert torch.allclose(grads[0], grads[1])
             losses.clear()
             grads.clear()
 
@@ -458,10 +437,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                 register_hook=False,
             )
             for p in fsdp_overlap.parameters():
-                if not hasattr(p, "_in_backward_optimizers"):
-                    raise AssertionError(
-                        "Expected parameter to have '_in_backward_optimizers' attribute"
-                    )
+                assert hasattr(p, "_in_backward_optimizers")
             optim = optim_cls(fsdp.parameters(), **optim_kwargs)
 
             # Verify params initially equal
@@ -507,7 +483,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                         self.assertNotEqual(
                             p,
                             p_prev,
-                            lambda msg: f"{msg}\n{n_prev} Params at iter {i} same as previous iter!",
+                            f"{n_prev} Params at iter {i} same as previous iter!",
                         )
 
                 # Verify overlap and non overlapped are the same
@@ -520,17 +496,15 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                             self.assertEqual(
                                 p,
                                 p_overlap,
-                                lambda msg: f"{msg}\nRank {self.rank}: Params not equal at iteration {i}: {n_overlap} - {p} vs {p_overlap}",
+                                f"Rank {self.rank}: Params not equal at iteration {i}: {n_overlap} - {p} vs {p_overlap}",
                             )
                             self.assertEqual(
-                                None,
-                                p.grad,
-                                lambda msg: f"{msg}\nExpected param {n} grad to be None",
+                                None, p.grad, f"Expected param {n} grad to be None"
                             )
                             self.assertEqual(
                                 None,
                                 p_overlap.grad,
-                                lambda msg: f"{msg}\nExpected param {n_overlap} grad to be None",
+                                f"Expected param {n_overlap} grad to be None",
                             )
 
                     fsdp_overlap_prev_params = [
@@ -569,67 +543,6 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                     _optim.step()
                     _optim.zero_grad()
                 self.assertEqual(losses[0], losses[1])
-
-    @skip_if_lt_x_gpu(2)
-    def test_summon_full_params_offload_to_cpu_on_cpu_model(self):
-        """
-        Tests ``summon_full_params(offload_to_cpu=True)`` when the FSDP compute
-        device is already CPU. There, the unsharded ``FlatParameter`` is already
-        on CPU, so ``to_cpu()`` must skip freeing the unsharded storage that
-        ``flat_param`` and its views alias; otherwise the summoned parameters
-        read freed memory.
-        """
-        gloo_pg = dist.new_group(backend="gloo")
-        self.run_subtests(
-            {
-                "sharding_strategy": [
-                    ShardingStrategy.FULL_SHARD,
-                    ShardingStrategy.SHARD_GRAD_OP,
-                ],
-                "use_orig_params": [False, True],
-                "writeback": [False, True],
-            },
-            self._test_summon_full_params_offload_to_cpu_on_cpu_model,
-            gloo_pg,
-        )
-
-    def _test_summon_full_params_offload_to_cpu_on_cpu_model(
-        self,
-        gloo_pg,
-        sharding_strategy: ShardingStrategy,
-        use_orig_params: bool,
-        writeback: bool,
-    ):
-        torch.manual_seed(42)
-        ref_model = MyModel()
-        ref_params = dict(ref_model.named_parameters())
-        model = FSDP(
-            deepcopy(ref_model),
-            sharding_strategy=sharding_strategy,
-            auto_wrap_policy=always_wrap_policy,
-            process_group=gloo_pg,
-            device_id=torch.device("cpu"),
-            use_orig_params=use_orig_params,
-        )
-        cpu = torch.device("cpu")
-        with FSDP.summon_full_params(model, offload_to_cpu=True, writeback=writeback):
-            summoned = dict(model.named_parameters())
-            self.assertEqual(len(summoned), len(ref_params))
-            for name, param in summoned.items():
-                self.assertEqual(param.device, cpu)
-                self.assertEqual(param, ref_params[clean_tensor_name(name)])
-            if writeback:
-                with torch.no_grad():
-                    for param in model.parameters():
-                        param.add_(1.0)
-        for param in model.parameters():
-            self.assertEqual(param.device, cpu)
-        # Re-summon to confirm the exit path resharded correctly and that the
-        # in-place edit was (not) persisted according to `writeback`.
-        delta = 1.0 if writeback else 0.0
-        with FSDP.summon_full_params(model, offload_to_cpu=True):
-            for name, param in model.named_parameters():
-                self.assertEqual(param, ref_params[clean_tensor_name(name)] + delta)
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):
@@ -1021,7 +934,6 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
             )
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/105024")
     @skip_if_lt_x_gpu(2)
     def test_homogeneous_attributes(self):
         """
@@ -1074,7 +986,6 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             inp = fsdp_model.module.get_input(torch.device(device_type))
             fsdp_model(*inp)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/137948")
     @skip_if_lt_x_gpu(2)
     def test_fsdp_unsupported_module_cls(self):
         regex = r"FSDP will not all-gather parameters for containers that do not implement forward"

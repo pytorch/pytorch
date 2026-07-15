@@ -1,6 +1,5 @@
 import abc
 import contextlib
-import contextvars
 import functools
 import logging
 import threading
@@ -45,9 +44,7 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
-    "region_activation_memory_budget",
     "set_warn_on_accumulate_grad_stream_mismatch",
-    "set_override_stale_capture_stream",
 ]
 
 
@@ -211,7 +208,7 @@ class GradientEdge(NamedTuple):
     output_nr: int
     # This token can be used to ensure the graph stays alive when it cannot be
     # done via the node field
-    ownership_token: Node | None = None
+    ownership_token: Optional[Node] = None
 
 
 def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
@@ -242,7 +239,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
 
 
-def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
+def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> None:
     """Update autograd metadata tracking whether the given Tensor was modified in place.
 
     This is to enable more accurate error checking within the autograd engine.
@@ -358,18 +355,9 @@ class save_on_cpu(saved_tensors_hooks):
     Use this context-manager to trade compute for GPU memory usage (e.g.
     when your model doesn't fit in GPU memory during training).
 
-    .. warning::
-
-        When ``pin_memory=True``, the GPU to CPU copy during packing is
-        asynchronous. Accessing saved tensors on CPU (e.g. via
-        ``grad_fn._saved_self``) before the CUDA stream has finished may
-        yield incorrect data. Call :func:`torch.cuda.synchronize` first
-        if you need to read them.
-
     Args:
         pin_memory (bool): If ``True`` tensors will be saved to CPU pinned memory
-                           during packing and copied to GPU asynchronously during both
-                           packing and unpacking.
+                           during packing and copied to GPU asynchronously during unpacking.
                            Defaults to ``False``.
                            Also see :ref:`cuda-memory-pinning`.
 
@@ -403,14 +391,13 @@ class save_on_cpu(saved_tensors_hooks):
         def pack_to_cpu(tensor: torch.Tensor) -> tuple[torch.device, torch.Tensor]:
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
-            is_pinnable = device_module.is_available() and not tensor.is_sparse
             packed = torch.empty(
                 tensor.size(),
                 dtype=tensor.dtype,
                 layout=tensor.layout,
-                pin_memory=is_pinnable,
+                pin_memory=(device_module.is_available() and not tensor.is_sparse),
             )
-            packed.copy_(tensor, non_blocking=is_pinnable)
+            packed.copy_(tensor)
             return (tensor.device, packed)
 
         def unpack_from_cpu(packed: tuple[torch.device, torch.Tensor]) -> torch.Tensor:
@@ -429,7 +416,7 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
 
     Args:
         error_message (str): When saved tensors default hooks are used when they
-                             have been disabled, a RuntimeError with this
+                             have been are disabled, a RuntimeError with this
                              error message gets raised.
 
     Example::
@@ -456,106 +443,11 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
 
 
-def region_activation_memory_budget(
-    budget: float,
-) -> contextlib.AbstractContextManager[None]:
-    r"""Context-manager that sets the activation memory budget for the region of
-    a compiled forward traced under it.
-
-    .. warning::
-        This is a prototype feature and is subject to change.
-
-    Under :func:`torch.compile`, the min-cut partitioner chooses which
-    activations to save versus recompute in the backward pass to stay under a
-    memory budget. ``budget`` is a ratio in ``[0, 1]``: ``0.0`` corresponds to
-    the activation memory from applying activation checkpointing to the full
-    region, and ``1.0`` corresponds to the activation memory from the default
-    runtime-optimized strategy. So ``0.4`` would result in a strategy that saves
-    40% of the activations compared to the default strategy. It solves a 0-1
-    knapsack to find the minimum recompute necessary to stay below the budget.
-    This overrides the global ``torch._functorch.config.activation_memory_budget``
-    for the annotated region.
-
-    .. note::
-        Today the partitioner only supports a single budget per compiled graph,
-        so the annotation must cover every forward op in the graph (a partial
-        annotation is rejected rather than silently applied graph-wide), and all
-        annotated nodes must agree on the budget. To use different budgets for
-        different parts of a model, separate them with a graph break (e.g.
-        ``torch._dynamo.graph_break()``) so each part becomes its own graph.
-
-    This only has an effect under :func:`torch.compile`; using it outside of a
-    compiled region raises a ``RuntimeError``.
-
-    Args:
-        budget (float): Activation memory budget ratio in ``[0, 1]``.
-
-    Example::
-
-        >>> # xdoctest: +SKIP
-        >>> with torch.autograd.graph.region_activation_memory_budget(0.0):
-        ...     x = layer(x)  # recompute this region's activations in backward
-    """
-    import torch.fx.traceback as fx_traceback
-
-    if isinstance(budget, bool) or not isinstance(budget, (int, float)):
-        raise TypeError(
-            f"torch.autograd.graph.region_activation_memory_budget: expects a "
-            f"float, got {type(budget).__name__}"
-        )
-    if not 0.0 <= budget <= 1.0:
-        raise ValueError(
-            f"torch.autograd.graph.region_activation_memory_budget: must be in "
-            f"[0, 1], got {budget}"
-        )
-    # The budget only takes effect when read back by the partitioner during
-    # compilation. Dynamo folds torch.compiler.is_compiling() to True while
-    # tracing this (inlined) call, so this guard only fires in eager mode.
-    if not torch.compiler.is_compiling():
-        raise RuntimeError(
-            "torch.autograd.graph.region_activation_memory_budget can only be "
-            "used inside a torch.compile region; it has no effect in eager mode."
-        )
-    return fx_traceback.annotate(
-        {fx_traceback.MEMORY_BUDGET_ANNOTATION_KEY: float(budget)}
-    )
-
-
 def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
     """Whether to warn when the AccumulateGrad node's stream does not match the stream
     of the node that produced the incoming gradient.
     """
     return torch._C._set_warn_on_accumulate_grad_stream_mismatch(enabled)
-
-
-def set_override_stale_capture_stream(enabled: bool) -> None:
-    """Control behavior when autograd detects a stale non-capturing stream during
-    CUDA graph capture.
-
-    During CUDA graph capture, autograd nodes may reference a stale stream
-    that is not part of the capture. With the flag disabled (the
-    process-initial state), autograd raises a ``RuntimeError`` when the stale
-    stream is the default stream (stream 0), because this case always
-    invalidates the capture: ``cudaStreamWaitEvent`` on the default stream
-    pulls a non-capturing stream into the graph. For non-default stale streams
-    the stream reference is left unchanged; the capture will succeed if the
-    user has joined the stream into the capture (e.g. via
-    ``capture_stream.wait_stream(stale_stream)``) and will otherwise fail with
-    a CUDA runtime error.
-
-    When ``enabled=True``, any stale non-capturing stream (default or
-    non-default) is automatically overridden with the producer's capturing
-    stream, allowing the capture to proceed. This is a process-global setting
-    and is not thread-local.
-
-    Args:
-        enabled (bool): If ``True``, override stale non-capturing streams with
-            the producer's capturing stream during CUDA graph capture. If
-            ``False`` (the process-initial state), raise an error only when the
-            stale stream is the default stream (stream 0); other stale streams
-            are left unchanged.
-    """
-    return torch._C._set_override_stale_capture_stream(enabled)
 
 
 class _MultiHandle(RemovableHandle):
@@ -577,8 +469,10 @@ class _MultiHandle(RemovableHandle):
 
 def register_multi_grad_hook(
     tensors: Sequence[torch.Tensor],
-    fn: Callable[[Sequence[torch.Tensor | None]], None]
-    | Callable[[torch.Tensor], None],
+    fn: Union[
+        Callable[[Sequence[Optional[torch.Tensor]]], None],
+        Callable[[torch.Tensor], None],
+    ],
     *,
     mode: Literal["all", "any"] = "all",
 ) -> RemovableHandle:
@@ -638,7 +532,7 @@ def register_multi_grad_hook(
     if mode == "all":
         count: dict[int, int] = {}
         nb_calls = None
-        buffer: dict[int, list[torch.Tensor | None]] = {}
+        buffer: dict[int, list[Optional[torch.Tensor]]] = {}
 
         grad_fns = list(map(_get_grad_fn_or_grad_acc, tensors))
         len_tensors = len(tensors)
@@ -669,7 +563,7 @@ def register_multi_grad_hook(
                 if nb_calls is None:
                     raise AssertionError("Expected nb_calls to be set")
                 if curr_count == nb_calls - 1:
-                    fn = cast(Callable[[Sequence[torch.Tensor | None]], None], fn)
+                    fn = cast(Callable[[Sequence[Optional[torch.Tensor]]], None], fn)
                     fn(buffer[id])
                     del count[id]
                     del buffer[id]
@@ -766,7 +660,7 @@ class _swap_with_cloned(saved_tensors_hooks):
             tid = _get_tid(tensor)
             sid = _get_sid(tensor)
             # Tensors saved for backward have an entry in _tid_to_weakhandle
-            handle: _Handle | None = None
+            handle: Optional[_Handle] = None
 
             # Save aliasing information
             ctx.sid_to_tid[sid].add(tid)
@@ -808,7 +702,7 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
         func: "OpOverload",
         types: Iterable[type],
         args: tuple[Any, ...] = (),
-        kwargs: dict[Any, Any] | None = None,
+        kwargs: Optional[dict[Any, Any]] = None,
     ) -> Any:
         kwargs = kwargs or {}
 
@@ -916,7 +810,7 @@ def allow_mutation_on_saved_tensors() -> Generator[
 
 
 def _register_logging_hooks_on_whole_graph(
-    t_outputs: Sequence[torch.Tensor | GradientEdge],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
 ) -> Callable[[], None]:
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
@@ -940,7 +834,7 @@ def _register_logging_hooks_on_whole_graph(
 
             yield node
 
-    def fmt(t: torch.Tensor | None) -> str:
+    def fmt(t: Optional[torch.Tensor]) -> str:
         # Avoid circular import
         from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -948,7 +842,7 @@ def _register_logging_hooks_on_whole_graph(
             return "None"
         return f"{dtype_abbrs[t.dtype]}[{', '.join(map(str, t.shape))}]"
 
-    def prehook(grad_outputs: Sequence[torch.Tensor | None]) -> None:
+    def prehook(grad_outputs: Sequence[Optional[torch.Tensor]]) -> None:
         node = torch._C._current_autograd_node()
         grad_outputs_str = f"[{','.join(fmt(t) for t in grad_outputs)}]"
         log_str = f"Executing: {node} with grad_outputs: {grad_outputs_str}"
@@ -964,17 +858,13 @@ def _register_logging_hooks_on_whole_graph(
 
 
 def _engine_run_backward(
-    t_outputs: Sequence[torch.Tensor | GradientEdge],
+    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor, ...]:
     attach_logging_hooks = log.getEffectiveLevel() <= logging.DEBUG
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
-
-    # Need to save the context so compiler config will be visible in device threads
-    torch._C._stash_obj_in_tls("context", contextvars.copy_context())
-
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
@@ -982,8 +872,3 @@ def _engine_run_backward(
     finally:
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
-        # Erase rather than overwrite-with-None so the thread_local map is
-        # truly empty.  SafePyObject's destructor needs the GIL; if a thread
-        # exits while a SafePyObject is still in its thread_local,
-        # __call_tls_dtors fires the destructor → take_gil → deadlock.
-        torch._C._remove_obj_from_tls("context")

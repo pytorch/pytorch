@@ -15,6 +15,7 @@ using TensorConstantMap = std::unordered_map<std::string, at::Tensor*>;
 
 class TORCH_API AOTIModelContainerRunner {
  public:
+  AOTIModelContainerRunner() = delete;
   AOTIModelContainerRunner(const AOTIModelContainerRunner& other) = delete;
   AOTIModelContainerRunner(AOTIModelContainerRunner&& other) = delete;
   AOTIModelContainerRunner& operator=(const AOTIModelContainerRunner& other) =
@@ -49,35 +50,14 @@ class TORCH_API AOTIModelContainerRunner {
       bool use_inactive,
       bool validate_full_updates,
       bool user_managed = false);
-  // Update constants from CPU tensors. CPU tensors are silently copied to the
-  // model's device.
-  void update_constant_buffer_from_cpu(
-      std::unordered_map<std::string, at::Tensor>& tensor_map,
-      bool use_inactive,
-      bool validate_full_updates);
-  void update_constant_buffer_from_cpu(
-      const TensorConstantMap& const_map,
-      bool use_inactive,
-      bool validate_full_updates);
   void run_const_fold(
       bool use_inactive,
       AOTInductorStreamHandle cuda_stream_handle = nullptr);
   void swap_constant_buffer();
   void free_inactive_constant_buffer();
   void update_constant_buffer_from_blob(const std::string& weights_path);
-  bool did_call_load_constants() const;
 
   std::vector<std::string> get_call_spec();
-
-  // Returns the torchbind custom-class constants embedded in the loaded
-  // model. The IValue payloads alias the live entries inside the proxy
-  // executor: downcasting to a CustomClassHolder subclass and mutating
-  // its state will affect subsequent run() invocations. Returns empty when
-  // the model has no torchbind constants.
-  std::unordered_map<std::string, c10::IValue> get_custom_objs() const {
-    return proxy_executor_ ? proxy_executor_->get_custom_objs()
-                           : std::unordered_map<std::string, c10::IValue>{};
-  }
 
  protected:
   AOTIModelContainerRunner(
@@ -86,20 +66,6 @@ class TORCH_API AOTIModelContainerRunner {
       const std::string& device_str,
       const std::string& cubin_dir,
       const bool run_single_threaded);
-
-  // Construct with externally-provided weights. Skips the .so weight load
-  // entirely (no GPU allocation) and seeds the container's constants map
-  // from the caller-supplied tensors. The caller retains ownership.
-  AOTIModelContainerRunner(
-      const std::string& model_so_path,
-      size_t num_models,
-      const std::string& device_str,
-      const std::string& cubin_dir,
-      std::unordered_map<std::string, at::Tensor>& constants);
-
-  // Default constructor for custom device implementations that don't
-  // use .so files. Derived classes must override run_impl().
-  AOTIModelContainerRunner();
 
   virtual std::vector<at::Tensor> run_impl(
       std::vector<AtenTensorHandle>& input_handles,
@@ -125,8 +91,6 @@ class TORCH_API AOTIModelContainerRunner {
       update_user_managed_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateConstantBuffer)
       update_constant_buffer_func_{nullptr};
-  decltype(&AOTInductorModelContainerUpdateConstantBufferFromCpu)
-      update_constant_buffer_from_cpu_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateInactiveConstantBuffer)
       update_inactive_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerRunConstantFolding) run_const_fold_func_{
@@ -138,24 +102,14 @@ class TORCH_API AOTIModelContainerRunner {
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
   decltype(&AOTInductorModelContainerGetConstantsBlobSize)
       get_constants_blob_size_func_{nullptr};
-  decltype(&AOTInductorModelContainerDidCallLoadConstants)
-      did_call_load_constants_func_{nullptr};
   decltype(&AOTInductorModelUpdateConstantsFromBlob)
       update_constants_from_blob_func_{nullptr};
-  decltype(&AOTInductorGetLastError) get_last_error_func_{nullptr};
-  decltype(&AOTInductorModelContainerCreateWithExternalConstants)
-      create_with_external_constants_func_{nullptr};
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 
-  AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
+  AOTIProxyExecutorHandle proxy_executor_handle_;
 
  private:
-  void load_aoti_symbols(
-      const std::string& model_so_path,
-      const std::string& device_str,
-      bool run_single_threaded);
-
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
 };
 

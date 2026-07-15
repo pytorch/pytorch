@@ -248,7 +248,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
   error_msg << "  - 3D or 4D input: padding size = 4 (pads last 2 dimensions)\n";
   error_msg << "  - 4D or 5D input: padding size = 6 (pads last 3 dimensions)";
 
-  C10_THROW_ERROR(NotImplementedError, std::move(error_msg).str());
+  C10_THROW_ERROR(NotImplementedError, error_msg.str());
 }
 
 Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view mode, std::optional<double> value) {

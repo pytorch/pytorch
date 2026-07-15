@@ -1,5 +1,5 @@
 class Equality:
-    def __init__(self, lhs: object, rhs: object) -> None:
+    def __init__(self, lhs: object, rhs: object):
         self.lhs = lhs
         self.rhs = rhs
 

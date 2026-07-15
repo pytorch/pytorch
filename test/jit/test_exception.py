@@ -141,7 +141,7 @@ class TestException(TestCase):
 
         @torch.jit.script
         def foo(cond):
-            assert bool(cond), "hi"  # noqa: S101
+            assert bool(cond), "hi"
 
         foo(torch.tensor(1))
         # we don't currently validate the name of the exception

@@ -1,3 +1,5 @@
+from typing import Optional
+
 import numpy as np
 
 import operator_benchmark as op_bench
@@ -178,10 +180,10 @@ class EmbedddingBag4BitRowwiseOffsetsTest(op_bench.TorchBenchmarkBase):
         indices,
         offsets,
         mode: int,
-        per_sample_weights: torch.Tensor | None,
+        per_sample_weights: Optional[torch.Tensor],
         include_last_offset: bool,
         is_pruned_weights: bool,
-        compressed_indices: torch.Tensor | None,
+        compressed_indices: Optional[torch.Tensor],
     ):
         return self.op_func(
             prepacked_weights,
@@ -290,10 +292,10 @@ class EmbedddingBagByteRowwiseOffsetsTest(op_bench.TorchBenchmarkBase):
         indices,
         offsets,
         mode: int,
-        per_sample_weights: torch.Tensor | None,
+        per_sample_weights: Optional[torch.Tensor],
         include_last_offset: bool,
         is_pruned_weights: bool,
-        compressed_indices: torch.Tensor | None,
+        compressed_indices: Optional[torch.Tensor],
     ):
         return self.op_func(
             prepacked_weights,

@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
-from torch.fx.experimental.symbolic_shapes import has_free_symbols, optimization_hint
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils._ordered_set import OrderedSet
 
 from .. import ir, mkldnn_ir
@@ -30,6 +30,7 @@ from .post_grad import register_lowering_pattern
 from .quantization import (
     _register_int8_woq_concat_linear_pattern,
     _register_quantization_lowerings,
+    _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
 )
 
@@ -74,18 +75,9 @@ if torch._C._has_mkldnn:
     class CpuMkldnnDeviceOp(MkldnnDeviceOpBase):
         def get_linear_transpose_weight(self, weight_node):
             packed_weight_node = weight_node
-            if packed_weight_node.target != mkldnn._reorder_linear_weight:
-                raise AssertionError(
-                    "expected packed_weight_node.target to be "
-                    "mkldnn._reorder_linear_weight, got "
-                    f"{packed_weight_node.target}"
-                )
+            assert packed_weight_node.target == mkldnn._reorder_linear_weight
             transpose_weight_node = packed_weight_node.args[0]
-            if transpose_weight_node.target is not aten.permute.default:
-                raise AssertionError(
-                    "expected transpose_weight_node.target to be "
-                    f"aten.permute.default, got {transpose_weight_node.target}"
-                )
+            assert transpose_weight_node.target is aten.permute.default
             return transpose_weight_node
 
         def pack_conv_weight(
@@ -112,7 +104,7 @@ if torch._C._has_mkldnn:
             # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
             packed_weight_inputs = (
                 transpose_weight_node,
-                optimization_hint(batch_size)
+                batch_size.node.shape_env.size_hint(batch_size.node.expr)
                 if has_free_symbols(batch_size)
                 else batch_size,
             )
@@ -167,10 +159,9 @@ if torch._C._has_mkldnn:
             constant_args,
             input_size,
         ):
-            if is_transposed:
-                raise AssertionError(
-                    "'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
-                )
+            assert not is_transposed, (
+                "'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
+            )
             return weight
 
     def _get_mkldnn_device_op(device_type: str) -> MkldnnDeviceOpBase:
@@ -239,11 +230,7 @@ if torch._C._has_mkldnn:
                         ]
                         with graph.inserting_after(grouped_gemm_node):
                             for gemm_idx, user in enumerate(users):
-                                if user.target != computation_op:
-                                    raise AssertionError(
-                                        "expected user.target to be "
-                                        f"{computation_op}, got {user.target}"
-                                    )
+                                assert user.target == computation_op
                                 get_item = graph.create_node(
                                     "call_function",
                                     operator.getitem,
@@ -469,7 +456,6 @@ if torch._C._has_mkldnn:
         @register_lowering_pattern(
             pattern,
             extra_check=_is_valid_computation_unary_fusion(computation_op, lowp_dtype),
-            output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
             computation_args = list(args)[:-3] + [
@@ -487,9 +473,7 @@ if torch._C._has_mkldnn:
 
     def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern,
-            extra_check=_is_single_computation_op(computation_op, lowp_dtype),
-            output_metadata_ignores_input_storage=True,
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
         def fn(match, *args, **kwargs):
             negative_slope = kwargs.get("negative_slope")
@@ -535,9 +519,7 @@ if torch._C._has_mkldnn:
 
     def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern,
-            extra_check=_is_single_computation_op(computation_op, lowp_dtype),
-            output_metadata_ignores_input_storage=True,
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
         def fn(match, *args, **kwargs):
             min_value = kwargs.get("min_value")
@@ -547,8 +529,7 @@ if torch._C._has_mkldnn:
             ):
                 matched = False
             else:  # inp is a Number
-                if max_value is None:
-                    raise AssertionError("expected max_value to not be None")
+                assert max_value is not None
                 matched = min_value <= max_value
             if lowp_dtype:
                 dtype1 = kwargs.get("to_float")
@@ -619,11 +600,7 @@ if torch._C._has_mkldnn:
             computation_node = (
                 n.args[0] if n.args[1] is match.kwargs["other"] else n.args[1]
             )
-            if computation_node.target != computation_op:
-                raise AssertionError(
-                    "expected computation_node.target to be "
-                    f"{computation_op}, got {computation_node.target}"
-                )
+            assert computation_node.target == computation_op
             computation_node_size = get_meta_value(computation_node).size()
             if computation_op is mkldnn._linear_pointwise.default:
                 broadcast_sizes = []
@@ -635,11 +612,7 @@ if torch._C._has_mkldnn:
                         ),
                     ]
             else:
-                if not len(computation_node_size) > 2:
-                    raise AssertionError(
-                        "expected len(computation_node_size) > 2, got "
-                        f"{len(computation_node_size)}"
-                    )
+                assert len(computation_node_size) > 2
                 broadcast_sizes = [
                     torch.Size(
                         [computation_node_size[0], computation_node_size[1]]
@@ -729,8 +702,9 @@ if torch._C._has_mkldnn:
             binary_nodes = filter_nodes(match.nodes, binary_op)
 
             def _get_compute_node(_binary_node, _other_index):
-                if len(_binary_node.all_input_nodes) != 2:
-                    raise AssertionError("Binary node should have 2 input nodes.")
+                assert len(_binary_node.all_input_nodes) == 2, (
+                    "Binary node should have 2 input nodes."
+                )
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
@@ -765,16 +739,11 @@ if torch._C._has_mkldnn:
         unary_attr=None,
     ):
         @register_lowering_pattern(
-            pattern,
-            extra_check=_is_valid_computation_binary(computation_op, binary_op),
-            output_metadata_ignores_input_storage=True,
+            pattern, extra_check=_is_valid_computation_binary(computation_op, binary_op)
         )
         def fn(match, *args, **kwargs):
             other = kwargs.get("other")
-            if not isinstance(other, ir.TensorBox):
-                raise AssertionError(
-                    f"expected other to be ir.TensorBox, got {type(other)}"
-                )
+            assert isinstance(other, ir.TensorBox)
             binary_attr = _binary_attr[binary_op]
             args_list = list(args)
             computation_args = [args_list[0], other] + args_list[1:-3] + [binary_attr]
@@ -849,14 +818,10 @@ if torch._C._has_mkldnn:
             extra_check=_is_valid_computation_binary_inplace(
                 computation_op, binary_op, other_index
             ),
-            output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
             other = kwargs.get("other")
-            if not isinstance(other, ir.TensorBox):
-                raise AssertionError(
-                    f"expected other to be ir.TensorBox, got {type(other)}"
-                )
+            assert isinstance(other, ir.TensorBox)
             binary_attr = _binary_attr[binary_op]
             args_list = list(args)
             computation_args = [args_list[0], other] + args_list[1:-3] + [binary_attr]
@@ -874,7 +839,7 @@ if torch._C._has_mkldnn:
             counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"] += (
                 len(match.nodes)
             )
-            # Make sure the other is not an alias or mutation (fx side doesn't have such info).
+            # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
             if not _can_be_inplace(other) or other.data.shape != list(
                 match.nodes[0].meta["val"].size()
@@ -1097,18 +1062,9 @@ if torch._C._has_mkldnn:
 
             reshape_1 = kwargs.get("reshape_1")
             reshape_2 = kwargs.get("reshape_2")
-            if not isinstance(reshape_1, list):
-                raise AssertionError(
-                    f"expected reshape_1 to be list, got {type(reshape_1)}"
-                )
-            if not isinstance(reshape_2, list):
-                raise AssertionError(
-                    f"expected reshape_2 to be list, got {type(reshape_2)}"
-                )
-            if len(reshape_1) != 2:
-                raise AssertionError(
-                    f"expected len(reshape_1) == 2, got {len(reshape_1)}"
-                )
+            assert isinstance(reshape_1, list)
+            assert isinstance(reshape_2, list)
+            assert len(reshape_1) == 2
 
             graph = match.graph
             reshape_2_node = match.output_node()
@@ -1151,9 +1107,10 @@ if torch._C._has_mkldnn:
             )
             weight_meta = transpose_weight_node.args[0].meta.get("val")
             bias_node = add_node.args[1]
-            if not isinstance(bias_node, torch.fx.Node):
+            if isinstance(bias_node, int):
+                # we only folding bias if it is a constant
                 return False
-            bias_meta = bias_node.meta.get("val")
+            bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
                 return False
 
@@ -1298,7 +1255,7 @@ if torch._C._has_mkldnn:
             return all(arg.op == "get_attr" for arg in weight.args[0])
 
         linear_node = match.output_node()
-        # mkldnn linear only supports beta=1 or 0 and alpha=1
+        # mkldnn linear only supports beta=1or0 and alpha=1
         if linear_node.target is aten.addmm.default:
             alpha = linear_node.kwargs.get("alpha", 1.0)
             beta = linear_node.kwargs.get("beta", 1.0)
@@ -1407,10 +1364,7 @@ if torch._C._has_mkldnn:
         )
         def convolution(match, *args, **kwargs):
             is_transposed = kwargs.get("is_transposed")
-            if not isinstance(is_transposed, bool):
-                raise AssertionError(
-                    f"expected is_transposed to be bool, got {type(is_transposed)}"
-                )
+            assert isinstance(is_transposed, bool)
             graph = match.graph
             conv_node = match.output_node()
             device_type = conv_node.args[0].meta.get("val").device.type
@@ -1432,8 +1386,7 @@ if torch._C._has_mkldnn:
                         input_size,
                     )
                 else:
-                    if is_transposed:
-                        raise AssertionError("expected is_transposed to be False")
+                    assert not is_transposed
                     # For dynamic shape case, we need to pack weight in runtime.
                     packed_weight_node = args[1]
 
@@ -1634,4 +1587,5 @@ if torch._C._has_mkldnn:
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
             _recover_linear()
+            _register_quantization_weight_pack_pass()
             _register_int8_woq_concat_linear_pattern()

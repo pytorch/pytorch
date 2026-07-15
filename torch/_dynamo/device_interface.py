@@ -20,13 +20,12 @@ import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Optional, Union
 
 import torch
-from torch.utils._pallas import has_torch_tpu
 
 
-get_cuda_stream: Callable[[int], int] | None
+get_cuda_stream: Optional[Callable[[int], int]]
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
 else:
@@ -182,7 +181,7 @@ class DeviceGuard:
     """
 
     def __init__(
-        self, device_interface: type[DeviceInterface], index: int | None
+        self, device_interface: type[DeviceInterface], index: Optional[int]
     ) -> None:
         self.device_interface = device_interface
         self.idx = index
@@ -223,10 +222,7 @@ class CudaInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    if device.type != "cuda":
-                        raise AssertionError(
-                            f"Expected device type 'cuda', got '{device.type}'"
-                        )
+                    assert device.type == "cuda"
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -245,6 +241,7 @@ class CudaInterface(DeviceInterface):
     set_device = staticmethod(torch.cuda.set_device)
     device_count = staticmethod(torch.cuda.device_count)
     stream = staticmethod(torch.cuda.stream)  # type: ignore[assignment]
+    # pyrefly: ignore [bad-override]
     current_stream = staticmethod(torch.cuda.current_stream)
     set_stream = staticmethod(torch.cuda.set_stream)  # type: ignore[assignment]
     _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
@@ -262,7 +259,7 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.is_available()
 
     @staticmethod
-    def get_compute_capability(device: torch.types.Device = None) -> int | str:
+    def get_compute_capability(device: torch.types.Device = None) -> Union[int, str]:
         if torch.version.hip is None:
             major, min = torch.cuda.get_device_capability(device)
             return major * 10 + min
@@ -293,7 +290,7 @@ class CudaInterface(DeviceInterface):
             raise RuntimeError("triton not built with the 'nvidia' backend")
 
 
-get_mtia_stream: Callable[[int], int] | None
+get_mtia_stream: Optional[Callable[[int], int]]
 if torch.mtia._is_compiled():
     from torch._C import _mtia_getCurrentRawStream as get_mtia_stream
 else:
@@ -322,10 +319,7 @@ class MtiaInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    if device.type != "mtia":
-                        raise AssertionError(
-                            f"Expected device type 'mtia', got '{device.type}'"
-                        )
+                    assert device.type == "mtia"
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -344,6 +338,7 @@ class MtiaInterface(DeviceInterface):
     set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
     device_count = staticmethod(torch.mtia.device_count)
     stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
+    # pyrefly: ignore [bad-override]
     current_stream = staticmethod(torch.mtia.current_stream)
     set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
     _set_stream_by_id = staticmethod(torch.mtia._set_stream_by_id)  # type: ignore[assignment]
@@ -378,7 +373,7 @@ class MtiaInterface(DeviceInterface):
             raise RuntimeError("triton not built with the 'mtia' backend")
 
 
-get_xpu_stream: Callable[[int], int] | None
+get_xpu_stream: Optional[Callable[[int], int]]
 if torch.xpu._is_compiled():
     from torch._C import _xpu_getCurrentRawStream as get_xpu_stream
 else:
@@ -407,10 +402,7 @@ class XpuInterface(DeviceInterface):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
-                    if device.type != "xpu":
-                        raise AssertionError(
-                            f"Expected device type 'xpu', got '{device.type}'"
-                        )
+                    assert device.type == "xpu"
                 if isinstance(device, torch.device):
                     device = device.index
             if device is None:
@@ -429,6 +421,7 @@ class XpuInterface(DeviceInterface):
     set_device = staticmethod(torch.xpu.set_device)
     device_count = staticmethod(torch.xpu.device_count)  # type: ignore[has-type]
     stream = staticmethod(torch.xpu.stream)  # type: ignore[assignment]
+    # pyrefly: ignore [bad-override]
     current_stream = staticmethod(torch.xpu.current_stream)
     set_stream = staticmethod(torch.xpu.set_stream)  # type: ignore[assignment]
     _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)  # type: ignore[assignment]
@@ -532,7 +525,7 @@ class CpuInterface(DeviceInterface):
 class MpsInterface(DeviceInterface):
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
-        return True
+        return torch.backends.mps.is_macos_or_newer(14, 0)
 
     @classmethod
     def is_dtype_supported(
@@ -540,7 +533,7 @@ class MpsInterface(DeviceInterface):
     ) -> bool:
         if dtype in [torch.float64, torch.complex128]:
             return False
-        return True
+        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
 
     @staticmethod
     def is_available() -> bool:
@@ -571,61 +564,19 @@ class MpsInterface(DeviceInterface):
             return 0
 
 
-class TpuInterface(DeviceInterface):
-    @staticmethod
-    def is_bf16_supported(including_emulation: bool = False) -> bool:
-        return True
-
-    @classmethod
-    def is_dtype_supported(
-        cls, dtype: torch.dtype, including_emulation: bool = False
-    ) -> bool:
-        return dtype not in (
-            torch.float64,
-            torch.complex32,
-            torch.complex64,
-            torch.complex128,
-            torch.half,
-        )
-
-    @staticmethod
-    def is_available() -> bool:
-        return has_torch_tpu()
-
-    @staticmethod
-    def current_device() -> int:
-        return 0
-
-    @staticmethod
-    def get_compute_capability(device: torch.types.Device = None) -> str:
-        return ""
-
-    # pyrefly: ignore [bad-override]
-    class Worker:
-        @staticmethod
-        def get_device_properties(device: torch.types.Device = None) -> Any:
-            return namedtuple("TPUProperties", ["multi_processor_count"])(
-                1  # type: ignore[arg-type]
-            )
-
-        @staticmethod
-        def current_device() -> int:
-            return 0
-
-
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
 
 
 def register_interface_for_device(
-    device: str | torch.device, device_interface: type[DeviceInterface]
+    device: Union[str, torch.device], device_interface: type[DeviceInterface]
 ) -> None:
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
 
 
-def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:
+def get_interface_for_device(device: Union[str, torch.device]) -> type[DeviceInterface]:
     if isinstance(device, torch.device):
         device = device.type
     if not _device_initialized:
@@ -657,6 +608,5 @@ def init_device_reg() -> None:
 
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
-    register_interface_for_device("tpu", TpuInterface)
 
     _device_initialized = True

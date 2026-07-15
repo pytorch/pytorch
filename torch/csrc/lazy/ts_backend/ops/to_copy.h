@@ -89,7 +89,7 @@ class ToCopy : public torch::lazy::TsNode {
     } else {
       ss << ", memory_format=null";
     }
-    return std::move(ss).str();
+    return ss.str();
   }
 
   torch::lazy::TSOpVector Lower(

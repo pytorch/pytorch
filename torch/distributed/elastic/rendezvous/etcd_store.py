@@ -120,7 +120,6 @@ class EtcdStore(Store):
             except etcd.EtcdCompareFailed:
                 cas_delay()
 
-    # pyrefly: ignore [bad-override]
     def wait(self, keys, override_timeout: datetime.timedelta | None = None):
         """
         Wait until all of the keys are published, or until timeout.

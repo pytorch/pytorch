@@ -76,7 +76,7 @@ class _DistWrapper:
     """
     This is a wrapper around PG that provides a series of features around object collectives.
 
-    It works without distributed initialized, where most collectives turn into nops.
+    It works without distributed initialized, where most collectives turns into nops.
 
     All variants that take functions are exception robust, meaning that if one or more
     ranks raise errors, all ranks will observe those.
@@ -191,7 +191,7 @@ class _DistWrapper:
         local_data: WRAPPED_EXCEPTION | T
         try:
             local_data = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
@@ -208,7 +208,7 @@ class _DistWrapper:
                         list[R | CheckpointException],
                         reduce_fun(cast(list[T], all_data)),
                     )
-                except BaseException as e:
+                except BaseException as e:  # noqa: B036
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -239,7 +239,7 @@ class _DistWrapper:
         local_data: T | WRAPPED_EXCEPTION
         try:
             local_data = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
@@ -251,7 +251,7 @@ class _DistWrapper:
             if len(node_failures) == 0:
                 try:
                     result = reduce_fun(cast(list[T], all_data))
-                except BaseException as e:
+                except BaseException as e:  # noqa: B036
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -261,7 +261,6 @@ class _DistWrapper:
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
-        # pyrefly: ignore [redundant-cast]
         return cast(R, final_result)
 
     def all_gather(
@@ -279,7 +278,7 @@ class _DistWrapper:
         result: T | WRAPPED_EXCEPTION
         try:
             result = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             result = _wrap_exception(e)
 
         all_results = self.all_gather_object(result)
@@ -305,13 +304,12 @@ class _DistWrapper:
         if self.is_coordinator:
             try:
                 result = map_fun()
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
         # pyrefly: ignore [bad-argument-type]
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
-        # pyrefly: ignore [redundant-cast]
         return cast(T, final_result)
 
     def barrier(self) -> None:

@@ -24,8 +24,7 @@ ExperimentalConfig::ExperimentalConfig(
     bool record_python_gc_info,
     bool expose_kineto_event_metadata,
     std::string custom_profiler_config,
-    bool adjust_timestamps,
-    bool trace_only)
+    bool adjust_timestamps)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
       verbose{verbose},
@@ -38,8 +37,11 @@ ExperimentalConfig::ExperimentalConfig(
       record_python_gc_info{record_python_gc_info},
       expose_kineto_event_metadata{expose_kineto_event_metadata},
       custom_profiler_config(std::move(custom_profiler_config)),
-      adjust_timestamps{adjust_timestamps},
-      trace_only{trace_only} {}
+      adjust_timestamps{adjust_timestamps} {}
+
+/*explicit*/ ExperimentalConfig::operator bool() const {
+  return !profiler_metrics.empty();
+}
 
 ProfilerConfig::ProfilerConfig(
     ProfilerState state,
@@ -100,7 +102,7 @@ ProfilerConfig ProfilerConfig::fromIValue(
       c10::str(
           "Expected exactly ",
           NUM_PROFILER_CFG_IVALUE_IDX,
-          " ivalues to reconstruct ProfilerConfig."));
+          " ivalues to resconstruct ProfilerConfig."));
   return ProfilerConfig(
       static_cast<ProfilerState>(ivalues.get(ProfilerIValueIdx::STATE).toInt()),
       ivalues.get(ProfilerIValueIdx::REPORT_INPUT_SHAPES).toBool(),
@@ -121,18 +123,13 @@ ProfilerStateBase::~ProfilerStateBase() {
   }
 }
 
-/*static*/ std::shared_ptr<ProfilerStateBase> ProfilerStateBase::getGlobal() {
-  auto out = GlobalManager::get();
+/*static*/ ProfilerStateBase* ProfilerStateBase::get(bool global) {
+  auto* out = global
+      ? GlobalManager::get()
+      : static_cast<ProfilerStateBase*>(
+            c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      out == nullptr || out->config().pushGlobalCallbacks());
-  return out;
-}
-
-/*static*/ ProfilerStateBase* ProfilerStateBase::getTLS() {
-  auto* out = static_cast<ProfilerStateBase*>(
-      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      out == nullptr || !out->config().pushGlobalCallbacks());
+      !out || out->config().pushGlobalCallbacks() == global);
   return out;
 }
 
@@ -162,8 +159,7 @@ std::shared_ptr<ProfilerStateBase> popTLS() {
 /*static*/ std::shared_ptr<ProfilerStateBase> ProfilerStateBase::pop(
     bool global) {
   auto out = global ? GlobalManager::pop() : popTLS();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      !out || out->config().pushGlobalCallbacks() == global);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!out || out->config().global() == global);
   return out;
 }
 
@@ -187,18 +183,18 @@ void ProfilerStateBase::removeCallback() {
 }
 
 bool profilerEnabled() {
-  ProfilerStateBase* state_ptr = ProfilerStateBase::getTLS();
+  auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
   return state_ptr && !state_ptr->config().disabled();
 }
 
 TORCH_API ActiveProfilerType profilerType() {
-  ProfilerStateBase* state_ptr = ProfilerStateBase::getTLS();
+  auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
   return state_ptr == nullptr ? ActiveProfilerType::NONE
                               : state_ptr->profilerType();
 }
 
 torch::profiler::impl::ProfilerConfig getProfilerConfig() {
-  ProfilerStateBase* state_ptr = ProfilerStateBase::getTLS();
+  auto* state_ptr = ProfilerStateBase::get(/*global=*/false);
   TORCH_CHECK(
       state_ptr,
       "Tried to access profiler config, but profiler is not enabled!");

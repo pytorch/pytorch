@@ -3,12 +3,16 @@
 namespace c10::impl {
 
 // Define the registry
-C10_DEFINE_REGISTRY(PyInterpreterHooksRegistry, PyInterpreterHooksInterface)
+C10_DEFINE_REGISTRY(
+    PyInterpreterHooksRegistry,
+    PyInterpreterHooksInterface,
+    PyInterpreterHooksArgs)
 
 const PyInterpreterHooksInterface& getPyInterpreterHooks() {
   auto create_impl = [] {
 #if !defined C10_MOBILE
-    auto hooks = PyInterpreterHooksRegistry()->Create("PyInterpreterHooks");
+    auto hooks = PyInterpreterHooksRegistry()->Create(
+        "PyInterpreterHooks", PyInterpreterHooksArgs{});
     if (hooks) {
       return hooks;
     }
@@ -22,8 +26,7 @@ const PyInterpreterHooksInterface& getPyInterpreterHooks() {
 
 // Main function to get global PyInterpreter
 PyInterpreter* getGlobalPyInterpreter() {
-  static PyInterpreter* cached = getPyInterpreterHooks().getPyInterpreter();
-  return cached;
+  return getPyInterpreterHooks().getPyInterpreter();
 }
 
 } // namespace c10::impl

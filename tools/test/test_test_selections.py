@@ -6,7 +6,6 @@ import sys
 import unittest
 from collections import defaultdict
 from pathlib import Path
-from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -14,11 +13,7 @@ try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
     from tools.testing.test_run import ShardedTest, TestRun
-    from tools.testing.test_selections import (
-        calculate_shards,
-        get_job_base_name,
-        THRESHOLD,
-    )
+    from tools.testing.test_selections import calculate_shards, THRESHOLD
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     sys.exit(1)
@@ -433,57 +428,6 @@ class TestCalculateShards(unittest.TestCase):
             ),
         )
 
-    def test_opinfo_uses_min_duration_for_pytest_sharding(self) -> None:
-        opinfo = "inductor/test_torchinductor_opinfo"
-        with mock.patch(
-            "tools.testing.test_selections.BUILD_ENVIRONMENT",
-            "linux-jammy-py3.10-gcc11",
-        ):
-            shards = calculate_shards(
-                1,
-                [TestRun(opinfo), TestRun("normal_test")],
-                {opinfo: 1, "normal_test": 2},
-                None,
-            )
-        self.assertEqual(THRESHOLD * 56 + 2, shards[0][0])
-
-        opinfo_shards = [test for test in shards[0][1] if test.name == opinfo]
-        self.assertEqual(56, len(opinfo_shards))
-        self.assertEqual(list(range(1, 57)), [test.shard for test in opinfo_shards])
-        self.assertTrue(
-            all(
-                test.num_shards == 56 and test.time == THRESHOLD
-                for test in opinfo_shards
-            )
-        )
-        self.assertIn(
-            ShardedTest(test="normal_test", shard=1, num_shards=1, time=2),
-            shards[0][1],
-        )
-
-    def test_opinfo_does_not_use_min_duration_on_windows(self) -> None:
-        opinfo = "inductor/test_torchinductor_opinfo"
-        with mock.patch(
-            "tools.testing.test_selections.BUILD_ENVIRONMENT",
-            "win-vs2022-cpu-py3",
-        ):
-            shards = calculate_shards(
-                1,
-                [TestRun(opinfo), TestRun("normal_test")],
-                {opinfo: 1, "normal_test": 2},
-                None,
-            )
-
-        self.assertEqual(3, shards[0][0])
-        self.assertIn(
-            ShardedTest(test=opinfo, shard=1, num_shards=1, time=1),
-            shards[0][1],
-        )
-        self.assertIn(
-            ShardedTest(test="normal_test", shard=1, num_shards=1, time=2),
-            shards[0][1],
-        )
-
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))
 
@@ -529,6 +473,7 @@ class TestCalculateShards(unittest.TestCase):
                     self.assertTrue(sharded_tests[0].time is None)
                 else:
                     # x.time is not None because of the above check
+                    # pyrefly: ignore [no-matching-overload]
                     self.assertAlmostEqual(
                         random_times[test],
                         sum(x.time for x in sharded_tests),  # type: ignore[misc]
@@ -603,52 +548,6 @@ class TestCalculateShards(unittest.TestCase):
                 )
                 # All the tests should be represented by some shard
                 self.assertEqual(sorted_tests, [x.name for x in sorted_shard_tests])
-
-
-class TestGetJobBaseName(unittest.TestCase):
-    def test_strips_test_target(self) -> None:
-        self.assertEqual(
-            get_job_base_name(
-                "linux-jammy-py3.10-clang18 / test (dynamo_wrapped, 1, 3, lf-l-x86)"
-            ),
-            "linux-jammy-py3.10-clang18",
-        )
-
-    def test_strips_test_osdc_target(self) -> None:
-        self.assertEqual(
-            get_job_base_name(
-                "linux-jammy-py3.14t-clang18 / test-osdc (dynamo_wrapped, 1, 3, mt-l-x86)"
-            ),
-            "linux-jammy-py3.14t-clang18",
-        )
-
-    def test_build_env_with_test_substring_is_preserved(self) -> None:
-        # The build env itself contains "-test-"; only the target suffix is stripped.
-        self.assertEqual(
-            get_job_base_name(
-                "cross-compile-linux-test-cuda13 / test-osdc (aoti, 1, 1, r, win)"
-            ),
-            "cross-compile-linux-test-cuda13",
-        )
-
-    def test_multi_segment_name_keeps_full_prefix(self) -> None:
-        # Only the final target is split; the rest is the key.
-        self.assertEqual(
-            get_job_base_name(
-                "unit-test / inductor-test / test-osdc (inductor, 2, 2, mt-l-x86)"
-            ),
-            "unit-test / inductor-test",
-        )
-
-    def test_unrelated_targets_are_not_matched(self) -> None:
-        # Non-test/test-osdc targets are left intact so they miss the lookup.
-        for name in (
-            "env / test-foo (default, 1, 1, r)",
-            "env / testbar (default, 1, 1, r)",
-            "env / inductor-cpu-core-test (3.11)",
-            "env / build",
-        ):
-            self.assertEqual(get_job_base_name(name), name)
 
 
 if __name__ == "__main__":

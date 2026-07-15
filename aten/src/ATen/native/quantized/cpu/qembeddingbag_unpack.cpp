@@ -94,6 +94,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
   TORCH_INTERNAL_ASSERT(
       false,
       "We currently only support 8-bit and 4-bit quantization of embedding_bag.");
+  return weight_origin;
 }
 
 namespace at::native {

@@ -59,7 +59,9 @@ def warn_deprecated():
     )
 
 
-def custom_op(qualname: str, manual_schema: str | None = None) -> typing.Callable:
+def custom_op(
+    qualname: str, manual_schema: typing.Optional[str] = None
+) -> typing.Callable:
     r"""
     This API is deprecated, please use torch.library.custom_op instead
     """
@@ -153,7 +155,7 @@ class CustomOp:
         self.__name__ = None  # mypy requires this
         # NB: Some of these impls are registered as kernels to DispatchKeys.
         # Modifying the _impls dict directly won't do anything in that case.
-        self._impls: dict[str, FuncAndLocation | None] = {}
+        self._impls: dict[str, typing.Optional[FuncAndLocation]] = {}
         # See NOTE [CustomOp autograd kernel indirection]
         self._registered_autograd_kernel_indirection = False
 
@@ -218,7 +220,7 @@ class CustomOp:
 
     def impl(
         self,
-        device_types: str | typing.Iterable[str],
+        device_types: typing.Union[str, typing.Iterable[str]],
         _stacklevel=2,
     ) -> typing.Callable:
         r"""
@@ -358,7 +360,7 @@ class CustomOp:
                 raise RuntimeError(
                     f"impl_backward/impl_save_for_backward: "
                     f"the operator {self._qualname} already has an Autograd kernel "
-                    f"registered to DispatchKey::{key} via a pre-existing "
+                    f"registered to DispatchKey::{key} vi a pre-existing "
                     f"torch.library or TORCH_LIBRARY registration. Please either "
                     f"remove those registrations or don't use the torch._custom_ops APIs"
                 )
@@ -397,7 +399,7 @@ class CustomOp:
         if _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "Meta"):
             raise RuntimeError(
                 f"impl_abstract(...): the operator {self._qualname} "
-                f"already has a DispatchKey::Meta implementation via a "
+                f"already has an DispatchKey::Meta implementation via a "
                 f"pre-existing torch.library or TORCH_LIBRARY registration. "
                 f"Please either remove that registration or don't call impl_abstract."
             )
@@ -556,7 +558,7 @@ def validate_function_matches_schema(
 ) -> None:
     sig = inspect.signature(func)
 
-    if not all(supported_param(p) for p in sig.parameters.values()):
+    if not all(supported_param(p) for _, p in sig.parameters.items()):
         raise ValueError(
             f"custom_op(..., manual_schema)(func): positional-only args, "
             f"varargs, and kwargs are not supported. Please rewrite `func` "
@@ -565,7 +567,8 @@ def validate_function_matches_schema(
 
     if (
         any(
-            p.annotation is not inspect.Parameter.empty for p in sig.parameters.values()
+            p.annotation is not inspect.Parameter.empty
+            for _, p in sig.parameters.items()
         )
         or sig.return_annotation is not inspect.Signature.empty
     ):

@@ -29,8 +29,7 @@ _set_triton_ptxas_path()
 try:
     import triton
 
-    if triton is None:
-        raise AssertionError("triton failed to preload in parent")
+    assert triton is not None  # preload in parent
 except ImportError:
     pass
 

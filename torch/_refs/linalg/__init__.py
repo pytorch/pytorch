@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 
-def _check_norm_dtype(dtype: torch.dtype | None, x_dtype: torch.dtype, fn_name: str):
+def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name: str):
     """
     Checks related to the dtype kwarg in `linalg.*norm` functions
     """
@@ -99,7 +99,7 @@ def diagonal(
 
 
 def _check_vector_norm_args(
-    x: TensorLikeType, ord: float | int = 2, dim: DimsType | None = None
+    x: TensorLikeType, ord: Union[float, int] = 2, dim: Optional[DimsType] = None
 ):
     from torch.fx.experimental.symbolic_shapes import sym_or
 
@@ -130,11 +130,11 @@ def _check_vector_norm_args(
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
-    ord: float | int = 2,
-    dim: DimsType | None = None,
+    ord: Union[float, int] = 2,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -163,15 +163,13 @@ def vector_norm(
     else:
         # From here on the computation dtype is important as the reduction is non-trivial
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
-        is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
-        if dim is not None and not isinstance(dim, IntLike) and len(dim) == 0:
-            dim = None
-        elif dim is not None:
-            dim = utils.canonicalize_dims(x.ndim, dim)
-
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
-        if (dim is None and guard_or_false(x.numel() == 1)) or (
+        is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
+        if dim == []:
+            dim = None
+
+        if (dim is None and x.numel() == 1) or (
             dim is not None
             and (x.ndim > 0 and all(guard_or_false(x.shape[d] == 1) for d in dim))
         ):
@@ -210,11 +208,11 @@ def _inverse_permutation(perm):
 @out_wrapper(exact_dtype=True)
 def matrix_norm(
     A: TensorLikeType,
-    ord: float | str = "fro",
+    ord: Union[float, str] = "fro",
     dim: DimsType = (-2, -1),
     keepdim: bool = False,
     *,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     # shape
     check_is_matrix(A, "linalg.matrix_norm")
@@ -311,11 +309,11 @@ def matrix_norm(
 @out_wrapper(exact_dtype=True)
 def norm(
     A: TensorLikeType,
-    ord: float | str | None = None,
-    dim: DimsType | None = None,
+    ord: Optional[Union[float, str]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     if dim is not None:
         if isinstance(dim, Dim):
@@ -363,3 +361,76 @@ def svdvals(A: TensorLikeType) -> Tensor:
 def vecdot(x: Tensor, y: Tensor, dim: int = -1) -> Tensor:
     check_fp_or_complex(x.dtype, "linalg.vecdot")
     return (x.conj() * y).sum(dim=dim)
+
+
+def _pivots_to_permutation(pivots, shape, *, inverse=False):
+    perm = torch.empty(shape, dtype=torch.int32, device=pivots.device)
+    perm[..., :] = torch.arange(shape[-1], dtype=torch.int32, device=pivots.device)
+    indices = range(shape[-1])
+    if inverse:
+        indices = reversed(indices)
+
+    if len(shape) > 1:
+        for i in indices:
+            j_s = pivots[..., i]
+            perm_i = perm[..., i].clone()
+            j_idx = torch.meshgrid(
+                *[torch.arange(s, device=perm.device) for s in j_s.shape], indexing="ij"
+            ) + (j_s,)
+            perm_j = perm[j_idx]
+            perm.index_put_(j_idx, perm_i)
+            perm[..., i].copy_(perm_j)
+
+    else:
+        for i in indices:
+            j = pivots[i]
+            perm_i = perm[i].clone()
+            perm_j = perm[j].clone()
+            perm[i].copy_(perm_j)
+            perm[j].copy_(perm_i)
+
+    return perm
+
+
+def _apply_pivots(a, pivots, shape, *, inverse=False):
+    perm = _pivots_to_permutation(pivots - 1, shape, inverse=inverse)
+
+    if len(shape) == 1:
+        return a[perm, :]
+    else:
+        idx = torch.meshgrid(
+            *[torch.arange(s, device=a.device) for s in perm.shape], indexing="ij"
+        )[:-1] + (perm, slice(None))
+        return a[idx]
+
+
+def linalg_lu_solve_out_mps(LU, pivots, B, *, left=True, adjoint=False, out):
+    if out.numel() == 0:
+        return
+
+    if not left:
+        adjoint = not adjoint
+        B = B.mH
+
+    if adjoint:
+        lu_ = LU.mH
+        x = torch.linalg.solve_triangular(lu_, B, left=True, upper=False)
+        x = torch.linalg.solve_triangular(
+            lu_, x, left=True, upper=True, unitriangular=True
+        )
+        x = _apply_pivots(x, pivots, LU.shape[:-1], inverse=True)
+    else:
+        x = _apply_pivots(B, pivots, LU.shape[:-1])
+        x = torch.linalg.solve_triangular(
+            LU, x, left=True, upper=False, unitriangular=True
+        )
+        x = torch.linalg.solve_triangular(LU, x, left=True, upper=True)
+
+    if not left:
+        x = x.mH
+
+    out.copy_(x)
+
+
+mps_lib = torch.library.Library("aten", "IMPL", "MPS")  # noqa: TOR901
+mps_lib.impl("aten::linalg_lu_solve.out", linalg_lu_solve_out_mps)

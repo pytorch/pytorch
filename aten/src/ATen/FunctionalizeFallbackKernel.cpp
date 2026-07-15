@@ -29,10 +29,11 @@
 namespace at::functionalization {
 
 Tensor resize__ViewMeta::forward(const Tensor& base) {
-  if (!reapply_views) {
+  if (reapply_views) {
+    return base.as_strided(size, c10::contiguous_strides(size));
+  } else {
     return at::as_strided_copy(base, size, c10::contiguous_strides(size));
   }
-  return base.as_strided(size, c10::contiguous_strides(size));
 }
 
 Tensor resize__ViewMeta::reverse(const Tensor& base, const Tensor& mutated_view) {
@@ -111,21 +112,6 @@ namespace {
           auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
           (*stack)[arguments_begin + idx] = t_new;
         }
-      } else if (ivalue.isList()) {
-        // Handle nested lists containing tensor lists (e.g., Tensor[][]).
-        auto list = ivalue.toList();
-        for (const auto i : c10::irange(list.size())) {
-          const auto& elem = list.get(i);
-          if (elem.isTensorList()) {
-            any_tensor_inputs = true;
-            auto tensors = elem.toTensorList();
-            if (at::functionalization::impl::isFunctionalTensor(tensors)) {
-              any_functional_inputs = true;
-              at::functionalization::impl::sync(tensors);
-              list.set(i, c10::IValue(at::functionalization::impl::from_functional_tensor(tensors)));
-            }
-          }
-        }
       }
     }
     // we should wrap the output if any inputs were wrapped,
@@ -156,16 +142,6 @@ namespace {
         auto opt_tensors = ivalue.toOptionalTensorList();
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
         (*stack)[returns_begin + idx] = t_new;
-      } else if (ivalue.isList() && should_wrap_outputs) {
-        // Handle nested lists containing tensor lists (e.g., Tensor[][]).
-        auto list = ivalue.toList();
-        for (const auto i : c10::irange(list.size())) {
-          const auto& elem = list.get(i);
-          if (elem.isTensorList()) {
-            auto tensors = elem.toTensorList();
-            list.set(i, c10::IValue(at::functionalization::impl::to_functional_tensor(tensors)));
-          }
-        }
       }
     }
   }
@@ -226,10 +202,7 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
 
 
 static at::Tensor lift_functionalize(const at::Tensor & self) {
-  if (at::functionalization::impl::isFunctionalTensor(self)) {
-    return self.view_as(self);
-  }
-
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift(self);
   return at::functionalization::impl::to_functional_tensor(out);

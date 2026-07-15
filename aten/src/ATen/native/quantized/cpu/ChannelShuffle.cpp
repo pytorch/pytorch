@@ -102,11 +102,10 @@ Tensor channel_shuffle_quantized_cpu(
     int64_t groups) {
 #ifdef USE_PYTORCH_QNNPACK
   return quantized_channel_shuffle_impl(self, groups);
-#else
+#endif
   // If QNNPACK is not available then fall back to the
   // non quantized path.
   return at::native::channel_shuffle(self, groups);
-#endif
 }
 
 // Keep the registry in the anonymous namespace.

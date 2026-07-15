@@ -181,7 +181,7 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(len(new_results), 1)
         self.assertEqual(
             set(key_1.keys()),
-            {j for i in new_results for j in i}
+            {j for i in new_results for j in i}  # noqa: SIM118
             - set(MODULE_DEFAULTS["torch._dynamo.config"].keys()),
         )
 

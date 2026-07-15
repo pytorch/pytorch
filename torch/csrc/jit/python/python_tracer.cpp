@@ -64,7 +64,7 @@ SourceRange getPythonInterpreterSourceRange() {
     }
   }
 
-  auto stack_trace_text = std::move(stack_trace).str();
+  auto stack_trace_text = stack_trace.str();
   auto source =
       std::make_shared<Source>(stack_trace_text, source_filename, source_line);
   return SourceRange(source, 0, stack_trace_text.size());
@@ -113,7 +113,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
         // We just leave the inputs_dict as it was and pass it to forward
         // method.
         auto out = func(**inputs_dict);
-        if (Py_IsNone(out.ptr())) {
+        if (out.ptr() == Py_None) {
           TORCH_CHECK(
               false,
               "The traced function didn't return any values! Side-effects are not "
@@ -154,7 +154,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
           py_inputs[i] = py::cast(inputs[i]);
         }
         auto out = func(*py_inputs);
-        if (Py_IsNone(out.ptr())) {
+        if (out.ptr() == Py_None) {
           TORCH_CHECK(
               false,
               "The traced function didn't return any values! Side-effects are not "
@@ -218,14 +218,14 @@ void initPythonTracerBindings(PyObject* module) {
           [](const TracingState& s) {
             std::ostringstream ss;
             ss << "<TracingState " << (const void*)&s << '>';
-            return std::move(ss).str();
+            return ss.str();
           })
       .def(
           "__str__",
           [](const TracingState& s) -> std::string {
             std::ostringstream ss;
             ss << *s.graph;
-            return std::move(ss).str();
+            return ss.str();
           })
       .def(
           "push_scope",

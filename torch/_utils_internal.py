@@ -228,16 +228,7 @@ def max_clock_rate():
     if not torch.version.hip:
         from triton.testing import nvsmi
 
-        try:
-            return nvsmi(["clocks.max.sm"])[0]
-        except FileNotFoundError:
-            import pynvml  # type: ignore[import]
-
-            handle = torch.cuda._get_pynvml_handler()
-            try:
-                return pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
-            finally:
-                pynvml.nvmlShutdown()
+        return nvsmi(["clocks.max.sm"])[0]
     else:
         # Manually set max-clock speeds on ROCm until equivalent nvmsi
         # functionality in triton.testing or via pyamdsmi enablement. Required
@@ -384,10 +375,3 @@ def find_compile_subproc_binary() -> str | None:
     Allows overriding the binary used for subprocesses
     """
     return None
-
-
-def get_torch_source_version() -> str:
-    """Return the source commit hash for the current PyTorch build."""
-    import torch.version as torch_version
-
-    return getattr(torch_version, "git_version", "")

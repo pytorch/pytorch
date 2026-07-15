@@ -8,11 +8,11 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfXPU,
     instantiate_device_type_tests,
-    onlyAccelerator,
+    onlyOn,
     skipMeta,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_WITH_ROCM
 from torch.nn.attention import SDPBackend
 
 class TestMHADeviceType(TestCase):
@@ -106,8 +106,8 @@ class TestMHADeviceType(TestCase):
     @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
     @skipMeta
-    @onlyAccelerator
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2182")
+    @onlyOn(["cuda", "xpu"])
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
             with self.subTest(use_padding=use_padding):
@@ -191,8 +191,9 @@ class TestMHADeviceType(TestCase):
             embed_dim=embed_dim, num_heads=num_heads, qkv=native_qkv, proj=native_proj
         ).to(dtype)
 
-        pt = pt.to(device)
-        npt = npt.to(device)
+        if device == "cuda" or device == "xpu":
+            pt = pt.to(device)
+            npt = npt.to(device)
 
         ypt, weight_pt = pt(
             q,
@@ -282,6 +283,11 @@ class TestMHADeviceType(TestCase):
     @torch.no_grad()
     def test_native_multihead_self_attention(self, device, dtype, use_nt,
                                              need_weights, average_attn_weights, use_padding, pad_all, fused):
+        if TEST_WITH_ROCM:
+            if use_nt and use_padding and pad_all:
+                self.skipTest("Large numerical errors on ROCM to investigate.")
+            if use_padding and not pad_all and fused:
+                self.skipTest("Large numerical errors on ROCM to investigate.")
         for need_weights in (False, not pad_all):
             with self.subTest(use_padding=use_padding, pad_all=pad_all,
                               use_nt=use_nt, need_weights=need_weights,

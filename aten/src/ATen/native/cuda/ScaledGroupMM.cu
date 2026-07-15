@@ -192,7 +192,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
           cutlass::epilogue::collective::EpilogueTileAuto,
           DtypeAccum,
           DtypeAccum,
-          void, // Indicate there is no beta scaling to save register
+          DtypeOutput,
           LayoutOutput*,
           AlignmentOutput,
           DtypeOutput,
@@ -390,7 +390,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
        (const DtypeB**)inputB_ptrs,
        stride_B},
       {{{{inputB_scale_ptrs}, {{inputA_scale_ptrs}, {}, {}}, {}}, {}},
-       nullptr,
+       (const DtypeOutput**)output_ptrs,
        stride_output,
        output_ptrs,
        stride_output}};

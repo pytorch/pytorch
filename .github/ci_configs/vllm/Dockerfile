@@ -74,13 +74,6 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # Use copy mode to avoid hardlink failures with Docker cache mounts
 ENV UV_LINK_MODE=copy
 
-# The pytorch CI base image provides Python as an activated venv (VIRTUAL_ENV +
-# PATH), which is the interpreter `python3 setup.py` and `uv pip freeze` use.
-# `uv pip install --system` deliberately bypasses that venv and targets the
-# separate /usr system python, so torch would land where the build can't see it.
-# Omit --system here so installs land in the active venv. The vllm-base stage
-# below creates and activates its own /opt/venv and is handled separately.
-
 WORKDIR /workspace
 
 # Install build and runtime dependencies
@@ -106,22 +99,22 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
         vision_whl=$(find /dist -name 'torchvision*.whl' | head -n1 | xargs); \
         audio_whl=$(find /dist -name 'torchaudio*.whl' | head -n1 | xargs); \
-        uv pip install "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
+        uv pip install --system "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
         echo "[INFO] Installing pinned torch nightly version to build vllm: $PINNED_TORCH_VERSION"; \
-        uv pip install "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
+        uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     else \
         echo "[INFO] Installing torch nightly with latest one to build vllm"; \
-        uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
+        uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
 # Install numba 0.61.2 for cuda environment
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install numba==0.61.2
+    uv pip install --system numba==0.61.2
 
 # Install common dependencies from vllm common.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r requirements/common.txt
+    uv pip install --system -r requirements/common.txt
 
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
 RUN cat torch_build_versions.txt
@@ -137,7 +130,7 @@ COPY . .
 RUN python3 use_existing_torch.py
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r requirements/build/cuda.txt
+    uv pip install --system -r requirements/build.txt
 
 ARG GIT_REPO_CHECK=0
 RUN --mount=type=bind,source=.git,target=.git \
@@ -152,9 +145,6 @@ ARG USE_SCCACHE
 ARG SCCACHE_BUCKET_NAME=vllm-build-sccache
 ARG SCCACHE_REGION_NAME=us-west-2
 ARG SCCACHE_S3_NO_CREDENTIALS=0
-
-ARG torch_cuda_arch_list='8.0;8.9;9.0;10.0;12.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 # Use sccache to speed up compilation
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -180,6 +170,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         && python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38 \
         && sccache --show-stats; \
     fi
+
+ARG torch_cuda_arch_list='8.0 8.6 8.9 9.0'
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 ARG vllm_target_device="cuda"
 ENV VLLM_TARGET_DEVICE=${vllm_target_device}
@@ -226,11 +219,6 @@ RUN if command -v apt-get >/dev/null; then \
     && ln -s /opt/venv/bin/pip /usr/bin/pip \
     && python3 --version && python3 -m pip --version
 
-# The pytorch CI FINAL_BASE_IMAGE already provides an activated venv (with pip)
-# on PATH, which shadows the bare /opt/venv created above. As in the base stage,
-# omit --system below so installs land in that active venv - the same interpreter
-# python3 and the pip freeze checks use.
-
 # Get the torch versions, and whls used in previous stage
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=build /workspace/vllm-dist /wheels/vllm
@@ -249,13 +237,13 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 ENV UV_LINK_MODE=copy
 
 # Install build and runtime dependencies
-COPY requirements/build/cuda.txt requirements/build/cuda.txt
+COPY requirements/build.txt requirements/build.txt
 COPY use_existing_torch.py use_existing_torch.py
 RUN python3 use_existing_torch.py
-RUN cat requirements/build/cuda.txt
+RUN cat requirements/build.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r requirements/build/cuda.txt
+    uv pip install --system -r requirements/build.txt
 
 # Default mount file as placeholder, this just avoid the mount error
 ARG TORCH_WHEELS_PATH="./requirements"
@@ -269,18 +257,18 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         vision_whl=$(find /dist -name 'torchvision*.whl' | head -n1 | xargs); \
         audio_whl=$(find /dist -name 'torchaudio*.whl' | head -n1 | xargs); \
         echo "[INFO] Use wheels to build : '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
-        uv pip install "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
+        uv pip install --system "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
     else \
         echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
-        uv pip install $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
+        uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --pre apache-tvm-ffi==0.1.0b15
+    uv pip install --system --pre apache-tvm-ffi==0.1.0b15
 
 # Install the vllm wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install /wheels/vllm/*.whl --verbose
+    uv pip install --system /wheels/vllm/*.whl --verbose
 
 # Logging to confirm the torch versions
 RUN pip freeze | grep -E 'torch|vllm'

@@ -3,6 +3,7 @@ import gc
 import json
 import os
 from abc import ABC, abstractmethod
+from typing import Optional
 from typing_extensions import Self
 
 import torch._C._instruction_counter as i_counter
@@ -54,7 +55,7 @@ if log_to_scuba:
         # A unique number for each run of a particular workflow in a repository, e.g., 238742. Derived from GITHUB_RUN_NUMBER.
         28: optional string github_run_number_str;
         }
-        """,
+        """,  # noqa: B950
     )
 
 
@@ -113,7 +114,7 @@ class BenchmarkBase(ABC):
     def device(self) -> str:
         return self._device
 
-    def is_dynamic(self) -> bool | None:
+    def is_dynamic(self) -> Optional[bool]:
         return self._dynamic
 
     def description(self) -> str:

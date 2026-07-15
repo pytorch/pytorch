@@ -17,6 +17,7 @@ IO errors are handled gracefully by returning empty cache entries.
 """
 
 import tokenize
+from typing import Optional
 
 
 cache: dict[str, dict[int, str]] = {}
@@ -68,7 +69,7 @@ def _add_file(filename: str) -> None:
     cache[filename] = result
 
 
-def get_funcname(filename: str, lineno: int) -> str | None:
+def get_funcname(filename: str, lineno: int) -> Optional[str]:
     if filename not in cache:
         _add_file(filename)
     return cache[filename].get(lineno, None)

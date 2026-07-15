@@ -5,25 +5,21 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
-import logging
 import os
 import unittest
 from collections import namedtuple
-from contextlib import contextmanager
 
 from functorch_additional_op_db import additional_op_db
 
 import torch
 import torch.utils._pytree as pytree
 from functorch import vmap
+from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_device_type import toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_modules import module_db
-from torch.testing._internal.opinfo.core import (
-    sample_skips_and_xfails,
-    SkipRule,
-    XFailRule,
-)
+from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.opinfo.core import sample_skips_and_xfails, XFailRule
 
 
 IS_FBCODE = os.getenv("FUNCTORCH_TEST_FBCODE") == "1"
@@ -35,8 +31,7 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     for idx in range(batch_size):
         flat_args, args_spec = pytree.tree_flatten(batched_args)
         flat_dims, dims_spec = pytree.tree_flatten(in_dims)
-        if args_spec != dims_spec:
-            raise AssertionError(f"args_spec {args_spec} != dims_spec {dims_spec}")
+        assert args_spec == dims_spec
         new_args = [
             a.select(in_dim, idx) if in_dim is not None else a
             for a, in_dim in zip(flat_args, flat_dims)
@@ -85,14 +80,9 @@ def loop2(
     flat_args, args_spec = pytree.tree_flatten(batched_args)
     flat_dims1, dims_spec1 = pytree.tree_flatten(in_dims1)
     flat_dims2, dims_spec2 = pytree.tree_flatten(in_dims2)
-    if args_spec != dims_spec1:
-        raise AssertionError(f"args_spec {args_spec} != dims_spec1 {dims_spec1}")
-    if args_spec != dims_spec2:
-        raise AssertionError(f"args_spec {args_spec} != dims_spec2 {dims_spec2}")
-    if len(flat_dims1) != len(flat_dims2):
-        raise AssertionError(
-            f"len(flat_dims1) {len(flat_dims1)} != len(flat_dims2) {len(flat_dims2)}"
-        )
+    assert args_spec == dims_spec1
+    assert args_spec == dims_spec2
+    assert len(flat_dims1) == len(flat_dims2)
     for idx1 in range(batch_size1):
         out_split = []
         arg_split = [
@@ -172,10 +162,7 @@ def get_bdim_choices(num_tensors):
     options = (-1, None)
     choices.extend(itertools.product(options, repeat=num_tensors))
 
-    if choices[-1] != (None,) * num_tensors:
-        raise AssertionError(
-            f"Expected choices[-1] to be {(None,) * num_tensors}, got {choices[-1]}"
-        )
+    assert choices[-1] == (None,) * num_tensors
     return tuple(choices[:-1])
 
 
@@ -206,18 +193,13 @@ def get_bdim_choices_batch_norm(
                 continue
             choices.append(choice)
 
-    if choices[-1] != (None,) * num_tensors:
-        raise AssertionError(
-            f"Expected choices[-1] to be {(None,) * num_tensors}, got {choices[-1]}"
-        )
+    assert choices[-1] == (None,) * num_tensors
     return tuple(choices[:-1])
 
 
 def add_batch_dim(arg, bdim, batch_size=3):
-    if bdim != 0 and bdim != -1:
-        raise AssertionError(f"Expected bdim to be 0 or -1, got {bdim}")
-    if not isinstance(arg, torch.Tensor):
-        raise AssertionError(f"Expected arg to be a torch.Tensor, got {type(arg)}")
+    assert bdim == 0 or bdim == -1
+    assert isinstance(arg, torch.Tensor)
     if bdim == 0:
         shape = [1] * len(arg.shape)
         shape.insert(bdim, batch_size)
@@ -256,10 +238,7 @@ def is_batch_norm_training(op_name, kwarg_values):
     if len(is_training) == 0:
         return default_training
     else:
-        if len(is_training) != 1:
-            raise AssertionError(
-                f"Expected len(is_training) to be 1, got {len(is_training)}"
-            )
+        assert len(is_training) == 1
         return is_training[0]
 
 
@@ -281,10 +260,8 @@ def generate_vmap_inputs(
 
     @memoize
     def get_batched_arg(arg, bdim):
-        if not isinstance(arg, torch.Tensor):
-            raise AssertionError(f"Expected arg to be a torch.Tensor, got {type(arg)}")
-        if bdim is None:
-            raise AssertionError("Expected bdim to not be None")
+        assert isinstance(arg, torch.Tensor)
+        assert bdim is not None
         result, _ = add_batch_dim(arg, bdim, batch_size)
         return result
 
@@ -428,10 +405,7 @@ def get_fallback_and_vmap_exhaustive(
             batch_size,
             compute_loop_out=False,
         ):
-            if quantities[1] is not None:
-                raise AssertionError(
-                    f"Expected quantities[1] to be None, got {quantities[1]}"
-                )
+            assert quantities[1] is None
             yield (quantities[0], expected_batched)
             yield (quantities[2], quantities[3])
 
@@ -455,8 +429,7 @@ DecorateMeta = namedtuple(
 def decorate(
     op_name, variant_name="", *, decorator=None, device_type=None, dtypes=None
 ):
-    if decorator is None:
-        raise AssertionError("decorator must not be None")
+    assert decorator is not None
     return DecorateMeta(
         op_name=op_name,
         variant_name=variant_name,
@@ -507,23 +480,37 @@ def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
     )
 
 
-def skipIf(op_name, fail_fn, variant_name="", *, device_type=None, dtypes=None):
-    return decorate(
-        op_name=op_name,
-        variant_name=variant_name,
-        decorator=sample_skips_and_xfails(
-            [
-                SkipRule(
-                    # op matching is already handled by DecorateMeta
-                    op_match_fn=lambda device, op: True,
-                    # device matching is already handled by DecorateMeta
-                    sample_match_fn=lambda device, sample: fail_fn(sample),
-                )
-            ]
-        ),
-        device_type=device_type,
-        dtypes=dtypes,
-    )
+def skipOps(test_case_name, base_test_name, to_skip):
+    all_opinfos = op_db + additional_op_db + autograd_function_db + custom_op_db
+    for decorate_meta in to_skip:
+        matching_opinfos = [
+            o
+            for o in all_opinfos
+            if o.name == decorate_meta.op_name
+            and o.variant_test_name == decorate_meta.variant_name
+        ]
+        assert len(matching_opinfos) > 0, f"Couldn't find OpInfo for {decorate_meta}"
+        assert len(matching_opinfos) == 1, (
+            "OpInfos should be uniquely determined by their (name, variant_name). "
+            f"Got more than one result for ({decorate_meta.op_name}, {decorate_meta.variant_name})"
+        )
+        opinfo = matching_opinfos[0]
+        decorators = list(opinfo.decorators)
+        new_decorator = DecorateInfo(
+            decorate_meta.decorator,
+            test_case_name,
+            base_test_name,
+            device_type=decorate_meta.device_type,
+            dtypes=decorate_meta.dtypes,
+        )
+        decorators.append(new_decorator)
+        opinfo.decorators = tuple(decorators)
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn):
+        return fn
+
+    return wrapped
 
 
 def decorateForModules(decorator, module_classes, device_type=None, dtypes=None):
@@ -536,17 +523,15 @@ def decorateForModules(decorator, module_classes, device_type=None, dtypes=None)
         dtypes=dtypes,
     ):
         name_parts = fn.__qualname__.split(".")
-        if len(name_parts) != 2:
-            raise AssertionError(
-                "Decorator only applies to a test function of a test class"
-            )
+        assert len(name_parts) == 2, (
+            "Decorator only applies to a test function of a test class"
+        )
         test_case_name, base_test_name = name_parts
         for module_cls in module_classes:
             matching_module_infos = [m for m in module_db if m.module_cls == module_cls]
-            if len(matching_module_infos) != 1:
-                raise AssertionError(
-                    f"Couldn't find single ModuleInfo for {module_cls}"
-                )
+            assert len(matching_module_infos) == 1, (
+                f"Couldn't find single ModuleInfo for {module_cls}"
+            )
             module_info = matching_module_infos[0]
             decorators = list(module_info.decorators)
             new_decorator = DecorateInfo(
@@ -589,8 +574,7 @@ def opsToleranceOverride(test_case_name, base_test_name, overrides):
             for o in all_opinfos
             if o.name == op_name and o.variant_test_name == variant_name
         ]
-        if len(matching_opinfos) != 1:
-            raise AssertionError(f"Couldn't find OpInfo for {override}")
+        assert len(matching_opinfos) == 1, f"Couldn't find OpInfo for {override}"
         opinfo = matching_opinfos[0]
         decorators = list(opinfo.decorators)
         decorators.append(
@@ -656,31 +640,3 @@ def saved_tensors_hooks_to_gm(
     set_manual_hash(unpack_gm.graph, unpack_cache_hash)
 
     return pack_gm, unpack_gm
-
-
-@contextmanager
-def capture_codegen_source(artifact_name):
-    trace_log = logging.getLogger("torch.__trace")
-    captured: list[str] = []
-
-    class _ArtifactHandler(logging.Handler):
-        def emit(self, record):
-            metadata = getattr(record, "metadata", {})
-            if (
-                "artifact" in metadata
-                and metadata["artifact"].get("name") == artifact_name
-            ):
-                payload = getattr(record, "payload", None)
-                if payload is not None:
-                    captured.append(payload)
-
-    handler = _ArtifactHandler()
-    handler.setLevel(logging.DEBUG)
-    old_level = trace_log.level
-    trace_log.setLevel(logging.DEBUG)
-    trace_log.addHandler(handler)
-    try:
-        yield captured
-    finally:
-        trace_log.removeHandler(handler)
-        trace_log.setLevel(old_level)

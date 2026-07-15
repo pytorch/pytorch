@@ -11,6 +11,7 @@ import logging
 import operator
 from collections import defaultdict, deque
 from collections.abc import Generator, Iterable
+from typing import Optional
 
 import torch
 import torch.fx
@@ -30,7 +31,7 @@ UsageIndex = tuple[int, int]
 
 log = logging.getLogger(__name__)
 
-last_node_to_additional_deps: dict[Node, OrderedSet[Node]] | None = None
+last_node_to_additional_deps: Optional[dict[Node, OrderedSet[Node]]] = None
 
 
 def apply_graph_deduplication(output_graph) -> dict[str, torch.fx.GraphModule]:  # type: ignore[no-untyped-def]
@@ -327,17 +328,15 @@ def _stable_topological_sort_impl(
     graph: torch.fx.Graph,
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
     do_sort: bool = True,
-    region: OrderedSet[Node] | None = None,
 ) -> bool:
     # Nodes are in exactly one of these four collections:
 
     # - Nodes in `pending` are waiting to be processed (in reverse order):
-    pending = list(reversed(region or graph.nodes))
+    pending = list(reversed(graph.nodes))
 
     # - Nodes in `ready` have been processed and are already in the correct
-    #   order.  When sorting a region, nodes outside the region are
-    #   implicitly ready (filtered out in the waiting_for check below).
-    ready: set[Node] = set()
+    #   order.
+    ready = OrderedSet[Node]()
 
     # - `waiting` is a mapping from a dependency to nodes which depend on that
     #   dependency.
@@ -346,35 +345,26 @@ def _stable_topological_sort_impl(
     # - `outputs` are always at the end of the graph
     outputs = OrderedSet[Node]()
 
-    has_additional_deps = bool(node_to_additional_deps)
-
     # The cursor indicates the last processed node so we can add new nodes
     # after it.
     cursor = None
     while pending:
         node = pending.pop()
 
-        if node.op == "output":
+        if node.target == "output":
             outputs.add(node)
-            if node.users:
-                raise AssertionError("output nodes should have no users")
+            assert not node.users, "output nodes should have no users"
             continue
 
-        # node._input_nodes is maintained by FX and already contains the
-        # unique set of input nodes — avoid rebuilding it via map_arg.
-        if has_additional_deps:
-            deps = _get_flat_args_unique(node, node_to_additional_deps)
-        else:
-            deps = node._input_nodes
-
-        last_unready = None
-        for x in deps:
-            if x not in ready and (region is None or x in region):
-                last_unready = x
-        if last_unready is not None:
-            # We have unprocessed input nodes. Wait for the last unready
+        waiting_for = [
+            x
+            for x in _get_flat_args_unique(node, node_to_additional_deps)
+            if x not in ready
+        ]
+        if waiting_for:
+            # We have unprocessed input nodes. Might as well wait for the last
             # arg so an already sorted list will only recheck this node once.
-            waiting[last_unready].append(node)
+            waiting[waiting_for[-1]].append(node)
         else:
             ready.add(node)
             if cursor and cursor.next is not node and do_sort:
@@ -385,24 +375,14 @@ def _stable_topological_sort_impl(
             pending.extend(reversed(waiting.pop(node, ())))
 
     ready.update(outputs)
-    expected_len = len(region) if region is not None else len(graph.nodes)
-    return not waiting and len(ready) == expected_len
+    return not waiting and len(ready) == len(graph.nodes)
 
 
 def _stable_topological_sort(
     graph: torch.fx.Graph,
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
 ) -> None:
-    if not _stable_topological_sort_impl(graph, node_to_additional_deps):
-        raise AssertionError("stable topological sort failed")
-
-
-def _stable_topological_sort_region(
-    graph: torch.fx.Graph,
-    region: OrderedSet[Node],
-) -> None:
-    if not _stable_topological_sort_impl(graph, {}, region=region):
-        raise AssertionError("stable topological sort of region failed")
+    assert _stable_topological_sort_impl(graph, node_to_additional_deps)
 
 
 def _has_cycle(
@@ -514,8 +494,7 @@ def _has_aliasing(
             continue
         if out_node:
             example_value = out_node.meta["example_value"]
-            if isinstance(example_value, list):
-                raise AssertionError("expected example_value to not be a list")
+            assert not isinstance(example_value, list)
             if isinstance(example_value, torch.Tensor):
                 storage = StorageWeakRef(example_value._typed_storage())
                 if storage in output_storages:
@@ -572,8 +551,7 @@ def _create_getitem_nodes(
     node: Node, subgraph_tuple_node: Node, subgraph: torch.fx.Graph
 ) -> tuple[list[Node], dict[tuple[int, ...], int]]:
     tup = node.meta["example_value"]
-    if not isinstance(tup, tuple):
-        raise AssertionError("_get_getitem_children expects tuple")
+    assert isinstance(tup, tuple), "_get_getitem_children expects tuple"
 
     getitem_nodes: list[Node] = []
     queue = deque([(e, (i,), subgraph_tuple_node) for i, e in enumerate(tup)])
@@ -606,8 +584,7 @@ def _replace_tuple_outputs(
     invoke_subgraph_node: Node,
     graph: torch.fx.Graph,
 ) -> OrderedSet[Node]:
-    if not _is_tuple_node(node):
-        raise AssertionError("_replace_tuple_outputs expects a tuple node")
+    assert _is_tuple_node(node), "_replace_tuple_outputs expects a tuple node"
 
     queue = deque((c, (c.args[1],)) for c in _get_children_getitems(node))
     erased_nodes: OrderedSet[Node] = OrderedSet()

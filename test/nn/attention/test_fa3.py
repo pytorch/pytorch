@@ -214,7 +214,7 @@ class TestFlashAttentionFA3(FlashAttentionTestMixin, TestCase):
         self.assertLessEqual(
             error,
             0.25,  # Relaxed tolerance for FP8
-            lambda msg: f"{msg}\nFP8 error {error:.4f} exceeds tolerance",
+            f"FP8 error {error:.4f} exceeds tolerance",
         )
 
     @unittest.skipUnless(_fa3_dependencies_available(), "FA3 backend unavailable")
@@ -367,7 +367,7 @@ class TestFlashAttentionFA3(FlashAttentionTestMixin, TestCase):
         # Values should be identical (deterministic)
         self.assertTrue(
             torch.allclose(out_eager, out_compiled),
-            lambda msg: f"{msg}\nCompiled output differs from eager. Max diff: {(out_eager - out_compiled).abs().max().item()}",
+            f"Compiled output differs from eager. Max diff: {(out_eager - out_compiled).abs().max().item()}",
         )
 
     # ==================== VARLEN TESTS ====================

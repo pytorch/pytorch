@@ -98,10 +98,7 @@ class TestCommonPass(TestCase):
 
         res = P(traced_m)
         modified_m = res.graph_module
-        if not isinstance(modified_m, GraphModule):
-            raise AssertionError(
-                f"Expected modified_m to be GraphModule, got {type(modified_m)}"
-            )
+        assert isinstance(modified_m, GraphModule)
 
         inp_copy = inp.clone()
         expected = f(inp)
@@ -121,10 +118,7 @@ class TestCommonPass(TestCase):
 
         res = P(traced_m)
         modified_m = res.graph_module
-        if not isinstance(modified_m, GraphModule):
-            raise AssertionError(
-                f"Expected modified_m to be GraphModule, got {type(modified_m)}"
-            )
+        assert isinstance(modified_m, GraphModule)
 
         inp_copy = inp.clone()
         expected = f(inp, device)

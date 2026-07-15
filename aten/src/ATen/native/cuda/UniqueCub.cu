@@ -8,7 +8,6 @@
 
 #include <c10/core/DeviceArray.h>
 #include <c10/util/Load.h>
-#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -47,7 +46,7 @@ const scalar_t * wrap_input_iterator(const scalar_t *data) {
 }
 
 struct LoadBoolOp {
-  __device__ int operator()(uint8_t x) const {
+  __device__ bool operator()(uint8_t x) const {
     return static_cast<bool>(x);
   }
 };
@@ -55,7 +54,7 @@ struct LoadBoolOp {
 auto wrap_input_iterator(const bool *data) {
   // See NOTE [Loading boolean values]
   LoadBoolOp op;
-  return ATEN_CUB_TRANSFORM_ITERATOR(bool, LoadBoolOp, const uint8_t*)(
+  return ATEN_CUB_TRANSFORM_ITERATOR(bool, LoadBoolOp, const uint8_t*, int)(
       reinterpret_cast<const uint8_t*>(data), op);
 }
 
@@ -134,7 +133,7 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
 
   data_out.resize_(num_out);
   return std::tuple<Tensor, Tensor, Tensor>(
-      std::move(data_out), std::move(inverse_indices), std::move(counts));
+      data_out, inverse_indices, counts);
 }
 
 } // namespace
@@ -150,6 +149,8 @@ struct UniqueCub {
       const bool consecutive,
       const bool return_inverse,
       const bool return_counts) {
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
     int64_t num_inp = self.numel();
     Tensor sorted;
     if (consecutive) {
@@ -258,7 +259,7 @@ struct UniqueCub<bool> {
 
     const bool* self_data = self.const_data_ptr<bool>();
     MapNumberOfTrueValues op;
-    ATEN_CUB_TRANSFORM_ITERATOR(int, MapNumberOfTrueValues, const uint8_t*)
+    ATEN_CUB_TRANSFORM_ITERATOR(int, MapNumberOfTrueValues, const uint8_t*, int)
         data_iter(reinterpret_cast<const uint8_t*>(self_data), op);
     at::cuda::cub::reduce(data_iter, tmp_num_true.get(), num_inp,
                           NO_ROCM(::cuda)::std::plus<>{}, 0);
@@ -296,8 +297,7 @@ struct UniqueCub<bool> {
     output.resize_({num_out});
     counts.resize_({num_out});
 
-    return std::tuple<Tensor, Tensor, Tensor>(
-        std::move(output), std::move(inverse_indices), std::move(counts));
+    return std::tuple<Tensor, Tensor, Tensor>(output, inverse_indices, counts);
   }
 };
 

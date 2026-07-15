@@ -15,7 +15,16 @@ import tempfile
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
-from typing import Any, cast, ClassVar, Generic, NamedTuple, TYPE_CHECKING
+from typing import (
+    Any,
+    cast,
+    ClassVar,
+    Generic,
+    NamedTuple,
+    Optional,
+    TYPE_CHECKING,
+    Union,
+)
 from typing_extensions import Self, TypeVar
 
 import sympy
@@ -26,7 +35,6 @@ from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._config_module import ConfigModule
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Max
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -74,9 +82,9 @@ if TYPE_CHECKING:
     from .wrapper import PythonWrapperCodegen
 
     _T = TypeVar("_T")
-    SchedulingConstructor = Callable[[Scheduler | None], BaseScheduling]
+    SchedulingConstructor = Callable[[Optional[Scheduler]], BaseScheduling]
     WrapperConstructor = type[PythonWrapperCodegen]
-    SymbolLike = str | sympy.Symbol
+    SymbolLike = Union[str, sympy.Symbol]
 
     # OpVarT should really be Union[CSEVariable, str], however this
     # causes typing errors in subclasses (defined in other files).
@@ -153,7 +161,7 @@ class CodegenSymbol(ABC):
         pass
 
     @abstractmethod
-    def get_example(self) -> torch.Tensor | sympy.Symbol:
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
         pass
 
 
@@ -200,14 +208,11 @@ class WorkspaceArg(CodegenSymbol):
 
     @staticmethod
     def maximum(a: WorkspaceArg, b: WorkspaceArg) -> WorkspaceArg:
-        if not (
+        assert (
             a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
-        ):
-            raise AssertionError(
-                "WorkspaceArg.maximum requires matching dtype, device, and inner_name"
-            )
+        )
         return WorkspaceArg(
-            count=Max(a.count, b.count),
+            count=sympy.Max(a.count, b.count),
             zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
             dtype=a.dtype,
             device=a.device,
@@ -224,7 +229,7 @@ class WorkspaceArg(CodegenSymbol):
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
-    def get_example(self) -> torch.Tensor | sympy.Symbol:
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
         return self.get_layout().get_example()
 
     def get_layout(self) -> FixedLayout:
@@ -279,7 +284,7 @@ class TensorArg:
     buffer: str
     dtype: torch.dtype
     offset: sympy.Expr = sympy.S.Zero  # c++ only
-    alias_of: str | None = None  # halide only
+    alias_of: Optional[str] = None  # halide only
 
 
 @dataclasses.dataclass
@@ -288,7 +293,7 @@ class SizeArg:
     expr: sympy.Expr
 
     @property
-    def alias_of(self) -> str | None:
+    def alias_of(self) -> Optional[str]:
         return None
 
 
@@ -301,19 +306,19 @@ class ConstexprArg:
 class TMADescriptorArg:
     name: str
     api_type: str  # "experimental" or "stable"
-    block_shape: list[sympy.Expr] | None  # only needed for "stable"
-    dtype: torch.dtype | None  # only needed for "stable"
+    block_shape: Optional[list[sympy.Expr]]  # only needed for "stable"
+    dtype: Optional[torch.dtype]  # only needed for "stable"
 
 
 @dataclasses.dataclass
 class DeviceCodegen:
     scheduling: SchedulingConstructor
     wrapper_codegen: WrapperConstructor
-    cpp_wrapper_codegen: WrapperConstructor | None = None
-    fx_wrapper_codegen: WrapperConstructor | None = None
+    cpp_wrapper_codegen: Optional[WrapperConstructor] = None
+    fx_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
-KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
+KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
 
 device_codegens: dict[str, DeviceCodegen] = {}
 
@@ -330,12 +335,6 @@ class DeviceOpOverrides:
 
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
-
-    def current_stream(self) -> str:
-        raise NotImplementedError
-
-    def stream_handle(self, stream_name: str) -> str:
-        return f"{stream_name}.native_handle"
 
     def cpp_device_guard(self) -> str:
         raise NotImplementedError
@@ -374,16 +373,15 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
     def cpp_scratch(
-        self, idx: int, workspace: TritonScratchWorkspace, prefix: str | None = None
-    ) -> tuple[list[str], str] | None:
+        self, idx: int, workspace: TritonScratchWorkspace, prefix: Optional[str] = None
+    ) -> Optional[tuple[list[str], str]]:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
 
 
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
-_device_op_overrides_initialized = False
-custom_backend_passes: dict[str, CustomGraphModulePass | None] = {}
-custom_backend_codegen_configs: dict[str, ConfigModule | None] = {}
+custom_backend_passes: dict[str, Optional[CustomGraphModulePass]] = {}
+custom_backend_codegen_configs: dict[str, Optional[ConfigModule]] = {}
 
 
 # The code generated by Inductor consists of two main parts: kernel code and wrapper code.
@@ -411,10 +409,10 @@ def register_backend_for_device(
     device: str,
     device_scheduling: SchedulingConstructor,
     device_wrapper_codegen: WrapperConstructor,
-    device_cpp_wrapper_codegen: WrapperConstructor | None = None,
-    device_fx_wrapper_codegen: WrapperConstructor | None = None,
-    device_custom_pass: CustomGraphModulePass | None = None,
-    device_custom_config: ConfigModule | None = None,
+    device_cpp_wrapper_codegen: Optional[WrapperConstructor] = None,
+    device_fx_wrapper_codegen: Optional[WrapperConstructor] = None,
+    device_custom_pass: Optional[CustomGraphModulePass] = None,
+    device_custom_config: Optional[ConfigModule] = None,
 ) -> None:
     device_codegens[device] = DeviceCodegen(
         device_scheduling,
@@ -424,13 +422,12 @@ def register_backend_for_device(
     )
     custom_backend_passes[device] = device_custom_pass
     if device_custom_config:
-        if not (
+        assert (
             isinstance(device_custom_config, ConfigModule)
             and device_custom_config is not config
-        ):
-            raise AssertionError(
-                f"{device_custom_config=} cannot be the same as the default inductor config {config=}"
-            )
+        ), (
+            f"{device_custom_config=} cannot be the same as the default inductor config {config=}"
+        )
     custom_backend_codegen_configs[device] = device_custom_config
 
 
@@ -448,7 +445,7 @@ class BackendFeature(Enum):
 
 
 def get_backend_features(
-    device: torch.device | str | None,
+    device: Union[torch.device, str, None],
 ) -> OrderedSet[BackendFeature]:
     if device is None:
         return OrderedSet()
@@ -456,33 +453,30 @@ def get_backend_features(
     if isinstance(device, torch.device):
         device_type = device.type
     else:
-        if not isinstance(device, str):
-            raise AssertionError(type(device))
+        assert isinstance(device, str), type(device)
         device_type = device
         device = torch.device(device_type)
     scheduling_ctor = get_scheduling_for_device(device_type)
-    if not scheduling_ctor:
-        raise AssertionError(f"no scheduling registered for device {device_type}")
+    assert scheduling_ctor
     scheduling = scheduling_ctor(None)
     return scheduling.get_backend_features(device)
 
 
 def has_backend_feature(
-    device: torch.device | str | None, feature: BackendFeature
+    device: Union[torch.device, str, None], feature: BackendFeature
 ) -> bool:
     """See also V.graph.has_feature"""
-    if not isinstance(feature, BackendFeature):
-        raise AssertionError(f"expected BackendFeature, got {type(feature)}")
+    assert isinstance(feature, BackendFeature)
     return feature in get_backend_features(device)
 
 
-def get_scheduling_for_device(device: str) -> SchedulingConstructor | None:
+def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
 def get_wrapper_codegen_for_device(
     device: str, cpp_wrapper: bool = False, fx_wrapper: bool = False
-) -> WrapperConstructor | None:
+) -> Optional[WrapperConstructor]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
         if fx_wrapper:
@@ -494,11 +488,11 @@ def get_wrapper_codegen_for_device(
     return None
 
 
-def get_custom_backend_pass_for_device(device: str) -> CustomGraphModulePass | None:
+def get_custom_backend_pass_for_device(device: str) -> Optional[CustomGraphModulePass]:
     return custom_backend_passes.get(device)
 
 
-def get_custom_backend_config_for_device(device: str) -> ConfigModule | None:
+def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
     return custom_backend_codegen_configs.get(device)
 
 
@@ -521,7 +515,6 @@ def init_backend_registration() -> None:
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
     from .wrapper_fxir import WrapperFxCodegen
-    from .xpu.xpu_combined_scheduling import XPUCombinedScheduling
 
     if get_scheduling_for_device("cpu") is None:
         cpu_backends = {
@@ -555,32 +548,13 @@ def init_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
-    if get_scheduling_for_device("tpu") is None:
-        register_backend_for_device(
-            "tpu",
-            PallasScheduling,
-            PythonWrapperCodegen,
-            # CppWrapperGpu,
-            # WrapperFxCodegen,
-        )
-
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device(
             "xpu",
-            XPUCombinedScheduling,
+            TritonScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
             WrapperFxCodegen,
-        )
-
-    if get_scheduling_for_device("tpu") is None:
-        tpu_backends = {
-            "pallas": PallasScheduling,
-        }
-        register_backend_for_device(
-            "tpu",
-            lambda scheduling: tpu_backends[config.tpu_backend](scheduling),
-            PythonWrapperCodegen,
         )
 
     if get_scheduling_for_device("mps") is None:
@@ -642,29 +616,15 @@ def register_device_op_overrides(
     device_op_overrides_dict[device] = device_op_overrides
 
 
-def _initialize_device_op_overrides():
-    # Use a flag rather than checking device_op_overrides_dict, since external/test
-    # code may partially populate it before we are called.
-    global _device_op_overrides_initialized
-    if _device_op_overrides_initialized:
-        return
-
-    from . import mps_device_op_overrides  # noqa: F401
-    from .cpu_device_op_overrides import CpuDeviceOpOverrides
-    from .cuda import device_op_overrides  # noqa: F401
-    from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
-    from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
-
-    # TPU uses Pallas for codegen and only needs no-op overrides
-    register_device_op_overrides("tpu", CpuDeviceOpOverrides())
-
-    _device_op_overrides_initialized = True
-
-
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
-    if not isinstance(device, str):
-        raise AssertionError(type(device))
-    _initialize_device_op_overrides()
+    assert isinstance(device, str), type(device)
+
+    if not device_op_overrides_dict:
+        from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
+        from .cuda import device_op_overrides  # noqa: F401
+        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+
     return device_op_overrides_dict[device]
 
 
@@ -694,7 +654,7 @@ def deduce_output_dtype_by_name(
     op_name: str,
     *args: Any,
     **kwargs: Any,
-) -> torch.dtype | None:
+) -> Optional[torch.dtype]:
     """
     Given op name and a list of input dtypes, deduce the output dtype
     """
@@ -703,7 +663,6 @@ def deduce_output_dtype_by_name(
     elif op_name in (
         "to_dtype",
         "index_expr",
-        "value_expr",
     ):
         return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
@@ -733,28 +692,16 @@ def deduce_output_dtype_by_name(
     return None
 
 
-def _is_runtime_triton_assert_target() -> bool:
-    return (
-        get_current_backend() == "triton"
-        and V.graph.get_current_device_or_throw().type != "cpu"
-        and hasattr(V.kernel, "triton_tensor_ndim")
-    )
-
-
 def check_dtype(
     buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
 ) -> None:
     backend = get_current_backend()
-    if (
-        config.test_configs.runtime_triton_dtype_assert
-        and _is_runtime_triton_assert_target()
-    ):
+    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
         buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
     elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
         from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
 
-        if not isinstance(var, CppCSEVariable):
-            raise AssertionError(type(var))
+        assert isinstance(var, CppCSEVariable), type(var)
         if dtype == torch.bool:
             if var.is_vec:
                 is_same_dt = f"IsVecMaskType<decltype({var})>::value"
@@ -773,12 +720,9 @@ def check_dtype(
 def check_shape(
     buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
 ) -> None:
-    if shape is None:
-        raise AssertionError("expected shape to be not None")
-    if (
-        config.test_configs.runtime_triton_shape_assert
-        and _is_runtime_triton_assert_target()
-    ):
+    backend = get_current_backend()
+    assert shape is not None
+    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
@@ -797,13 +741,13 @@ def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
 class DataTypePropagation:
     def __init__(self, body: LoopBody) -> None:
         self.body = body
-        self.graphs: dict[Callable[..., Any] | str, Any] = {
+        self.graphs: dict[Union[Callable[..., Any], str], Any] = {
             "root": body.root_block.graph
         }
         for k, v in body.subblocks.items():
             self.graphs[k] = v.graph
 
-    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node) -> torch.dtype | None:
+    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node) -> Optional[torch.dtype]:
         inputs = node.all_input_nodes
         input_nodes = [
             n for n in inputs if isinstance(n, torch.fx.Node) and n.op != "placeholder"
@@ -827,11 +771,10 @@ class DataTypePropagation:
     def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node) -> torch.dtype:
         sub_graph = self.graphs[node.target]
         dtype = self.propagate_graph(sub_graph)
-        if not dtype:
-            raise AssertionError("expected subgraph to propagate a dtype")
+        assert dtype
         return dtype
 
-    def deduce_node_dtype(self, node: torch.fx.Node) -> torch.dtype | None:
+    def deduce_node_dtype(self, node: torch.fx.Node) -> Optional[torch.dtype]:
         if node.op == "placeholder":
             return None
 
@@ -841,12 +784,10 @@ class DataTypePropagation:
 
         if node.target is operator.getitem:
             node_arg = node.args[0]
-            if not isinstance(node_arg, torch.fx.Node):
-                raise AssertionError(type(node_arg))
+            assert isinstance(node_arg, torch.fx.Node), type(node_arg)
             return self.deduce_node_dtype(node_arg)
 
-        if not isinstance(node.target, str):
-            raise AssertionError(type(node.target))
+        assert isinstance(node.target, str), type(node.target)
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -862,10 +803,9 @@ class DataTypePropagation:
 
         return self.deduce_node_dtype_by_inputs(node)
 
-    def propagate_graph(self, graph: torch.fx.Graph) -> torch.dtype | None:
-        if not graph.nodes:
-            raise AssertionError("expected graph to have nodes")
-        graph_dtype: torch.dtype | None = None
+    def propagate_graph(self, graph: torch.fx.Graph) -> Optional[torch.dtype]:
+        assert graph.nodes
+        graph_dtype: Optional[torch.dtype] = None
         # For masked_subblock, we use output's dtype to represent
         # the dtype of this subgraph. For other cases, graph_dtype
         # might be None
@@ -881,22 +821,20 @@ class DataTypePropagation:
                 graph_dtype = opt_ctx.dtype
         return graph_dtype
 
-    def propagate(self) -> torch.dtype | None:
+    def propagate(self) -> Optional[torch.dtype]:
         return self.propagate_graph(self.graphs["root"])
 
     @classmethod
-    def propagate_loopbody(cls, body: LoopBody) -> torch.dtype | None:
+    def propagate_loopbody(cls, body: LoopBody) -> Optional[torch.dtype]:
         return cls(body).propagate()
 
     @classmethod
-    def propagate_scheduler_node(cls, node: SchedulerNode) -> torch.dtype | None:
+    def propagate_scheduler_node(cls, node: SchedulerNode) -> Optional[torch.dtype]:
         from ..loop_body import LoopBody
         from ..scheduler import SchedulerNode
 
-        if not isinstance(node, SchedulerNode):
-            raise AssertionError(type(node))
-        if not isinstance(node._body, LoopBody):
-            raise AssertionError(type(node._body))
+        assert isinstance(node, SchedulerNode), type(node)
+        assert isinstance(node._body, LoopBody), type(node._body)
         return DataTypePropagation.propagate_loopbody(node._body)
 
 
@@ -913,7 +851,6 @@ class PythonPrinter(_PythonPrinter):
         if isinstance(item, sympy.Mod):
             # use parenthesis to enforce precedence.
             # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
-            # pyrefly: ignore [missing-attribute]
             return f"({self._print(item)})"
         else:
             return super().parenthesize(item, level, strict)
@@ -931,9 +868,7 @@ class OpDecompositions:
 
     @staticmethod
     def reciprocal(x: OpVarT) -> OpVarT:
-        # Use float32 constant so that div_rn can be applied when
-        # eager_numerics.division_rounding is enabled
-        return ops.truediv(ops.constant(1.0, torch.float32), x)
+        return ops.truediv(ops.constant(1, torch.int32), x)
 
     @staticmethod
     def square(x: OpVarT) -> OpVarT:
@@ -987,11 +922,6 @@ class OpDecompositions:
         return ops.mul(x, y)
 
     @staticmethod
-    def div_rn(x: OpVarT, y: OpVarT) -> OpVarT:
-        # for backends that don't override this, just use regular div
-        return ops.truediv(x, y)
-
-    @staticmethod
     def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.floor(a), dtype)
 
@@ -1031,8 +961,7 @@ def _all_in_parens(string: str) -> bool:
             count -= 1
         if count == 0 and i != len(string) - 2:
             return False
-    if count != 0:
-        raise AssertionError(f"expected balanced count == 0, got {count}")
+    assert count == 0
     return True
 
 
@@ -1051,46 +980,38 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         return f"({string})"
 
     @staticmethod
-    def constant(value: bool | float | int, dtype: torch.dtype) -> OpVarT:
+    def constant(value: Union[bool, float, int], dtype: torch.dtype) -> OpVarT:
         return repr(value)
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def bitwise_not(x: OpVarT) -> OpVarT:
         return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def logical_not(a: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def bitwise_and(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def bitwise_or(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def bitwise_xor(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def bitwise_left_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def bitwise_right_shift(x: OpVarT, y: OpVarT) -> OpVarT:
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
-    # pyrefly: ignore [bad-override]
     def int_truediv(a: OpVarT, b: OpVarT) -> OpVarT:
         # TODO: this is wrong
         # TODO: an easy bandaid is to generate runtime asserts that it's
@@ -1104,7 +1025,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     def indirect_indexing(
         self,
         var: OpVarT,
-        size: sympy.Expr | int,
+        size: Union[sympy.Expr, int],
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
@@ -1144,8 +1065,8 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: OpVarT | tuple[OpVarT, ...],
-    ) -> OpVarT | tuple[OpVarT, ...]:
+        value: Union[OpVarT, tuple[OpVarT, ...]],
+    ) -> Union[OpVarT, tuple[OpVarT, ...]]:
         raise NotImplementedError(
             f"{type(self).__name__}: reduction should be handled by CSEProxy"
         )
@@ -1181,8 +1102,8 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         boundary_indices: OpVarT,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: tuple[str, sympy.Expr] | None = None,
-        sorter_indices: OpVarT | None = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[OpVarT] = None,
     ) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: bucketize should be handled by CSEProxy"
@@ -1202,11 +1123,10 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         self,
         *inputs: OpVarT,
         asm: str,
-        constraints: str | None = None,
+        constraints: Optional[str] = None,
         dtype: torch.dtype = torch.float32,
         is_pure: bool = True,
         pack: int = 1,
-        input_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
@@ -1241,8 +1161,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
 
     @classmethod
     def _initialize_pointwise_overrides(cls, target: str) -> None:
-        if target not in ("triton", "cpp", "cppvec", "halide", "mps"):
-            raise AssertionError(target)
+        assert target in ("triton", "cpp", "cppvec", "halide", "mps"), target
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
@@ -1250,10 +1169,9 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
                 if cls._is_unimplemented(funcname):
                     setattr(cls, funcname, cls._unimplemented(funcname))
             else:
-                if funcname in cls.__dict__:
-                    raise AssertionError(
-                        f"multiple definitions of {funcname} on {cls.__name__}"
-                    )
+                assert funcname not in cls.__dict__, (
+                    f"multiple definitions of {funcname} on {cls.__name__}"
+                )
                 impl.__name__ = funcname
                 setattr(cls, funcname, staticmethod(impl))
 
@@ -1263,35 +1181,14 @@ class OverridesData:
     name: str
     cpp: Callable[..., str]
     # None when not impl in libdevice/triton
-    triton: Callable[..., str] | None = None
+    triton: Optional[Callable[..., str]] = None
     # None when not impl in aten/.../vec
-    cppvec: Callable[..., str] | None = None
+    cppvec: Optional[Callable[..., str]] = None
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    halide: Callable[..., str] | None = None
-    mps: Callable[..., str] | None = None
-
-
-def _triton_bessel(order: int, kind: str, x: str) -> str:
-    # PyTorch eager returns NaN for +/-inf, while libdevice returns
-    # the mathematical limit. x - x yields NaN in x's dtype
-    # (avoids fp32 literal promotion under tl.where for float64 inputs)
-    return (
-        f"tl.where(tl_math.abs({x}) == float('inf'), "
-        f"{x} - {x}, "
-        f"libdevice.{kind}{order}({x}))"
-    )
-
-
-def _triton_cyl_bessel_i(order: int, x: str) -> str:
-    # PyTorch's Cephes-derived kernels return NaN for infinities; libdevice
-    # returns signed infinities, so synthesize a same-dtype NaN with x - x.
-    return (
-        f"tl.where(tl.abs({x}) == float('inf'), "
-        f"{x} - {x}, "
-        f"libdevice.cyl_bessel_i{order}({x}))"
-    )
+    halide: Optional[Callable[..., str]] = None
+    mps: Optional[Callable[..., str]] = None
 
 
 # NB: if you add a new special function, don't forget to update
@@ -1305,25 +1202,25 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_j0_forward({x})",
-        triton=lambda x: _triton_bessel(0, "j", x),
+        triton=lambda x: f"libdevice.j0({x})",
         name="special_bessel_j0",
     ),
     bessel_j1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_j1_forward({x})",
-        triton=lambda x: _triton_bessel(1, "j", x),
+        triton=lambda x: f"libdevice.j1({x})",
         name="special_bessel_j1",
     ),
     bessel_y0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_y0_forward({x})",
-        triton=lambda x: _triton_bessel(0, "y", x),
+        triton=lambda x: f"libdevice.y0({x})",
         name="special_bessel_y0",
     ),
     bessel_y1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_y1_forward({x})",
-        triton=lambda x: _triton_bessel(1, "y", x),
+        triton=lambda x: f"libdevice.y1({x})",
         name="special_bessel_y1",
     ),
     digamma=OverridesData(
@@ -1389,7 +1286,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"calc_i0({x})",
-        triton=lambda x: _triton_cyl_bessel_i(0, x),
+        triton=lambda x: f"libdevice.cyl_bessel_i0({x})",
         cppvec=lambda x: f"{x}.i0()",
         name="i0",
     ),
@@ -1402,7 +1299,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"calc_i1({x})",
-        triton=lambda x: _triton_cyl_bessel_i(1, x),
+        triton=lambda x: f"libdevice.cyl_bessel_i1({x})",
         name="special_i1",
     ),
     i1e=OverridesData(
@@ -1419,13 +1316,13 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     modified_bessel_i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"modified_bessel_i0_forward({x})",
-        triton=lambda x: _triton_cyl_bessel_i(0, x),
+        triton=lambda x: f"libdevice.cyl_bessel_i0({x})",
         name="special_modified_bessel_i0",
     ),
     modified_bessel_i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"modified_bessel_i1_forward({x})",
-        triton=lambda x: _triton_cyl_bessel_i(1, x),
+        triton=lambda x: f"libdevice.cyl_bessel_i1({x})",
         name="special_modified_bessel_i1",
     ),
     modified_bessel_k0=OverridesData(
@@ -1559,10 +1456,9 @@ class DeferredLine(DeferredLineBase):
     def __init__(self, name: str, line: str):
         super().__init__(line)
         self.name = name
-        if isinstance(line, DeferredLineBase):
-            raise AssertionError("line must not be a DeferredLineBase")
+        assert not isinstance(line, DeferredLineBase)
 
-    def __call__(self) -> str | None:
+    def __call__(self) -> Optional[str]:
         if not is_buffer_removed(self.name):
             return self.line
         return None
@@ -1619,10 +1515,10 @@ class KernelArgs:
     @staticmethod
     def _lookup(
         prefix: str,
-        odict: dict[_T, str | RemovedArg] | dict[_T, str],
+        odict: Union[dict[_T, Union[str, RemovedArg]], dict[_T, str]],
         name: _T,
     ) -> str:
-        result: str | RemovedArg = odict.get(name, REMOVED)
+        result: Union[str, RemovedArg] = odict.get(name, REMOVED)
         if isinstance(result, RemovedArg):
             odict[name] = new_result = f"{prefix}{len(odict)}"
             return new_result
@@ -1630,8 +1526,8 @@ class KernelArgs:
 
     def __init__(self) -> None:
         self.input_buffers: dict[str, str] = {}
-        self.output_buffers: dict[str, str | RemovedArg] = {}
-        self.inplace_buffers: dict[str, InplacedBuffer | RemovedArg] = {}
+        self.output_buffers: dict[str, Union[str, RemovedArg]] = {}
+        self.inplace_buffers: dict[str, Union[InplacedBuffer, RemovedArg]] = {}
         self.sizevars: dict[sympy.Expr, str] = {}
         self.workspace_args: list[WorkspaceArg] = []
 
@@ -1658,8 +1554,7 @@ class KernelArgs:
     def input(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
-        if name in V.graph.removed_buffers:
-            raise AssertionError(name)
+        assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return cast(str, self.output_buffers[name])
         if name in self.inplace_buffers:
@@ -1671,8 +1566,7 @@ class KernelArgs:
     def output(self, name: str) -> str:
         if V.graph.scheduler:
             name = V.graph.scheduler.mutation_real_name.get(name, name)
-        if name in V.graph.removed_buffers:
-            raise AssertionError(name)
+        assert name not in V.graph.removed_buffers, name
         if name in self.inplace_buffers:
             return cast(InplacedBuffer, self.inplace_buffers[name]).inner_name
         return self._lookup("out_ptr", self.output_buffers, name)
@@ -1680,12 +1574,10 @@ class KernelArgs:
     def make_inplace(self, input_name: str, output_name: str) -> None:
         if input_name in V.graph.unaligned_buffers:
             V.graph.unaligned_buffers.add(output_name)
-        if output_name in self.inplace_buffers:
-            raise AssertionError(output_name)
+        assert output_name not in self.inplace_buffers, output_name
         if input_name in self.inplace_buffers:
             buf = self.inplace_buffers[input_name]
-            if isinstance(buf, RemovedArg):
-                raise AssertionError("buf must not be a RemovedArg")
+            assert not isinstance(buf, RemovedArg)
             buf.other_names.append(output_name)
             self.inplace_buffers[output_name] = buf
         else:
@@ -1747,11 +1639,10 @@ class KernelArgs:
                 offset = existing_arg.count
                 self.workspace_args[i] = WorkspaceArg.join(existing_arg, arg)
                 return existing_arg.inner_name, existing_arg.outer_name, offset
-            if not (
+            assert (
                 existing_arg.inner_name != arg.inner_name
                 and existing_arg.outer_name != arg.outer_name
-            ):
-                raise AssertionError(existing_arg)
+            ), existing_arg
         self.workspace_args.append(arg)
         return arg.inner_name, arg.outer_name, 0
 
@@ -1779,14 +1670,12 @@ class KernelArgs:
         )
         for existing_arg in self.workspace_args:
             if existing_arg.inner_name == arg.inner_name:
-                if arg != existing_arg:
-                    raise AssertionError((arg, existing_arg))
+                assert arg == existing_arg, (arg, existing_arg)
         self.workspace_args.append(arg)
         return arg.inner_name
 
     def seed_offset(self, name: str, value: int) -> str:
-        if not isinstance(value, int):
-            raise AssertionError((type(value), value))
+        assert isinstance(value, int), (type(value), value)
         # here we are lifting a constant integer into an arg to the kernel to try to get additional cache hits
         value = sympy.Integer(value)
         if value in self.sizevars:
@@ -1799,8 +1688,7 @@ class KernelArgs:
         return name
 
     def size(self, name: sympy.Symbol) -> str:
-        if not isinstance(name, sympy.Symbol):
-            raise AssertionError((type(name), name))
+        assert isinstance(name, sympy.Symbol), (type(name), name)
         if name.name == "seed":
             self.sizevars[name] = "seed"  # don't manage the name of seeds
             return "seed"
@@ -1811,7 +1699,7 @@ class KernelArgs:
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
-    def arg_name(self, name: str) -> str | None:
+    def arg_name(self, name: str) -> Optional[str]:
         """
         Returns inner name of a given outer name.
         """
@@ -1830,7 +1718,7 @@ class KernelArgs:
         return str(size)
 
     def cpp_argdefs(
-        self, dtype_to_cpp_type: dict[torch.dtype, str] | None = None
+        self, dtype_to_cpp_type: Optional[dict[torch.dtype, str]] = None
     ) -> tuple[list[str], list[str], list[str]]:
         from .cpp_utils import INDEX_TYPE
 
@@ -1880,8 +1768,7 @@ class KernelArgs:
             call_args.append(self.wrap_size_arg(outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        if self.workspace_args:
-            raise AssertionError("Workspace not supported on CPU ")
+        assert not self.workspace_args, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
     def python_argdefs(
@@ -1982,12 +1869,11 @@ class CSEVariable:
         self,
         name: str,
         bounds: ValueRanges[Any],
-        dtype: torch.dtype | None = None,
+        dtype: Optional[torch.dtype] = None,
         shape: BlockShapeType = None,
     ):
         super().__init__()
-        if not isinstance(bounds, ValueRanges):
-            raise AssertionError(type(bounds))
+        assert isinstance(bounds, ValueRanges), type(bounds)
         self.name = name
         self.bounds = bounds
         self.use_count = 1  # track how many times this expression is used
@@ -2017,7 +1903,7 @@ if TYPE_CHECKING:
     ReductionCacheKey = tuple[
         torch.dtype,
         ReductionType,
-        CSEVariable | tuple[CSEVariable, ...],
+        Union[CSEVariable, tuple[CSEVariable, ...]],
     ]
 
 
@@ -2029,11 +1915,12 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         prefix: str = "",
         suffix: str = "",
         name_prefix: str = "tmp",
-        iter_buffers: itertools.count[int] | None = None,
-        store_cache: MutableMapping[str, CSEVariableType] | None = None,
-        reduction_cache: MutableMapping[ReductionCacheKey, CSEVariableType]
-        | None = None,
-        varname_map: dict[str, CSEVariableType] | None = None,
+        iter_buffers: Optional[itertools.count[int]] = None,
+        store_cache: Optional[MutableMapping[str, CSEVariableType]] = None,
+        reduction_cache: Optional[
+            MutableMapping[ReductionCacheKey, CSEVariableType]
+        ] = None,
+        varname_map: Optional[dict[str, CSEVariableType]] = None,
     ):
         self.prefix = prefix
         self.suffix = suffix
@@ -2086,7 +1973,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
     def contains(self, cache_key: str) -> bool:
         return self.augment_key(cache_key) in self._cache
 
-    def try_get(self, cache_key: str) -> CSEVariableType | None:
+    def try_get(self, cache_key: str) -> Optional[CSEVariableType]:
         return self._cache.get(self.augment_key(cache_key), None)
 
     def get(self, cache_key: str) -> CSEVariableType:
@@ -2095,19 +1982,18 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: str | CSEVariable | OpsValue | IndentedBuffer | DeferredLineBase,
+        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer, DeferredLineBase],
         *,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write: bool = True,
         assignment: bool = True,
-        dtype: torch.dtype | None = None,
+        dtype: Optional[torch.dtype] = None,
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
         if isinstance(expr, OpsValue):
             expr = expr.value
 
-        if not (write or assignment):
-            raise AssertionError("expected write or assignment to be set")
+        assert write or assignment
         if isinstance(expr, CSEVariable):
             # If the expressions were always created with all the information, we could
             # assert expr.bounds == bounds, but sometimes the expression is created
@@ -2120,8 +2006,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         elif isinstance(expr, DeferredLineBase):
             cache_key = expr.line
         else:
-            if not isinstance(expr, str):
-                raise AssertionError(f"expected str, got {type(expr)}")
+            assert isinstance(expr, str)
             cache_key = expr
         var = self.try_get(cache_key)
         if shape is None and not assignment:
@@ -2142,8 +2027,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                     buffer.splice(expr)
                     buffer.writeline(self.suffix)
                 elif isinstance(expr, DeferredLineBase):
-                    if not assignment:
-                        raise AssertionError("expected assignment to be set")
+                    assert assignment
                     buffer.writeline(
                         expr._new_line(f"{self.prefix}{var} = {expr.line}{self.suffix}")
                     )
@@ -2175,7 +2059,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
     def newvar(
         self,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
-        dtype: torch.dtype | None = None,
+        dtype: Optional[torch.dtype] = None,
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
@@ -2187,7 +2071,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         self,
         name: str,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
-        dtype: torch.dtype | None = None,
+        dtype: Optional[torch.dtype] = None,
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
         torch._check_value(
@@ -2212,14 +2096,12 @@ class CodeGen:
 
 
 class Kernel(CodeGen, Generic[CSEVariableType]):
-    """Base class for generated kernels and their code buffers."""
-
     newvar_prefix: str = ""
     suffix: str = ""
-    overrides: Callable[[], OpsHandler[Any]] | None = None
+    overrides: Optional[Callable[[], OpsHandler[Any]]] = None
 
     def __init__(
-        self, args: KernelArgs | None = None, increase_kernel_count: bool = True
+        self, args: Optional[KernelArgs] = None, increase_kernel_count: bool = True
     ) -> None:
         super().__init__()
         if increase_kernel_count:
@@ -2238,11 +2120,11 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers: OrderedSet[str] = OrderedSet()
         self.store_buffer_names: OrderedSet[str] = OrderedSet()
-        self._load_mask: str | None = None
-        self._load_other: None | int | float = None
+        self._load_mask: Optional[str] = None
+        self._load_other: Union[None, int, float] = None
         # OrderedSet in set_current_node
-        self.current_node: SchedulerNode | None = None
-        self.node_to_bounds: dict[torch.fx.Node, ValueRanges[Any]] | None = None
+        self.current_node: Optional[SchedulerNode] = None
+        self.node_to_bounds: Optional[dict[torch.fx.Node, ValueRanges[Any]]] = None
 
         self.removed_buffers: OrderedSet[str] = OrderedSet()
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
@@ -2253,7 +2135,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.inplace_update_buffers: dict[str, str] = {}
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
-        self.kernel_name: str | None = None
+        self.kernel_name: Optional[str] = None
 
     @contextlib.contextmanager
     def set_current_node(self, node: SchedulerNode) -> Iterator[None]:
@@ -2269,8 +2151,8 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def swap_buffers(
         self,
         lb: IndentedBuffer,
-        cb: IndentedBuffer | None = None,
-        sb: IndentedBuffer | None = None,
+        cb: Optional[IndentedBuffer] = None,
+        sb: Optional[IndentedBuffer] = None,
     ) -> Iterator[None]:
         if cb is None:
             cb = lb
@@ -2293,8 +2175,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             self.cse = cse
             # pyrefly: ignore [unbound-name]
             if disallow_stores:
-                if sb:
-                    raise AssertionError("unexpected store inside swap_buffers")
+                assert not sb, "unexpected store inside swap_buffers"
 
     def emit_kernel_override(
         self,
@@ -2343,8 +2224,8 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: CSEVariable | tuple[CSEVariable, ...],
-    ) -> CSEVariable | tuple[CSEVariable, ...]:
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         raise NotImplementedError
 
     def partial_accumulate(
@@ -2385,8 +2266,8 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: tuple[str, sympy.Expr] | None = None,
-        sorter_indices: CSEVariable | None = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[CSEVariable] = None,
     ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
@@ -2399,19 +2280,16 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
 
     def indirect_assert(
         self,
-        var: CSEVariable | str,
-        lower: str | None,
-        upper: str | None,
-        mask: CSEVariable | str | None = None,
+        var: Union[CSEVariable, str],
+        lower: Optional[str],
+        upper: Optional[str],
+        mask: Optional[Union[CSEVariable, str]] = None,
     ) -> str:
         if isinstance(var, CSEVariable):
             var = str(var)
-        if not isinstance(var, str):
-            raise AssertionError(type(var))
-        if not (lower is None or isinstance(lower, str)):
-            raise AssertionError(f"expected lower to be None or str, got {type(lower)}")
-        if not (upper is None or isinstance(upper, str)):
-            raise AssertionError(f"expected upper to be None or str, got {type(upper)}")
+        assert isinstance(var, str), type(var)
+        assert lower is None or isinstance(lower, str)
+        assert upper is None or isinstance(upper, str)
         if lower and upper:
             # The conditions need to be in parens because of Python's operator precedence.
             # It'd be less error-prone to use and/or/not, which is supported by triton
@@ -2421,8 +2299,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             cond = f"{lower} <= {var}"
             cond_print = cond
         else:
-            if not upper:
-                raise AssertionError("expected upper to be set")
+            assert upper
             cond = f"{var} < {upper}"
             cond_print = cond
 
@@ -2441,8 +2318,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
 
     def __enter__(self) -> Self:
         super().__enter__()
-        if not self.overrides:
-            raise AssertionError("expected overrides to be set")
+        assert self.overrides
         self.exit_stack.enter_context(
             V.set_ops_handler(CSEProxy(self, self.overrides()))
         )
@@ -2507,7 +2383,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.removed_buffers.add(name)
 
     def rename_indexing(
-        self, index: list[sympy.Expr] | tuple[sympy.Expr, ...] | sympy.Expr
+        self, index: Union[list[sympy.Expr], tuple[sympy.Expr, ...], sympy.Expr]
     ) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
@@ -2533,7 +2409,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
         return CSEVariable(*args, **kwargs)
 
-    def arg_name(self, node: IRNode) -> str | None:
+    def arg_name(self, node: IRNode) -> Optional[str]:
         """
         Returns arg name of a given input or output node.
         """
@@ -2541,21 +2417,12 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             return None
         return self.args.arg_name(node.get_name())
 
-    def record_op_trace(
-        self,
-        name: str,
-        args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-        result: Any = None,
-    ) -> None:
-        pass
-
 
 @dataclasses.dataclass
 class OptimizationContext:
     key: ClassVar[str] = "opt_ctx"
 
-    dtype: torch.dtype | None = None
+    dtype: Optional[torch.dtype] = None
     ops_name: str = ""
 
 
@@ -2636,7 +2503,7 @@ class KernelTemplate:
 
     @staticmethod
     def _fake_get_dtype(
-        fake_outs: list[Buffer] | Buffer,
+        fake_outs: Union[list[Buffer], Buffer],
     ) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
         if isinstance(fake_outs, (list, tuple)):
@@ -2652,7 +2519,7 @@ class KernelTemplate:
 
         return get_dtype
 
-    def __init__(self, name: str, hash: str | None = None) -> None:
+    def __init__(self, name: str, hash: Optional[str] = None) -> None:
         self.name = name
         self._hash = hash
 
@@ -2668,7 +2535,7 @@ class KernelTemplate:
         return self.name
 
     @property
-    def src_hash(self) -> str | None:
+    def src_hash(self) -> Union[str, None]:
         """
         source hash for a Template.
 
@@ -2678,7 +2545,7 @@ class KernelTemplate:
         """
         return self._hash
 
-    def choice_or_none(self, **kwargs: Any) -> ChoiceCaller | None:
+    def choice_or_none(self, **kwargs: Any) -> Optional[ChoiceCaller]:
         """
         Maybe generates a new ChoiceCaller and returns it, or None if generation fails.
 
@@ -2692,7 +2559,7 @@ class KernelTemplate:
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
-    ) -> NotImplementedError | None:
+    ) -> Optional[NotImplementedError]:
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
         Returns None if success, otherwise returns the error.
@@ -2705,7 +2572,7 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -2765,15 +2632,14 @@ class CSEProxy(DefaultHandler):
 
         if backend in ("triton", "cpp"):
             # maybe there are some exceptions on mps?
-            if output_dtype is None:
-                raise AssertionError("expected output_dtype to be not None")
+            assert output_dtype is not None
 
         output_idx = 0
 
-        def do_cse(v: str | CSEVariable) -> CSEVariable:
+        def do_cse(v: Union[str, CSEVariable]) -> CSEVariable:
             # we tree_map over the output, so we need to fetch corresponding dtype
             nonlocal output_idx
-            var_dtype: torch.dtype | None = (
+            var_dtype: Optional[torch.dtype] = (
                 output_dtype[output_idx]
                 if isinstance(output_dtype, (list, tuple))
                 else output_dtype
@@ -2807,25 +2673,20 @@ class CSEProxy(DefaultHandler):
             if (
                 config.test_configs.runtime_triton_dtype_assert
                 or config.test_configs.static_cpp_dtype_assert
-            ) and var_dtype is not None:
+            ):
+                assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if (
-                config.test_configs.runtime_triton_shape_assert
-                and _is_runtime_triton_assert_target()
-            ):
-                shape_to_check = csevar.shape if csevar.shape is not None else var_shape
-                if shape_to_check is not None:
-                    check_shape(V.kernel.compute, csevar, shape_to_check)
+            if config.test_configs.runtime_triton_shape_assert:
+                assert output_shape is not None
+                check_shape(V.kernel.compute, csevar, output_shape)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)
 
             return csevar
 
-        result = pytree.tree_map(do_cse, value)
-        self.kernel.record_op_trace(name, args, kwargs, result)
-        return result
+        return pytree.tree_map(do_cse, value)
 
     def _bound_variable(self, name: str, *args: Any, **kwargs: Any) -> ValueRanges[Any]:
         """
@@ -2834,12 +2695,12 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
-        from .cutlass.kernel import CUTLASSTemplateKernel
+        from .cutlass.cuda_kernel import CUDATemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
             return ValueRanges.unknown()
 
-        if isinstance(V.kernel, CUTLASSTemplateKernel):
+        if isinstance(V.kernel, CUDATemplateKernel):
             return ValueRanges.unknown()
 
         if isinstance(V.interpreter, NullHandler):
@@ -2847,8 +2708,9 @@ class CSEProxy(DefaultHandler):
 
         fx_node = V.interpreter.current_node
         if fx_node.target == name and self.kernel.node_to_bounds is not None:
-            if not isinstance(self.kernel.node_to_bounds, dict):
-                raise AssertionError(type(self.kernel.node_to_bounds))
+            assert isinstance(self.kernel.node_to_bounds, dict), type(
+                self.kernel.node_to_bounds
+            )
             return self.kernel.node_to_bounds.get(fx_node, ValueRanges.unknown())
         elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
             # These create lots of inner strings. We would need to compute the bounds at the ops
@@ -2860,8 +2722,7 @@ class CSEProxy(DefaultHandler):
             # intermediary strings, wrap them in CSE variables with properly initialised bounds.
 
             # If there is no FX bound but we know how to compute one we do so
-            if kwargs:
-                raise AssertionError("expected no kwargs")
+            assert not kwargs
 
             def arg_to_bound(x: Any) -> Any:
                 if isinstance(x, CSEVariable):
@@ -2878,14 +2739,13 @@ class CSEProxy(DefaultHandler):
     def indirect_indexing(
         self,
         var: CSEVariable,
-        size: sympy.Expr | int,
+        size: Union[sympy.Expr, int],
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
         if isinstance(size, int):
             size = sympy.Integer(size)
-        if not isinstance(size, sympy.Expr):
-            raise AssertionError((type(size), size))
+        assert isinstance(size, sympy.Expr), (type(size), size)
         # Skip CSE since this doesn't return an expression
 
         if var.bounds.lower < 0:
@@ -2898,15 +2758,9 @@ class CSEProxy(DefaultHandler):
             else:
                 stm = var
 
-            # Propagate bounds as we know how to compute them properly.
-            # When wrap_neg=False, negative indices stay negative and must keep
-            # their original bounds so lower-bound checks are not elided.
-            new_bounds = var.bounds if not wrap_neg else ValueRanges.unknown()
-            if (
-                wrap_neg
-                and var.bounds != ValueRanges.unknown()
-                and isinstance(size, sympy.Number)
-            ):
+            # Propagate bounds as we know how to compute them properly
+            new_bounds = ValueRanges.unknown()
+            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the cond
@@ -2957,7 +2811,6 @@ class CSEProxy(DefaultHandler):
         # cse cache.
         if out.use_count == 1:
             self.kernel.num_load += 1
-        self.kernel.record_op_trace("load", (name, index), {}, out)
         return out
 
     def _update_store_cache(self, name: str, value: CSEVariable) -> None:
@@ -2971,17 +2824,14 @@ class CSEProxy(DefaultHandler):
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
         self.kernel.store_buffer_names.add(name)
-        # Update store cache when mode is None or "tma"
-        if mode != "atomic_add":
+        if mode is None:
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
-        self.kernel.record_op_trace("store", (name, index, value, mode), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
-        self.kernel.record_op_trace("device_assert_async", (cond, msg), {})
 
     # pyrefly: ignore [bad-override]
     def partial_accumulate(self, *args: Any) -> None:
@@ -3000,8 +2850,8 @@ class CSEProxy(DefaultHandler):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: CSEVariable | tuple[CSEVariable, ...],
-    ) -> CSEVariable | tuple[CSEVariable, ...]:
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         self.kernel.num_reduction += 1
         return self.kernel.reduction(dtype, src_dtype, reduction_type, value)
 
@@ -3032,8 +2882,8 @@ class CSEProxy(DefaultHandler):
         boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: tuple[str, sympy.Expr] | None = None,
-        sorter_indices: CSEVariable | None = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[CSEVariable] = None,
     ) -> CSEVariable:
         """
         [Note: Inductor bucketize op]

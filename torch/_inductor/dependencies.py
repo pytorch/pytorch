@@ -4,7 +4,7 @@ import itertools
 import logging
 import re
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -80,7 +80,7 @@ class MemoryDep(Dep):
     index: sympy.Expr
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
-    mode: str | None = None
+    mode: Optional[str] = None
 
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
@@ -101,14 +101,11 @@ class MemoryDep(Dep):
     def num_vars(self) -> int:
         return len(self.var_names)
 
-    def decide_loop_order_to_match(self, other: "MemoryDep") -> list[int] | None:
+    def decide_loop_order_to_match(self, other: "MemoryDep") -> Optional[list[int]]:
         """
         Can return None if not able to decide loop orders.
         """
-        if self.num_vars != other.num_vars:
-            raise AssertionError(
-                f"expected num_vars to match, got {self.num_vars} and {other.num_vars}"
-            )
+        assert self.num_vars == other.num_vars
 
         # ignore broadcast for now since broadcast causes extra 0 strides
         # which makes it hard to decide the correct loop orders.
@@ -121,9 +118,9 @@ class MemoryDep(Dep):
         # For size == 0, it's an empty tensor, any strides for that dimension
         # are equivalent. Skip for simplicity and it may not matter that much.
         #
-        # For size == 1, it cause tie for strides of different dimensions.
+        # For size == 1, it cause cause tie for strides of different dimensions.
         # Also when we first time create LoopBody in ComputedBuffer.simplify_and_reorder
-        # we can dependencies.index_vars_squeeze which should already squeeze
+        # we can dependencies.index_vars_squeeze which should already sqeeuze
         # the size == 1 dimensions.
         if any(s == 0 or s == 1 for s in itertools.chain(self.size, other.size)):
             return None
@@ -158,10 +155,7 @@ class MemoryDep(Dep):
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        if OrderedSet(order) != OrderedSet(range(self.num_vars)):
-            raise AssertionError(
-                f"expected order to be a permutation of range({self.num_vars}), got {order}"
-            )
+        assert OrderedSet(order) == OrderedSet(range(self.num_vars))
         return order
 
     def get_offset(self) -> sympy.Expr:
@@ -172,8 +166,8 @@ class MemoryDep(Dep):
 
     def normalize(self) -> "MemoryDep":
         """
-        Normalize by merging loops. The difference from normalize_with_stride_order is,
-        this method does not reorder loops while normalize_with_stride_order reorders
+        Normalize by merging loops. The different to normalize_with_stride_order is,
+        this method does not reorder loops while normalize_with_stride_order reorder
         loops based on stride order.
         """
         return MemoryDep(
@@ -326,7 +320,7 @@ class MemoryDep(Dep):
 class StarDep(Dep):
     # pyrefly: ignore [bad-override]
     name: str
-    mode: str | None = None
+    mode: Optional[str] = None
 
     # depends on the entire buffer
     @property
@@ -439,8 +433,8 @@ class ReadWrites:
     reads: OrderedSet[Dep]
     writes: OrderedSet[Dep]
     index_exprs: OrderedSet[IndexExprDep]
-    range_vars: list[sympy.Expr] | None = None
-    var_ranges: VarRanges | None = None
+    range_vars: Optional[list[sympy.Expr]] = None
+    var_ranges: Optional[VarRanges] = None
 
     def rename(self, renames: dict[str, str]) -> "ReadWrites":
         return ReadWrites(
@@ -451,11 +445,8 @@ class ReadWrites:
             self.var_ranges,
         )
 
-    def with_read(self, dep: Dep | OrderedSet[Dep]) -> "ReadWrites":
-        if not isinstance(dep, (WeakDep, StarDep, OrderedSet)):
-            raise AssertionError(
-                f"expected WeakDep, StarDep, or OrderedSet, got {type(dep)}"
-            )
+    def with_read(self, dep: Union[Dep, OrderedSet[Dep]]) -> "ReadWrites":
+        assert isinstance(dep, (WeakDep, StarDep, OrderedSet))
         if not isinstance(dep, OrderedSet):
             dep = OrderedSet([dep])
         return ReadWrites(
@@ -526,7 +517,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     @staticmethod
     def drop_unused_symbols(
-        index: int | sympy.Expr,
+        index: Union[int, sympy.Expr],
         var_names: list[sympy.Expr],
         sizes: list[sympy.Expr],
     ) -> None:
@@ -591,22 +582,18 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
 
     def load_seed(self, name: str, index: int) -> None:
-        if not isinstance(index, int):
-            raise AssertionError(f"expected index to be int, got {type(index)}")
+        assert isinstance(index, int)
         self.load(name, sympy.Integer(index))
 
     def store(
-        self, name: str, index: sympy.Expr, value: str, mode: str | None = None
+        self, name: str, index: sympy.Expr, value: str, mode: Optional[str] = None
     ) -> None:
         self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
 
     def store_reduction(self, name: str, index: sympy.Expr, value: str) -> None:
         self.store(name, index, f"store_reduction({value})")
 
-    def index_expr(self, index: sympy.Expr, dtype: torch.dtype | None) -> None:
-        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
-
-    def value_expr(self, index: sympy.Expr, dtype: torch.dtype | None) -> None:
+    def index_expr(self, index: sympy.Expr, dtype: Optional[torch.dtype]) -> None:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
 
     def bucketize(
@@ -616,8 +603,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: tuple[str, sympy.Expr] | None = None,
-        sorter_indices: T | None = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
     ) -> None:
         """Records the names of the buffers that bucketize will read from."""
         self._reads.add(StarDep(boundaries[0]))
@@ -661,8 +648,10 @@ def index_vars_squeeze(
 
     var_ranges, add_var = var_builder(prefix)
     args: list[Sequence[sympy.Expr]] = []
+    new_sizes: list[Sequence[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
+        new_sizes.append(new_size)
         args.append(reindex(list(map(add_var, new_size))))
     return args, var_ranges
 
@@ -759,7 +748,7 @@ def extract_loop_body_with_args(
 
 def extract_input_node_reduction_ranges(
     input_node: "torch._inductor.ir.IRNode",
-) -> tuple[list[sympy.Expr] | None, list[sympy.Expr] | None]:
+) -> tuple[Optional[list[sympy.Expr]], Optional[list[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
     It's possible that a node has multiple inputs, some are Reduction nodes and others are Pointwise nodes.
@@ -769,8 +758,8 @@ def extract_input_node_reduction_ranges(
 
     from .ir import ComputedBuffer, ExternKernel, Loops
 
-    size: list[sympy.Expr] | None
-    reduction_size: list[sympy.Expr] | None
+    size: Optional[list[sympy.Expr]]
+    reduction_size: Optional[list[sympy.Expr]]
 
     if isinstance(input_node.get_defining_op(), ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
@@ -789,8 +778,8 @@ def extract_input_node_reduction_ranges(
     # The current method still uses reduction ranges from the dependent realized node, which is not ideal.
     # Is there a way to check whether there are permutations in between?
     reads = input_node.get_reads()
-    reduction_size: list[sympy.Expr] | None = None
-    size: list[sympy.Expr] | None = None
+    reduction_size: Optional[list[sympy.Expr]] = None
+    size: Optional[list[sympy.Expr]] = None
     while reduction_size is None and len(reads) > 0:
         seen: OrderedSet[str] = OrderedSet()
         new_reads: list[Dep] = []
@@ -844,14 +833,11 @@ class FreeSymbolsOpsHandler(DefaultHandler):
     def indirect_indexing(
         self,
         index_var: Any,
-        size: int | sympy.Expr,
+        size: Union[int, sympy.Expr],
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
-        if isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean)):
-            raise AssertionError(
-                f"index_var must not be a sympy Expr or Boolean, got {type(index_var)}"
-            )
+        assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
         self.symbols |= self.get_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
@@ -873,14 +859,13 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: None | tuple[None, ...],
-    ) -> None | tuple[None, ...]:
+        value: Union[None, tuple[None, ...]],
+    ) -> Union[None, tuple[None, ...]]:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
 
     def masked(self, mask: Any, body: Callable[..., Any], other: Any) -> None:
-        if not callable(body):
-            raise AssertionError("masked body must always be callable.")
+        assert callable(body), "masked body must always be callable."
         # The body can make additional calls, for e.g. ops.indirect_indexing
         body()
 
@@ -888,7 +873,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
 def extract_free_symbols(
     fn: Callable[..., Any],
     index: Sequence[sympy.Expr],
-    rindex: Sequence[sympy.Expr] | None = None,
+    rindex: Optional[Sequence[sympy.Expr]] = None,
     unbacked_only: bool = True,
 ) -> OrderedSet[sympy.Symbol]:
     from .ir import FlexibleLayout
@@ -903,16 +888,3 @@ def extract_free_symbols(
     ):
         fn(*args)
     return handler.symbols
-
-
-class SymbolUsageCollectorOpsHandler(DefaultHandler):
-    usages: OrderedSet[str]
-
-    def __init__(self, symbol: sympy.Symbol) -> None:
-        self.symbol = symbol
-        self.usages = OrderedSet()
-
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        used_here = self.symbol in args or self.symbol in kwargs.values()
-        if used_here:
-            self.usages.add(name)

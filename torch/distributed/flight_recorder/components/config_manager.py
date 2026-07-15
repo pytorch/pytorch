@@ -94,17 +94,15 @@ class JobConfig:
         # pyrefly: ignore [missing-attribute]
         if args.selected_ranks is not None:
             # pyrefly: ignore [missing-attribute]
-            if not args.just_print_entries:
-                raise AssertionError(
-                    "Not support selecting ranks without printing entries"
-                )
+            assert args.just_print_entries, (
+                "Not support selecting ranks without printing entries"
+            )
         # pyrefly: ignore [missing-attribute]
         if args.pg_filters is not None:
             # pyrefly: ignore [missing-attribute]
-            if not args.just_print_entries:
-                raise AssertionError(
-                    "Not support selecting pg filters without printing entries"
-                )
+            assert args.just_print_entries, (
+                "Not support selecting pg filters without printing entries"
+            )
         # pyrefly: ignore [missing-attribute]
         if args.verbose:
             logger.set_log_level(logging.DEBUG)

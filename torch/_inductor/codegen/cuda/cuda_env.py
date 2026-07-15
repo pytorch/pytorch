@@ -1,6 +1,7 @@
 import functools
 import logging
 import shutil
+from typing import Optional
 
 import torch
 from torch._inductor.utils import clear_on_fresh_cache
@@ -13,7 +14,7 @@ log = logging.getLogger(__name__)
 
 @clear_on_fresh_cache
 @functools.lru_cache(1)
-def get_cuda_arch() -> str | None:
+def get_cuda_arch() -> Optional[str]:
     try:
         cuda_arch = config.cuda.arch
         if cuda_arch is None:
@@ -38,7 +39,7 @@ def is_datacenter_blackwell_arch() -> bool:
 
 @clear_on_fresh_cache
 @functools.lru_cache(1)
-def get_cuda_version() -> str | None:
+def get_cuda_version() -> Optional[str]:
     try:
         cuda_version = config.cuda.version
         if cuda_version is None:
@@ -50,5 +51,5 @@ def get_cuda_version() -> str | None:
 
 
 @functools.cache
-def nvcc_exist(nvcc_path: str | None = "nvcc") -> bool:
+def nvcc_exist(nvcc_path: Optional[str] = "nvcc") -> bool:
     return nvcc_path is not None and shutil.which(nvcc_path) is not None

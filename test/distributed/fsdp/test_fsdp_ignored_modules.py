@@ -83,8 +83,7 @@ class ModelWithIgnoredModules(Model):
     """Adds a variable number of :class:`IgnoredModule` to ``self.layer1``."""
 
     def __init__(self, num_ignored: int) -> None:
-        if not (num_ignored >= 0):
-            raise AssertionError(f"Expected num_ignored >= 0, got {num_ignored}")
+        assert num_ignored >= 0
         super().__init__()
         layer1_modules = (
             [torch.nn.Linear(5, 4), torch.nn.Linear(4, 4)]

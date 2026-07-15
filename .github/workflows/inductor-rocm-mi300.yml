@@ -1,4 +1,3 @@
-# Owner(s): ["module: rocm"]
 name: inductor-rocm-mi300
 
 on:
@@ -18,13 +17,15 @@ concurrency:
 permissions:
   id-token: write
   contents: read
-  actions: read
 
 jobs:
   target-determination:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
 
   get-label-type:
     name: get-label-type
@@ -38,12 +39,11 @@ jobs:
       opt_out_experiments: lf
 
   linux-noble-rocm-py3_12-inductor-build:
-    name: linux-noble-rocm-py3.12-mi300
+    name: rocm-py3.12-inductor-mi300
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "mt-"
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-noble-rocm-py3.12-mi300
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |
@@ -54,7 +54,10 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_12-inductor-test:
-    name: linux-noble-rocm-py3.12-mi300
+    permissions:
+      id-token: write
+      contents: read
+    name: rocm-py3.12-inductor-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_12-inductor-build
     with:

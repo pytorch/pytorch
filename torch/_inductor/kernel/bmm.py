@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -10,7 +10,6 @@ from torch._inductor.kernel.mm_common import load_kernel_template
 from .. import config as inductor_config, ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings, make_pointwise, make_reduction, transform_args
-from ..runtime.runtime_utils import get_max_y_grid
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -44,14 +43,8 @@ aten = torch.ops.aten
 
 
 @SymbolicGridFn
-def bmm_grid(b, m, n, meta, *, cdiv, max):
-    tiles = cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"])
-    # Split batch across grid_y and grid_z to avoid exceeding CUDA grid_y limit.
-    # When b <= max_y_grid, grid_z = 1 and behavior is identical to the original.
-    max_y_grid = get_max_y_grid()
-    grid_z = max(cdiv(b, max_y_grid), 1)
-    grid_y = cdiv(b, grid_z)
-    return (tiles, grid_y, grid_z)
+def bmm_grid(b, m, n, meta, *, cdiv):
+    return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
 
 
 # We define each template kernel in a separate file which is the name of the input to load_kernel_template
@@ -67,24 +60,12 @@ bmm_template = TritonTemplate(
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
-    "at::_bmm_out_dtype_xpu" if torch.xpu._is_compiled() else "at::_bmm_out_dtype_cuda",
+    "at::_bmm_out_dtype_xpu" if torch.xpu.is_available() else "at::_bmm_out_dtype_cuda",
     name="bmm_dtype",
     op_overload=aten.bmm.dtype_out,
 )
 aten_baddbmm = ExternKernelChoice(
     torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
-)
-
-# This path targets vmapped dot products and similar tiny vector contractions,
-# where extern bmm launch overhead and lost fusion dominate. Keep the threshold
-# conservative so reductions proven to be larger than the threshold continue
-# through the normal bmm machinery.
-_BMM_DOT_K_DECOMPOSE_THRESHOLD = 32
-_BMM_DOT_DECOMPOSE_DTYPES = (
-    torch.float16,
-    torch.bfloat16,
-    torch.float32,
-    torch.float64,
 )
 
 
@@ -93,36 +74,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.bmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    sizevars = V.graph.sizevars
-    dtype = mat1.get_dtype()
-    device_type = mat1.get_device().type
-
-    def dim_is_one_or_hint(dim):
-        # The mul+sum decomposition is valid for any M/N. The size-1 hint is
-        # only a profitability signal, so avoid specializing dynamic dims here.
-        return sizevars.optimization_hint(dim, fallback=2) == 1
-
-    def dim_is_not_known_gt(dim, threshold):
-        # Do not use optimization_hint() for K: the same symbolic FX graph can
-        # be code-cache reused across different concrete K values.
-        return not sizevars.statically_known_gt(dim, threshold)
-
-    if (
-        out_dtype is None
-        and device_type in ("cuda", "xpu")
-        and device_type == mat2.get_device().type
-        and dtype == mat2.get_dtype()
-        and dtype in _BMM_DOT_DECOMPOSE_DTYPES
-        and dim_is_one_or_hint(mat1.get_size()[1])
-        and dim_is_one_or_hint(mat2.get_size()[2])
-        and dim_is_not_known_gt(mat1.get_size()[2], _BMM_DOT_K_DECOMPOSE_THRESHOLD)
-    ):
-        # Preserve dot-shaped bmm as pointwise/reduction IR so surrounding
-        # operations can fuse instead of dispatching a tiny extern bmm.
-        mat1 = L.unsqueeze(mat1, -1)
-        mat2 = L.unsqueeze(mat2, 1)
-        return L.sum_(L.mul(mat1, mat2), axis=2)
-
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
         # decompose to small ops when memory bound
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
@@ -212,22 +163,26 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     aten_handler: ExternKernelChoice = aten_bmm
     aten_extra_kwargs = {}
     if out_dtype:
-        if mat1.get_device().type not in ("cuda", "xpu"):
-            raise AssertionError("out_dtype is only supported for CUDA or XPU")
+        assert mat1.get_device().type in ("cuda", "xpu"), (
+            "out_dtype is only supported for CUDA or XPU"
+        )
         aten_handler = aten_bmm_dtype
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
-    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_handler)
         kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
-    if use_triton_template(layout, check_max_autotune=False):
+    if use_triton_template(layout, check_max_autotune=False) and (
+        out_dtype is None or out_dtype == mat1.get_dtype()
+    ):
+        # TODO: add out_dtype support for Triton Template
         templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
@@ -270,8 +225,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
         add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
 
-    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
-    return node
+    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
 
 @L.register_lowering(aten.baddbmm)
@@ -319,7 +273,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
-    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_baddbmm)
 
@@ -331,5 +285,4 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
     )
 
-    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
-    return node
+    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)

@@ -2,7 +2,6 @@
 
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/DeadlockDetection.h>
 #include <c10/util/Exception.h>
 #include <c10/util/python_stub.h>
 
@@ -38,27 +37,40 @@ namespace c10 {
 // not be a way to conveniently index based on the object.)
 class PyHandleCache {
  public:
-  PyHandleCache() = default;
+  PyHandleCache() : pyinterpreter_(nullptr) {}
 
-  // Attempt to fetch the pointer from the cache, if the PyObject
+  // Attempt to fetch the pointer from the cache, if the PyInterpreter
   // matches.  If it doesn't exist, or the cache entry is not valid,
   // use slow_accessor to get the real pointer value and return that
   // (possibly writing it to the cache, if the cache entry is
   // available.)
   template <typename F>
-  PyObject* ptr_or(F slow_accessor) const {
-    PyObject* d = data_.load(std::memory_order_acquire);
-    if (C10_LIKELY(d != nullptr)) {
-      return d;
+  PyObject* ptr_or(impl::PyInterpreter* self_interpreter, F slow_accessor)
+      const {
+    // Note [Memory ordering on Python interpreter tag]
+    impl::PyInterpreter* interpreter =
+        pyinterpreter_.load(std::memory_order_acquire);
+    if (C10_LIKELY(interpreter == self_interpreter)) {
+      return data_;
+    } else if (interpreter == nullptr) {
+      auto* r = slow_accessor();
+      impl::PyInterpreter* expected = nullptr;
+      // attempt to claim this cache entry with the specified interpreter tag
+      if (pyinterpreter_.compare_exchange_strong(
+              expected, self_interpreter, std::memory_order_acq_rel)) {
+        data_ = r;
+      }
+      // This shouldn't be possible, as you should be GIL protected
+      TORCH_INTERNAL_ASSERT(expected != self_interpreter);
+      return r;
+    } else {
+      return slow_accessor();
     }
-    auto* r = slow_accessor();
-    PyObject* expected = nullptr;
-    data_.compare_exchange_strong(expected, r, std::memory_order_acq_rel);
-    return r;
   }
 
  private:
-  mutable std::atomic<PyObject*> data_{nullptr};
+  mutable std::atomic<impl::PyInterpreter*> pyinterpreter_;
+  mutable PyObject* data_{nullptr};
 };
 
 } // namespace c10

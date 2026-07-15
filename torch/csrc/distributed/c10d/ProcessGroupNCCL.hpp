@@ -16,7 +16,6 @@
 #include <iostream>
 #include <list>
 #include <mutex>
-#include <optional>
 #include <thread>
 #include <unordered_map>
 
@@ -196,10 +195,16 @@ static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
 
 #if defined(__linux__)
 struct DumpPipe {
-  DumpPipe(int rank, const std::string& fileStem, int traceBufferSize) {
-    if (fileStem.empty() || traceBufferSize <= 0) {
+  DumpPipe(int rank) {
+    std::string fileStem =
+        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
+    // NOTE: This default value (2000) is duplicated in FlightRecorder.hpp.
+    // Keep in sync. See FlightRecorder.hpp for details.
+    if (fileStem.empty() ||
+        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 2000) <= 0) {
       return;
     }
+    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_PIPE_FILE is empty");
     std::string filename = c10::str(fileStem, rank, ".pipe");
     TORCH_CHECK(
         unlink(filename.c_str()) != -1 || errno == ENOENT,
@@ -304,7 +309,7 @@ class TensorShelf {
 //   ProcessGroupNCCL pg(store, rank, size);
 //   std::shared_ptr<WorkNCCL> work = pg.allreduce(tensors);
 //
-//   // At this point, NCCL kernel has already been queued successfully
+//   // At this point, NCCL kernel has already by queued successfully
 //   // Now, let current stream wait for the NCCL to finish, this function is
 //   // async operation as well
 //
@@ -527,8 +532,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
+#ifdef NCCL_HAS_CONFIG
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#endif
 
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
@@ -544,7 +551,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // must be within the numerical range of C++ int. Otherwise, Python will
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
+#ifdef NCCL_HAS_COMM_SPLIT
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
+#else
+    // [Note 3]: for older NCCL versions, NCCL_SPLIT_NOCOLOR is not defined. But
+    // `split_color` is pybinded to Python, so we need to define it. So we use
+    // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
+    int split_color{-2};
+#endif
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -861,7 +875,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> all_gather_single(
+  c10::intrusive_ptr<Work> _allgather_base(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -871,7 +885,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> all_gather_single_coalesced(
+  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -881,12 +895,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> reduce_scatter_single(
+  c10::intrusive_ptr<Work> _reduce_scatter_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
+  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
@@ -894,7 +908,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  c10::intrusive_ptr<Work> all_to_all_single(
+  c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
@@ -938,6 +952,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
+
+  // Agrees on an initial sequence number for the whole group by having rank 0
+  // create it and broadcast it to other ranks using the store.
+  void setSequenceNumberForGroup() override;
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
@@ -1039,13 +1057,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void setEnableNanCheck(bool enableNanCheck);
 
-  // APIs related to memory offload (require NCCL 2.29.7+ at runtime)
-  void suspend() override;
-
-  void resume() override;
-
-  std::unordered_map<std::string, uint64_t> getMemoryStats() override;
-
  protected:
   uint64_t getWatchdogHeartbt() const;
 
@@ -1088,7 +1099,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
-  // Ensure that if record is True, the work obj will be enqueued via
+  // Ensure thaht if record is True, the work obj will be enqueued via
   // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
@@ -1345,9 +1356,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Size of ring buffer where we store NCCL Traces for debugging.
   int traceBufferSize_;
-
-  // Stores TORCH_NCCL_DEBUG_INFO_PIPE_FILE
-  std::string debugInfoPipeFile_;
 
   // We gate the cudaEventCache so that we can roll it out gradually.
   std::atomic<bool> cudaEventCacheEnabled_;

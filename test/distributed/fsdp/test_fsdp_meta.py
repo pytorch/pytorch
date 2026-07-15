@@ -2,6 +2,7 @@
 
 import itertools
 import sys
+from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -128,8 +129,7 @@ def _init_with_torchdistX(module: nn.Module):
     torchdistX-based deferred module initialization function example
     using ``materialize_module``.
     """
-    if not _TORCHDISTX_AVAIL:
-        raise AssertionError("Expected _TORCHDISTX_AVAIL to be True")
+    assert _TORCHDISTX_AVAIL
 
     def check_fn(k):
         return not isinstance(k, FSDP)
@@ -150,9 +150,7 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
         with FSDP.summon_full_params(fsdp1):
             with FSDP.summon_full_params(fsdp2):
                 for p1, p2 in zip(fsdp1.parameters(), fsdp2.parameters()):
-                    self.assertTrue(
-                        torch.allclose(p1, p2), lambda msg: f"{msg}\n{p1} vs {p2}"
-                    )
+                    self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
     def _test_simple_model_with_meta_device(self, meta_module_fn, init_fn=None):
         # Create model on meta device and wrap with FSDP.
@@ -375,7 +373,7 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
 
         class FakeLinear(nn.Module):
             def __init__(
-                self, in_dim: int, out_dim: int, device: torch.device | str
+                self, in_dim: int, out_dim: int, device: Union[torch.device, str]
             ) -> None:
                 super().__init__()
                 self.weight = nn.Parameter(

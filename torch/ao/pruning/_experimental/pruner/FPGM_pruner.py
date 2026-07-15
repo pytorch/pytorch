@@ -51,7 +51,7 @@ class FPGMPruner(BaseStructuredSparsifier):
         Args:
             t (torch.Tensor): tensor representing the parameter to prune
         Returns:
-            distance (torch.Tensor): distance computed across filters
+            distance (torch.Tensor): distance computed across filtters
         """
         dim = 0  # prune filter (row)
 
@@ -69,6 +69,7 @@ class FPGMPruner(BaseStructuredSparsifier):
         dist_matrix = self.dist_fn(t_flatten)
 
         # more similar with other filter indicates large in the sum of row
+        # pyrefly: ignore [bad-argument-type]
         distance = torch.sum(torch.abs(dist_matrix), 1)
 
         return distance

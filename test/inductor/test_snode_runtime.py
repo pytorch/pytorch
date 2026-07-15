@@ -10,6 +10,7 @@ from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
+from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -74,13 +75,11 @@ class TestCase(InductorTestCase):
         super().tearDown()
 
     def assertZero(self, x: float):
-        if not isinstance(x, float):
-            raise AssertionError(f"Expected float, got {type(x)}")
+        assert isinstance(x, float)
         super().assertEqual(x, 0.0, atol=0, rtol=0)
 
     def assertNotZero(self, x):
-        if not isinstance(x, float):
-            raise AssertionError(f"Expected float, got {type(x)}")
+        assert isinstance(x, float)
         super().assertNotEqual(x, 0.0, atol=0, rtol=0)
 
 
@@ -105,6 +104,8 @@ class UnsupportedTests(TestCase):
 class ComputeBoundedTests(TestCase):
     device = DEVICE
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_conv1d(self):
         def f(x, y):
             return torch.nn.functional.conv1d(x, y)
@@ -112,6 +113,8 @@ class ComputeBoundedTests(TestCase):
         inp = (T(33, 16, 30), T(20, 16, 5))
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_conv2d(self):
         def f(x, y):
             return torch.nn.functional.conv2d(x, y, padding=1)
@@ -119,6 +122,8 @@ class ComputeBoundedTests(TestCase):
         inp = (T(8, 4, 3, 3), T(1, 4, 5, 5))
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_conv2d_transpose(self):
         def f(x, y):
             return torch.nn.functional.conv_transpose2d(x, y, padding=1)
@@ -126,6 +131,8 @@ class ComputeBoundedTests(TestCase):
         inp = (T(8, 1, 1, 1), T(1, 4, 5, 5))
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_conv3d(self):
         def f(x, y):
             return torch.nn.functional.conv3d(x, y)
@@ -133,6 +140,8 @@ class ComputeBoundedTests(TestCase):
         inp = (T(20, 16, 50, 10, 20), T(33, 16, 3, 3, 3))
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_mm(self):
         def f(a, b):
             return torch.mm(a, b)
@@ -143,6 +152,8 @@ class ComputeBoundedTests(TestCase):
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_addmm(self):
         def f(a, b, c):
             return torch.addmm(a, b, c)
@@ -154,6 +165,8 @@ class ComputeBoundedTests(TestCase):
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_bmm(self):
         def f(a, b):
             return torch.bmm(a, b)
@@ -168,6 +181,8 @@ class ComputeBoundedTests(TestCase):
 class MemoryBoundedTests(TestCase):
     device = DEVICE
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_relu(self):
         def f(a):
             return torch.nn.functional.relu(a)
@@ -175,6 +190,8 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10, 10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_horizontal_reduction_pointwise(self):
         def f(a):
             b = a.sum(dim=1)
@@ -184,6 +201,8 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10, 10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     def test_pointwise(self):
         def f(x):
             return x.cos()
@@ -191,6 +210,8 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
+    @expectedFailureXPU
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dynamic(self):
         def f(x):
@@ -198,97 +219,6 @@ class MemoryBoundedTests(TestCase):
 
         inp = (T(10),)
         self.assertNotZero(calculate_runtime(f, *inp))
-
-
-class InputDistanceTests(TestCase):
-    device = DEVICE
-
-    def _get_snodes(self, f, *args):
-        metrics.reset()
-        torch._logging.set_logs(inductor_metrics=True)
-        torch.compile(f, backend=compile_but_use_eager)(*args)
-        torch._logging.set_logs()
-        return [snode for snode, _ in metrics.nodes_num_elem]
-
-    def test_chain_with_reduction(self):
-        """
-        input -> sum (depth 0) -> sum (depth 1)
-        Reductions prevent full fusion, giving us distinct depth levels.
-        """
-
-        def f(x):
-            a = x.sum(dim=-1)
-            return a.sum(dim=-1)
-
-        snodes = self._get_snodes(f, T(10, 10, 10))
-        all_min = [s.min_input_distance for s in snodes]
-        all_max = [s.max_input_distance for s in snodes]
-        self.assertEqual(min(all_min), 0)
-        self.assertEqual(max(all_max), 1)
-
-    def test_fused_node_depth_range(self):
-        """
-        A reduction fused with its pointwise epilogue should have
-        min_input_distance=0 and max_input_distance=1.
-        """
-
-        def f(x):
-            a = x.sum(dim=-1)
-            return a.cos()
-
-        snodes = self._get_snodes(f, T(10, 10))
-        # The reduction and pointwise get fused
-        self.assertEqual(len(snodes), 1)
-        self.assertEqual(snodes[0].min_input_distance, 0)
-        self.assertEqual(snodes[0].max_input_distance, 1)
-
-    def test_extern_kernel_chain(self):
-        """
-        mm (depth 0, extern) -> cos+sum fused (depth 1)
-        """
-
-        def f(a, b):
-            c = torch.mm(a, b)
-            d = c.cos()
-            return d.sum(dim=-1)
-
-        snodes = self._get_snodes(f, T(10, 10), T(10, 10))
-        all_min = [s.min_input_distance for s in snodes]
-        all_max = [s.max_input_distance for s in snodes]
-        self.assertEqual(min(all_min), 0)
-        self.assertEqual(max(all_max), 1)
-
-    def test_foreach_basic(self):
-        """
-        foreach_add on graph inputs should have depth 0.
-        """
-
-        def f(xs, ys):
-            return torch._foreach_add(xs, ys)
-
-        xs = [T(10), T(20)]
-        ys = [T(10), T(20)]
-        snodes = self._get_snodes(f, xs, ys)
-        for s in snodes:
-            self.assertEqual(s.min_input_distance, 0)
-            self.assertEqual(s.max_input_distance, 0)
-
-    def test_foreach_after_extern(self):
-        """
-        mm (extern, depth 0) -> foreach_add (depth 1)
-        The extern kernel creates a fusion barrier so the foreach
-        has a real dependency chain.
-        """
-
-        def f(a, b, ys):
-            c = torch.mm(a, b)
-            return torch._foreach_add([c, c], ys)
-
-        snodes = self._get_snodes(f, T(10, 10), T(10, 10), [T(10, 10), T(10, 10)])
-        all_min = [s.min_input_distance for s in snodes]
-        all_max = [s.max_input_distance for s in snodes]
-        self.assertEqual(min(all_min), 0)
-        self.assertGreaterEqual(max(all_max), 1)
 
 
 @skipIf(not dist.is_available(), "requires distributed")

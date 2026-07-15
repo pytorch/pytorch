@@ -14,8 +14,8 @@ try:
 except ImportError:
     _cusparselt = None  # type: ignore[assignment]
 
-__cusparselt_version: int | None = None
-__MAX_ALG_ID: int | None = None
+__cusparselt_version: Optional[int] = None
+__MAX_ALG_ID: Optional[int] = None
 
 if _cusparselt is not None:
 
@@ -39,7 +39,7 @@ else:
         return False
 
 
-def version() -> int | None:
+def version() -> Optional[int]:
     """Return the version of cuSPARSELt"""
     if not _init():
         return None
@@ -51,7 +51,7 @@ def is_available() -> bool:
     return torch._C._has_cusparselt
 
 
-def get_max_alg_id() -> int | None:
+def get_max_alg_id() -> Optional[int]:
     if not _init():
         return None
     return __MAX_ALG_ID

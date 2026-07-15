@@ -201,7 +201,7 @@ class TestLazyOpInfo(TestCase):
         allowed_dtypes=(torch.float,),
     )
     def test_dispatched_to_lazy(self, device, dtype, op):
-        def get_name(op):
+        def get_name(op):  # noqa: F841
             l = [op.name]
             if op.variant_test_name != "":
                 l.append(op.variant_test_name)
@@ -228,8 +228,7 @@ class TestLazyOpInfo(TestCase):
             cands.append(f"{prefix}::{alias.name}{symint_suffix}")
 
         self.assertTrue(
-            any(c in metrics for c in cands),
-            lambda msg: f"{msg}\nnone of {cands} not found in {metrics}",
+            any(c in metrics for c in cands), f"none of {cands} not found in {metrics}"
         )
 
     @ops(
@@ -240,7 +239,7 @@ class TestLazyOpInfo(TestCase):
             and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST
         ],
         allowed_dtypes=(torch.float,),
-    )
+    )  # noqa: B950
     def test_correctness(self, device, dtype, op):
         test_device = get_test_device()
 
@@ -256,9 +255,7 @@ class TestLazyOpInfo(TestCase):
             self.assertEqual(type(a), type(b))
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
-                    torch.allclose(
-                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
-                    )
+                    torch.allclose(clone_to_device(a, test_device), b, atol=1e-4)
                 )
 
             if isinstance(a, Sequence):
@@ -287,7 +284,7 @@ class TestLazyOpInfo(TestCase):
             and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST
         ],
         allowed_dtypes=(torch.float,),
-    )
+    )  # noqa: B950
     def test_correctness_with_reusing_ir(self, device, dtype, op):
         torch._lazy.config.set_reuse_ir(True)
         test_device = get_test_device()
@@ -304,9 +301,7 @@ class TestLazyOpInfo(TestCase):
             self.assertEqual(type(a), type(b))
             if isinstance(a, torch.Tensor):
                 self.assertTrue(
-                    torch.allclose(
-                        clone_to_device(a, test_device), b, atol=1e-4, equal_nan=True
-                    )
+                    torch.allclose(clone_to_device(a, test_device), b, atol=1e-4)
                 )
 
             if isinstance(a, Sequence):

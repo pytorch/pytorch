@@ -881,7 +881,7 @@ class TestProfilerTree(TestCase):
               aten::add_
                 cudaLaunchKernel
                   void at::native::vectorized_elementwise_kernel<...>(...)
-            [memory]""",
+            [memory]""",  # noqa: B950
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 
@@ -1150,7 +1150,7 @@ class TestProfilerTree(TestCase):
                     <built-in method get of dict object at 0xXXXXXXXXXXXX>
                       enum.py(...): __hash__
                         <built-in function hash>
-                    ...""",
+                    ...""",  # noqa: B950
             allow_failure=ALLOW_CUDA_FAILURE,
         )
 

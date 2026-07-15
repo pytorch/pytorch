@@ -26,7 +26,7 @@ sys.path.append(pytorch_test_dir)
 # If GPU is not available, then do not run the tests
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    JitTestCase = NoTest
+    JitTestCase = NoTest  # noqa: F811
 
 TEST_LARGE_TENSOR = TEST_CUDA
 

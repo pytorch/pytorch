@@ -144,7 +144,6 @@ __all__ = [
     "collapse_view",
     "conj",
     "expand_dims",
-    # pyrefly: ignore [bad-dunder-all]
     "slice",
     "split_dim",
     "squeeze",
@@ -349,11 +348,13 @@ def _make_prim(
     if tags:
         _prim._tags = tags
     elif aten_packet := getattr(torch.ops.aten, name, None):
-        overload_tags = [overload.tags for overload in aten_packet.op_overloads()]
+        overload_tags = [
+            getattr(aten_packet, overload).tags for overload in aten_packet.overloads()
+        ]
         tags_intersection = set(overload_tags[0])
         tags_intersection.intersection_update(*overload_tags[1:])
 
-        # don't inadvertently add to prim ops
+        # dont inadvertently add to prim ops
         tags_intersection.discard(torch.Tag.core)
         # causes errors with python ref executor tests, none of the
         # data dependent pytorch ops actually decompose to prims
@@ -382,10 +383,6 @@ def _make_prim(
         p.prim_impl = _prim_impl
         p.prim_meta_impl = meta
         p.impl_aten = impl_aten
-
-    torch._C._fake_dispatch_register_prim_meta(
-        _prim._schema.name, _prim._schema.overload_name
-    )
 
     return _prim
 
@@ -661,7 +658,7 @@ def _cbrt_aten(a: torch.Tensor) -> Tensor:
         lambda: "cbrt: Complex inputs not supported. Consider calling torch.pow(a, 1.0/3.0)",
     )
     # Returns the real cubic root of the number.
-    # Note that if a < 0, pow(a, (1. / 3.)) returns the complex number
+    # Note that if a < 0, pow(a, (1. / 3.)) returns th complex number
     # exp(1/3 * log(a)) = exp(1/3 * (log(abs(a)) + pi*i)) = cbrt(abs(a)) * e^{pi/3*i}
     # which is a complex number.
     # For more info see the section Note in
@@ -1472,7 +1469,7 @@ def _collapse_view_helper(
             if guard_or_false(valid_op is False):
                 break
 
-    # for unbacked this becomes a runtime assertion.
+    # for unbacked this become a runtime assertion.
     valid_op = sym_or(valid_op, a.numel() == 0)
 
     if must_be_valid:
@@ -1884,7 +1881,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 )
 
     new_shape = list(tensors[0].shape).copy()
-    new_shape[dim] = torch.sym_sum(sym_sum_args)  # type: ignore[call-overload]
+    new_shape[dim] = torch.sym_sum(sym_sum_args)
     return TensorMeta(
         tensors[0],
         shape=new_shape,
@@ -2390,7 +2387,7 @@ def _prod_aten(
             inp = torch.prod(inp, d, dtype=dtype)
         return inp
     else:
-        return torch.prod(inp, dtype=dtype)
+        return torch.prod(inp, dims, dtype=dtype)
 
 
 prod = _make_reduction_prim(
@@ -2469,7 +2466,7 @@ def _iota_aten(
 
 
 iota = _make_prim(
-    schema="iota(SymInt length, *, SymInt start, SymInt step, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    schema="iota(SymInt length, *, SymInt start, SymInt step, ScalarType dtype, Device device, bool requires_grad) -> Tensor",  # noqa: B950
     return_type=RETURN_TYPE.NEW,
     meta=_iota_meta,
     impl_aten=_iota_aten,
@@ -2577,7 +2574,7 @@ _empty_permuted_doc = """
 
 # TODO: add layout, pin_memory
 empty_permuted = _make_prim(
-    schema="empty_permuted(SymInt[] shape, int[] physical_layout, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    schema="empty_permuted(SymInt[] shape, int[] physical_layout, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",  # noqa: B950
     return_type=RETURN_TYPE.NEW,
     meta=_empty_permuted_meta,
     impl_aten=torch.empty_permuted,
@@ -2834,7 +2831,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad, Generator? generator=None) -> Tensor"
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad, Generator? generator=None) -> Tensor"  # noqa: B950
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,

@@ -5,6 +5,7 @@ import threading
 import weakref
 from dataclasses import dataclass
 from functools import partial, reduce
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -83,7 +84,7 @@ _reduce_ops = {
 # actually update any view metadata if you do differentiation.  This
 # ordinarily "doesn't matter" because distributed collectives aren't
 # differentiable anyway, but it's possible to tickle this in testing if
-# someone tries to touch the grad_fn of a Tensor.  There are a few ways to
+# someone tries to touch the grad_fn of a Tensor.  There a few ways to
 # fix this, but the easiest way was to use the .detach() trick to hide
 # the mutations from autograd.
 
@@ -131,7 +132,7 @@ class AllToAllBase:
     def _size_cumsum(
         self,
         buf_size: int,
-        sizes: torch.Tensor | list[int] | None,
+        sizes: Union[torch.Tensor, list[int], None],
         world_size: int,
     ) -> torch.Tensor:
         if sizes is None or len(sizes) == 0:
@@ -398,12 +399,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
             cls._cur_coll_on_pgs = {}
             cls._terminate.clear()
 
-    def all_to_all_single(
+    def alltoall_base(
         self,
         output_buffer: torch.Tensor,
         input_buffer: torch.Tensor,
-        output_split_sizes: list[int] | None,
-        input_split_sizes: list[int] | None,
+        output_split_sizes: Optional[list[int]],
+        input_split_sizes: Optional[list[int]],
         opts=AllToAllOptions(),
     ) -> torch.Tensor:
         coll = ProcessLocalGroup._start_coll(AllToAllBase(), self)
@@ -441,7 +442,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def all_gather_single(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
         tensor_list = list(torch.chunk(output_tensor, self._world_size))
         return self.allgather([tensor_list], [input_tensor], opts)
 
@@ -469,17 +470,17 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def reduce_scatter_single(
+    def _reduce_scatter_base(
         self, output_tensor, input_tensor, opts=ReduceScatterOptions()
     ):
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
-    def reduce_scatter_single_coalesced(
+    def reduce_scatter_tensor_coalesced(
         self, output_tensors, input_tensors, opts=ReduceScatterOptions()
     ):
         works = [
-            self.reduce_scatter_single(output_tensor, input_tensor, opts)
+            self._reduce_scatter_base(output_tensor, input_tensor, opts)
             for output_tensor, input_tensor in zip(
                 output_tensors, input_tensors, strict=True
             )
@@ -488,12 +489,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
             work.wait()
         return works[-1]
 
-    def all_gather_single_coalesced(
+    def allgather_into_tensor_coalesced(
         self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()
     ):
         res = None
         for o_t, i_t in zip(output_tensor_list, input_tensor_list, strict=True):
-            res = self.all_gather_single(o_t, i_t)
+            res = self._allgather_base(o_t, i_t)
         return res
 
     def __init__(self, rank, world_size):
@@ -545,23 +546,20 @@ def _create_threaded_pg(prefix_store, rank, world_size, timeout):
     return pg
 
 
-dist.Backend.register_backend(
-    "threaded", _create_threaded_pg, devices=["cpu", "cuda", "xpu"]
-)
+dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "cuda"])
 
 
 @dataclass
 class WorldData:
     default_pg: dist.ProcessGroup
-    pg_map: dict[dist.ProcessGroup, tuple[str, Store | None]]
+    pg_map: dict[dist.ProcessGroup, tuple[str, Optional[Store]]]
     pg_names: dict[dist.ProcessGroup, str]
     pg_group_ranks: dict[dist.ProcessGroup, dict[int, int]]
     pg_backend_config: dict[dist.ProcessGroup, str]
     group_count: int
     tags_to_pg: dict[str, list[dist.ProcessGroup]]
     pg_to_tag: dict[dist.ProcessGroup, str]
-    pg_coalesce_state: dict[dist.ProcessGroup, list[_CollOp | P2POp]]
-    comms: list
+    pg_coalesce_state: dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]
 
 
 class ThreadLocalWorld:
@@ -570,7 +568,7 @@ class ThreadLocalWorld:
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
             ThreadLocalWorld._world.world = WorldData(
-                None, {}, {}, {}, {}, 0, {}, {}, {}, []
+                None, {}, {}, {}, {}, 0, {}, {}, {}
             )
         return ThreadLocalWorld._world.world
 
@@ -615,12 +613,8 @@ class ThreadLocalWorld:
         return self._get_world().pg_to_tag
 
     @property
-    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[_CollOp | P2POp]]:
+    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]:
         return self._get_world().pg_coalesce_state
-
-    @property
-    def comms(self):
-        return self._get_world().comms
 
 
 _old_pg_world = None
@@ -638,9 +632,4 @@ def _install_threaded_pg():
 
 
 def _uninstall_threaded_pg():
-    global _ctx_manager
     dist.distributed_c10d._world = _old_pg_world
-    # Restore autograd multithreading state that was disabled in _install_threaded_pg
-    if _ctx_manager is not None:
-        _ctx_manager.__exit__(None, None, None)
-        _ctx_manager = None

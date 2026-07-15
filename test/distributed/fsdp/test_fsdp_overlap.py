@@ -104,9 +104,9 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
     def _dist_train(self):
         rank = self.rank
         world_size = self.world_size
-        # Save the original torch.distributed.all_gather_single function since we will
+        # Save the original torch.distributed.all_gather_into_tensor function since we will
         # patch it to include an artificial delay.
-        orig_all_gather = torch.distributed.all_gather_single
+        orig_all_gather = torch.distributed.all_gather_into_tensor
 
         def run(compute_cycles, all_gather_cycles):
             has_params = all_gather_cycles > 0
@@ -143,8 +143,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
                     all_gather_called = True
                     if torch.cuda.is_available():
                         torch.cuda._sleep(all_gather_cycles)
-                    if not orig_all_gather:
-                        raise AssertionError("Expected orig_all_gather to be truthy")
+                    assert orig_all_gather
                     return orig_all_gather(*args, **kwargs)
 
                 # forward pass
@@ -152,7 +151,9 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
                 # Even though both e1 & e2 are on the compute stream, since
                 # compute depends on all_gather, e2-e1 includes all_gather time.
                 e1.record()
-                with patch("torch.distributed.all_gather_single", _delayed_all_gather):
+                with patch(
+                    "torch.distributed.all_gather_into_tensor", _delayed_all_gather
+                ):
                     out = model(batch)
                     if has_params and world_size > 1:
                         self.assertTrue(all_gather_called)

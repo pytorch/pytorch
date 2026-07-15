@@ -2,9 +2,8 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from unittest import mock
 
 import torch
@@ -15,26 +14,6 @@ from .runtime.runtime_utils import cache_dir
 
 
 log = logging.getLogger(__name__)
-
-
-@dataclass
-class AOTICompileBackend:
-    compile_fn: Callable[..., str]
-    load_fn: Callable[[str, str, str], list[dict[str, Any] | None]]
-
-
-_aoti_compile_backends: dict[str, AOTICompileBackend] = {}
-
-
-def register_aoti_compile_backend(
-    device_type: str,
-    compile_fn: Callable[..., str],
-    load_fn: Callable[[str, str, str], list[dict[str, Any] | None]],
-) -> None:
-    _aoti_compile_backends[device_type] = AOTICompileBackend(
-        compile_fn=compile_fn,
-        load_fn=load_fn,
-    )
 
 
 def aoti_eager_cache_dir(namespace: str, device: str) -> Path:
@@ -53,11 +32,7 @@ def aoti_eager_op_conf_lock(op_func_name_with_overload: str) -> Any:
 
 def load_aoti_eager_cache(
     ns: str, op_func_name_with_overload: str, device_type: str
-) -> list[dict[str, Any] | None]:
-    backend = _aoti_compile_backends.get(device_type)
-    if backend:
-        return backend.load_fn(ns, op_func_name_with_overload, device_type)
-
+) -> list[Optional[dict[str, Any]]]:
     device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
     op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
     if not op_conf.exists():
@@ -120,8 +95,7 @@ def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> dict[str, Any
     metadata: dict[str, Any] = {}
     metadata["is_dynamic"] = dynamic
 
-    if not isinstance(input, torch.Tensor):
-        raise AssertionError(f"expected torch.Tensor, got {type(input)}")
+    assert isinstance(input, torch.Tensor)
     metadata["device_type"] = f"{input.device.type}"
     if is_cpu_device([input]):
         metadata["device_index"] = -1
@@ -141,8 +115,7 @@ def extract_tensor_list_metadata(
 ) -> dict[str, Any]:
     metadata_list = []
     for item in input:
-        if not isinstance(item, torch.Tensor):
-            raise AssertionError(f"expected torch.Tensor, got {type(item)}")
+        assert isinstance(item, torch.Tensor)
         metadata_list.append(extract_tensor_metadata(dynamic, item))
 
     metadata: dict[str, Any] = {}
@@ -151,8 +124,7 @@ def extract_tensor_list_metadata(
 
 
 def extract_scalar_metadata(device_type: str, input: Any) -> dict[str, Any]:
-    if not isinstance(input, supported_scalar_types()):
-        raise AssertionError(f"expected a supported scalar type, got {type(input)}")
+    assert isinstance(input, supported_scalar_types())
     metadata: dict[str, Any] = {}
     metadata["is_dynamic"] = False
     # Scalar tensor
@@ -165,24 +137,21 @@ def extract_scalar_metadata(device_type: str, input: Any) -> dict[str, Any]:
 
 
 def extract_string_metadata(input: str) -> dict[str, Any]:
-    if not isinstance(input, str):
-        raise AssertionError(f"expected str, got {type(input)}")
+    assert isinstance(input, str)
     metadata: dict[str, Any] = {}
     metadata["string_value"] = input
     return metadata
 
 
 def extract_dtype_metadata(input: torch.dtype) -> dict[str, Any]:
-    if not isinstance(input, torch.dtype):
-        raise AssertionError(f"expected torch.dtype, got {type(input)}")
+    assert isinstance(input, torch.dtype)
     metadata: dict[str, Any] = {}
     metadata["dtype_value"] = f"{input}"
     return metadata
 
 
 def extract_device_metadata(input: torch.device) -> dict[str, Any]:
-    if not isinstance(input, torch.device):
-        raise AssertionError(f"expected torch.device, got {type(input)}")
+    assert isinstance(input, torch.device)
     metadata: dict[str, Any] = {}
     metadata["device_type_value"] = f"{input.type}"
     metadata["device_index_value"] = input.index
@@ -190,21 +159,9 @@ def extract_device_metadata(input: torch.device) -> dict[str, Any]:
 
 
 def extract_layout_metadata(input: torch.layout) -> dict[str, Any]:
-    if not isinstance(input, torch.layout):
-        raise AssertionError(f"expected torch.layout, got {type(input)}")
+    assert isinstance(input, torch.layout)
     metadata: dict[str, Any] = {}
     metadata["layout_value"] = f"{input}"
-    return metadata
-
-
-def extract_int_list_metadata(input: list[int]) -> dict[str, Any]:
-    if not (
-        isinstance(input, (list, tuple))
-        and all(isinstance(item, int) and not isinstance(item, bool) for item in input)
-    ):
-        raise AssertionError(f"expected a list/tuple of int, got {input!r}")
-    metadata: dict[str, Any] = {}
-    metadata["int_list_value"] = list(input)
     return metadata
 
 
@@ -217,32 +174,15 @@ def aoti_compile_with_persistent_cache(
     args: tuple[Any],
     kwargs: dict[str, Any],
     *,
-    dynamic_shapes: dict[str, Any] | None = None,
-    options: dict[str, Any] | None = None,
+    dynamic_shapes: Optional[dict[str, Any]] = None,
+    options: Optional[dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
 ) -> str:
     """
     Compile the given function with persistent cache for AOTI eager mode.
     """
-    backend = _aoti_compile_backends.get(device_type)
-    if backend:
-        return backend.compile_fn(
-            ns,
-            op_func_name_with_overload,
-            device_type,
-            dynamic,
-            f,
-            args,
-            kwargs,
-            dynamic_shapes=dynamic_shapes,
-            options=options,
-            remove_runtime_assertions=remove_runtime_assertions,
-            disable_constraint_solver=disable_constraint_solver,
-        )
-
-    if dynamic:
-        raise AssertionError("Only support static shape for now")
+    assert not dynamic, "Only support static shape for now"
     flattened_inputs = list(args) + list(kwargs.values())
     if not all(
         isinstance(
@@ -296,39 +236,16 @@ def aoti_compile_with_persistent_cache(
                 # need to keep the same signature.
                 same_signature=False,
             )
-            if not isinstance(kernel_lib_path, str):
-                raise AssertionError(
-                    f"expected kernel_lib_path to be str, got {type(kernel_lib_path)}"
-                )
+            assert isinstance(kernel_lib_path, str)
 
             kernel_metadata_items = []
 
             for idx, input in enumerate(flattened_inputs):
-                # Skip explicit-None args (e.g. an optional `int[1]? dim`) so the
-                # written metadata vector matches the cache reader, which also
-                # drops None entries.
-                if input is None:
-                    continue
                 if isinstance(input, torch.Tensor):
                     metadata = extract_tensor_metadata(dynamic, input)
-                elif isinstance(input, (list, tuple)) and all(
-                    isinstance(item, int) and not isinstance(item, bool)
-                    for item in input
-                ):
-                    # `int[]` / `SymInt[]` params. Checked before the Tensor-list
-                    # branch so an empty list/tuple is tagged INT_LIST, matching
-                    # the cache reader and C++ unpack_input_parameters for an
-                    # empty `int[]`. An empty `Tensor[]` is the converse case:
-                    # C++ tags it TENSOR_LIST (isTensorList() is checked before
-                    # isIntList()) while this tags it INT_LIST -- only a cache
-                    # miss/recompile (per-op cache, fixed schema type per slot ->
-                    # no aliasing), and it does not arise for real ops
-                    # (`cat([])`/`stack([])` raise in eager).
-                    metadata = extract_int_list_metadata(list(input))
-                elif isinstance(input, (list, tuple)) and all(
-                    isinstance(item, torch.Tensor) for item in input
-                ):
-                    metadata = extract_tensor_list_metadata(dynamic, list(input))
+                elif isinstance(input, list):
+                    assert all(isinstance(item, torch.Tensor) for item in input)
+                    metadata = extract_tensor_list_metadata(dynamic, input)
                 elif isinstance(input, supported_scalar_types()):
                     metadata = extract_scalar_metadata(device_type, input)
                 elif isinstance(input, str):
@@ -362,15 +279,9 @@ def aoti_compile_with_persistent_cache(
                     except Exception:
                         json_data = []
 
-                    if not isinstance(json_data, list):
-                        raise AssertionError(
-                            f"expected json_data to be list, got {type(json_data)}"
-                        )
+                    assert isinstance(json_data, list)
                     for item in json_data:
-                        if not isinstance(item, dict):
-                            raise AssertionError(
-                                f"expected item to be dict, got {type(item)}"
-                            )
+                        assert isinstance(item, dict)
                         # Same kernel meta info already exists in the json file
                         if item["meta_info"] == kernel_metadata_items:
                             update_json = False

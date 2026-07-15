@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
-from torch._inductor.heuristics.template.cutedsl import get_groupgemm_configs
 from torch._inductor.runtime.triton_compat import tl
+from torch._inductor.template_heuristics.cutedsl import get_groupgemm_configs
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
@@ -143,58 +143,10 @@ cutedsl_grouped_mm_template = CuteDSLTemplate(
 )
 
 
-def has_grouped_mm_triton_support() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    if torch.version.hip:
-        # The grouped GEMM Triton template is supported on ROCm too. ATen
-        # remains a separate autotune choice when fallback kernels are enabled.
-        return True
-    return torch.cuda.get_device_capability() >= (9, 0)
-
-
-def _rocm_gcn_arch() -> str:
-    return torch.cuda.get_device_properties(
-        torch.cuda.current_device()
-    ).gcnArchName.split(":", 1)[0]
-
-
-def has_rocm_fp8_hardware_support() -> bool:
-    if not torch.version.hip:
-        return False
-
-    # Keep this in sync with torch.testing._internal.common_cuda.PLATFORM_SUPPORTS_FP8;
-    # this is the production-side equivalent used to gate Triton FP8 lowering.
-    arch = _rocm_gcn_arch()
-    rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
-    if arch.startswith("gfx94"):
-        return True
-    if arch.startswith("gfx120") and rocm_version >= (6, 3):
-        return True
-    if arch.startswith("gfx95") and rocm_version >= (6, 5):
-        return True
-    return False
-
-
-def has_scaled_grouped_mm_triton_support(mat_a: TensorBox, mat_b: TensorBox) -> bool:
-    if not torch.version.hip:
-        return True
-    if not has_rocm_fp8_hardware_support():
-        return False
-
-    arch = _rocm_gcn_arch()
-    # Match ATen's ROCm rowwise scaled grouped GEMM contract: gfx94 uses the
-    # FNUZ FP8 encoding, while newer FP8-capable arches use OCP FP8.
-    expected_dtype = (
-        torch.float8_e4m3fnuz if arch.startswith("gfx94") else torch.float8_e4m3fn
-    )
-    return mat_a.get_dtype() == expected_dtype and mat_b.get_dtype() == expected_dtype
-
-
 def grouped_mm_args(
     mat1: TensorBox,
     mat2: TensorBox,
-    offs: TensorBox | None,
+    offs: Optional[TensorBox],
     layout=None,
     out_dtype=None,
 ):
@@ -206,10 +158,8 @@ def grouped_mm_args(
 
     m1dim, m2dim = len(mat1_size), len(mat2_size)
 
-    if m1dim not in (2, 3):
-        raise AssertionError(f"Expected 2D or 3D mat1, got {m1dim}D")
-    if m2dim not in (2, 3):
-        raise AssertionError(f"Expected 2D or 3D mat2, got {m2dim}D")
+    assert m1dim == 2 or m1dim == 3
+    assert m2dim == 2 or m2dim == 3
 
     if layout is None:
         from torch._inductor.ir import FixedLayout
@@ -220,8 +170,7 @@ def grouped_mm_args(
 
         if m1dim == 2:
             if m2dim == 2:
-                if offs is None:
-                    raise AssertionError("offs must be provided for 2D x 2D grouped mm")
+                assert offs is not None
                 out_size = [offs.get_size()[0], mat1_size[0], mat2_size[1]]
             else:
                 out_size = [mat1_size[0], mat2_size[-1]]
@@ -230,20 +179,11 @@ def grouped_mm_args(
                 out_size = [mat1_size[1], mat2_size[1]]
             else:
                 out_size = [mat1_size[0], mat1_size[1], mat2_size[-1]]
-        # Match the ATen extern output layout: CUDA pads grouped GEMM outputs for
-        # TMA alignment, while ROCm's ATen path returns contiguous tensors.
-        # TODO: Revisit whether 16-byte alignment would be beneficial for gfx1250.
-        if torch.version.hip:
-            if len(out_size) == 2:
-                out_stride = [out_size[1], 1]
-            else:
-                out_stride = [out_size[1] * out_size[2], out_size[2], 1]
+        size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
+        if len(out_size) == 2:
+            out_stride = [size_padded, 1]
         else:
-            size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
-            if len(out_size) == 2:
-                out_stride = [size_padded, 1]
-            else:
-                out_stride = [out_size[1] * size_padded, size_padded, 1]
+            out_stride = [out_size[1] * size_padded, size_padded, 1]
 
         layout = FixedLayout(
             mat1.get_device(),
@@ -252,8 +192,7 @@ def grouped_mm_args(
             out_stride,
         )
     else:
-        if out_dtype is not None:
-            raise AssertionError("out_dtype is ignored if layout is specified.")
+        assert out_dtype is None, "out_dtype is ignored if layout is specified."
 
     return (mat1_size, mat2_size, layout, mat1, mat2, offs)
 
@@ -277,11 +216,15 @@ aten__scaled_grouped_mm = ExternKernelChoice(
 def can_use_triton_kernel(
     mat_a: TensorBox,
     mat_b: TensorBox,
-    offs: TensorBox | None,
-    bias: TensorBox | None,
-    scale_result: TensorBox | None,
+    offs: Optional[TensorBox],
+    bias: Optional[TensorBox],
+    scale_result: Optional[TensorBox],
 ) -> bool:
-    if not has_grouped_mm_triton_support():
+    if not (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (9, 0)
+        and not torch.version.hip
+    ):
         return False
     if not has_triton():
         return False
@@ -311,8 +254,8 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
         else:
             return None
 
-    end_hint = V.graph.sizevars.optimization_hint(end)
-    noffs_hint = V.graph.sizevars.optimization_hint(offs_box.get_size()[0])
+    end_hint = V.graph.sizevars.size_hint(end)
+    noffs_hint = V.graph.sizevars.size_hint(offs_box.get_size()[0])
     offs = torch.arange(1, noffs_hint + 1, dtype=torch.float32) * (
         end_hint / noffs_hint
     )
@@ -328,21 +271,17 @@ def _tuned_grouped_mm_common(
     kernel_template: TritonTemplate,
     mat_a: TensorBox,
     mat_b: TensorBox,
-    scale_a: TensorBox | None = None,
-    scale_b: TensorBox | None = None,
-    offs: TensorBox | None = None,
-    bias: TensorBox | None = None,
-    scale_result: TensorBox | None = None,
-    out_dtype: torch.dtype | None = None,
-    use_fast_accum: bool | None = None,
-    layout: Layout | None = None,
+    scale_a: Optional[TensorBox] = None,
+    scale_b: Optional[TensorBox] = None,
+    offs: Optional[TensorBox] = None,
+    bias: Optional[TensorBox] = None,
+    scale_result: Optional[TensorBox] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    use_fast_accum: Optional[bool] = None,
+    layout: Optional[Layout] = None,
 ) -> TensorBox:
-    if (scale_a is None) != (scale_b is None):
-        raise AssertionError(
-            "scale_a and scale_b must both be None or both be provided"
-        )
-    if scale_result is not None and scale_a is None:
-        raise AssertionError("scale_result requires scale_a and scale_b")
+    assert (scale_a is None) == (scale_b is None)
+    assert scale_result is None or scale_a is not None
 
     m1_size, m2_size, layout, mat_a, mat_b, offs = grouped_mm_args(
         mat_a, mat_b, offs, layout=layout, out_dtype=out_dtype
@@ -425,14 +364,13 @@ def _tuned_grouped_mm_common(
             k = V.graph.sizevars.check_equals(k1, k2)
             a_is_2d, b_is_2d = False, False
 
-    scaled = scale_a is not None
-
     if (
         is_nonzero
         and use_triton_template(layout)
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
-        and (not scaled or has_scaled_grouped_mm_triton_support(mat_a, mat_b))
     ):
+        scaled = scale_a is not None
+
         a_is_k_major = mat_a.get_stride()[-1] == 1
         b_is_k_major = mat_b.get_stride()[-2] == 1
 
@@ -510,20 +448,19 @@ def _tuned_grouped_mm_common(
         input_gen_fns[input_offs_idx] = lambda x: create_offsets(
             x, a_is_2d, b_is_2d, m, n, k, alignment
         )
-    node, _ = autotune_select_algorithm(
+    return autotune_select_algorithm(
         algorithm_name, choices, input_nodes, layout, input_gen_fns=input_gen_fns
     )
-    return node
 
 
 @register_lowering(aten._grouped_mm.default, type_promotion_kind=None)
 def tuned_grouped_mm(
     mat_a: TensorBox,
     mat_b: TensorBox,
-    offs: TensorBox | None = None,
-    bias: TensorBox | None = None,
-    out_dtype: torch.dtype | None = None,
-    layout: Layout | None = None,
+    offs: Optional[TensorBox] = None,
+    bias: Optional[TensorBox] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    layout: Optional[Layout] = None,
 ) -> TensorBox:
     """Auto-tuning for _grouped_mm() operator."""
 
@@ -551,12 +488,12 @@ def tuned_scaled_grouped_mm(
     mat_b: TensorBox,
     scale_a: TensorBox,
     scale_b: TensorBox,
-    offs: TensorBox | None = None,
-    bias: TensorBox | None = None,
-    scale_result: TensorBox | None = None,
-    out_dtype: torch.dtype | None = None,
+    offs: Optional[TensorBox] = None,
+    bias: Optional[TensorBox] = None,
+    scale_result: Optional[TensorBox] = None,
+    out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
-    layout: Layout | None = None,
+    layout: Optional[Layout] = None,
 ) -> TensorBox:
     """Auto-tuning for _scaled_grouped_mm() operator."""
 

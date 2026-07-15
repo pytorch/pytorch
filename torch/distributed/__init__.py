@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import contextlib
 import logging
 import sys
 import traceback
@@ -29,35 +28,6 @@ def is_available() -> bool:
     return hasattr(torch._C, "_c10d_init")
 
 
-_spmd_types_available: bool | None = None
-
-
-def _is_spmd_types_available() -> bool:
-    """Check if the spmd_types package is installed."""
-    import importlib.util
-
-    global _spmd_types_available
-    if _spmd_types_available is None:
-        _spmd_types_available = importlib.util.find_spec("spmd_types") is not None
-    return _spmd_types_available
-
-
-def _spmd_no_typecheck():
-    """
-    Return a spmd_types no_typecheck context, or a no-op if not installed.
-    """
-    if _is_spmd_types_available():
-        import spmd_types
-
-        return spmd_types.no_typecheck()
-
-    @contextlib.contextmanager
-    def no_typecheck():
-        yield
-
-    return no_typecheck()
-
-
 if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
@@ -72,10 +42,12 @@ if is_available():
     from torch._C._distributed_c10d import (
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
+        _ControlCollectives,
         _DEFAULT_FIRST_BUCKET_BYTES,
         _make_nccl_premul_sum,
         _register_builtin_comm_hook,
         _register_comm_hook,
+        _StoreCollectives,
         _test_python_store,
         _verify_params_across_processes,
         Backend as _Backend,
@@ -139,7 +111,7 @@ if is_available():
         # avoid having the default timeout (if short) interrupt your debug session
         if timeout_s is not None:
             for group in torch.distributed.distributed_c10d._pg_map:
-                torch.distributed.distributed_c10d.set_timeout(
+                torch.distributed.distributed_c10d._set_pg_timeout(
                     timedelta(seconds=timeout_s), group
                 )
 
@@ -176,13 +148,8 @@ if is_available():
         _CoalescingManager,
         _create_process_group_wrapper,
         _get_process_group_name,
-        _get_reconfigure_handle,
-        _new_window,
         _rank_not_in_group,
-        _reconfigure,
         _reduce_scatter_base,
-        _supports_reconfigure,
-        _supports_window,
         _time_estimator,
         get_node_local_rank,
     )
@@ -202,8 +169,7 @@ else:
     # stubs as necessary.
     # We cannot define stubs directly because they confuse pyre
 
-    class _Stub:
+    class _ProcessGroupStub:
         pass
 
-    sys.modules["torch.distributed"].GroupName = _Stub  # type: ignore[attr-defined]
-    sys.modules["torch.distributed"].ProcessGroup = _Stub  # type: ignore[attr-defined]
+    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]

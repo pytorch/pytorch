@@ -140,8 +140,7 @@ def _modify_ddp_ignored_params(
 ):
     modified_list = []
     for name in ddp_ignored_param_names:
-        if name not in name_to_param_map:
-            raise AssertionError(f"Expected {name} in name_to_param_map")
+        assert name in name_to_param_map
         param = name_to_param_map[name]
         if param not in fsdp_ignored_params:
             # DDP can ignore only if it is not ignored by FSDP

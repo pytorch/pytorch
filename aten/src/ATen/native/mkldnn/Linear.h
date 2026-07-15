@@ -6,7 +6,7 @@
 #if AT_MKLDNN_ENABLED()
 
 namespace at::native {
-TORCH_API Tensor mkldnn_linear_pointwise(
+C10_API Tensor mkldnn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
@@ -14,7 +14,7 @@ TORCH_API Tensor mkldnn_linear_pointwise(
     c10::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm);
 
-TORCH_API Tensor mkldnn_linear_pointwise_binary(
+C10_API Tensor mkldnn_linear_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
@@ -23,7 +23,7 @@ TORCH_API Tensor mkldnn_linear_pointwise_binary(
 
 #if AT_MKL_ENABLED()
 
-TORCH_API Tensor mkl_linear(
+C10_API Tensor mkl_linear(
     const Tensor& self,
     const Tensor& mkl_weight_t,
     const Tensor& origin_weight_t,

@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-import argparse  # noqa: TC003
+import argparse
 import logging
 
 from cli.lib.common.cli_helper import register_targets, RichHelp, TargetSpec

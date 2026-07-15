@@ -116,18 +116,15 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         elif layout_A == "view":
             A_storage = torch.randn(sum_M * K, device=device, dtype=dtype)
             A = A_storage.view(sum_M, K)
-            if A._base is None:
-                raise AssertionError
-            if A.shape != (sum_M, K):
-                raise AssertionError
+            assert A._base is not None
+            assert A.shape == (sum_M, K)
 
         B = torch.randn((G, K, N), dtype=dtype, device=device) * 0.01
 
         if layout_B == "broadcasted":
             # Broadcast B across groups (zero stride along G)
             B = B[0].expand(G, K, N)
-            if B.stride(0) != 0:
-                raise AssertionError
+            assert B.stride(0) == 0
 
         def grouped_gemm_fn(A_packed, B_batched, offs):
             return F.grouped_mm(A_packed, B_batched, offs=offs)

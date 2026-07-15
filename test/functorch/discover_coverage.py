@@ -294,10 +294,7 @@ def get_ops_percentage(torch_threshold, nn_fn_threshold):
         if opname == "t":
             return 0
         result = [op[1] for op in data if op[0] == opname]
-        if len(result) != 1:
-            raise AssertionError(
-                f"Expected exactly 1 result for {opname}, got {len(result)}"
-            )
+        assert len(result) == 1
         return result[0]
 
     # get all operators that are not in the denylist
@@ -355,10 +352,7 @@ tests = {
 
 
 def is_decorateinfo_skip_or_xfail(decorateinfo):
-    if len(decorateinfo.decorators) != 1:
-        raise AssertionError(
-            f"Expected exactly 1 decorator, got {len(decorateinfo.decorators)}"
-        )
+    assert len(decorateinfo.decorators) == 1
     actual_decorator = decorateinfo.decorators[0]
     if isinstance(actual_decorator, toleranceOverride):
         return False
@@ -468,8 +462,7 @@ print(
 
 
 def remove_torch(name):
-    if name[:6] != "torch.":
-        raise AssertionError(f"Expected name to start with 'torch.', got {name!r}")
+    assert name[:6] == "torch."
     return name[6:]
 
 
@@ -522,15 +515,8 @@ def get_jvp_coverage(subset=None):
     supports_forward_ad = {
         remove_torch(test) for test in list(supports_forwardad_ops_dct.keys())
     }
-    if not supports_forward_ad.issubset(supports_autograd):
-        raise AssertionError(
-            f"supports_forward_ad is not a subset of supports_autograd: "
-            f"{supports_forward_ad - supports_autograd}"
-        )
-    if not supports_autograd.issubset(ops):
-        raise AssertionError(
-            f"supports_autograd is not a subset of ops: {supports_autograd - ops}"
-        )
+    assert supports_forward_ad.issubset(supports_autograd)
+    assert supports_autograd.issubset(ops)
 
     failed_ops = get_skipped_or_xfailed_ops_for("test_jvp")
 
@@ -713,10 +699,7 @@ class Operator:
     def __init__(self, name):
         self.name = name
         self.opinfos = NAME_TO_OPINFO.get(name, None)
-        if self.opinfos is not None and len(self.opinfos) == 0:
-            raise AssertionError(
-                f"Operator {name!r} found in NAME_TO_OPINFO but has empty opinfos list"
-            )
+        assert self.opinfos is None or len(self.opinfos) > 0
 
     def has_opinfo(self):
         return self.opinfos is not None

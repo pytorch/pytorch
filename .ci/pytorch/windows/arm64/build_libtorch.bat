@@ -27,8 +27,8 @@ where cl.exe
 :: change to source directory
 cd %PYTORCH_ROOT%
 
-:: copy libuv.dll (cmake installs the dll to bin/, not lib/Release/)
-copy %libuv_ROOT%\bin\uv.dll torch\lib\uv.dll
+:: copy libuv.dll
+copy %libuv_ROOT%\lib\Release\uv.dll torch\lib\uv.dll
 
 :: create virtual environment
 python -m venv .venv

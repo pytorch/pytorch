@@ -6,7 +6,6 @@
 #include <ATen/native/transformers/xpu/sdp_utils.h>
 #include <c10/util/Array.h>
 #include <torch/library.h>
-#include <utility>
 
 namespace {
 bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
@@ -350,15 +349,15 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   auto philox_seed = at::empty({}, at::dtype(at::kLong));
   auto philox_offset = at::empty({}, at::dtype(at::kLong));
   return std::make_tuple(
-      std::move(output),
-      std::move(logsumexp),
+      output,
+      logsumexp,
       /* cum_seq_q */ at::Tensor(),
       /* cum_seq_k */ at::Tensor(),
       seq_len_q,
       seq_len_kv,
-      std::move(philox_seed),
-      std::move(philox_offset),
-      std::move(debug_attn_mask));
+      philox_seed,
+      philox_offset,
+      debug_attn_mask);
 }
 
 REGISTER_XPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_xpu);

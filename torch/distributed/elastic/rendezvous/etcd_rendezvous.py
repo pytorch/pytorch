@@ -51,7 +51,7 @@ logger.setLevel(logging.INFO)
 logger.addHandler(_log_handler)
 
 
-# Retryable failure exception means we were too late to make
+# Retryable failure exception means the we were too late to make
 # a desired state transition (e.g. because of a race condition),
 # and should now restart from the beginning.
 # A small delay is recommended to avoid spamming Etcd.
@@ -207,7 +207,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
         try:
             self.set_closed()
             return True
-        except BaseException:
+        except BaseException:  # noqa: B036
             logger.warning("Shutdown failed", exc_info=True)
             return False
 
@@ -332,7 +332,7 @@ class EtcdRendezvous:
                 # to avoid spamming etcd
                 # FIXME: there are a few things that fall under this like
                 # etcd.EtcdKeyNotFound, etc, which could be handled more explicitly.
-                logger.info("Rendezvous attempt failed, will retry. Reason: %s", e)
+                logger.info("Rendezvous attempt failed, will retry. Reason: %s", e)  # noqa: G200
                 time.sleep(1)
 
     def init_phase(self):
@@ -412,8 +412,9 @@ class EtcdRendezvous:
         active_version = self.wait_for_peers(expected_version)
         state = json.loads(active_version.value)
 
-        if state["version"] != expected_version:
-            raise AssertionError("Logic error: failed to observe version mismatch")
+        assert state["version"] == expected_version, (
+            "Logic error: failed to observe version mismatch"
+        )
 
         return self.confirm_phase(expected_version, this_rank)
 
@@ -531,10 +532,9 @@ class EtcdRendezvous:
                     "Rendezvous version changed. Must try join the new one."
                 )
 
-            if len(state["participants"]) >= self._num_max_workers:
-                raise AssertionError(
-                    "Logic error: joinable rendezvous should always have space left"
-                )
+            assert len(state["participants"]) < self._num_max_workers, (
+                "Logic error: joinable rendezvous should always have space left"
+            )
 
             this_rank = len(state["participants"])
             state["participants"].append(this_rank)
@@ -954,8 +954,7 @@ class EtcdRendezvous:
 
             # Find the extra_data node, if it exists
             extra_data = [n for n in root.children if n.key == node]
-            if len(extra_data) > 1:
-                raise AssertionError
+            assert len(extra_data) <= 1
 
             # Node for extra_data exists, check the desired key inside it.
             if len(extra_data) == 1:

@@ -39,8 +39,10 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    TEST_CUDA,
+)
 from torch.utils.checkpoint import checkpoint
 
 
@@ -57,25 +59,6 @@ def aot_eager_regional_inductor():
         fw_compiler=regional_inductor,
         bw_compiler=regional_inductor,
     )
-
-
-class SingleCondModel(torch.nn.Module):
-    def __init__(self, d=64):
-        super().__init__()
-        self.fc1 = torch.nn.Linear(d, d)
-        self.fc2 = torch.nn.Linear(d, d)
-
-    def forward(self, x):
-        x = self.fc1(x)
-
-        def true_fn(x):
-            return x * 2.0
-
-        def false_fn(x):
-            return x * 3.0
-
-        x = torch.cond(x.shape[0] < 32, true_fn, false_fn, (x,))
-        return self.fc2(x)
 
 
 class MooType:
@@ -158,14 +141,14 @@ class MultiHeadSelfAttention(nn.Module):
         }
         compile_key = tuple(sorted(compile_spec.items()))
         if compile_key not in MultiHeadSelfAttention._flex_attention_cache:
-            MultiHeadSelfAttention._flex_attention_cache[compile_key] = torch.compile(  # noqa: UNSPECIFIED_BACKEND
+            MultiHeadSelfAttention._flex_attention_cache[compile_key] = torch.compile(
                 flex_attention, **compile_spec
             )
         self._flex_attention = MultiHeadSelfAttention._flex_attention_cache[compile_key]
 
         # Also compile create_block_mask
         if MultiHeadSelfAttention._create_block_mask_fn is None:
-            MultiHeadSelfAttention._create_block_mask_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
+            MultiHeadSelfAttention._create_block_mask_fn = torch.compile(
                 create_block_mask, dynamic=False, fullgraph=True
             )
 
@@ -374,7 +357,7 @@ class TestVLLMModel(MultiModalMixin, TextModel):
 def _subprocess_entry(fn, queue):
     try:
         fn()
-    except BaseException as exc:
+    except BaseException as exc:  # noqa: BLE001
         import traceback
 
         queue.put((type(exc).__name__, str(exc), traceback.format_exc()))
@@ -404,7 +387,7 @@ def _subprocess_disable_guard_check():
         def fn(x, y):
             return x + y
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
         inputs = (torch.randn(3, 4), torch.randn(3, 4))
@@ -421,10 +404,7 @@ def _subprocess_disable_guard_check():
                 raise AssertionError("Guard check should have failed")
             compiled_fn.disable_guard_check()
             actual = compiled_fn(*inputs)
-            if not torch.allclose(actual, expected):
-                raise AssertionError(
-                    f"Expected tensors to be close, got {actual} vs {expected}"
-                )
+            assert torch.allclose(actual, expected)
         finally:
             torch.set_grad_enabled(prev_grad)
 
@@ -441,13 +421,13 @@ def _subprocess_grad_mode_after_prior_compile():
         def target_fn(x, y):
             return x - y
 
-        torch.compile(warmup_fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+        torch.compile(warmup_fn, fullgraph=True).aot_compile(
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
         torch._dynamo.reset()
 
         with torch.no_grad():
-            compiled_fn = torch.compile(target_fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+            compiled_fn = torch.compile(target_fn, fullgraph=True).aot_compile(
                 ((torch.randn(3, 4), torch.randn(3, 4)), {})
             )
 
@@ -455,10 +435,7 @@ def _subprocess_grad_mode_after_prior_compile():
         with torch.no_grad():
             actual = compiled_fn(*inputs)
             expected = target_fn(*inputs)
-            if not torch.allclose(actual, expected):
-                raise AssertionError(
-                    f"Expected tensors to be close, got {actual} vs {expected}"
-                )
+            assert torch.allclose(actual, expected)
 
 
 def _subprocess_aot_compile_module():
@@ -496,10 +473,7 @@ def _subprocess_aot_compile_module():
                 args=(torch.randn(3, 3),), kwargs={}, contexts=[train_mode(model)]
             ),
         ]
-        if not isinstance(model, torch._dynamo.eval_frame.OptimizedModule):
-            raise AssertionError(
-                f"Expected OptimizedModule, got {type(model).__name__}"
-            )
+        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
         model._aot_compile(inputs)
 
         with torch.compiler.set_stance("fail_on_recompile"):
@@ -507,10 +481,7 @@ def _subprocess_aot_compile_module():
             eager_inputs = (torch.randn(3, 3),)
             expected = mod(*eager_inputs)
             actual = model(*eager_inputs)
-            if not torch.allclose(expected, actual):
-                raise AssertionError(
-                    f"Expected tensors to be close, got {actual} vs {expected}"
-                )
+            assert torch.allclose(expected, actual)
             model.train()
             expected.sum().backward()
 
@@ -526,10 +497,7 @@ def _subprocess_aot_compile_module():
                     "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
                 },
             )
-            if not isinstance(model, torch._dynamo.eval_frame.OptimizedModule):
-                raise AssertionError(
-                    f"Expected OptimizedModule, got {type(model).__name__}"
-                )
+            assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
             with open(path, "rb") as f:
                 data = f.read()
                 model._load_aot_compiled_module(data)
@@ -539,10 +507,7 @@ def _subprocess_aot_compile_module():
                 eager_inputs = (torch.randn(3, 3),)
                 expected = mod(*eager_inputs)
                 actual = model(*eager_inputs)
-                if not torch.allclose(expected, actual):
-                    raise AssertionError(
-                        f"Expected tensors to be close, got {actual} vs {expected}"
-                    )
+                assert torch.allclose(expected, actual)
 
 
 class RedistributeModel(torch.nn.Module):
@@ -607,29 +572,6 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
-
-    def test_aot_compile_autocast_guard_reload(self):
-        def fn(x):
-            return x + 1 * x
-
-        def backend(gm, example_inputs):
-            return CustomCompiledFunction(gm, example_inputs)
-
-        x = torch.randn(3, 4)
-        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
-            compiled_fn = torch.compile(
-                fn, fullgraph=True, backend=backend
-            ).aot_compile(((x,), {}))
-            expected = fn(x)
-            self.assertEqual(expected, compiled_fn(x))
-
-        compiled_fn.save_compiled_function(self.path())
-        torch._dynamo.reset()
-        with open(self.path(), "rb") as f:
-            compiled_fn = torch.compiler.load_compiled_function(f)
-        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
-            actual = compiled_fn(x)
-        self.assertEqual(expected, actual)
 
     def test_aot_compile_basic_forward(self):
         mod = SimpleLinearModule()
@@ -701,7 +643,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         def check_inputs(fn):
             def _fn(*args, **kwargs):
                 for arg in args:
-                    assert arg.shape[0] > 1  # noqa: S101
+                    assert arg.shape[0] > 1
 
                 return fn(*args, **kwargs)
 
@@ -748,31 +690,12 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
-    def test_aot_eager_backend(self):
-        def fn(x, y):
-            return x + y
-
-        compiled_fn = torch.compile(
-            fn, fullgraph=True, backend="aot_eager"
-        ).aot_compile(((torch.randn(3, 4), torch.randn(3, 4)), {}))
-        inputs = (torch.randn(3, 4), torch.randn(3, 4))
-        expected = fn(*inputs)
-        actual = compiled_fn(*inputs)
-        self.assertEqual(expected, actual)
-        compiled_fn.save_compiled_function(self.path())
-        torch._dynamo.reset()
-        with torch.compiler.set_stance("fail_on_recompile"):
-            with open(self.path(), "rb") as f:
-                compiled_fn = torch.compiler.load_compiled_function(f)
-            actual = compiled_fn(*inputs)
-            self.assertEqual(expected, actual)
-
     def test_decorated_function_with_functools_wrap_aot(self):
         def check_inputs(fn):
             @functools.wraps(fn)
             def _fn(*args, **kwargs):
                 for arg in args:
-                    assert arg.shape[0] > 1  # noqa: S101
+                    assert arg.shape[0] > 1
 
                 return fn(*args, **kwargs)
 
@@ -812,7 +735,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return MY_LAMBDA(x) + y
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
 
@@ -868,7 +791,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
 
         self.assertExpectedInlineMunged(
             Unsupported,
-            lambda: torch.compile(foo, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+            lambda: torch.compile(foo, fullgraph=True).aot_compile(
                 ((torch.ones(3), torch.ones(3)), {})
             ),
             """\
@@ -889,7 +812,7 @@ from user code:
         def check_inputs(fn):
             def _fn(*args, **kwargs):
                 for arg in args:
-                    assert arg.shape[0] > 1  # noqa: S101
+                    assert arg.shape[0] > 1
 
                 return fn(*args, **kwargs)
 
@@ -958,15 +881,14 @@ from user code:
                 torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
             )
         )
-        if not hasattr(backend_result.compiled_fn, "serialize"):
-            raise AssertionError("Expected compiled_fn to have 'serialize' attribute")
+        assert hasattr(backend_result.compiled_fn, "serialize")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
 
     def test_aot_compile_portable_guards_unsafe(self):
         def fn(xy):
             return xy[0] + xy[1]
 
-        compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(
             fn,
             fullgraph=True,
             options={"guard_filter_fn": torch.compiler.keep_portable_guards_unsafe},
@@ -997,46 +919,8 @@ from user code:
                 torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
             )
         )
-        if not hasattr(backend_result.compiled_fn, "serialize"):
-            raise AssertionError("Expected compiled_fn to have 'serialize' attribute")
+        assert hasattr(backend_result.compiled_fn, "serialize")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
-
-    def test_aot_cache_predicate_not_pickleable(self):
-        import torch._functorch.config as functorch_config
-        import torch._inductor.config as inductor_config
-
-        model = SingleCondModel().eval()
-
-        old_cacheable = torch.ops.higher_order.cond._cacheable
-        torch.ops.higher_order.cond._cacheable = True
-        try:
-            with (
-                functorch_config.patch(
-                    enable_autograd_cache=True,
-                    force_non_lazy_backward_lowering=True,
-                    strict_autograd_cache=True,
-                ),
-                inductor_config.patch(
-                    fx_graph_cache=True,
-                    fx_graph_remote_cache=False,
-                ),
-            ):
-                compiled = torch.compile(model, backend="inductor", dynamic=True)
-
-                # Test both branches of the cond predicate (x.shape[0] < 32).
-                for batch_size in (16, 64):
-                    inp = torch.randn(batch_size, 64)
-                    expected = model(inp)
-                    actual = compiled(inp)
-                    self.assertEqual(expected, actual)
-
-                # If the SymBool predicate is not pickleable, the FxGraphCache
-                # silently bypasses instead of caching. Assert no bypass occurred.
-                self.assertEqual(
-                    torch._dynamo.utils.counters["inductor"]["fxgraph_cache_bypass"], 0
-                )
-        finally:
-            torch.ops.higher_order.cond._cacheable = old_cacheable
 
     def test_fullgraph_capture_with_pytree_module(self):
         from torch._dynamo.functional_export import dynamo_graph_capture_for_export
@@ -1116,27 +1000,13 @@ from user code:
         )
         self.assertEqual(compiled_foo(inputs), foo(inputs))
 
-    def test_fullgraph_capture_schema_self_arg_no_collision(self):
-        """Regression: aten op schemas with `self` at non-first position
-        (e.g. `aten.where.self(Tensor condition, Tensor self, Tensor other)`)
-        must not produce `def forward(self, condition, self, other):` and
-        SyntaxError at `graph_module.recompile()`."""
-        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
-
-        cond = torch.tensor([True, False, True, False])
-        x = torch.tensor(0.0)
-        y = torch.tensor([1.0, 2.0, 3.0, 4.0])
-        op = torch.ops.aten.where.self
-        compiled = dynamo_graph_capture_for_export(op)(cond, x, y)
-        self.assertEqual(compiled(cond, x, y), op(cond, x, y))
-
     def test_aot_compile_with_closure_save_and_load(self):
         tmp = 2
 
         def fn(x, y):
             return x + y + tmp
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
         inputs = (torch.randn(3, 4), torch.randn(3, 4))
@@ -1151,7 +1021,7 @@ from user code:
 
     def test_aot_compile_with_super_call(self):
         fn = TestVLLMModel()
-        compiled_fn = torch.compile(fn.forward, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn.forward, fullgraph=True).aot_compile(
             ((torch.randn(3, 4),), {})
         )
         self.assertEqual(fn.forward.__code__.co_freevars, ("__class__",))
@@ -1172,7 +1042,7 @@ from user code:
         def make_inputs():
             return (torch.randn(3, 4), torch.randn(3, 4))
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))
 
         test_inputs = make_inputs()
         self.assertEqual(compiled_fn(*test_inputs), fn(*test_inputs))
@@ -1181,7 +1051,7 @@ from user code:
         def fn(x, y=1):
             return x + x
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
             ((torch.randn(3, 4),), {})
         )
         inputs = (torch.randn(3, 4),)
@@ -1194,9 +1064,9 @@ from user code:
         actual = compiled_fn(*inputs)
         self.assertEqual(expected, actual)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_aot_compile_with_aoti(self):
-        with torch.device(GPU_TYPE):
+        with torch.device("cuda"):
             from torch._dynamo.hooks import Hooks
 
             def fn(x, y):
@@ -1222,9 +1092,9 @@ from user code:
             actual = compiled_fn(*test_inputs)
             self.assertEqual(expected, actual)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_aot_compile_with_aoti_module(self):
-        with torch.device(GPU_TYPE):
+        with torch.device("cuda"):
             from torch._dynamo.hooks import Hooks
 
             mod = SimpleLinearModule()
@@ -1256,9 +1126,9 @@ from user code:
             actual.sum().backward()
             self.assertEqual(get_grads(original_mod), expected_grads)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_aot_compile_with_aoti_torch_compile(self):
-        with torch.device(GPU_TYPE):
+        with torch.device("cuda"):
 
             def fn(x, y):
                 return x + y
@@ -1266,7 +1136,7 @@ from user code:
             def make_inputs():
                 return (torch.randn(3, 4), torch.randn(3, 4))
 
-            compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
+            compiled_fn = torch.compile(
                 fn, fullgraph=True, options={"use_aoti": True}
             ).aot_compile((make_inputs(), {}))
             test_inputs = make_inputs()
@@ -1297,7 +1167,7 @@ from user code:
             d_input_tensor = DTensor.from_local(input_tensor, mesh, placements)
             mod = RedistributeModel()
 
-            compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
+            compiled_fn = torch.compile(
                 mod,
                 fullgraph=True,
             ).forward.aot_compile(((input_tensor, d_input_tensor, mesh), {}))
@@ -1328,7 +1198,7 @@ from user code:
         fn = wrap_forward_function(fn)
         mod.forward = fn
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
             ((torch.randn(4, 3),), {})
         )
         mod.forward = compiled_fn
@@ -1367,7 +1237,7 @@ from user code:
 
         fn = wrap_forward_function(fn)
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
             ((torch.randn(4, 3),), {})
         )
         mod.forward = compiled_fn
@@ -1403,7 +1273,7 @@ from user code:
 
             return checkpoint(compute, x, y, use_reentrant=False)
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
             ((torch.randn(3, 4), torch.randn(3, 4)), {})
         )
         inputs = (torch.randn(3, 4), torch.randn(3, 4))
@@ -1427,7 +1297,7 @@ from user code:
         def make_inputs():
             return (torch.randn(3, 4), torch.randn(3, 4))
 
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))
         test_inputs = make_inputs()
         expected = fn(*test_inputs)
         actual = compiled_fn(*test_inputs)
@@ -1445,30 +1315,9 @@ from user code:
         actual = compiled_fn(*test_inputs)
         self.assertEqual(expected.x, actual.x)
 
-    def test_builtins_dict_survives_serialization(self):
-        """Test that __builtins_dict__ is preserved through serialize/deserialize."""
-
-        def fn(x):
-            return x + 1, type
-
-        x = torch.randn(4)
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(((x,), {}))  # noqa: UNSPECIFIED_BACKEND
-
-        # Save and reload without f_globals
-        compiled_fn.save_compiled_function(self.path())
-        with open(self.path(), "rb") as f:
-            loaded_fn = torch.compiler.load_compiled_function(
-                f, f_globals=fn.__globals__
-            )
-
-        expected = fn(x)
-        actual = loaded_fn(x)
-        self.assertEqual(expected[0], actual[0])
-        self.assertEqual(expected[1], actual[1])
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_cross_aot_compile(self):
-        """Test cross-compilation using fake tensors and backward correctness"""
+        """Test cross-compilation using fake cuda tensors and backward correctness"""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x, y):
@@ -1476,10 +1325,10 @@ from user code:
 
         with FakeTensorMode(allow_non_fake_inputs=True):
             fake_inputs = (
-                torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
-                torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
+                torch.randn(3, 4, device="cuda", requires_grad=True),
+                torch.randn(3, 4, device="cuda", requires_grad=True),
             )
-        compiled_fn = torch.compile(  # noqa: UNSPECIFIED_BACKEND
+        compiled_fn = torch.compile(
             fn,
             fullgraph=True,
         ).aot_compile((fake_inputs, {}))
@@ -1491,8 +1340,8 @@ from user code:
             loaded_fn = torch.compiler.load_compiled_function(f)
 
         inputs = (
-            torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
-            torch.randn(3, 4, device=GPU_TYPE, requires_grad=True),
+            torch.randn(3, 4, device="cuda", requires_grad=True),
+            torch.randn(3, 4, device="cuda", requires_grad=True),
         )
         expected = fn(*inputs)
         actual = loaded_fn(*inputs)
@@ -1516,7 +1365,7 @@ from user code:
             self.assertEqual(eg, cg)
 
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_cross_compile_realistic_transformer_model(self):
         """
         Test cross-compilation with transformer model with DTensors,
@@ -1568,7 +1417,7 @@ from user code:
             This ensures reproducible results across eager and compiled runs.
             """
             torch.manual_seed(seed)
-            getattr(torch, GPU_TYPE).manual_seed(seed)
+            torch.cuda.manual_seed(seed)
             for name, param in module.named_parameters():
                 if param.requires_grad:
                     local_param = (
@@ -1584,7 +1433,7 @@ from user code:
 
         try:
             rank = c10d.get_rank()
-            device = torch.device(f"{GPU_TYPE}:{rank}")
+            device = torch.device(f"cuda:{rank}")
             vocab_size = 1000
             embed_dim = 256
             num_heads = 8
@@ -1595,7 +1444,7 @@ from user code:
             seq_len = 16
 
             device_mesh = init_device_mesh(
-                GPU_TYPE,
+                "cuda",
                 (1,),
                 mesh_dim_names=("dp",),
             )
@@ -1632,7 +1481,9 @@ from user code:
 
             from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
-            gm = dynamo_graph_capture_for_export(model)(input_ids_dt)
+            gm = dynamo_graph_capture_for_export(model, restore_state_dict=True)(
+                input_ids_dt
+            )
 
             fake_mode = gm.meta["fake_mode"]
 
@@ -1779,7 +1630,7 @@ from user code:
                     self.assertEqual(
                         compiled_grads[name],
                         eager_grads[name],
-                        msg=lambda msg: f"{msg}\nGradients for {name} should be bitwise equivalent",
+                        msg=f"Gradients for {name} should be bitwise equivalent",
                     )
         finally:
             c10d.destroy_process_group()

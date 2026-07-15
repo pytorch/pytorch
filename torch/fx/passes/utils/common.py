@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
@@ -15,7 +17,7 @@ class HolderModule(Module):
     that uses the attributes
     """
 
-    def __init__(self, d: dict[str, Module | None]) -> None:
+    def __init__(self, d):
         super().__init__()
         for k, v in d.items():
             self.add_module(k, v)
@@ -29,14 +31,12 @@ def lift_subgraph_as_module(
     class_name: str = "GraphModule",
 ) -> tuple[GraphModule, dict[str, str]]:
     """
-    Create a GraphModule for subgraph, which copies the necessary attributes
-    from the original parent graph_module.
+    Create a GraphModule for subgraph, which copies the necessary attributes from the original parent graph_module.
 
     Args:
         gm (GraphModule): parent graph module
 
-        subgraph (:class:`torch.fx.Graph`): a valid subgraph that contains copied nodes from the
-            parent graph
+        subgraph (Graph): a valid subgraph that contains copied nodes from the parent graph
 
         comp_name (str): name for the new component
 
@@ -48,7 +48,7 @@ def lift_subgraph_as_module(
     # in this component, creating HolderModules as necessary to match the path.
     # e.g. if in the original module there's a get_attr node fetches "conv.weight".
     # We create a HolderModule as root -> add a HolderModule named "conv" ->
-    # make "weight" an attribute of "conv" HolderModule and point to conv.weight in
+    # make "weight" a attribute of "conv" HolderModule and point to conv.weight in
     # the original module.
     submodule = HolderModule({})
     orig_to_split_fqn_mapping: dict[str, str] = {}

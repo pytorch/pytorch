@@ -161,12 +161,17 @@ AccessHashMap& Scope::getAccessMapByBuf(const BufPtr& b) {
 }
 
 void Scope::filterClosed() {
-  std::erase_if(closedAccesses_, [](auto info) {
-    return info->store_cost()->isConstant() &&
-        immediateAs<int>(info->store_cost()) <= 1 &&
-        info->load_cost()->isConstant() &&
-        immediateAs<int>(info->load_cost()) <= 1;
-  });
+  closedAccesses_.erase(
+      std::remove_if(
+          closedAccesses_.begin(),
+          closedAccesses_.end(),
+          [](auto info) {
+            return info->store_cost()->isConstant() &&
+                immediateAs<int>(info->store_cost()) <= 1 &&
+                info->load_cost()->isConstant() &&
+                immediateAs<int>(info->load_cost()) <= 1;
+          }),
+      closedAccesses_.end());
 }
 
 // RegisterizerAnalysis
@@ -286,13 +291,13 @@ void RegisterizerAnalysis::visit(const CondPtr& v) {
       std::make_shared<Scope>(false_stmt, prev_scope, ++conditionId_);
 
   if (true_stmt) {
-    currentScope_ = std::move(true_scope);
+    currentScope_ = true_scope;
     true_stmt->accept(this);
     mergeHiddenScope(true);
     mergeCurrentScopeIntoParent();
   }
   if (false_stmt) {
-    currentScope_ = std::move(false_scope);
+    currentScope_ = false_scope;
     false_stmt->accept(this);
     mergeHiddenScope(true);
     mergeCurrentScopeIntoParent();
@@ -330,14 +335,14 @@ void RegisterizerAnalysis::visit(const IfThenElsePtr& v) {
   exprConditionals_.insert(false_scope->conditionId());
 
   if (true_value) {
-    currentScope_ = std::move(true_scope);
+    currentScope_ = true_scope;
     true_value->accept(this);
     mergeHiddenScope(false);
     mergeCurrentScopeIntoParent();
   }
 
   if (false_value) {
-    currentScope_ = std::move(false_scope);
+    currentScope_ = false_scope;
     false_value->accept(this);
     mergeHiddenScope(false);
     mergeCurrentScopeIntoParent();
@@ -517,7 +522,7 @@ void RegisterizerAnalysis::mergeHiddenScope(bool allowClosed) {
   }
 }
 
-// Merge currentScope_ into its parent, and make parent the new currentScope_.
+// Merge currentScope_ into it's parent, and make parent the new currentScope_.
 void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
   auto parent = currentScope_->parent();
 
@@ -632,7 +637,7 @@ void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
     }
   }
 
-  currentScope_ = std::move(parent);
+  currentScope_ = parent;
 }
 
 std::vector<std::shared_ptr<AccessInfo>> RegisterizerAnalysis::getCandidates() {

@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 from types import CodeType
+from typing import Optional
 
 import torch
 
@@ -104,7 +105,7 @@ if _IS_MONKEYTYPE_INSTALLED:
         def filter(
             self,
             qualified_name: str,
-            qualname_prefix: str | None = None,
+            qualname_prefix: Optional[str] = None,
             limit: int = 2000,
         ) -> list[CallTraceThunk]:
             return self.trace_records[qualified_name]
@@ -153,7 +154,7 @@ if _IS_MONKEYTYPE_INSTALLED:
         def trace_store(self) -> CallTraceStore:
             return self.s
 
-        def code_filter(self) -> CodeFilter | None:
+        def code_filter(self) -> Optional[CodeFilter]:
             return jit_code_filter
 
 else:
@@ -171,7 +172,7 @@ else:
         def __init__(self) -> None:
             pass
 
-    monkeytype_trace = None  # type: ignore[assignment]
+    monkeytype_trace = None  # type: ignore[assignment]  # noqa: F811
 
 
 def jit_code_filter(code: CodeType) -> bool:

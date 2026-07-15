@@ -74,13 +74,10 @@ inline BoxedKernel BoxedKernel::makeAmbiguousAutogradOther() {
       &ambiguous_autogradother_kernel);
 }
 
-template <class KernelFunctor>
-inline void BoxedKernel::make_boxed_functor(
-    OperatorKernel* kernel,
-    const OperatorHandle& op,
-    DispatchKeySet ks,
-    Stack* stack) {
-  (*static_cast<KernelFunctor*>(kernel))(op, ks, stack);
+inline BoxedKernel BoxedKernel::makeNamedNotSupported() {
+  return BoxedKernel(
+      nullptr, // no functor_ object
+      &named_not_supported_kernel);
 }
 
 template <class KernelFunctor>
@@ -90,18 +87,17 @@ inline BoxedKernel BoxedKernel::makeFromFunctor(
       std::is_base_of_v<OperatorKernel, KernelFunctor>,
       "Tried to call BoxedKernel::makeFromFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
   return BoxedKernel(
-      std::move(kernelFunctor), &make_boxed_functor<KernelFunctor>);
+      std::move(kernelFunctor),
+      [](OperatorKernel* kernel,
+         const OperatorHandle& op,
+         DispatchKeySet ks,
+         Stack* stack) {
+        (*static_cast<KernelFunctor*>(kernel))(op, ks, stack);
+      });
 }
 
 inline OperatorKernel* BoxedKernel::getFunctor() const {
   return functor_.get();
-}
-template <class KernelFunctor>
-inline const KernelFunctor* BoxedKernel::getFunctor() const {
-  if (boxed_kernel_func_ != &make_boxed_functor<KernelFunctor>) {
-    return nullptr;
-  }
-  return static_cast<const KernelFunctor*>(functor_.get());
 }
 inline BoxedKernel::InternalBoxedKernelFunction* BoxedKernel::getFnPtr() const {
   return boxed_kernel_func_;

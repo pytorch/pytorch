@@ -1,14 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import json
-import math
 import os
-import tempfile
 import unittest
 
 import torch
-import torch._dynamo.config
 import torch.distributed as dist
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -49,171 +45,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_package
 
 
-class TestDebugModeLogSerialization(TestCase):
-    def _run_hashed_debug_mode(self, x):
-        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
-            x.sin().sum()
-        return debug_mode.logs
-
-    def test_save_load_empty_logs(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "empty.json")
-            DebugMode.save_logs([], path)
-            self.assertEqual(DebugMode.load_logs(path), [])
-
-    def test_save_load_redistribute_outer_call(self):
-        call = _RedistributeCall(1, "S(0)", "R", None, 0)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "redistribute.json")
-            DebugMode.save_logs([call], path)
-            loaded_call = DebugMode.load_logs(path)[0]
-
-        self.assertIsInstance(loaded_call, _RedistributeCall)
-        self.assertTrue(loaded_call.is_outer_call)
-        self.assertEqual(loaded_call.render([]), call.render([]))
-
-    def test_save_load_logs_for_hash_mismatch(self):
-        x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
-        x_different = x + 1
-
-        logs1 = self._run_hashed_debug_mode(x)
-        logs2 = self._run_hashed_debug_mode(x_different)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path1 = os.path.join(tmpdir, "run1.json")
-            path2 = os.path.join(tmpdir, "run2.json")
-            DebugMode.save_logs(logs1, path1)
-            DebugMode.save_logs(logs2, path2)
-
-            loaded1 = DebugMode.load_logs(path1)
-            loaded2 = DebugMode.load_logs(path2)
-
-        self.assertEqual(
-            [log.render([]) for log in loaded1],
-            [log.render([]) for log in logs1],
-        )
-        self.assertEqual(
-            DebugMode.check_hash_mismatches(logs1, loaded1, compare_inputs=True),
-            [],
-        )
-        self.assertTrue(
-            any(
-                isinstance(log, _OpCall)
-                and log.log is not None
-                and isinstance(log.log.get("input_hash"), tuple)
-                for log in loaded1
-            )
-        )
-
-        mismatches = DebugMode.check_hash_mismatches(
-            loaded1, loaded2, compare_inputs=True
-        )
-        self.assertGreater(len(mismatches), 0)
-        self.assertIn("aten::sin", {mismatch["call"] for mismatch in mismatches})
-
-    def test_save_load_logs_with_record_outputs(self):
-        x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
-
-        with (
-            DebugMode() as debug_mode,
-            DebugMode.record_outputs(),
-            DebugMode.log_tensor_hashes(),
-        ):
-            x.sin().sum()
-        logs = debug_mode.logs
-
-        self.assertTrue(
-            any(
-                isinstance(log, _OpCall)
-                and log.record is not None
-                and "output" in log.record
-                for log in logs
-            )
-        )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "logs.json")
-            DebugMode.save_logs(logs, path)
-            loaded_logs = DebugMode.load_logs(path)
-
-        self.assertTrue(all(log.record is None for log in loaded_logs))
-        self.assertEqual(DebugMode.check_hash_mismatches(logs, loaded_logs), [])
-
-    def test_save_load_logs_with_nonfinite_hashes(self):
-        def reject_nonstandard_json_constant(value):
-            raise AssertionError(f"nonstandard JSON constant: {value}")
-
-        def run_with_hash(hash_value):
-            x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
-            with (
-                DebugMode() as debug_mode,
-                DebugMode.log_tensor_hashes(
-                    hash_fn=lambda t: hash_value, hash_inputs=True
-                ),
-            ):
-                x.sin().sum()
-            return debug_mode.logs
-
-        logs_nan = run_with_hash(float("nan"))
-        logs_inf = run_with_hash(float("inf"))
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path_nan = os.path.join(tmpdir, "nan.json")
-            path_inf = os.path.join(tmpdir, "inf.json")
-            DebugMode.save_logs(logs_nan, path_nan)
-            DebugMode.save_logs(logs_inf, path_inf)
-
-            with open(path_nan, encoding="utf-8") as f:
-                nan_json = f.read()
-            with open(path_inf, encoding="utf-8") as f:
-                inf_json = f.read()
-
-            json.loads(nan_json, parse_constant=reject_nonstandard_json_constant)
-            json.loads(inf_json, parse_constant=reject_nonstandard_json_constant)
-            self.assertNotIn("NaN", nan_json)
-            self.assertNotIn("Infinity", inf_json)
-
-            loaded_nan = DebugMode.load_logs(path_nan)
-            loaded_inf = DebugMode.load_logs(path_inf)
-
-        self.assertTrue(
-            any(
-                isinstance(log, _OpCall)
-                and log.log is not None
-                and math.isnan(log.log["hash"])
-                for log in loaded_nan
-            )
-        )
-        self.assertTrue(
-            any(
-                isinstance(log, _OpCall)
-                and log.log is not None
-                and math.isinf(log.log["hash"])
-                for log in loaded_inf
-            )
-        )
-
-        mismatches = DebugMode.check_hash_mismatches(
-            loaded_nan, loaded_inf, compare_inputs=True
-        )
-        self.assertGreater(len(mismatches), 0)
-        self.assertTrue(any(math.isnan(mismatch["hash1"]) for mismatch in mismatches))
-        self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
-
-
 @requires_cuda
 class TestDTensorDebugMode(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        torch._dynamo.config.canonicalize_output_graph_node_order = True
-
-    @classmethod
-    def tearDownClass(cls):
-        torch._dynamo.config.canonicalize_output_graph_node_order = False
-        super().tearDownClass()
-
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
@@ -541,16 +374,13 @@ class TestDTensorDebugMode(TestCase):
         _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
         aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
         aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
-    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
         )
 
     def test_debug_mode_einsum(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
-        # Create test tensors with mixed Partial placements: P(sum)R and RP(sum).
-        # Per-input linearity allows bmm to operate directly on Partial inputs
-        # without redistribution, producing P(sum)P(sum) output.
-        # Numerics are verified in test_matrix_ops.py::test_mm_partial_inputs.
+        # Create test tensors
         a = torch.randn(16, 6, 8)
         b = torch.randn(8, 4, 4)
 
@@ -586,7 +416,25 @@ class TestDTensorDebugMode(TestCase):
     aten::view(dt: f32[8, 4, 4, 1, 1]| RP(sum), [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
     aten::bmm(dt: f32[1, 96, 8]| P(sum)R, dt: f32[1, 8, 16]| RP(sum))
-      aten::bmm(t: f32[1, 96, 8], t: f32[1, 8, 16])
+      redistribute_input [implicit] (0, P(sum)R -> S(2)[0]S(2)[1])
+        redistribute_input(t: f32[1, 96, 8], trace: P(sum)R->S(2)R->S(2)[0]S(2)[1])
+          aten::chunk(t: f32[1, 96, 8], 4, 2)
+          aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
+          _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 1)
+          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 96, 2])
+          _c10d_functional::wait_tensor(t: f32[1, 96, 2])
+          aten::chunk(t: f32[1, 96, 2], 2, 2)
+          aten::clone(t: f32[1, 96, 1])
+      redistribute_input [implicit] (1, RP(sum) -> S(1)[0]S(1)[1])
+        redistribute_input(t: f32[1, 8, 16], trace: RP(sum)->S(1)P(sum)->S(1)[0]S(1)[1])
+          aten::chunk(t: f32[1, 8, 16], 4, 1)
+          aten::clone(t: f32[1, 2, 16])
+          aten::chunk(t: f32[1, 2, 16], 2, 1)
+          aten::cat(['t: f32[1, 1, 16]', 't: f32[1, 1, 16]'])
+          _c10d_functional::reduce_scatter_tensor(t: f32[2, 1, 16], sum, 2, 3)
+          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 1, 16])
+          _c10d_functional::wait_tensor(t: f32[1, 1, 16])
+      aten::bmm(t: f32[1, 96, 1], t: f32[1, 1, 16])
     aten::view(dt: f32[1, 96, 16]| P(sum)P(sum), [16, 6, 1, 4, 4])
       aten::view(t: f32[1, 96, 16], [16, 6, 1, 4, 4])
     aten::permute(dt: f32[16, 6, 1, 4, 4]| P(sum)P(sum), [0, 1, 3, 4, 2])
@@ -833,7 +681,6 @@ class TestDTensorDebugMode(TestCase):
         with DebugMode(record_nn_module=True) as debug_mode:
             fn(inp)
 
-    @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     def test_nn_module_in_compiled_regions(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -921,8 +768,7 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[4, 4])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [4, 4])  ->  t: f32[4, 4]
-    aten::empty_strided([4, 4], [4, 1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[4, 4]
-    aten::copy_(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::clone(t: f32[4, 4], memory_format=torch.contiguous_format)  ->  t: f32[4, 4]
   [aot_eager region (compile)] enter
     [nn.Mod (compile)] L['self'].bar
       [nn.Mod (compile)] L['self'].bar.l3
@@ -957,12 +803,12 @@ class TestDTensorDebugMode(TestCase):
         aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
         aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
   [aot_eager region (compile)] exit
-    aten::detach(t: f32[4])  ->  t: f32[4]
-    aten::detach(t: f32[4])  ->  t: f32[4]
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
     aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
     aten::detach(t: f32[4])  ->  t: f32[4]
     aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
-    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]""",
+    aten::detach(t: f32[4])  ->  t: f32[4]
+    aten::detach(t: f32[4])  ->  t: f32[4]""",
         )
 
     def test_record_function(self):
@@ -1179,7 +1025,6 @@ class TestDTensorDebugMode(TestCase):
         gm_str = gm.print_readable(colored=False, print_output=False)
         self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
 
-    @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     def test_invoke_subgraph(self):
         # Test that DebugMode can trace the operations inside
         # invoke_subgraph HOP
@@ -1224,8 +1069,7 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[8, 8])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [8, 8])  ->  t: f32[8, 8]
-    aten::empty_strided([8, 8], [8, 1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[8, 8]
-    aten::copy_(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::clone(t: f32[8, 8], memory_format=torch.contiguous_format)  ->  t: f32[8, 8]
     torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, t: f32[8, 8], t: f32[8, 8])  ->  ('t: f32[8, 8]',)
     [annotate] [enter InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
       aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
@@ -1237,14 +1081,13 @@ class TestDTensorDebugMode(TestCase):
       aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
       aten::mul.Tensor(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
     [annotate] [exit InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
-    aten::detach(t: f32[8, 8])  ->  t: f32[8, 8]""",
+    aten::detach(t: f32[8, 8])  ->  t: f32[8, 8]""",  # noqa: B950
             ignore_comments=True,
         )
 
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_nested_invoke_subgraph(self):
         # Test that DebugMode can trace the operations inside
         # invoke_subgraph HOP
@@ -1287,7 +1130,7 @@ class TestDTensorDebugMode(TestCase):
       [annotate] [exit InvokeSubgraph HOP] subgraph_0
       aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
     [annotate] [exit InvokeSubgraph HOP] subgraph_1
-    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]""",
+    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]""",  # noqa: B950
             ignore_comments=True,
         )
 
@@ -1347,7 +1190,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         )
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
-            dist.all_gather_single(output_tensor, tensor)
+            dist.all_gather_into_tensor(output_tensor, tensor)
 
         self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
 
@@ -1375,7 +1218,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             # Call with async_op=True returns a work handle
-            work = dist.all_gather_single(output_tensor, tensor, async_op=True)
+            work = dist.all_gather_into_tensor(output_tensor, tensor, async_op=True)
             # Wait for the async operation to complete
             work.wait()
 
@@ -1405,7 +1248,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         # Use functional collectives which return AsyncCollectiveTensor
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
-            result = _functional_collectives.all_gather_single(
+            result = _functional_collectives.all_gather_tensor(
                 tensor, gather_dim=0, group=dist.group.WORLD
             )
 

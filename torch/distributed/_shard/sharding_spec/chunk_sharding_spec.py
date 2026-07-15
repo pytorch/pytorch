@@ -36,8 +36,10 @@ class ChunkShardingSpec(ShardingSpec):
     in the placement specified.
 
     Args:
-        dim (int):
-            The dimension to shard on, an integer representing the dimension.
+        dim (int or str):
+            The dimension to shard on, could be an integer representing the
+            dimension or a string in case of named tensors where dimensions are
+            named. Note that named tensor support is not added yet.
         placement(List[Union[_remote_device, str]]):
             Specifies the placement of each shard of the Tensor. The size of
             the list represents the number of shards to be created. This could
@@ -180,10 +182,8 @@ class ChunkShardingSpec(ShardingSpec):
 
         # each rank should have local_tensor and local_metadata initialized if we build
         # the metadata list in a correct way.
-        if local_tensor is None:
-            raise AssertionError
-        if local_metadata is None:
-            raise AssertionError
+        assert local_tensor is not None
+        assert local_metadata is not None
 
         # Scatter the shards to all ranks in the pg
         # scatter takes the global rank as ``src``
@@ -200,8 +200,7 @@ class ChunkShardingSpec(ShardingSpec):
         if current_rank == src_rank:
             tensors_to_scatter_ = []
             for t in tensors_to_scatter:
-                if not isinstance(t, torch.Tensor):
-                    raise AssertionError
+                assert isinstance(t, torch.Tensor)
                 tensors_to_scatter_.append(t)
 
         dist.scatter(

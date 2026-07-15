@@ -1,5 +1,4 @@
 #include <ATen/Context.h>
-#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/DeviceAccelerator.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
 
@@ -136,18 +135,6 @@ c10::DeviceCapability getDeviceCapability(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   return impl.getDeviceCapability({device_type, device_index});
-}
-
-void emptyHostCache() {
-  const auto device_type = getAccelerator(true).value();
-  at::getHostAllocator(device_type)->empty_cache();
-}
-
-const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) {
-  const auto device_type = getAccelerator(true).value();
-  return at::globalContext()
-      .getAcceleratorHooksInterface(device_type)
-      .getDefaultGenerator(device_index);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 

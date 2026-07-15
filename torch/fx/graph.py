@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+# mypy: allow-untyped-defs
 import builtins
 import contextlib
 import copy
@@ -16,42 +15,30 @@ import types
 import typing
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, TYPE_CHECKING
+from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
-from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_constant_type
-from torch.types import py_sym_types
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
-from .node import (
-    _device_annotation,
-    _get_qualified_name,
-    _type_repr,
-    Argument,
-    Node,
-    Target,
-)
-from .tensor_type import TensorType
+from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
 
 log = logging.getLogger(__name__)
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
-
 if TYPE_CHECKING:
-    import sympy
-
-    from ._symbolic_trace import Tracer
-    from .graph_module import GraphModule
+    from ._symbolic_trace import Tracer  # noqa: F401
+    from .graph_module import GraphModule  # noqa: F401
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -69,7 +56,7 @@ _legal_ops = dict.fromkeys(
 )
 
 
-# Signature for functions that transform the body (`list[str]`) of the
+# Signature for functions thattransforms the body (`list[str]`) of the
 # generated code
 TransformCodeFunc = Callable[[list[str]], list[str]]
 
@@ -85,7 +72,7 @@ class _CustomBuiltin(NamedTuple):
     # How to import this object from the standard library.
     import_str: str
     # The actual object, produced from that import string.
-    obj: object
+    obj: Any
 
 
 # Combined dict of disallowed variable names so we can check with one lookup
@@ -95,7 +82,7 @@ _illegal_names.update(builtins.__dict__)  # can't shadow a builtin name
 _custom_builtins: dict[str, _CustomBuiltin] = {}
 
 
-def _register_custom_builtin(name: str, import_str: str, obj: object) -> None:
+def _register_custom_builtin(name: str, import_str: str, obj: Any):
     _custom_builtins[name] = _CustomBuiltin(import_str, obj)
     _illegal_names[name] = obj
 
@@ -144,7 +131,7 @@ _torch_but_not_dynamo = re.compile(
 ).fullmatch
 
 
-def _is_from_torch(obj: object) -> bool:
+def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, "__module__", None)
     if module_name is not None:
         return _torch_but_not_dynamo(module_name) is not None
@@ -168,12 +155,12 @@ class _Namespace:
     - Names generated do not shadow builtins, unless the object is indeed that builtin.
     """
 
-    def __init__(self) -> None:
-        self._obj_to_name: dict[object, str] = {}
+    def __init__(self):
+        self._obj_to_name: dict[Any, str] = {}
         self._used_names: set[str] = set()
         self._base_count: dict[str, int] = {}
 
-    def create_name(self, candidate: str, obj: object | None) -> str:
+    def create_name(self, candidate: str, obj: Optional[Any]) -> str:
         """Create a unique name.
 
         Arguments:
@@ -203,10 +190,7 @@ class _Namespace:
 
         base, num = match.group(1, 2)
         if num is None or candidate in self._used_names:
-            # Look up `base` to match the key used in the store on line below;
-            # using `candidate` misses when it has a numeric suffix, making
-            # the while-loop quadratic.
-            num = self._base_count.get(base, 0)
+            num = self._base_count.get(candidate, 0)
             if _illegal_names.get(candidate, obj) is not obj:
                 num += 1
                 candidate = f"{base}_{num}"
@@ -224,7 +208,7 @@ class _Namespace:
             self._obj_to_name[obj] = candidate
         return candidate
 
-    def associate_name_with_obj(self, name: str, obj: object) -> None:
+    def associate_name_with_obj(self, name: str, obj: Any):
         """Associate a unique name with an object.
 
         Neither `name` nor `obj` should be associated already.
@@ -233,7 +217,7 @@ class _Namespace:
         if maybe_existing is not name:
             raise AssertionError("obj is already associated")
 
-    def _rename_object(self, obj: object, name: str) -> None:
+    def _rename_object(self, obj: Any, name: str):
         if obj not in self._obj_to_name:
             raise AssertionError(f"Object {obj} is not in _obj_to_name")
         self._obj_to_name[obj] = name
@@ -253,7 +237,7 @@ class PythonCode:
     globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
     # node index. Line number starts at the prologue (i.e. forward()).
-    _lineno_map: dict[int, int | None] | None
+    _lineno_map: Optional[dict[int, Optional[int]]]
     # The line number of prologue in fn_code
     _prologue_start: int = 0
 
@@ -270,26 +254,19 @@ def _format_target(base: str, target: str) -> str:
 
 
 class _InsertPoint:
-    def __init__(self, graph: Graph, new_insert: Callable[..., None]) -> None:
+    def __init__(self, graph, new_insert):
         self.graph = graph
         self.orig_insert, graph._insert = graph._insert, new_insert
 
-    def __enter__(self) -> None:
+    def __enter__(self):
         pass
 
-    def __exit__(
-        self,
-        type: type[BaseException] | None,
-        value: BaseException | None,
-        tb: types.TracebackType | None,
-    ) -> None:
+    def __exit__(self, type, value, tb):
         self.graph._insert = self.orig_insert
 
 
 class _node_list:
-    def __init__(
-        self, graph: Graph, direction: Literal["_prev", "_next"] = "_next"
-    ) -> None:
+    def __init__(self, graph: "Graph", direction: Literal["_prev", "_next"] = "_next"):
         if direction not in ("_next", "_prev"):
             raise AssertionError(
                 f"direction must be '_next' or '_prev', got {direction}"
@@ -297,19 +274,14 @@ class _node_list:
         self.graph = graph
         self.direction = direction
 
-    def __len__(self) -> int:
+    def __len__(self):
         return self.graph._len
 
-    # TODO: These should return Iterator[Node], but doing so causes ~350
-    # downstream pyrefly errors because Node.target is typed as
-    # Callable[..., Any] | str and pyrefly can't narrow it based on
-    # node.op checks (e.g. `if node.op == "call_module": node.target`
-    # should be str but pyrefly doesn't support that narrowing).
-    def __iter__(self) -> Iterator[Any]:
+    def __iter__(self):
         return _NodeIter(self.graph._root, self.direction == "_prev")
 
-    def __reversed__(self) -> Iterator[Any]:
-        return _NodeIter(self.graph._root, self.direction == "_next")
+    def __reversed__(self):
+        return _node_list(self.graph, "_next" if self.direction == "_prev" else "_prev")
 
 
 class _PyTreeInfo(NamedTuple):
@@ -319,7 +291,7 @@ class _PyTreeInfo(NamedTuple):
 
     orig_args: list[str]
     in_spec: pytree.TreeSpec
-    out_spec: pytree.TreeSpec | None
+    out_spec: Optional[pytree.TreeSpec]
 
 
 @dataclass(frozen=True)
@@ -333,14 +305,14 @@ class _ParsedStackTrace:
     name: str
     code: str
 
-    def get_summary_str(self) -> str:
+    def get_summary_str(self):
         return f"File: {self.file}:{self.lineno} in {self.name}, code: {self.code}"
 
 
 # get File:lineno code from stack_trace
 def _parse_stack_trace(
-    stack_trace: str, filter_fn: Callable[[str, str, str], bool] | None = None
-) -> _ParsedStackTrace | None:
+    stack_trace: str, filter_fn: Optional[Callable[[str, str, str], bool]] = None
+):
     if stack_trace is None:
         return None
     pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
@@ -366,10 +338,10 @@ def _parse_stack_trace(
 @compatibility(is_backward_compatible=False)
 class CodeGen:
     # This is an override hook so we can customize the SymNode printer.
-    _sym_repr: Callable[[torch.types.PySymType], str] = lambda x: repr(x)
+    _sym_repr: Callable[["torch.types.PySymType"], str] = lambda x: repr(x)
 
-    def __init__(self) -> None:
-        self._body_transformer: TransformCodeFunc | None = None
+    def __init__(self):
+        self._body_transformer: Optional[TransformCodeFunc] = None
         self._func_name: str = "forward"
 
     def _format_multiline_args(self, args: list[str]) -> str:
@@ -384,43 +356,30 @@ class CodeGen:
         else:
             return f"    {arg},\n"
 
-    def _get_delimiters(self, container: Sequence[object]) -> tuple[str, str]:
+    def _get_delimiters(self, container) -> tuple[str, str]:
         """Helper to get opening and closing delimiters for containers."""
         return ("(", ")") if isinstance(container, tuple) else ("[", "]")
 
-    def _format_multiline_container(
-        self,
-        items: Sequence[object],
-        descs: Sequence[str] | None = None,
-        prefix: str = "",
-        repr_fn: Callable[[object], str] | None = None,
-    ) -> str:
+    def _format_multiline_container(self, items, descs=None, prefix="") -> str:
         """Helper to format containers (lists/tuples) in multiline format."""
         ldelim, rdelim = self._get_delimiters(items)
         desc_trailers = self._get_desc_trailers(items, descs)
-        if repr_fn is None:
-            repr_fn = repr
 
         return (
             f"{prefix}{ldelim}\n"
             + "".join(
-                f"    {repr_fn(item)},{trailer}\n"
-                for item, trailer in zip(items, desc_trailers)
+                f"    {item},{trailer}\n" for item, trailer in zip(items, desc_trailers)
             )
             + f"{rdelim}"
         )
 
-    def _get_desc_trailers(
-        self, items: Sequence[object], descs: Sequence[str] | None
-    ) -> list[str]:
+    def _get_desc_trailers(self, items, descs):
         """Helper to generate description trailers for items."""
         if descs is None:
             return [""] * len(items)
         return [f"  # {desc}" for desc in descs]
 
-    def _call_method_with_signature_check(
-        self, method: Callable[..., Any], *args: Any, **kwargs: Any
-    ) -> Any:
+    def _call_method_with_signature_check(self, method, *args, **kwargs):
         """Helper to call a method with optional parameters based on signature."""
         sig = inspect.signature(method)
         # Filter kwargs to only include parameters that exist in the method signature
@@ -452,24 +411,16 @@ class CodeGen:
             return f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
 
     def generate_output(
-        self,
-        output_args: Argument,
-        *,
-        descs: Sequence[str] | None = None,
-        repr_fn: Callable[[object], str] | None = None,
+        self, output_args: Argument, *, descs: Optional[Any] = None
     ) -> str:
         """
         Given the output arguments, generates the return statement of the FX function.
         Note: The returned statement should not be indented.
         """
-        if repr_fn is None:
-            repr_fn = repr
         if descs is not None and isinstance(output_args, (list, tuple)):
-            return self._format_multiline_container(
-                output_args, descs, "return ", repr_fn=repr_fn
-            )
+            return self._format_multiline_container(output_args, descs, "return ")
         else:
-            return f"return {repr_fn(output_args)}"
+            return f"return {repr(output_args)}"
 
     def process_inputs(self, *args: Any) -> Any:
         """
@@ -499,7 +450,7 @@ class CodeGen:
 
     def _gen_python_code(
         self,
-        nodes: _node_list,
+        nodes,
         root_module: str,
         namespace: _Namespace,
         *,
@@ -510,7 +461,7 @@ class CodeGen:
         # Render each argument on its own line
         expanded_def: bool = False,
         record_func: bool = False,
-        additional_meta: list[str] | None = None,
+        additional_meta: Optional[list[str]] = None,
     ) -> PythonCode:
         free_vars: list[str] = []
         body: list[str] = []
@@ -527,7 +478,7 @@ class CodeGen:
         )
         include_meta = os.environ.get("FX_GRAPH_SHOW_META", "0") == "1"
 
-        def add_global(name_hint: str, obj: Any) -> str:
+        def add_global(name_hint: str, obj: Any):
             """Add an obj to be tracked as a global.
 
             We call this for names that reference objects external to the
@@ -559,7 +510,7 @@ class CodeGen:
         for name, (_, obj) in _custom_builtins.items():
             add_global(name, obj)
 
-        def type_repr(o: object) -> str:
+        def type_repr(o: Any):
             if o == ():
                 # Empty tuple is used for empty tuple type annotation Tuple[()]
                 return "()"
@@ -567,7 +518,7 @@ class CodeGen:
             typename = _type_repr(o)
             if isinstance(o, types.UnionType) and "|" in typename:
                 # str | int
-                args = [type_repr(arg) for arg in typing.get_args(o)]
+                args = [type_repr(arg) for arg in o.__args__]
                 return "|".join(args)
 
             if origin_type := getattr(o, "__origin__", None):
@@ -579,12 +530,8 @@ class CodeGen:
 
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
-                if isinstance(o, TensorType):
-                    type_args = o.dims
-                else:
-                    type_args = typing.get_args(o)
-                if type_args:
-                    args = [type_repr(arg) for arg in type_args]
+                if hasattr(o, "__args__") and o.__args__:
+                    args = [type_repr(arg) for arg in o.__args__]
                     return f"{origin_typename}[{','.join(args)}]"
                 else:
                     return origin_typename
@@ -605,7 +552,7 @@ class CodeGen:
             dim_blue = _identity
             blue = _identity
 
-        def _get_repr(arg: object) -> str:
+        def _get_repr(arg: Any) -> str:
             if isinstance(arg, Node):  # first because common
                 return repr(arg)
             elif isinstance(arg, tuple) and hasattr(arg, "_fields"):
@@ -623,19 +570,6 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
-            elif isinstance(arg, complex):
-                if (
-                    arg.real == 0.0
-                    or arg.imag == 0.0
-                    or not math.isfinite(arg.real)
-                    or not math.isfinite(arg.imag)
-                ):
-                    # complex.__repr__ is not a safe source representation for
-                    # signed zero components, e.g. eval("(-0-1j)") loses the sign.
-                    # It's also unsafe for nan/inf imaginary parts: repr produces
-                    # "nanj"/"infj" which Python parses as a single identifier.
-                    return f"complex({_get_repr(arg.real)}, {_get_repr(arg.imag)})"
-                return blue(repr(arg))
             elif isinstance(arg, torch.Tensor):
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
@@ -649,7 +583,7 @@ class CodeGen:
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
-            elif is_opaque_constant_type(type(arg)):
+            elif is_opaque_value_type(type(arg)):
                 obj_repr, opaque_types = get_opaque_obj_repr(arg)
                 for n, t in opaque_types.items():
                     add_global(n, t)
@@ -671,7 +605,7 @@ class CodeGen:
         node_to_last_use: dict[Node, Node] = {}
         user_to_last_uses: dict[Node, list[Node]] = {}
 
-        def register_last_uses(n: Node, user: Node) -> None:
+        def register_last_uses(n: Node, user: Node):
             if n not in node_to_last_use:
                 node_to_last_use[n] = user
                 user_to_last_uses.setdefault(user, []).append(n)
@@ -680,7 +614,7 @@ class CodeGen:
             for input_node in node._input_nodes:
                 register_last_uses(input_node, node)
 
-        def delete_unused_values(user: Node) -> None:
+        def delete_unused_values(user: Node):
             """
             Delete values after their last use. This ensures that values that are
             not used in the remainder of the code are freed and the memory usage
@@ -709,7 +643,7 @@ class CodeGen:
 
         prev_summary_str = None
 
-        def append_stacktrace_summary(node: Node) -> None:
+        def append_stacktrace_summary(node: Node):
             """
             Append a summary of the stacktrace to the generated code. This is
             useful for debugging.
@@ -719,7 +653,7 @@ class CodeGen:
             if node.op not in {"placeholder", "output"}:
                 additional_meta_str = ""
                 if additional_meta:
-                    parts: list[str] = []
+                    parts = []
                     for key in additional_meta:
                         if key in node.meta:
                             parts.append(f"{key}: {node.meta[key]}")
@@ -742,10 +676,6 @@ class CodeGen:
                 if stack_trace := node.stack_trace:
                     if parsed_stack_trace := _parse_stack_trace(stack_trace):
                         stack_trace_str = parsed_stack_trace.get_summary_str()
-                        if node.meta.get("autograd_backward", False):
-                            stack_trace_str = (
-                                f"Backward of forward node: {stack_trace_str}"
-                            )
 
                 maybe_recompute_info = ""
                 if hasattr(node, "meta") and node.meta:
@@ -770,10 +700,10 @@ class CodeGen:
                     prev_summary_str = summary_str
                     body.append(summary_str)
 
-        def stringify_shape(shape: Iterable[object]) -> str:
+        def stringify_shape(shape: Iterable) -> str:
             return f"[{', '.join([str(x) for x in shape])}]"
 
-        def emit_node(node: Node) -> None:
+        def emit_node(node: Node):
             maybe_type_annotation = (
                 "" if node.type is None else f" : {type_repr(node.type)}"
             )
@@ -800,7 +730,7 @@ class CodeGen:
 
                 def _tensor_annotation(t: torch.Tensor) -> str:
                     stride = stringify_shape(t.stride()) if include_stride else ""
-                    device = _device_annotation(t.device) if include_device else ""
+                    device = f"{t.device}" if include_device else ""
                     return (
                         f"{red(dtype_abbrs[t.dtype])}"
                         f"{blue(stringify_shape(t.shape))}"
@@ -934,68 +864,9 @@ class CodeGen:
                         f"{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.args[1])}"
                     )
                     return
-                meta = node.meta
-                boxed_arg_indices = getattr(node.target, "_boxed_arg_indices", ())
-                boxed_arg_indices = meta.get("boxed_arg_indices", boxed_arg_indices)
-                boxed_arg_names: dict[int, str] = {}
-                for i in boxed_arg_indices:
-                    name = f"{node.name}_boxed_arg_{i}"
-                    boxed_arg_names[i] = namespace.create_name(name, None)
-
-                if boxed_arg_names:
-                    # Generate the boxed arguments on separate lines so the
-                    # original node locals can be cleared before the call.
-                    boxed_assignments = []
-                    for i, name in boxed_arg_names.items():
-                        boxed_assignments.append(f"{name} = {_get_repr(node.args[i])}")
-                    body.append("\n".join(boxed_assignments))
-
-                    # If this call is the last use of nodes inside the boxed
-                    # args, clear those node locals after creating the boxed
-                    # args and before emitting the call.
-                    boxed_nodes: set[Node] = set()
-                    unboxed_nodes: set[Node] = set()
-                    boxed_args = tuple(node.args[i] for i in boxed_arg_names)
-                    unboxed_args = []
-                    for i, arg in enumerate(node.args):
-                        if i not in boxed_arg_names:
-                            unboxed_args.append(arg)
-                    map_arg(boxed_args, boxed_nodes.add)
-                    map_arg((unboxed_args, node.kwargs), unboxed_nodes.add)
-
-                    last_uses = user_to_last_uses.get(node, [])
-                    only_in_boxes = boxed_nodes - unboxed_nodes
-                    nodes_to_delete = [n for n in last_uses if n in only_in_boxes]
-                    if nodes_to_delete:
-                        last_uses = [n for n in last_uses if n not in nodes_to_delete]
-                        user_to_last_uses[node] = last_uses
-                        to_delete_str = " = ".join(
-                            [repr(n) for n in nodes_to_delete] + ["None"]
-                        )
-                        body.append(f";  {dim(to_delete_str)}")
-                    body.append("\n")
-
-                    # Rewrite the generated call to use the boxed arg locals
-                    # instead of rebuilding the boxed args inline.
-                    kwargs = node.kwargs.items()
-                    call_args = [_get_repr(arg) for arg in node.args]
-                    for i, name in boxed_arg_names.items():
-                        call_args[i] = name
-                    call_args.extend(f"{k} = {_get_repr(v)}" for k, v in kwargs)
-                    formatted_args_str = ", ".join(call_args)
-                else:
-                    formatted_args_str = _format_args(node.args, node.kwargs)
-
-                lhs = f"{repr(node)}{maybe_type_annotation}"
-                rhs = f"{global_name}({formatted_args_str})"
-                body.append(f"{lhs} = {rhs}")
-
-                if boxed_arg_names:
-                    # Clear the generated boxed arg locals after the call. The
-                    # call is their only generated use, and these locals are not
-                    # FX nodes tracked by normal last-use cleanup.
-                    boxed_names_str = " = ".join([*boxed_arg_names.values(), "None"])
-                    body.append(f";  {dim(boxed_names_str)}")
+                body.append(
+                    f"{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})"
+                )
                 if node.meta.get("is_wrapped", False):
                     wrapped_fns.setdefault(global_name)
                 return
@@ -1026,7 +897,6 @@ class CodeGen:
                         self.generate_output,
                         node.args[0],
                         descs=desc if expanded_def else None,
-                        repr_fn=_get_repr,
                     )
                 )
                 return
@@ -1088,7 +958,7 @@ class CodeGen:
         )
 
         # remove counter and generate lineno to node index mapping
-        lineno_map: dict[int, int | None] = {}
+        lineno_map: dict[int, Optional[int]] = {}
         prologue_len = prologue.count("\n") + 1
         new_lines: list[str] = []
         cur_idx = None
@@ -1134,12 +1004,8 @@ class _BoxedCodeGen(CodeGen):
     """
 
     def gen_fn_def(
-        self,
-        free_vars: list[str],
-        maybe_return_annotation: str,
-        *,
-        expanded_def: bool = False,
-    ) -> str:
+        self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
+    ):
         """
         Generate function definition for boxed calling convention.
 
@@ -1167,7 +1033,7 @@ class _BoxedCodeGen(CodeGen):
 
 
 class _PyTreeCodeGen(CodeGen):
-    def __init__(self, pytree_info: _PyTreeInfo) -> None:
+    def __init__(self, pytree_info: _PyTreeInfo):
         super().__init__()
         self.pytree_info: _PyTreeInfo = pytree_info
 
@@ -1196,12 +1062,9 @@ class _PyTreeCodeGen(CodeGen):
         if expanded_def:
             return "\n    " + "\n    ".join(has_annotation)
         else:
-            # Use join() to avoid trailing whitespace (breaks expecttest snapshots).
-            return "\n    " + "; ".join(has_annotation) + ";\n"
+            return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
 
-    def gen_var_bindings(
-        self, fn_args: list[str], free_vars: list[str], expanded_def: bool
-    ) -> str:
+    def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
         in_spec = self.pytree_info.in_spec
         # when kwargs is present, in_spec is tuple(args, kwargs)
         has_args_kwargs_tuple = (
@@ -1239,12 +1102,8 @@ class _PyTreeCodeGen(CodeGen):
         return bindings
 
     def gen_fn_def(
-        self,
-        free_vars: list[str],
-        maybe_return_annotation: str,
-        *,
-        expanded_def: bool = False,
-    ) -> str:
+        self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
+    ):
         # Given a user function/model:
         #   myargs = [myargs0, myargs1]
         #   mykwargs = {'mykwargs0': ..., 'mykwargs1': ...}
@@ -1277,41 +1136,32 @@ class _PyTreeCodeGen(CodeGen):
             fn_definition += self.gen_var_bindings(fn_args, free_vars, expanded_def)
         return fn_definition
 
-    def generate_output(
-        self,
-        output_args: Argument,
-        *,
-        descs: Sequence[str] | None = None,
-        repr_fn: Callable[[object], str] | None = None,
-    ) -> str:
-        if repr_fn is None:
-            repr_fn = repr
+    def generate_output(self, output_args, *, descs: Optional[Any] = None):
         if self.pytree_info and self.pytree_info.out_spec:
             if descs is not None and isinstance(output_args, (list, tuple)):
                 return (
                     self._format_multiline_container(
-                        output_args,
-                        descs,
-                        "return pytree.tree_unflatten(",
-                        repr_fn=repr_fn,
+                        output_args, descs, "return pytree.tree_unflatten("
                     )
                     + ", self._out_spec)"
                 )
             else:
-                return f"return pytree.tree_unflatten({repr_fn(output_args)}, self._out_spec)"
+                return (
+                    f"return pytree.tree_unflatten({repr(output_args)}, self._out_spec)"
+                )
         else:
-            return super().generate_output(output_args, descs=descs, repr_fn=repr_fn)
+            return super().generate_output(output_args, descs=descs)
 
 
 class _ExportCodeGen(_PyTreeCodeGen):
     def __init__(
         self,
         pytree_info: _PyTreeInfo,
-        in_shuffle_graph: GraphModule,
-        out_shuffle_graph: GraphModule,
+        in_shuffle_graph: "GraphModule",
+        out_shuffle_graph: "GraphModule",
         tree_leaf_names: list[str],
-        root: torch.nn.Module | None,
-    ) -> None:
+        root: Optional[torch.nn.Module],
+    ):
         super().__init__(pytree_info)
         self.in_shuffle_graph = in_shuffle_graph
         self.out_shuffle_graph = out_shuffle_graph
@@ -1331,13 +1181,11 @@ class _ExportCodeGen(_PyTreeCodeGen):
         ret = super().process_outputs(flat_outs)
         return ret
 
-    def gen_fn_def(self, *args: Any, **kwargs: Any) -> str:
+    def gen_fn_def(self, *args, **kwargs) -> str:
         fn_def = super().gen_fn_def(*args, **kwargs)
         return fn_def
 
-    def gen_var_bindings(
-        self, fn_args: list[str], free_vars: list[str], expanded_def: bool
-    ) -> str:
+    def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
         without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
         fn_signature: str = f"{', '.join(fn_args)}"
         if self.root is not None:
@@ -1346,11 +1194,7 @@ class _ExportCodeGen(_PyTreeCodeGen):
     {", ".join(self.tree_leaf_names)}, = pytree.tree_leaves(({fn_signature},))
     {", ".join(without_annotation)}, = self._in_shuffle_graph({", ".join(self.tree_leaf_names)})"""
 
-    def generate_output(self, output_args: Argument, *args: Any, **kwargs: Any) -> str:
-        if not isinstance(output_args, (list, tuple)):
-            raise TypeError(
-                f"Expected list or tuple for output_args, got {type(output_args)}"
-            )
+    def generate_output(self, output_args, *args, **kwargs) -> str:
         output = f"self._out_shuffle_graph({', '.join(self.tree_leaf_names)}, {', '.join([str(a) for a in output_args])})"
         return f"return pytree.tree_unflatten({output}, self._out_spec)"
 
@@ -1360,15 +1204,15 @@ class _FindNodesLookupTable:
     Side table for the graph for the purpose of doing fast queries
     """
 
-    def __init__(self) -> None:
-        self.table: dict[tuple[str, Target | None], dict[Node, None]] = defaultdict(
+    def __init__(self):
+        self.table: dict[tuple[str, Optional[Target]], dict[Node, None]] = defaultdict(
             dict
         )
 
-    def _key(self, node: Node) -> tuple[str, Target | None]:
+    def _key(self, node) -> tuple[str, Optional[Target]]:
         return (node.op, node.target if node.op == "call_function" else None)
 
-    def __contains__(self, node: Node) -> bool:
+    def __contains__(self, node) -> bool:
         return node in self.table[self._key(node)]
 
     def insert(self, node: Node) -> None:
@@ -1377,8 +1221,7 @@ class _FindNodesLookupTable:
     def remove(self, node: Node) -> None:
         self.table[self._key(node)].pop(node)
 
-    # TODO: should return list[Node], see _node_list.__iter__ comment
-    def find_nodes(self, *, op: str, target: Target | None = None) -> list[Any]:
+    def find_nodes(self, *, op: str, target: Optional["Target"] = None):
         if op == "call_function":
             if target is None:
                 raise AssertionError("target must not be None for call_function op")
@@ -1443,10 +1286,10 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        owning_module: GraphModule | None = None,
-        tracer_cls: type[Tracer] | None = None,
-        tracer_extras: dict[str, Any] | None = None,
-    ) -> None:
+        owning_module: Optional["GraphModule"] = None,
+        tracer_cls: Optional[type["Tracer"]] = None,
+        tracer_extras: Optional[dict[str, Any]] = None,
+    ):
         """
         Construct an empty Graph.
         """
@@ -1463,11 +1306,11 @@ class Graph:
         self._find_nodes_lookup_table = _FindNodesLookupTable()
 
     @property
-    def owning_module(self) -> GraphModule | None:
+    def owning_module(self):
         return self._owning_module
 
     @owning_module.setter
-    def owning_module(self, mod: GraphModule | None) -> None:
+    def owning_module(self, mod: Optional["GraphModule"]):
         self._owning_module = mod
 
     @property
@@ -1493,10 +1336,9 @@ class Graph:
         return output_node
 
     @compatibility(is_backward_compatible=False)
-    # TODO: should return list[Node], see _node_list.__iter__ comment
     def find_nodes(
-        self, *, op: str, target: Target | None = None, sort: bool = True
-    ) -> list[Any]:
+        self, *, op: str, target: Optional["Target"] = None, sort: bool = True
+    ):
         """
         Allows for fast query of nodes
 
@@ -1521,8 +1363,8 @@ class Graph:
 
     @compatibility(is_backward_compatible=True)
     def graph_copy(
-        self, g: Graph, val_map: dict[Node, Node], return_output_node: bool = False
-    ) -> Argument | None:
+        self, g: "Graph", val_map: dict[Node, Node], return_output_node=False
+    ) -> "Optional[Argument]":
         """
         Copy all nodes from a given graph into ``self``.
 
@@ -1548,7 +1390,7 @@ class Graph:
             val_map[node] = self.node_copy(node, lambda n: val_map[n])
         return None
 
-    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Graph:
+    def __deepcopy__(self, memo=None) -> "Graph":
         """
         Explicitly implement __deepcopy__ to prevent excessive recursion depth
         from the default implementation. This uses graph_copy to copy the nodes
@@ -1558,11 +1400,7 @@ class Graph:
         """
         memo = memo if memo else {}
         g = Graph(tracer_cls=self._tracer_cls)
-        output_vals = g.graph_copy(
-            self,
-            val_map=memo,  # pyrefly: ignore[bad-argument-type]
-            return_output_node=True,
-        )
+        output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         g._codegen = copy.deepcopy(self._codegen)
         if output_vals is not None:
             if not isinstance(output_vals, tuple):
@@ -1583,11 +1421,11 @@ class Graph:
     def create_node(
         self,
         op: str,
-        target: Target,
-        args: tuple[Argument, ...] | None = None,
-        kwargs: dict[str, Argument] | None = None,
-        name: str | None = None,
-        type_expr: Any | None = None,
+        target: "Target",
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
+        name: Optional[str] = None,
+        type_expr: Optional[Any] = None,
     ) -> Node:
         """
         Create a ``Node`` and add it to the ``Graph`` at the current insert-point.
@@ -1626,20 +1464,6 @@ class Graph:
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
 
-        # TODO: Generalize this invariant to all FX node args once the broader
-        # FX argument contract no longer permits raw symbolic leaves.
-        if op in ("call_function", "call_method", "call_module") and (args or kwargs):
-            for val in pytree.tree_iter((args, kwargs)):
-                if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                    warnings.warn(
-                        f"Raw {type(val).__name__} value ({val}) passed as argument to "
-                        f"Graph.create_node(op='{op}', target={target}). "
-                        f"Use create_*_node() helpers for tensor metadata queries "
-                        f"or materialize_symints() for general symbolic expressions.",
-                        stacklevel=2,
-                    )
-                    break
-
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)
@@ -1659,14 +1483,14 @@ class Graph:
         return n
 
     @compatibility(is_backward_compatible=False)
-    def process_inputs(self, *args: Any) -> Any:
+    def process_inputs(self, *args):
         """
         Processes args so that they can be passed to the FX graph.
         """
         return self._codegen.process_inputs(*args)
 
     @compatibility(is_backward_compatible=False)
-    def process_outputs(self, out: Any) -> Any:
+    def process_outputs(self, out):
         return self._codegen.process_outputs(out)
 
     @compatibility(is_backward_compatible=True)
@@ -1711,9 +1535,9 @@ class Graph:
         )
 
     @compatibility(is_backward_compatible=True)
-    def inserting_before(self, n: Node | None = None) -> _InsertPoint:
+    def inserting_before(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
-        When used within a 'with' statement, this will temporarily set the insert point and
+        When used within a 'with' statement, this will temporary set the insert point and
         then restore it when the with statement exits::
 
             with g.inserting_before(n):
@@ -1736,9 +1560,9 @@ class Graph:
         return _InsertPoint(self, n.prepend)
 
     @compatibility(is_backward_compatible=True)
-    def inserting_after(self, n: Node | None = None) -> _InsertPoint:
+    def inserting_after(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
-        When used within a 'with' statement, this will temporarily set the insert point and
+        When used within a 'with' statement, this will temporary set the insert point and
         then restore it when the with statement exits::
 
             with g.inserting_after(n):
@@ -1764,7 +1588,7 @@ class Graph:
     def placeholder(
         self,
         name: str,
-        type_expr: Any | None = None,
+        type_expr: Optional[Any] = None,
         default_value: Any = inspect.Signature.empty,
     ) -> Node:
         """
@@ -1794,7 +1618,7 @@ class Graph:
         return self.create_node("placeholder", name, args=args, type_expr=type_expr)
 
     @compatibility(is_backward_compatible=True)
-    def get_attr(self, qualified_name: str, type_expr: Any | None = None) -> Node:
+    def get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``get_attr`` node into the Graph. A ``get_attr`` ``Node`` represents the
         fetch of an attribute from the ``Module`` hierarchy.
@@ -1844,7 +1668,7 @@ class Graph:
 
             return True
 
-        if self.owning_module is not None and not _get_attr_reference_exists(
+        if self.owning_module and not _get_attr_reference_exists(
             self.owning_module, qualified_name
         ):
             warnings.warn(
@@ -1865,9 +1689,9 @@ class Graph:
     def call_module(
         self,
         module_name: str,
-        args: tuple[Argument, ...] | None = None,
-        kwargs: dict[str, Argument] | None = None,
-        type_expr: Any | None = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
+        type_expr: Optional[Any] = None,
     ) -> Node:
         """
         Insert a ``call_module`` ``Node`` into the ``Graph``. A ``call_module`` node
@@ -1899,10 +1723,7 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
-        if (
-            self.owning_module is not None
-            and self.owning_module.get_submodule(module_name) is None
-        ):
+        if self.owning_module and self.owning_module.get_submodule(module_name) is None:
             warnings.warn(
                 "Attempted to insert a call_module Node with "
                 "no underlying reference in the owning "
@@ -1918,9 +1739,9 @@ class Graph:
     def call_method(
         self,
         method_name: str,
-        args: tuple[Argument, ...] | None = None,
-        kwargs: dict[str, Argument] | None = None,
-        type_expr: Any | None = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
+        type_expr: Optional[Any] = None,
     ) -> Node:
         """
         Insert a ``call_method`` ``Node`` into the ``Graph``. A ``call_method`` node
@@ -1957,10 +1778,10 @@ class Graph:
     def call_function(
         self,
         the_function: Callable[..., Any],
-        args: tuple[Argument, ...] | None = None,
-        kwargs: dict[str, Argument] | None = None,
-        type_expr: Any | None = None,
-        name: str | None = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
+        type_expr: Optional[Any] = None,
+        name: Optional[str] = None,
     ) -> Node:
         """
         Insert a ``call_function`` ``Node`` into the ``Graph``. A ``call_function`` node
@@ -1995,394 +1816,9 @@ class Graph:
             "call_function", the_function, args, kwargs, name=name, type_expr=type_expr
         )
 
-    @staticmethod
-    def _get_tensor_meta_val(tensor_node: Node) -> tuple[Any, str]:
-        """Read the example tensor stored on ``tensor_node`` under either
-        ``meta['val']`` (export / proxy_tensor convention) or
-        ``meta['example_value']`` (dynamo convention).
-
-        Returns ``(value, key)`` where ``key`` is the meta key the value was
-        found under (defaulting to ``"val"`` if no meta is present). Callers
-        that emit a new node should mirror ``key`` so the new node matches
-        the surrounding graph's convention.
-        """
-        if "val" in tensor_node.meta:
-            return tensor_node.meta["val"], "val"
-        if "example_value" in tensor_node.meta:
-            return tensor_node.meta["example_value"], "example_value"
-        return None, "val"
-
-    @compatibility(is_backward_compatible=False)
-    def create_size_node(self, tensor_node: Node, dim: int) -> Node:
-        """Create an FX node for ``tensor_node.size(dim)``."""
-        val, key = self._get_tensor_meta_val(tensor_node)
-        node = self.call_function(torch.ops.aten.sym_size.int, (tensor_node, dim))
-        if val is not None:
-            node.meta[key] = val.size(dim)
-        return node
-
-    @compatibility(is_backward_compatible=False)
-    def create_stride_node(self, tensor_node: Node, dim: int) -> Node:
-        """Create an FX node for ``tensor_node.stride(dim)``."""
-        val, key = self._get_tensor_meta_val(tensor_node)
-        node = self.call_function(torch.ops.aten.sym_stride.int, (tensor_node, dim))
-        if val is not None:
-            node.meta[key] = val.stride(dim)
-        return node
-
-    @compatibility(is_backward_compatible=False)
-    def create_storage_offset_node(self, tensor_node: Node) -> Node:
-        """Create an FX node for ``tensor_node.storage_offset()``."""
-        val, key = self._get_tensor_meta_val(tensor_node)
-        node = self.call_function(
-            torch.ops.aten.sym_storage_offset.default, (tensor_node,)
-        )
-        if val is not None:
-            node.meta[key] = val.storage_offset()
-        return node
-
-    @compatibility(is_backward_compatible=False)
-    def _resolve_unbacked_binding(
-        self,
-        producer: Node,
-        keypath: tuple[object, ...],
-        lower_symint: Callable[[torch.SymInt], Node | int],
-    ) -> Node:
-        """Walk an ``unbacked_bindings`` keypath, emitting FX ops on this
-        graph to recover the bound SymInt from ``producer``'s result.
-
-        ``lower_symint`` is invoked for the only keypath component that may
-        carry a non-literal value: ``DivideByKey`` with a SymInt divisor.
-        Callers must provide one (e.g. a wrapper around their sympy interp
-        cache).
-        """
-        import operator
-
-        from torch.fx.experimental.symbolic_shapes import (
-            CallMethodKey,
-            ConvertIntKey,
-            DivideByKey,
-            InnerTensorKey,
-        )
-
-        node = producer
-        i = 0
-        while i < len(keypath):
-            k = keypath[i]
-            nxt = keypath[i + 1] if i + 1 < len(keypath) else None
-            if isinstance(k, CallMethodKey) and isinstance(nxt, pytree.SequenceKey):
-                idx = nxt.idx
-                if k.name == "size":
-                    node = self.create_size_node(node, idx)
-                elif k.name == "stride":
-                    node = self.create_stride_node(node, idx)
-                else:
-                    node = self.call_method(k.name, (node, idx))
-                i += 2
-            elif isinstance(k, CallMethodKey):
-                if k.name == "storage_offset":
-                    node = self.create_storage_offset_node(node)
-                else:
-                    node = self.call_method(k.name, (node,))
-                i += 1
-            elif isinstance(k, pytree.SequenceKey):
-                node = self.call_function(operator.getitem, (node, k.idx))
-                i += 1
-            elif isinstance(k, ConvertIntKey):
-                node = self.call_function(torch.sym_ite, (node, 1, 0))
-                i += 1
-            elif isinstance(k, DivideByKey):
-                divisor = k.divisor
-                if isinstance(divisor, torch.SymInt):
-                    divisor = lower_symint(divisor)
-                node = self.call_function(operator.floordiv, (node, divisor))
-                i += 1
-            elif isinstance(k, InnerTensorKey):
-                node = self.call_function(getattr, (node, k.inner_name))
-                i += 1
-            else:
-                raise AssertionError(f"unrecognized keypath component {k}")
-        return node
-
-    @compatibility(is_backward_compatible=False)
-    def materialize_symints(
-        self, values: Sequence[torch.SymInt | int]
-    ) -> list[Node | int]:
-        """Materialize a list of ``SymInt``/``int`` values as FX subgraphs rooted
-        at existing nodes in this graph whose meta produces the referenced
-        symbols (typically SymInt placeholders or other sym ops).
-
-        consider a graph with a tensor placeholder
-        ``%x`` of shape ``(s32, s32)`` and we want to record this stride
-        as an FX value to pass to a later op, two ways to do it.
-
-        * ``g.create_stride_node(%x, 0)`` emits ``%t = aten.sym_stride.int(%x, 0)``.
-          The semantics of this op are "ask ``%x`` for its current stride at
-          dim 0". If a later pass (e.g. mkldnn channels-last conversion) mutates
-          ``%x``'s layout, re-running ``FakeTensorProp`` will overwrite
-          ``%t.meta["val"]`` with the NEW stride. This is the right behavior
-          when you want a *live* query on the producer.
-
-        * ``g.materialize_symints([%x.meta["val"].stride(0)])`` walks the sympy
-          expression ``s32`` and emits an FX subgraph that recomputes it from
-          the existing producer of ``s32`` (here the placeholder ``%x`` itself
-          via ``aten.sym_size.int(%x, 0)``, or a SymInt placeholder if one
-          exists). The resulting node's value is "what ``s32`` is at runtime"
-          -- which is determined by the input's shape and is INDEPENDENT of any
-          layout change to ``%x``. This is the right behavior when you want to
-          *freeze* the trace-time stride into the graph.
-
-        Note: like other ``Graph`` node-creation APIs (``call_function``,
-        ``create_size_node``, etc.), nodes are emitted at the graph's current
-        insertion point. The default insertion point (``Graph._root.prepend``)
-        appends new nodes to the end of the graph, which on a graph that
-        already has an ``output`` node means they land *after* ``return``
-        (orphaned). Callers typically scope this in
-        ``with graph.inserting_before(graph.output_node()):`` so the new
-        nodes land in the body.
-
-        Performance: each call performs an O(graph_size) producer-discovery
-        scan and builds a per-call ``expr_to_proxy`` hash-cons cache. Prefer
-        batching every SymInt you need to lift into a single call (or as few
-        calls as possible) over calling it once per value -- this amortises
-        the graph scan and lets symints with shared sub-expressions get
-        hash-consed into a single subgraph.
-        """
-        # Local imports keep sympy off the ``import torch`` path; the helper
-        # is only invoked from passes that already depend on symbolic shapes.
-        import operator
-
-        import sympy
-
-        from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
-        from torch.utils._sympy.reference import PythonReferenceAnalysis
-
-        # TODO: consider caching `expr_to_proxy` / `sym_size_sources` across
-        # calls.
-        # Read tensor/SymInt metadata with fallback. Edge graphs can have
-        # a mixed convention: lifted parameters carry both ``"val"`` and
-        # ``"example_value"`` (dynamo-style) while real user inputs carry
-        # only ``"val"`` (export-style). Probing the graph for a single
-        # key would lock onto one convention and silently miss symbols on
-        # the others; reading per-node with fallback handles both.
-        def _node_val(n: Node) -> Any:
-            val = n.meta.get("val")
-            if val is not None:
-                return val
-            return n.meta.get("example_value")
-
-        def _set_node_val(n: Node, val: Any) -> None:
-            """Set ``n.meta['val']`` and, if any of ``n``'s input nodes carry
-            ``"example_value"``, mirror it there too so the new node matches
-            the surrounding graph's meta-key convention."""
-            n.meta["val"] = val
-            if any(isinstance(a, Node) and "example_value" in a.meta for a in n.args):
-                n.meta["example_value"] = val
-
-        # Build the symbol -> Proxy map once; shared across all inputs so common
-        # sub-expressions across symints get hash-consed into single subgraphs.
-        tracer = torch.fx.proxy.GraphAppendingTracer(self)
-        expr_to_proxy: dict[sympy.Expr, torch.fx.Proxy] = {}
-
-        # Pass 1: walk the graph to discover producers. All backed symbols
-        # must be found here -- their only safe producer is an input.
-        # Populates:
-        #   - ``expr_to_proxy``: SymInt placeholders -> Proxy (direct).
-        #   - ``sym_size_sources``: tensor placeholder shape symbol
-        #     -> (placeholder, dim, divisor) (lazy, used by Pass 2).
-        #     divisor=1 when the placeholder dim IS the bare ``Symbol``;
-        #     divisor>1 when the dim is ``Symbol * c`` (the ``Dim("h")*N``
-        #     derived-shape pattern). Recovery emits
-        #     ``sym_size.int(ph, dim) // divisor``.
-        #   - ``sym_to_binding``: unbacked symbol -> (producer node, keypath)
-        #     from ``node.meta["unbacked_bindings"]`` (lazy, used by Pass 2).
-        sym_size_sources: dict[sympy.Symbol, tuple[Node, int, int]] = {}
-        sym_to_binding: dict[sympy.Symbol, tuple[Node, tuple[object, ...]]] = {}
-
-        def _record_shape_source(expr: sympy.Expr, node: Node, dim: int) -> None:
-            """Register ``(node, dim)`` as a recoverable source for ``expr``.
-
-            - bare ``Symbol``: divisor = 1.
-            - ``Symbol * c`` (positive integer constant): divisor = c.
-              Recovery is ``sym_size.int(ph, dim) // c``.
-            - anything else: skipped (general inverse needs sympy.solve).
-            """
-            if isinstance(expr, sympy.Symbol):
-                sym_size_sources.setdefault(expr, (node, dim, 1))
-                return
-            if isinstance(expr, sympy.Mul) and len(expr.args) == 2:
-                a, b = expr.args
-                if isinstance(b, sympy.Symbol) and isinstance(a, sympy.Integer):
-                    a, b = b, a  # normalize to (Symbol, Integer) order
-                if (
-                    isinstance(a, sympy.Symbol)
-                    and isinstance(b, sympy.Integer)
-                    and int(b) > 0
-                ):
-                    sym_size_sources.setdefault(a, (node, dim, int(b)))
-
-        for node in self.nodes:
-            if node.op == "placeholder":
-                val = _node_val(node)
-                if isinstance(val, py_sym_types):
-                    expr = val.node.expr
-                    if isinstance(expr, sympy.Symbol) and expr not in expr_to_proxy:
-                        expr_to_proxy[expr] = torch.fx.Proxy(node, tracer=tracer)
-                elif isinstance(val, torch.Tensor):
-                    for dim, s in enumerate(val.shape):
-                        if isinstance(s, torch.SymInt):
-                            _record_shape_source(s.node.expr, node, dim)
-            else:
-                bindings = node.meta.get("unbacked_bindings")
-                if bindings:
-                    for sym, keypath in bindings.items():
-                        sym_to_binding.setdefault(sym, (node, tuple(keypath)))
-
-        from sympy.logic.boolalg import BooleanAtom
-
-        from torch.fx.experimental.symbolic_shapes import (
-            DivideByKey,
-            free_unbacked_symbols,
-        )
-
-        def _arg_meta_val(a: Any) -> Any:
-            if isinstance(a, torch.fx.Node):
-                return _node_val(a)
-            return a
-
-        def _sympy_interp_cached(expr: sympy.Expr) -> Any:
-            # Common expressions cached in expr_to_proxy
-            if expr in expr_to_proxy:
-                return expr_to_proxy[expr]
-            if isinstance(
-                expr, (sympy.Integer, sympy.Number, sympy.Symbol, BooleanAtom)
-            ):
-                # handle leaf terms.
-                return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
-            # handle composite expressions.
-            result = _run_sympy_handler(
-                PythonReferenceAnalysis,
-                [_sympy_interp_cached(arg) for arg in expr.args],
-                expr,
-            )
-            if not isinstance(result, torch.fx.Proxy):
-                return result
-            expr_to_proxy[expr] = result
-            node = result.node
-            target = node.target
-            if not callable(target):
-                return result
-            try:
-                fake_args = tuple(_arg_meta_val(a) for a in node.args)
-                fake_kwargs = {k: _arg_meta_val(v) for k, v in node.kwargs.items()}
-                _set_node_val(node, target(*fake_args, **fake_kwargs))
-            except (TypeError, ValueError, AttributeError) as e:
-                log.debug(
-                    "materialize_symints: skipping meta annotation for %s: %s",
-                    expr,
-                    e,
-                )
-            return result
-
-        def _lower_symint_divisor(d: torch.SymInt) -> Node | int:
-            r = _sympy_interp_cached(d.node.expr)
-            return r.node if isinstance(r, torch.fx.Proxy) else r
-
-        # Pass 2 (lazy, recursive): materialize a producer for each needed
-        # symbol. Three cases:
-        #   - already in expr_to_proxy: nothing to do.
-        #   - in sym_size_sources: emit sym_size.int for shape symbols
-        #     recoverable from a tensor placeholder shape.
-        #   - in sym_to_binding: fallback for missing unbacked symbols. Use
-        #     the node.meta["unbacked_bindings"] map -- the authoritative
-        #     source for "this node produces these unbacked symbols". The
-        #     keypath tells us how to recover the SymInt from the node's
-        #     result (e.g. .size(i), .stride(i), storage_offset()).
-        def _ensure_produced(sym: sympy.Symbol) -> None:
-            if sym in expr_to_proxy:
-                return
-            if sym in sym_size_sources:
-                ph, dim, divisor = sym_size_sources[sym]
-                sym_node = self.call_function(torch.ops.aten.sym_size.int, (ph, dim))
-                tensor = _node_val(ph)
-                if isinstance(tensor, torch.Tensor):
-                    _set_node_val(sym_node, tensor.shape[dim])
-                if divisor != 1:
-                    # Placeholder dim was ``sym * divisor`` (e.g. from
-                    # ``Dim("h") * N``); recover the underlying symbol as
-                    # ``sym_size.int(ph, dim) // divisor``.
-                    div_node = self.call_function(
-                        operator.floordiv, (sym_node, divisor)
-                    )
-                    if isinstance(tensor, torch.Tensor):
-                        _set_node_val(div_node, tensor.shape[dim] // divisor)
-                    expr_to_proxy[sym] = torch.fx.Proxy(div_node, tracer=tracer)
-                else:
-                    expr_to_proxy[sym] = torch.fx.Proxy(sym_node, tracer=tracer)
-                return
-            if sym in sym_to_binding:
-                if not free_unbacked_symbols(sym):
-                    raise AssertionError(
-                        f"materialize_symints: backed symbol {sym} has no "
-                        f"input producer (backed symbols cannot be recovered "
-                        f"from non-placeholder nodes)"
-                    )
-                producer_node, keypath = sym_to_binding[sym]
-                for k in keypath:
-                    if isinstance(k, DivideByKey) and isinstance(
-                        k.divisor, torch.SymInt
-                    ):
-                        for s2 in k.divisor.node.expr.free_symbols:
-                            _ensure_produced(s2)
-                producer = self._resolve_unbacked_binding(
-                    producer_node, keypath, lower_symint=_lower_symint_divisor
-                )
-                expr_to_proxy[sym] = torch.fx.Proxy(producer, tracer=tracer)
-                return
-            raise AssertionError(f"materialize_symints: no producer for {sym}")
-
-        out: list[Node | int] = []
-        for s in values:
-            if isinstance(s, torch.SymInt):
-                pass
-            elif isinstance(s, int):  # also covers bool (subclass of int)
-                out.append(s)
-                continue
-            else:
-                raise TypeError(
-                    f"materialize_symints: expected SymInt or int, got "
-                    f"{type(s).__name__} ({s!r})"
-                )
-            target_expr = s.node.expr
-            if target_expr.is_number:
-                out.append(int(s))
-                continue
-            for sym in target_expr.free_symbols:
-                _ensure_produced(sym)
-            result = _sympy_interp_cached(target_expr)
-            if not isinstance(result, torch.fx.Proxy):
-                # ``target_expr`` was non-constant per sympy but our interpreter
-                # still folded it to a Python int/bool. Unwrap to that constant.
-                if not isinstance(result, (int, bool)):
-                    raise AssertionError(
-                        f"materialize_symints: non-Proxy result {result!r} for "
-                        f"non-constant target {target_expr!r}"
-                    )
-                out.append(int(result))
-                continue
-            out_node = result.node
-            _set_node_val(out_node, s)
-            out.append(out_node)
-        return out
-
-    @compatibility(is_backward_compatible=False)
-    def materialize_symint(self, value: torch.SymInt | int) -> Node | int:
-        """Single-value convenience wrapper around :meth:`materialize_symints`."""
-        return self.materialize_symints([value])[0]
-
     @compatibility(is_backward_compatible=True)
     def node_copy(
-        self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x
+        self, node: Node, arg_transform: Callable[[Node], "Argument"] = lambda x: x
     ) -> Node:
         """
         Copy a node from one graph into another. ``arg_transform`` needs to transform arguments from
@@ -2418,10 +1854,7 @@ class Graph:
         return result_node
 
     @compatibility(is_backward_compatible=True)
-    # TODO: should return Node, see _node_list.__iter__ comment
-    def output(  # pyrefly: ignore[unannotated-return]
-        self, result: Argument, type_expr: Any | None = None
-    ):
+    def output(self, result: "Argument", type_expr: Optional[Any] = None):
         """
         Insert an ``output`` ``Node`` into the ``Graph``. An ``output`` node represents
         a ``return`` statement in Python code. ``result`` is the value that should
@@ -2443,7 +1876,7 @@ class Graph:
             op="output", target="output", args=(result,), type_expr=type_expr
         )
 
-    def _target_to_str(self, target: Target | None) -> str:
+    def _target_to_str(self, target: Optional[Target]) -> str:
         if callable(target):
             op = target.__name__
         else:
@@ -2466,7 +1899,7 @@ class Graph:
         colored: bool = False,
         expanded_def: bool = False,
         record_func: bool = False,
-        additional_meta: list[str] | None = None,
+        additional_meta: Optional[list[str]] = None,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -2492,7 +1925,7 @@ class Graph:
         # When generating Python code, we need to make sure to name things
         # appropriately. In particular:
         # - All names should be unique, to avoid weird shadowing bugs.
-        # - These names need to be consistent, e.g. an object should always be
+        # - These names need to be consistent, e.g. a object should always be
         #   referenced by the same name.
         #
         # To do this, we create a new namespace just for this source. All names
@@ -2509,11 +1942,11 @@ class Graph:
         # makes sense to reuse it. This way, it's easy to print something like
         # Tuple[Node, Node] by simply calling repr() on it. Node's __repr__ is
         # implemented cooperatively to allow this.
-        def node_repr(n: Node) -> str:
+        def node_repr(n: Node):
             return namespace.create_name(n.name, n)
 
         @contextmanager
-        def override_node_repr(graph: Graph) -> Generator[None, None, None]:
+        def override_node_repr(graph: Graph):
             orig_repr_fns = {}
             for node in graph.nodes:
                 orig_repr_fns[node] = node._repr_fn
@@ -2549,7 +1982,7 @@ class Graph:
         colored: bool = False,
         expanded_def: bool = False,
         record_func: bool = False,
-        additional_meta: list[str] | None = None,
+        additional_meta: Optional[list[str]] = None,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes,
@@ -2583,14 +2016,14 @@ class Graph:
         return s
 
     @compatibility(is_backward_compatible=True)
-    def print_tabular(self) -> None:
+    def print_tabular(self):
         """
         Prints the intermediate representation of the graph in tabular
         format. Note that this API requires the ``tabulate`` module to be
         installed.
         """
         try:
-            from tabulate import tabulate  # pyrefly: ignore[missing-import]
+            from tabulate import tabulate
         except ImportError:
             print(
                 "`print_tabular` relies on the library `tabulate`, "
@@ -2605,7 +2038,7 @@ class Graph:
         )
 
     @compatibility(is_backward_compatible=True)
-    def lint(self) -> None:
+    def lint(self):
         """
         Runs various checks on this Graph to make sure it is well-formed. In
         particular:
@@ -2616,7 +2049,7 @@ class Graph:
         """
 
         # Check topo order
-        def check_arg(arg: Node, n: Node | None = None) -> None:
+        def check_arg(arg: Node, n: Optional[Node] = None) -> None:
             context_str = f" of Node '{n}' " if n else " "
             if arg.graph is not self:
                 raise RuntimeError(
@@ -2686,7 +2119,7 @@ class Graph:
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(
-        self, is_impure_node: Callable[[Node], bool] | None = None
+        self, is_impure_node: Optional[Callable[[Node], bool]] = None
     ) -> bool:
         """
         Remove all dead code from the graph, based on each node's number of
@@ -2739,7 +2172,7 @@ class Graph:
         if torch._guards.TracingContext.try_get():
             impure_random = torch._inductor.config.fallback_random
 
-        def has_side_effect(node: Node) -> bool:
+        def has_side_effect(node):
             if is_impure_node is not None:
                 return is_impure_node(node)
             return node.is_impure(impure_random)
@@ -2774,14 +2207,14 @@ class Graph:
         return changed
 
     @compatibility(is_backward_compatible=False)
-    def set_codegen(self, codegen: CodeGen) -> None:
+    def set_codegen(self, codegen: CodeGen):
         self._codegen = codegen
 
     @compatibility(is_backward_compatible=False)
     def on_generate_code(
         self,
-        make_transformer: Callable[[TransformCodeFunc | None], TransformCodeFunc],
-    ) -> contextlib.AbstractContextManager[None]:
+        make_transformer: Callable[[Optional[TransformCodeFunc]], TransformCodeFunc],
+    ):
         """Register a transformer function when python code is generated
 
         Args:
@@ -2854,7 +2287,7 @@ class Graph:
         self._codegen._body_transformer = make_transformer(on_gen_code_old)
 
         @contextlib.contextmanager
-        def on_generate_code_context_manager() -> Generator[None, None, None]:
+        def on_generate_code_context_manager():
             try:
                 yield
             finally:
@@ -2870,8 +2303,8 @@ class Graph:
 
 @contextmanager
 def _override_sym_repr(
-    override: Callable[[torch.types.PySymType], str],
-) -> Generator[None, None, None]:
+    override: Callable[["torch.types.PySymType"], str],
+) -> Iterator[None]:
     tmp = CodeGen._sym_repr
     try:
         CodeGen._sym_repr = override
@@ -2880,12 +2313,12 @@ def _override_sym_repr(
         CodeGen._sym_repr = tmp
 
 
-def _identity(x: str) -> str:
+def _identity(x):
     return x
 
 
-def _make_color_fn(code: str) -> Callable[[str], str]:
-    def f(s: str) -> str:
+def _make_color_fn(code):
+    def f(s):
         reset = "\033[0m"
         return f"{code}{s}{reset}"
 

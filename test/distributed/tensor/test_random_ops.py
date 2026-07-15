@@ -91,43 +91,11 @@ class DistTensorRandomInitTest(DTensorTestBase):
         )
         self._run_init_op(torch.nn.init.normal_, mean=1.5, std=0.8)
         self._run_init_op(torch.nn.init.uniform_, a=0, b=1.2)
-        self._run_init_op(torch.Tensor.log_normal_)
-        self._run_init_op(torch.Tensor.exponential_)
-        self._run_init_op(torch.Tensor.geometric_, p=0.3)
 
         for dtype in (torch.float32, torch.float16):
             self._run_init_op(torch.rand_like, dtype=dtype)
             self._run_init_op(torch.randn_like, dtype=dtype)
             self._run_init_op(torch.randint_like, low=0, high=100, dtype=dtype)
-
-    @with_comms
-    def test_multinomial_sharded(self):
-        """Test multinomial with sharded batch dimension."""
-        device_mesh = self.build_device_mesh()
-        # Create a probability tensor with shape [8, 4] (batch_size=8, categories=4)
-        probs = torch.rand(8, 4, device=self.device_type)
-        probs = probs / probs.sum(dim=-1, keepdim=True)  # normalize to valid probs
-
-        # Shard on batch dim (dim 0) — should work
-        dt_probs = distribute_tensor(probs, device_mesh, [Shard(0)])
-        result = torch.multinomial(dt_probs, num_samples=2, replacement=True)
-        self.assertEqual(result.shape, torch.Size([8, 2]))
-        self.assertIsInstance(result, DTensor)
-        # Output should also be sharded on dim 0
-        self.assertEqual(result.placements, (Shard(0),))
-
-        # Shard on last dim (categories) — not supported, should redistribute
-        # to Replicate before sampling since the strategy excludes this dim.
-        dt_probs_last = distribute_tensor(probs, device_mesh, [Shard(1)])
-        with CommDebugMode() as comm_mode:
-            result_last = torch.multinomial(
-                dt_probs_last, num_samples=2, replacement=True
-            )
-        # Should have triggered a redistribute (all_gather) to unshard the categories dim
-        self.assertGreater(comm_mode.get_total_counts(), 0)
-        self.assertEqual(result_last.shape, torch.Size([8, 2]))
-        # Output should be Replicate since input was redistributed to Replicate
-        self.assertEqual(result_last.placements, (Replicate(),))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -145,9 +113,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
             # run a second time, to make sure that `rng`'s offset-state is advancing on the second usage
             torch.nn.init.uniform_(t1, 0.0, 1.0)
             torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
-            self.assertEqual(
-                t1.full_tensor(), t2.full_tensor(), lambda msg: f"{msg}\nFailed at {i=}"
-            )
+            self.assertEqual(t1.full_tensor(), t2.full_tensor(), f"Failed at {i=}")
 
         # ensure that we do not cache the 'seed' from the first time we see it in DTensor
         # this is a behavior change, DTensor used to cache the generator state and not modify the original generator,
@@ -181,7 +147,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        gathered_local_tensors = funcol.all_gather_single(
+        gathered_local_tensors = funcol.all_gather_tensor(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -213,7 +179,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(not random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_single(
+        local_tensor = funcol.all_gather_tensor(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -246,17 +212,13 @@ class DistTensorRandomInitTest(DTensorTestBase):
             and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
-        if not isinstance(model.weight, DTensor):
-            raise AssertionError(
-                f"Expected model.weight to be DTensor, got {type(model.weight)}"
-            )
+        assert isinstance(model.weight, DTensor)
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        if WORLD is None:
-            raise AssertionError("Expected WORLD to not be None")
+        assert WORLD is not None
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_single(
+        weight_gather = funcol.all_gather_tensor(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -307,17 +269,13 @@ class DistTensorRandomInitTest(DTensorTestBase):
             and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
-        if not isinstance(model.weight, DTensor):
-            raise AssertionError(
-                f"Expected model.weight to be DTensor, got {type(model.weight)}"
-            )
+        assert isinstance(model.weight, DTensor)
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        if WORLD is None:
-            raise AssertionError("Expected WORLD to not be None")
+        assert WORLD is not None
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_single(
+        weight_gather = funcol.all_gather_tensor(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -476,19 +434,20 @@ class DistTensorRandomOpTest(DTensorTestBase):
         )
         torch.nn.init.normal_(spmd_dtensor)
 
-        # verify the weights are initialized differently on all ranks
+        # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        if WORLD is None:
-            raise AssertionError("Expected WORLD to not be None")
-        tensor_gather = funcol.all_gather_single(
+        assert WORLD is not None
+        tensor_gather = funcol.all_gather_tensor(
             spmd_dtensor.to_local(),
             gather_dim=0,
             group=WORLD,
-        ).wait()
+        )
+
+        # verify the weights are initialized differently on all ranks
         for other_rank in range(self.world_size):
             if self.rank != other_rank:
                 self.assertNotEqual(
-                    spmd_dtensor.to_local(),
+                    spmd_dtensor,
                     tensor_gather[2 * other_rank : 2 * (other_rank + 1), :],
                 )
 
@@ -518,7 +477,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor = dropout(dtensor)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_single(
+        local_tensor = funcol.all_gather_tensor(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -548,7 +507,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             torch.distributed.tensor.randn,
         ]:
             dtensor = fn(size, device_mesh=device_mesh, placements=[Shard(1)])
-            local_tensor = funcol.all_gather_single(
+            local_tensor = funcol.all_gather_tensor(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
@@ -570,7 +529,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # we should set manual seed to the same value on all SPMD ranks
             torch.manual_seed(0)
             dtensor = fn(size, device_mesh=device_mesh, placements=[Replicate()])
-            local_tensor = funcol.all_gather_single(
+            local_tensor = funcol.all_gather_tensor(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
@@ -623,8 +582,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         ]
 
         coordinate = device_mesh.get_coordinate()
-        if coordinate is None:
-            raise AssertionError("Expected coordinate to not be None")
+        assert coordinate is not None
 
         for placements, shard_index in zip(placements_list, shard_index_list):
             dtensor = dtensor.redistribute(device_mesh, placements)
@@ -733,222 +691,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
         philox.seed = philox.seed.clone()
 
 
-class DistTensorRandomOpCompileTest(DTensorTestBase):
-    def _run_with_seed(self, fn, create_input, num_runs):
-        """Run fn num_runs times after resetting RNG, returning results and states."""
-        torch.manual_seed(0)
-        results = []
-        rng_states = [torch.cuda.get_rng_state()]
-        for _ in range(num_runs):
-            x = create_input()
-            result = fn(x)
-            results.append(result.to_local().clone())
-            rng_states.append(torch.cuda.get_rng_state())
-        # verify RNG state advances after each call
-        for i in range(len(rng_states) - 1):
-            self.assertFalse(
-                torch.equal(rng_states[i], rng_states[i + 1]),
-                lambda msg: f"{msg}\nRNG state did not change between call {i} and {i + 1}",
-            )
-        return results, rng_states
-
-    def _run_eager_and_compiled(self, fn, create_input, num_runs):
-        """Run fn both eagerly and compiled with aot_eager, returning results
-        and RNG states. Verifies the graph contains run_dtensor_rng_op."""
-        from torch._dynamo.testing import AotEagerAndRecordGraphs
-
-        eager_results, eager_rng_states = self._run_with_seed(
-            fn, create_input, num_runs
-        )
-        backend = AotEagerAndRecordGraphs()
-        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
-        compiled_results, compiled_rng_states = self._run_with_seed(
-            compiled_fn, create_input, num_runs
-        )
-        self.assertIn("run_dtensor_rng_op", backend.fw_graphs[0].code)
-        return eager_results, eager_rng_states, compiled_results, compiled_rng_states
-
-    def _assert_eager_compiled_match(
-        self, eager_results, eager_rng_states, compiled_results, compiled_rng_states
-    ):
-        """Assert per-iteration results and RNG states match between eager and compiled."""
-        for i in range(len(eager_results)):
-            self.assertEqual(eager_results[i], compiled_results[i])
-            self.assertEqual(
-                eager_rng_states[i + 1],
-                compiled_rng_states[i + 1],
-                lambda msg: f"{msg}\nRNG state mismatch between eager and compiled after call {i}",
-            )
-
-    def _assert_replicate_cross_rank_equal(self, results, device_mesh):
-        """Assert all ranks produced identical results (for Replicate placement)."""
-        for i in range(len(results)):
-            local_result = results[i]
-            gathered = funcol.all_gather_single(
-                local_result, gather_dim=0, group=(device_mesh, 0)
-            ).wait()
-            local_size = local_result.shape[0]
-            for other_rank in range(self.world_size):
-                if self.rank != other_rank:
-                    self_slice = slice(
-                        self.rank * local_size, (self.rank + 1) * local_size
-                    )
-                    other_slice = slice(
-                        other_rank * local_size, (other_rank + 1) * local_size
-                    )
-                    self.assertEqual(
-                        gathered[self_slice],
-                        gathered[other_slice],
-                    )
-
-    def _test_compile_random_op(
-        self, fn, device_mesh, create_input=None, num_runs=3, placements=None
-    ):
-        """Run fn eager and compiled num_runs times, assert i-th results match
-        and graph contains run_dtensor_rng_op. Tests both aot_eager and inductor
-        backends."""
-        if placements is None:
-            placements = [Shard(0)]
-
-        if create_input is None:
-
-            def create_input():
-                return torch.distributed.tensor.ones(
-                    (8, 8), device_mesh=device_mesh, placements=placements
-                )
-
-        # Test with aot_eager backend (also verifies graph contents)
-        eager_results, eager_rng_states, compiled_results, compiled_rng_states = (
-            self._run_eager_and_compiled(fn, create_input, num_runs)
-        )
-        self._assert_eager_compiled_match(
-            eager_results, eager_rng_states, compiled_results, compiled_rng_states
-        )
-        if all(isinstance(p, Replicate) for p in placements):
-            self._assert_replicate_cross_rank_equal(compiled_results, device_mesh)
-
-        # Test with inductor backend
-        torch._dynamo.reset()
-        inductor_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        inductor_results, inductor_rng_states = self._run_with_seed(
-            inductor_fn, create_input, num_runs
-        )
-        self._assert_eager_compiled_match(
-            eager_results, eager_rng_states, inductor_results, inductor_rng_states
-        )
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_compile_native_dropout(self):
-        device_mesh = self.build_device_mesh()
-
-        def fn(x):
-            return torch.nn.functional.dropout(x, p=0.5, training=True)
-
-        for placements in ([Shard(0)], [Replicate()]):
-            self._test_compile_random_op(fn, device_mesh, placements=placements)
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_compile_normal_(self):
-        device_mesh = self.build_device_mesh()
-
-        def fn(x):
-            return x.normal_()
-
-        for placements in ([Shard(0)], [Replicate()]):
-            self._test_compile_random_op(fn, device_mesh, placements=placements)
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_compile_rand_like(self):
-        device_mesh = self.build_device_mesh()
-
-        def fn(x):
-            return torch.rand_like(x)
-
-        for placements in ([Shard(0)], [Replicate()]):
-            self._test_compile_random_op(fn, device_mesh, placements=placements)
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_compile_randn_like(self):
-        device_mesh = self.build_device_mesh()
-
-        def fn(x):
-            return torch.randn_like(x)
-
-        for placements in ([Shard(0)], [Replicate()]):
-            self._test_compile_random_op(fn, device_mesh, placements=placements)
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_compile_randint_like(self):
-        device_mesh = self.build_device_mesh()
-
-        def fn(x):
-            return torch.randint_like(x, 0, 10)
-
-        for placements in ([Shard(0)], [Replicate()]):
-            self._test_compile_random_op(fn, device_mesh, placements=placements)
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_compile_uniform_(self):
-        device_mesh = self.build_device_mesh()
-
-        def fn(x):
-            return x.uniform_(0.0, 1.0)
-
-        for placements in ([Shard(0)], [Replicate()]):
-            self._test_compile_random_op(fn, device_mesh, placements=placements)
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_compile_bernoulli(self):
-        device_mesh = self.build_device_mesh()
-
-        def fn(x):
-            return torch.bernoulli(x)
-
-        for placements in ([Shard(0)], [Replicate()]):
-
-            def create_input(placements=placements):
-                return distribute_tensor(
-                    torch.full((8, 8), 0.5, device=self.device_type),
-                    device_mesh,
-                    placements,
-                )
-
-            self._test_compile_random_op(
-                fn, device_mesh, create_input=create_input, placements=placements
-            )
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_compile_bernoulli_float(self):
-        device_mesh = self.build_device_mesh()
-
-        def fn(x):
-            return x.bernoulli_(0.5)
-
-        for placements in ([Shard(0)], [Replicate()]):
-            self._test_compile_random_op(fn, device_mesh, placements=placements)
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_compile_multiple_random_ops(self):
-        device_mesh = self.build_device_mesh()
-
-        def fn(x):
-            x = x.uniform_(0, 1)
-            x = torch.nn.functional.dropout(x, p=0.5)
-            return x
-
-        for placements in ([Shard(0)], [Replicate()]):
-            self._test_compile_random_op(fn, device_mesh, placements=placements)
-
-
 class DistTensorRandomOpsTest3D(DTensorTestBase):
     @property
     def world_size(self):
@@ -988,17 +730,13 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
             and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
-        if not isinstance(model.weight, DTensor):
-            raise AssertionError(
-                f"Expected model.weight to be DTensor, got {type(model.weight)}"
-            )
+        assert isinstance(model.weight, DTensor)
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        if WORLD is None:
-            raise AssertionError("Expected WORLD to not be None")
+        assert WORLD is not None
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_single(
+        weight_gather = funcol.all_gather_tensor(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -1039,10 +777,6 @@ DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
 
 DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomOpTest,
-    skipped_tests=[
-        # cross-pp-stage seeding is not simulated in local tensor mode
-        "test_pipeline_parallel_manual_seed",
-    ],
 )
 
 DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(

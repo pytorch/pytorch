@@ -22,7 +22,7 @@ class BaseDataScheduler:
         schedule_param (str)
             A specific hyperparameter of the passed sparsifier that needs to be scheduled/varied
         last_epoch (int, default=-1)
-            This is specifically passed when training needs to be resumed from a particular
+            This is specifically is passed when training needs to be resumed from a particular
             point.
         verbose (bool, default=False)
             Verbosity of the BaseDataScheduler

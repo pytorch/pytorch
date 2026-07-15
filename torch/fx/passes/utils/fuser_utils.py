@@ -1,5 +1,6 @@
 import copy
-import heapq
+from queue import SimpleQueue
+from typing import Optional as _Optional
 
 import torch.fx
 from torch.fx._compatibility import compatibility
@@ -12,30 +13,27 @@ from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-d
 
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
-    # Stable topological sort: among nodes with no dependency between them,
-    # preserve their relative order in the input list. This uses a min-heap
-    # keyed by original position instead of a FIFO queue.
+    # sort nodes according to the topological order
     indegree_map = dict.fromkeys(nodes, 0)
-    position = {node: i for i, node in enumerate(nodes)}
-    candidates: list[tuple[int, Node]] = []
+    candidates: SimpleQueue[Node] = SimpleQueue()
 
     for node in nodes:
         for n in node.all_input_nodes:
             if n in indegree_map:
                 indegree_map[node] += 1
         if indegree_map[node] == 0:
-            heapq.heappush(candidates, (position[node], node))
+            candidates.put(node)
 
     sorted_nodes: NodeList = []
-    while candidates:
-        _, node = heapq.heappop(candidates)
+    while not candidates.empty():
+        node = candidates.get()
         sorted_nodes.append(node)
 
         for n in node.users:
             if n in indegree_map:
                 indegree_map[n] -= 1
                 if indegree_map[n] == 0:
-                    heapq.heappush(candidates, (position[n], n))
+                    candidates.put(n)
 
     if len(nodes) != len(sorted_nodes):
         raise AssertionError(
@@ -99,7 +97,7 @@ def fuse_as_graphmodule(
     gm: GraphModule,
     nodes: NodeList,
     module_name: str,
-    partition_lookup_table: dict[Node, int | None] | None = None,
+    partition_lookup_table: _Optional[dict[Node, _Optional[int]]] = None,
     *,
     always_return_tuple: bool = False,
 ) -> tuple[GraphModule, tuple[Node, ...], tuple[Node, ...]]:
@@ -155,38 +153,6 @@ def fuse_as_graphmodule(
     ] = {}  # mapping of nodes from old graph to placeholder in new graph
     node_map: dict[Node, Node] = {}  # mapping of nodes from old graph to new graph
 
-    def create_placeholder(input_node: Node) -> None:
-        placeholder_node = subgraph.placeholder(
-            input_node.name, type_expr=input_node.type
-        )
-        # copy all meta fields, even if some fields might be irrelevant for the placeholder node
-        placeholder_node.meta = copy.copy(input_node.meta)
-        node_to_placeholder[input_node] = placeholder_node
-
-    external_inputs: list[Node] = []
-    external_inputs_set: set[Node] = set()
-    for node in nodes:
-        for input_node in node.all_input_nodes:
-            if (
-                input_node not in partition_lookup_table
-                and input_node not in external_inputs_set
-            ):
-                external_inputs.append(input_node)
-                external_inputs_set.add(input_node)
-
-    if external_inputs and all(
-        input_node.op == "placeholder" for input_node in external_inputs
-    ):
-        # True graph placeholders have a stable original input order. Keep the
-        # historical encounter order for mixed or intermediate boundaries,
-        # because downstream lowering may derive its own call args from the
-        # submodule placeholder order.
-        graph_order = {node: i for i, node in enumerate(gm.graph.nodes)}
-        external_inputs.sort(key=lambda node: graph_order[node])
-
-    for input_node in external_inputs:
-        create_placeholder(input_node)
-
     # handles inputs through graph.node_copy's arg_transform functions
     def remap_inputs(x: Node) -> Node:
         if x.op == "get_attr":
@@ -198,6 +164,13 @@ def fuse_as_graphmodule(
             # x is inside subgraph, return the copied node
             # the node should have been copied already, as we are copying graph in the topological order
             return node_map[x]
+
+        if x not in node_to_placeholder:
+            # x is not in subgraph, create a new placeholder for subgraph
+            placeholder_node = subgraph.placeholder(x.name, type_expr=x.type)
+            # copy all meta fields, even if some fields might be irrelevant for the placeholder node
+            placeholder_node.meta = copy.copy(x.meta)
+            node_to_placeholder[x] = placeholder_node
 
         return node_to_placeholder[x]
 
@@ -247,48 +220,42 @@ def insert_subgm(
     sub_gm: GraphModule,
     orig_inputs: tuple[Node, ...],
     orig_outputs: tuple[Node, ...],
-    insertion_point: Node | None = None,
 ) -> GraphModule:
     # add sub_gm into gm
     submodule_name = sub_gm.__class__.__name__
     gm.add_submodule(submodule_name, sub_gm)
 
-    # Use provided insertion point, or fall back to last output node for backwards compat
-    if insertion_point is None:
+    def last_node(target_nodes: tuple[Node, ...]) -> Node | None:
         for node in reversed(gm.graph.nodes):
-            if node in orig_outputs:
-                insertion_point = node
-                break
-        if insertion_point is None:
-            raise AssertionError(
-                "Cannot determine insertion point: no insertion_point provided and "
-                "orig_outputs is empty. Pass the last partition node as insertion_point."
-            )
+            if node in target_nodes:
+                return node
+        return None
+
+    last_output_node: Node | None = last_node(orig_outputs)
+    if last_output_node is None:
+        raise AssertionError("last_output_node is None")
 
     # Create a call_module node in main graph.
-    with gm.graph.inserting_after(insertion_point):
+    with gm.graph.inserting_after(last_output_node):
         module_node = gm.graph.call_module(
             submodule_name, args=orig_inputs, kwargs=None
         )
         output_node = sub_gm.graph.output_node()
 
-    # Replace uses of original outputs with the fused module outputs.
-    # If there are no external outputs, skip replacement (nothing to replace).
-    if orig_outputs:
-        next_node = module_node.next
-        with gm.graph.inserting_before(next_node):
-            if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
-                # main_remapping[comp.orig_outputs[0]] = module_node
-                orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
-            else:
-                for i, orig_output in enumerate(orig_outputs):
-                    # Use Proxy to record getitem access.
-                    proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
-                    orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
+    next_node = module_node.next
+    with gm.graph.inserting_before(next_node):
+        if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
+            # main_remapping[comp.orig_outputs[0]] = module_node
+            orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
+        else:
+            for i, orig_output in enumerate(orig_outputs):
+                # Use Proxy to record getitem access.
+                proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
+                orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
 
-                module_node.meta["val"] = tuple(
-                    orig_output.meta.get("val", None) for orig_output in orig_outputs
-                )
+            module_node.meta["val"] = tuple(
+                orig_output.meta.get("val", None) for orig_output in orig_outputs
+            )
     return gm
 
 
@@ -302,7 +269,7 @@ def erase_nodes(gm: GraphModule, nodes: NodeList) -> None:
 @compatibility(is_backward_compatible=False)
 def fuse_by_partitions(
     gm: GraphModule,
-    partitions: list[dict[Node, int | None]],
+    partitions: list[dict[Node, _Optional[int]]],
     prefix: str = "fused_",
     always_return_tuple: bool = False,
 ) -> GraphModule:
@@ -318,7 +285,7 @@ def fuse_by_partitions(
             always_return_tuple=always_return_tuple,
         )
 
-        insert_subgm(gm, sub_gm, orig_inputs, orig_outputs, sorted_nodes[-1])
+        insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)
 
         erase_nodes(gm, sorted_nodes)
 
