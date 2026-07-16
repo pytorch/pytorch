@@ -984,7 +984,7 @@ inline bool is_nonzero(T val) {
 // on Metal 3.x, so int/uint is the widest scan primitive available; index
 // math for the output address is widened to int64 explicitly at the write
 // site (see scatter_nonzero_indices).
-template <typename T>
+template <typename T, typename index_t>
 [[max_total_threads_per_threadgroup(1024)]]
 kernel void count_nonzero_prefix_sum(
     const device T* input [[buffer(0)]],
@@ -1004,7 +1004,7 @@ kernel void count_nonzero_prefix_sum(
   // to global element and block indices so tensors with more than 2^32 elements
   // (which exceed Metal's 32-bit thread_position_in_grid) are handled across
   // multiple dispatches over a single global prefix-sum.
-  ulong gid = flat_base + tid;
+  index_t gid = static_cast<index_t>(flat_base) + tid;
 
   uint flag = is_nonzero(input[gid]) ? 1u : 0u;
 
@@ -1174,49 +1174,65 @@ kernel void scatter_nonzero_indices(
   }
 }
 
-#define REGISTER_NONZERO_KERNELS(DTYPE)                                       \
-  template [[host_name("count_nonzero_prefix_sum_" #DTYPE)]] [[kernel]] void  \
-  count_nonzero_prefix_sum<DTYPE>(                                            \
-      const device DTYPE* input [[buffer(0)]],                                \
-      device uint* prefix [[buffer(1)]],                                      \
-      device uint* block_sums [[buffer(2)]],                                  \
-      constant ulong& flat_base [[buffer(3)]],                                \
-      constant uint& block_base [[buffer(4)]],                                \
-      uint tid [[thread_position_in_grid]],                                   \
-      uint lid [[thread_position_in_threadgroup]],                            \
-      uint tgsize [[threads_per_threadgroup]],                                \
-      uint tgid [[threadgroup_position_in_grid]],                             \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                        \
-      uint simd_group_id [[simdgroup_index_in_threadgroup]]);                 \
-                                                                              \
-  template                                                                    \
-      [[host_name("scatter_nonzero_indices_" #DTYPE "_i32")]] [[kernel]] void \
-      scatter_nonzero_indices<DTYPE, uint>(                                   \
-          const device DTYPE* input [[buffer(0)]],                            \
-          const device uint* prefix [[buffer(1)]],                            \
-          device int64_t* output [[buffer(2)]],                               \
-          constant int& ndim [[buffer(3)]],                                   \
-          constant int64_t* sizes [[buffer(4)]],                              \
-          constant uint* block_offsets [[buffer(5)]],                         \
-          constant uint& max_entries [[buffer(6)]],                           \
-          constant ulong& flat_base [[buffer(7)]],                            \
-          constant uint& block_base [[buffer(8)]],                            \
-          uint tid [[thread_position_in_grid]],                               \
-          uint tgid [[threadgroup_position_in_grid]]);                        \
-                                                                              \
-  template                                                                    \
-      [[host_name("scatter_nonzero_indices_" #DTYPE "_i64")]] [[kernel]] void \
-      scatter_nonzero_indices<DTYPE, ulong>(                                  \
-          const device DTYPE* input [[buffer(0)]],                            \
-          const device uint* prefix [[buffer(1)]],                            \
-          device int64_t* output [[buffer(2)]],                               \
-          constant int& ndim [[buffer(3)]],                                   \
-          constant int64_t* sizes [[buffer(4)]],                              \
-          constant uint* block_offsets [[buffer(5)]],                         \
-          constant uint& max_entries [[buffer(6)]],                           \
-          constant ulong& flat_base [[buffer(7)]],                            \
-          constant uint& block_base [[buffer(8)]],                            \
-          uint tid [[thread_position_in_grid]],                               \
+#define REGISTER_NONZERO_KERNELS(DTYPE)                                        \
+  template                                                                     \
+      [[host_name("count_nonzero_prefix_sum_" #DTYPE "_i32")]] [[kernel]] void \
+      count_nonzero_prefix_sum<DTYPE, uint>(                                   \
+          const device DTYPE* input [[buffer(0)]],                             \
+          device uint* prefix [[buffer(1)]],                                   \
+          device uint* block_sums [[buffer(2)]],                               \
+          constant ulong& flat_base [[buffer(3)]],                             \
+          constant uint& block_base [[buffer(4)]],                             \
+          uint tid [[thread_position_in_grid]],                                \
+          uint lid [[thread_position_in_threadgroup]],                         \
+          uint tgsize [[threads_per_threadgroup]],                             \
+          uint tgid [[threadgroup_position_in_grid]],                          \
+          uint simd_lane_id [[thread_index_in_simdgroup]],                     \
+          uint simd_group_id [[simdgroup_index_in_threadgroup]]);              \
+                                                                               \
+  template                                                                     \
+      [[host_name("count_nonzero_prefix_sum_" #DTYPE "_i64")]] [[kernel]] void \
+      count_nonzero_prefix_sum<DTYPE, ulong>(                                  \
+          const device DTYPE* input [[buffer(0)]],                             \
+          device uint* prefix [[buffer(1)]],                                   \
+          device uint* block_sums [[buffer(2)]],                               \
+          constant ulong& flat_base [[buffer(3)]],                             \
+          constant uint& block_base [[buffer(4)]],                             \
+          uint tid [[thread_position_in_grid]],                                \
+          uint lid [[thread_position_in_threadgroup]],                         \
+          uint tgsize [[threads_per_threadgroup]],                             \
+          uint tgid [[threadgroup_position_in_grid]],                          \
+          uint simd_lane_id [[thread_index_in_simdgroup]],                     \
+          uint simd_group_id [[simdgroup_index_in_threadgroup]]);              \
+                                                                               \
+  template                                                                     \
+      [[host_name("scatter_nonzero_indices_" #DTYPE "_i32")]] [[kernel]] void  \
+      scatter_nonzero_indices<DTYPE, uint>(                                    \
+          const device DTYPE* input [[buffer(0)]],                             \
+          const device uint* prefix [[buffer(1)]],                             \
+          device int64_t* output [[buffer(2)]],                                \
+          constant int& ndim [[buffer(3)]],                                    \
+          constant int64_t* sizes [[buffer(4)]],                               \
+          constant uint* block_offsets [[buffer(5)]],                          \
+          constant uint& max_entries [[buffer(6)]],                            \
+          constant ulong& flat_base [[buffer(7)]],                             \
+          constant uint& block_base [[buffer(8)]],                             \
+          uint tid [[thread_position_in_grid]],                                \
+          uint tgid [[threadgroup_position_in_grid]]);                         \
+                                                                               \
+  template                                                                     \
+      [[host_name("scatter_nonzero_indices_" #DTYPE "_i64")]] [[kernel]] void  \
+      scatter_nonzero_indices<DTYPE, ulong>(                                   \
+          const device DTYPE* input [[buffer(0)]],                             \
+          const device uint* prefix [[buffer(1)]],                             \
+          device int64_t* output [[buffer(2)]],                                \
+          constant int& ndim [[buffer(3)]],                                    \
+          constant int64_t* sizes [[buffer(4)]],                               \
+          constant uint* block_offsets [[buffer(5)]],                          \
+          constant uint& max_entries [[buffer(6)]],                            \
+          constant ulong& flat_base [[buffer(7)]],                             \
+          constant uint& block_base [[buffer(8)]],                             \
+          uint tid [[thread_position_in_grid]],                                \
           uint tgid [[threadgroup_position_in_grid]])
 
 REGISTER_NONZERO_KERNELS(float);

@@ -362,7 +362,12 @@ static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int
   const auto type_str = scalarToMetalTypeString(input);
   MPSStream* stream = getCurrentMPSStream();
 
-  auto pso_step1 = lib.getPipelineStateForFunc(fmt::format("count_nonzero_prefix_sum_{}", type_str));
+  // Count (step 1) indexes input/prefix by the flat element id, which is
+  // bounded by numel, so its index width depends only on the input. Scatter
+  // (step 3) also indexes the output, so it recomputes the width including out.
+  const bool count_use_32bit_index = canUse32BitIndexMath(input);
+  auto pso_step1 = lib.getPipelineStateForFunc(
+      fmt::format("count_nonzero_prefix_sum_{}_{}", type_str, count_use_32bit_index ? "i32" : "i64"));
   auto pso_step2 = lib.getPipelineStateForFunc("prefix_sum_blocks");
 
   uint32_t threads_per_group = static_cast<uint32_t>([pso_step1 maxTotalThreadsPerThreadgroup]);
