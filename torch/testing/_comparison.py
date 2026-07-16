@@ -1249,10 +1249,12 @@ def originate_pairs(
             )
         return pairs
 
-    # Dataclass instances fall through to ObjectPair otherwise, which compares with
-    # ``actual == expected``. Dataclass ``__eq__`` treats each field comparison as a
-    # Python bool, so tensor fields raise on Python 3.13+ (no same-object shortcut).
-    # Recurse field-by-field so tensors use the normal tensor comparison path.
+    # Dataclass instances normally compare via ``==`` / ObjectPair so custom ``__eq__``
+    # (including ``eq=False`` classes) is respected. Generated dataclass ``__eq__``
+    # treats each field comparison as a Python bool, so multi-element tensor fields
+    # raise on Python 3.13+ (no same-object shortcut), or return a Tensor when that
+    # field is the sole compare=True field. Only then recurse field-by-field so
+    # tensors use the normal tensor comparison path.
     elif (
         dataclasses.is_dataclass(actual)
         and not isinstance(actual, type)
@@ -1260,6 +1262,17 @@ def originate_pairs(
         and not isinstance(expected, type)
         and type(actual) is type(expected)
     ):
+        try:
+            equal = actual == expected
+        except RuntimeError as error:
+            if "Boolean value of Tensor" not in str(error):
+                raise
+        else:
+            # Single tensor-field dataclasses can return a Tensor from __eq__
+            # without raising; only a real bool means == is usable as-is.
+            if type(equal) is bool:
+                return [ObjectPair(actual, expected, id=id, **options)]
+
         pairs = []
         for field in dataclasses.fields(actual):
             if not field.compare:
