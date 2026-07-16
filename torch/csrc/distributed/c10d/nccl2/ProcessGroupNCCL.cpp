@@ -4,12 +4,14 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -86,10 +88,6 @@ void ProcessGroupNCCL::init(at::Device device) {
     nccl_api_ = std::make_unique<DefaultNcclApi>();
   }
 
-  if (!cuda_api_) {
-    cuda_api_ = std::make_unique<DefaultCudaApi>();
-  }
-
   if (device_.index() == -1 || nccl_comm_ == nullptr) {
     auto bootstrap = std::make_unique<NCCLBootstrap>(
         store_,
@@ -97,7 +95,6 @@ void ProcessGroupNCCL::init(at::Device device) {
         getRank(),
         getSize(),
         nccl_api_,
-        cuda_api_,
         options_c10d_->timeout);
     device_ = bootstrap->getDevice();
 
@@ -115,61 +112,22 @@ void ProcessGroupNCCL::init(at::Device device) {
 }
 
 void ProcessGroupNCCL::initNcclResources() {
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->setDevice(device_.index()),
-      fmt::format("Failed to set CUDA device to {}", device_.index()));
-
-  cudaDeviceProp device_prop = {};
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->getDeviceProperties(&device_prop, device_.index()),
-      fmt::format(
-          "Failed to get device properties for device {}", device_.index()));
-
-  size_t free_memory, total_memory;
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->memGetInfo(&free_memory, &total_memory),
-      fmt::format("Failed to get memory info for device {}", device_.index()));
+  c10::cuda::CUDAGuard gpuGuard(device_);
 
   is_high_priority_stream_ = options_c10d_->is_high_priority_stream;
 
-  int stream_priority = 0;
-
-  if (is_high_priority_stream_) {
-    int leastPriority, greatestPriority;
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->getStreamPriorityRange(&leastPriority, &greatestPriority),
-        "Failed to get stream");
-    stream_priority = greatestPriority;
-  }
-
   if (!internal_stream_) {
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->streamCreateWithPriority(
-            &internal_stream_, cudaStreamNonBlocking, stream_priority),
-        fmt::format(
-            "Failed to create internal CUDA stream on device {}",
-            device_.index()));
+    internal_stream_.emplace(
+        at::cuda::getStreamFromPool(is_high_priority_stream_, device_.index()));
   }
 
   if (!dependency_event_) {
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->eventCreateWithFlags(
-            &dependency_event_, cudaEventDisableTiming),
-        fmt::format(
-            "Failed to create dependency event on device {}", device_.index()));
+    dependency_event_.emplace(cudaEventDisableTiming);
   }
 
   if (!barrier_buffer_) {
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->malloc(&barrier_buffer_, sizeof(float)),
-        "Failed to allocate barrier buffer");
+    barrier_buffer_ =
+        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
   }
 
   max_event_pool_size_ = kDefaultMaxEventPoolSize;
@@ -204,6 +162,46 @@ void ProcessGroupNCCL::abort() {
     abortNcclComm();
   }
   comm_state_ = CommState::ERROR;
+}
+
+void ProcessGroupNCCL::suspend() {
+  checkInitialized();
+  c10::cuda::CUDAGuard gpuGuard(device_);
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->commSuspend(nccl_comm_, NCCL_SUSPEND_MEM),
+      "NCCL Suspend failed (requires NCCL 2.29.7+)");
+}
+
+void ProcessGroupNCCL::resume() {
+  checkInitialized();
+  c10::cuda::CUDAGuard gpuGuard(device_);
+  NCCL_CHECK(
+      nccl_api_,
+      nccl_comm_,
+      nccl_api_->commResume(nccl_comm_),
+      "NCCL Resume failed (requires NCCL 2.29.7+)");
+}
+
+std::unordered_map<std::string, uint64_t> ProcessGroupNCCL::getMemoryStats() {
+  checkInitialized();
+  c10::cuda::CUDAGuard gpuGuard(device_);
+  // Stat indices follow ncclCommMemStat_t: suspend=0, suspended=1, persist=2,
+  // total=3. Keys match ProcessGroupNCCL (the original backend).
+  static constexpr std::array<std::pair<const char*, int>, 4> kStats = {
+      {{"suspend", 0}, {"suspended", 1}, {"persist", 2}, {"total", 3}}};
+  std::unordered_map<std::string, uint64_t> stats;
+  for (const auto& [name, stat] : kStats) {
+    uint64_t value = 0;
+    NCCL_CHECK(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->commMemStats(nccl_comm_, stat, &value),
+        "NCCL MemStats failed (requires NCCL 2.29.7+)");
+    stats.emplace(name, value);
+  }
+  return stats;
 }
 
 ::c10d::ErrorType ProcessGroupNCCL::getError() {
@@ -255,7 +253,7 @@ void ProcessGroupNCCL::finalize() {
     throw std::runtime_error("Work timed out during finalize");
   } else if (work_status == WorkNCCL::WorkStatus::ERROR) {
     comm_state_ = CommState::ERROR;
-    ncclResult_t asyncErr;
+    ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
         nccl_comm_,
@@ -264,46 +262,21 @@ void ProcessGroupNCCL::finalize() {
     NCCLException ncclException(
         *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
     abortNcclComm();
-    throw ncclException;
+    throw std::move(ncclException);
   }
 
   // Clean up event pool
   {
     std::lock_guard<std::mutex> lock(event_pool_mutex_);
     while (!event_pool_.empty()) {
-      cudaEvent_t event = event_pool_.front();
       event_pool_.pop();
-      CUDA_CHECK(
-          cuda_api_, cuda_api_->eventDestroy(event), "Failed to destroy event");
     }
   }
 
-  // Free barrier buffer (errors handled by CUDA_CHECK)
-  if (barrier_buffer_) {
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->free(barrier_buffer_),
-        "Failed to free barrier buffer");
-    barrier_buffer_ = nullptr;
-  }
+  barrier_buffer_.clear();
 
-  // Destroy dependency event
-  if (dependency_event_) {
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->eventDestroy(dependency_event_),
-        "Failed to destroy dependency event");
-    dependency_event_ = nullptr;
-  }
-
-  // Destroy internal stream
-  if (internal_stream_) {
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->streamDestroy(internal_stream_),
-        "Failed to destroy internal stream");
-    internal_stream_ = nullptr;
-  }
+  dependency_event_.reset();
+  internal_stream_.reset();
 
   // Destroy NCCL communicator
   // Note: If abortNcclComm() was called, nccl_comm_ is already nullptr and this
@@ -828,7 +801,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
 
   for (int i = 0; i < comm_size_; ++i) {
     const auto dataType = getNcclDataType(input_list[i]);
-    ncclResult_t opResult;
+    ncclResult_t opResult{};
     if (i == rank_) {
       // This rank receives the reduced result
       opResult = nccl_api_->reduce(
@@ -1241,8 +1214,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
       nccl_api_,
       nccl_comm_,
       nccl_api_->allReduce(
-          barrier_buffer_,
-          barrier_buffer_,
+          barrier_buffer_.get(),
+          barrier_buffer_.get(),
           1,
           ncclFloat32,
           ncclSum,
@@ -1326,17 +1299,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
     NCCL_CHECK(
         nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
 
-    // Root copies its own data using cudaMemcpyAsync
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->memcpyAsync(
-            output_tensor.data_ptr(),
-            input_tensor_list[root].data_ptr(),
-            input_tensor_list[root].numel() *
-                input_tensor_list[root].element_size(),
-            cudaMemcpyDeviceToDevice,
-            stream),
-        "memcpyAsync failed");
+    at::cuda::CUDAStreamGuard stream_guard(
+        at::cuda::getStreamFromExternal(stream, device_.index()));
+    output_tensor.copy_(input_tensor_list[root], true);
   } else {
     // Non-root ranks receive from root
     NCCL_CHECK(
@@ -1428,16 +1393,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     NCCL_CHECK(
         nccl_api_, nccl_comm_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
 
-    // Root copies its own data using cudaMemcpyAsync
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->memcpyAsync(
-            output_tensor_list[root].data_ptr(),
-            input_tensor.data_ptr(),
-            input_tensor.numel() * input_tensor.element_size(),
-            cudaMemcpyDeviceToDevice,
-            stream),
-        "memcpyAsync failed");
+    at::cuda::CUDAStreamGuard stream_guard(
+        at::cuda::getStreamFromExternal(stream, device_.index()));
+    output_tensor_list[root].copy_(input_tensor, true);
   } else {
     // Non-root ranks send to root
     NCCL_CHECK(
