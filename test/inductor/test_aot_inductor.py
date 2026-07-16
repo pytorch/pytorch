@@ -2533,7 +2533,9 @@ class AOTInductorTestsTemplate:
                 return res[0]
 
         m = Module().to(device=self.device)
-        tensor_shape = (4, 32, 4, 4)
+        # Use head_dim = q.shape[1] // 2 = 64, which is supported by both CUDA
+        # and XPU flash attention (XPU supports: 64, 96, 128, 192).
+        tensor_shape = (4, 128, 4, 4)
         inputs = (
             torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
             torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
