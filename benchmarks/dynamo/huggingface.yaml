@@ -6,6 +6,8 @@ skip:
     - BlenderbotForConditionalGeneration
     - GPTNeoForCausalLM
     - GPTNeoForSequenceClassification
+    # Fails importing transformers.modeling_deberta_v2 with current TorchScript.
+    - DebertaV2ForMaskedLM
     # Fails with even batch size = 1
     - GPTJForCausalLM
     - GPTJForQuestionAnswering
@@ -74,7 +76,6 @@ batch_size:
 tolerance:
   higher_training:
     - MT5ForConditionalGeneration
-    - BertForMaskedLM
 
   higher_max_autotune_training: []
 

@@ -1,4 +1,5 @@
 set SRC_DIR=%~dp0
+set TARGET_OS=windows
 
 pushd %SRC_DIR%\..
 
@@ -41,7 +42,6 @@ echo "install wheel package"
 
 call "internal\install_python.bat"
 
-if "%DESIRED_PYTHON%" == "3.13t" %PYTHON_EXEC% -m pip install --pre numpy==2.2.1 protobuf
 if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install --pre numpy==2.1.2 protobuf
 if "%DESIRED_PYTHON%" == "3.12" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
 if "%DESIRED_PYTHON%" == "3.11" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
@@ -96,6 +96,10 @@ if ERRORLEVEL 1 exit /b 1
 
 echo Checking that basic CNN works
 %PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke.py
+if ERRORLEVEL 1 exit /b 1
+
+echo Running smoke_test.py
+%PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\smoke_test\smoke_test.py --package=torchonly --torch-compile-check disabled --runtime-error-check disabled
 if ERRORLEVEL 1 exit /b 1
 
 goto end

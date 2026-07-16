@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.fx as fx
-from torch.fx.experimental.symbolic_shapes import size_hint
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
@@ -144,9 +144,7 @@ class GraphAliasTracker:
 
 
 def _size_of_default(num_bytes: int | torch.SymInt) -> int:
-    return size_hint(
-        num_bytes, fallback=torch._inductor.config.unbacked_symint_fallback
-    )
+    return optimization_hint(num_bytes)
 
 
 def device_filter(device: torch.device) -> bool:
@@ -255,7 +253,8 @@ def get_fwd_bwd_interactions(
 
     # Get storages in forward output
     fwd_output_node = next(iter(reversed(fwd_graph.nodes)))[-1]
-    assert fwd_output_node.op == "output"
+    if fwd_output_node.op != "output":
+        raise AssertionError(f"expected output node, got op {fwd_output_node.op}")
     fwd_output_storages = fwd_alias_info.get_storage_uses(fwd_output_node)
 
     # Node names that should not be deleted during memory profile estimation of bwd_graph
@@ -376,7 +375,8 @@ class MemoryTracker:
         Args:
             node: The node being scheduled (potentially out of original order)
         """
-        assert node not in self.scheduled, "should not schedule node twice"
+        if node in self.scheduled:
+            raise AssertionError("should not schedule node twice")
         self.scheduled.add(node)
         self._update_memory_for_node(node)
 
@@ -387,9 +387,7 @@ class MemoryTracker:
     def _get_storage_size(self, storage_key: StorageKey) -> int:
         """Get the size of a storage in bytes, handling symbolic shapes."""
         size_bytes = storage_key.storage.nbytes()
-        return size_hint(
-            size_bytes, fallback=torch._inductor.config.unbacked_symint_fallback
-        )
+        return optimization_hint(size_bytes)
 
     def _get_storages_freed_by_node(self, node: fx.Node) -> OrderedSet[StorageKey]:
         """Get storages that would be freed if we schedule this node."""
@@ -401,9 +399,8 @@ class MemoryTracker:
                 continue
 
             # Invariant: if a node uses a storage, it must be live
-            assert storage_key in self.current_live_storages, (
-                "all input storages should be currently allocated"
-            )
+            if storage_key not in self.current_live_storages:
+                raise AssertionError("all input storages should be currently allocated")
 
             if not self.is_releasable(
                 self.alias_tracker.storage_to_allocator[storage_key]

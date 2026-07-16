@@ -11,7 +11,8 @@ enum {
   A_REG_PLUS_DATA_DEREF = 0x3 // exp = *(REG[reg] + data0)
 };
 
-// register numbers in dwarf info
+// DWARF register numbers — architecture-specific
+#if defined(__x86_64__)
 enum {
   D_UNDEFINED = -1,
   D_RBP = 6,
@@ -19,6 +20,28 @@ enum {
   D_RIP = 16,
   D_REG_SIZE = 17,
 };
+static constexpr int D_FRAME_PTR = D_RBP;
+static constexpr int D_STACK_PTR = D_RSP;
+static constexpr int D_RET_ADDR = D_RIP;
+static constexpr int D_EXPECTED_RA_REG = 16;
+#elif defined(__aarch64__)
+enum {
+  D_UNDEFINED = -1,
+  D_FP = 29,
+  D_LR = 30,
+  D_SP = 31,
+  D_REG_SIZE = 32,
+};
+static constexpr int D_FRAME_PTR = D_FP;
+static constexpr int D_STACK_PTR = D_SP;
+static constexpr int D_RET_ADDR = D_LR;
+static constexpr int D_EXPECTED_RA_REG = 30;
+#else
+enum {
+  D_UNDEFINED = -1,
+  D_REG_SIZE = 1,
+};
+#endif
 
 struct Action {
   uint8_t kind = A_UNDEFINED;

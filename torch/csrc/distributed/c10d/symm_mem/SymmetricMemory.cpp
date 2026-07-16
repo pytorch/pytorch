@@ -295,6 +295,14 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
   return allocator->rendezvous(tensor.storage().data_ptr().get(), group_name);
 }
 
+TORCH_API bool is_symm_mem_tensor(const at::Tensor& tensor) {
+  if (!has_allocator(tensor.device().type())) {
+    return false;
+  }
+  auto allocator = get_allocator(tensor.device().type());
+  return allocator->has_allocation(tensor.storage().data_ptr().get());
+}
+
 TORCH_API bool has_multicast_support(
     c10::DeviceType device_type,
     int device_idx) {
@@ -539,9 +547,13 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "stream_write_value32_(Tensor(a!) input, int offset, int val) -> Tensor(a!)");
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
+  m.def(
+      "memcpy_to_multicast_(Tensor(a!) symm_mem_out, Tensor src, int byte_offset, str group_name) -> Tensor(a!)");
 
   m.def("nvshmem_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nvshmem_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def(
+      "nvshmem_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
   m.def(
       "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
   m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
@@ -549,8 +561,14 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
   m.def("nccl_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def(
+      "nccl_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
   m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
   m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
+  m.def(
+      "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
+  m.def(
+      "nccl_all_to_all_nd(Tensor input, Tensor(a!) out, int scatter_dim, int gather_dim, str group_name) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
@@ -583,7 +601,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
 c10::intrusive_ptr<SymmetricMemory> rendezvous_op(
     const at::Tensor& tensor,
-    std::optional<std::string> group_name) {
+    const std::optional<std::string>& group_name) {
   return c10d::symmetric_memory::rendezvous(tensor, group_name);
 }
 

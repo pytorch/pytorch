@@ -58,6 +58,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list
   std::list<CacheEntry>::iterator _owner_loc;
+  // The isolate_recompiles_id for this entry's bucket in cache_entry_map
+  int64_t _isolate_recompiles_id{-1};
   // Reference to string representation of the CompileContext
   std::string trace_annotation;
 
@@ -67,9 +69,6 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   CacheEntry& operator=(const CacheEntry&) = default;
   CacheEntry& operator=(CacheEntry&&) = default;
   ~CacheEntry();
-
-  // Warning: returns a reference whose lifetime is controlled by C++
-  py::object next();
 
   void invalidate(py::object deleted_guard_manager);
   // Called from the python side to update the diff guard root manager

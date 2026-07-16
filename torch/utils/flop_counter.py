@@ -1,4 +1,88 @@
 # mypy: allow-untyped-defs
+"""Utilities for counting theoretical floating point operations.
+
+``FlopCounterMode`` is a context manager that intercepts PyTorch operators and
+adds up their registered FLOP formulas. The result is a shape-based,
+theoretical FLOP count for the operators that ran inside the context, not a
+hardware performance measurement.
+
+The counter is useful when comparing model graphs, activation checkpointing
+plans, or shape changes with a stable FLOP accounting rule. It should not be
+read as kernel instructions, wall-clock time, memory bandwidth, achieved
+FLOP/s, Tensor Core utilization, or the exact work done by a fused kernel.
+
+Counting semantics
+------------------
+
+* Counts are produced by formulas in ``flop_registry``. Operators without a
+  formula may be decomposed into registered operators; otherwise they add zero
+  FLOPs.
+* Formula inputs have tensor arguments replaced by their shapes by default.
+  Non-tensor arguments pass through unchanged. Use
+  ``register_flop_formula(..., get_raw=True)`` only when the formula needs the
+  original tensor arguments or metadata.
+* Forward and backward operations are counted only if they execute while the
+  context manager is active.
+* The default formulas use dense, naive mathematical definitions. For example,
+  matrix multiplication counts ``2 * m * n * k`` FLOPs.
+* Counts do not automatically adjust for dtype-specific throughput, Tensor
+  Cores, sparsity, quantization, masking, skipped elements, memory movement, or
+  data-dependent early exits. A formula must explicitly model those semantics.
+  For example, the built-in attention formulas are upper bounds for causal or
+  otherwise masked attention unless the formula explicitly models the mask.
+* Higher-order operators and ``torch.compile`` may expose decomposed or fused
+  work differently from eager execution. Custom operators and custom Triton
+  kernels need a formula or a decomposition if they should contribute FLOPs.
+* Module attribution is tracked through ``ModuleTracker``. Totals are always
+  available under ``"Global"``; submodule rows are best-effort attribution for
+  module calls observed during the context.
+* The workload still executes normally. Use this mode for a few representative
+  iterations rather than long training runs if overhead or memory use matters.
+
+Example
+-------
+
+.. code-block:: python
+
+    import torch
+    from torch.utils.flop_counter import FlopCounterMode
+
+    model = torch.nn.Linear(16, 32)
+    x = torch.randn(4, 16)
+
+    with FlopCounterMode(display=False) as mode:
+        model(x).sum().backward()
+
+    print(mode.get_total_flops())
+    print(mode.get_flop_counts()["Global"])
+
+Registering a formula for a custom op
+-------------------------------------
+
+Register custom FLOP formulas before constructing ``FlopCounterMode``. The
+mode snapshots the global registry during initialization.
+
+.. code-block:: python
+
+    from math import prod
+
+    import torch
+    from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
+
+    @torch.library.custom_op("example::scale", mutates_args=())
+    def scale(x: torch.Tensor) -> torch.Tensor:
+        return x * 2
+
+    @register_flop_formula(torch.ops.example.scale)
+    def scale_flops(x_shape, *, out_shape=None) -> int:
+        return prod(x_shape)
+
+    x = torch.randn(8)
+    with FlopCounterMode(display=False) as mode:
+        scale(x)
+
+    assert mode.get_total_flops() == 8
+"""
 from types import NoneType
 import logging
 import torch
@@ -53,10 +137,13 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
             flop_formula = shape_wrapper(flop_formula)
 
         def register(target) -> None:
-            if not (isinstance(target, (torch._ops.OpOverloadPacket, _JITFunction))):
+            from torch._ops import HigherOrderOperator
+
+            if not (isinstance(target, (torch._ops.OpOverloadPacket, _JITFunction, HigherOrderOperator))):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
-                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), or JitFunction"
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), JitFunction, "
+                    f"or HigherOrderOperator"
                     f", got {target} which is of type {type(target)}")
             if target in flop_registry:
                 raise RuntimeError(f"duplicate registrations for {target}")
@@ -187,7 +274,8 @@ def conv_backward_flop(
         _output_padding,
         _groups,
         output_mask,
-        out_shape) -> int:
+        out_shape,
+        **kwargs) -> int:
 
     def t(shape):
         return [shape[1], shape[0]] + list(shape[2:])
@@ -320,9 +408,9 @@ def _offsets_to_lengths(offsets, max_len):
     If the offsets tensor is fake, then we don't know the actual lengths.
     In that case, we can just assume the worst case; each batch has max length.
     """
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import is_fake_tensor
     from torch._subclasses.functional_tensor import FunctionalTensor
-    if not isinstance(offsets, (FakeTensor, FunctionalTensor)) and offsets.device.type != "meta":
+    if not (is_fake_tensor(offsets) or isinstance(offsets, FunctionalTensor)) and offsets.device.type != "meta":
         return offsets.diff().tolist()
     return [max_len] * (offsets.size(0) - 1)
 
@@ -449,6 +537,10 @@ def _flash_attention_forward_flop(
 ) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
+    if cum_seq_q is None and query.ndim == 4:
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     sizes = _unpack_flash_attention_nested_shapes(
@@ -527,7 +619,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     # scores: [b, h_q, s_k, s_q] @ gradOut: [b, h_q, s_q, d_v] -> gradV: [b, h_q, s_k, d_v]
     total_flops += bmm_flop((b * h_q, s_k, s_q), (b * h_q, s_q, d_v))
 
-    # Step 3: We propagate th gradients through the k @ v operation
+    # Step 3: We propagate the gradients through the k @ v operation
     # gradScores: [b, h_q, s_q, s_k] @ k: [b, h_q, s_k, d_q] -> gradQ: [b, h_q, s_q, d_q]
     total_flops += bmm_flop((b * h_q, s_q, s_k), (b * h_q, s_k, d_q))
     # q: [b, h_q, d_q, s_q] @ gradScores: [b, h_q, s_q, s_k] -> gradK: [b, h_q, d_q, s_k]
@@ -557,6 +649,11 @@ def _flash_attention_backward_flop(
     *args,
     **kwargs,
 ) -> int:
+    if cum_seq_q is None and query.ndim == 4:
+        grad_out = grad_out.transpose(-2, -3)
+        query = query.transpose(-2, -3)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
     # in case this is a nested tensor, we unpack the individual batch elements
     # and then sum the flops per batch element
     shapes = _unpack_flash_attention_nested_shapes(
@@ -608,6 +705,120 @@ def _efficient_attention_backward_flop(
     )
 
 
+def _register_flex_attention_flops() -> None:
+    from torch._higher_order_ops.flex_attention import (
+        flex_attention,
+        flex_attention_backward,
+    )
+
+    def _get_sparsity_hint(kwargs: dict[str, Any]) -> float:
+        node_meta = kwargs.get("_node_meta")
+        if node_meta is None:
+            return 0.0
+        custom = node_meta.get("custom")
+        if custom is None:
+            return 0.0
+        return max(0.0, min(1.0, custom.get("sparsity_hint", 0.0)))
+
+    @register_flop_formula(flex_attention, get_raw=True)
+    def flex_attention_forward_flop(
+        query, key, value, *args, out_val=None, **kwargs
+    ) -> int:
+        flops = sdpa_flop_count(query.shape, key.shape, value.shape)
+        sparsity = _get_sparsity_hint(kwargs)
+        return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
+
+    @register_flop_formula(flex_attention_backward, get_raw=True)
+    def flex_attention_backward_flop(
+        query, key, value, out, logsumexp, grad_out, *args, out_val=None, **kwargs
+    ) -> int:
+        grad_out_shape = grad_out.shape if grad_out is not None else out.shape
+        flops = sdpa_backward_flop_count(
+            grad_out_shape, query.shape, key.shape, value.shape
+        )
+        sparsity = _get_sparsity_hint(kwargs)
+        return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
+
+
+def _varlen_attn_forward_flop(
+    query,
+    key,
+    value,
+    cu_seq_q,
+    cu_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_val=None,
+    **kwargs,
+) -> int:
+    """Count flops for varlen_attn forward."""
+    sizes = _unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        cum_seq_q=cu_seq_q,
+        cum_seq_k=cu_seq_k if cu_seq_k is not None else cu_seq_q,
+        max_q=max_q,
+        max_k=max_k,
+    )
+    return sum(
+        sdpa_flop_count(query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, _ in sizes
+    )
+
+
+def _varlen_attn_out_flop(
+    out,
+    query,
+    key,
+    value,
+    cu_seq_q,
+    cu_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_val=None,
+    **kwargs,
+) -> int:
+    """Count flops for varlen_attn_out forward."""
+    return _varlen_attn_forward_flop(
+        query, key, value, cu_seq_q, cu_seq_k, max_q, max_k,
+    )
+
+
+def _varlen_attn_backward_flop(
+    grad_out,
+    query,
+    key,
+    value,
+    out,
+    lse,
+    cu_seq_q,
+    cu_seq_k,
+    max_q,
+    max_k,
+    *args,
+    out_val=None,
+    **kwargs,
+) -> int:
+    """Count flops for varlen_attn backward."""
+    sizes = _unpack_flash_attention_nested_shapes(
+        query=query,
+        key=key,
+        value=value,
+        grad_out=grad_out,
+        cum_seq_q=cu_seq_q,
+        cum_seq_k=cu_seq_k,
+        max_q=max_q,
+        max_k=max_k,
+    )
+    return sum(
+        sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
+        for query_shape, key_shape, value_shape, grad_out_shape in sizes
+    )
+
+
 flop_registry = {
     aten.mm: mm_flop,
     aten.addmm: addmm_flop,
@@ -631,6 +842,9 @@ flop_registry = {
     aten._flash_attention_backward: _flash_attention_backward_flop,
     aten._efficient_attention_backward: _efficient_attention_backward_flop,
 }
+
+_register_flex_attention_flops()
+
 
 def normalize_tuple(x):
     if not isinstance(x, tuple):
@@ -671,22 +885,29 @@ def _pytreeify_preserve_structure(f):
 
 
 class FlopCounterMode:
-    """
-    ``FlopCounterMode`` is a context manager that counts the number of flops within its context.
+    """Count theoretical FLOPs for operators that run inside the context.
 
-    It does this using a ``TorchDispatchMode``.
+    ``FlopCounterMode`` uses ``TorchDispatchMode`` to intercept operations and
+    apply registered FLOP formulas. Counts are shape-based and formula-defined;
+    unsupported operations contribute zero FLOPs unless they decompose into
+    supported operations.
 
-    It also supports hierarchical output by passing a module (or list of
-    modules) to FlopCounterMode on construction. If you do not need hierarchical
-    output, you do not need to use it with a module.
+    The optional ``mods`` argument is no longer needed for module attribution.
+    When ``display`` is true, exiting the context prints a table. Use
+    ``get_total_flops()`` or ``get_flop_counts()`` to read the same information
+    programmatically.
 
-    Example usage
+    Example usage:
 
     .. code-block:: python
 
         mod = ...
-        with FlopCounterMode(mod) as flop_counter:
-            mod.sum().backward()
+        inp = ...
+
+        with FlopCounterMode(display=False) as flop_counter:
+            mod(inp).sum().backward()
+
+        total = flop_counter.get_total_flops()
 
     """
 

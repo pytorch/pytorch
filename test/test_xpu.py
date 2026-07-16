@@ -6,6 +6,7 @@ import contextlib
 import ctypes
 import gc
 import json
+import os
 import random
 import re
 import subprocess
@@ -17,12 +18,14 @@ import unittest
 import warnings
 from copy import deepcopy
 from itertools import product
+from unittest.mock import patch
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
 from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     OpDTypes,
     ops,
@@ -111,6 +114,18 @@ class TestXpu(TestCase):
             self.assertEqual(target_device, torch.xpu.current_device())
         self.assertEqual(current_device, torch.xpu.current_device())
 
+    def test_xpu_device(self):
+        def fn(x):
+            with torch.xpu.device(x.device.index):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device="xpu")
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_get_device_properties(self):
         current_device = torch.xpu.current_device()
         device_properties = torch.xpu.get_device_properties(current_device)
@@ -126,6 +141,9 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
         self.assertTrue(device_capability["local_mem_size"] > 0)
+        self.assertTrue(device_capability["last_level_cache_size"] > 0)
+        self.assertTrue(device_capability["memory_clock_rate"] > 0)
+        self.assertTrue(device_capability["memory_bus_width"] > 0)
         self.assertEqual(
             device_properties.driver_version, device_capability["driver_version"]
         )
@@ -150,15 +168,19 @@ class TestXpu(TestCase):
             device_properties.has_subgroup_2d_block_io,
             device_capability["has_subgroup_2d_block_io"],
         )
-        if int(torch.version.xpu) >= 20250000:
-            self.assertEqual(
-                device_properties.architecture,
-                device_capability["architecture"],
-            )
+        self.assertEqual(
+            device_properties.architecture,
+            device_capability["architecture"],
+        )
         self.assertEqual(
             len(str(device_properties.uuid)), 36
         )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(device_properties.uuid.bytes), 16)
+        if int(torch.version.xpu) >= 20260000:
+            self.assertEqual(
+                device_properties.is_integrated_gpu,
+                device_capability["is_integrated_gpu"],
+            )
 
     def test_get_device_capability(self):
         device_capability = torch.xpu.get_device_capability()
@@ -240,9 +262,307 @@ if __name__ == "__main__":
     test_multi_process(model, input)
     print(torch.xpu.device_count())
 """
-        # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
-        rc = check_output(test_script).splitlines()[-1]
+        rc = check_output(test_script)
         self.assertEqual(rc, str(torch.xpu.device_count()))
+
+    def test_parse_visible_devices(self):
+        def _parse_visible_devices(val, strict=False):
+            with patch.dict(os.environ, {"ZE_AFFINITY_MASK": val}, clear=True):
+                return torch.xpu._parse_visible_devices(strict=strict)
+
+        # Tokens with trailing non-numeric characters are invalid; entire list is rejected
+        self.assertEqual(_parse_visible_devices("1a, 2b"), [])
+        # Negative indices are silently skipped; valid indices before and after are kept
+        self.assertEqual(_parse_visible_devices("0, 1, 2, -1, 3"), [0, 1, 2, 3])
+        # Duplicate indices are silently ignored; each ordinal appears at most once
+        self.assertEqual(_parse_visible_devices("0, 1, 2, 1"), [0, 1, 2])
+        # Leading '+'/'-' on an integer are accepted; '-0' is treated as 0
+        self.assertEqual(_parse_visible_devices("2, +3, -0, 5"), [2, 3, 0, 5])
+        # Purely alphabetic tokens make the entire list invalid
+        self.assertEqual(_parse_visible_devices("one, two, 3, 4"), [])
+
+        # Valid masks should work the same with strict=True
+        self.assertEqual(_parse_visible_devices("0, 1, 2", strict=True), [0, 1, 2])
+        # COMPOSITE-style masks raise ValueError in strict mode
+        with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
+            _parse_visible_devices("0.0,0.1", strict=True)
+        with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
+            _parse_visible_devices("one, two", strict=True)
+
+    def test_device_info_api_raises_import_error_without_pyzes(self):
+        with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.temperature()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.clock_rate()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.power_draw()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.utilization()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.memory_usage()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.device_memory_used()
+            with self.assertRaisesRegex(ImportError, "pyzes is required"):
+                torch.xpu.list_gpu_processes()
+
+    def test_temperature_returns_float(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            temp = torch.xpu.temperature()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU temperature requires elevated privileges")
+            raise
+
+        self.assertIsInstance(temp, float)
+        # Sanity check: GPU temperature should be in a plausible range (0–150 °C)
+        self.assertGreaterEqual(temp, 0.0)
+        self.assertLess(temp, 150.0)
+
+    def test_clock_rate_returns_float(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            rate = torch.xpu.clock_rate()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU clock rate requires elevated privileges")
+            raise
+
+        self.assertIsInstance(rate, float)
+        # Sanity check: GPU clock rate should be in a plausible range (0–5000 MHz)
+        self.assertGreaterEqual(rate, 0.0)
+        self.assertLess(rate, 5000.0)
+
+    def test_power_draw_returns_float(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            power = torch.xpu.power_draw()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU power draw requires elevated privileges")
+            raise
+
+        self.assertIsInstance(power, float)
+        # Sanity check: GPU power draw should be non-negative and within a plausible range (0–1000 W)
+        self.assertGreaterEqual(power, 0.0)
+        self.assertLess(power, 1000.0)
+
+    def test_utilization_returns_float(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            util = torch.xpu.utilization()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU utilization requires elevated privileges")
+            raise
+
+        self.assertIsInstance(util, float)
+        # Sanity check: GPU utilization should be between 0 and 100 percent
+        self.assertGreaterEqual(util, 0.0)
+        self.assertLessEqual(util, 100.0)
+
+    def test_memory_usage_returns_float(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            mem_usage = torch.xpu.memory_usage()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU memory usage requires elevated privileges")
+            raise
+
+        self.assertIsInstance(mem_usage, float)
+        # Sanity check: GPU memory bandwidth usage should be between 0 and 100 percent
+        self.assertGreaterEqual(mem_usage, 0.0)
+        self.assertLessEqual(mem_usage, 100.0)
+
+    def test_device_memory_used_returns_int(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        try:
+            mem_used = torch.xpu.device_memory_used()
+        except RuntimeError as e:
+            if "elevated privileges" in str(e):
+                self.skipTest("Reading GPU memory usage requires elevated privileges")
+            raise
+
+        self.assertIsInstance(mem_used, int)
+        # Sanity check: Memory used should be non-negative and less than total memory
+        total_memory = torch.xpu.get_device_properties().total_memory
+        self.assertGreaterEqual(mem_used, 0)
+        self.assertLessEqual(mem_used, total_memory)
+
+    def test_list_gpu_processes_returns_string(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+        if torch.xpu._get_pyzes_version() < (0, 1, 2):
+            with self.assertRaisesRegex(
+                RuntimeError, "requires pyzes version >= 0.1.2"
+            ):
+                torch.xpu.list_gpu_processes()
+
+        processes_info = torch.xpu.list_gpu_processes()
+
+        self.assertIsInstance(processes_info, str)
+        # Sanity check: Output should contain the header line with the current device
+        current_device = torch.xpu.current_device()
+        self.assertRegex(processes_info, rf"GPU:\s*{current_device}\b")
+
+    def test_device_count_respects_affinity_mask(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        def _run(mask: str) -> str:
+            script = f"""\
+import torch
+import os
+os.environ['ZE_AFFINITY_MASK'] = {mask!r}
+r1 = torch.xpu._device_count_zes()
+r2 = torch._C._xpu_getDeviceCount()
+print(f"{{r1}}, {{r2}}")
+"""
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+                .splitlines()[-1]
+            )
+
+        # Index 128 is out of range → both return 0
+        self.assertEqual(_run("128"), "0, 0")
+        # COMPOSITE-style mask → _device_count_zes returns -1
+        self.assertEqual(_run("0.0").split(",")[0].strip(), "-1")
+        # Valid mask selecting device 0 on a single-GPU system → both return 1
+        self.assertEqual(_run("0"), "1, 1")
+        if TEST_MULTIXPU:
+            # Valid mask selecting device 1 on a multi-GPU system → both return 1
+            self.assertEqual(_run("1"), "1, 1")
+
+    @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    def test_device_count_not_cached_pre_init(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        test_script = """\
+import torch
+import os
+r1 = torch.xpu.device_count()
+os.environ['ZE_AFFINITY_MASK'] = '0'
+r2 = torch.xpu.device_count()
+torch.empty(10, device='xpu')
+print(f"{r1}, {r2}")
+"""
+
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+
+        x = torch.xpu.device_count()
+        self.assertEqual(f"{x}, 1", r)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
+    def test_cached_zes_device_infos(self):
+        try:
+            import pyzes  # noqa: F401
+        except ImportError:
+            self.skipTest("pyzes is required for this test")
+
+        test_script = """\
+import torch
+import os
+from torch.xpu import _cached_zes_device_infos, _parse_visible_devices, _enum_zes_device_infos
+
+def device_key(info):
+    return (info.device_handle.value, info.subdevice_id)
+
+# Enumerate both devices and snapshot their keys
+os.environ['ZE_AFFINITY_MASK'] = '0, 1'
+_enum_zes_device_infos(_parse_visible_devices())
+orig_keys = [device_key(info) for info in _cached_zes_device_infos]
+
+# Restrict to device 1 only; cached entry should match orig device 1
+os.environ['ZE_AFFINITY_MASK'] = '1'
+_enum_zes_device_infos(_parse_visible_devices())
+match1 = orig_keys[1] == device_key(_cached_zes_device_infos[0])
+
+# Restrict to device 0 only; cached entry should match orig device 0
+os.environ['ZE_AFFINITY_MASK'] = '0'
+_enum_zes_device_infos(_parse_visible_devices())
+match0 = orig_keys[0] == device_key(_cached_zes_device_infos[0])
+print(match1, match0)
+"""
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual("True True", r)
+
+    def test_device_telemetry_api_without_ze_loader(self):
+        # Simulate libze_loader.so.1 missing: pyzes raises OSError at import
+        # time. Discovery must degrade gracefully; query APIs must surface a
+        # RuntimeError (not leak OSError).
+        import builtins
+
+        real_import = builtins.__import__
+        oserror_msg = (
+            "libze_loader.so.1: cannot open shared object file: "
+            "No such file or directory"
+        )
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pyzes":
+                raise OSError(oserror_msg)
+            return real_import(name, *args, **kwargs)
+
+        torch.xpu._cached_zes_device_infos.clear()
+        with unittest.mock.patch.object(builtins, "__import__", fake_import):
+            self.assertEqual(torch.xpu._device_count_zes(), -1)
+
+            for api in (
+                torch.xpu.temperature,
+                torch.xpu.clock_rate,
+                torch.xpu.power_draw,
+                torch.xpu.utilization,
+                torch.xpu.memory_usage,
+                torch.xpu.device_memory_used,
+                torch.xpu.list_gpu_processes,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Failed to import pyzes"):
+                    api()
 
     @unittest.skipIf(
         IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
@@ -277,12 +597,12 @@ print(torch.xpu.is_initialized())
 """
         rc = check_output(test_script).splitlines()
         self.assertEqual(
-            rc[0],
+            rc[-2],
             "0",
             "Importing torch._inductor.lowering should not query XPU device count",
         )
         self.assertEqual(
-            rc[1],
+            rc[-1],
             "False",
             "Importing torch._inductor.lowering should not initialize XPU",
         )
@@ -332,14 +652,7 @@ print(torch.xpu.is_initialized())
         time.sleep(0.1)
         stream.record_event(end_event)
         torch.xpu.synchronize()
-        if int(torch.version.xpu) >= 20250000:
-            self.assertGreater(start_event.elapsed_time(end_event), 0)
-        else:
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
-            ):
-                start_event.elapsed_time(end_event)
+        self.assertGreater(start_event.elapsed_time(end_event), 0)
 
         event = torch.xpu.Event(enable_timing=True)
         self.assertEqual(event.sycl_event, 0)
@@ -383,14 +696,8 @@ print(torch.xpu.is_initialized())
         self.assertTrue(event2.query())
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
-        if int(torch.version.xpu) >= 20250000:
-            self.assertGreater(event1.elapsed_time(event2), 0)
-        else:
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "elapsedTime requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
-            ):
-                event1.elapsed_time(event2)
+        self.assertGreater(event1.elapsed_time(event2), 0)
+
         xpu_event = torch.xpu.Event()
         self.assertIsInstance(xpu_event, torch.Event)
         self.assertTrue(issubclass(type(xpu_event), torch.Event))
@@ -511,6 +818,24 @@ print(torch.xpu.is_initialized())
         torch.xpu.set_rng_state(g_state0)
         self.assertEqual(2024, torch.xpu.initial_seed())
 
+    def test_accelerator_default_generator(self):
+        torch.xpu.init()
+        for index in range(torch.accelerator.device_count()):
+            xpu_default_generator = torch.xpu.default_generators[index]
+            acc_default_generator = torch._C._accelerator_getDefaultGenerator(index)
+            self.assertEqual(xpu_default_generator.device, acc_default_generator.device)
+            # Verify they share the same underlying GeneratorImpl
+            self.assertEqual(
+                xpu_default_generator.get_state(), acc_default_generator.get_state()
+            )
+            xpu_default_generator.manual_seed(42)
+            self.assertEqual(acc_default_generator.initial_seed(), 42)
+            # Verify state stays in sync after reseeding
+            xpu_default_generator.seed()
+            self.assertEqual(
+                xpu_default_generator.get_state(), acc_default_generator.get_state()
+            )
+
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).xpu()
         y = torch.zeros(2, 5, dtype=torch.int, device="xpu")
@@ -545,10 +870,28 @@ print(torch.xpu.is_initialized())
             self.assertIs(type(copy), type(original))
             self.assertEqual(copy.get_device(), original.get_device())
 
+    def test_is_shared(self):
+        t = torch.randn(5, 5, device="xpu")
+        self.assertTrue(t.is_shared())
+
+    def test_share_memory(self):
+        t = torch.randn(5, 5, device="xpu")
+        result = t.share_memory_()
+        self.assertIs(result, t)
+        self.assertTrue(t.is_shared())
+
+    def test_share_memory_nested(self):
+        a = torch.randn(3, 4, device="xpu")
+        b = torch.randn(5, 4, device="xpu")
+        nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
+        result = nt.share_memory_()
+        self.assertIs(result, nt)
+        self.assertTrue(nt.is_shared())
+
     def test_out_of_memory(self):
         if self.expandable_segments:
             self.skipTest("Skipping OOM test for expandable segments allocator.")
-        tensor = torch.zeros(1024, device="xpu")  # noqa: F841
+        tensor = torch.zeros(1024, device="xpu")
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="xpu")
@@ -693,10 +1036,6 @@ print(torch.xpu.is_initialized())
         self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
         self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
 
-    @unittest.skipIf(
-        int(torch.version.xpu) < 20250000,
-        "Test requires SYCL compiler version 2025.0.0 or newer.",
-    )
     def test_mem_get_info(self):
         torch.xpu.synchronize()
         torch.xpu.empty_cache()
@@ -1155,6 +1494,8 @@ print(torch.xpu.is_initialized())
         return allocator, dummy_allocator
 
     def test_xpu_pluggable_allocator(self):
+        from torch.utils.cpp_extension import load_inline
+
         torch.xpu.init()
         allocator, dummy_allocator = self.get_dummy_allocator(True)
         alloc_lib = ctypes.CDLL(dummy_allocator)
@@ -1229,6 +1570,40 @@ if __name__ == "__main__":
         self.assertEqual(called_dummy_alloc_value, "123")
         self.assertEqual(called_dummy_free_value, "321")
 
+        cpp_source = r"""
+        #include <torch/extension.h>
+        #include <torch/csrc/xpu/XPUPluggableAllocator.h>
+        // Mimics what torchcomms' get_mem_allocator("xccl") does:
+        // creates an XPUPluggableAllocator and returns it as c10::Allocator*.
+        std::shared_ptr<c10::Allocator> get_xpu_allocator() {
+            auto allocator =
+                torch::xpu::XPUPluggableAllocator::createCustomAllocator(
+                    // alloc_fn
+                    [](size_t size, int device, sycl::queue* queue) -> void* {
+                        void* ptr = sycl::malloc_device(size, *queue);
+                        return ptr;
+                    },
+                    // free_fn
+                    [](void* ptr, size_t size, int device, sycl::queue* queue) {
+                        sycl::free(ptr, *queue);
+                    });
+            return allocator;
+        }
+        """
+        ext = load_inline(
+            name="repro_xpu_alloc",
+            cpp_sources=[cpp_source],
+            functions=["get_xpu_allocator"],
+            verbose=True,
+            is_python_module=True,
+            with_sycl=True,
+        )
+        # Verify that the XPUPluggableAllocator returned as
+        # std::shared_ptr<c10::Allocator> is correctly recognized as Python type.
+        # A TypeError here would mean the custom allocator lacks proper
+        # c10::Allocator pybind11 bindings.
+        allocator = ext.get_xpu_allocator()
+
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)
         compiler_version = int(torch.version.xpu)
@@ -1242,20 +1617,167 @@ if __name__ == "__main__":
             for result in results:
                 self.assertTrue(b"libsycl.so" in result)
 
+    def test_xpu_header_installed(self):
+        include_dir = os.path.join(os.path.dirname(torch.__file__), "include")
+        aten_dir = os.path.join(include_dir, "ATen")
+        aten_ops_dir = os.path.join(aten_dir, "ops")
+        self.assertTrue(os.path.exists(os.path.join(aten_dir, "XPUFunctions.h")))
+        self.assertTrue(
+            os.path.exists(os.path.join(aten_ops_dir, "cat_xpu_dispatch.h"))
+        )
+        self.assertTrue(os.path.exists(os.path.join(aten_ops_dir, "col2im_native.h")))
+        with open(os.path.join(aten_ops_dir, "col2im_native.h")) as fr:
+            self.assertIn("col2im_xpu", fr.read())
+
     def test_dlpack_conversion(self):
         if self.expandable_segments:
             self.skipTest("Skipping DLPack test for expandable segments allocator.")
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
-        if IS_WINDOWS and int(torch.version.xpu) < 20250000:
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0.",
-            ):
-                torch.to_dlpack(x)
-        else:
-            z = torch.from_dlpack(torch.to_dlpack(x))
-            z[0] = z[0] + 1.0
-            self.assertEqual(z, x)
+        z = torch.from_dlpack(torch.to_dlpack(x))
+        z[0] = z[0] + 1.0
+        self.assertEqual(z, x)
+        cpu = make_tensor((5,), dtype=torch.float32, device="cpu")
+        z = torch.from_dlpack(cpu, device="xpu")
+        self.assertTrue(z.is_xpu)
+        self.assertEqual(z.cpu(), cpu)
+
+    def test_dlpack_exchange_api_current_work_stream_xpu(self):
+        """Test DLPack Exchange API current_work_stream returns non-null for XPU."""
+        from torch.utils import cpp_extension
+
+        self.assertTrue(hasattr(torch.Tensor, "__dlpack_c_exchange_api__"))
+        api_capsule = torch.Tensor.__dlpack_c_exchange_api__
+
+        tensor = torch.randn(8, device="xpu")
+
+        source = """
+        #include <torch/extension.h>
+        #include <ATen/dlpack.h>
+        #include <pybind11/pybind11.h>
+
+        namespace py = pybind11;
+
+        void test_xpu_current_work_stream(at::Tensor tensor, py::object api_obj) {
+            PyObject* api_capsule = api_obj.ptr();
+            TORCH_CHECK(PyCapsule_IsValid(api_capsule, "dlpack_exchange_api"),
+                        "Invalid DLPack exchange API capsule");
+            const DLPackExchangeAPI* api =
+                static_cast<const DLPackExchangeAPI*>(
+                    PyCapsule_GetPointer(api_capsule, "dlpack_exchange_api"));
+            TORCH_CHECK(api != nullptr, "API pointer is NULL");
+            TORCH_CHECK(api->current_work_stream != nullptr,
+                        "current_work_stream function pointer is NULL");
+
+            // Get the DL device info from the tensor
+            DLTensor dltensor;
+            {
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                    THPVariable_Wrap(tensor), &Py_DecRef);
+                int result = api->dltensor_from_py_object_no_sync(py_obj.get(), &dltensor);
+                TORCH_CHECK(result == 0, "dltensor_from_py_object_no_sync failed");
+            }
+
+            // Verify device type is kDLOneAPI (14)
+            TORCH_CHECK(dltensor.device.device_type == kDLOneAPI,
+                        "Expected kDLOneAPI (14), got ", dltensor.device.device_type);
+
+            // Test current_work_stream returns success and non-null stream
+            void* stream_out = nullptr;
+            int result = api->current_work_stream(
+                dltensor.device.device_type, dltensor.device.device_id, &stream_out);
+            TORCH_CHECK(result == 0,
+                        "current_work_stream failed with code ", result);
+            TORCH_CHECK(stream_out != nullptr,
+                        "current_work_stream returned NULL for XPU device - "
+                        "expected a valid stream handle");
+        }
+        """
+
+        module = cpp_extension.load_inline(
+            name="test_xpu_current_work_stream",
+            cpp_sources=[source],
+            functions=["test_xpu_current_work_stream"],
+            verbose=False,
+        )
+        module.test_xpu_current_work_stream(tensor, api_capsule)
+
+    def test_dlpack_exchange_api_stream_changes_with_xpu_stream(self):
+        """Test that current_work_stream reflects XPU stream context changes."""
+        from torch.utils import cpp_extension
+
+        api_capsule = torch.Tensor.__dlpack_c_exchange_api__
+        tensor = torch.randn(4, device="xpu")
+
+        source = """
+        #include <torch/extension.h>
+        #include <ATen/dlpack.h>
+        #include <pybind11/pybind11.h>
+
+        namespace py = pybind11;
+
+        uintptr_t get_xpu_work_stream(at::Tensor tensor, py::object api_obj) {
+            PyObject* api_capsule = api_obj.ptr();
+            const DLPackExchangeAPI* api =
+                static_cast<const DLPackExchangeAPI*>(
+                    PyCapsule_GetPointer(api_capsule, "dlpack_exchange_api"));
+            TORCH_CHECK(api != nullptr);
+
+            DLTensor dltensor;
+            {
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                    THPVariable_Wrap(tensor), &Py_DecRef);
+                int result = api->dltensor_from_py_object_no_sync(py_obj.get(), &dltensor);
+                TORCH_CHECK(result == 0);
+            }
+
+            void* stream_out = nullptr;
+            int result = api->current_work_stream(
+                dltensor.device.device_type, dltensor.device.device_id, &stream_out);
+            TORCH_CHECK(result == 0, "current_work_stream failed");
+            TORCH_CHECK(stream_out != nullptr, "stream is NULL");
+            return reinterpret_cast<uintptr_t>(stream_out);
+        }
+        """
+
+        module = cpp_extension.load_inline(
+            name="test_xpu_stream_changes",
+            cpp_sources=[source],
+            functions=["get_xpu_work_stream"],
+            verbose=False,
+        )
+
+        # Get stream handle on default stream
+        default_handle = module.get_xpu_work_stream(tensor, api_capsule)
+        self.assertNotEqual(default_handle, 0)
+
+        # Create a new stream and switch to it
+        new_stream = torch.xpu.Stream()
+        with torch.xpu.stream(new_stream):
+            new_handle = module.get_xpu_work_stream(tensor, api_capsule)
+            self.assertNotEqual(new_handle, default_handle)
+
+        # After exiting context, should be back on default stream
+        restored_handle = module.get_xpu_work_stream(tensor, api_capsule)
+        self.assertEqual(default_handle, restored_handle)
+
+    def test_storage_pin_memory(self):
+        t = torch.empty(10, pin_memory=True)
+        self.assertTrue(t.is_pinned())
+        storage = t.untyped_storage()
+        self.assertTrue(storage.is_pinned())
+
+        t = torch.empty(10)
+        self.assertFalse(t.is_pinned())
+        storage = t.untyped_storage()
+        s = storage.pin_memory()
+        self.assertTrue(s.is_pinned())
+
+        t = torch.empty(10, device="xpu")
+        s = t.untyped_storage()
+        s_cpu = s.to(device="cpu", non_blocking=True)
+
+        torch.xpu.synchronize()
+        self.assertTrue(s_cpu.is_pinned())
 
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.xpu.is_current_stream_capturing())
@@ -1263,8 +1785,10 @@ if __name__ == "__main__":
         with torch.xpu.stream(s):
             g = torch.xpu.XPUGraph()
             self.assertFalse(torch.xpu.is_current_stream_capturing())
+            self.assertFalse(s.is_capturing())
             g.capture_begin()
             self.assertTrue(torch.xpu.is_current_stream_capturing())
+            self.assertTrue(s.is_capturing())
             g.capture_end()
 
     def test_graph_capture_simple(self):
@@ -1280,6 +1804,21 @@ if __name__ == "__main__":
                 b = b + 1
             g.capture_end()
         torch.xpu.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertEqual(b.sum().item(), 11000.0)
+
+    def test_accelerator_graph_simple(self):
+        s = torch.Stream()
+        g = torch.accelerator.Graph()
+
+        with s, g:
+            a = torch.full((1000,), 1, device="xpu")
+            b = a
+            for _ in range(10):
+                b = b + 1
+        torch.accelerator.current_stream().wait_stream(s)
 
         g.replay()
 
@@ -1951,7 +2490,7 @@ if __name__ == "__main__":
         g = torch.xpu.XPUGraph()
         with self.assertRaisesRegex(
             RuntimeError,
-            "XPUGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",  # noqa: B950
+            "XPUGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",
         ):
             with torch.xpu.graph(g):
                 torch.xpu.manual_seed(1)
@@ -2307,14 +2846,14 @@ if __name__ == "__main__":
             try:
                 with torch.xpu.stream(stream):
                     mem = torch.xpu.caching_allocator_alloc(1024)
-            except BaseException:  # noqa: B036
+            except BaseException:
                 if mem is None:
                     return
             try:
                 torch.xpu.caching_allocator_delete(mem)
                 mem = None
                 return None
-            except BaseException:  # noqa: B036
+            except BaseException:
                 pass
 
         def throws_on_xpu_event():
@@ -2505,6 +3044,60 @@ class TestCachingHostAllocatorXpuGraph(TestCase):
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
+class TestXpuNativeMath(TestCase):
+    """Test SYCL native fast math functions in NumericUtils.h on XPU."""
+
+    def test_cauchy_sanity(self):
+        """cauchy_() exercises at::tan -> sycl::native::tan via TransformationHelper."""
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            x = torch.empty(10000, device="xpu", dtype=dtype)
+            x.cauchy_(median=0.0, sigma=1.0)
+            # Cauchy can produce large values but should mostly be finite
+            finite_ratio = torch.isfinite(x).float().mean().item()
+            self.assertTrue(
+                finite_ratio > 0.99,
+                f"cauchy_ produced too many non-finite for {dtype}",
+            )
+
+    def test_log_normal_sanity(self):
+        """log_normal_() exercises at::exp -> sycl::native::exp via TransformationHelper."""
+        for dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            x = torch.empty(10000, device="xpu", dtype=dtype)
+            x.log_normal_(mean=0.0, std=1.0)
+            self.assertTrue(
+                (x > 0).all(),
+                f"log_normal_ produced non-positive for {dtype}",
+            )
+            if dtype == torch.float32:
+                self.assertTrue(
+                    torch.isfinite(x).all(),
+                    f"log_normal_ produced non-finite for {dtype}",
+                )
+
+    def test_cauchy_accuracy(self):
+        """Verify cauchy_() median is correct (exercises sycl::native::tan precision)."""
+        torch.manual_seed(42)
+        x = torch.empty(100000, device="xpu", dtype=torch.float32)
+        x.cauchy_(median=5.0, sigma=1.0)
+        # Median of Cauchy(median=5, sigma=1) should be 5.0
+        self.assertTrue(abs(x.median().item() - 5.0) < 0.1)
+
+    def test_log_normal_accuracy(self):
+        """Verify log_normal_() statistics (exercises sycl::native::exp precision)."""
+        import math
+
+        torch.manual_seed(42)
+        x = torch.empty(100000, device="xpu", dtype=torch.float32)
+        x.log_normal_(mean=0.0, std=0.5)
+        # Median of LogNormal(0, 0.5) = exp(0) = 1.0
+        self.assertTrue(abs(x.median().item() - 1.0) < 0.05)
+        # Mean of LogNormal(mu, sigma) = exp(mu + sigma^2/2) = exp(0.125) ≈ 1.133
+        expected_mean = math.exp(0.0 + 0.5**2 / 2)
+        self.assertTrue(abs(x.mean().item() - expected_mean) < 0.05)
+
+
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestXpuOptims(TestCase):
     @optims(
         [optim for optim in optim_db if optim.has_capturable_arg],
@@ -2679,7 +3272,6 @@ class TestXpuOptims(TestCase):
 
         scaler = torch.amp.GradScaler(device="xpu", init_scale=4.0)
         g = torch.xpu.XPUGraph()
-        s = torch.xpu.Stream()
 
         weight = torch.ones((100,), device="xpu", requires_grad=True)
         opt = optim_info.optim_cls([weight], lr=0.1, foreach=foreach, fused=fused)
@@ -2770,6 +3362,78 @@ class TestXpuOps(TestCase):
 
             self.assertEqual(expect, actual)
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    def test_fused_rms_norm(self, device, dtype):
+        # Verify _fused_rms_norm is dispatched to XPU kernel (not fallback)
+        has_xpu_kernel = torch._C._dispatch_has_kernel_for_dispatch_key(
+            "aten::_fused_rms_norm",
+            torch._C._dispatch_key_name(torch._C.DispatchKey.XPU),
+        )
+        self.assertTrue(has_xpu_kernel, "_fused_rms_norm XPU kernel is not registered")
+        has_xpu_kernel = torch._C._dispatch_has_kernel_for_dispatch_key(
+            "aten::_fused_rms_norm_backward",
+            torch._C._dispatch_key_name(torch._C.DispatchKey.XPU),
+        )
+        self.assertTrue(
+            has_xpu_kernel, "_fused_rms_norm_backward XPU kernel is not registered"
+        )
+
+        shapes = [
+            (2, 16),  # small 2D
+            (4, 8, 32),  # 3D
+            (1, 1, 64),  # degenerate batch
+            (8, 128),  # typical sequence hidden
+            (2, 16, 512),  # typical LLM hidden dim
+            (4, 32, 1024),  # larger hidden dim
+            (1, 1, 4096),  # LLM-scale hidden
+            (3, 7, 17),  # non-power-of-2
+        ]
+        eps = 1e-5
+        atol_fwd = 1e-1 if dtype in [torch.float16, torch.bfloat16] else 1e-5
+        atol_bwd = 1e-1 if dtype in [torch.float16, torch.bfloat16] else 1e-5
+
+        for shape in shapes:
+            normalized_shape = list(shape[-1:])
+            x = torch.randn(*shape, dtype=dtype, device=device, requires_grad=True)
+            w = torch.randn(
+                *normalized_shape, dtype=dtype, device=device, requires_grad=True
+            )
+            grad_out = torch.randn(*shape, dtype=dtype, device=device)
+            x_cpu = x.detach().cpu().requires_grad_(True)
+            w_cpu = w.detach().cpu().requires_grad_(True)
+            grad_out_cpu = grad_out.detach().cpu()
+
+            # Forward
+            y, _ = torch.ops.aten._fused_rms_norm(x, normalized_shape, w, eps)
+            y_cpu, _ = torch.ops.aten._fused_rms_norm(
+                x_cpu, normalized_shape, w_cpu, eps
+            )
+            self.assertEqual(
+                y,
+                y_cpu,
+                atol=atol_fwd,
+                rtol=0,
+                msg=lambda msg: f"{msg}\nforward shape={shape}, dtype={dtype}",
+            )
+
+            # Backward
+            y.backward(grad_out)
+            y_cpu.backward(grad_out_cpu)
+            self.assertEqual(
+                x.grad.cpu(),
+                x_cpu.grad,
+                atol=atol_bwd,
+                rtol=0,
+                msg=lambda msg: f"{msg}\nx_grad shape={shape}, dtype={dtype}",
+            )
+            self.assertEqual(
+                w.grad.cpu(),
+                w_cpu.grad,
+                atol=atol_bwd,
+                rtol=0,
+                msg=lambda msg: f"{msg}\nw_grad shape={shape}, dtype={dtype}",
+            )
+
 
 instantiate_device_type_tests(TestXpuOps, globals(), only_for="xpu", allow_xpu=True)
 
@@ -2858,6 +3522,7 @@ class TestXpuAutocast(TestAutocast):
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
     def setUp(self):
+        super().setUp()
         torch._C._activate_gpu_trace()
         self.mock = unittest.mock.MagicMock()
 
@@ -2944,6 +3609,8 @@ class TestXPUAPISanity(TestCase):
                 self.assertTrue(value.group(1) in ["ON", "1"])
             else:
                 self.assertTrue(value.group(1) in ["OFF", "0"])
+            value = re.search(r"SYCL_COMPILER_VERSION=([^,]+)", config)
+            self.assertEqual(value.group(1), torch.version.xpu)
         else:
             self.assertTrue(value.group(1) in ["OFF", "0"])
             self.assertFalse(torch.distributed.is_xccl_available())

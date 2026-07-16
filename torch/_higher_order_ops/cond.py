@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
-import functools
 import logging
 import warnings
 from collections.abc import Callable
@@ -21,8 +20,8 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
+    create_fn_remove_none,
     fill_none_with_masks,
-    filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
     save_values_for_backward,
@@ -198,7 +197,7 @@ def cond(
     if isinstance(pred, (bool, int, float)):
         # This is the non-strict export case. Strict export and torch.compile are
         # handled above in dynamo.
-        if torch.compiler.is_compiling():
+        if torch.compiler.is_exporting():
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
@@ -241,12 +240,9 @@ def cond(
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
-    from torch._higher_order_ops.utils import setup_compilation_env
+    from torch._higher_order_ops.utils import _hop_compile_and_call
 
-    with setup_compilation_env() as backend:
-        return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
-            pred, true_fn, false_fn, operands
-        )
+    return _hop_compile_and_call(_cond_op_wrapper, (pred, true_fn, false_fn, operands))
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
@@ -350,31 +346,17 @@ class CondAutogradOp(torch.autograd.Function):
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
-
-        grads_tensor_masks = []
-
-        def create_fn_remove_none(fn):
-            @functools.wraps(fn)
-            def wrapped(*args):
-                nonlocal grads_tensor_masks
-
-                true_outputs = fn(*args)
-                grads_tensor_masks = [
-                    bool(isinstance(out, torch.Tensor)) for out in true_outputs
-                ]
-                return filter_with_masks(true_outputs, grads_tensor_masks)
-
-            return wrapped
-
+        true_wrapped, grads_tensor_masks = create_fn_remove_none(ctx._true_bw_fn)
         true_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._true_bw_fn),
+            true_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
+        false_wrapped, _ = create_fn_remove_none(ctx._false_bw_fn)
         false_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._false_bw_fn),
+            false_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,

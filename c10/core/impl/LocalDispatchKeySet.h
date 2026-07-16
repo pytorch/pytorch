@@ -94,7 +94,7 @@ class C10_API IncludeDispatchKeyGuard {
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
   PODLocalDispatchKeySet* tls_;
-  DispatchKeySet include_;
+  DispatchKeySet saved_state_;
 };
 
 class C10_API ExcludeDispatchKeyGuard {
@@ -112,7 +112,7 @@ class C10_API ExcludeDispatchKeyGuard {
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
   PODLocalDispatchKeySet* tls_;
-  DispatchKeySet exclude_;
+  DispatchKeySet saved_state_;
 };
 
 struct C10_API ForceDispatchKeyGuard {

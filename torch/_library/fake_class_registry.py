@@ -19,24 +19,24 @@ class FakeScriptObject:
         object.__setattr__(self, "wrapped_obj", wrapped_obj)
         object.__setattr__(self, "script_class_name", script_class_name)
 
-        from torch._library.opaque_object import is_opaque_type
+        from torch._library.opaque_object import is_custom_class
 
-        # We dont want to deepcopy when tracing with opaque objects because
+        # We don't want to deepcopy when tracing with opaque objects because
         # if a mutation happens intentionally (Ex. caching in device mesh)
         # then we want it to be recorded on the real object
         real_obj = x
-        if not is_opaque_type(type(x)):
+        if not is_custom_class(type(x)):
             try:
                 with _disable_current_modes():
                     real_obj = copy.deepcopy(x)
             except (RuntimeError, TypeError) as e:
-                log.warning(  # noqa: G200
+                log.warning(
                     "Unable to deepcopy the custom object %s due to %s. "
                     "Defaulting to the user given object. This might be "
                     "dangerous as side effects may be directly applied "
                     "to the object.",
                     script_class_name,
-                    str(e),
+                    e,
                 )
 
         object.__setattr__(self, "real_obj", real_obj)
@@ -51,7 +51,7 @@ class FakeScriptObject:
                 "The fake kernel should not depend on the contents of the "
                 "OpaqueObject at all, so we're erroring out. If this attr is "
                 "a method or constant attribute, you can allow this member access by "
-                "registering it via `register_opaque_type(members=...)`."
+                "registering it via `register_custom_class(members=...)`."
             ) from e
 
     def __setattr__(self, name, value):
@@ -69,12 +69,31 @@ class FakeScriptObject:
         return self.real_obj[key]
 
     def __eq__(self, other):
+        if self is other:
+            return True
+        # Get real_obj without triggering custom __getattribute__
+        self_real = object.__getattribute__(self, "real_obj")
         if isinstance(other, FakeScriptObject):
-            return self.real_obj == other.real_obj
-        return self.real_obj == other
+            other_real = object.__getattribute__(other, "real_obj")
+            # For reference types, identity check first
+            if self_real is other_real:
+                return True
+            # Fall back to equality check
+            return self_real == other_real
+        # Compare with the real object directly
+        return self_real == other
 
-    def __hash__(self) -> int:
-        return hash(self.real_obj)
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        # Use real_obj's hash if available, otherwise use object id
+        real_obj = object.__getattribute__(self, "real_obj")
+        try:
+            return hash(real_obj)
+        except TypeError:
+            # Object is not hashable, use identity-based hash
+            return id(real_obj)
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "FakeScriptObject":
         if id(self) in memo:
@@ -85,21 +104,28 @@ class FakeScriptObject:
             new_obj, "wrapped_obj", copy.deepcopy(self.wrapped_obj, memo)
         )
         object.__setattr__(new_obj, "script_class_name", self.script_class_name)
-        new_real_obj = copy.deepcopy(self.real_obj, memo)
-        object.__setattr__(new_obj, "real_obj", new_real_obj)
-        for name, value in self.__dict__.items():
-            if name not in ("wrapped_obj", "script_class_name", "real_obj"):
-                if isinstance(value, FakeScriptMethod):
-                    object.__setattr__(
-                        new_obj,
-                        name,
-                        FakeScriptMethod(new_obj, value.method_name, value.schema),
-                    )
-                else:
-                    if hasattr(new_real_obj, name):
-                        object.__setattr__(new_obj, name, getattr(new_real_obj, name))
+        # Disable dispatch modes during deepcopy of real_obj and attribute
+        # access to prevent tensor operations (e.g. storage cloning, property
+        # access on DeviceMesh) from going through proxy tracing or
+        # functionalization.
+        with _disable_current_modes():
+            new_real_obj = copy.deepcopy(self.real_obj, memo)
+            object.__setattr__(new_obj, "real_obj", new_real_obj)
+            for name, value in self.__dict__.items():
+                if name not in ("wrapped_obj", "script_class_name", "real_obj"):
+                    if isinstance(value, FakeScriptMethod):
+                        object.__setattr__(
+                            new_obj,
+                            name,
+                            FakeScriptMethod(new_obj, value.method_name, value.schema),
+                        )
                     else:
-                        object.__setattr__(new_obj, name, value)
+                        if hasattr(new_real_obj, name):
+                            object.__setattr__(
+                                new_obj, name, getattr(new_real_obj, name)
+                            )
+                        else:
+                            object.__setattr__(new_obj, name, value)
         return new_obj
 
 
@@ -217,13 +243,12 @@ def maybe_to_fake_obj(
         FakeOpaqueObject,
         get_opaque_obj_info,
         get_opaque_type_name,
-        is_opaque_type,
+        is_custom_class,
         OpaqueTypeStr,
     )
-    from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     x_type = type(x)
-    if is_opaque_type(x_type):
+    if is_custom_class(x_type):
         type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
         fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
 
@@ -232,7 +257,7 @@ def maybe_to_fake_obj(
         if opaque_info is None:
             raise AssertionError(f"opaque_info for type {x_type} must not be None")
         for attr_name in opaque_info.members:
-            with unset_fake_temporarily():
+            with _disable_current_modes():
                 if not hasattr(x, attr_name):
                     raise TypeError(
                         f"Opaque object of type '{type_name}' was specified to have member "
