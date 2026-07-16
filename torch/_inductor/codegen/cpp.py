@@ -1012,6 +1012,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"std::max({a}, {b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         return f"{a} ? {b} : {c}"
 
@@ -1715,6 +1720,10 @@ class CppVecOverrides(CppOverrides):
             return f"{a_cast} | {b_cast}"
         else:
             return f"at::vec::maximum({a}, {b})"
+
+    @staticmethod
+    def fmaximum(a, b):
+        return f"decltype({a})::blendv({a}, {b}, {a} < {b})"
 
     @staticmethod
     def square(a):

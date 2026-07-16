@@ -4,6 +4,7 @@ from typing import cast, NamedTuple
 
 import torch
 from torch import Tensor
+from torch._native.instrumentation import instrumented_cutedsl_cache
 from torch._C import (
     _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
     _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
@@ -586,7 +587,7 @@ def _allocate_output(
     return None
 
 
-@functools.cache
+@instrumented_cutedsl_cache("aten::_scaled_grouped_mm_v2")
 def _compile_scaled_grouped_mm_blockscaled(
     sm_count: int,
     max_active_clusters: int,

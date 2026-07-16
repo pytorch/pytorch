@@ -15,18 +15,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
-# The "nccl2" backend is normally discovered via the torch.distributed.backends
-# entry point. Register it explicitly here too so the test is self-contained
-# under editable installs, where a stale repo egg-info can shadow the dist-info
-# entry points. _ensure_backend_registered short-circuits if already present.
-try:
-    from torch.distributed.distributed_c10d import _register_builtin_nccl2_backend
-
-    _register_builtin_nccl2_backend()
-except Exception:
-    pass
-
-
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
@@ -144,6 +132,43 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         for w in dist.batch_isend_irecv(ops):
             w.wait()
         self.assertEqual(recv_t, torch.full((1,), float(prev), device=self.device))
+
+
+class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
+    # The whole nccl2 suite, run against the lazy wrapper: collectives go to
+    # the primary comm, send/recv to lazily-created per-peer pair comms.
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_lazy_pair_channels(self) -> None:
+        # Collectives run on the primary and must not create pair channels;
+        # send/recv lazily creates one channel per peer. The PG is shared
+        # across tests in this class, so only assert on deltas/lower bounds.
+        backend = dist.get_backend_impl(device=self.device)
+        before_collective = backend._num_active_channels()
+        t = torch.full((4,), 1.0, device=self.device)
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+        self.assertEqual(backend._num_active_channels(), before_collective)
+
+        send_t = torch.full((4,), float(self.rank), device=self.device)
+        recv_t = torch.empty((4,), device=self.device)
+        nxt = (self.rank + 1) % self.world_size
+        prev = (self.rank - 1) % self.world_size
+        if self.rank % 2 == 0:
+            dist.send(send_t, nxt)
+            dist.recv(recv_t, prev)
+        else:
+            dist.recv(recv_t, prev)
+            dist.send(send_t, nxt)
+        torch.cuda.synchronize()
+        self.assertEqual(recv_t, torch.full((4,), float(prev), device=self.device))
+
+        expected = 1 if nxt == prev else 2
+        self.assertGreaterEqual(backend._num_active_channels(), expected)
 
 
 if __name__ == "__main__":

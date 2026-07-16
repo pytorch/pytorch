@@ -1,9 +1,9 @@
-import functools
+from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._compile_with_safe_names import _compile_with_safe_names
 
 
-@functools.cache
+@instrumented_cutedsl_cache("aten::_scaled_grouped_mm_v2")
 def _compile_scaled_grouped_mm_prepare_metadata(
     a_is_2d: bool,
     b_is_2d: bool,
