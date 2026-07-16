@@ -4827,6 +4827,42 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cfg.sizes[0], 1)
         self.assertEqual(cfg.mapping["a"], 10)
 
+    def test_copy_namedtuple_and_user_object(self):
+        # namedtuple is a tuple subclass with __slots__ = () and no __dict__; it
+        # must reduce via __getnewargs__ rather than obj.__dict__. Also exercise
+        # a plain user object (has __dict__) to guard the common path.
+        from collections import namedtuple
+
+        NT = namedtuple("NT", "x y z")
+
+        class Plain:
+            def __init__(self):
+                self.a = 1
+                self.b = [10, 20]
+
+        def fn(o):
+            return copy.copy(o), copy.deepcopy(o)
+
+        cfn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        nt = NT(10, 20, 30)
+        c, d = cfn(nt)
+        self.assertEqual(c, nt)
+        self.assertEqual(d, nt)
+        self.assertIs(type(c), NT)
+        self.assertIs(type(d), NT)
+        self.assertEqual(c._fields, nt._fields)
+
+        p = Plain()
+        c, d = cfn(p)
+        self.assertEqual(c.a, 1)
+        self.assertEqual(c.b, [10, 20])
+        self.assertIs(c.b, p.b)  # shallow copy shares the list
+        self.assertEqual(d.a, 1)
+        self.assertEqual(d.b, [10, 20])
+        self.assertIsNot(d.b, p.b)  # deep copy clones the list
+        self.assertIs(type(d), Plain)
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
