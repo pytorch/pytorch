@@ -697,7 +697,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertLessEqual(
             nprocs,
             1,
-            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
+            lambda msg: f"{msg}\nFound {nprocs} processes creating contexts on {device}, expecting 1 at most",
         )
 
     def _helper_test_extra_cuda_context_by_memory(self):
@@ -735,7 +735,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
                 # Bump the heuristic from 1.5 to 1.7 due to
                 # https://github.com/pytorch/pytorch/issues/153122
                 used_after < used_before * 1.7,
-                f"{device} used {used_after} bytes after collective, "
+                lambda msg: f"{msg}\n{device} used {used_after} bytes after collective, "
                 f"70% more than the status before ({used_before} bytes). "
                 f"Extra CUDA context may have been created.",
             )
@@ -805,7 +805,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertLessEqual(
             nprocs,
             1,
-            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
+            lambda msg: f"{msg}\nFound {nprocs} processes creating contexts on {device}, expecting 1 at most",
         )
 
     @requires_nccl()
@@ -1649,7 +1649,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertLess(
                 elapsed_time,
                 30.0,
-                f"shrink_group took {elapsed_time:.3f}s, possible regression",
+                lambda msg: f"{msg}\nshrink_group took {elapsed_time:.3f}s, possible regression",
             )
 
             # Test collective performance
@@ -1808,7 +1808,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def _validate_shrunk_group(self, shrunk_pg, expected_size, test_name=""):
         """Validate properties of a shrunk process group."""
-        self.assertIsNotNone(shrunk_pg, f"{test_name}: shrunk_pg should not be None")
+        self.assertIsNotNone(
+            shrunk_pg, lambda msg: f"{msg}\n{test_name}: shrunk_pg should not be None"
+        )
         actual_size = shrunk_pg.size()
         self.assertEqual(
             actual_size,
@@ -1818,7 +1820,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         new_rank = shrunk_pg.rank()
         self.assertTrue(
-            0 <= new_rank < expected_size, f"{test_name}: invalid new rank {new_rank}"
+            0 <= new_rank < expected_size,
+            lambda msg: f"{msg}\n{test_name}: invalid new rank {new_rank}",
         )
 
         log_test_info(
@@ -2191,27 +2194,27 @@ class DistributedDataParallelTest(
             ):
                 self.assertIsNotNone(
                     p_ddp.grad,
-                    f"DDP gradient is None at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nDDP gradient is None at iteration {iteration}, param {name}",
                 )
 
                 self.assertIsNotNone(
                     p_ref.grad,
-                    f"Reference gradient is None at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nReference gradient is None at iteration {iteration}, param {name}",
                 )
 
                 self.assertTrue(
                     p_ddp.grad.is_complex(),
-                    f"DDP gradient lost complex dtype at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nDDP gradient lost complex dtype at iteration {iteration}, param {name}",
                 )
 
                 self.assertTrue(
                     p_ref.grad.is_complex(),
-                    f"Reference gradient lost complex dtype at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nReference gradient lost complex dtype at iteration {iteration}, param {name}",
                 )
 
                 self.assertFalse(
                     torch.allclose(p_ddp.grad.imag, torch.zeros_like(p_ddp.grad.imag)),
-                    f"DDP imaginary gradient is all zeros at iteration {iteration}, param {name}! "
+                    lambda msg: f"{msg}\nDDP imaginary gradient is all zeros at iteration {iteration}, param {name}! "
                     f"This indicates the complex gradient bug.",
                 )
 
@@ -2219,7 +2222,7 @@ class DistributedDataParallelTest(
                     torch.allclose(
                         p_ddp.grad.real, p_ref.grad.real, rtol=1e-5, atol=1e-5
                     ),
-                    f"Real gradient mismatch at iteration {iteration}, param {name}\n"
+                    lambda msg: f"{msg}\nReal gradient mismatch at iteration {iteration}, param {name}\n"
                     f"DDP real: {p_ddp.grad.real.mean():.6f}, "
                     f"Ref real: {p_ref.grad.real.mean():.6f}",
                 )
@@ -2228,7 +2231,7 @@ class DistributedDataParallelTest(
                     torch.allclose(
                         p_ddp.grad.imag, p_ref.grad.imag, rtol=1e-5, atol=1e-5
                     ),
-                    f"Imaginary gradient mismatch at iteration {iteration}, param {name}\n"
+                    lambda msg: f"{msg}\nImaginary gradient mismatch at iteration {iteration}, param {name}\n"
                     f"DDP imag: {p_ddp.grad.imag.mean():.6f}, "
                     f"Ref imag: {p_ref.grad.imag.mean():.6f}",
                 )
@@ -2310,16 +2313,16 @@ class DistributedDataParallelTest(
             ):
                 self.assertIsNotNone(
                     p_ddp.grad,
-                    f"DDP gradient is None at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nDDP gradient is None at iteration {iteration}, param {name}",
                 )
                 self.assertIsNotNone(
                     p_ref.grad,
-                    f"Reference gradient is None at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nReference gradient is None at iteration {iteration}, param {name}",
                 )
 
                 self.assertTrue(
                     p_ddp.grad.is_complex() == p_ref.grad.is_complex(),
-                    f"Gradient dtype mismatch at iteration {iteration}, param {name}",
+                    lambda msg: f"{msg}\nGradient dtype mismatch at iteration {iteration}, param {name}",
                 )
 
                 if p_ddp.grad.is_complex():
@@ -2327,24 +2330,24 @@ class DistributedDataParallelTest(
                         torch.allclose(
                             p_ddp.grad.imag, torch.zeros_like(p_ddp.grad.imag)
                         ),
-                        f"DDP imaginary gradient is all zeros at iteration {iteration}, param {name}",
+                        lambda msg: f"{msg}\nDDP imaginary gradient is all zeros at iteration {iteration}, param {name}",
                     )
                     self.assertTrue(
                         torch.allclose(
                             p_ddp.grad.real, p_ref.grad.real, rtol=1e-5, atol=1e-5
                         ),
-                        f"Real gradient mismatch at iteration {iteration}, param {name}",
+                        lambda msg: f"{msg}\nReal gradient mismatch at iteration {iteration}, param {name}",
                     )
                     self.assertTrue(
                         torch.allclose(
                             p_ddp.grad.imag, p_ref.grad.imag, rtol=1e-5, atol=1e-5
                         ),
-                        f"Imaginary gradient mismatch at iteration {iteration}, param {name}",
+                        lambda msg: f"{msg}\nImaginary gradient mismatch at iteration {iteration}, param {name}",
                     )
                 else:
                     self.assertTrue(
                         torch.allclose(p_ddp.grad, p_ref.grad, rtol=1e-5, atol=1e-5),
-                        f"Real gradient mismatch at iteration {iteration}, param {name}",
+                        lambda msg: f"{msg}\nReal gradient mismatch at iteration {iteration}, param {name}",
                     )
 
     @requires_nccl()

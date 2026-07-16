@@ -15,6 +15,7 @@
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
 
 namespace c10d::nccl2 {
 
@@ -91,6 +92,12 @@ void ProcessGroupNCCL::ensureInitialized(at::Device device) {
   TORCH_CHECK(
       init_state_ == InitializationState::UNINITIALIZED,
       "ProcessGroupNCCL has been finalized");
+  // In the reconfigure regime the communicator is only ever created by
+  // reconfigure(); collectives before the first reconfigure are an error.
+  TORCH_CHECK(
+      !options_c10d_->enable_reconfigure,
+      "ProcessGroupNCCL has not been initialized. Call reconfigure() before "
+      "issuing collectives when enable_reconfigure=True.");
   // Lazy one-time bootstrap (replaces torchcomms' eager init(device)).
   init(device);
 }
@@ -171,6 +178,29 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
         });
   }();
   return allocator;
+}
+
+c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
+    const std::optional<at::Tensor>& tensor) {
+  // Trigger the lazy bootstrap: prefer the tensor's device, then the bound
+  // device, then the current CUDA device (same policy as barrier()).
+  if (init_state_ != InitializationState::INITIALIZED) {
+    at::Device dev = at::Device(at::kCUDA, at::cuda::current_device());
+    if (tensor.has_value()) {
+      dev = tensor->device();
+    } else if (getBoundDeviceId().has_value()) {
+      dev = getBoundDeviceId().value();
+    }
+    ensureInitialized(dev);
+  }
+  checkInitialized();
+  auto window = c10::make_intrusive<WindowNCCL>(
+      c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(
+          this));
+  if (tensor.has_value()) {
+    window->tensor_register(*tensor);
+  }
+  return window;
 }
 
 // ---------------------------------------------------------------------------
