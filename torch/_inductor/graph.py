@@ -2540,6 +2540,15 @@ class GraphLowering(torch.fx.Interpreter):
         if has_gpu or needs_cpu_triton_two_pass:
 
             def extract_real_inputs() -> list[int | float | torch.Tensor]:
+                if self.is_const_graph:
+                    # The constant-folding subgraph has no runtime placeholder
+                    # inputs; its foldable constants are appended separately below
+                    # from self.constants. Inheriting the main graph's V.real_inputs
+                    # here would feed those tensors at the const wrapper's constant
+                    # offsets and launch the fold kernels on wrong shapes (an
+                    # illegal memory access), so the const graph has no real inputs.
+                    return []
+
                 def materialize(
                     x: torch.SymInt | torch.SymFloat | torch.Tensor,
                 ) -> int | float | torch.Tensor:
