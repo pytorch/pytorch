@@ -266,32 +266,38 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
     # ============================================================
 
     @parametrize("device", devices)
-    def test_all_reduce_backward(self, device):
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_all_reduce_backward(self, device, reduce_op):
         """Test all_reduce backward does all_reduce.
 
         Both tensor AND gradients are VARYING (different across ranks).
-        Backward aggregates gradients via all_reduce(sum).
+        Backward aggregates gradients via all_reduce().
         """
+        shape = (3, 3)
         group_name = dist.group.WORLD.group_name
 
         input_tensor = torch.randn(3, 3, requires_grad=True, device=device)
-        output = fcols.all_reduce(input_tensor, "sum", group=group_name)
+        output = fcols.all_reduce(input_tensor, reduce_op, group=group_name)
 
         # Backward with ones
         output.sum().backward()
 
         # Gradient should be aggregated (backward is all_reduce)
-        expected_grad = torch.full(
-            (3, 3), fill_value=float(self.world_size), device=device
-        )
+        if reduce_op == "sum":
+            expected_grad = torch.full(
+                shape, fill_value=float(self.world_size), device=device
+            )
+        elif reduce_op == "avg":
+            expected_grad = torch.full(shape, fill_value=1.0, device=device)
         self.assertEqual(input_tensor.grad, expected_grad)
 
-        # Backward is all_reduce (sum)
         grad_outputs = torch.rand_like(output, device=device)
         (grad_input,) = torch.autograd.grad(
             output, input_tensor, grad_outputs=grad_outputs
         )
-        expected_grad_input = fcols.all_reduce(grad_outputs, "sum", group=group_name)
+        expected_grad_input = fcols.all_reduce(
+            grad_outputs, reduce_op, group=group_name
+        )
         self.assertEqual(grad_input, expected_grad_input)
 
     @parametrize("device", devices)
