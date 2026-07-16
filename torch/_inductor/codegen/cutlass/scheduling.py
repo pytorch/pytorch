@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import cast, TypeGuard
 
+import sympy
+
 from torch._inductor.codegen.cutlass.python_evt import (
     CutlassEVTCodegen,
     MockCutlassHandler,
@@ -65,7 +67,8 @@ class CUTLASSScheduling(BaseScheduling):
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         if self.is_cutlass_template(node1) and isinstance(node2, BaseSchedulerNode):
-            assert node1.node, "node1.node should not be None"
+            if not node1.node:
+                raise AssertionError("node1.node should not be None")
             return self._can_fuse_epilogue_impl(
                 cast(CUTLASSTemplateBuffer, node1.node),
                 [],
@@ -74,8 +77,10 @@ class CUTLASSScheduling(BaseScheduling):
         elif self.is_cutlass_fused_template(node1) and isinstance(
             node2, BaseSchedulerNode
         ):
-            assert node1.node, "node1.node should not be None"
-            assert node2.node, "node2.node should not be None"
+            if not node1.node:
+                raise AssertionError("node1.node should not be None")
+            if not node2.node:
+                raise AssertionError("node2.node should not be None")
             fnode1 = cast(FusedSchedulerNode, node1)
             return self._can_fuse_epilogue_impl(
                 fnode1.get_template_node(),  # type: ignore[arg-type]
@@ -121,6 +126,22 @@ class CUTLASSScheduling(BaseScheduling):
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
+
+            # For JIT cpp_wrapper, the kernel call site emits a bare
+            # `extern "C"` symbol reference; compile the .so now so the
+            # wrapper compile can link against it via extra_flags.
+            # Autotune compiled a .so for the unfused kernel name
+            # (e.g. cutlass_<hash>), but at codegen time the kernel name
+            # gains a descriptive prefix (cutlass_fused_mm_<hash>), so the
+            # exported symbol differs and we need a fresh compile.
+            if V.graph.cpp_wrapper and not V.graph.aot_mode:
+                from ...codecache import CUDACodeCache, XPUCodeCache
+
+                codecache_cls = (
+                    XPUCodeCache if V.graph.device_type == "xpu" else CUDACodeCache
+                )
+                so_path, _, _ = codecache_cls.compile(src_code, "so")
+                wrapper.external_kernel_libs.add(so_path)
         return kernel_name
 
     def codegen_template(
@@ -133,16 +154,19 @@ class CUTLASSScheduling(BaseScheduling):
         Codegen a cutlass template, possibly with fused epilogues
         """
         counters["inductor"]["cutlass_epilogue_fusion_counter"] += len(epilogue_nodes)
-        assert self.is_cutlass_template(template_node), (
-            "Template node passed to CUTLASSScheduling.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
-        )
+        if not self.is_cutlass_template(template_node):
+            raise AssertionError(
+                "Template node passed to CUTLASSScheduling.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
+            )
         _, (_numel, rnumel) = template_node.group
-        assert rnumel == 1
+        if rnumel != 1:
+            raise AssertionError(f"expected rnumel == 1, got {rnumel}")
         ctb: CUTLASSTemplateBuffer = cast(CUTLASSTemplateBuffer, template_node.node)
         epilogue_ir_nodes: list[Buffer] = [n.node for n in epilogue_nodes]  # type: ignore[misc]
-        assert all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes), (
-            "Epilogue nodes must all be instances of ir.ComputedBuffer"
-        )
+        if not all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes):
+            raise AssertionError(
+                "Epilogue nodes must all be instances of ir.ComputedBuffer"
+            )
         kernel, render = ctb.make_kernel_render(  # type: ignore[misc]
             ctb, epilogue_nodes=epilogue_nodes
         )
@@ -157,9 +181,11 @@ class CUTLASSScheduling(BaseScheduling):
             ctb.emulate_store_fn()
             for node in epilogue_ir_nodes:
                 with V.set_ops_handler(MockCutlassHandler(V.get_ops_handler())):
-                    assert isinstance(
-                        node, ComputedBuffer
-                    )  # Not sure why we need to do this again
+                    # Not sure why we need to do this again
+                    if not isinstance(node, ComputedBuffer):
+                        raise AssertionError(
+                            f"expected ComputedBuffer, got {type(node)}"
+                        )
                     node.get_store_function()(CutlassEVTCodegen.get_index_vars(node))
 
         with V.set_kernel_handler(kernel):
@@ -186,13 +212,47 @@ class CUTLASSScheduling(BaseScheduling):
     ) -> list[BaseSchedulerNode]:
         nodes = fused_node.get_nodes()
         template_node = fused_node.get_template_node()
-        assert all(n.node is not None for n in nodes), (
-            "All epilogue nodes should have an IRNode"
-        )
+        if not all(n.node is not None for n in nodes):
+            raise AssertionError("All epilogue nodes should have an IRNode")
         # pyrefly: ignore [redundant-cast]
         return cast(
             list[BaseSchedulerNode], [n for n in nodes if n.node is not template_node]
         )
+
+    @staticmethod
+    def _is_compatible_reshape(
+        template_size: Sequence[sympy.Expr], node_size: Sequence[sympy.Expr]
+    ) -> bool:
+        """
+        Check if node_size is a compatible reshape of template_size.
+        This allows cases like template [8192, 3072] with node [16, 512, 3072]
+        where [16*512, 3072] == [8192, 3072] (prefix dims multiply to match).
+        """
+        if len(node_size) <= len(template_size):
+            return False
+        # Try to merge consecutive node dims to reconstruct template dims
+        t_idx = 0
+        n_idx = 0
+
+        def _matches_template_dim(lhs: sympy.Expr, rhs: sympy.Expr) -> bool:
+            # Fast path for concrete/static equality before invoking simplify.
+            if lhs == rhs:
+                return True
+            if V.graph.sizevars.statically_known_equals(lhs, rhs):
+                return True
+            return sympy.simplify(lhs - rhs) == 0
+
+        while t_idx < len(template_size) and n_idx < len(node_size):
+            product = node_size[n_idx]
+            n_idx += 1
+            # Try multiplying consecutive node dims until we match template dim
+            while not _matches_template_dim(product, template_size[t_idx]):
+                if n_idx >= len(node_size):
+                    return False
+                product = product * node_size[n_idx]
+                n_idx += 1
+            t_idx += 1
+        return t_idx == len(template_size) and n_idx == len(node_size)
 
     def _can_fuse_epilogue_impl(
         self,
@@ -218,7 +278,10 @@ class CUTLASSScheduling(BaseScheduling):
 
         scheduler_nodes_to_fuse = node_to_fuse.get_nodes()
 
-        assert isinstance(cutlass_template_buffer, CUTLASSTemplateBuffer)
+        if not isinstance(cutlass_template_buffer, CUTLASSTemplateBuffer):
+            raise AssertionError(
+                f"expected CUTLASSTemplateBuffer, got {type(cutlass_template_buffer)}"
+            )
 
         # Checks on constituent nodes
         for s_node in scheduler_nodes_to_fuse:
@@ -236,18 +299,26 @@ class CUTLASSScheduling(BaseScheduling):
 
             name = node.get_computed_buffer_name()  # type: ignore[attr-defined]
             # dtype can differ, and strides can differ as long as they are broadcastable
+            # Allow compatible reshapes (e.g., [8192, 3072] vs [16, 512, 3072])
+            # where the node's shape is a split of the template's shape
             if node.get_size() != cutlass_template_buffer.get_size():
-                why(
-                    f"{name}'s size: {node.get_size()} differs from {cutlass_template_buffer.get_name()}'s \
+                if not self._is_compatible_reshape(
+                    cutlass_template_buffer.get_size(), node.get_size()
+                ):
+                    why(
+                        f"{name}'s size: {node.get_size()} differs from {cutlass_template_buffer.get_name()}'s \
 size: {cutlass_template_buffer.get_size()}"
-                )
-                return False
+                    )
+                    return False
 
-        assert len(
-            existing_epilogue_nodes
-        ) or cutlass_template_buffer.get_name() in OrderedSet(
-            [rd.name for rd in node_to_fuse.read_writes.reads]
-        ), "First epilogue node must read from cutlass template buffer"
+        if not (
+            len(existing_epilogue_nodes)
+            or cutlass_template_buffer.get_name()
+            in OrderedSet([rd.name for rd in node_to_fuse.read_writes.reads])
+        ):
+            raise AssertionError(
+                "First epilogue node must read from cutlass template buffer"
+            )
 
         if node_to_fuse.has_aliasing_or_mutation():
             why(f"{node_to_fuse.get_name()} has aliasing or mutation")

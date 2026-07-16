@@ -638,7 +638,7 @@ void Reducer::delay_all_reduce() {
     if (!unused_parameters_.empty()) {
       LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
                 << "Parameter(s) (in the format of {param_name, index}): "
-                << unused_params_stream.str()
+                << std::move(unused_params_stream).str()
                 << " is(are) unused during first iteration. Since"
                 << " static_graph=True is enabled for DDP, we expect"
                 << " this set of unused parameters to remain consistent"
@@ -2413,7 +2413,8 @@ compute_bucket_assignment_by_size(
     bucket_indices.emplace_back(std::get<0>(bucket_indices_with_size));
     per_bucket_size_limits.emplace_back(std::get<1>(bucket_indices_with_size));
   }
-  return std::make_tuple(bucket_indices, per_bucket_size_limits);
+  return std::make_tuple(
+      std::move(bucket_indices), std::move(per_bucket_size_limits));
 }
 
 // Verifies corresponding params in the model replica have the same

@@ -194,8 +194,8 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const index_t nthreads,
     bool count_include_pad, bool use_divisor) {
   CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
     const int c = index % channels;
-    const int w = (index / channels) % width;
-    const int h = (index / channels / width) % height;
+    const int w = (index / channels) % width + pad_w;
+    const int h = (index / channels / width) % height + pad_h;
     const int n = index / channels / width / height;
 
     const int phstart = (h < kernel_h) ? 0 : (h - kernel_h) / stride_h + 1;
