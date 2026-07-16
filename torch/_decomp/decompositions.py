@@ -1744,8 +1744,8 @@ def native_group_norm_backward(
     )
 
     # Compute Internal gradients
-    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
-    db = grad_output.view(N, C, HxW).sum(dim=[2])
+    ds = torch.mul(grad_output, input).view(N, C, HxW).sum(2)
+    db = grad_output.view(N, C, HxW).sum(2)
 
     d_input: Tensor | None = None
     d_gamma: Tensor | None = None
@@ -1762,10 +1762,7 @@ def native_group_norm_backward(
         else:
             ds_val = ds.reshape(N, group, cpg).sum(2)
             db_val = db.reshape(N, group, cpg).sum(2)
-            c1 = torch.mul(
-                rstd.unsqueeze(-1),
-                torch.ones((1, group, cpg), device=rstd.device),
-            )
+            c1 = rstd.unsqueeze(-1)
         c2 = (db_val * mean - ds_val) * rstd * rstd * rstd * s
         c3 = -c2 * mean - db_val * rstd * s
 
@@ -1784,13 +1781,13 @@ def native_group_norm_backward(
                 (ds.view(N, group, cpg) - db.view(N, group, cpg) * mean.unsqueeze(-1))
                 * rstd.unsqueeze(-1)
             )
-            .sum(dim=[0])
+            .sum(0)
             .reshape(C)
         )
     if output_mask[2]:
-        d_bias = db.sum(dim=[0])
+        d_bias = db.sum(0)
 
-    return (d_input, d_gamma, d_bias)
+    return d_input, d_gamma, d_bias
 
 
 # out_wrapper currently does not allow optional outputs
