@@ -1859,7 +1859,7 @@ class ComboKernelDynamicShapesTestsPerSubkernelBlocks(ComboKernelDynamicShapesTe
 @instantiate_parametrized_tests
 class ComboKernelCompileTimeAutotuneTests(TestCase):
     """Compile-time per-subkernel autotune: each combo subkernel autotunes its blocks
-    standalone at compile time; winners are stitched + baked into the combo."""
+    standalone at compile time; winners are stitched into the combo's launch config."""
 
     def setUp(self):
         super().setUp()
@@ -1902,8 +1902,8 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             torch.randn(1024, 768, device=GPU_TYPE),
         ]
         counters.clear()
-        # fresh_cache so the subkernels are benchmarked (not served from a warm perf cache),
-        # which is what makes the cdt mode actually run coordinate descent.
+        # fresh_cache so the subkernels aren't served from the autotune cache
+        # (.best_config), which is what makes the cdt mode actually run coordesc.
         with fresh_cache(), torch._inductor.config.patch(extra):
             out, code = run_and_get_code(torch.compile(f), *inps)
         code = " ".join(code)
@@ -1982,8 +1982,10 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             out, code = run_and_get_code(torch.compile(f), *inps)
         # loose tolerance: summing 65536 fp32 elements is accumulation-order sensitive
         self.assertEqual(out, f(*inps), atol=1e-3, rtol=1e-3)
-        src = " ".join(code)
-        FileCheck().check("R0_BLOCK_0").check("R0_BLOCK_1").run(src)
+        # cpp_wrapper emits C++ source; the constexpr args only appear in python codegen
+        if not torch._inductor.config.cpp_wrapper:
+            src = " ".join(code)
+            FileCheck().check("R0_BLOCK_0").check("R0_BLOCK_1").run(src)
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
 
     @requires_gpu_and_triton
@@ -2004,6 +2006,43 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         a2 = torch.randn(5000, device=GPU_TYPE)
         b2 = torch.randn(7000, device=GPU_TYPE)
         self.assertEqual(fn_c(a2, b2), f(a2, b2))
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_sort_forces_persistent(self):
+        # The standalone benchmark twin must stay persistent for sort even when the
+        # choices-level heuristic says otherwise (TritonKernel.sort asserts persistent;
+        # TritonKernel.should_use_persistent_reduction enforces it above the heuristic).
+        from torch._inductor.choices import InductorChoices
+
+        orig = InductorChoices.should_use_persistent_reduction
+
+        @staticmethod
+        def force_non_persistent_for_sort(features, cooperative_reduction):
+            if features.contains_op("sort"):
+                return False
+            return orig(features, cooperative_reduction)
+
+        def fn(a, b):
+            return torch.sort(a, dim=1).values, torch.sort(b, dim=1).values
+
+        inps = [
+            torch.randint(0, 1000, (10, 200), device=GPU_TYPE),
+            torch.randint(0, 1000, (20, 200), device=GPU_TYPE),
+        ]
+        counters.clear()
+        with (
+            patch.object(
+                InductorChoices,
+                "should_use_persistent_reduction",
+                force_non_persistent_for_sort,
+            ),
+            fresh_cache(),
+            torch._inductor.config.patch({"triton.coalesce_tiling_analysis": False}),
+        ):
+            out = torch.compile(fn)(*inps)
+        self.assertEqual(out, fn(*inps))
+        # Sorts stay fused in the combo: tuned normally, no carve-out fallbacks.
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
 
     @requires_gpu_and_triton
