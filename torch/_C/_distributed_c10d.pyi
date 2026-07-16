@@ -1110,6 +1110,21 @@ class ProcessGroupXCCL(Backend):
     ) -> str: ...
     def _reset_fr_recording_xccl(self) -> None: ...
 
+class ProcessGroupNCCL2(Backend):
+    class Options(Backend.Options):
+        is_high_priority_stream: bool
+        abort_process_on_timeout_or_error: bool
+
+        def __init__(self, is_high_priority_stream: bool = False): ...
+
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: Options,
+    ) -> None: ...
+
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...
 
