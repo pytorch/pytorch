@@ -11680,6 +11680,19 @@ class TestAutotuneMPS(TestCaseMPS):
             with torch.backends.mps.flags(benchmark=1):
                 pass
 
+    def test_benchmark_hint_warning(self, device):
+        a = torch.randn(1, 256, device=device)
+        b = torch.randn(256, 512, device=device)
+        with torch.backends.mps.flags(benchmark=False):
+            with self.assertWarnsOnceRegex(UserWarning, r".*torch\.backends\.mps\.benchmark"):
+                _ = a @ b
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _ = a @ b
+        self.assertFalse(
+            any("mps.benchmark" in str(w.message) for w in caught)
+        )
+
     def test_trace_validation(self, device):
         with self.assertRaisesRegex(TypeError, "max_entries must be an int"):
             torch.backends.mps.autotune_trace(max_entries=True)

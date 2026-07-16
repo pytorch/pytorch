@@ -138,14 +138,9 @@ std::string gemv_config_id(const GemvConfig& config) {
   return fmt::format("standard:nsimd={}:vec={}", config.nsimd, config.vec);
 }
 
-at::mps::MPSAutotuneTensorInfo gemv_tensor_info(
-    const char* name,
-    const Tensor& tensor) {
-  return {name,
-          c10::toString(tensor.scalar_type()),
-          tensor.sizes().vec(),
-          tensor.strides().vec(),
-          tensor.storage_offset()};
+at::mps::MPSAutotuneTensorInfo gemv_tensor_info(const char* name, const Tensor& tensor) {
+  return {
+      name, c10::toString(tensor.scalar_type()), tensor.sizes().vec(), tensor.strides().vec(), tensor.storage_offset()};
 }
 
 bool same_gemv_config(const GemvConfig& a, const GemvConfig& b) {
@@ -165,12 +160,11 @@ GemvConfig make_t2d_config(int kq) {
   return config;
 }
 
-std::optional<GemvConfig> normalize_gemv_config(
-    GemvConfig config,
-    c10::ScalarType dt,
-    bool use_t,
-    bool matrix_contiguous,
-    int64_t align) {
+std::optional<GemvConfig> normalize_gemv_config(GemvConfig config,
+                                                c10::ScalarType dt,
+                                                bool use_t,
+                                                bool matrix_contiguous,
+                                                int64_t align) {
   if (config.kernel == GemvKernel::T2D) {
     const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
     if (!use_t || !matrix_contiguous || (align & (t2d_vec - 1))) {
@@ -181,16 +175,14 @@ std::optional<GemvConfig> normalize_gemv_config(
   return GemvPolicy::clamp_vec(config, align);
 }
 
-std::vector<GemvConfig> gemv_benchmark_candidates(
-    c10::ScalarType dt,
-    bool use_t,
-    bool matrix_contiguous,
-    int64_t align,
-    GemvConfig heuristic) {
+std::vector<GemvConfig> gemv_benchmark_candidates(c10::ScalarType dt,
+                                                  bool use_t,
+                                                  bool matrix_contiguous,
+                                                  int64_t align,
+                                                  GemvConfig heuristic) {
   std::vector<GemvConfig> candidates;
   auto add = [&](GemvConfig config) {
-    auto normalized =
-        normalize_gemv_config(config, dt, use_t, matrix_contiguous, align);
+    auto normalized = normalize_gemv_config(config, dt, use_t, matrix_contiguous, align);
     if (!normalized.has_value()) {
       return;
     }
@@ -226,64 +218,45 @@ std::vector<GemvConfig> gemv_benchmark_candidates(
   return candidates;
 }
 
-std::string gemv_kernel_name(
-    const std::string& dt_str,
-    GemvConfig config,
-    GemmEpilogue epi,
-    bool use_t,
-    bool matrix_contiguous,
-    bool idx64,
-    int64_t vec_xs,
-    int64_t vec_offset) {
+std::string gemv_kernel_name(const std::string& dt_str,
+                             GemvConfig config,
+                             GemmEpilogue epi,
+                             bool use_t,
+                             bool matrix_contiguous,
+                             bool idx64,
+                             int64_t vec_xs,
+                             int64_t vec_offset) {
   const bool use_t2d = use_t && config.kernel == GemvKernel::T2D;
-  const bool xc = !use_t && config.vec > 1 && vec_xs == 1 &&
-      (vec_offset % config.vec) == 0;
+  const bool xc = !use_t && config.vec > 1 && vec_xs == 1 && (vec_offset % config.vec) == 0;
   const auto epi_str = epi == GemmEpilogue::Bias ? "ab" : "none";
   const auto matrix_str = matrix_contiguous ? "" : "_strided";
   const auto idx_str = idx64 ? "_i64" : "";
   if (use_t2d) {
-    return fmt::format(
-        "gemv_t2d_{}_{}_{}_{}", dt_str, config.nsimd, config.kq, epi_str);
+    return fmt::format("gemv_t2d_{}_{}_{}_{}", dt_str, config.nsimd, config.kq, epi_str);
   }
   if (use_t) {
-    return fmt::format(
-        "gemv_t_{}_{}_{}_{}{}{}",
-        dt_str,
-        config.nsimd,
-        config.vec,
-        epi_str,
-        matrix_str,
-        idx_str);
+    return fmt::format("gemv_t_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, matrix_str, idx_str);
   }
-  return fmt::format("gemv_nt_{}_{}_{}_{}_{}{}{}",
-                     dt_str,
-                     config.nsimd,
-                     config.vec,
-                     epi_str,
-                     xc ? "xc" : "xs",
-                     matrix_str,
-                     idx_str);
+  return fmt::format(
+      "gemv_nt_{}_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, xc ? "xc" : "xs", matrix_str, idx_str);
 }
 
-GemvLaunch prepare_gemv_launch(
-    const std::string& dt_str,
-    c10::ScalarType dt,
-    GemvConfig config,
-    GemmEpilogue epi,
-    bool use_t,
-    bool matrix_contiguous,
-    bool idx64,
-    int64_t outlen,
-    int64_t vec_xs,
-    int64_t vec_offset) {
+GemvLaunch prepare_gemv_launch(const std::string& dt_str,
+                               c10::ScalarType dt,
+                               GemvConfig config,
+                               GemmEpilogue epi,
+                               bool use_t,
+                               bool matrix_contiguous,
+                               bool idx64,
+                               int64_t outlen,
+                               int64_t vec_xs,
+                               int64_t vec_offset) {
   const bool use_t2d = use_t && config.kernel == GemvKernel::T2D;
-  auto kernel = gemv_kernel_name(
-      dt_str, config, epi, use_t, matrix_contiguous, idx64, vec_xs, vec_offset);
+  auto kernel = gemv_kernel_name(dt_str, config, epi, use_t, matrix_contiguous, idx64, vec_xs, vec_offset);
   const int t2d_vec = static_cast<int>(16 / c10::elementSize(dt));
-  const int64_t rows_per_tg = use_t2d
-      ? (c10::metal::simdgroup_size / config.kq) * t2d_vec
-      : use_t ? c10::metal::simdgroup_size * config.vec
-              : config.nsimd;
+  const int64_t rows_per_tg = use_t2d ? (c10::metal::simdgroup_size / config.kq) * t2d_vec
+      : use_t                         ? c10::metal::simdgroup_size * config.vec
+                                      : config.nsimd;
   auto pso = lib.getPipelineStateForFunc(kernel);
   return {std::move(kernel),
           pso,
@@ -301,8 +274,7 @@ void encode_gemv_launch(at::mps::MPSStream* stream,
                         const std::array<float, 2>& alpha_beta,
                         bool profile) {
   if (profile) {
-    getMPSProfiler().beginProfileKernel(
-        launch.pso, "gemm_gemv/" + launch.kernel, {mat, vec});
+    getMPSProfiler().beginProfileKernel(launch.pso, "gemm_gemv/" + launch.kernel, {mat, vec});
   }
   auto enc = stream->commandEncoder();
   [enc setComputePipelineState:launch.pso];
@@ -338,12 +310,9 @@ struct GemvBenchmarkKey {
   GemmEpilogue epi;
 
   bool operator==(const GemvBenchmarkKey& other) const {
-    return dt == other.dt && outlen == other.outlen && K == other.K &&
-        ld == other.ld && ms == other.ms && vec_xs == other.vec_xs &&
-        bias_stride == other.bias_stride &&
-        mat_alignment == other.mat_alignment &&
-        vec_alignment == other.vec_alignment && use_t == other.use_t &&
-        m_is_one == other.m_is_one &&
+    return dt == other.dt && outlen == other.outlen && K == other.K && ld == other.ld && ms == other.ms &&
+        vec_xs == other.vec_xs && bias_stride == other.bias_stride && mat_alignment == other.mat_alignment &&
+        vec_alignment == other.vec_alignment && use_t == other.use_t && m_is_one == other.m_is_one &&
         beta_nonzero == other.beta_nonzero && epi == other.epi;
   }
 };
@@ -352,8 +321,7 @@ struct GemvBenchmarkKeyHash {
   size_t operator()(const GemvBenchmarkKey& key) const {
     size_t hash = std::hash<int>()(static_cast<int>(key.dt));
     auto mix = [&](int64_t value) {
-      hash ^= std::hash<int64_t>()(value) + 0x9e3779b97f4a7c15ULL +
-          (hash << 6) + (hash >> 2);
+      hash ^= std::hash<int64_t>()(value) + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
     };
     mix(key.outlen);
     mix(key.K);
@@ -415,10 +383,8 @@ struct GemvBenchmarkState {
   at::mps::MPSAutotuneRecord trace;
 };
 
-using GemvBenchmarkStates = std::unordered_map<
-    GemvBenchmarkKey,
-    std::shared_ptr<GemvBenchmarkState>,
-    GemvBenchmarkKeyHash>;
+using GemvBenchmarkStates =
+    std::unordered_map<GemvBenchmarkKey, std::shared_ptr<GemvBenchmarkState>, GemvBenchmarkKeyHash>;
 
 struct GemvBenchmarkCache {
   GemvBenchmarkStates states;
@@ -446,8 +412,7 @@ size_t fastest_gemv_candidate(const GemvBenchmarkState& state) {
     }
   }
   if (best == state.candidates.size()) {
-    return std::find(state.active.begin(), state.active.end(), true) -
-        state.active.begin();
+    return std::find(state.active.begin(), state.active.end(), true) - state.active.begin();
   }
   return best;
 }
@@ -457,9 +422,7 @@ bool update_gemv_benchmark_state(GemvBenchmarkState& state) {
   while (!state.settled) {
     bool ready_to_prune = true;
     for (size_t i = 0; i < state.candidates.size(); ++i) {
-      if (state.active[i] &&
-          static_cast<int>(state.times[i].size()) <
-              state.next_prune_samples) {
+      if (state.active[i] && static_cast<int>(state.times[i].size()) < state.next_prune_samples) {
         ready_to_prune = false;
         break;
       }
@@ -478,8 +441,7 @@ bool update_gemv_benchmark_state(GemvBenchmarkState& state) {
     }
     int active_count = 0;
     for (size_t i = 0; i < state.candidates.size(); ++i) {
-      if (state.active[i] &&
-          median_gemv_time(state.times[i]) > best_time * threshold) {
+      if (state.active[i] && median_gemv_time(state.times[i]) > best_time * threshold) {
         state.active[i] = false;
       }
       active_count += state.active[i];
@@ -496,22 +458,20 @@ bool update_gemv_benchmark_state(GemvBenchmarkState& state) {
   for (int count : state.in_flight) {
     outstanding += count;
   }
-  if (!state.settled &&
-      state.issued == kGemvMaxBenchmarkIterations && outstanding == 0) {
+  if (!state.settled && state.issued == kGemvMaxBenchmarkIterations && outstanding == 0) {
     state.config = state.candidates[fastest_gemv_candidate(state)];
     state.settled = true;
   }
   return !was_settled && state.settled;
 }
 
-GemvConfig pick_gemv_benchmark_config(
-    const GemvBenchmarkKey& key,
-    const std::vector<GemvConfig>& candidates,
-    const std::vector<std::string>& candidate_kernels,
-    const at::mps::MPSAutotuneRecord* trace,
-    std::shared_ptr<GemvBenchmarkState>& state_out,
-    int& candidate_index,
-    GemvLaunchPhase& phase) {
+GemvConfig pick_gemv_benchmark_config(const GemvBenchmarkKey& key,
+                                      const std::vector<GemvConfig>& candidates,
+                                      const std::vector<std::string>& candidate_kernels,
+                                      const at::mps::MPSAutotuneRecord* trace,
+                                      std::shared_ptr<GemvBenchmarkState>& state_out,
+                                      int& candidate_index,
+                                      GemvLaunchPhase& phase) {
   auto& cache = gemv_benchmark_cache();
   std::lock_guard<std::mutex> guard(cache.mutex);
   const auto generation = at::mps::getMPSAutotuneCacheGeneration();
@@ -522,8 +482,7 @@ GemvConfig pick_gemv_benchmark_config(
   auto& state = cache.states[key];
   if (!state) {
     TORCH_INTERNAL_ASSERT(!candidates.empty());
-    const auto minimum_samples =
-        candidates.size() * kGemvMinBenchmarkSamples;
+    const auto minimum_samples = candidates.size() * kGemvMinBenchmarkSamples;
     TORCH_INTERNAL_ASSERT(minimum_samples <= kGemvMaxBenchmarkIterations);
     state = std::make_shared<GemvBenchmarkState>();
     state->candidates = candidates;
@@ -547,14 +506,12 @@ GemvConfig pick_gemv_benchmark_config(
   size_t min_samples = std::numeric_limits<size_t>::max();
   for (size_t i = 0; i < state->candidates.size(); ++i) {
     if (state->active[i]) {
-      min_samples = std::min(
-          min_samples, state->times[i].size() + state->in_flight[i]);
+      min_samples = std::min(min_samples, state->times[i].size() + state->in_flight[i]);
     }
   }
   for (size_t offset = 0; offset < state->candidates.size(); ++offset) {
     const size_t i = (state->cursor + offset) % state->candidates.size();
-    if (state->active[i] && state->in_flight[i] == 0 &&
-        state->times[i].size() == min_samples) {
+    if (state->active[i] && state->in_flight[i] == 0 && state->times[i].size() == min_samples) {
       candidate_index = static_cast<int>(i);
       state->in_flight[i] = 1;
       ++state->issued;
@@ -572,17 +529,15 @@ GemvConfig pick_gemv_benchmark_config(
   return state->config;
 }
 
-void record_gemv_benchmark_sample(
-    const std::shared_ptr<GemvBenchmarkState>& state,
-    int candidate_index,
-    double seconds,
-    bool record_selection) {
+void record_gemv_benchmark_sample(const std::shared_ptr<GemvBenchmarkState>& state,
+                                  int candidate_index,
+                                  double seconds,
+                                  bool record_selection) {
   std::optional<at::mps::MPSAutotuneRecord> selection;
   {
     auto& cache = gemv_benchmark_cache();
     std::lock_guard<std::mutex> guard(cache.mutex);
-    if (state->generation != at::mps::getMPSAutotuneCacheGeneration() ||
-        candidate_index < 0 ||
+    if (state->generation != at::mps::getMPSAutotuneCacheGeneration() || candidate_index < 0 ||
         candidate_index >= static_cast<int>(state->candidates.size())) {
       return;
     }
@@ -604,14 +559,11 @@ void record_gemv_benchmark_sample(
         if (same_gemv_config(state->candidates[i], state->config)) {
           selection->kernel = state->candidate_kernels[i];
         }
-        selection->results.push_back(
-            {gemv_config_id(state->candidates[i]),
-             state->candidate_kernels[i],
-             state->times[i].empty()
-                 ? 0.0
-                 : median_gemv_time(state->times[i]) * 1.0e6,
-             static_cast<int>(state->times[i].size()),
-             state->active[i]});
+        selection->results.push_back({gemv_config_id(state->candidates[i]),
+                                      state->candidate_kernels[i],
+                                      state->times[i].empty() ? 0.0 : median_gemv_time(state->times[i]) * 1.0e6,
+                                      static_cast<int>(state->times[i].size()),
+                                      state->active[i]});
       }
     }
     if (settled) {
@@ -670,20 +622,16 @@ void dispatch_gemv(const Tensor& A,
   dims.xs = vec_xs;
   dims.bias_r = gemv_use_t ? 0 : out_stride;
   dims.bias_c = gemv_use_t ? out_stride : 0;
-  const std::array<float, 2> alpha_beta = {
-      static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
+  const std::array<float, 2> alpha_beta = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
 
   GemvConfig config;
   if (idx64) {
     // These operands are DRAM-bound, so use the fixed _i64 configurations.
-    config = gemv_use_t ? GemvConfig{16, 2}
-                        : GemvConfig{8, dt == at::kFloat ? 4 : 8};
+    config = gemv_use_t ? GemvConfig{16, 2} : GemvConfig{8, dt == at::kFloat ? 4 : 8};
   } else {
-    config = gemv_use_t ? policy.pick_t(dt, outlen, K, align)
-                        : policy.pick_nt(dt, outlen, K, align);
+    config = gemv_use_t ? policy.pick_t(dt, outlen, K, align) : policy.pick_nt(dt, outlen, K, align);
   }
-  auto normalized =
-      normalize_gemv_config(config, dt, gemv_use_t, matrix_contiguous, align);
+  auto normalized = normalize_gemv_config(config, dt, gemv_use_t, matrix_contiguous, align);
   if (normalized.has_value()) {
     config = *normalized;
   } else {
@@ -694,14 +642,20 @@ void dispatch_gemv(const Tensor& A,
   }
 
   const bool trace_enabled = at::mps::isMPSAutotuneTraceEnabled();
-  const bool benchmark_enabled =
-      !idx64 && at::globalContext().benchmarkMPS();
+  const bool benchmark_enabled = !idx64 && at::globalContext().benchmarkMPS();
   const auto forced = at::mps::getMPSAutotuneOverride("gemv");
+  if (!idx64 && !benchmark_enabled && !forced.has_value()) {
+    TORCH_WARN_ONCE(
+        "MPS matrix-vector products (mm/addmm/mv/addmv with a rank-1 "
+        "result) support kernel autotuning. Set "
+        "torch.backends.mps.benchmark = True to benchmark kernel "
+        "configurations for each shape and cache the fastest; the first "
+        "calls for a new shape run slower while candidates are measured.");
+  }
   std::vector<GemvConfig> candidates;
   if (benchmark_enabled || trace_enabled || forced.has_value()) {
     candidates = idx64 ? std::vector<GemvConfig>{config}
-                       : gemv_benchmark_candidates(
-                             dt, gemv_use_t, matrix_contiguous, align, config);
+                       : gemv_benchmark_candidates(dt, gemv_use_t, matrix_contiguous, align, config);
   }
 
   std::vector<std::string> candidate_ids;
@@ -714,15 +668,8 @@ void dispatch_gemv(const Tensor& A,
     for (const auto& candidate : candidates) {
       candidate_ids.push_back(gemv_config_id(candidate));
       if (trace_enabled) {
-        candidate_kernels.push_back(gemv_kernel_name(
-            dt_str,
-            candidate,
-            epi,
-            gemv_use_t,
-            matrix_contiguous,
-            idx64,
-            vec_xs,
-            vec_offset));
+        candidate_kernels.push_back(
+            gemv_kernel_name(dt_str, candidate, epi, gemv_use_t, matrix_contiguous, idx64, vec_xs, vec_offset));
       }
     }
   }
@@ -731,25 +678,22 @@ void dispatch_gemv(const Tensor& A,
   if (trace_enabled) {
     trace.emplace();
     trace->operation = "gemv";
-    trace->tensors = {gemv_tensor_info("matrix", matrix.tensor),
-                      gemv_tensor_info("vector", vvec),
-                      gemv_tensor_info("output", out)};
+    trace->tensors = {
+        gemv_tensor_info("matrix", matrix.tensor), gemv_tensor_info("vector", vvec), gemv_tensor_info("output", out)};
     if (epi == GemmEpilogue::Bias) {
       trace->tensors.push_back(gemv_tensor_info("self", expanded_bias));
     }
-    trace->attributes = {
-        {"M", std::to_string(A.size(0))},
-        {"N", std::to_string(B.size(1))},
-        {"K", std::to_string(K)},
-        {"orientation", gemv_use_t ? "t" : "nt"},
-        {"matrix_ld", std::to_string(matrix.ld)},
-        {"matrix_stride", std::to_string(matrix.stride)},
-        {"vector_stride", std::to_string(vec_xs)},
-        {"index", idx64 ? "int64" : "int32"},
-        {"epilogue",
-         epi == GemmEpilogue::Bias ? "alpha_beta" : "none"},
-        {"alpha", fmt::format("{}", alpha.toDouble())},
-        {"beta", fmt::format("{}", beta.toDouble())}};
+    trace->attributes = {{"M", std::to_string(A.size(0))},
+                         {"N", std::to_string(B.size(1))},
+                         {"K", std::to_string(K)},
+                         {"orientation", gemv_use_t ? "t" : "nt"},
+                         {"matrix_ld", std::to_string(matrix.ld)},
+                         {"matrix_stride", std::to_string(matrix.stride)},
+                         {"vector_stride", std::to_string(vec_xs)},
+                         {"index", idx64 ? "int64" : "int32"},
+                         {"epilogue", epi == GemmEpilogue::Bias ? "alpha_beta" : "none"},
+                         {"alpha", fmt::format("{}", alpha.toDouble())},
+                         {"beta", fmt::format("{}", beta.toDouble())}};
     trace->candidates = candidate_ids;
   }
 
@@ -757,27 +701,21 @@ void dispatch_gemv(const Tensor& A,
   int benchmark_candidate = -1;
   GemvLaunchPhase phase = GemvLaunchPhase::Heuristic;
   if (forced.has_value()) {
-    auto candidate = std::find_if(
-        candidates.begin(), candidates.end(), [&](const GemvConfig& value) {
-          return gemv_config_id(value) == *forced;
-        });
+    auto candidate = std::find_if(candidates.begin(), candidates.end(), [&](const GemvConfig& value) {
+      return gemv_config_id(value) == *forced;
+    });
     if (candidate == candidates.end()) {
       std::string valid;
       for (const auto& id : candidate_ids) {
         valid += valid.empty() ? id : ", " + id;
       }
       TORCH_CHECK(
-          false,
-          "invalid forced GEMV autotune config '",
-          *forced,
-          "'; valid configs for this input are: ",
-          valid);
+          false, "invalid forced GEMV autotune config '", *forced, "'; valid configs for this input are: ", valid);
     }
     config = *candidate;
     phase = GemvLaunchPhase::Forced;
   } else if (benchmark_enabled) {
-    const bool beta_nonzero = epi == GemmEpilogue::Bias &&
-        beta.toDouble() != 0.0;
+    const bool beta_nonzero = epi == GemmEpilogue::Bias && beta.toDouble() != 0.0;
     const GemvBenchmarkKey key{dt,
                                outlen,
                                K,
@@ -791,27 +729,17 @@ void dispatch_gemv(const Tensor& A,
                                m_is_one,
                                beta_nonzero,
                                epi};
-    config = pick_gemv_benchmark_config(
-        key,
-        candidates,
-        candidate_kernels,
-        trace.has_value() ? &*trace : nullptr,
-        benchmark_state,
-        benchmark_candidate,
-        phase);
+    config = pick_gemv_benchmark_config(key,
+                                        candidates,
+                                        candidate_kernels,
+                                        trace.has_value() ? &*trace : nullptr,
+                                        benchmark_state,
+                                        benchmark_candidate,
+                                        phase);
   }
 
-  const auto launch = prepare_gemv_launch(
-      dt_str,
-      dt,
-      config,
-      epi,
-      gemv_use_t,
-      matrix_contiguous,
-      idx64,
-      outlen,
-      vec_xs,
-      vec_offset);
+  const auto launch =
+      prepare_gemv_launch(dt_str, dt, config, epi, gemv_use_t, matrix_contiguous, idx64, outlen, vec_xs, vec_offset);
   if (trace.has_value()) {
     trace->event = "launch";
     trace->phase = gemv_phase_name(phase);
@@ -828,24 +756,12 @@ void dispatch_gemv(const Tensor& A,
       if (benchmarking) {
         stream->synchronize(SyncType::COMMIT);
       }
-      encode_gemv_launch(
-          stream,
-          launch,
-          matrix.tensor,
-          vvec,
-          out,
-          dims,
-          expanded_bias,
-          alpha_beta,
-          !benchmarking);
+      encode_gemv_launch(stream, launch, matrix.tensor, vvec, out, dims, expanded_bias, alpha_beta, !benchmarking);
       if (benchmarking) {
         const bool trace_callback = at::mps::retainMPSAutotuneTrace();
         [stream->commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> command_buffer) {
           record_gemv_benchmark_sample(
-              state,
-              candidate,
-              command_buffer.GPUEndTime - command_buffer.GPUStartTime,
-              trace_callback);
+              state, candidate, command_buffer.GPUEndTime - command_buffer.GPUStartTime, trace_callback);
           if (trace_callback) {
             at::mps::releaseMPSAutotuneTrace();
           }
