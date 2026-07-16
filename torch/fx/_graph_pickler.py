@@ -22,7 +22,12 @@ import torch.utils._pytree as pytree
 from torch._guards import TracingContext
 from torch._inductor.standalone_compile import AOTCompiledArtifact
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    FakeTensorMode,
+    is_fake_tensor,
+    Tensor,
+)
 from torch._subclasses.meta_utils import (
     MetaConverter,
     MetaTensorDesc,
@@ -150,7 +155,7 @@ class GraphPickler(pickle.Pickler):
         if type(obj) in self._PASSTHROUGH_TYPES:
             return NotImplemented
 
-        if isinstance(obj, FakeTensor):
+        if is_fake_tensor(obj):
             return _TensorPickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch.fx.GraphModule):
             return _GraphModulePickleData.reduce_helper(self, obj)
@@ -509,7 +514,7 @@ class _TensorPickleData:
 
     @classmethod
     def reduce_helper(
-        cls, pickler: GraphPickler, obj: FakeTensor
+        cls, pickler: GraphPickler, obj: Tensor
     ) -> tuple[
         Callable[[Self, _UnpickleState], FakeTensor], tuple[Self, _UnpickleStateToken]
     ]:

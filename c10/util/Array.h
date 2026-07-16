@@ -11,7 +11,8 @@ namespace c10 {
 //
 // See also https://stackoverflow.com/a/26351760/23845
 template <typename V, typename... T>
-inline constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
+[[nodiscard]] inline constexpr auto array_of(T&&... t)
+    -> std::array<V, sizeof...(T)> {
   return {{std::forward<T>(t)...}};
 }
 
