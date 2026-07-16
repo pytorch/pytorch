@@ -1162,11 +1162,6 @@ class TestFP8Lowering(TestCase):
         bias = None
 
         am, ak, bn, bk = scaling_block_sizes
-        if IS_SM90 and (bn, bk) == (1, 128):
-            self.skipTest(
-                "SM90 cuBLAS scaled_mm expects non-transposed RHS "
-                "BlockWise1x128 scales"
-            )
         tma_supported = (bn, bk) != (1, 128) and (
             ((am, ak) != (128, 128) and (bn, bk) != (128, 128))
             or ceil_div(K, 128) % 4 == 0
@@ -1177,8 +1172,13 @@ class TestFP8Lowering(TestCase):
             w, dtype_float8, block_outer=bn, block_inner=bk
         )
         w_t_fp8 = w_fp8.t()
+        # cuBLAS expects RHS BlockWise1x128 scales in [N, ceil(K / 128)]
+        # order even though the corresponding weight is passed transposed.
         w_inverse_scale = _prepare_blockwise_scale(
-            w_inverse_scale, bn, bk, transposed=True
+            w_inverse_scale,
+            bn,
+            bk,
+            transposed=(bn, bk) != (1, 128),
         )
 
         # quantize input x
