@@ -1,8 +1,8 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import importlib
 import math
-import subprocess
 import sys
 import unittest
 from types import SimpleNamespace
@@ -65,13 +65,12 @@ if cute is not None:
 
 class TestFlexGemmRuntimeImport(TestCase):
     def test_import_does_not_load_external_quack(self):
-        subprocess.check_call(
-            [
-                sys.executable,
-                "-c",
-                "import sys; import torch._inductor.kernel.flex_gemm.runtime; assert 'quack' not in sys.modules",
-            ]
-        )
+        for name in list(sys.modules):
+            if name == "quack" or name.startswith("quack."):
+                del sys.modules[name]
+        sys.modules.pop("torch._inductor.kernel.flex_gemm.runtime", None)
+        importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
+        self.assertNotIn("quack", sys.modules)
 
 
 @instantiate_parametrized_tests
@@ -2180,6 +2179,53 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         actual, aux = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b, epilogue_fn)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_tuple_aux_local_m_reduce_tuned_internal_transpose(self):
+        m = 128
+        n = 192
+        k = 64
+        group = 16
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            return acc.relu(), x.sum(1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b.mT),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(n, k, device="cuda", dtype=torch.bfloat16)
+
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            validate_flex_gemm_local_reduce_config,
+        )
+        from torch._inductor.template_heuristics import (
+            flex_gemm as flex_gemm_heuristics,
+        )
+
+        configs = tuple(
+            config
+            for config in flex_gemm_heuristics.candidate_gemm_configs_for_device(
+                a.device
+            )
+            if validate_flex_gemm_local_reduce_config(config, group, 0)
+        )[:2]
+        self.assertEqual(len(configs), 2)
+        with mock.patch(
+            "torch._inductor.heuristics.template.flex_gemm.candidate_gemm_configs_for_device",
+            return_value=configs,
+        ):
+            actual, aux = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+        self.assertLocalReduceAuxMatches(actual, aux, a, b.mT, epilogue_fn)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
