@@ -466,8 +466,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     )
     @unittest.skip(
         "Disabled due to CI failures on B200; see "
-        "https://github.com/pytorch/pytorch/issues/190087 and "
-        "https://github.com/pytorch/pytorch/issues/190088"
+        "https://github.com/pytorch/pytorch/issues/190086"
     )
     def test_scaled_mm(self):
         device_mesh = self.build_device_mesh()
