@@ -19,7 +19,6 @@ from .gemm_tvm_ffi_utils import (
     compile_gemm_kernel,
     get_dtypes,
     get_majors,
-    launch_gemm,
     make_fake_gemm_tensors,
     make_fake_varlen_args,
     make_fake_scheduler_args,
@@ -109,7 +108,6 @@ def _compile_sm120_grouped_mm_varlen(
 
 class _GroupedGemmPlan(NamedTuple):
     compiled_fn: object
-    is_sm100_family: bool
     epi_static: object
     scheduler_static: object | None
     max_active_clusters: int
@@ -120,7 +118,28 @@ class _GroupedGemmPlan(NamedTuple):
 _plan_cache: dict[tuple, _GroupedGemmPlan] = {}
 
 
-def _plan(A: Tensor, B_lower: Tensor, out: Tensor, *, varlen_m: bool, varlen_k: bool) -> _GroupedGemmPlan:
+def _empty_grouped_mm_output(
+    out_shape: tuple[int, ...],
+    dtype: torch.dtype,
+    device: torch.device,
+) -> Tensor:
+    alignment = 16 // dtype.itemsize
+    size_padded = (out_shape[-1] + alignment - 1) // alignment * alignment
+    if len(out_shape) == 2:
+        out_stride = (size_padded, 1)
+    else:
+        out_stride = (out_shape[1] * size_padded, size_padded, 1)
+    return torch.empty_strided(out_shape, out_stride, dtype=dtype, device=device)
+
+
+def _plan(
+    A: Tensor,
+    B_lower: Tensor,
+    out: Tensor,
+    *,
+    varlen_m: bool,
+    varlen_k: bool,
+) -> _GroupedGemmPlan:
     config = _sm120_default_config()
     device_capacity = get_device_capacity(A.device)
     a_major, b_major, d_major, _ = get_majors(A, B_lower, out, None)
@@ -136,13 +155,11 @@ def _plan(A: Tensor, B_lower: Tensor, out: Tensor, *, varlen_m: bool, varlen_k: 
         varlen_m,
         varlen_k,
         device_capacity,
-        config,
     )
     cached = _plan_cache.get(key)
     if cached is not None:
         return cached
 
-    cluster_shape_mnk = (config.cluster_m, config.cluster_n, config.cluster_k)
     compiled_fn = _compile_sm120_grouped_mm_varlen(
         a_dtype,
         b_dtype,
@@ -153,7 +170,7 @@ def _plan(A: Tensor, B_lower: Tensor, out: Tensor, *, varlen_m: bool, varlen_k: 
         varlen_m,
         varlen_k,
         (config.tile_m, config.tile_n),
-        cluster_shape_mnk,
+        (config.cluster_m, config.cluster_n, config.cluster_k),
         config.pingpong,
         True,
         config.is_dynamic_persistent,
@@ -165,7 +182,6 @@ def _plan(A: Tensor, B_lower: Tensor, out: Tensor, *, varlen_m: bool, varlen_k: 
     )
     plan = _GroupedGemmPlan(
         compiled_fn=compiled_fn,
-        is_sm100_family=False,
         epi_static=GemmDefaultEpiMixin.EpilogueArguments(
             alpha=None,
             beta=None,
@@ -189,42 +205,29 @@ def _plan(A: Tensor, B_lower: Tensor, out: Tensor, *, varlen_m: bool, varlen_k: 
     return plan
 
 
-def grouped_mm_sm120_varlen_m(A: Tensor, B: Tensor, cu_seqlens_m: Tensor) -> Tensor:
-    """Run grouped GEMM for A[cu_seqlens_m[i]:cu_seqlens_m[i+1]] @ B[i]."""
-    B_lower = B.permute(2, 1, 0)
-    out = torch.empty((A.shape[0], B.shape[-1]), dtype=A.dtype, device=A.device)
-    plan = _plan(A, B_lower, out, varlen_m=True, varlen_k=False)
-    launch_gemm(
-        plan,
-        A,
-        B_lower,
-        out,
-        None,
-        plan.epi_static,
-        plan.scheduler_static,
-        make_varlen_args(cu_seqlens_m, None, None),
-    )
-    return out
+def grouped_mm_sm12x(A: Tensor, B: Tensor, cu_seqlens: Tensor) -> Tensor:
+    B_lower = B.transpose(-1, 0)
+    varlen_k = B.dim() == 2
+    varlen_m = B.dim() == 3
 
+    if varlen_k:
+        out_shape = (cu_seqlens.numel() - 1, A.shape[0], B.shape[-1])
+        varlen_args = make_varlen_args(None, cu_seqlens, None)
+    else:
+        out_shape = (A.shape[0], B.shape[-1])
+        varlen_args = make_varlen_args(cu_seqlens, None, None)
 
-def grouped_mm_sm120_varlen_k(A: Tensor, B: Tensor, cu_seqlens_k: Tensor) -> Tensor:
-    """Run grouped GEMM for A[:, k_i:k_{i+1}] @ B[k_i:k_{i+1}]."""
-    B_lower = B.t()
-    out = torch.empty(
-        (cu_seqlens_k.numel() - 1, A.shape[0], B.shape[-1]),
-        dtype=A.dtype,
-        device=A.device,
-    )
-    out_lower = out.permute(1, 2, 0)
-    plan = _plan(A, B_lower, out_lower, varlen_m=False, varlen_k=True)
-    launch_gemm(
-        plan,
+    out = _empty_grouped_mm_output(out_shape, A.dtype, A.device)
+    out_lower = out.permute(1, 2, 0) if varlen_k else out
+    plan = _plan(A, B_lower, out_lower, varlen_m=varlen_m, varlen_k=varlen_k)
+    plan.compiled_fn(
         A,
         B_lower,
         out_lower,
         None,
         plan.epi_static,
         plan.scheduler_static,
-        make_varlen_args(None, cu_seqlens_k, None),
+        varlen_args,
+        None,
     )
     return out

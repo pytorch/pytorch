@@ -7,14 +7,6 @@ import torch
 from ... import cutedsl_utils as cu
 
 
-def _same_cuda_device(*tensors: torch.Tensor | None) -> bool:
-    concrete_tensors = [t for t in tensors if t is not None]
-    if not concrete_tensors:
-        return False
-    device = concrete_tensors[0].device
-    return all(t.device == device and t.device.type == "cuda" for t in concrete_tensors)
-
-
 def _valid_2d_or_3d_strides(t: torch.Tensor) -> bool:
     if t.data_ptr() % 16 != 0:
         return False
@@ -29,26 +21,7 @@ def _valid_2d_or_3d_strides(t: torch.Tensor) -> bool:
     return False
 
 
-def _require_sm120_varlen_k_layout(mat1: torch.Tensor, mat2: torch.Tensor) -> None:
-    if not _valid_2d_or_3d_strides(mat1):
-        raise RuntimeError(
-            "QuACK SM120 grouped_mm 2d/2d requires mat1 to have a compact 16-byte aligned layout"
-        )
-    if not _valid_2d_or_3d_strides(mat2):
-        raise RuntimeError(
-            "QuACK SM120 grouped_mm 2d/2d requires mat2 to have a compact 16-byte aligned layout"
-        )
-    if mat1.stride(0) != 1:
-        raise RuntimeError(
-            "QuACK SM120 grouped_mm 2d/2d requires mat1 to be M-major with stride(0) == 1"
-        )
-    if mat2.stride(1) != 1:
-        raise RuntimeError(
-            "QuACK SM120 grouped_mm 2d/2d requires mat2 to be N-major with stride(1) == 1"
-        )
-
-
-def _grouped_mm_sm120_cond(
+def _grouped_mm_sm12x_cond(
     self: torch.Tensor,
     mat2: torch.Tensor,
     offs: torch.Tensor | None = None,
@@ -57,28 +30,34 @@ def _grouped_mm_sm120_cond(
 ) -> bool:
     if torch.version.hip is not None:
         return False
-    if not _same_cuda_device(self, mat2, offs):
-        return False
     if self.dtype not in (torch.float16, torch.bfloat16) or mat2.dtype != self.dtype:
         return False
     if out_dtype is not None and out_dtype != self.dtype:
         return False
+    if offs is None:
+        return False
+    if offs.dim() != 1 or offs.dtype != torch.int32 or offs.stride(0) != 1:
+        return False
     if bias is not None:
         return False
-    major, minor = torch.cuda.get_device_capability(self.device)
-    if (major, minor) not in ((12, 0), (12, 1)):
+    if not self.is_cuda or not mat2.is_cuda or not offs.is_cuda:
+        return False
+    if mat2.device != self.device or offs.device != self.device:
+        return False
+    is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
+    if is_cow(self) or is_cow(mat2) or is_cow(offs):
+        return False
+    if not _valid_2d_or_3d_strides(self) or not _valid_2d_or_3d_strides(mat2):
+        return False
+    major, _ = torch.cuda.get_device_capability(self.device)
+    if major != 12:
         return False
 
     # QuACK's varlen-M GEMM maps the common grouped forward form:
     #   self: (total_m, k), mat2: (groups, k, n), offs: (groups,)
     # Its varlen-K path maps:
     #   self: (m, total_k), mat2: (total_k, n), offs: (groups,)
-    if self.dim() != 2 or offs is None:
-        return False
-    if offs.dim() != 1 or offs.dtype != torch.int32 or offs.stride(0) != 1:
-        return False
-    is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
-    if is_cow(self) or is_cow(mat2) or is_cow(offs):
+    if self.dim() != 2:
         return False
     if mat2.dim() == 3:
         if offs.numel() != mat2.size(0):
@@ -92,8 +71,6 @@ def _grouped_mm_sm120_cond(
             or mat2.size(2) == 0
         ):
             return False
-        if not _valid_2d_or_3d_strides(self) or not _valid_2d_or_3d_strides(mat2):
-            return False
         return True
     if mat2.dim() == 2:
         if self.size(1) != mat2.size(0):
@@ -105,29 +82,27 @@ def _grouped_mm_sm120_cond(
             or offs.numel() == 0
         ):
             return False
+        if self.stride(0) != 1 or mat2.stride(1) != 1:
+            return False
         return True
     return False
 
 
-def _grouped_mm_sm120_impl(
+def _grouped_mm_sm12x_impl(
     self: torch.Tensor,
     mat2: torch.Tensor,
     offs: torch.Tensor | None = None,
     bias: torch.Tensor | None = None,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
-    from torch._vendor.quack.grouped_gemm import (
-        grouped_mm_sm120_varlen_k,
-        grouped_mm_sm120_varlen_m,
-    )
+    from torch._vendor.quack.grouped_gemm import grouped_mm_sm12x
 
-    assert offs is not None
+    if offs is None:
+        raise RuntimeError("offs must be provided")
     zero = torch.zeros(1, dtype=torch.int32, device=offs.device)
     cu_seqlens = torch.cat((zero, offs))
-    if mat2.dim() == 2:
-        _require_sm120_varlen_k_layout(self, mat2)
-        return grouped_mm_sm120_varlen_k(self, mat2, cu_seqlens)
-    return grouped_mm_sm120_varlen_m(self, mat2, cu_seqlens)
+
+    return grouped_mm_sm12x(self, mat2, cu_seqlens)
 
 
 def register_to_dispatch() -> None:
@@ -135,6 +110,6 @@ def register_to_dispatch() -> None:
         "aten",
         "_grouped_mm",
         "CUDA",
-        cond=_grouped_mm_sm120_cond,
-        impl=_grouped_mm_sm120_impl,
+        cond=_grouped_mm_sm12x_cond,
+        impl=_grouped_mm_sm12x_impl,
     )
