@@ -214,6 +214,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
   void setTimeout(std::chrono::milliseconds timeout) override;
   void eagerConnectSingleDevice(at::Device device) override;
+  uint64_t getSequenceNumberForGroup() override {
+    return sequence_number_;
+  }
   void shutdown() override;
   void abort() override;
   ::c10d::ErrorType getError() override;
@@ -493,6 +496,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   } init_state_{InitializationState::UNINITIALIZED};
 
   c10::intrusive_ptr<::c10d::Store> store_;
+  uint64_t bootstrap_generation_{0};
+  uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
 
@@ -536,6 +541,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
   std::optional<BatchSendRecv> coalescing_batch_;
+  c10::intrusive_ptr<WorkNCCL> coalesced_work_;
 
   std::unordered_map<
       unsigned long long,
