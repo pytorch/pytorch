@@ -918,6 +918,9 @@ class AOTInductorModelBase {
       delete *run_finished_;
       run_finished_.reset();
     }
+    if (stream == nullptr) {
+      aoti_torch_get_current_xpu_stream(this->device_idx_, (void**)&stream);
+    }
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = false;
 #endif
@@ -938,8 +941,6 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
       AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
 #elif defined(USE_XPU)
-      // sycl::queue* queue_ptr = nullptr;
-      // aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
       run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
           static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
 
