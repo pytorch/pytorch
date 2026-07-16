@@ -19,9 +19,9 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_philox_normal_dense_slice_native.h>
+#include <ATen/ops/_philox_normal_flat_slice_native.h>
 #include <ATen/ops/_philox_normal_native.h>
-#include <ATen/ops/_philox_uniform_dense_slice_native.h>
+#include <ATen/ops/_philox_uniform_flat_slice_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #endif
 
@@ -72,13 +72,13 @@ __device__ __forceinline__ double2 box_muller_double(uint4 r) {
 }
 
 template <typename scalar_t, typename sample_t, typename param_t>
-__global__ void dense_distribution_slice_kernel(
+__global__ void distribution_flat_slice_kernel(
     scalar_t* __restrict__ output,
     PhiloxCudaState philox_args,
     int64_t local_numel,
-    int64_t dense_numel,
-    int64_t slice_start,
-    int64_t dense_grid,
+    int64_t total_numel,
+    int64_t start_index,
+    int64_t total_grid,
     sample_t sample_func,
     param_t param_func) {
   constexpr int unroll_factor = elems_per_call<scalar_t>;
@@ -88,35 +88,35 @@ __global__ void dense_distribution_slice_kernel(
     return;
   }
 
-  const int64_t dense_idx = slice_start + local_idx;
-  if (dense_idx >= dense_numel) {
+  const int64_t logical_index = start_index + local_idx;
+  if (logical_index >= total_numel) {
     return;
   }
 
-  const int64_t dense_stride = blockDim.x * dense_grid;
-  const int64_t dense_thread_idx = dense_idx % dense_stride;
-  const int64_t dense_thread_iter_and_lane = dense_idx / dense_stride;
-  const int64_t lane = dense_thread_iter_and_lane % unroll_factor;
-  const uint64_t dense_thread_iter =
-      static_cast<uint64_t>(dense_thread_iter_and_lane / unroll_factor);
+  const int64_t total_stride = blockDim.x * total_grid;
+  const int64_t thread_index = logical_index % total_stride;
+  const int64_t thread_iteration_and_lane = logical_index / total_stride;
+  const int64_t lane = thread_iteration_and_lane % unroll_factor;
+  const uint64_t thread_iteration =
+      static_cast<uint64_t>(thread_iteration_and_lane / unroll_factor);
 
   auto [seed, offset] = at::cuda::philox::unpack(philox_args);
   curandStatePhilox4_32_10_t state;
   curand_init(
       seed,
-      static_cast<uint64_t>(dense_thread_idx),
-      offset + dense_thread_iter * max_generator_offsets_per_curand_call,
+      static_cast<uint64_t>(thread_index),
+      offset + thread_iteration * max_generator_offsets_per_curand_call,
       &state);
   auto sample = sample_func(&state);
   output[local_idx] = param_func((&sample.x)[lane]);
 }
 
 template <typename scalar_t, typename sample_t, typename param_t>
-void dense_distribution_slice(
+void distribution_flat_slice(
     const char* op_name,
     Tensor& self,
-    int64_t dense_numel,
-    int64_t slice_start,
+    int64_t total_numel,
+    int64_t start_index,
     std::optional<Generator> generator,
     const sample_t& sample_func,
     const param_t& param_func) {
@@ -125,28 +125,28 @@ void dense_distribution_slice(
       op_name,
       ": self must be a floating point tensor, got ",
       self.scalar_type());
-  TORCH_CHECK(dense_numel >= 0, op_name, ": dense_numel must be non-negative");
-  TORCH_CHECK(slice_start >= 0, op_name, ": slice_start must be non-negative");
+  TORCH_CHECK(total_numel >= 0, op_name, ": total_numel must be non-negative");
+  TORCH_CHECK(start_index >= 0, op_name, ": start_index must be non-negative");
   TORCH_CHECK(
-      slice_start + self.numel() <= dense_numel,
+      start_index + self.numel() <= total_numel,
       op_name,
       ": output slice [",
-      slice_start,
+      start_index,
       ", ",
-      slice_start + self.numel(),
-      ") exceeds dense_numel ",
-      dense_numel);
+      start_index + self.numel(),
+      ") exceeds total_numel ",
+      total_numel);
   TORCH_CHECK(
-      dense_numel <= std::numeric_limits<int32_t>::max(),
+      total_numel <= std::numeric_limits<int32_t>::max(),
       op_name,
-      ": dense_numel > INT_MAX is not supported yet");
-  if (dense_numel == 0) {
+      ": total_numel > INT_MAX is not supported yet");
+  if (total_numel == 0) {
     return;
   }
 
   constexpr int unroll_factor = elems_per_call<scalar_t>;
-  auto [counter_offset, dense_grid, block] =
-      calc_execution_policy(dense_numel, unroll_factor);
+  auto [counter_offset, total_grid, block] =
+      calc_execution_policy(total_numel, unroll_factor);
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(
       generator, cuda::detail::getDefaultCUDAGenerator());
   PhiloxCudaState rng_engine_inputs;
@@ -161,14 +161,14 @@ void dense_distribution_slice(
   auto output = self.contiguous();
   const uint32_t local_grid =
       static_cast<uint32_t>((self.numel() + block.x - 1) / block.x);
-  dense_distribution_slice_kernel<scalar_t>
+  distribution_flat_slice_kernel<scalar_t>
       <<<local_grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
       output.mutable_data_ptr<scalar_t>(),
       rng_engine_inputs,
       self.numel(),
-      dense_numel,
-      slice_start,
-      dense_grid.x,
+      total_numel,
+      start_index,
+      total_grid.x,
       sample_func,
       param_func);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -434,10 +434,10 @@ Tensor& _philox_normal_cuda_(
   return self;
 }
 
-Tensor& _philox_uniform_dense_slice_cuda_(
+Tensor& _philox_uniform_flat_slice_cuda_(
     Tensor& self,
-    int64_t dense_numel,
-    int64_t slice_start,
+    int64_t total_numel,
+    int64_t start_index,
     double low,
     double high,
     std::optional<Generator> generator) {
@@ -445,7 +445,7 @@ Tensor& _philox_uniform_dense_slice_cuda_(
       kHalf,
       kBFloat16,
       self.scalar_type(),
-      "_philox_uniform_dense_slice_",
+      "_philox_uniform_flat_slice_",
       [&] {
         using opmath_t = at::opmath_type<scalar_t>;
         auto lo = static_cast<scalar_t>(low);
@@ -466,11 +466,11 @@ Tensor& _philox_uniform_dense_slice_cuda_(
           auto value = static_cast<scalar_t>(rand * range + lo);
           return value == hi ? lo : value;
         };
-        dense_distribution_slice<scalar_t>(
-            "_philox_uniform_dense_slice_",
+        distribution_flat_slice<scalar_t>(
+            "_philox_uniform_flat_slice_",
             self,
-            dense_numel,
-            slice_start,
+            total_numel,
+            start_index,
             generator,
             sample_func,
             param_func);
@@ -478,10 +478,10 @@ Tensor& _philox_uniform_dense_slice_cuda_(
   return self;
 }
 
-Tensor& _philox_normal_dense_slice_cuda_(
+Tensor& _philox_normal_flat_slice_cuda_(
     Tensor& self,
-    int64_t dense_numel,
-    int64_t slice_start,
+    int64_t total_numel,
+    int64_t start_index,
     double mean,
     double stddev,
     std::optional<Generator> generator) {
@@ -489,7 +489,7 @@ Tensor& _philox_normal_dense_slice_cuda_(
       kHalf,
       kBFloat16,
       self.scalar_type(),
-      "_philox_normal_dense_slice_",
+      "_philox_normal_flat_slice_",
       [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
         auto mu = static_cast<accscalar_t>(mean);
@@ -509,11 +509,11 @@ Tensor& _philox_normal_dense_slice_cuda_(
           return static_cast<scalar_t>(
               at::transformation::normal<accscalar_t>(rand, mu, sigma));
         };
-        dense_distribution_slice<scalar_t>(
-            "_philox_normal_dense_slice_",
+        distribution_flat_slice<scalar_t>(
+            "_philox_normal_flat_slice_",
             self,
-            dense_numel,
-            slice_start,
+            total_numel,
+            start_index,
             generator,
             sample_func,
             param_func);

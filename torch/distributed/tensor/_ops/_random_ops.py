@@ -31,7 +31,7 @@ def _contiguous_stride(shape: torch.Size) -> tuple[int, ...]:
     return tuple(reversed(stride))
 
 
-def _flat_start_for_dtensor(tensor: DTensor) -> int | None:
+def _start_index_for_flat_slice(tensor: DTensor) -> int | None:
     local_shape, global_offset = compute_local_shape_and_global_offset(
         tensor.shape,
         tensor.device_mesh,
@@ -65,20 +65,20 @@ def _sync_rng_state_from_mesh_root(tensor: DTensor, state: torch.Tensor) -> None
 
 
 @maybe_run_for_local_tensor
-def _run_dense_slice_with_generator(
+def _run_flat_slice_with_generator(
     local_tensor: torch.Tensor,
-    dense_numel: int,
-    slice_start: int,
-    dense_slice_op_call: torch._ops.OpOverload,
+    total_numel: int,
+    start_index: int,
+    flat_slice_op_call: torch._ops.OpOverload,
     generator: torch.Generator,
     generator_state: torch.Tensor,
     op_args: tuple[object, ...],
 ) -> torch.Tensor:
     generator.set_state(generator_state)
-    return dense_slice_op_call(
+    return flat_slice_op_call(
         local_tensor,
-        dense_numel,
-        slice_start,
+        total_numel,
+        start_index,
         *op_args,
         generator=generator,
     )
@@ -87,7 +87,7 @@ def _run_dense_slice_with_generator(
 def _run_dtensor_local_rng_op(
     tensor: DTensor,
     generator: torch.Generator | None,
-    dense_slice_op_call: torch._ops.OpOverload,
+    flat_slice_op_call: torch._ops.OpOverload,
     fallback_op_call: torch._ops.OpOverload,
     *op_args: object,
 ) -> DTensor:
@@ -102,13 +102,13 @@ def _run_dtensor_local_rng_op(
         return tensor
     if not local_tensor.is_contiguous():
         raise RuntimeError(
-            f"{dense_slice_op_call}: expected a contiguous local shard, "
+            f"{flat_slice_op_call}: expected a contiguous local shard, "
             f"got stride {local_tensor.stride()}"
         )
 
-    dense_numel = tensor.numel()
-    slice_start = _flat_start_for_dtensor(tensor)
-    if slice_start is None:
+    total_numel = tensor.numel()
+    start_index = _start_index_for_flat_slice(tensor)
+    if start_index is None:
         if not random._rng_tracker and is_rng_supported_mesh(tensor.device_mesh):
             random._rng_tracker = random.OffsetBasedRNGTracker(tensor.device_mesh)
         tracker = random._rng_tracker
@@ -129,27 +129,27 @@ def _run_dtensor_local_rng_op(
         tracker._set_device_state(device_state)
 
     if generator is None:
-        dense_slice_op_call(
+        flat_slice_op_call(
             local_tensor,
-            dense_numel,
-            slice_start,
+            total_numel,
+            start_index,
             *op_args,
         )
     elif enabled_local_tensor_mode():
-        _run_dense_slice_with_generator(
+        _run_flat_slice_with_generator(
             local_tensor,
-            dense_numel,
-            slice_start,
-            dense_slice_op_call,
+            total_numel,
+            start_index,
+            flat_slice_op_call,
             generator,
             generator.get_state(),
             op_args,
         )
     else:
-        dense_slice_op_call(
+        flat_slice_op_call(
             local_tensor,
-            dense_numel,
-            slice_start,
+            total_numel,
+            start_index,
             *op_args,
             generator=generator,
         )
@@ -173,7 +173,7 @@ def _normal_dtensor_handler(
     return _run_dtensor_local_rng_op(
         tensor,
         generator,
-        aten._philox_normal_dense_slice_.default,
+        aten._philox_normal_flat_slice_.default,
         op_call,
         mean,
         std,
@@ -197,7 +197,7 @@ def _uniform_dtensor_handler(
     return _run_dtensor_local_rng_op(
         tensor,
         generator,
-        aten._philox_uniform_dense_slice_.default,
+        aten._philox_uniform_flat_slice_.default,
         op_call,
         low,
         high,
