@@ -1428,7 +1428,7 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 113)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_grad_with_v_schedule(self):
         """
         We have a special case for V schedules where 2 adjacent stages are on the same rank.
@@ -1546,7 +1546,7 @@ class TestScheduleLowering(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_grad_with_split_b_w(self):
         """
         Ensure that separate dInput and dWeight computations are correctly executed.
