@@ -93,32 +93,6 @@ it.
 #    guard on / specialize a marked dim fails LOUDLY at capture (PrecompileError) instead
 #    of baking a silently-wrong result.
 #
-#    DANGER -- two independently-marked unbacked dims that the graph requires to be EQUAL
-#    bake a SILENT equal-size assumption (unlike eager). Dims that MUST be equal at runtime
-#    (e.g. the rows of ``a`` and ``b`` in ``model(a) + model(b)``, where the add broadcasts)
-#    MUST be given a SHARED mark_unbacked shape_id: a shared id binds them to ONE symbol, so
-#    they are equal by construction AND a runtime size mismatch is REJECTED (see invariant 6,
-#    the assert_size_stride / shape_id path). If instead you mark each dim independently (no
-#    shared shape_id) and the graph combines them in a way that requires equality, the trace
-#    reasons size-obliviously: it silently bakes an equal-size assumption, and at runtime a
-#    mismatch (e.g. a=(10,4), b=(12,4)) is UNDEFINED -- precompile does NOT loudly raise the
-#    size-mismatch eager would; there is no deferred assert to make it loud, because the
-#    broadcast is size-oblivious at capture. So: give equal-must-be-equal dims a shared
-#    shape_id; never rely on independently-marked dims happening to be equal.
-#
-#    CONTROL FLOW is always specialized -- the single
-#    traced path is baked even for a dynamic dim. Inputs that would take a different path,
-#    or a different STATIC shape, yield a wrong result (an inductor-backend static-dim
-#    mismatch is rejected; see invariant 6). Each dense user-input leaf's DTYPE and
-#    DEVICE are also baked at capture: a runtime input whose dtype or device differs
-#    from the example is rejected up front with a PrecompileError (both backends), since
-#    the graph is specialized to them. Control flow is NOT enforced -- this is the
-#    defining property of a non-strict trace. Capture also EXECUTES ``fn`` once on the
-#    example inputs (on FAKE inputs when mark_unbacked dims are present), so any
-#    in-place mutation of an input or other side effect ``fn`` performs (e.g.
-#    ``x.add_(1)``, printing, RNG advancement) happens to the example inputs / external
-#    state at capture time; pass throwaway example inputs if that matters.
-#
 # 4. Boundary effects. Input mutation (including module buffers -- e.g. BatchNorm
 #    running stats in training mode), tensor-subclass wrap/unwrap (e.g. DTensor),
 #    outputs that alias inputs, and functionalized RNG are SUPPORTED: the inductor
@@ -337,7 +311,7 @@ def _resolved_get_attrs(
 # The functions below read PRIVATE per-tensor attributes that
 # torch._dynamo.decorators.mark_unbacked stamps onto a tensor: it consumes
 # _dynamo_unbacked_indices / _dynamo_strict_unbacked_indices / _dynamo_shape_ids /
-# _dynamo_unbacked_bounds, and rejects _dynamo_dynamic_indices / _dynamo_hint_overrides
+# _dynamo_unbacked_bounds / _dynamo_hint_overrides, and rejects _dynamo_dynamic_indices
 # / _specialize_on (marks it cannot honor). This is a deliberate coupling to a private
 # dynamo contract -- mark_unbacked is the documented entry point, and precompile reads
 # what it leaves behind rather than exposing its own dynamic-shape kwarg. A stable
@@ -359,10 +333,12 @@ def _reject_unsupported_marks(user_flat: list[Any]) -> None:
     """Reject mark options precompile cannot honor, loudly (invariant 3).
 
     precompile only honors mark_unbacked (backed unbacked dims) and mark_unbacked's
-    strict variant. Backed dynamic marks (mark_dynamic -> _dynamo_dynamic_indices),
-    per-dim specialization (_specialize_on), and hint overrides (_dynamo_hint_overrides)
-    have no analogue in the static/unbacked capture path -- silently dropping them would
-    bake a wrong artifact, so reject rather than ignore.
+    strict variant. Backed dynamic marks (mark_dynamic -> _dynamo_dynamic_indices) and
+    per-dim specialization (_specialize_on) have no analogue in the static/unbacked
+    capture path -- silently dropping them would bake a wrong artifact, so reject rather
+    than ignore. (mark_unbacked's hint_override is NOT rejected: it is a perf-only
+    autotuning size hint, never a guard, so the single artifact is valid regardless; it
+    is threaded into the capture ShapeEnv in _fakeify_with_unbacked.)
     """
     for t in user_flat:
         if not isinstance(t, torch.Tensor):
@@ -372,12 +348,6 @@ def _reject_unsupported_marks(user_flat: list[Any]) -> None:
                 "precompile: an input has a mark_dynamic (backed dynamic) dim, which "
                 "precompile cannot honor; it supports only mark_unbacked dynamic dims. "
                 "Use torch._dynamo.decorators.mark_unbacked, or leave the dim static."
-            )
-        if getattr(t, "_dynamo_hint_overrides", None):
-            raise PrecompileError(
-                "precompile: an input has a mark_unbacked hint_override, which "
-                "precompile cannot honor (it does not recompile / specialize on hints). "
-                "Remove the hint_override."
             )
         specialize_on = getattr(t, "_specialize_on", None)
         if specialize_on and any(v for v in specialize_on.values()):
@@ -394,9 +364,10 @@ def _read_unbacked_marks(user_flat: list[Any]) -> list[dict[int, Any]]:
     Dynamic shapes are opt-in via that decorator (the caller marks dims before calling
     precompile), NOT via a precompile kwarg -- so the precompile signature stays simple.
     Returns a per-leaf list aligned to ``user_flat``; each entry maps a marked dim to
-    ``(shape_id, min, max)`` (None when unset), empty when the leaf has no marks. Dims
-    sharing a ``shape_id`` get the SAME unbacked symbol (so they are equal by
-    construction); ``min``/``max`` become runtime range asserts.
+    ``(shape_id, min, max, hint_override)`` (None when unset), empty when the leaf has no
+    marks. Dims sharing a ``shape_id`` get the SAME unbacked symbol (so they are equal by
+    construction); ``min``/``max`` become runtime range asserts; ``hint_override`` is a
+    perf-only autotuning size hint applied to the symbol in _fakeify_with_unbacked.
     """
     marks: list[dict[int, Any]] = []
     for t in user_flat:
@@ -414,7 +385,13 @@ def _read_unbacked_marks(user_flat: list[Any]) -> list[dict[int, Any]]:
             continue
         shape_ids = getattr(t, "_dynamo_shape_ids", {}) or {}
         bounds = getattr(t, "_dynamo_unbacked_bounds", {}) or {}
-        marks.append({d: (shape_ids.get(d), *bounds.get(d, (None, None))) for d in idx})
+        hints = getattr(t, "_dynamo_hint_overrides", {}) or {}
+        marks.append(
+            {
+                d: (shape_ids.get(d), *bounds.get(d, (None, None)), hints.get(d))
+                for d in idx
+            }
+        )
     return marks
 
 
@@ -432,7 +409,7 @@ def _read_input_bounds(marks: list[dict[int, Any]]) -> list[Any]:
     bounds: list[Any] = []
     for per in marks:
         per_leaf: dict[int, Any] = {}
-        for d, (_shape_id, lo, hi) in per.items():
+        for d, (_shape_id, lo, hi, _hint) in per.items():
             if lo is not None or hi is not None:
                 per_leaf[d] = (lo, hi)
         bounds.append(per_leaf or None)
@@ -493,7 +470,7 @@ def _fakeify_with_unbacked(
                     if i not in per:
                         sizes.append(int(s))
                         continue
-                    shape_id, lo, hi = per[i]
+                    shape_id, lo, hi, hint = per[i]
                     if shape_id is not None and shape_id in shared:
                         u = shared[shape_id]
                         # Reusing the shared symbol still applies THIS occurrence's
@@ -511,6 +488,11 @@ def _fakeify_with_unbacked(
                         torch._check(u >= lo)
                     if hi is not None:
                         torch._check(u <= hi)
+                    # hint_override is a perf-only autotuning size hint (not a guard):
+                    # thread it onto the fresh symbol so inductor autotuning sees it. For a
+                    # shared shape_id the group's one symbol keeps the first hint set here.
+                    if hint is not None:
+                        shape_env._set_unbacked_var_to_hint_override(u, hint)
                     if shape_id is not None:
                         shared[shape_id] = u
                     sizes.append(u)
@@ -685,8 +667,9 @@ def _capture(
     buffer_devices = [str(t.device) for t in pb_flat[num_params:]]
 
     user_flat, in_spec = pytree.tree_flatten(user_inputs)
-    # Reject mark options precompile cannot honor (mark_dynamic, hint_override,
-    # specialize_on) loudly here, before tracing, rather than silently dropping them.
+    # Reject mark options precompile cannot honor (mark_dynamic, specialize_on) loudly
+    # here, before tracing, rather than silently dropping them. (hint_override is honored,
+    # not rejected -- it is a perf-only autotuning hint threaded onto the capture symbol.)
     _reject_unsupported_marks(user_flat)
     flat_args = [*pb_flat, *user_flat]
     # The REAL example tensors (params/buffers and user inputs). flat_args is reassigned
