@@ -9,9 +9,12 @@
 // Intercepts setComputePipelineState:, setBuffer:offset:atIndex:,
 // setBytes:length:atIndex:, setThreadgroupMemoryLength:atIndex:,
 // dispatchThreads:threadsPerThreadgroup:, and
-// dispatchThreadgroups:threadsPerThreadgroup: to record Metal kernel state.
-// All other selectors are forwarded to the real encoder via
-// forwardingTargetForSelector:.
+// dispatchThreadgroups:threadsPerThreadgroup: to track cumulative encoder
+// binding state. On every dispatch we snapshot the full sticky state into a
+// CapturedMetalKernel so each captured step is self-contained on replay
+// (matches Metal semantics where buffer/threadgroup bindings persist across
+// dispatches and setComputePipelineState calls until overwritten). All other
+// selectors are forwarded to the real encoder via forwardingTargetForSelector:.
 //
 // This centralizes capture recording so that every Metal kernel going through
 // MPSStream::commandEncoder() is automatically captured -- no per-site code.

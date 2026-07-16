@@ -122,8 +122,13 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
 
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
 
+  // No-graph execution causes nonsense if these are non-contiguous.
   const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
 
+  // Skip the fused no-graph fast path during MPS graph capture: it dispatches
+  // a raw Metal kernel that bypasses executeMPSGraph, so the op would not be
+  // recorded on the CapturedSteps list and replay would silently omit it.
+  // Falling through to the graph-based path keeps linear ops replayable.
   if (is_macos_at_least(MacOSVersion::MACOS_15_0) && is_contiguous && !is_complex &&
       !getCurrentMPSStream()->captureMode()) {
     // The fused 3-source kernel drops the bias for vector-shaped (M==1) inputs on the M1

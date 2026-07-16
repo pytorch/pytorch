@@ -50,7 +50,7 @@ MPSStream::~MPSStream() {
   _errorBuffer = nil;
   _compilationDescriptor = nil;
 
-  assert(_commandBuffer == nil);
+  TORCH_INTERNAL_ASSERT(_commandBuffer == nil);
 }
 
 MPSCommandBuffer* MPSStream::commandBuffer() {
@@ -331,6 +331,9 @@ id<MTLBuffer> MPSStream::getErrorBuffer() {
 
 void MPSStream::captureBegin() {
   TORCH_CHECK(!_captureMode, "MPS graph capture already in progress");
+  TORCH_CHECK(!getMPSProfiler().isOperationProfilingEnabled(),
+              "MPS graph capture requires MPSProfiler operation profiling to be disabled. "
+              "Disable operation profiling before calling metal_graph_capture().");
   // Release any steps from a previous capture.
   dispatch_sync_with_rethrow(_serialQueue, ^() {
     for (auto& step : _capturedSteps) {
@@ -390,13 +393,13 @@ void MPSStream::pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> ker
 }
 
 void MPSStream::replay() {
-  if (_capturedSteps.empty()) {
-    TORCH_WARN(
-        "torch.mps.metal_graph_replay() called with no captured steps. "
-        "Did the capture block contain any MPS ops?");
-    return;
-  }
   dispatch_sync_with_rethrow(_serialQueue, ^() {
+    if (_capturedSteps.empty()) {
+      TORCH_WARN(
+          "torch.mps.metal_graph_replay() called with no captured steps. "
+          "Did the capture block contain any MPS ops?");
+      return;
+    }
     endKernelCoalescing();
     for (auto& step : _capturedSteps) {
       if (step.kind == CapturedStep::Kind::MPSGraph) {
@@ -446,7 +449,7 @@ void MPSStream::replay() {
         for (auto& b : mk.bytes) {
           [enc setBytes:b.data.data() length:b.data.size() atIndex:b.index];
         }
-        for (auto& tm : mk.threadgroupMem) {
+        for (auto& tm : mk.threadgroupMemory) {
           [enc setThreadgroupMemoryLength:tm.length atIndex:tm.index];
         }
         auto gridSize = MTLSizeMake(mk.gridX, mk.gridY, mk.gridZ);

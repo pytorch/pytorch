@@ -149,13 +149,13 @@ class TORCH_API MPSStream {
       std::vector<uint8_t> data;
       unsigned index;
     };
-    struct ThreadgroupMemBinding {
+    struct ThreadgroupMemoryBinding {
       size_t length;
       unsigned index;
     };
     std::vector<BufferBinding> buffers;
     std::vector<BytesBinding> bytes;
-    std::vector<ThreadgroupMemBinding> threadgroupMem;
+    std::vector<ThreadgroupMemoryBinding> threadgroupMemory;
     uint64_t gridX = 0, gridY = 0, gridZ = 0;
     uint64_t tgX = 0, tgY = 0, tgZ = 0;
     bool useThreadgroups = false; // true = dispatchThreadgroups, false = dispatchThreads
