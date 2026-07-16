@@ -3707,12 +3707,12 @@ class SIMDScheduling(BaseScheduling):
 
         Triton precompiles are submitted to the async compile pool as each subkernel is codegened.
         The subkernels are then benchmarked in compile-completion order through the standard
-        benchmark_codegened_module path (the same one benchmark_fused_nodes uses), so device
-        benchmarking overlaps the remaining precompiles while retaining preserve_rng_state,
-        argument cloning and the n_spills guard. Subkernels with a single candidate config (or an
-        in-memory / on-disk autotune-cache hit) are taken directly with no benchmark. A subkernel
-        whose compile or benchmark fails is marked register_bound so the caller carves it out to
-        run standalone instead of failing the compile.
+        benchmark_codegened_module path, so device benchmarking overlaps the remaining precompiles
+        while retaining preserve_rng_state, argument cloning and the n_spills guard. Subkernels
+        with a single candidate config (unless coordinate descent tuning is on) or an autotune
+        cache hit are taken directly with no benchmark. A subkernel whose compile or benchmark
+        fails is marked register_bound so the caller carves it out to run standalone instead of
+        failing the compile.
         """
         from concurrent.futures import as_completed
 
@@ -3727,7 +3727,7 @@ class SIMDScheduling(BaseScheduling):
         seen_autotuners: OrderedSet[int] = OrderedSet()
 
         # Benchmark codegen must not count toward generated_kernel_count: these kernels
-        # are never emitted into the wrapper (matches debug_triton_code's save/restore).
+        # are never emitted into the wrapper.
         old_kernel_count = metrics.generated_kernel_count
         for pn in group:
             node_info = node_schedule_map[pn]
@@ -3789,9 +3789,6 @@ class SIMDScheduling(BaseScheduling):
         winners: list[SubkernelTune | None] = [None] * len(work)
 
         def fallback(index: int, pn: Any) -> None:
-            # Compile/benchmark failed: mark register_bound so the caller carves this
-            # subkernel out to run standalone (the pre-combo form) instead of stitching
-            # an arbitrary config or failing the compile.
             counters["inductor"]["combo_subkernel_autotune_fallback"] += 1
             log.warning("combo compile-time autotune failed for %s; carving out", pn)
             winners[index] = SubkernelTune(None, None, True)
@@ -3802,8 +3799,7 @@ class SIMDScheduling(BaseScheduling):
             configs = autotuner.configs
             benchmark_failed = False
             if not already_tuned and not single:
-                # skip_perf_cache: a .kernel_perf hit returns before the autotuner runs,
-                # leaving no launchers and an untuned configs[0] as the "winner".
+                # skip_perf_cache: the winner is needed in launchers, not just the timing.
                 try:
                     ms, _mod_path = self.benchmark_codegened_module(
                         mod, skip_perf_cache=True
@@ -3838,9 +3834,8 @@ class SIMDScheduling(BaseScheduling):
                 return
             launchers = autotuner.launchers
             info = autotuner.autotune_cache_info or {}
-            # cached == no fresh benchmark ran: in-process reuse (launchers already set), or
-            # the benchmark was skipped (no launchers), or a .best_config hit. (A skipped
-            # single-config kernel has no launchers, so it lands here too.)
+            # cached == no fresh benchmark ran: in-process reuse (launchers already set),
+            # the benchmark was skipped (no launchers), or a .best_config hit.
             cached = (
                 already_tuned
                 or not launchers
