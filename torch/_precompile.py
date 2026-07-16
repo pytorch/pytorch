@@ -736,10 +736,7 @@ def _capture(
     # fresh grad object, since .grad was snapshotted and cleared to None just above. The
     # finally-restore below puts the snapshotted object back, so both grad identity and
     # value are preserved regardless of which path ran.
-    saved_grads = [
-        a.grad if isinstance(a, torch.Tensor) and a.grad is not None else None
-        for a in real_flat
-    ]
+    saved_grads = [a.grad if isinstance(a, torch.Tensor) else None for a in real_flat]
     for a in real_flat:
         if isinstance(a, torch.Tensor):
             a.grad = None
@@ -1092,8 +1089,19 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
         target = node.targets[0]
-        if isinstance(target, ast.Name) and target.id in wanted:
+        if not isinstance(target, ast.Name):
+            continue
+        if target.id in wanted:
             found[target.id] = ast.literal_eval(node.value)
+        else:
+            # Not a metadata name we consume (e.g. a driver-internal top-level like
+            # _MODULE_POSITIONS_SET). Skipped by design, but log it at debug so a
+            # malformed / renamed artifact is diagnosable rather than silently dropped.
+            log.debug(
+                "precompile: ignoring unrecognized top-level assignment %r while "
+                "parsing artifact calling-convention metadata",
+                target.id,
+            )
     missing = wanted - found.keys()
     if missing:
         raise PrecompileError(
