@@ -9,7 +9,11 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import requires_cuda_p2p_access, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    requires_cuda_p2p_access,
+    run_tests,
+)
 
 
 if not dist.is_available() or not dist.is_nccl_available():
@@ -23,6 +27,8 @@ if not dist.is_available() or not dist.is_nccl_available():
 @requires_nccl_version((2, 28), "Need NCCL 2.28+ for CE collectives")
 @requires_cuda_p2p_access()
 class NCCLCopyEngineCollectives(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def backend_str(cls) -> str | None:
         return "nccl"
