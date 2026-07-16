@@ -1995,24 +1995,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # CPython: PyNumber_Index checks tp_as_number->nb_index.
-        type_attr, source = self._lookup_slot_type_attr(tx, "__index__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            return super().nb_index_impl(tx)
-        method_var = self.resolve_type_attr(tx, "__index__", type_attr, source)
-        result = method_var.call_function(tx, [], {})
-        # CPython validates that __index__ returns an int.
-        # https://github.com/python/cpython/blob/c09ccd9c429/Objects/abstract.c#L1433-L1438
-        if result.is_python_constant() and not isinstance(
-            result.as_python_constant(), int
-        ):
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    f"__index__ returned non-int (type {type(result.as_python_constant()).__name__})"
-                ],
-            )
-        return result
+        return self.SLOT0(tx, "__index__")
 
     def nb_int_impl(
         self,
@@ -2020,20 +2003,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_int calls __int__(), PyNumber_Long validates the return type.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1538-L1550
-        type_attr, source = self._lookup_slot_type_attr(tx, "__int__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            return super().nb_int_impl(tx)
-        method_var = self.resolve_type_attr(tx, "__int__", type_attr, source)
-        result = method_var.call_function(tx, [], {})
-        if not issubclass(result.python_type(), int):
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    f"__int__ returned non-int (type {result.python_type().__name__})"
-                ],
-            )
-        return result
+        return self.SLOT0(tx, "__int__")
 
     def nb_float_impl(
         self,
@@ -2041,20 +2011,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_float calls __float__(), PyNumber_Float validates the return type.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1647-L1658
-        type_attr, source = self._lookup_slot_type_attr(tx, "__float__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            return super().nb_float_impl(tx)
-        method_var = self.resolve_type_attr(tx, "__float__", type_attr, source)
-        result = method_var.call_function(tx, [], {})
-        if not issubclass(result.python_type(), float):
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    f"__float__ returned non-float (type {result.python_type().__name__})"
-                ],
-            )
-        return result
+        return self.SLOT0(tx, "__float__")
 
     def nb_negative_impl(
         self,
@@ -2062,21 +2019,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_negative calls __neg__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
-        type_attr = self.lookup_class_mro_attr("__neg__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            raise_type_error(
-                tx, f"bad operand type for unary -: '{self.python_type_name()}'"
-            )
-        if type_attr is None:
-            raise_type_error(tx, "'NoneType' object is not callable")
-
-        method = self._maybe_get_baseclass_method("__neg__")
-        if method is None:
-            raise_type_error(
-                tx, f"bad operand type for unary -: '{self.python_type_name()}'"
-            )
-
-        return self.call_method(tx, "__neg__", [], {})
+        return self.SLOT0(tx, "__neg__")
 
     def nb_positive_impl(
         self,
@@ -2084,22 +2027,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_positive calls __pos__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9361
-        type_attr = self.lookup_class_mro_attr("__pos__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            raise_type_error(
-                tx, f"bad operand type for unary +: '{self.python_type_name()}'"
-            )
-        if type_attr is None:
-            raise_type_error(tx, "'NoneType' object is not callable")
-
-        method = self._maybe_get_baseclass_method("__pos__")
-        if method is None:
-            raise_type_error(
-                tx,
-                f"bad operand type for unary +: '{self.python_type_name()}'",
-            )
-
-        return self.call_method(tx, "__pos__", [], {})
+        return self.SLOT0(tx, "__pos__")
 
     def nb_absolute_impl(
         self,
@@ -2107,23 +2035,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_absolute calls __abs__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9406
-        type_attr = self.lookup_class_mro_attr("__abs__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            raise_type_error(
-                tx,
-                f"bad operand type for abs(): '{self.python_type_name()}'",
-            )
-        if type_attr is None:
-            raise_type_error(tx, "'NoneType' object is not callable")
-
-        method = self._maybe_get_baseclass_method("__abs__")
-        if method is None:
-            raise_type_error(
-                tx,
-                f"bad operand type for abs(): '{self.python_type_name()}'",
-            )
-
-        return self.call_method(tx, "__abs__", [], {})
+        return self.SLOT0(tx, "__abs__")
 
     def nb_invert_impl(
         self,
@@ -2131,24 +2043,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_invert calls __invert__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9426
-
-        type_attr = self.lookup_class_mro_attr("__invert__")
-        if type_attr is NO_SUCH_SUBOBJ:
-            raise_type_error(
-                tx,
-                f"bad operand type for unary ~: '{self.python_type_name()}'",
-            )
-        if type_attr is None:
-            raise_type_error(tx, "'NoneType' object is not callable")
-
-        method = self._maybe_get_baseclass_method("__invert__")
-        if method is None:
-            raise_type_error(
-                tx,
-                f"bad operand type for unary ~: '{self.python_type_name()}'",
-            )
-
-        return self.call_method(tx, "__invert__", [], {})
+        return self.SLOT0(tx, "__invert__")
 
     def torch_function_check(self) -> None:
         if not has_torch_function(self):
@@ -2248,18 +2143,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
-        method, source_fn = self._lookup_slot_type_attr(tx, "__getitem__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.mp_subscript_impl(tx, key)
-        if isinstance(method, types.FunctionType):
-            return variables.UserMethodVariable(
-                method, self, source_fn=source_fn, source=self.source
-            ).call_function(tx, [key], {})
-        return super().mp_subscript_impl(tx, key)
+        return self.SLOT1(tx, "__getitem__", key)
 
     def sq_repeat_impl(
         self,
@@ -2315,6 +2199,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
+        *,
+        raise_attribute_error: bool,
     ) -> VariableTracker:
         # Mirrors CPython's vectorcall_maybe: lookup `name` on the type's MRO
         # (NOT the instance), bind via the descriptor protocol, and call.
@@ -2328,6 +2214,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2968-L2989
         method = self._maybe_get_baseclass_method(name)
         if method is None:
+            if raise_attribute_error:
+                raise_type_error(tx, "'NoneType' object is not callable")
             return variables.ConstantVariable.create(NotImplemented)
         # Delegate to _base_vt for non-overridden base-class methods
         # (e.g. UserDict, list/tuple subclasses) — mirrors the same
@@ -2338,12 +2226,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and method in self._base_methods
         ):
             return self._base_vt.call_method(tx, name, list(args), {})
-        if not isinstance(method, types.FunctionType):
-            # C-implemented method descriptors / slot wrappers (e.g.
-            # Tensor.__add__) cannot be invoked here without re-entering the
-            # nb_<op>_impl -> SLOT1BIN dispatch via call_method, which would
-            # infinitely recurse. Graph-break instead and let the outer
-            # binary-op machinery fall back.
+        if isinstance(method, types.WrapperDescriptorType):
+            # C slot wrapper inherited from a builtin base (e.g. int.__neg__ on
+            # an IntEnum member).  It has no Python body; resolving+calling it
+            # would route back through call_method -> nb_<op>_impl -> here and
+            # infinitely recurse.  If self and all args are constants, fold the
+            # op on the values; otherwise there's no traceable body -> graph
+            # break.  (classmethod/staticmethod/plain defs are handled below by
+            # resolve_type_attr via the descriptor protocol.)
+            if self.is_python_constant() and all(a.is_python_constant() for a in args):
+                result = method(
+                    self.as_python_constant(),
+                    *[a.as_python_constant() for a in args],
+                )
+                return VariableTracker.build(tx, result)
             unimplemented(
                 gb_type="vectorcall_maybe on C method descriptor",
                 context=f"name={name}, type={self.python_type_name()}, method={method}",
@@ -2357,6 +2253,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # resolve_type_attr returns a bound callable (self already bound via
         # the descriptor protocol), so we pass only the remaining args.
         return method_var.call_function(tx, list(args), {})  # type: ignore[arg-type]
+
+    def SLOT0(
+        self,
+        tx: "InstructionTranslatorBase",
+        dunder: str,
+    ) -> VariableTracker:
+        # Mirrors CPython's SLOT0 macro (Objects/typeobject.c).
+        return self._vectorcall_maybe(tx, dunder, [], raise_attribute_error=True)
+
+    def SLOT1(
+        self,
+        tx: "InstructionTranslatorBase",
+        dunder: str,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # Mirrors CPython's SLOT1 macro (Objects/typeobject.c).
+        return self._vectorcall_maybe(tx, dunder, [other], raise_attribute_error=True)
 
     def SLOT1BIN(
         self,
@@ -2448,12 +2361,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     rdunder
                 ) != other_._maybe_get_baseclass_method(rdunder)
                 if method_is_overloaded:
-                    r = other_._vectorcall_maybe(tx, rdunder, [self_])
+                    r = other_._vectorcall_maybe(
+                        tx, rdunder, [self_], raise_attribute_error=False
+                    )
                     if not is_nb_not_implemented(r):
                         return r
                     do_other = False
 
-            r = self_._vectorcall_maybe(tx, dunder, [other_])
+            r = self_._vectorcall_maybe(
+                tx, dunder, [other_], raise_attribute_error=False
+            )
             if not is_nb_not_implemented(r) or py_is_type(o_type, s_type):
                 return r
 
@@ -2463,7 +2380,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     f"Expected UserDefinedObjectVariable, got {type(other_)}"
                 )
             if other_._maybe_get_baseclass_method(rdunder):
-                r = other_._vectorcall_maybe(tx, rdunder, [self_])
+                r = other_._vectorcall_maybe(
+                    tx, rdunder, [self_], raise_attribute_error=False
+                )
                 if not is_nb_not_implemented(r):
                     return r
 
@@ -2505,7 +2424,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        return self.call_method(tx, "__ilshift__", [other], {})
+        return self.SLOT1(tx, "__ilshift__", other)
 
     def nb_rshift_impl(
         self,
@@ -2528,7 +2447,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        return self.call_method(tx, "__irshift__", [other], {})
+        return self.SLOT1(tx, "__irshift__", other)
 
     def nb_or_impl(
         self,
@@ -2552,7 +2471,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
-        return self.call_method(tx, "__ior__", [other], {})
+        return self.SLOT1(tx, "__ior__", other)
 
     def nb_and_impl(
         self,
@@ -2575,7 +2494,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        return self.call_method(tx, "__iand__", [other], {})
+        return self.SLOT1(tx, "__iand__", other)
 
     def nb_xor_impl(
         self,
@@ -2598,7 +2517,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        return self.call_method(tx, "__ixor__", [other], {})
+        return self.SLOT1(tx, "__ixor__", other)
 
     def nb_add_impl(
         self,
@@ -2622,7 +2541,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9494
-        return self.call_method(tx, "__iadd__", [other], {})
+        return self.SLOT1(tx, "__iadd__", other)
 
     def nb_subtract_impl(
         self,
@@ -2646,14 +2565,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10362-L10363
-        return self.call_method(tx, "__isub__", [other], {})
+        return self.SLOT1(tx, "__isub__", other)
 
     def nb_inplace_multiply_impl(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        return self.call_method(tx, "__imul__", [other], {})
+        return self.SLOT1(tx, "__imul__", other)
 
     def nb_floor_divide_impl(
         self,
@@ -2676,7 +2595,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        return self.call_method(tx, "__ifloordiv__", [other], {})
+        return self.SLOT1(tx, "__ifloordiv__", other)
 
     def nb_true_divide_impl(
         self,
@@ -2699,7 +2618,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        return self.call_method(tx, "__itruediv__", [other], {})
+        return self.SLOT1(tx, "__itruediv__", other)
 
     def nb_remainder_impl(
         self,
@@ -2722,7 +2641,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        return self.call_method(tx, "__imod__", [other], {})
+        return self.SLOT1(tx, "__imod__", other)
 
     def nb_divmod_impl(
         self,
@@ -2767,7 +2686,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         other: VariableTracker,
         z: VariableTracker | None,
     ) -> VariableTracker:
-        return self.call_method(tx, "__ipow__", [other], {})
+        return self.SLOT1(tx, "__ipow__", other)
 
     def nb_power_z_impl(
         self,
@@ -3833,7 +3752,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9521-L9565
         # __hash__ = None → PyObject_HashNotImplemented:
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L8066-L8085
-        from ..exc import raise_type_error
 
         obj_type = type(self.value)
 
@@ -4618,6 +4536,20 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             except ObservedKeyError:
                 handle_observed_exception(tx)
                 return self.call_method(tx, "__missing__", args, kwargs)
+        if name == "__init__" and self._maybe_get_baseclass_method("__init__") in (
+            dict.__init__,
+            collections.OrderedDict.__init__,
+        ):
+            # dict.__init__(*args, **kwargs) populates the underlying dict
+            # storage (CPython dict_init -> dict_update_common == dict.update).
+            # Route it to _base_vt so the content isn't lost, mirroring how a
+            # dict subclass inherits dict's C-level __init__.  Restricted to
+            # dict/OrderedDict __init__ -- defaultdict.__init__'s first arg is
+            # the default_factory, not dict content, and has its own path.
+            if self._base_vt is None:
+                raise AssertionError("_base_vt must not be None in call_method")
+            self._base_vt.call_method(tx, "update", args, kwargs)
+            return variables.ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
 
     def debug_repr(self) -> str:
@@ -5070,7 +5002,10 @@ class DefaultDictVariable(UserDefinedDictVariable):
                 )
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in __init__")
-        return self._base_vt.call_method(tx, "__init__", args, kwargs)
+        # dict.__init__(*args, **kwargs) populates via dict_update_common ==
+        # dict.update; route to update so the content is copied into _base_vt
+        # (call_method("__init__") no longer populates a ConstDictVariable).
+        return self._base_vt.call_method(tx, "update", args, kwargs)
 
     def call_method(
         self,
