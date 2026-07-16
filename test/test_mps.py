@@ -1328,23 +1328,6 @@ class TestMPS(TestCaseMPS):
         out_cpu = a.cpu() @ b.cpu()
         self.assertEqual(out_cpu, out_mps.cpu(), **tol)
 
-    def test_mps_benchmark_flag(self):
-        original = torch.backends.mps.benchmark
-        with torch.backends.mps.flags(benchmark=not original):
-            self.assertEqual(torch.backends.mps.benchmark, not original)
-        self.assertEqual(torch.backends.mps.benchmark, original)
-        with self.assertRaisesRegex(RuntimeError, "set_benchmark_mps expects a bool"):
-            with torch.backends.mps.flags(benchmark=1):
-                pass
-
-    def test_mps_autotune_trace_validation(self):
-        with self.assertRaisesRegex(TypeError, "max_entries must be an int"):
-            torch.backends.mps.autotune_trace(max_entries=True)
-        with self.assertRaisesRegex(ValueError, "greater than zero"):
-            torch.backends.mps.autotune_trace(max_entries=0)
-        with self.assertRaisesRegex(TypeError, "must be a bool"):
-            torch.backends.mps.autotune_trace(wait_until_completed=1)
-
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("transpose", [False, True])
     def test_gemv_mm(self, dtype, transpose):
@@ -1489,14 +1472,26 @@ class TestMPS(TestCaseMPS):
         a = torch.randn(1, K, device="mps", dtype=torch.bfloat16)
         b = self._gemv_mat(K, N, torch.bfloat16, transpose=layout == "tn")  # 4.3 GB
         bias = torch.randn(1, N, device="mps", dtype=torch.bfloat16) if layout == "tn" else None
-        got = a @ b if bias is None else torch.addmm(bias, a, b)
+        with torch.backends.mps.flags(benchmark=True):
+            with torch.backends.mps.autotune_trace(max_entries=1) as trace:
+                got = a @ b if bias is None else torch.addmm(bias, a, b)
         self.assertFalse(got.isnan().any().item())
+        launch = trace.records[-1]
+        self.assertEqual(launch["phase"], "heuristic")
+        self.assertEqual(launch["candidates"], [launch["config"]])
+        self.assertIn("_i64", launch["kernel"])
+        with torch.backends.mps._autotune_override("gemv", launch["config"]):
+            with torch.backends.mps.autotune_trace(max_entries=1) as forced_trace:
+                forced = a @ b if bias is None else torch.addmm(bias, a, b)
+        self.assertEqual(forced_trace.records[-1]["phase"], "forced")
+        self.assertEqual(forced_trace.records[-1]["kernel"], launch["kernel"])
         # CPU reference over a column slice to stay within RAM.
         sl = slice(0, 2048) if check == "head" else slice(-2048, None)
         ref = a.float().cpu() @ b[:, sl].float().cpu()
         if bias is not None:
             ref += bias[:, sl].float().cpu()
         self.assertEqual(got[:, sl].float().cpu(), ref, atol=2e-1, rtol=5e-2)
+        self.assertEqual(forced[:, sl], got[:, sl], atol=0, rtol=0)
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("case", [
@@ -11661,34 +11656,92 @@ class TestConv3dChannelsLast3dMPS(NNTestCase):
         self.assertEqual(m_cpu.weight.grad, m_mps.weight.grad.cpu(), atol=1e-4, rtol=1e-4)
 
 
-class TestLinalgMPS(TestCaseMPS):
+class TestAutotuneMPS(TestCaseMPS):
+    """Tests for MPS kernel autotuning (torch.backends.mps.benchmark).
+
+    Covers the flag itself, autotune_trace records, forced-config overrides,
+    cache clearing, and the GEMV tuner's candidate pools, phases, and kernel
+    routing. setUp enables benchmarking with a fresh autotune cache per test.
+    """
+
+    def setUp(self):
+        super().setUp()
+        stack = contextlib.ExitStack()
+        stack.enter_context(torch.backends.mps.flags(benchmark=True))
+        self.addCleanup(stack.close)
+        torch.backends.mps._clear_autotune_cache()
+
+    def test_benchmark_flag(self, device):
+        original = torch.backends.mps.benchmark
+        with torch.backends.mps.flags(benchmark=not original):
+            self.assertEqual(torch.backends.mps.benchmark, not original)
+        self.assertEqual(torch.backends.mps.benchmark, original)
+        with self.assertRaisesRegex(RuntimeError, "set_benchmark_mps expects a bool"):
+            with torch.backends.mps.flags(benchmark=1):
+                pass
+
+    def test_trace_validation(self, device):
+        with self.assertRaisesRegex(TypeError, "max_entries must be an int"):
+            torch.backends.mps.autotune_trace(max_entries=True)
+        with self.assertRaisesRegex(ValueError, "greater than zero"):
+            torch.backends.mps.autotune_trace(max_entries=0)
+        with self.assertRaisesRegex(TypeError, "must be a bool"):
+            torch.backends.mps.autotune_trace(wait_until_completed=1)
+        with torch.backends.mps.autotune_trace():
+            with self.assertRaisesRegex(RuntimeError, "already active"):
+                with torch.backends.mps.autotune_trace():
+                    pass
+
+    def test_trace_limit(self, device):
+        a = torch.randn(1, 256, device=device)
+        b = torch.randn(256, 512, device=device)
+        with torch.backends.mps.flags(benchmark=False):
+            with torch.backends.mps.autotune_trace(max_entries=2) as trace:
+                for _ in range(3):
+                    _ = a @ b
+        self.assertEqual(trace.schema_version, 1)
+        self.assertEqual(len(trace.records), 2)
+        self.assertEqual(trace.dropped, 1)
+        self.assertEqual(
+            [record["sequence"] for record in trace.records], [2, 3]
+        )
+
+    def test_trace_no_wait(self, device):
+        a = torch.randn(1, 256, device=device)
+        b = torch.randn(256, 512, device=device)
+        with torch.backends.mps.flags(benchmark=False):
+            with torch.backends.mps.autotune_trace(
+                wait_until_completed=False
+            ) as trace:
+                _ = a @ b
+        self.assertEqual(len(trace.records), 1)
+        self.assertEqual(trace.records[0]["phase"], "heuristic")
+
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     @parametrize("transpose", [False, True])
     def test_gemv_benchmark(self, device, dtype, transpose):
-        with torch.backends.mps.flags(benchmark=True):
-            torch.backends.mps._clear_autotune_cache()
-            a = torch.randn(1, 257, device=device, dtype=dtype)
-            if transpose:
-                b = torch.randn(513, 257, device=device, dtype=dtype).t()
-            else:
-                b = torch.randn(257, 513, device=device, dtype=dtype)
-            expected = a.cpu() @ b.cpu()
-            records = []
-            for _ in range(50):
-                with torch.backends.mps.autotune_trace(max_entries=2) as trace:
-                    result = a @ b
-                records.extend(trace.records)
-                if any(record["event"] == "selection" for record in trace.records):
-                    break
-            with torch.backends.mps.autotune_trace(max_entries=1) as cached_trace:
-                cached = a @ b
-            tol = (
-                dict(atol=2e-2, rtol=2e-2)
-                if dtype == torch.bfloat16
-                else dict(atol=1e-3, rtol=1e-4)
-            )
-            self.assertEqual(expected, result.cpu(), **tol)
-            self.assertEqual(expected, cached.cpu(), **tol)
+        a = torch.randn(1, 257, device=device, dtype=dtype)
+        if transpose:
+            b = torch.randn(513, 257, device=device, dtype=dtype).t()
+        else:
+            b = torch.randn(257, 513, device=device, dtype=dtype)
+        expected = a.cpu() @ b.cpu()
+        records = []
+        for _ in range(50):
+            with torch.backends.mps.autotune_trace(max_entries=2) as trace:
+                result = a @ b
+            records.extend(trace.records)
+            if any(record["event"] == "selection" for record in trace.records):
+                break
+        with torch.backends.mps.autotune_trace(max_entries=1) as cached_trace:
+            cached = a @ b
+        tol = (
+            dict(atol=2e-2, rtol=2e-2)
+            if dtype == torch.bfloat16
+            else dict(atol=1e-3, rtol=1e-4)
+        )
+        self.assertEqual(expected, result.cpu(), **tol)
+        self.assertEqual(expected, cached.cpu(), **tol)
         selections = [
             record for record in records if record["event"] == "selection"
         ]
@@ -11710,24 +11763,38 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(selection["kernel"], selected_result["kernel"])
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    @parametrize("transpose", [False, True])
+    @parametrize("matrix_layout", ["dense", "transposed", "strided", "sliced"])
+    @parametrize("vector_stride", [1, 2])
     @parametrize("vector_side", ["left", "right"])
-    def test_gemv_autotune_candidates(
-        self, device, dtype, transpose, vector_side
+    def test_gemv_candidates(
+        self, device, dtype, matrix_layout, vector_stride, vector_side
     ):
         K, outlen = 256, 512
+
+        def make_matrix(rows, cols):
+            if matrix_layout == "transposed":
+                return torch.randn(cols, rows, device=device, dtype=dtype).t()
+            if matrix_layout == "strided":
+                return torch.randn(
+                    rows, 2 * cols, device=device, dtype=dtype
+                )[:, ::2]
+            if matrix_layout == "sliced":
+                return torch.randn(
+                    rows, cols + 1, device=device, dtype=dtype
+                )[:, 1:]
+            return torch.randn(rows, cols, device=device, dtype=dtype)
+
         if vector_side == "left":
-            a = torch.randn(1, K, device=device, dtype=dtype)
-            if transpose:
-                b = torch.randn(outlen, K, device=device, dtype=dtype).t()
-            else:
-                b = torch.randn(K, outlen, device=device, dtype=dtype)
+            a = torch.randn(
+                1, vector_stride * K, device=device, dtype=dtype
+            )[:, ::vector_stride]
+            b = make_matrix(K, outlen)
         else:
-            if transpose:
-                a = torch.randn(K, outlen, device=device, dtype=dtype).t()
-            else:
-                a = torch.randn(outlen, K, device=device, dtype=dtype)
-            b = torch.randn(K, 1, device=device, dtype=dtype)
+            a = make_matrix(outlen, K)
+            b = torch.randn(
+                K, vector_stride, device=device, dtype=dtype
+            )[:, :1]
+        use_t = (vector_side == "left") != (matrix_layout == "transposed")
         expected = a.cpu() @ b.cpu()
         tol = (
             dict(atol=2e-2, rtol=2e-2)
@@ -11752,18 +11819,25 @@ class TestLinalgMPS(TestCaseMPS):
             self.assertEqual(launch["phase"], "heuristic")
             self.assertIn(launch["config"], configs)
             self.assertTrue(launch["kernel"].startswith("gemv_"))
+            has_t2d = any(config.startswith("t2d:") for config in configs)
+            self.assertEqual(
+                has_t2d, use_t and matrix_layout in ("dense", "transposed")
+            )
+            if matrix_layout == "sliced":
+                self.assertTrue(
+                    all(config.endswith(":vec=1") for config in configs)
+                )
 
-        with torch.backends.mps.flags(benchmark=True):
-            with torch.backends.mps.autotune_trace(
-                max_entries=2 * len(configs)
-            ) as forced_trace:
-                for config in configs:
-                    with torch.backends.mps._autotune_override("gemv", config):
-                        self.assertEqual(expected, (a @ b).cpu(), **tol)
-                        result = torch.addmm(
-                            bias, a, b, beta=0.7, alpha=1.3
-                        )
-                        self.assertEqual(expected_addmm, result.cpu(), **tol)
+        with torch.backends.mps.autotune_trace(
+            max_entries=2 * len(configs)
+        ) as forced_trace:
+            for config in configs:
+                with torch.backends.mps._autotune_override("gemv", config):
+                    self.assertEqual(expected, (a @ b).cpu(), **tol)
+                    result = torch.addmm(
+                        bias, a, b, beta=0.7, alpha=1.3
+                    )
+                    self.assertEqual(expected_addmm, result.cpu(), **tol)
 
         self.assertEqual(
             [record["config"] for record in forced_trace.records],
@@ -11778,8 +11852,16 @@ class TestLinalgMPS(TestCaseMPS):
         ):
             self.assertIn("_none", mm_record["kernel"])
             self.assertIn("_ab", addmm_record["kernel"])
+        for record in [launch, *forced_trace.records]:
+            self.assertEqual(
+                "_strided" in record["kernel"], matrix_layout == "strided"
+            )
+        if not use_t and vector_stride > 1:
+            self.assertTrue(
+                all("_xs" in record["kernel"] for record in forced_trace.records)
+            )
 
-    def test_gemv_autotune_override_validation(self, device):
+    def test_gemv_override_validation(self, device):
         a = torch.randn(1, 256, device=device)
         b = torch.randn(256, 512, device=device)
         with torch.backends.mps._autotune_override("gemv", "invalid"):
@@ -11788,34 +11870,20 @@ class TestLinalgMPS(TestCaseMPS):
             ):
                 _ = a @ b
 
-    def test_gemv_autotune_cache_clear(self, device):
+    def test_gemv_cache_clear(self, device):
         a = torch.randn(1, 256, device=device)
         b = torch.randn(256, 512, device=device)
-        with torch.backends.mps.flags(benchmark=True):
-            torch.backends.mps._clear_autotune_cache()
-            with torch.backends.mps.autotune_trace() as first:
-                _ = a @ b
-            torch.backends.mps._clear_autotune_cache()
-            with torch.backends.mps.autotune_trace() as second:
-                _ = a @ b
+        with torch.backends.mps.autotune_trace() as first:
+            _ = a @ b
+        torch.backends.mps._clear_autotune_cache()
+        with torch.backends.mps.autotune_trace() as second:
+            _ = a @ b
         self.assertEqual(first.records[-1]["phase"], "explore")
         self.assertEqual(second.records[-1]["phase"], "explore")
         self.assertEqual(first.records[-1]["config"], second.records[-1]["config"])
 
-    def test_gemv_autotune_trace_limit(self, device):
-        a = torch.randn(1, 256, device=device)
-        b = torch.randn(256, 512, device=device)
-        with torch.backends.mps.flags(benchmark=False):
-            with torch.backends.mps.autotune_trace(max_entries=2) as trace:
-                for _ in range(3):
-                    _ = a @ b
-        self.assertEqual(trace.schema_version, 1)
-        self.assertEqual(len(trace.records), 2)
-        self.assertEqual(trace.dropped, 1)
-        self.assertEqual(
-            [record["sequence"] for record in trace.records], [2, 3]
-        )
 
+class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
         dtype = t.dtype
         numpy_dtype = dtype
@@ -16902,6 +16970,7 @@ instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
+instantiate_device_type_tests(TestAutotuneMPS, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestAutocastMPS)
