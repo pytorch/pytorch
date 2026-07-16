@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Repair a PyTorch wheel: bundle libgomp + GPU libs, set RPATHs, retag platform.
 
-Uses the `wheel` Python package for unpack/pack/tags (not zip).
+Uses auditwheel for unpack/repack (not the `wheel` CLI). `wheel pack`/`wheel tags`
+emit an invalid ZIP64 header for archives over 4GB (pypa/wheel#692), which makes
+large ROCm wheels fail to install under strict zip parsers such as uv
+(pytorch#189748). auditwheel repacks via the stdlib `zipfile`, which writes a
+correct ZIP64 record.
 
 Usage: repair_wheel.py <input_dir> <output_dir>
 
@@ -20,12 +24,24 @@ import platform
 import shutil
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from auditwheel.wheeltools import add_platforms, InWheelCtx
+
 
 PATCHELF = "/usr/local/bin/patchelf"
+
+
+def wheel_platform_tags(wheel_name: str) -> list[str]:
+    """Platform tags encoded in a wheel filename.
+
+    The filename is ``{name}-{version}-{python}-{abi}-{platform}.whl``; the
+    platform field is the last ``-``-delimited component and may itself be a
+    ``.``-joined set of tags (e.g. ``linux_x86_64`` or
+    ``manylinux1_x86_64.manylinux_2_17_x86_64``).
+    """
+    return wheel_name.removesuffix(".whl").rsplit("-", 1)[-1].split(".")
 
 
 @dataclass
@@ -263,18 +279,6 @@ def set_rpath(sofile: Path, rpath: str, force_rpath: bool) -> None:
     patchelf(*cmd)
 
 
-def unpack_wheel(wheel: Path, work: Path) -> Path:
-    subprocess.run(["wheel", "unpack", str(wheel), "-d", str(work)], check=True)
-    unpacked = next(work.glob("torch-*"), None)
-    if unpacked is None:
-        raise RuntimeError(f"wheel unpack produced no torch-* dir in {work}")
-    return unpacked
-
-
-def pack_wheel(unpacked: Path, output_dir: Path) -> None:
-    subprocess.run(["wheel", "pack", str(unpacked), "-d", str(output_dir)], check=True)
-
-
 def replace_needed(unpacked_torch: Path, original: str, replacement: str) -> None:
     """Rewrite NEEDED entries that match `original*` to `replacement` across the wheel."""
     for sofile in unpacked_torch.rglob("*.so*"):
@@ -294,6 +298,7 @@ def replace_needed(unpacked_torch: Path, original: str, replacement: str) -> Non
 def repair_wheel(
     wheel: Path,
     output_dir: Path,
+    platform_tag: str,
     libgomp_path: Path,
     aarch64_deps: list[Path],
     bundled_libs: list[BundledLib],
@@ -302,10 +307,12 @@ def repair_wheel(
     lib_so_rpath: str,
     force_rpath: bool,
 ) -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        work = Path(tmp)
-        unpacked = unpack_wheel(wheel, work)
-        torch_dir = unpacked / "torch"
+    # InWheelCtx unpacks via auditwheel's zip2dir on enter and, once out_wheel is
+    # set, regenerates RECORD and repacks via dir2zip on exit. dir2zip uses the
+    # stdlib zipfile (correct ZIP64), unlike `wheel pack`/`wheel tags` which
+    # corrupt >4GB ROCm wheels (pypa/wheel#692, pytorch#189748).
+    with InWheelCtx(wheel, output_dir / wheel.name) as ctx:
+        torch_dir = ctx.path / "torch"
         torch_lib = torch_dir / "lib"
 
         # Bundle libgomp and rewrite NEEDED entries to point at our copy
@@ -361,14 +368,11 @@ def repair_wheel(
             if sofile.is_file():
                 set_rpath(sofile, lib_so_rpath, force_rpath)
 
-        pack_wheel(unpacked, output_dir)
-
-
-def retag_wheels(output_dir: Path, platform_tag: str) -> None:
-    for whl in output_dir.glob("*.whl"):
-        subprocess.run(
-            ["wheel", "tags", "--platform-tag", platform_tag, "--remove", str(whl)],
-            check=True,
+        # Retag linux_* -> manylinux_2_28_* in both the filename and the WHEEL
+        # metadata. add_platforms updates ctx.out_wheel to the new name; RECORD
+        # regeneration and repacking happen when the context exits.
+        add_platforms(
+            ctx, [platform_tag], remove_platforms=wheel_platform_tags(wheel.name)
         )
 
 
@@ -420,10 +424,12 @@ def main() -> None:
     if not wheels:
         sys.exit(f"No wheels found in {args.input_dir}")
 
+    platform_tag = f"manylinux_2_28_{arch}"
     for whl in wheels:
         repair_wheel(
             whl,
             args.output_dir,
+            platform_tag,
             libgomp_path,
             aarch64_deps,
             bundled_libs,
@@ -433,7 +439,6 @@ def main() -> None:
             force_rpath,
         )
 
-    retag_wheels(args.output_dir, f"manylinux_2_28_{arch}")
     repaired = list(args.output_dir.glob("*.whl"))
     print(f"Repaired {len(repaired)} wheel(s) in {args.output_dir}")
 
