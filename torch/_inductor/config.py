@@ -1044,6 +1044,17 @@ split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
 deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 
+
+def _parse_deterministic_ops_env():
+    use_env = os.environ.get("TORCHINDUCTOR_DETERMINISTIC_OPS", "").split(",")
+    return use_env
+
+
+# fine-grained deterministic mode flag
+class deterministic_ops:
+    pad_mm = True if "pad_mm" in _parse_deterministic_ops_env() else None
+
+
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 

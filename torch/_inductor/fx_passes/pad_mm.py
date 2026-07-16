@@ -93,6 +93,13 @@ def hint_symbols(
     return [optimization_hint(d) for d in ds]
 
 
+def _uses_deterministic_pad_mm() -> bool:
+    return (
+        torch._inductor.config.deterministic
+        or torch._inductor.config.deterministic_ops.pad_mm
+    )
+
+
 def can_pad(
     mat1: Tensor,
     mat2: Tensor,
@@ -161,7 +168,7 @@ def can_pad(
     # In deterministic mode, we can't safely benchmark - disallow padding
     # Check this after other basic checks so force_shape_pad/autoheuristic can override
     if (
-        torch._inductor.config.deterministic
+        _uses_deterministic_pad_mm()
         and not torch._inductor.config.force_shape_pad
         and not torch._inductor.config.use_autoheuristic("pad_mm")
     ):
@@ -674,7 +681,7 @@ def _should_pad(
                 return ah_should_pad
 
         # AH didn't make a decision, so if we're in deterministic mode, we should return false
-        if torch._inductor.config.deterministic:
+        if _uses_deterministic_pad_mm():
             return False
 
         if ori_time is None:
