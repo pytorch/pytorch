@@ -6659,6 +6659,85 @@ def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with crossref
+    def test_switch_lifted_args_dedup_check_graph(self):
+        a = torch.ones(2, 3)
+        b = torch.ones(2, 3) + 1
+        c = torch.ones(2, 3) * 2
+
+        # branch0 closes over {a, b}, branch1 over {a, b, c}, branch2 over {c}.
+        # No leaf is in *all* three -> shared block is empty; `a` is lifted by
+        # branches 0+1, `b` by branches 0+1, `c` by branches 1+2.
+        def branch0(inp_x):
+            return inp_x + a + b
+
+        def branch1(inp_x):
+            return inp_x + a + b + c
+
+        def branch2(inp_x):
+            return inp_x + c
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend, fullgraph=True)(
+            torch.tensor([1]), torch.randn(2, 3)
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        # The outer operand tuple lists `a`, `b`, `c` exactly once each, with
+        # no duplicates from the per-branch unique lists.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_closure_0_cell_contents : torch.Tensor, L_branch0_closure_1_cell_contents : torch.Tensor, L_branch1_closure_2_cell_contents : torch.Tensor):
+    l_inp_x_ = L_inp_x_
+    l_idx_ = L_idx_
+    l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
+    l_branch0_closure_1_cell_contents = L_branch0_closure_1_cell_contents
+    l_branch1_closure_2_cell_contents = L_branch1_closure_2_cell_contents
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
+    switch_branch0_0 = self.switch_branch0_0
+    switch_branch1_0 = self.switch_branch1_0
+    switch_branch2_0 = self.switch_branch2_0
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch0_closure_1_cell_contents, l_branch1_closure_2_cell_contents));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch0_closure_1_cell_contents = l_branch1_closure_2_cell_contents = None
+    getitem = switch[0];  switch = None
+    return (getitem,)""",
+        )
+        # Every branch submodule shares the same placeholder signature,
+        # listing each of {a, b, c} once. The "_branch0" / "_branch2" suffixes
+        # reflect which branch first lifted the leaf.
+        self.assertExpectedInline(
+            gm.switch_branch0_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
+    add_1 = add + l_branch0_closure_1_cell_contents_branch0;  add = l_branch0_closure_1_cell_contents_branch0 = None
+    return (add_1,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch1_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
+    add_1 = add + l_branch0_closure_1_cell_contents_branch0;  add = l_branch0_closure_1_cell_contents_branch0 = None
+    add_2 = add_1 + l_branch1_closure_2_cell_contents_branch1;  add_1 = l_branch1_closure_2_cell_contents_branch1 = None
+    return (add_2,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch2_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch1_closure_2_cell_contents_branch1;  l_inp_x__1 = l_branch1_closure_2_cell_contents_branch1 = None
+    return (add,)""",
+        )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_switch_constant_index_specialization_check_graph(self):
         # When the index is a Python constant, dynamo specializes into the
         # selected branch and the switch HOP is not emitted at all. The
