@@ -965,10 +965,10 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
   HANDLE_TH_ERRORS
-  Tensor self_t = Tensor(
-      c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
+  Tensor self_t =
+      Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
+                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+             unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
   PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
   END_HANDLE_TH_ERRORS_PYBIND
@@ -983,6 +983,10 @@ std::string ConcretePyInterpreterVTable::name() const {
 namespace {
 
 
+// Returns a per-output converter that stamps a callback's result tensors as
+// C++ fakes on the op's common device.
+// skip_fake: op_impl already converts its outputs to fakes through
+// fake_mode.from_real_tensor, so do not re-fakeify an already-fake output here.
 std::function<py::object(py::object)> make_fake_device_stamp(
     c10::Device common_device,
     std::shared_ptr<c10::FakeTensorMode> mode,
@@ -1002,6 +1006,8 @@ std::function<py::object(py::object)> make_fake_device_stamp(
   };
 }
 
+// Runs a Python fake callback over the op's stack args; returns false and
+// restores the stack if it returns NotImplemented, else pushes the results.
 bool run_fake_python_callback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
@@ -1044,6 +1050,8 @@ bool run_fake_python_callback(
 
 } // namespace
 
+// Try a registered Python decomposition for op (skipped when op has a
+// meta_table entry, which takes precedence).
 bool ConcretePyInterpreterVTable::fake_try_decomp(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
@@ -1072,6 +1080,8 @@ bool ConcretePyInterpreterVTable::fake_try_decomp(
       "decomposition");
 }
 
+// Try the Python op_implementations handlers (dict lookup + pattern checks) for
+// op, stamping any non-fake outputs onto common_device.
 bool ConcretePyInterpreterVTable::fake_try_op_impl(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
@@ -1120,6 +1130,8 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
   return false;
 }
 
+// Try the Python fast op-impl (pointwise fast path) for op; its raw meta
+// outputs are stamped onto common_device.
 bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
@@ -1156,6 +1168,7 @@ bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
       "fast_op_impl");
 }
 
+// Try op's prim_meta_impl (prims meta rule) if it defines one.
 bool ConcretePyInterpreterVTable::fake_try_prim_meta(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
@@ -1176,6 +1189,8 @@ bool ConcretePyInterpreterVTable::fake_try_prim_meta(
       "prim_meta_impl");
 }
 
+// Convert a real tensor to a meta tensor via the mode's converter, then stamp
+// it as a C++ fake on the real tensor's device.
 c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     const c10::intrusive_ptr<c10::TensorImpl>& real_impl) const {
   py::gil_scoped_acquire gil;
