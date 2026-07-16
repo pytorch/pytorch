@@ -988,6 +988,50 @@ void scatter(
   int numranks = 0, cur_rank = 0;
   NCCL_CHECK_TIMEOUT(ncclCommCount(comm, &numranks), _comm);
   NCCL_CHECK_TIMEOUT(ncclCommUserRank(comm, &cur_rank), _comm);
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  const void* send_ptr = nullptr;
+  auto type = to_nccl_data_type(outputs);
+  int64_t count = outputs.numel();
+  at::Tensor flat; // keep alive until after NCCL call
+  if (cur_rank == root) {
+    TORCH_CHECK_VALUE(
+        static_cast<int>(inputs.size()) == numranks,
+        "root must provide inputs.size()==numranks");
+    // Allocate one flat buffer [world_size * count]
+    flat = at::empty(
+        {numranks * count}, outputs.options(), c10::MemoryFormat::Contiguous);
+
+    // Pack each inputs[i] into its slot
+    for (int i = 0; i < numranks; ++i) {
+      const at::Tensor& src = inputs[i];
+      TORCH_CHECK_VALUE(
+          src.scalar_type() == outputs.scalar_type(),
+          "dtype mismatch at i=",
+          i);
+      TORCH_CHECK_VALUE(
+          src.is_cuda() && src.get_device() == outputs.get_device(),
+          "device mismatch at i=",
+          i);
+      TORCH_CHECK_VALUE(
+          src.numel() == count,
+          "numel mismatch at i=",
+          i,
+          " (got ",
+          src.numel(),
+          ", expected ",
+          count,
+          ")");
+      auto slot = flat.narrow(0, i * count, count).view(src.sizes());
+      slot.copy_(src, /*non_blocking=*/true);
+    }
+    // Make sure packing copies are visible to NCCL on the same stream
+    // (copy_ on the same stream is already ordered; no extra sync needed)
+    send_ptr = flat.const_data_ptr();
+  }
+  const auto* sendbuff = reinterpret_cast<const char*>(send_ptr);
+  auto* recvbuff = reinterpret_cast<char*>(outputs.mutable_data_ptr());
+  NCCL_CHECK(ncclScatter(sendbuff, recvbuff, count, type, root, comm, stream));
+#else
   NCCL_CHECK(ncclGroupStart());
   if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
@@ -1009,6 +1053,7 @@ void scatter(
     NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
   }
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
+#endif
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
