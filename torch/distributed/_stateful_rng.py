@@ -3,55 +3,29 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, cast, Protocol, runtime_checkable, TypeGuard
+from typing import Any, cast, TypeGuard
 
 import torch
 from torch._library.utils import fill_defaults
+from torch.distributed import StatefulRNGTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
 aten = torch.ops.aten
 
 __all__ = [
-    "RNGIndexBlock",
     "StatefulRNGMode",
-    "StatefulRNGTensor",
-    "set_stateful_rng_metadata",
 ]
-
-
-@dataclass(frozen=True)
-class RNGIndexBlock:
-    start_index: int
-    block_size: int
-    block_stride: int
-    num_blocks: int
-
-
-@runtime_checkable
-class StatefulRNGTensor(Protocol):
-    rng_global_numel: int
-    rng_index_blocks: tuple[RNGIndexBlock, ...]
 
 
 def _is_stateful_rng_tensor(obj: object) -> TypeGuard[StatefulRNGTensor]:
     return isinstance(obj, torch.Tensor) and isinstance(obj, StatefulRNGTensor)
 
 
-def set_stateful_rng_metadata(
-    tensor: torch.Tensor,
-    global_numel: int,
-    index_blocks: tuple[RNGIndexBlock, ...],
-) -> None:
-    setattr(tensor, "rng_global_numel", global_numel)  # noqa: B010
-    setattr(tensor, "rng_index_blocks", index_blocks)  # noqa: B010
-
-
 def _run_stateful_rng_op(
     tensor: torch.Tensor,
     global_numel: int,
-    index_blocks: tuple[RNGIndexBlock, ...],
+    index_blocks: tuple[tuple[int, int, int, int], ...],
     flat_slice_op_call: torch._ops.OpOverload,
     generator: torch.Generator | None,
     *op_args: object,
@@ -64,10 +38,10 @@ def _run_stateful_rng_op(
     return flat_slice_op_call(
         tensor,
         global_numel,
-        [block.start_index for block in index_blocks],
-        [block.block_size for block in index_blocks],
-        [block.block_stride for block in index_blocks],
-        [block.num_blocks for block in index_blocks],
+        [start_index for start_index, _, _, _ in index_blocks],
+        [block_size for _, block_size, _, _ in index_blocks],
+        [block_stride for _, _, block_stride, _ in index_blocks],
+        [num_blocks for _, _, _, num_blocks in index_blocks],
         *op_args,
         generator=generator,
     )

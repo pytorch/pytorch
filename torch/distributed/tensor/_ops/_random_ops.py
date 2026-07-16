@@ -7,7 +7,7 @@ from torch.distributed._local_tensor import (
     enabled_local_tensor_mode,
     maybe_run_for_local_tensor,
 )
-from torch.distributed._stateful_rng import _run_stateful_rng_op, RNGIndexBlock
+from torch.distributed._stateful_rng import _run_stateful_rng_op
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._op_schema import ArgsType, KwargsType
@@ -32,7 +32,9 @@ def _contiguous_stride(shape: torch.Size) -> tuple[int, ...]:
     return tuple(reversed(stride))
 
 
-def _rng_index_blocks(tensor: DTensor) -> tuple[RNGIndexBlock, ...] | None:
+def _rng_index_blocks(
+    tensor: DTensor,
+) -> tuple[tuple[int, int, int, int], ...] | None:
     if tensor.device_mesh.ndim != 1:
         return None
 
@@ -50,7 +52,7 @@ def _rng_index_blocks(tensor: DTensor) -> tuple[RNGIndexBlock, ...] | None:
         return ()
     placement = tensor.placements[0]
     if placement.is_replicate():
-        return (RNGIndexBlock(0, tensor.numel(), tensor.numel(), 1),)
+        return ((0, tensor.numel(), tensor.numel(), 1),)
     if not isinstance(placement, Shard):
         return None
 
@@ -68,7 +70,7 @@ def _rng_index_blocks(tensor: DTensor) -> tuple[RNGIndexBlock, ...] | None:
     num_blocks = 1
     for size in local_shape[:shard_dim]:
         num_blocks *= size
-    return (RNGIndexBlock(start_index, block_size, block_stride, num_blocks),)
+    return ((start_index, block_size, block_stride, num_blocks),)
 
 
 def _sync_rng_state_from_mesh_root(tensor: DTensor, state: torch.Tensor) -> None:
@@ -98,7 +100,7 @@ def _run_flat_slice(
             raise AssertionError
         generator.set_state(generator_state)
     index_blocks = tuple(
-        RNGIndexBlock(start_index, block_size, block_stride, block_count)
+        (start_index, block_size, block_stride, block_count)
         for start_index, block_size, block_stride, block_count in zip(
             start_indices,
             block_sizes,
@@ -166,10 +168,10 @@ def _run_dtensor_local_rng_op(
         _run_flat_slice(
             local_tensor,
             total_numel,
-            tuple(block.start_index for block in index_blocks),
-            tuple(block.block_size for block in index_blocks),
-            tuple(block.block_stride for block in index_blocks),
-            tuple(block.num_blocks for block in index_blocks),
+            tuple(block[0] for block in index_blocks),
+            tuple(block[1] for block in index_blocks),
+            tuple(block[2] for block in index_blocks),
+            tuple(block[3] for block in index_blocks),
             flat_slice_op_call,
             generator,
             generator.get_state(),

@@ -8,12 +8,8 @@ from functools import partial
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
+from torch.distributed import stateful_rng_mode, StatefulRNGTensor
 from torch.distributed._local_tensor import LocalTensor, maybe_run_for_local_tensor
-from torch.distributed._stateful_rng import (
-    RNGIndexBlock,
-    set_stateful_rng_metadata,
-    StatefulRNGMode,
-)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor import (
@@ -411,8 +407,8 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
     def test_stateful_rng_tensor_protocol(self):
         device = torch.device("cuda", torch.cuda.current_device())
         index_blocks = (
-            RNGIndexBlock(2, 2, 5, 3),
-            RNGIndexBlock(20, 3, 3, 1),
+            (2, 2, 5, 3),
+            (20, 3, 3, 1),
         )
         global_indices = torch.tensor([2, 3, 7, 8, 12, 13, 20, 21, 22], device=device)
         init_fns = {
@@ -435,8 +431,10 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
 
                 torch.manual_seed(123)
                 actual = torch.empty(global_indices.numel(), device=device)
-                set_stateful_rng_metadata(actual, 24, index_blocks)
-                with StatefulRNGMode():
+                setattr(actual, "rng_global_numel", 24)  # noqa: B010
+                setattr(actual, "rng_index_blocks", index_blocks)  # noqa: B010
+                self.assertIsInstance(actual, StatefulRNGTensor)
+                with stateful_rng_mode():
                     init_fn(actual)
 
                 self.assertEqual(actual, expected[global_indices], rtol=0, atol=0)
@@ -448,8 +446,9 @@ class DistTensorStatefulRNGInitTest(DTensorTestBase):
 
         torch.manual_seed(123)
         empty = torch.empty(0, device=device)
-        set_stateful_rng_metadata(empty, 24, ())
-        with StatefulRNGMode():
+        setattr(empty, "rng_global_numel", 24)  # noqa: B010
+        setattr(empty, "rng_index_blocks", ())  # noqa: B010
+        with stateful_rng_mode():
             empty.uniform_()
         self.assertEqual(torch.cuda.get_rng_state(device), expected_state)
 
