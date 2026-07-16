@@ -379,8 +379,8 @@ std::optional<InferredType> _tryToInferTypeImpl(py::handle input);
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
 //   input is an empty container (list, dict)
-//   input is an list with element types that cannot be unified
-//   input is an dict with key or value types that cannot be unified
+//   input is a list with element types that cannot be unified
+//   input is a dict with key or value types that cannot be unified
 inline InferredType tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
@@ -772,14 +772,6 @@ inline IValue createGenericDict(
   return IValue(elems);
 }
 
-template <class T>
-inline void guardAgainstNamedTensor(const T& var) {
-  TORCH_CHECK(
-      !var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
-      "workaround please drop names via `tensor = tensor.rename(None)`.");
-}
-
 // Extract custom class registered with torchbind
 template <typename T>
 c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
@@ -808,7 +800,7 @@ inline std::string friendlyTypeName(py::handle obj) {
       first = false;
     }
     ss << "))";
-    return ss.str();
+    return std::move(ss).str();
   } else {
     return py::str(py::type::handle_of(obj).attr("__name__"));
   }
@@ -876,7 +868,7 @@ inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
     err << "Unknown reference to ScriptClass ";
     err << classType->name()->qualifiedName();
     err << ". (Did you forget to import it?)";
-    throw std::runtime_error(err.str());
+    throw std::runtime_error(std::move(err).str());
   }
   return py_class;
 }
@@ -1203,6 +1195,10 @@ inline std::optional<py::object> maybeTorchFunctionDispatch(
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
     const c10::QualifiedName& qualname) {
+  if (consume_should_skip_torch_function()) {
+    return std::nullopt;
+  }
+
   std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);

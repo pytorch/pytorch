@@ -35,7 +35,7 @@ class Vectorized<int64_t> {
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
+  Vectorized() = default;
   C10_ALWAYS_INLINE Vectorized(vint64 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool64 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
   C10_ALWAYS_INLINE Vectorized(vint64 v1, vint64 v2) : _vec0{v1}, _vec1{v2} {}

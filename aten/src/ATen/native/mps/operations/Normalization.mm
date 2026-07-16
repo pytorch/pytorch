@@ -96,9 +96,26 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                          Tensor& output,
                                                          Tensor& save_mean,
                                                          Tensor& save_var) {
-  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "Long batch norm is not supported with MPS");
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
-                              "Batch norm for complex is not supported for MPS");
+  // Flatten 5D to 4D: MPSGraph normalization is significantly slower for rank-5 tensors.
+  // Merging spatial dims is safe since BatchNorm reduces over all dims except channel.
+  if (self.dim() == 5) {
+    auto input_4d = self.contiguous().reshape({self.size(0), self.size(1), self.size(2) * self.size(3), self.size(4)});
+    auto output_4d = output.reshape(input_4d.sizes());
+    return batch_norm_mps_out(input_4d,
+                              weight_opt,
+                              bias_opt,
+                              running_mean_opt,
+                              running_var_opt,
+                              train,
+                              momentum,
+                              epsilon,
+                              output_4d,
+                              save_mean,
+                              save_var);
+  }
+
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      isFloatingType(self.scalar_type()), "batch_norm is not implemented for ", self.scalar_type(), " on MPS");
   using namespace at::native::mps;
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -124,7 +141,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
   const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
   const bool has_bias = (bias_opt.has_value() && bias_opt->defined());
 
-  auto memory_format = self.suggest_memory_format();
+  // Use exact-match: a channel-slice of a channels-last tensor has CL-like
+  // strides but is not NHWC-packed.
+  // See https://github.com/pytorch/pytorch/issues/180984
+  auto memory_format = self.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
 
   if (output.numel() == 0) {
     return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
@@ -393,7 +413,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
                                                   bool train,
                                                   double momentum,
                                                   double epsilon) {
-  const auto memory_format = self.suggest_memory_format();
+  // See https://github.com/pytorch/pytorch/issues/180984
+  const auto memory_format = self.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
 
   auto output = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, memory_format);
 
@@ -541,11 +562,32 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                                            bool train,
                                                            double epsilon,
                                                            std::array<bool, 3> grad_input_mask) {
+  // Flatten 5D to 4D (see batch_norm_mps_out for rationale).
+  if (input.dim() == 5) {
+    auto input_4d =
+        input.contiguous().reshape({input.size(0), input.size(1), input.size(2) * input.size(3), input.size(4)});
+    auto grad_out_4d = grad_out.contiguous().reshape(input_4d.sizes());
+    auto [gi, gw, gb] = batch_norm_backward_mps(grad_out_4d,
+                                                input_4d,
+                                                weight_opt,
+                                                running_mean_opt,
+                                                running_var_opt,
+                                                save_mean_opt,
+                                                save_var_opt,
+                                                train,
+                                                epsilon,
+                                                grad_input_mask);
+    if (gi.defined())
+      gi = gi.reshape(input.sizes());
+    return std::make_tuple(std::move(gi), std::move(gw), std::move(gb));
+  }
+
   Tensor grad_input;
   Tensor grad_weight;
   Tensor grad_bias;
 
-  const auto memory_format = input.suggest_memory_format();
+  // See https://github.com/pytorch/pytorch/issues/180984
+  const auto memory_format = input.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
 
   if (grad_input_mask[0]) {
     grad_input = at::empty(input.sizes(), input.scalar_type(), std::nullopt, kMPS, std::nullopt, memory_format);
@@ -731,7 +773,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                                                   secondaryTensor:epsilonTensor
                                                                              name:nil];
 #ifdef __MAC_15_0
-          if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+          if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
             rsqrtTensor = [mpsGraph reciprocalSquareRootWithTensor:varianceEpsTensor name:nil];
           } else
 #endif // __MAC_15_0
@@ -765,7 +807,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                                                     secondaryTensor:epsilonTensor
                                                                                name:nil];
 #ifdef __MAC_15_0
-            if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+            if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
               rsqrtTensor = [mpsGraph reciprocalSquareRootWithTensor:varianceEpsTensor name:nil];
             } else
 #endif // __MAC_15_0
@@ -830,7 +872,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       newCachedGraph->gradBiasTensor_ = gradBiasTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, input_shape);
+    // For channels_last, input_shape is the NHWC-packed shape; feed the raw buffer directly instead of
+    // viewing the NCHW tensor to NHWC (which view() rejects). Mirrors the forward pass.
+    const auto needs_gather = memory_format != MemoryFormat::ChannelsLast;
+    auto inputPlaceholder =
+        Placeholder(cachedGraph->inputTensor_, input, input_shape, needs_gather, MPSDataTypeInvalid, needs_gather);
     auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_out, input_shape_readonly);
     auto weightPlaceholder = Placeholder();
     if (has_weight)
@@ -850,7 +896,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
     auto gradInputPlaceholder = Placeholder();
     if (grad_input_mask[0])
-      gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape);
+      gradInputPlaceholder =
+          Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape, false, MPSDataTypeInvalid, needs_gather);
     auto gradWeightPlaceholder = Placeholder();
     if (grad_input_mask[1])
       gradWeightPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
@@ -1042,7 +1089,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
 
     const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
 
-    if (grad_input.numel() == 0) {
+    if (X->numel() == 0) {
       return std::make_tuple(grad_input, grad_weight, grad_bias);
     }
 

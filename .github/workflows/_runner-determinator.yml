@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Check whether the workflow owner can use ARC runners
 
 on:
@@ -56,21 +57,25 @@ on:
       runner-label:
         description: Fully qualified runner label derived from runner_config
         value: ${{ jobs.runner-determinator.outputs.runner-label }}
-      use-arc:
-        description: Whether to use ARC runners
-        value: ${{ jobs.runner-determinator.outputs.use-arc }}
+      amd-do-label-type:
+        description: Runner prefix for the "amd-do" experiment (empty when not enabled)
+        value: ${{ jobs.runner-determinator.outputs.amd-do-label-type }}
+      ci-docker-hash:
+        description: "Git tree hash of .ci/docker, used as the suffix of CI docker image tags"
+        value: ${{ jobs.runner-determinator.outputs.ci-docker-hash }}
 
 jobs:
   runner-determinator:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       label-type: ${{ steps.set-condition.outputs.label-type }}
       runner-config: ${{ steps.set-runner-info.outputs.runner-config }}
       runner-type: ${{ steps.set-runner-info.outputs.runner-type }}
       runner-label: ${{ steps.set-runner-info.outputs.runner-label }}
-      use-arc: ${{ steps.set-condition.outputs.use-arc }}
+      amd-do-label-type: ${{ steps.set-condition.outputs.amd-do-label-type }}
+      ci-docker-hash: ${{ steps.ci-docker-hash.outputs.ci-docker-hash }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ inputs.issue_number }}
@@ -79,9 +84,40 @@ jobs:
       CHECK_EXPERIMENTS: ${{ inputs.check_experiments }}
       OPT_OUT_EXPERIMENTS: ${{ inputs.opt_out_experiments }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
+      WORKFLOW_NAME: ${{ github.workflow }}
     steps:
       - name: Checkout PyTorch
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Use the default ref (the merge commit for pull_request events) so the
+          # determinator script always reflects the current base branch, even when
+          # a PR's own branch is far behind main. See #189113/#189171: main's build
+          # workflow no longer has an EC2 fallback, so a stale determinator script
+          # here can emit a runner-label prefix (e.g. "lf.") that main's build job
+          # no longer knows how to route.
+          fetch-depth: 1
+          sparse-checkout: |
+            .github/scripts/runner_determinator.py
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout .ci/docker from PR head
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # .ci/docker is hashed from the PR's own branch (not the merge commit) so
+          # the resulting image tag reflects the docker changes the PR is actually
+          # introducing. See #182579.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          path: pr-head
+          sparse-checkout: |
+            .ci/docker
+          sparse-checkout-cone-mode: false
+
+      - name: Compute .ci/docker tree hash
+        id: ci-docker-hash
+        shell: bash
+        run: |
+          echo "ci-docker-hash=$(git -C pr-head rev-parse HEAD:.ci/docker)" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
@@ -103,7 +139,8 @@ jobs:
             --github-repo "$GITHUB_REPOSITORY" \
             --eligible-experiments "$CHECK_EXPERIMENTS" \
             --opt-out-experiments "$OPT_OUT_EXPERIMENTS" \
-            --pr-number "${PR_NUMBER}"
+            --pr-number "${PR_NUMBER}" \
+            --workflow-name "${WORKFLOW_NAME}"
 
       - name: Determine runner configuration
         id: set-runner-info

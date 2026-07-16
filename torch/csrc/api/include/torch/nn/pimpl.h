@@ -34,7 +34,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
  public:
   using ContainedType = Contained;
 
-  /// Default constructs the contained module if if has a default constructor,
+  /// Default constructs the contained module if it has a default constructor,
   /// else produces a static error.
   ///
   /// NOTE: This uses the behavior of template

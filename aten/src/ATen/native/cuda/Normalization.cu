@@ -9,6 +9,7 @@
 #include <ATen/native/cuda/Resize.h>
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -479,7 +480,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const std
       output,
       save_mean,
       save_invstd);
-  return std::make_tuple(output, save_mean, save_invstd);
+  return std::make_tuple(
+      std::move(output), std::move(save_mean), std::move(save_invstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_cuda(
@@ -504,7 +506,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_cuda(
     std::tie(output, save_mean, save_var) =
         batch_norm_cuda(input, weight_opt, bias_opt, running_mean, running_var, /*training*/true, momentum, eps);
   }
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
+      std::move(output),
+      std::move(save_mean),
+      std::move(save_var),
+      std::move(reserve));
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_cuda_out(
@@ -644,7 +650,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
     }
   }
 
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsilon) {

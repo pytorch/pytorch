@@ -655,8 +655,7 @@ struct ReduceOp {
     __syncthreads();
     // Intra-warp reduction, fix CUDA to have offset decreasing for better numerics
     // matching Triton, etc.
-    // TODO(PaulZhang12): AMD and internal
-    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
+    #if defined(USE_ROCM)
     for (int offset = 1; offset < dim_x; offset <<= 1) {
     #else
     for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
@@ -977,7 +976,7 @@ inline void launch_jitted_reduce_kernel(
 
 class AccumulationBuffer {
  public:
-  AccumulationBuffer() {}
+  AccumulationBuffer() = default;
 
   AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
     out_ptr_ = (char*)out_ptr;
@@ -1173,7 +1172,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // We want the minimum of ctas_per_output1 and ctas_per_output2, so that each thread can have
     // a large number of values to deal with. But we don't want values_per_thread to be larger than
     // max_values_per_thread
-    config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
+    config.ctas_per_output = std::clamp<int>(ctas_per_output1, ctas_per_output3, ctas_per_output2);
     if (config.ctas_per_output > 1) {
 #ifdef USE_ROCM
       // Set min ctas value as 64. Having more reductions (i.e less values_per_thread) seems to improve perf.
