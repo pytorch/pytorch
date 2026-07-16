@@ -502,7 +502,7 @@ std::vector<Node*> get_current_graph_task_execution_order() {
 // thread_main is used by:
 // 1). autograd threads for devices (i.e. CUDA, XLA)
 // 2). the caller/owning thread of the backward call on CPU (sync mode)
-// 3). Renetrant backward that invoked by either 1) or 2)
+// 3). Reentrant backward that invoked by either 1) or 2)
 // The exit conditions are different for the above three cases.
 // For 1), we are spinning on running the thread_main on device autograd
 //         threads throughout the Engine lifetime, thread_main will get
