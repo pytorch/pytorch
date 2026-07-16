@@ -240,6 +240,8 @@ inductor_skips["xpu"] = {
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
+# torch-xpu-ops: #2956
+inductor_skips["xpu"]["lu"] = {f32}
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
 inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
@@ -251,7 +253,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
@@ -466,6 +467,10 @@ inductor_override_kwargs["cuda"] = {
     ("linalg.cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("atanh", f16): {"reference_in_float": True},
@@ -742,7 +747,11 @@ inductor_override_kwargs["xpu"] = {
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
-        {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
+        {
+            ("cummin", f16): {"atol": 1e-3, "rtol": 1e-5},
+            # See https://github.com/pytorch/pytorch/pull/186595#issuecomment-4849920339
+            ("combinations", f16): {"grad_atol": 5e-4, "grad_rtol": 2e-3},
+        }
     )
 
 
