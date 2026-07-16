@@ -606,7 +606,7 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
             )
 
         nested_config = get_invoke_subgraph_compile_options(
-            inductor_config_patches={"post_grad_custom_pre_pass": inner_pass}
+            fw_inductor_config_patches={"post_grad_custom_pre_pass": inner_pass}
         )
 
         @torch.compiler.nested_compile_region(options=nested_config)
@@ -661,7 +661,7 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
         # `repeated_subgraph0` and the parent as `call`. fx_graph_cache is off to
         # dodge a triton multi-kernel cache-reload issue unrelated to threading.
         nested_config = get_invoke_subgraph_compile_options(
-            inductor_config_patches={"triton.multi_kernel": True}
+            fw_inductor_config_patches={"triton.multi_kernel": True}
         )
 
         @torch.compiler.nested_compile_region(options=nested_config)
@@ -690,7 +690,7 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
         # reduction to be looped (triton_red_*) while the parent keeps its
         # persistent kernel (triton_per_*).
         nested_config = get_invoke_subgraph_compile_options(
-            inductor_config_patches={"triton.persistent_reductions": False}
+            fw_inductor_config_patches={"triton.persistent_reductions": False}
         )
 
         @torch.compiler.nested_compile_region(options=nested_config)
@@ -712,6 +712,69 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
         self.assertIn("triton_red_", region_code)
         self.assertNotIn("triton_per_", region_code)
         self.assertIn("triton_per_", parent_code)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_nested_region_separate_fw_bw_inductor_config(self):
+        # A region can compile its forward and backward under different inductor
+        # configs. The forward keeps persistent reductions (default) while the
+        # backward is forced to looped reductions via bw_inductor_config_patches.
+        nested_config = get_invoke_subgraph_compile_options(
+            bw_inductor_config_patches={"triton.persistent_reductions": False},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.softmax(x, dim=-1)
+
+        def fn(x):
+            return (g(x) * 3).sum()
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(4096, 256, device="cuda", requires_grad=True)
+        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 2)
+        fw_code, bw_code = codes
+        # Forward region keeps its persistent reduction; the backward region is
+        # looped, so only the backward reflects bw_inductor_config_patches.
+        self.assertIn("triton_per_", fw_code)
+        self.assertIn("triton_red_", bw_code)
+        self.assertNotIn("triton_per_", bw_code)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_nested_region_fw_bw_inductor_config_both_set(self):
+        # Forward and backward set to different explicit configs: the forward
+        # forces persistent reductions, the backward forces looped ones. Each
+        # direction's own region is compiled under its own config.
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.persistent_reductions": True},
+            bw_inductor_config_patches={"triton.persistent_reductions": False},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.softmax(x, dim=-1)
+
+        def fn(x):
+            return (g(x) * 3).sum()
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(4096, 256, device="cuda", requires_grad=True)
+        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(len(codes), 2)
+        fw, bw = codes
+        fw_region = self._generated_fn_body(fw, "def partitioned_fw_subgraph_0_0(")
+        bw_region = self._generated_fn_body(bw, "def partitioned_bw_subgraph_0_0(")
+        # Forward region is persistent; backward region is looped.
+        self.assertIn("triton_per_", fw_region)
+        self.assertNotIn("triton_red_", fw_region)
+        self.assertIn("triton_red_", bw_region)
+        self.assertNotIn("triton_per_", bw_region)
 
     def test_custom_decomposition(self):
         # Test that custom decompositions are applied to the subgraph.
@@ -1162,7 +1225,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         import torch._inductor.config as inductor_config
 
         nested_config = get_invoke_subgraph_compile_options(
-            inductor_config_patches={
+            fw_inductor_config_patches={
                 "max_autotune": True,
                 "triton.cudagraphs": False,
             }
@@ -1227,7 +1290,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             "Invalid inductor config key 'invalid_config_key'",
         ):
             get_invoke_subgraph_compile_options(
-                inductor_config_patches={
+                fw_inductor_config_patches={
                     "invalid_config_key": True,
                 }
             )

@@ -3586,7 +3586,7 @@ class TestFxGraphCacheHashing(TestCase):
 
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
         gm.meta["nested_region_config"] = get_invoke_subgraph_compile_options(
-            inductor_config_patches=patches
+            fw_inductor_config_patches=patches
         )
         return gm
 
@@ -3648,6 +3648,58 @@ class TestFxGraphCacheHashing(TestCase):
             ),
             require_shape_env=False,
         ).validate()
+
+    def _nested_region_bw_gm(self, bw_patches):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        fw_config = get_invoke_subgraph_compile_options(
+            bw_inductor_config_patches=bw_patches
+        )
+        bw_config = get_backward_nested_region_config(fw_config)
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        # Mirror run_joint_graph_passes_on_hops: the backward config is stamped on
+        # the partitioned backward invoke_subgraph node's meta["custom"] (the
+        # source of truth), not the subgraph module.
+        node = gm.graph.call_function(torch.ops.higher_order.invoke_subgraph)
+        node.meta["custom"] = {"nested_region_config": bw_config}
+        gm.graph.output(())
+        gm.recompile()
+        return gm
+
+    def test_nested_region_bw_config_patches_affect_cache_key(self):
+        # bw_inductor_config_patches (stamped on the backward invoke_subgraph
+        # node) must be part of the cache key, or two graphs differing only in
+        # backward config would collide.
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+            get_invoke_subgraph_compile_options,
+        )
+
+        # Backward config replaces (does not merge with) the forward config.
+        bw_config = get_backward_nested_region_config(
+            get_invoke_subgraph_compile_options(
+                bw_inductor_config_patches={"max_autotune": True}
+            )
+        )
+        self.assertEqual(
+            bw_config.inductor_config_patches,
+            {"max_autotune": True},
+        )
+
+        same1 = self._nested_region_bw_gm({"max_autotune": True})
+        same2 = self._nested_region_bw_gm({"max_autotune": True})
+        different = self._nested_region_bw_gm({"max_autotune": False})
+        self.assertEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(same2, []),
+        )
+        self.assertNotEqual(
+            self._fx_graph_cache_key(same1, []),
+            self._fx_graph_cache_key(different, []),
+        )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_check_for_hop_skips_constants(self):
