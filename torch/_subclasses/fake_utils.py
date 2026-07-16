@@ -9,6 +9,8 @@ import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_fake_mode,
     MetadataMismatchError,
     tree_flatten_only,
     UnsupportedFakeTensorException,
@@ -124,13 +126,13 @@ def try_convert_fake_to_real(
     Note: this is not currently optimized (makes copies of the meta converter internal dictionaries)
     """
 
-    fake_tensor = next(
-        (item for item in ten_list if isinstance(item, FakeTensor)), None
-    )
+    fake_tensor = next((item for item in ten_list if is_fake_tensor(item)), None)
     if fake_tensor is None:
         return ten_list
 
-    fake_mode = fake_tensor.fake_mode
+    fake_mode = maybe_get_fake_mode(fake_tensor)
+    if fake_mode is None:
+        return ten_list
     meta_converter = fake_mode.fake_tensor_converter.meta_converter
     desc = meta_converter.describer
 
@@ -138,7 +140,7 @@ def try_convert_fake_to_real(
     key_to_real_storage = {v: k for k, v in desc.lookup_storage.items()}
     out = []
     for t in ten_list:
-        if not isinstance(t, FakeTensor) or t.layout != torch.strided:
+        if not is_fake_tensor(t) or t.layout != torch.strided:
             out.append(t)
             continue
 
@@ -148,20 +150,23 @@ def try_convert_fake_to_real(
             out.append(t)
             continue
 
-        unhinted = False
+        contains_unhinted = False
 
         def map_symint(s: torch.SymInt | int) -> int:
-            nonlocal unhinted
+            nonlocal contains_unhinted
             if not isinstance(s, torch.SymInt):
                 return s
-            unhinted = unhinted if not unhinted else s.node.has_hint()
-            return s.node.hint
+            hint = s.hint
+            if hint is None:
+                contains_unhinted = True
+                return 0  # unused: caller bails (contains_unhinted) and discards this
+            return hint
 
         stor_offset = map_symint(t.storage_offset())
         size = [map_symint(s) for s in t.shape]
         stride = [map_symint(s) for s in t.stride()]
 
-        if unhinted:
+        if contains_unhinted:
             out.append(t)
             continue
 

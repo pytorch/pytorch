@@ -1,5 +1,7 @@
 #include <c10/core/AutogradState.h>
 
+#include <utility>
+
 namespace c10 {
 
 namespace {
@@ -17,7 +19,7 @@ AutogradState& AutogradState::get_tls_state() {
 }
 
 void AutogradState::set_tls_state(AutogradState state) {
-  autograd_state_tls = state;
+  autograd_state_tls = std::move(state);
 }
 
 } // namespace c10

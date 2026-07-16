@@ -501,7 +501,7 @@ def _check_trace(
             if len(nondeterm_ops) > 0:
                 nondeterministic_ops_warning = "Trace had nondeterministic nodes. "
                 nondeterministic_ops_warning += (
-                    "Did you forget call .eval() on your model? Nodes:\n"
+                    "Did you forget to call .eval() on your model? Nodes:\n"
                 )
                 nondeterministic_ops_warning += "\n".join(
                     [indent(str(op)) for op in nondeterm_ops][:20]
@@ -610,7 +610,7 @@ class TracerWarning(Warning):
         warnings.filterwarnings("ignore", "torch::jit::fuser::cuda")
 
 
-# We ignore the tracer warnings coming form inside the library, because all our shape
+# We ignore the tracer warnings coming from inside the library, because all our shape
 # checks in nn will trigger them.
 TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()
@@ -661,7 +661,7 @@ def analyze_ts_result_with_export_result(export, trace):
         if type(orig) is not type(loaded):
             return False
 
-        if isinstance(orig, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(orig):
             # Skip for FakeTensor.
             return True
         elif isinstance(orig, torch.Tensor):
@@ -1000,12 +1000,12 @@ def trace(
         warnings.warn(
             "`torch.jit.trace` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return func
@@ -1139,12 +1139,12 @@ def trace_module(
         warnings.warn(
             "`torch.jit.trace_method` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     else:
         warnings.warn(
             "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
-            DeprecationWarning,
+            FutureWarning,
         )
     if not _enabled:
         return mod
