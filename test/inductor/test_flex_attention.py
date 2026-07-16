@@ -98,23 +98,7 @@ running_on_a100_only = skipUnless(
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-
-
-_PRIOR_FP32_MATMUL_PRECISION: str | None = None
-
-
-def setUpModule():
-    global _PRIOR_FP32_MATMUL_PRECISION
-    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
-    torch.set_float32_matmul_precision("high")
-
-
-def tearDownModule():
-    global _PRIOR_FP32_MATMUL_PRECISION
-    if _PRIOR_FP32_MATMUL_PRECISION is not None:
-        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
-        _PRIOR_FP32_MATMUL_PRECISION = None
-
+torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
@@ -8081,6 +8065,65 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         block_mask = create_block_mask(mask_mod, None, None, 1023, 1023, device=device)
         with self.assertRaisesRegex(RuntimeError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    def test_block_mask_check_does_not_specialize_backed_dynamic_length(self, device):
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        dtype = device_configs[torch.device(device).type].dtypes_fast[0]
+
+        def create_inputs(S):
+            q, k, v = (
+                torch.randn(1, 1, S, 64, dtype=dtype, device=device) for _ in range(3)
+            )
+            block_mask = create_block_mask(mask_mod, None, None, S, S, device=device)
+            return q, k, v, block_mask
+
+        counter = CompileCounterWithBackend("eager")
+        guard_code_parts = []
+
+        @torch.compile(fullgraph=True, backend=counter)
+        def flex_attention_call(q, k, v, block_mask):
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        def collect_guard_code_parts(guard_wrapper, f_locals, builder):
+            parts = []
+            for guard in guard_wrapper.root.get_epilogue_lambda_guards():
+                parts.extend(guard.verbose_code_parts())
+            guard_code_parts.append(parts)
+
+        old_hook = torch._dynamo.guards.guard_manager_testing_hook_fn
+        torch._dynamo.guards.guard_manager_testing_hook_fn = collect_guard_code_parts
+        try:
+            with torch.no_grad():
+                for S in (320, 256, 192):
+                    self.assertEqual(
+                        flex_attention_call(*create_inputs(S)).shape, (1, 1, S, 64)
+                    )
+        finally:
+            torch._dynamo.guards.guard_manager_testing_hook_fn = old_hook
+
+        self.assertEqual(counter.frame_count, 2)
+        dynamic_guard_code = "\n".join(guard_code_parts[-1])
+        self.assertIn(
+            "L['block_mask'].seq_lengths[0] == L['q'].size()[2]",
+            dynamic_guard_code,
+        )
+        self.assertIn(
+            "L['block_mask'].seq_lengths[1] == L['k'].size()[2]",
+            dynamic_guard_code,
+        )
+
+        stale_block_mask = create_block_mask(
+            mask_mod, None, None, 320, 320, device=device
+        )
+        with self.assertRaisesRegex(
+            Exception, "block_mask was created for a smaller length"
+        ):
+            flex_attention_call(*create_inputs(512)[:3], stale_block_mask)
 
     @supported_platform
     @common_utils.parametrize("full_indices", [False, True])
