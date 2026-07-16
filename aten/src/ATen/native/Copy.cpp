@@ -138,6 +138,105 @@ bool is_supported_device(Device device) {
 
 namespace at::native {
 
+static bool has_symbolic_sizes_or_strides(const Tensor& t) {
+  for (const auto& size : t.sym_sizes()) {
+    if (size.is_symbolic()) {
+      return true;
+    }
+  }
+  for (const auto& stride : t.sym_strides()) {
+    if (stride.is_symbolic()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool copy_allows_same_start_expanded_src(
+    const Tensor& self,
+    const Tensor& src) {
+  if (has_symbolic_sizes_or_strides(self) ||
+      has_symbolic_sizes_or_strides(src)) {
+    return false;
+  }
+  if (self.layout() != kStrided || src.layout() != kStrided ||
+      self.scalar_type() != src.scalar_type() ||
+      self.is_conj() != src.is_conj() || self.is_neg() != src.is_neg() ||
+      self.dim() != src.dim() || !self.sizes().equals(src.sizes())) {
+    return false;
+  }
+
+  const auto* self_impl = self.unsafeGetTensorImpl();
+  const auto* src_impl = src.unsafeGetTensorImpl();
+  const auto& self_storage = self_impl->unsafe_storage();
+  if (!self_storage ||
+      !self_storage.is_alias_of(src_impl->unsafe_storage()) ||
+      self_impl->data() != src_impl->data()) {
+    return false;
+  }
+
+  bool has_expanded_src_dim = false;
+  for (const auto i : c10::irange(src.dim())) {
+    if (src.sizes()[i] <= 1) {
+      continue;
+    }
+    if (src.strides()[i] == 0) {
+      has_expanded_src_dim = true;
+      continue;
+    }
+    if (self.strides()[i] != src.strides()[i]) {
+      return false;
+    }
+  }
+  return has_expanded_src_dim;
+}
+
+static bool copy_has_same_start_expanded_alias(
+    const Tensor& self,
+    const Tensor& src) {
+  if (has_symbolic_sizes_or_strides(self) ||
+      has_symbolic_sizes_or_strides(src)) {
+    return false;
+  }
+  if (self.layout() != kStrided || src.layout() != kStrided ||
+      self.dim() != src.dim() || !self.sizes().equals(src.sizes())) {
+    return false;
+  }
+
+  const auto* self_impl = self.unsafeGetTensorImpl();
+  const auto* src_impl = src.unsafeGetTensorImpl();
+  const auto& self_storage = self_impl->unsafe_storage();
+  if (!self_storage ||
+      !self_storage.is_alias_of(src_impl->unsafe_storage()) ||
+      self_impl->data() != src_impl->data()) {
+    return false;
+  }
+
+  for (const auto i : c10::irange(src.dim())) {
+    if (src.sizes()[i] > 1 &&
+        (self.strides()[i] == 0 || src.strides()[i] == 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void assert_no_partial_overlap_for_copy(
+    const Tensor& self,
+    const Tensor& src) {
+  const auto lap = at::get_overlap_status(self, src);
+  const auto allowed_expanded_src =
+      copy_allows_same_start_expanded_src(self, src);
+  TORCH_CHECK(
+      (lap != at::MemOverlapStatus::Partial &&
+       !(copy_has_same_start_expanded_alias(self, src) &&
+         !allowed_expanded_src)) ||
+          allowed_expanded_src,
+      "unsupported operation: some elements of the input tensor and "
+      "the written-to tensor refer to a single memory location. "
+      "Please clone() the tensor before performing the operation.");
+}
+
 static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
@@ -158,6 +257,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         ((self.is_contiguous() && src.is_contiguous()) ||
          (self.is_non_overlapping_and_dense() && self.strides() == src.strides())) &&
         (self.sizes() == src.sizes())) {
+      at::assert_no_internal_overlap(self);
+      assert_no_partial_overlap_for_copy(self, src);
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
@@ -269,11 +370,14 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
+  at::assert_no_internal_overlap(self);
+  assert_no_partial_overlap_for_copy(self, src);
 
   auto iter = TensorIteratorConfig()
     .add_output(self)
     .add_const_input(src)
     .resize_outputs(false)
+    .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .check_all_same_device(false)
     .build();
@@ -313,7 +417,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 }
 
 Tensor copy_meta(const Tensor& self, const Tensor& src, bool non_blocking) {
-  at::assert_no_partial_overlap(self, src);
+  assert_no_partial_overlap_for_copy(self, src);
   // Must directly use self(), so we can dispatch properly is self is a subclass
   auto r = clone_preserve_strides(self);
   r.copy_(src, non_blocking);
@@ -325,7 +429,7 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
   // (1) It isn't exposed to the frontend (no python bindings)
   // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
-  at::assert_no_partial_overlap(self, src);
+  assert_no_partial_overlap_for_copy(self, src);
   auto self_storage = self.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl();
   // If self has no real storage, we can't actually clone it.
   // Instead, generate an empty tensor with the right sizes/strides, since we should be able to assume

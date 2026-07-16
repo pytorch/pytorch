@@ -1,6 +1,8 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/TensorBase.h>
 #include <c10/util/irange.h>
+#include <optional>
+#include <string>
 
 namespace at {
 
@@ -57,27 +59,131 @@ MemOverlapStatus get_overlap_status(const TensorBase& a, const TensorBase& b) {
   return get_overlap_status(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
 }
 
-MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
-  if (a == b) return MemOverlapStatus::Full;
-  if (a->has_symbolic_sizes_strides() || b->has_symbolic_sizes_strides()) {
+static bool same_address_mapping(const TensorImpl* a, const TensorImpl* b) {
+  if (a->itemsize() != b->itemsize() || a->sizes() != b->sizes()) {
+    return false;
+  }
+  for (const auto i : c10::irange(a->dim())) {
+    if (a->sizes()[i] > 1 && a->strides()[i] != b->strides()[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool has_expanded_dim(const TensorImpl* t) {
+  for (const auto i : c10::irange(t->dim())) {
+    if (t->sizes()[i] > 1 && t->strides()[i] == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool has_symbolic_sizes_or_strides(const TensorImpl* t) {
+  for (const auto& size : t->sym_sizes()) {
+    if (size.is_symbolic()) {
+      return true;
+    }
+  }
+  for (const auto& stride : t->sym_strides()) {
+    if (stride.is_symbolic()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static std::optional<bool> maybe_guard_bool(const c10::SymBool& value) {
+  if (!value.has_hint()) {
+    return std::nullopt;
+  }
+  return TORCH_GUARD_OR_FALSE(value);
+}
+
+static MemOverlapStatus symbolic_same_start_overlap(
+    const TensorImpl* a,
+    const TensorImpl* b) {
+  if (a->itemsize() != b->itemsize() || a->dim() != b->dim()) {
     return MemOverlapStatus::TooHard;
   }
-  if (a->numel() == 0 || b->numel() == 0) {
+
+  const auto a_sizes = a->sym_sizes();
+  const auto b_sizes = b->sym_sizes();
+  const auto sizes_equal = maybe_guard_bool(c10::sym_equals(a_sizes, b_sizes));
+  if (!sizes_equal || !*sizes_equal) {
+    return MemOverlapStatus::TooHard;
+  }
+
+  const auto a_strides = a->sym_strides();
+  const auto b_strides = b->sym_strides();
+  bool different_mapping = false;
+  for (const auto i : c10::irange(a->dim())) {
+    const auto stride_diff =
+        maybe_guard_bool(a_strides[i].sym_ne(b_strides[i]));
+    if (stride_diff && !*stride_diff) {
+      continue;
+    }
+
+    const auto size_gt_one = maybe_guard_bool(a_sizes[i].sym_gt(1));
+    if (!size_gt_one) {
+      return MemOverlapStatus::TooHard;
+    }
+    if (!*size_gt_one) {
+      continue;
+    }
+
+    if (!stride_diff) {
+      return MemOverlapStatus::TooHard;
+    }
+
+    const auto a_stride_zero = maybe_guard_bool(a_strides[i].sym_eq(0));
+    const auto b_stride_zero = maybe_guard_bool(b_strides[i].sym_eq(0));
+    if (!a_stride_zero || !b_stride_zero) {
+      return MemOverlapStatus::TooHard;
+    }
+    if (*a_stride_zero || *b_stride_zero) {
+      return MemOverlapStatus::Partial;
+    }
+    different_mapping = true;
+  }
+
+  return different_mapping ? MemOverlapStatus::Partial
+                           : MemOverlapStatus::Full;
+}
+
+static MemOverlapStatus get_overlap_status_impl(
+    const TensorImpl* a,
+    const TensorImpl* b) {
+  if (a == b) return MemOverlapStatus::Full;
+  const auto has_symbolic_sizes_strides =
+      a->has_symbolic_sizes_strides() || b->has_symbolic_sizes_strides() ||
+      has_symbolic_sizes_or_strides(a) || has_symbolic_sizes_or_strides(b);
+  if (!has_symbolic_sizes_strides && (a->numel() == 0 || b->numel() == 0)) {
     return MemOverlapStatus::No;
   }
-  // Even when the views are not non-overlapping-and-dense, two aliases that
-  // start at the same address overlap in at least their first element.  If the
-  // logical layouts differ, this is a partial overlap and in-place TensorIterator
-  // ops cannot safely pick an execution order.
   if (a->layout() == kStrided && b->layout() == kStrided) {
     const auto& a_storage = a->unsafe_storage();
     if (a_storage && a_storage.is_alias_of(b->unsafe_storage()) &&
         a->data() == b->data()) {
-      return (a->sizes() == b->sizes() && a->strides() == b->strides() &&
-              a->itemsize() == b->itemsize())
-          ? MemOverlapStatus::Full
-          : MemOverlapStatus::Partial;
+      if (has_symbolic_sizes_strides) {
+        return symbolic_same_start_overlap(a, b);
+      }
+      // Even when the views are not non-overlapping-and-dense, two aliases that
+      // start at the same address overlap in at least their first element.
+      // When the per-element address mapping differs, this is a partial overlap
+      // and in-place TensorIterator ops cannot safely pick an execution order.
+      if (same_address_mapping(a, b)) {
+        return MemOverlapStatus::Full;
+      }
+      if (has_expanded_dim(a) || has_expanded_dim(b)) {
+        return MemOverlapStatus::Partial;
+      }
+      return MemOverlapStatus::Partial;
     }
+  }
+  if (has_symbolic_sizes_strides) {
+    return MemOverlapStatus::TooHard;
   }
   if (!a->is_non_overlapping_and_dense_or_false() || !b->is_non_overlapping_and_dense_or_false()) {
     return MemOverlapStatus::TooHard;
@@ -103,6 +209,18 @@ MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
     }
   }
   return MemOverlapStatus::No;
+}
+
+MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
+  try {
+    return get_overlap_status_impl(a, b);
+  } catch (const c10::Error& e) {
+    if (std::string(e.what_without_backtrace())
+            .find("symbolic sizes/strides") != std::string::npos) {
+      return MemOverlapStatus::TooHard;
+    }
+    throw;
+  }
 }
 
 void assert_no_partial_overlap(const TensorBase& a, const TensorBase& b) {

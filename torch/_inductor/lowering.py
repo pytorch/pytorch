@@ -12,7 +12,7 @@ import sys
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar
+from typing import Any, cast, Literal, NoReturn, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -48,6 +48,7 @@ from torch._prims_common import (
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
+    GuardOnDataDependentSymNode,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
     SymTypes,
@@ -2809,7 +2810,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
             return False
 
         for meta in pytree.tree_leaves(inp_out_node.meta["val"]):
-            if not isinstance(meta, torch._subclasses.FakeTensor):
+            if not torch._subclasses.fake_tensor.is_fake_tensor(meta):
                 continue
 
             if is_output:
@@ -3764,6 +3765,8 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
+# Not data-dependent, but still using fallback
+make_fallback(aten.nonzero_static.default)
 # Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
 # native implementations)
 make_fallback(aten.bincount.default, warn=False)
@@ -3912,10 +3915,612 @@ make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
 
 # Register with type_promotion_kind None.
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
+_COPY_OVERLAP_EXACT_MAX_ELEMENTS = 65536
+
+
+def _raise_copy_overlap_error() -> NoReturn:
+    raise RuntimeError(
+        "unsupported operation: some elements of the input tensor and "
+        "the written-to tensor refer to a single memory location. "
+        "Please clone() the tensor before performing the operation."
+    )
+
+
+def _same_root_reindex(
+    x: IRNode,
+) -> tuple[IRNode, list[sympy.Expr], list[sympy.Symbol]]:
+    if isinstance(x, TensorBox):
+        x = x.data
+
+    size = x.get_size()
+    index_symbols = [
+        sympy.Symbol(f"copy_overlap_{i}", integer=True, nonnegative=True)
+        for i in range(len(size))
+    ]
+
+    try:
+        storage, layout = ir.as_storage_and_layout(x, freeze=False)
+        return (
+            storage,
+            [sympy.expand(layout.make_indexer()(index_symbols))],
+            index_symbols,
+        )
+    except NotImplementedError:
+        pass
+
+    index: list[sympy.Expr] = list(index_symbols)
+    while isinstance(x, BaseView):
+        if isinstance(x, ir.ReinterpretView):
+            index = [sympy.expand(x.make_indexer()(index))]
+            x = x.data
+            continue
+        index = [sympy.expand(expr) for expr in x.make_reindexer()(index)]
+        x = x.data
+    return x, index, index_symbols
+
+
+def _same_copy_root(a: IRNode, b: IRNode) -> bool:
+    if a is b:
+        return True
+    return (
+        isinstance(a, ir.StorageBox)
+        and isinstance(b, ir.StorageBox)
+        and a.data is b.data
+    )
+
+
+def _copy_root_name(root: IRNode) -> str | None:
+    try:
+        return root.get_name()
+    except NotImplementedError:
+        return None
+
+
+def _depends_on_index(index: Sequence[sympy.Expr], symbol: sympy.Symbol) -> bool:
+    return any(symbol in expr.free_symbols for expr in index)
+
+
+def _copy_dim_may_have_multiple_elements(size: sympy.Expr) -> bool:
+    sizevars = V.graph.sizevars
+    if sizevars.statically_known_leq(size, 1):
+        return False
+    return sizevars.evaluate_expr(sympy.Gt(size, 1), fallback_value=True)
+
+
+def _index_bounds(
+    index: Sequence[sympy.Expr],
+    symbols: Sequence[sympy.Symbol],
+    sizes: Sequence[sympy.Expr],
+) -> list[tuple[sympy.Expr, sympy.Expr]] | None:
+    sizevars = V.graph.sizevars
+    zero_index = dict.fromkeys(symbols, sympy.S.Zero)
+    bounds = []
+    for expr in index:
+        expr = sympy.expand(expr)
+        lower = sympy.expand(expr.xreplace(zero_index))
+        upper = lower
+        for symbol, size in zip(symbols, sizes):
+            coeff = sympy.expand(expr).coeff(symbol)
+            if coeff == 0:
+                continue
+            if symbol in sympy.expand(expr - coeff * symbol).free_symbols:
+                return None
+            if sizevars.evaluate_expr(sympy.Ge(coeff, 0), fallback_value=True):
+                upper += coeff * (size - 1)
+            else:
+                lower += coeff * (size - 1)
+        bounds.append((sympy.expand(lower), sympy.expand(upper)))
+    return bounds
+
+
+def _affine_index_base_and_strides(
+    index: Sequence[sympy.Expr],
+    symbols: Sequence[sympy.Symbol],
+) -> tuple[sympy.Expr, tuple[sympy.Expr, ...]] | None:
+    if len(index) != 1:
+        return None
+
+    expr = sympy.expand(index[0])
+    zero_index = dict.fromkeys(symbols, sympy.S.Zero)
+    base = sympy.expand(expr.xreplace(zero_index))
+    strides = []
+    for symbol in symbols:
+        coeff = sympy.expand(expr).coeff(symbol)
+        if symbol in sympy.expand(expr - coeff * symbol).free_symbols:
+            return None
+        strides.append(sympy.expand(coeff))
+    return base, tuple(strides)
+
+
+def _statically_known_disjoint_modular_indexing(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+) -> bool:
+    self_affine = _affine_index_base_and_strides(self_index, self_symbols)
+    src_affine = _affine_index_base_and_strides(src_index, src_symbols)
+    if self_affine is None or src_affine is None:
+        return False
+
+    self_base, self_strides = self_affine
+    src_base, src_strides = src_affine
+    stride_gcd = None
+    for stride in (*self_strides, *src_strides):
+        if not isinstance(stride, sympy.Integer):
+            return False
+        stride_int = int(stride)
+        stride_abs = stride_int if stride_int >= 0 else -stride_int
+        if stride_abs == 0:
+            continue
+        stride_gcd = (
+            stride_abs if stride_gcd is None else math.gcd(stride_gcd, stride_abs)
+        )
+
+    if stride_gcd is None or stride_gcd == 1:
+        return False
+    return V.graph.sizevars.statically_known_true(
+        sympy.Ne(sympy.Mod(self_base - src_base, stride_gcd), 0)
+    )
+
+
+def _residue_interval(
+    index: Sequence[sympy.Expr],
+    symbols: Sequence[sympy.Symbol],
+    sizes: Sequence[sympy.Expr],
+    modulus: int,
+) -> tuple[int, int] | None:
+    if len(index) != 1:
+        return None
+
+    expr = sympy.expand(index[0])
+    zero_index = dict.fromkeys(symbols, sympy.S.Zero)
+    base = sympy.expand(expr.xreplace(zero_index))
+    try:
+        base_mod = int(sympy.Mod(base, modulus))
+    except TypeError:
+        return None
+
+    varying_dim = None
+    for dim, symbol in enumerate(symbols):
+        coeff = sympy.expand(expr).coeff(symbol)
+        if coeff == 0:
+            continue
+        if symbol in sympy.expand(expr - coeff * symbol).free_symbols:
+            return None
+        if coeff == 1:
+            if varying_dim is not None:
+                return None
+            varying_dim = dim
+        elif isinstance(coeff, sympy.Integer) and int(coeff) % modulus == 0:
+            continue
+        else:
+            return None
+
+    if varying_dim is None:
+        return (base_mod, base_mod)
+
+    size = sizes[varying_dim]
+    if not isinstance(size, sympy.Integer):
+        return None
+    size_int = int(size)
+    if size_int <= 0 or base_mod + size_int > modulus:
+        return None
+    return (base_mod, base_mod + size_int - 1)
+
+
+def _statically_known_disjoint_residue_intervals(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+    src_size: Sequence[sympy.Expr],
+) -> bool:
+    self_affine = _affine_index_base_and_strides(self_index, self_symbols)
+    src_affine = _affine_index_base_and_strides(src_index, src_symbols)
+    if self_affine is None or src_affine is None:
+        return False
+
+    _, self_strides = self_affine
+    _, src_strides = src_affine
+    moduli = OrderedSet()
+    for stride in (*self_strides, *src_strides):
+        if isinstance(stride, sympy.Integer):
+            stride_int = int(stride)
+            stride_abs = stride_int if stride_int >= 0 else -stride_int
+            if stride_abs > 1:
+                moduli.add(stride_abs)
+
+    for modulus in moduli:
+        self_interval = _residue_interval(self_index, self_symbols, self_size, modulus)
+        src_interval = _residue_interval(src_index, src_symbols, src_size, modulus)
+        if self_interval is None or src_interval is None:
+            continue
+        if self_interval[1] < src_interval[0] or src_interval[1] < self_interval[0]:
+            return True
+    return False
+
+
+def _index_ranges_may_overlap(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+    src_size: Sequence[sympy.Expr],
+) -> bool:
+    if len(self_index) != len(src_index):
+        return True
+
+    sizevars = V.graph.sizevars
+    if any(sizevars.statically_known_equals(size, 0) for size in self_size):
+        return False
+    if any(sizevars.statically_known_equals(size, 0) for size in src_size):
+        return False
+
+    self_bounds = _index_bounds(self_index, self_symbols, self_size)
+    src_bounds = _index_bounds(src_index, src_symbols, src_size)
+    if self_bounds is None or src_bounds is None:
+        return True
+
+    if _statically_known_disjoint_modular_indexing(
+        self_index, self_symbols, src_index, src_symbols
+    ):
+        return False
+    if _statically_known_disjoint_residue_intervals(
+        self_index, self_symbols, self_size, src_index, src_symbols, src_size
+    ):
+        return False
+
+    for (self_min, self_max), (src_min, src_max) in zip(self_bounds, src_bounds):
+        if not sizevars.evaluate_expr(sympy.Le(self_min, src_max), fallback_value=True):
+            return False
+        if not sizevars.evaluate_expr(sympy.Le(src_min, self_max), fallback_value=True):
+            return False
+    return True
+
+
+def _guarded_index_hint(expr: sympy.Expr) -> int:
+    sizevars = V.graph.sizevars
+    hint = sizevars.guarding_hint_or_throw(expr)
+    if not sizevars.evaluate_expr(sympy.Eq(expr, hint), fallback_value=False):
+        raise GuardOnDataDependentSymNode(sympy.Eq(expr, hint))
+    return hint
+
+
+def _exact_index_values(
+    index: Sequence[sympy.Expr],
+    symbols: Sequence[sympy.Symbol],
+    sizes: Sequence[sympy.Expr],
+) -> OrderedSet[tuple[int, ...]] | None:
+    size_hints = []
+    numel = 1
+    try:
+        for size in sizes:
+            hint = _guarded_index_hint(size)
+            if hint < 0:
+                return None
+            numel *= hint
+            if numel > _COPY_OVERLAP_EXACT_MAX_ELEMENTS:
+                return None
+            size_hints.append(hint)
+
+        values = OrderedSet()
+        for point in itertools.product(*(range(size) for size in size_hints)):
+            replacements = dict(zip(symbols, point))
+            values.add(
+                tuple(
+                    _guarded_index_hint(sympy.expand(expr.xreplace(replacements)))
+                    for expr in index
+                )
+            )
+        return values
+    except GuardOnDataDependentSymNode:
+        return None
+
+
+def _exact_index_ranges_overlap(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+    src_size: Sequence[sympy.Expr],
+) -> bool | None:
+    self_values = _exact_index_values(self_index, self_symbols, self_size)
+    if self_values is None:
+        return None
+    src_values = _exact_index_values(src_index, src_symbols, src_size)
+    if src_values is None:
+        return None
+    return not self_values.isdisjoint(src_values)
+
+
+def _has_expanded_mapping(
+    index: Sequence[sympy.Expr],
+    symbols: Sequence[sympy.Symbol],
+    sizes: Sequence[sympy.Expr],
+) -> bool:
+    return any(
+        _copy_dim_may_have_multiple_elements(size)
+        and not _depends_on_index(index, symbol)
+        for symbol, size in zip(symbols, sizes)
+    )
+
+
+def _copy_allows_same_start_expanded_src(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+    src_size: Sequence[sympy.Expr],
+) -> bool:
+    sizevars = V.graph.sizevars
+    if len(self_symbols) != len(src_symbols) or not (
+        sizevars.statically_known_list_equals(self_size, src_size)
+    ):
+        return False
+    if _has_expanded_mapping(self_index, self_symbols, self_size):
+        return False
+
+    replacements: dict[sympy.Symbol, sympy.Expr] = {}
+    has_expanded_src_dim = False
+    for self_symbol, src_symbol, size in zip(self_symbols, src_symbols, src_size):
+        if sizevars.statically_known_leq(size, 1):
+            replacements[self_symbol] = sympy.S.Zero
+            replacements[src_symbol] = sympy.S.Zero
+            continue
+        if not _depends_on_index(src_index, src_symbol):
+            has_expanded_src_dim = True
+            replacements[self_symbol] = sympy.S.Zero
+            replacements[src_symbol] = sympy.S.Zero
+            continue
+        replacements[src_symbol] = self_symbol
+
+    if not has_expanded_src_dim:
+        return False
+
+    remapped_self_index = [
+        sympy.expand(expr.xreplace(replacements)) for expr in self_index
+    ]
+    remapped_src_index = [
+        sympy.expand(expr.xreplace(replacements)) for expr in src_index
+    ]
+    return sizevars.statically_known_list_equals(
+        remapped_self_index, remapped_src_index
+    )
+
+
+def _remove_size_one_dims_from_mapping(
+    index: Sequence[sympy.Expr],
+    symbols: Sequence[sympy.Symbol],
+    sizes: Sequence[sympy.Expr],
+) -> tuple[list[sympy.Expr], list[sympy.Symbol], list[sympy.Expr]]:
+    sizevars = V.graph.sizevars
+    replacements: dict[sympy.Symbol, sympy.Expr] = {}
+    compact_symbols = []
+    compact_sizes = []
+    for symbol, size in zip(symbols, sizes):
+        if sizevars.statically_known_leq(size, 1):
+            replacements[symbol] = sympy.S.Zero
+        else:
+            compact_symbols.append(symbol)
+            compact_sizes.append(size)
+
+    compact_index = [sympy.expand(expr.xreplace(replacements)) for expr in index]
+    return compact_index, compact_symbols, compact_sizes
+
+
+def _same_mapping_ignoring_size_one_dims(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    src_index: Sequence[sympy.Expr],
+    src_symbols: Sequence[sympy.Symbol],
+    src_size: Sequence[sympy.Expr],
+) -> bool:
+    sizevars = V.graph.sizevars
+    self_index, self_symbols, self_size = _remove_size_one_dims_from_mapping(
+        self_index, self_symbols, self_size
+    )
+    src_index, src_symbols, src_size = _remove_size_one_dims_from_mapping(
+        src_index, src_symbols, src_size
+    )
+    if not sizevars.statically_known_list_equals(self_size, src_size):
+        return False
+    if len(self_symbols) != len(src_symbols):
+        return False
+
+    replacements: dict[sympy.Symbol, sympy.Expr] = {}
+    for self_symbol, src_symbol, size in zip(self_symbols, src_symbols, self_size):
+        if sizevars.statically_known_leq(size, 1):
+            replacements[self_symbol] = sympy.S.Zero
+            replacements[src_symbol] = sympy.S.Zero
+        else:
+            replacements[src_symbol] = self_symbol
+
+    remapped_self_index = [
+        sympy.expand(expr.xreplace(replacements)) for expr in self_index
+    ]
+    remapped_src_index = [
+        sympy.expand(expr.xreplace(replacements)) for expr in src_index
+    ]
+    return sizevars.statically_known_list_equals(
+        remapped_self_index, remapped_src_index
+    )
+
+
+def _read_dep_matches_write_mapping(
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    dep_index: sympy.Expr,
+    dep_symbols: Sequence[sympy.Symbol],
+    dep_size: Sequence[sympy.Expr],
+) -> bool:
+    if len(self_index) != 1:
+        return False
+    return _same_mapping_ignoring_size_one_dims(
+        self_index,
+        self_symbols,
+        self_size,
+        [dep_index],
+        dep_symbols,
+        dep_size,
+    )
+
+
+def _copy_has_aliasing_copyback_origin(x: IRNode) -> bool:
+    seen = OrderedSet()
+
+    def visit(node: object) -> bool:
+        node_id = id(node)
+        if node_id in seen:
+            return False
+        seen.add(node_id)
+
+        if any(
+            origin.meta.get("copy_overlap_from_aliasing_mutation")
+            for origin in getattr(node, "origins", ())
+        ):
+            return True
+
+        data = getattr(node, "data", None)
+        return data is not None and visit(data)
+
+    return visit(x)
+
+
+def _is_aliasing_copyback_source(src: IRNode) -> bool:
+    return _copy_has_aliasing_copyback_origin(src)
+
+
+def _copy_reads_overlap(
+    self_root: IRNode,
+    self_index: Sequence[sympy.Expr],
+    self_symbols: Sequence[sympy.Symbol],
+    self_size: Sequence[sympy.Expr],
+    src: IRNode,
+) -> bool:
+    root_name = _copy_root_name(self_root)
+    if root_name is None:
+        return False
+
+    try:
+        reads = src.get_reads()
+    except NotImplementedError:
+        return False
+
+    for dep in reads:
+        dep_name = getattr(dep, "name", None)
+        try:
+            dep_index = dep.index
+        except NotImplementedError:
+            continue
+        dep_symbols = getattr(dep, "var_names", None)
+        dep_size = getattr(dep, "size", None)
+        if (
+            dep_name != root_name
+            or dep_index is None
+            or dep_symbols is None
+            or dep_size is None
+        ):
+            continue
+
+        dep_index = [sympy.expand(dep_index)]
+        dep_symbols = list(dep_symbols)
+        dep_size = list(dep_size)
+        if _read_dep_matches_write_mapping(
+            self_index, self_symbols, self_size, dep_index[0], dep_symbols, dep_size
+        ):
+            continue
+        sizevars = V.graph.sizevars
+        self_start = [
+            sympy.expand(expr.xreplace(dict.fromkeys(self_symbols, sympy.S.Zero)))
+            for expr in self_index
+        ]
+        dep_start = [
+            sympy.expand(expr.xreplace(dict.fromkeys(dep_symbols, sympy.S.Zero)))
+            for expr in dep_index
+        ]
+        if _copy_allows_same_start_expanded_src(
+            self_index, self_symbols, self_size, dep_index, dep_symbols, dep_size
+        ) and sizevars.statically_known_list_equals(self_start, dep_start):
+            continue
+
+        if not _index_ranges_may_overlap(
+            self_index, self_symbols, self_size, dep_index, dep_symbols, dep_size
+        ):
+            continue
+        exact_overlap = _exact_index_ranges_overlap(
+            self_index, self_symbols, self_size, dep_index, dep_symbols, dep_size
+        )
+        if exact_overlap is not None and not exact_overlap:
+            continue
+
+        return True
+
+    return False
+
+
+def _raise_if_copy_has_partial_overlap(self: IRNode, src: IRNode) -> bool:
+    # The copy lowering clones src and otherwise skips the native overlap check.
+    # Preserve the check for view aliases over the same root.
+    self_root, self_index, self_symbols = _same_root_reindex(self)
+    src_root, src_index, src_symbols = _same_root_reindex(src)
+    if not _same_copy_root(self_root, src_root):
+        reads_overlap = _copy_reads_overlap(
+            self_root, self_index, self_symbols, self.get_size(), src
+        )
+        if reads_overlap and _is_aliasing_copyback_source(src):
+            _raise_copy_overlap_error()
+        return reads_overlap
+
+    sizevars = V.graph.sizevars
+    self_size = self.get_size()
+    src_size = src.get_size()
+    same_mapping = _same_mapping_ignoring_size_one_dims(
+        self_index, self_symbols, self_size, src_index, src_symbols, src_size
+    )
+    if same_mapping:
+        return False
+    self_start = [
+        sympy.expand(expr.xreplace(dict.fromkeys(self_symbols, sympy.S.Zero)))
+        for expr in self_index
+    ]
+    src_start = [
+        sympy.expand(expr.xreplace(dict.fromkeys(src_symbols, sympy.S.Zero)))
+        for expr in src_index
+    ]
+    if sizevars.statically_known_list_equals(
+        self_start, src_start
+    ) and _copy_allows_same_start_expanded_src(
+        self_index, self_symbols, self_size, src_index, src_symbols, src_size
+    ):
+        return False
+
+    if not _index_ranges_may_overlap(
+        self_index, self_symbols, self_size, src_index, src_symbols, src_size
+    ):
+        return False
+
+    exact_overlap = _exact_index_ranges_overlap(
+        self_index, self_symbols, self_size, src_index, src_symbols, src_size
+    )
+    if exact_overlap is not None and not exact_overlap:
+        return False
+
+    _raise_copy_overlap_error()
+
+
 @register_lowering(aten.copy, type_promotion_kind=None)
 def copy(self, src, non_blocking=False):
     if not isinstance(src, ir.IRNode):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
+    _raise_if_copy_has_partial_overlap(self, src)
+
     x = src
     if self.get_device() != src.get_device():
         x = to_device(x, self.get_device())
@@ -5032,10 +5637,100 @@ def clamp(a, min, max):
 
 @register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
 def as_strided_scatter(self, src, size, stride, storage_offset=None):
-    output = clone(self)
-    output_view = as_strided(output, size, stride, storage_offset)
-    copy_(output_view, src)
-    return output
+    """Lower 1D as_strided_scatter while preserving clone storage layout."""
+    self_size = self.get_size()
+    layout = self.maybe_get_layout()
+    if layout is None or len(self_size) != 1 or len(size) != 1 or len(stride) != 1:
+        return fallback_handler(aten.as_strided_scatter.default)(
+            self, src, size, stride, storage_offset
+        )
+    input_has_internal_overlap = any(
+        V.graph.sizevars.statically_known_equals(input_stride, 0)
+        and not V.graph.sizevars.statically_known_leq(input_size, 1)
+        for input_size, input_stride in zip(self_size, layout.stride)
+    )
+
+    scatter_stride = convert_symint_to_expr(stride[0])
+    if not V.graph.sizevars.statically_known_equals(scatter_stride, 1):
+        return fallback_handler(aten.as_strided_scatter.default)(
+            self, src, size, stride, storage_offset
+        )
+
+    scatter_size = [convert_symint_to_expr(size[0])]
+    if storage_offset is None:
+        scatter_offset = sympy.S.Zero if input_has_internal_overlap else layout.offset
+    else:
+        scatter_offset = convert_symint_to_expr(storage_offset)
+    original_src = src
+    src = expand(to_dtype(src, self.get_dtype()), scatter_size)
+    src_loader = src.make_loader()
+
+    def scatter_value(storage_index, fallback):
+        src_index = sympy.expand(storage_index - scatter_offset)
+        mask = ops.and_(
+            ops.ge(
+                ops.index_expr(src_index, torch.int64), ops.constant(0, torch.int64)
+            ),
+            ops.lt(
+                ops.index_expr(src_index, torch.int64),
+                ops.index_expr(scatter_size[0], torch.int64),
+            ),
+        )
+        src_val = ops.masked(
+            mask,
+            lambda: src_loader([src_index]),
+            0 if is_integer_type(self) else 0.0,
+        )
+        return ops.where(mask, src_val, fallback)
+
+    if not input_has_internal_overlap:
+        try:
+            storage, storage_layout = ir.as_storage_and_layout(self, freeze=False)
+        except NotImplementedError:
+            return fallback_handler(aten.as_strided_scatter.default)(
+                self, original_src, size, stride, storage_offset
+            )
+        storage_loader = storage.make_loader()
+
+        def storage_inner_fn(idx):
+            storage_index = sympy.expand(idx[0])
+            return scatter_value(storage_index, storage_loader([storage_index]))
+
+        storage_result = Pointwise.create(
+            device=self.get_device(),
+            dtype=self.get_dtype(),
+            inner_fn=storage_inner_fn,
+            ranges=[storage_layout.storage_size()],
+        )
+        storage_result.realize()
+        result_layout = ir.FixedLayout(
+            layout.device,
+            layout.dtype,
+            list(self_size),
+            list(layout.stride),
+            layout.offset,
+            layout.is_pinned,
+        )
+        return TensorBox(
+            ir.ReinterpretView(data=storage_result.data, layout=result_layout)
+        )
+
+    self_loader = self.make_loader()
+
+    def inner_fn(idx):
+        storage_index = sympy.expand(idx[0])
+        return scatter_value(storage_index, self_loader(idx))
+
+    result = Pointwise.create(
+        device=self.get_device(),
+        dtype=self.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=list(self_size),
+    )
+    if input_has_internal_overlap:
+        result.realize()
+        result.freeze_layout_with_exact_strides([1])
+    return result
 
 
 @register_lowering(aten.scatter, type_promotion_kind=None)
@@ -7621,9 +8316,14 @@ def copy_(dst, src, non_blocking=False):
     if dst is src:
         # dst.copy_(dst) can happen from the reinplacing pass
         return dst
+    materialize_src = _raise_if_copy_has_partial_overlap(dst, src)
+
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
     src = expand(src, dst.get_size())
+    if materialize_src:
+        src = clone(src)
+        src.realize()
     return mutate_to(dst, src)
 
 
@@ -9324,6 +10024,15 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
+    # An effectful op may retain its tensor inputs in state that inductor cannot
+    # see (e.g. pushing a tensor onto a torchbind queue), so those input buffers
+    # must outlive the op and must never be reused for another buffer.
+    if effect_type:
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if isinstance(arg, TensorBox):
+                arg.realize()
+                V.graph.never_reuse_buffers.add(arg.get_name())
+
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9353,7 +10062,9 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (

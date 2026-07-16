@@ -2076,6 +2076,7 @@ class TestTorchDeviceType(TestCase):
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
                           lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
                           lambda: torch.any(y),
+                          lambda: torch.combinations(x, r=2),
                           lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
@@ -4254,6 +4255,21 @@ class TestTorchDeviceType(TestCase):
         x = x.permute(2, 1, 0)
         with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
             x[0].copy_(x[0].t())
+        x = torch.arange(2, dtype=dtype, device=device).reshape(2, 1)
+        x.copy_(x.as_strided((2, 1), (1, 0)))
+        x = torch.arange(6, dtype=dtype, device=device).reshape(3, 2)
+        expected = x[0:1].clone().expand_as(x)
+        x.copy_(x[0:1].expand_as(x))
+        self.assertEqual(x, expected)
+        x = torch.arange(4, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
+            x.as_strided((2, 2), (1, 2)).copy_(x.as_strided((2, 2), (0, 1)))
+        base = torch.empty(0, dtype=dtype, device=device)
+        base.as_strided((1, 0), (1, 1)).copy_(base.as_strided((0,), (1,)))
+        if torch.device(device).type == "cpu":
+            base = torch.arange(8, dtype=torch.float16, device=device)
+            with self.assertRaisesRegex(RuntimeError, "unsupported operation"):
+                base.view(torch.float32).copy_(base[:4])
 
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
@@ -10946,6 +10962,61 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
 
+    def test_swap_allows_tensor_weakref(self):
+        from torch.utils.weak import TensorWeakRef
+
+        t1 = torch.nn.Parameter(torch.zeros(2))
+        t2 = torch.nn.Parameter(torch.ones(2))
+        t2.foo = "bar"
+
+        t1_ref = TensorWeakRef(t1)
+        t2_ref = TensorWeakRef(t2)
+        t1_ref.extra = "still settable"
+        self.assertEqual(t1_ref.extra, "still settable")
+        self.assertIs(t1_ref(), t1)
+        self.assertIs(t2_ref(), t2)
+        t1_weakrefs = weakref.getweakrefs(t1)
+        t2_weakrefs = weakref.getweakrefs(t2)
+        self.assertEqual(len(t1_weakrefs), 1)
+        self.assertEqual(len(t2_weakrefs), 1)
+        self.assertIs(t1_weakrefs[0], t1_ref.ref)
+        self.assertIs(t2_weakrefs[0], t2_ref.ref)
+
+        torch.utils.swap_tensors(t1, t2)
+
+        self.assertIs(t1_ref(), t1)
+        self.assertIs(t2_ref(), t2)
+        self.assertEqual(t1, torch.ones(2))
+        self.assertEqual(t2, torch.zeros(2))
+        self.assertEqual(t1.foo, "bar")
+
+        _wr = weakref.ref(t1)
+        self.assertIs(_wr(), t1)
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t1, t2)
+
+        t3 = torch.nn.Parameter(torch.zeros(2))
+        t4 = torch.nn.Parameter(torch.ones(2))
+        _ = TensorWeakRef(t3)
+        _ = TensorWeakRef(t4)
+        _wr = weakref.ref(t4)
+        self.assertIs(_wr(), t4)
+        with self.assertRaisesRegex(RuntimeError, "has weakref"):
+            torch.utils.swap_tensors(t3, t4)
+
+    def test_tensor_weakref_bc_behavior(self):
+        from torch.utils.weak import TensorWeakRef, WeakIdRef
+
+        t = torch.zeros(3)
+        tensor_ref = TensorWeakRef(t)
+        plain_ref = weakref.ref(t)
+
+        tensor_ref.extra = "still settable"
+        self.assertEqual(tensor_ref.extra, "still settable")
+        self.assertIs(tensor_ref(), t)
+        self.assertFalse(tensor_ref == plain_ref)
+        self.assertTrue(bool(TensorWeakRef(t) == WeakIdRef(t)))
+        self.assertFalse(bool(tensor_ref == plain_ref))
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_fail_slots(self):
