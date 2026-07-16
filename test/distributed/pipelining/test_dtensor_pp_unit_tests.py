@@ -65,10 +65,10 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 backend = dist.get_default_backend_for_device(device_type)
 
 
-def _requires_multi_gpu(fn):
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+def _requires_multi_accelerator(fn):
+    @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ accelerators"
     )
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -102,8 +102,8 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     def init_pg(self):
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(self.device)
 
     # -----------------------------------------------------------------
     # Shared helpers
@@ -150,7 +150,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # Category 1: Metadata Classes (_TensorMeta, _DTensorMeta, _MeshCache)
     # -----------------------------------------------------------------
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_tensor_meta_extraction_roundtrip_and_errors(self):
         """Test _TensorMeta: extraction, roundtrip, DTensor rejection."""
         self.init_pg()
@@ -183,7 +183,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             _TensorMeta.from_tensor(dt)
         self.assertIn("DTensor", str(ctx.exception))
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_tensor_meta_non_float_requires_grad_guard(self):
         """Test that to_tensor/to_dtensor don't set requires_grad on non-float dtypes."""
         self.init_pg()
@@ -228,7 +228,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             self.assertEqual(dt.dtype, dtype)
             self.assertFalse(dt.requires_grad)
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_dtensor_meta_extraction_and_roundtrip(self):
         """Test _DTensorMeta: extraction and roundtrip for Shard/Replicate."""
         self.init_pg()
@@ -248,7 +248,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             reconstructed_meta = _DTensorMeta.from_dtensor(reconstructed)
             self.assertEqual(meta.get_diff(reconstructed_meta), [])
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_get_diff_detects_mismatches(self):
         """Test get_diff() detects shape/dtype/placement/cross-type differences."""
         self.init_pg()
@@ -274,7 +274,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         diffs = dm1.get_diff(m1)
         self.assertTrue(any("type" in d.lower() or "_TensorMeta" in d for d in diffs))
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_mesh_cache_operations(self):
         """Test _MeshCache: __contains__/put/get_mesh/callback/update_from_tensors."""
         self.init_pg()
@@ -330,7 +330,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # Category 2: InferenceMode Decision Logic
     # -----------------------------------------------------------------
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_needs_dynamic_all_cases(self):
         """Test all 8 cases of the needs_dynamic() decision matrix."""
         self.init_pg()
@@ -385,7 +385,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                     lambda msg: f"{msg}\nCase {i} failed",
                 )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_NoneGrad_dtensor_grad_metadata_not_derived(self):
         self.init_pg()
         mesh = self._make_mesh()
@@ -401,7 +401,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         self.assertIsNotNone(plain_grad_meta)
         self.assertIsNone(dtensor_grad_meta)
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_NoneGrad_dtensor_runtime_send_contract(self):
         self.init_pg()
         mesh = self._make_mesh()
@@ -441,7 +441,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # Category 3: Validation Functions
     # -----------------------------------------------------------------
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_validate_metadata(self):
         """Test validate_metadata: match, raise, warn, type mismatch."""
         self.init_pg()
@@ -469,7 +469,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         diffs = validate_metadata("test", meta, plain)
         self.assertTrue(any("type" in d for d in diffs))
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_validate_tensors_metadata(self):
         """Test validate_tensors_metadata: batch validation, length mismatch, None handling."""
         self.init_pg()
@@ -504,7 +504,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         with self.assertRaises(PipeliningMetadataError):
             validate_tensors_metadata("test", (meta,), (None,))
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_validate_static_arg_grad_correspondence(self):
         """Test DTensor↔grad correspondence: all valid/invalid combos."""
         self.init_pg()
@@ -545,7 +545,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # Category 4: Helper Functions
     # -----------------------------------------------------------------
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_extract_tensor_metas(self):
         """Test extract_tensor_metas: plain, DTensor, None handling."""
         self.init_pg()
@@ -574,7 +574,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         with self.assertRaises(PipeliningMetadataError):
             extract_tensor_metas((dt, None))  # type: ignore[arg-type]
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_to_local_if_dtensor(self):
         """Test to_local_if_dtensor: DTensor→local, plain passthrough, detach."""
         self.init_pg()
@@ -597,7 +597,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         self.assertNotIsInstance(local_detached, DTensor)
         self.assertFalse(local_detached.requires_grad)
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_validate_and_normalize_to_tuple(self):
         """Test validate_and_normalize_to_tuple: single, tuple, list, None, errors."""
         self.init_pg()
@@ -640,7 +640,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # Category 5: Microbatch DTensor Split & Merge
     # -----------------------------------------------------------------
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_split_tensor_dtensor_preserves_placements(self):
         """Test _split_tensor splits a DTensor into chunks that are still DTensors
         with the same placements, correct local shapes, and matching data."""
@@ -681,7 +681,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                 "Split chunks do not reconstruct the original local tensor",
             )
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_merge_chunks_dtensor_roundtrip(self):
         """Test that split → merge is a roundtrip: merge_chunks reconstructs
         the original DTensor data and preserves placements."""
@@ -719,7 +719,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             )
             self.assertEqual(merged_dt.shape, dt.shape)
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_merge_chunks_dtensor_placement_mismatch_raises(self):
         """Test that merge_chunks raises when chunk placements don't match."""
         self.init_pg()
@@ -737,7 +737,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             )
         self.assertIn("placement mismatch", str(ctx.exception))
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_merge_chunks_dtensor_mixed_types_raises(self):
         """Test that merge_chunks raises when mixing DTensors and plain tensors."""
         self.init_pg()
@@ -755,7 +755,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             )
         self.assertIn("mix", str(ctx.exception))
 
-    @_requires_multi_gpu
+    @_requires_multi_accelerator
     def test_split_target_preserves_dtensor_placements(self):
         """Regression test: schedules' target-split path must split DTensor
         targets via _split_tensor (not torch.tensor_split) so that Shard
