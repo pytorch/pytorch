@@ -483,9 +483,9 @@ class _ChunkContext:
             )
         use_acc_dtype = dtype != acc_dtype
 
-        # Internal dtype layout. ``compact`` reuses ``balanced``'s layout;
-        # its savings come from skipping the weight_grad_chunk scratch, not dtype.
-        is_memory_like = acc_policy in {"balanced", "compact"}
+        # Internal dtype layout shared by the memory-like policy. ``compact``'s
+        # savings come from skipping the weight_grad_chunk scratch, not dtype.
+        is_memory_like = acc_policy == "compact"
         if use_acc_dtype:
             output_dtype = acc_dtype if dtype == torch.float16 else dtype
             grad_input_dtype = dtype if is_memory_like else acc_dtype
@@ -503,7 +503,7 @@ class _ChunkContext:
             )
 
         # ===== Dispatch flags =====
-        # CUDA + balanced uses cuBLAS out_dtype= directly; no cast.
+        # CUDA + compact uses cuBLAS out_dtype= directly; no cast.
         needs_linear_weight_cast = use_acc_dtype and (
             not is_cuda or (compute_input_grad and grad_input_dtype == logits_buf_dtype)
         )
@@ -899,7 +899,7 @@ def _linear_cross_entropy_batch_chunked_accumulator(
             # Loss target term sum_{n,c} (w*t)*x_shifted, read BEFORE
             # ``sumexp_`` (it ``exp_``s logits in place). torch.dot returns its
             # scalar at the operand dtype, so when the logits buffer is fp16
-            # (CUDA balanced/compact) the sum overflows fp16 (>65504) for a
+            # (CUDA compact) the sum overflows fp16 (>65504) for a
             # large batch of max-shifted (<=0) logits; a per-row einsum summed
             # across rows in fp32 stays finite (same cost as the dot). bf16/fp32
             # operands return a wide-enough scalar, so keep the flat dot.

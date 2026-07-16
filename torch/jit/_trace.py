@@ -661,7 +661,7 @@ def analyze_ts_result_with_export_result(export, trace):
         if type(orig) is not type(loaded):
             return False
 
-        if isinstance(orig, torch._subclasses.FakeTensor):
+        if torch._subclasses.fake_tensor.is_fake_tensor(orig):
             # Skip for FakeTensor.
             return True
         elif isinstance(orig, torch.Tensor):

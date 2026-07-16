@@ -63,7 +63,13 @@ runs:
         set +x
         if [[ ${WITH_PUSH:-false} == "true" ]]; then
           echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
-          docker push ${DOCKER_IMAGE_NAME_PREFIX}
+          # Only push the floating base tag from main; release branch rebuilds
+          # must not clobber the image that main CI consumes. The suffixed tags
+          # (branch / commit / .ci/docker hash) are still published so release
+          # builds can pin to ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}.
+          if [[ "${GIT_BRANCH_NAME}" == "main" ]]; then
+            docker push ${DOCKER_IMAGE_NAME_PREFIX}
+          fi
           docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
           docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
           docker push ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}

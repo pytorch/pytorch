@@ -725,8 +725,9 @@ instantiate_parametrized_tests(ExprPrinterTests)
 
 
 class TestIndexConstOverflowInt32(InductorTestCase):
-    """Tests for
-    ``SIMDKernelFeatures.any_index_expr_const_overflows_int32``."""
+    """Tests for the constant-offset check in
+    ``SIMDKernelFeatures.any_index_expr_overflows_int32`` (index evaluated at
+    the origin)."""
 
     def make_feats(self, indices):
         # Bypass __init__ (needs V.graph) and shadow scheduler_nodes().
@@ -739,7 +740,7 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         return feats
 
     def check(self, indices):
-        return self.make_feats(indices).any_index_expr_const_overflows_int32()
+        return self.make_feats(indices).any_index_expr_overflows_int32()
 
     def test_production_constant_detected(self):
         x0, x1 = sympy.symbols("x0 x1", integer=True)
@@ -771,6 +772,55 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         good = sympy.Integer(42) + x0
         bad = sympy.Integer(-(2**31) - 1) + x0
         self.assertTrue(self.check([good, bad]))
+
+
+class TestIndexExprUpperBounds(InductorTestCase):
+    """Tests for the variable-scaled bound check in
+    ``SIMDKernelFeatures.any_index_expr_overflows_int32``, which bounds the
+    addressing expression over each loop variable's iteration range (catching
+    fused `V * x0` terms while letting a stride on a size-1 dim drop out)."""
+
+    def make_feats(self, deps):
+        node = types.SimpleNamespace(
+            read_writes=types.SimpleNamespace(reads=deps, writes=[])
+        )
+        feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
+        feats.scheduler_nodes = lambda: [node]
+        return feats
+
+    def dep(self, index, var_names, sizes):
+        return MemoryDep("buf", index, tuple(var_names), tuple(sizes))
+
+    def check(self, deps):
+        return self.make_feats(deps).any_index_expr_overflows_int32()
+
+    def test_chunked_cross_buffer_overflow_caught(self):
+        # `V * x0 + i`: per-chunk stride V over the fused numel overflows int32
+        # even though no single buffer's storage does.
+        x0, i = sympy.symbols("x0 i", integer=True)
+        dep = self.dep(410_000_000 * x0 + i, [x0, i], [16384, 128])
+        self.assertTrue(self.check([dep]))
+
+    def test_in_range_index_not_flagged(self):
+        # stride 16 over numel 4M stays within int32.
+        x0 = sympy.Symbol("x0", integer=True)
+        dep = self.dep(16 * x0, [x0], [4_000_000])
+        self.assertFalse(self.check([dep]))
+
+    def test_stride_on_size_one_dim_drops_out(self):
+        # Layout shape=(1, 1M), stride=(1M, 1): the large stride multiplies a
+        # size-1 dim and must not force int64 (the Option A false positive).
+        d0, d1 = sympy.symbols("d0 d1", integer=True)
+        dep = self.dep(1_000_000 * d0 + d1, [d0, d1], [1, 1_000_000])
+        self.assertFalse(self.check([dep]))
+
+    def test_symbolic_size_skipped(self):
+        # Dynamic dims are covered by the storage-size check; the precise bound
+        # skips them rather than flagging or crashing on a symbolic size.
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        d0 = sympy.Symbol("d0", integer=True)
+        dep = self.dep(1_000_000_000_000 * d0, [d0], [s0])
+        self.assertFalse(self.check([dep]))
 
 
 class TestEvaluateMinMax(InductorTestCase):

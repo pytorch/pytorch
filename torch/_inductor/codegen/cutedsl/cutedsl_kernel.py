@@ -123,6 +123,26 @@ class CuteDSLIndexFragment:
     contiguous_width: int | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class IndexSymbolInfo:
+    """What lane analysis may assume about a generated index symbol.
+
+    expr: Recovered semantic index expression, or None when the value's
+        semantics are unknown (loaded from a captured tensor, or produced by
+        ops outside the traced index algebra). Unknown semantics force a
+        per-lane gather: assuming lane-uniform would broadcast lane 0's load
+        across the vectorized group (#188878).
+    contiguous_ok: False when the value passed through a negative-index wrap
+        (idx + size for negative lanes only). Uniform lanes all wrap
+        identically, so lane-uniformity survives, but a contiguous window
+        straddling 0 jumps from size-1 back to 0 and we can't prove a window
+        avoids 0.
+    """
+
+    expr: sympy.Expr | None
+    contiguous_ok: bool = True
+
+
 @dataclasses.dataclass
 class CuteDSLSubgraphInfo:
     """Minimal subgraph info for CuteDSL kernels."""
@@ -626,9 +646,9 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         self.mask = mask
         # Track tensor buffers that get added during modification processing
         self.tensor_buffers: list[str] = []
-        # Maps generated CSE names back to their original index expressions so
-        # vector-load analysis can reason about the source indexing semantics.
-        self._semantic_index_replacements: dict[sympy.Symbol, sympy.Expr] = {}
+        # Maps generated CSE names to their semantic provenance so vector-load
+        # analysis can reason about the source indexing semantics.
+        self._index_symbol_info: dict[sympy.Symbol, IndexSymbolInfo] = {}
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
         """Get the dtype for an input from the kernel's named_input_nodes."""
@@ -657,6 +677,10 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             dim_sizes = buffer.get_size()
             if len(dim_sizes) == 0:
                 dim_indices = ()
+            # Per-dimension indices into captured buffers are bounded by dim
+            # sizes (not flattened offsets), so Int32 is safe whatever index
+            # dtype the consuming kernel passes in; wider index expressions are
+            # narrowed at fragment materialization.
             idx_vars = [
                 self._emit_index_fragment(
                     dim_index, dim_size, "cutlass.Int32", torch.int32
@@ -887,13 +911,22 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def _emit_per_lane_gather_load(
         self, var: str, idx_vars: list[CuteDSLIndexFragment], val_frag: str
     ) -> None:
-        """Emit scalar per-lane loads for non-contiguous gather indices."""
+        """Emit scalar per-lane loads for non-contiguous gather indices.
+
+        Lane-uniform index fragments hold a single element, so they are indexed
+        at [0] rather than [load_idx] (which would read out of bounds and
+        silently corrupt the gathered rows).
+        """
         self.kernel.body.writeline(
             f"for load_idx in cutlass.range(cute.size({val_frag}.shape), unroll_full=True):"
         )
         with self.kernel.body.indent():
             load_indices = [
-                idx.code if idx.is_static_int else f"{idx.code}[load_idx]"
+                idx.code
+                if idx.is_static_int
+                else f"{idx.code}[0]"
+                if idx.is_lane_uniform
+                else f"{idx.code}[load_idx]"
                 for idx in idx_vars
             ]
             self.kernel.body.writeline(
@@ -916,15 +949,8 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             )
 
         expr = self.kernel.rename_indexing(expr)
-        static_expr = self._static_integer_expr(expr)
-        if static_expr is not None:
-            return CuteDSLIndexFragment(
-                self.kernel.kexpr(self._wrap_static_index(static_expr, dim_size)),
-                is_static_int=True,
-            )
-
         is_lane_uniform, is_contiguous, contiguous_width = self._analyze_index_fragment(
-            self._semantic_index_expr(expr)
+            expr
         )
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
@@ -939,12 +965,27 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         )
 
     def _analyze_index_fragment(
-        self, semantic_expr: sympy.Expr
+        self, expr: sympy.Expr
     ) -> tuple[bool, bool, int | None]:
         if self.vector_load_config is None:
             return False, False, None
         if self.vector_load_config.vec_size <= 1:
             return True, False, None
+
+        contiguous_ok = True
+        for sym in expr.free_symbols:
+            info = self._index_symbol_info.get(sym)
+            if info is not None:
+                if info.expr is None:
+                    # If we dont know the semantics of the index, we cannot determine lane behavior.
+                    # So we default to safe/pessimistic behavior: per-lane gather, no uniformity, no contiguity.
+                    return False, False, None
+                contiguous_ok &= info.contiguous_ok
+
+        semantic_expr = self._semantic_index_expr(expr)
+        if self._has_unresolved_index_symbols(semantic_expr):
+            # ditto -> we dont know so choose safe/pessimistic behavior
+            return False, False, None
 
         lane_info = classify_lane_expr(
             semantic_expr,
@@ -954,8 +995,27 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         )
         return (
             lane_info.is_uniform,
-            lane_info.is_contiguous,
-            lane_info.contiguous_width,
+            lane_info.is_contiguous and contiguous_ok,
+            lane_info.contiguous_width if contiguous_ok else None,
+        )
+
+    def _has_unresolved_index_symbols(self, semantic_expr: sympy.Expr) -> bool:
+        """Return whether the expression references opaque computed indices.
+
+        Lane analysis treats unknown non-lane symbols as lane-uniform scalars,
+        which is correct for sizes and fixed inputs but silently broadcasts
+        lane 0's gather when the symbol is actually per-lane runtime data
+        (#188878). Recovered semantics substitute away generated CSE names, so
+        a surviving symbol in the reserved ``tmpN`` namespace means recovery
+        failed and the load must stay a per-lane gather.
+        """
+        prefix = self.kernel.cse.name_prefix
+        lane_var = self.vector_load_config.index if self.vector_load_config else None
+        return any(
+            sym is not lane_var
+            and sym.name.startswith(prefix)
+            and sym.name[len(prefix) :].isdigit()
+            for sym in semantic_expr.free_symbols
         )
 
     @staticmethod
@@ -980,9 +1040,11 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     def _semantic_index_expr(self, expr: sympy.Expr) -> sympy.Expr:
         """Recover the original index meaning from generated CSE names."""
-        replacements: dict[sympy.Symbol, sympy.Expr] = dict(
-            self._semantic_index_replacements
-        )
+        replacements: dict[sympy.Symbol, sympy.Expr] = {
+            symbol: info.expr
+            for symbol, info in self._index_symbol_info.items()
+            if info.expr is not None
+        }
         for var in self.kernel.cse._cache.values():
             if isinstance(var, CuteDSLCSEVariable) and var.index_expr is not None:
                 replacements[sympy_index_symbol(var.name)] = var.index_expr
@@ -1016,23 +1078,34 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             and not V.graph.sizevars.statically_known_geq(index_var.index_expr, 0)
         ):
             wrapped = self.kernel.cse.newvar(dtype=index_var.dtype)
-            size_expr = self.kernel.kexpr(size)
+            # Dynamic sizes render as Int64 aux_scalars; cast to the index dtype so
+            # both cute.where branches agree (per-dim size, so narrowing is safe).
+            index_cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
+                index_var.dtype, "cutlass.Int32"
+            )
+            size_expr = f"{index_cute_dtype}({self.kernel.kexpr(size)})"
             self.kernel.body.writeline(
                 f"{wrapped} = cute.where("
                 f"{index_var} < 0, {index_var} + {size_expr}, {index_var})"
             )
-            return sympy_index_symbol(str(wrapped))
+            symbol = sympy_index_symbol(str(wrapped))
+            # Preserve the pre-wrap semantics so lane analysis sees the true
+            # lane structure; the wrap remaps negative lanes individually, so
+            # contiguity of the pre-wrap expression does not survive it.
+            self._index_symbol_info[symbol] = IndexSymbolInfo(
+                index_var.index_expr, contiguous_ok=False
+            )
+            return symbol
         source_name = None
         for expr, var in self.kernel.cse._cache.items():
             if var is index_var:
                 source_name = expr if isinstance(expr, str) else None
                 break
         symbol = sympy_index_symbol(source_name or str(index_var))
-        if (
-            isinstance(index_var, CuteDSLCSEVariable)
-            and index_var.index_expr is not None
-        ):
-            self._semantic_index_replacements[symbol] = index_var.index_expr
+        index_expr = (
+            index_var.index_expr if isinstance(index_var, CuteDSLCSEVariable) else None
+        )
+        self._index_symbol_info[symbol] = IndexSymbolInfo(index_expr)
         return symbol
 
     # pyrefly: ignore [bad-override]

@@ -7,11 +7,14 @@ import torch
 __all__ = ["LinearCrossEntropyOptions"]
 
 
+_VALID_ACC_POLICIES = ("auto", "accurate", "compact")
+
+
 def _auto_acc_policy(device_type: str | None, dtype: torch.dtype) -> str:
     """Resolve the ``acc_policy`` ``"auto"`` sentinel from device and dtype.
 
     Only CPU + low-precision input (fp16/bf16) picks ``"accurate"``: there
-    ``compact``/``balanced`` run the weight-grad GEMM in the input dtype,
+    ``compact`` runs the weight-grad GEMM in the input dtype,
     hitting CPU's emulated low-precision matmul (~20-50x slower), so
     ``"accurate"`` keeps it in fp32. Everything else picks ``"compact"`` --
     accelerators have hardware-native low-precision GEMMs, and for fp32/fp64
@@ -95,7 +98,6 @@ class LinearCrossEntropyOptions:
 
     acc_policy: Literal[
         "accurate",
-        "balanced",
         "compact",
         "auto",
     ] = "auto"
@@ -113,21 +115,18 @@ class LinearCrossEntropyOptions:
       policies on CUDA. Only chunked policy whose weight-grad matmul
       runs in fp32 on CPU (other policies hit CPU's emulated
       low-precision path, ~20-50x slower).
-    - ``"balanced"`` -- :attr:`acc_dtype` only where needed for gradient
-      correctness; keeps a ``(num_classes, in_features)``
-      :attr:`acc_dtype` scratch for cross-chunk weight-grad accumulation.
-      Same precision as ``"accurate"`` in bf16, slightly looser in fp16,
-      faster than ``"accurate"`` in both.
-    - ``"compact"`` -- like ``"balanced"`` but drops the weight-grad
-      scratch and accumulates per-chunk directly via ``addmm_`` (cuBLAS
-      uses an fp32 internal accumulator, so bulk precision matches
-      ``"balanced"``). Saves ``num_classes * in_features *
-      sizeof(acc_dtype)`` -- typically several hundred MB for an LLM
-      head. On non-CUDA mixed-precision falls back to ``"balanced"``.
+    - ``"compact"`` -- :attr:`acc_dtype` only where needed for gradient
+      correctness; accumulates the weight gradient per chunk directly via
+      ``addmm_`` instead of a ``(num_classes, in_features)``
+      :attr:`acc_dtype` scratch (on CUDA cuBLAS uses an fp32 internal
+      accumulator, so bulk precision is unchanged). Saves
+      ``num_classes * in_features * sizeof(acc_dtype)`` -- typically
+      several hundred MB for an LLM head. On non-CUDA mixed-precision it
+      retains that scratch for the cross-chunk accumulation.
 
-    Policy effects (``"balanced"`` vs ``"accurate"``) are visible only
-    when :attr:`acc_dtype` differs from the input dtype; ``"compact"``
-    saves memory in both regimes.
+    The precision difference between ``"compact"`` and ``"accurate"`` is
+    visible only when :attr:`acc_dtype` differs from the input dtype;
+    ``"compact"`` saves memory in both regimes.
     """
 
     acc_dtype: torch.dtype | None = None
@@ -140,8 +139,11 @@ class LinearCrossEntropyOptions:
     """
 
     def __post_init__(self):
-        if self.acc_policy not in {"auto", "accurate", "balanced", "compact"}:
-            raise ValueError(f"invalid acc_policy: {self.acc_policy!r}")
+        if self.acc_policy not in _VALID_ACC_POLICIES:
+            raise ValueError(
+                f"invalid acc_policy: {self.acc_policy!r}; expected one of "
+                f"{', '.join(map(repr, _VALID_ACC_POLICIES))}"
+            )
         if self.chunking_method is not None and self.chunking_method != "auto":
             name, sep, factor = self.chunking_method.partition(":")
             if not sep:

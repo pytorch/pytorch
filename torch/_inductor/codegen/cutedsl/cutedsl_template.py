@@ -43,7 +43,12 @@ class CuteDSLTemplate(KernelTemplate):
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
         self.template = CuteDSLTemplate._template_from_string(source)
-        if name in self.all_templates:
+        # A module that registers templates can be initialized more than once in
+        # a single process (e.g. a double-import path). Tolerate re-registration
+        # under an existing name as long as the template source matches, but
+        # reject a genuine name collision between different templates.
+        existing = self.all_templates.get(name)
+        if existing is not None and existing.source != self.source:
             raise AssertionError(f"duplicate template name, {name}")
         CuteDSLTemplate.all_templates[name] = self
 

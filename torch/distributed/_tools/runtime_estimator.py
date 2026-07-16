@@ -72,9 +72,19 @@ class RuntimeEstimator(TorchDispatchMode):
 
     _no_fallback_kernel: set[torch._ops._OpNamespace] = set()
     fake_mode: FakeTensorMode
+    gpu_type: str | None = None
 
-    def __init__(self) -> None:
+    def __init__(self, gpu_type: str | None = None) -> None:
+        """
+        Args:
+            gpu_type (str | None): Optional datasheet device name (e.g.
+                ``"NVIDIA H100"``) to pin the roofline peak FLOPS and DRAM
+                bandwidth to instead of querying the current device. This
+                makes ``operator-level-cost-model`` estimates deterministic
+                and hardware-independent. Only affects the roofline estimator.
+        """
         super().__init__()
+        self._gpu_type = gpu_type
         self._estimate: Callable
         self._estimate_mode_type: str
         self._mod_tracker = ModTracker()
@@ -269,7 +279,9 @@ class RuntimeEstimator(TorchDispatchMode):
         if func_packet not in _IGNORE_OPS:
             flat_args_kwargs, args_spec = pytree.tree_flatten((args, kwargs))
             flat_outs, out_spec = pytree.tree_flatten(out)
-            transfer_time = get_transfer_time(flat_args_kwargs, flat_outs)
+            transfer_time = get_transfer_time(
+                flat_args_kwargs, flat_outs, gpu_type=cls.gpu_type
+            )
 
             out_dtypes = {
                 t.dtype
@@ -280,7 +292,9 @@ class RuntimeEstimator(TorchDispatchMode):
             args, kwargs = pytree.tree_unflatten(flat_args_kwargs, args_spec)
             out = pytree.tree_unflatten(flat_outs, out_spec)
 
-            compute_time = get_compute_time(func_packet, args, kwargs, out, out_dtypes)
+            compute_time = get_compute_time(
+                func_packet, args, kwargs, out, out_dtypes, gpu_type=cls.gpu_type
+            )
             # We get the estimated time as the max of the transfer time and
             # compute time. We divide by 1e6 to get the time in ms
             op_time = max(transfer_time, compute_time) / 1e6
@@ -364,6 +378,7 @@ class RuntimeEstimator(TorchDispatchMode):
                 "No FakeTensorMode found, designed to be used under FakeTensorMode"
             )
         RuntimeEstimator.fake_mode = fake_mode
+        RuntimeEstimator.gpu_type = self._gpu_type
         self.total_runtime = 0.0
         self.mod_runtimes = defaultdict(lambda: defaultdict(lambda: 0.0))
         self.mod_fw_pre_order.clear()
