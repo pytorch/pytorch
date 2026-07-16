@@ -7318,6 +7318,7 @@ class ExternKernel(InputsKernel):
             ctx: AbstractContextManager[None] = nullcontext()
             if V.current_node.target is torch._higher_order_ops.effects.with_effects:
                 # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
+                # pyrefly: ignore[unsupported-operation]
                 node_meta_val = node_meta_val[1]
                 ctx = _remove_effect_token_unbacked_bindings(V.current_node)
 
@@ -7632,18 +7633,43 @@ class ExternKernel(InputsKernel):
             for dim in expanded_dims:
                 x = torch._inductor.lowering.slice_(x, dim, 0, 1)
 
-        # Although this is a clone, inductor is good about fusing clones into previous
-        # operations if they weren't realized and their layouts were flexible.
-        x = cls.copy_input(x)
+        if x.get_dtype().is_complex:
+            # Triton signature codegen has no complex pointer dtype, so avoid
+            # materializing complex layout constraints through a pointwise copy.
+            if exact_strides is not None:
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_exact_strides(exact_strides, allow_padding=allow_padding)
+            else:
+                if order is None:
+                    raise AssertionError(
+                        "Expected order is not None when exact_strides is None"
+                    )
+                layout = FlexibleLayout(
+                    x.get_device_or_error(), x.get_dtype(), x.get_size()
+                ).as_stride_order(order, allow_padding=allow_padding)
 
-        as_storage_and_layout(
-            x,
-            freeze=True,
-            want_contiguous=False,
-            stride_order=order,
-            allow_padding=allow_padding,
-            exact_strides=exact_strides,
-        )
+            src = x
+            x = torch._inductor.lowering.empty_strided(
+                x.get_size(),
+                layout.stride,
+                dtype=x.get_dtype(),
+                device=x.get_device_or_error(),
+            )
+            InplaceCopyFallback.create(x, src)
+        else:
+            # Although this is a clone, inductor is good about fusing clones into previous
+            # operations if they weren't realized and their layouts were flexible.
+            x = cls.copy_input(x)
+
+            as_storage_and_layout(
+                x,
+                freeze=True,
+                want_contiguous=False,
+                stride_order=order,
+                allow_padding=allow_padding,
+                exact_strides=exact_strides,
+            )
         if (
             order
             and not free_unbacked_symbols(x.get_size())
@@ -9322,6 +9348,9 @@ class FallbackKernel(ExternKernelAlloc):
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
             self.mutation_names.append(tensor_args[0].get_name())
+            # Record aliasing relationship so memory planning doesn't wrongly
+            # reuse its storage.
+            self.alias_names.append(tensor_args[0].get_name())
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
