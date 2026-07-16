@@ -1,8 +1,8 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import importlib
 import math
-import subprocess
 import sys
 import unittest
 from types import SimpleNamespace
@@ -65,13 +65,12 @@ if cute is not None:
 
 class TestFlexGemmRuntimeImport(TestCase):
     def test_import_does_not_load_external_quack(self):
-        subprocess.check_call(
-            [
-                sys.executable,
-                "-c",
-                "import sys; import torch._inductor.kernel.flex_gemm.runtime; assert 'quack' not in sys.modules",
-            ]
-        )
+        for name in list(sys.modules):
+            if name == "quack" or name.startswith("quack."):
+                del sys.modules[name]
+        sys.modules.pop("torch._inductor.kernel.flex_gemm.runtime", None)
+        importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
+        self.assertNotIn("quack", sys.modules)
 
 
 @instantiate_parametrized_tests
