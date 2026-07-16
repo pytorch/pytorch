@@ -3114,6 +3114,34 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_local_n_reduce_group32_filters_half_fragment_configs(self):
+        from torch._inductor.heuristics.template.flex_gemm import (
+            candidate_gemm_configs_for_device,
+        )
+        from torch._inductor.kernel.flex_gemm.constraints import (
+            validate_flex_gemm_local_reduce_config,
+        )
+
+        candidates = candidate_gemm_configs_for_device(torch.device("cuda"))
+        half_fragment_configs = [
+            config
+            for config in candidates
+            if config.tile_m == 128
+            and config.tile_n == 128
+            and config.cluster_m > 1
+            and validate_flex_gemm_local_reduce_config(config, 16, 1)
+        ]
+        self.assertTrue(half_fragment_configs)
+        self.assertTrue(
+            all(
+                not validate_flex_gemm_local_reduce_config(config, 32, 1)
+                for config in half_fragment_configs
+            )
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_local_reduce_result_feeds_main_output(self):
         m = 128
         n = 128
@@ -4256,13 +4284,14 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @parametrize(
         "case",
         (
-            ("multi_chunk_large_group", 256, 128),
-            ("tile_n_group", 256, 256),
+            ("fragment_group_tuned", 128, 32, True),
+            ("multi_chunk_large_group", 256, 128, False),
+            ("tile_n_group", 256, 256, False),
         ),
         name_fn=lambda case: case[0],
     )
     def test_mm_coda_rmsnorm_rewrite_e2e(self, case):
-        _, n, group = case
+        _, n, group, tuned = case
         m, k, p = 64, 32, 48
         eps = 1e-5
 
@@ -4277,7 +4306,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 torch.mm,
                 (a, b1),
                 first_epilogue,
-                kernel_options={"backend": "QUACK"},
+                kernel_options={"backend": "QUACK", "tuned": tuned},
             )
             rstd = (partial_mean_square.mean(-1, keepdim=True) + eps).rsqrt()
 
@@ -4313,7 +4342,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             f"FlexGemmLocalReduceGeometry(group={group}, axis=1)",
             code,
         )
-        self.assertIn("combine_fn=", code)
+        if group > 32:
+            self.assertIn("combine_fn=", code)
         self.assertIn("epilogue_arg_kinds=('row',)", code)
         self.assertIn("epilogue_arg_kinds=('col',)", code)
         self.assertNotIn("local_reduce_feeds_main=True", code)
