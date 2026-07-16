@@ -9118,8 +9118,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnt.frame_count, 1)
 
     def test_no_guard_for_unused_input_when_locals_called(self):
-        # locals() can observe the full namespace without LOAD_FAST, so we
-        # must keep all inputs and accept the resulting recompiles.
+        # locals() is handled at trace time by _call_frame_locals_snapshot, which
+        # adds pruned locals back from tx.f_locals and installs guards on them.
+        # So y still causes a recompile when its shape changes.
         def fn(x, y):
             return locals()["x"] + 1
 
@@ -9132,6 +9133,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_locals_dict_access_of_unused_param_works(self):
         def fn(x, y):
             return locals()["y"] + x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_locals_alias_access_of_unused_param_works(self):
+        # locals() called via an alias (locals2 = locals in global scope) must
+        # still expose pruned locals; _call_frame_locals_snapshot adds them back.
+        locals2 = locals
+
+        def fn(x, y):
+            return locals2()["y"] + x
 
         opt_fn = torch.compile(fn, backend="eager")
         x, y = torch.randn(3), torch.randn(3)
