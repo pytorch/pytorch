@@ -8,16 +8,26 @@ import torch
 
 from ... import flydsl_utils as fu
 
-
-_SUPPORTED_HIDDEN_SIZES = frozenset(
-    {128, 256, 512, 1024, 2000, 2048, 4096, 8192}
-)
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _SUPPORTED_EPS = 1e-5
+_HIP_AVAILABLE = torch.version.hip is not None
+_is_cow_tensor = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
+_rmsnorm_fwd = None
+_rmsnorm_bwd = None
 
 
 def _normalized_shape_1d(normalized_shape) -> int | None:
     """Return N for the one-dimensional normalization supported by the kernel."""
+
+    if isinstance(normalized_shape, int):
+        return normalized_shape
+    if isinstance(normalized_shape, (tuple, list, torch.Size)):
+        if len(normalized_shape) != 1:
+            return None
+        try:
+            return int(normalized_shape[0])
+        except (TypeError, ValueError):
+            return None
 
     try:
         shape = tuple(int(x) for x in normalized_shape)
@@ -33,15 +43,11 @@ def _normalized_shape_1d(normalized_shape) -> int | None:
 
 def _common_supported(
     input: torch.Tensor,
-    normalized_shape,
+    n: int,
     weight: torch.Tensor | None,
 ) -> bool:
     """Cheap dispatcher predicate shared by forward and backward."""
-
-    n = _normalized_shape_1d(normalized_shape)
-    if n is None or n not in _SUPPORTED_HIDDEN_SIZES:
-        return False
-    if torch.version.hip is None or input.device.type != "cuda":
+    if not _HIP_AVAILABLE or input.device.type != "cuda":
         return False
     if input.dtype not in _SUPPORTED_DTYPES:
         return False
@@ -65,10 +71,28 @@ def _common_supported(
             return False
     # Reshaping a copy-on-write tensor would materialize it. Let ATen preserve
     # its normal semantics for these uncommon inputs.
-    is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
-    if is_cow(input) or is_cow(weight):
+    if _is_cow_tensor(input) or _is_cow_tensor(weight):
         return False
     return True
+
+
+def _fused_rms_norm_fwd_perf_wins(input: torch.Tensor, n: int) -> bool:
+    rows_m = input.numel() // n
+    # Tuned on MI355.
+    return (
+        (4096 <= n < 8192 and rows_m >= 8192)
+        or (8192 <= n < 16384 and rows_m >= 4096)
+        or (n >= 16384 and rows_m >= 2048)
+    )
+
+
+def _fused_rms_norm_bwd_perf_wins(input: torch.Tensor, n: int) -> bool:
+    # Tuned on MI355. Keep only regions where benchmarks show at least a
+    # 10% win over ATen.  Borderline fp16/bf16 large-N and fp32 cases fall back.
+    rows_m = input.numel() // n
+    if input.dtype in (torch.float16, torch.bfloat16):
+        return 8192 <= n < 32768 and rows_m >= 32768
+    return False
 
 
 def _fused_rms_norm_cond(
@@ -77,11 +101,38 @@ def _fused_rms_norm_cond(
     weight: torch.Tensor | None,
     eps: float | None,
 ) -> bool:
-    if not _common_supported(input, normalized_shape, weight):
+    n = _normalized_shape_1d(normalized_shape)
+    if n is None:
         return False
-    # Keep the first forward integration intentionally narrow and identical to
-    # the reference PR. Other eps values safely use ATen.
-    return eps is not None and float(eps) == _SUPPORTED_EPS
+    if not _common_supported(input, n, weight):
+        return False
+    if eps is None or float(eps) != _SUPPORTED_EPS:
+        return False
+    return _fused_rms_norm_fwd_perf_wins(input, n)
+
+
+def _get_rmsnorm_fwd(input: torch.Tensor):
+    global _rmsnorm_fwd
+    if _rmsnorm_fwd is None:
+        # Import under the input device guard because the vendored builders query
+        # the active ROCm architecture while initializing wave-size constants.
+        with torch.cuda.device(input.device):
+            from .flydsl_kernels import rmsnorm_fwd
+
+        _rmsnorm_fwd = rmsnorm_fwd
+    return _rmsnorm_fwd
+
+
+def _get_rmsnorm_bwd(input: torch.Tensor):
+    global _rmsnorm_bwd
+    if _rmsnorm_bwd is None:
+        # See _get_rmsnorm_fwd: importing the kernel module can query the active
+        # device while initializing vendored FlyDSL constants.
+        with torch.cuda.device(input.device):
+            from .flydsl_kernels import rmsnorm_bwd
+
+        _rmsnorm_bwd = rmsnorm_bwd
+    return _rmsnorm_bwd
 
 
 def _fused_rms_norm_impl(
@@ -95,12 +146,8 @@ def _fused_rms_norm_impl(
     if weight is None or eps is None:
         raise RuntimeError("FlyDSL RMSNorm requires explicit weight and eps")
 
-    # Import under the input device guard because the vendored builders query
-    # the active ROCm architecture while initializing wave-size constants.
-    with torch.cuda.device(input.device):
-        from .flydsl_kernels import rmsnorm_fwd
-
-        return rmsnorm_fwd(input, normalized_shape, weight, float(eps))
+    rmsnorm_fwd = _get_rmsnorm_fwd(input)
+    return rmsnorm_fwd(input, normalized_shape, weight, float(eps))
 
 
 def _fused_rms_norm_backward_cond(
@@ -113,11 +160,10 @@ def _fused_rms_norm_backward_cond(
 ) -> bool:
     # Backward receives the already-computed rstd, so its formula is independent
     # of the eps value used by forward.
-    if not _common_supported(input, normalized_shape, weight):
-        return False
-
     n = _normalized_shape_1d(normalized_shape)
     if n is None:
+        return False
+    if not _common_supported(input, n, weight):
         return False
     rows_m = input.numel() // n
     if (
@@ -137,10 +183,9 @@ def _fused_rms_norm_backward_cond(
     if len(output_mask) != 2 or not any(bool(x) for x in output_mask):
         return False
 
-    is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
-    if is_cow(grad_out) or is_cow(rstd):
+    if _is_cow_tensor(grad_out) or _is_cow_tensor(rstd):
         return False
-    return True
+    return _fused_rms_norm_bwd_perf_wins(input, n)
 
 
 def _fused_rms_norm_backward_impl(
@@ -154,12 +199,8 @@ def _fused_rms_norm_backward_impl(
     if weight is None:
         raise RuntimeError("FlyDSL RMSNorm backward requires an explicit weight")
 
-    with torch.cuda.device(input.device):
-        from .flydsl_kernels import rmsnorm_bwd
-
-        grad_input, grad_weight = rmsnorm_bwd(
-            grad_out, input, normalized_shape, rstd, weight
-        )
+    rmsnorm_bwd = _get_rmsnorm_bwd(input)
+    grad_input, grad_weight = rmsnorm_bwd(grad_out, input, normalized_shape, rstd, weight)
     return (
         grad_input if bool(output_mask[0]) else None,
         grad_weight if bool(output_mask[1]) else None,
