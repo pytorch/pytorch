@@ -270,7 +270,9 @@ def lookup_device_info(name: str) -> DeviceInfo | None:
     return _device_mapping.get(name.upper())
 
 
-def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
+def datasheet_tops(
+    dtype: torch.dtype, is_tf32: bool = False, device_name: str | None = None
+) -> float | None:
     """
     Get the theoretical *dense* TFLOPS of the device for a given dtype.
 
@@ -278,11 +280,17 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> float | None:
     (``tops_sparsity_factor > 1``), they are divided by that factor so
     callers always receive the throughput achievable by cuBLAS/cuDNN on
     non-sparse data.
+
+    If ``device_name`` is given, the datasheet is looked up for that named
+    device instead of querying the current device. This lets callers pin a
+    device spec for deterministic, hardware-independent estimates.
     """
-    if torch.cuda.is_available():
-        name: str | None = torch.cuda.get_device_name()
+    if device_name is not None:
+        name: str | None = device_name
+    elif torch.cuda.is_available():
+        name = torch.cuda.get_device_name()
     elif torch.xpu.is_available():
-        name: str | None = torch.xpu.get_device_name()
+        name = torch.xpu.get_device_name()
     else:
         log.info("No supported device available, skipping datasheet lookup")
         return None

@@ -53,7 +53,7 @@ name: !{{ build_environment }}
   {%- set test_runs_on  = "linux.arm64.2xlarge" %}
   {%- set alpine_image  = "arm64v8/alpine" %}
   {%- set timeout_minutes = 420 %}
-  {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
+  {%- set runner_prefix = "" %}
   {%- set use_container_directive = true %}
 {%- elif "s390x" in build_environment %}
   {%- set build_runs_on = "linux.s390x" %}
@@ -67,8 +67,27 @@ name: !{{ build_environment }}
   {%- set test_runs_on  = "" %}{# CPU/CUDA test runners are picked per-matrix entry below #}
   {%- set alpine_image  = "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine" %}
   {%- set timeout_minutes = common.timeout_minutes %}
-  {%- set runner_prefix = "${{ needs.get-label-type.outputs.label-type }}" %}
+  {%- set runner_prefix = "" %}
   {%- set use_container_directive = true %}
+{%- endif %}
+
+{#- On release-candidate tag builds the manylinux builder image is pinned to the
+    .ci/docker tree hash (computed at runtime by the get-docker-tag job below) so
+    the release uses the reproducible image binary-docker-build published as
+    ${prefix}-${CI_FOLDER_SHA}, instead of main's floating tag. Doing this at
+    runtime means .ci/docker changes on a release branch need no workflow
+    regeneration. s390x is intentionally excluded. -#}
+{%- set pin_docker_image = "s390x" not in build_environment %}
+{%- if pin_docker_image %}
+  {%- set docker_image_suffix = "${{ needs.get-docker-tag.outputs.docker_image_suffix }}" %}
+  {#- get-docker-tag only runs on tag pushes, so jobs that need it must tolerate
+      it being skipped (a skipped need skips dependents by default). !failure()
+      keeps the real build->test ordering; a skipped get-docker-tag is not a
+      failure, and its output reads as blank, giving the floating tag. -#}
+  {%- set owner_if = "${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}" %}
+{%- else %}
+  {%- set docker_image_suffix = "" %}
+  {%- set owner_if = "${{ github.repository_owner == 'pytorch' }}" %}
 {%- endif %}
 
 on:
@@ -110,15 +129,42 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
+{%- if pin_docker_image %}
+  # Computes the manylinux builder image tag suffix at runtime. On release
+  # candidate tag pushes (v1.2.3-rc4) it resolves to "-<.ci/docker tree hash>",
+  # pinning the build/test/upload jobs to the reproducible image published by
+  # binary-docker-build; otherwise it is empty (main's floating tag). ciflow/*
+  # tags keep the floating tag. Done in a shared job so the value can feed the
+  # job-level `container:` directives, which are resolved before any step runs.
+  get-docker-tag:
+    # Only runs on tag pushes (release candidates); on branch/PR runs it is
+    # skipped and its output reads as blank, so the floating tag is used.
+    if: ${{ github.repository_owner == 'pytorch' && github.ref_type == 'tag' }}
+    name: get-docker-tag
+    runs-on: ubuntu-24.04
+    outputs:
+      docker_image_suffix: ${{ steps.calc.outputs.docker_image_suffix }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          submodules: false
+          show-progress: false
+      - name: Calculate docker image suffix
+        id: calc
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          suffix=""
+          if [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
+            suffix="-$(git rev-parse HEAD:.ci/docker)"
+          fi
+          echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
+{%- endif %}
 
 {#- One inline build job per (gpu_arch_type, desired_cuda) group. Each loops
     over all CPython versions in the group on a single runner, reusing build/
@@ -146,19 +192,21 @@ jobs:
 
   !{{ job_name }}:
     name: !{{ job_name }}
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
+    if: !{{ owner_if }}
+{%- if pin_docker_image %}
+    needs: get-docker-tag
+{%- endif %}
     runs-on: "!{{ runner_prefix }}!{{ build_runs_on }}"
     timeout-minutes: !{{ timeout_minutes }}
     container:
-      image: pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}
+      image: pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}!{{ docker_image_suffix }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: !{{ first['package_type'] }}
       DESIRED_CUDA: !{{ desired_cuda }}
       GPU_ARCH_VERSION: "!{{ first['gpu_arch_version'] | default('') }}"
       GPU_ARCH_TYPE: !{{ arch_type }}
-      DOCKER_IMAGE: pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}
+      DOCKER_IMAGE: pytorch/!{{ first['container_image'] }}:!{{ first['container_image_tag_prefix'] }}!{{ docker_image_suffix }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHONS: "!{{ group | map(attribute='python_version') | join(' ') }}"
       BUILD_NAME_PREFIX: "manywheel-py"
@@ -207,9 +255,11 @@ jobs:
 
   manywheel-build:
     name: ${{ matrix.build_name }}-build
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: !{{ owner_if }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
+{%- if pin_docker_image %}
+    needs: get-docker-tag
+{%- endif %}
     strategy:
       fail-fast: false
       matrix:
@@ -240,7 +290,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "!{{ runner_prefix }}"
       runs_on: !{{ build_runs_on }}
@@ -262,8 +312,8 @@ jobs:
    skip the cpu/cuda tests. #}
   manywheel-test:
     name: ${{ matrix.build_name }}-test
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type{%- if matrix_standard_configs %}, manywheel-build{%- endif %}{%- for n in unified_job_names %}, !{{ n }}{%- endfor %}]
+    if: !{{ owner_if }}
+    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}{%- if matrix_standard_configs %}manywheel-build, {% endif %}{%- for n in unified_job_names %}!{{ n }}{%- if not loop.last %}, {% endif %}{%- endfor %}]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
@@ -295,7 +345,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
       build_environment: !{{ build_environment }}
@@ -311,8 +361,8 @@ jobs:
 
   manywheel-test-rocm:
     name: ${{ matrix.build_name }}-test
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build]
+    if: !{{ owner_if }}
+    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}manywheel-build]
     uses: ./.github/workflows/_binary-test-rocm-linux.yml
     strategy:
       fail-fast: false
@@ -334,7 +384,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
 {%- endif %}
@@ -343,8 +393,8 @@ jobs:
 
   manywheel-test-xpu:
     name: ${{ matrix.build_name }}-test
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build]
+    if: !{{ owner_if }}
+    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}manywheel-build]
     uses: ./.github/workflows/_binary-test-xpu-linux.yml
     strategy:
       fail-fast: false
@@ -364,7 +414,7 @@ jobs:
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
 {%- endif %}
@@ -377,7 +427,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    needs: [{%- if matrix_build_configs %}manywheel-build, {% endif %}{%- for n in unified_job_names %}!{{ n }}, {% endfor %}manywheel-test{%- if rocm_configs %}, manywheel-test-rocm{%- endif %}{%- if xpu_configs %}, manywheel-test-xpu{%- endif %}]
+    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}{%- if matrix_build_configs %}manywheel-build, {% endif %}{%- for n in unified_job_names %}!{{ n }}, {% endfor %}manywheel-test{%- if rocm_configs %}, manywheel-test-rocm{%- endif %}{%- if xpu_configs %}, manywheel-test-xpu{%- endif %}]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
@@ -399,7 +449,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
     secrets:
@@ -414,8 +464,8 @@ jobs:
   libtorch-extract:
     name: ${{ matrix.build_name }}-extract
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, manywheel-build]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    needs: [manywheel-build]
+    runs-on: "linux.4xlarge"
     timeout-minutes: 60
     strategy:
       fail-fast: false

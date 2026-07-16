@@ -14,6 +14,7 @@ import torch
 from torch._inductor.codegen.common import CSEVariable, OpOverrides
 from torch._inductor.utils import get_bounds_index_expr
 from torch._inductor.virtualized import OpsValue, V
+from torch.utils._sympy.functions import Max, Min
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -268,13 +269,17 @@ class CuteDSLOpOverrides(OpOverrides):
         return f"{cute_type}({expr})"
 
     @staticmethod
-    def _apply_unary_op(x: CuteDSLArg, op_format: str) -> CuteDSLArg:
+    def _apply_unary_op(
+        x: CuteDSLArg, op_format: str, index_expr_fn=None
+    ) -> CuteDSLArg:
         """
         Apply a unary operation, returning CSEVariable if input is a tensor.
 
         Args:
             x: Input operand (CSEVariable for tensors, str for scalars, or OpsValue wrapper)
             op_format: Format string with {x} placeholder for the operation
+            index_expr_fn: Optional sympy builder to propagate index semantics
+                through the op for lane analysis
 
         Returns:
             CSEVariable if input is a tensor, otherwise string
@@ -289,6 +294,10 @@ class CuteDSLOpOverrides(OpOverrides):
                 dtype=cse_var.dtype,
                 shape=cse_var.shape,
             )
+            if index_expr_fn is not None and isinstance(result, CuteDSLCSEVariable):
+                x_expr = CuteDSLOpOverrides._index_expr(x)
+                if x_expr is not None:
+                    result.index_expr = V.graph.sizevars.simplify(index_expr_fn(x_expr))
             if CuteDSLOpOverrides._is_scalar_expr(x):
                 result.is_scalar_expr = True
             return result
@@ -488,11 +497,15 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def _minmax(a: CuteDSLArg, b: CuteDSLArg, *, op: str) -> CuteDSLArg:
+        index_expr_fn = Max if op == ">" else Min
         if CuteDSLOpOverrides._is_tensor_like(a) or CuteDSLOpOverrides._is_tensor_like(
             b
         ):
             return CuteDSLOpOverrides._apply_binary_op(
-                a, b, f"cute.where(({{a}}) {op} ({{b}}), {{a}}, {{b}})"
+                a,
+                b,
+                f"cute.where(({{a}}) {op} ({{b}}), {{a}}, {{b}})",
+                index_expr_fn,
             )
 
         lhs = CuteDSLOpOverrides._as_expr(a)
@@ -513,6 +526,13 @@ class CuteDSLOpOverrides(OpOverrides):
             bounds=bounds,
             dtype=dtype if dtype is not None else torch.int32,
         )
+        if isinstance(result, CuteDSLCSEVariable):
+            a_expr = CuteDSLOpOverrides._index_expr(a)
+            b_expr = CuteDSLOpOverrides._index_expr(b)
+            if a_expr is not None and b_expr is not None:
+                result.index_expr = V.graph.sizevars.simplify(
+                    index_expr_fn(a_expr, b_expr)
+                )
         result.is_scalar_expr = True
         return result
 
@@ -611,17 +631,24 @@ class CuteDSLOpOverrides(OpOverrides):
             return CuteDSLOpOverrides._apply_unary_op(
                 x,
                 f"cute.TensorSSA({abs_op}({{x}}), {{x}}.shape, {{x}}.dtype)",
+                index_expr_fn=sympy.Abs,
             )
-        return CuteDSLOpOverrides._apply_unary_op(x, f"{abs_op}({{x}})")
+        return CuteDSLOpOverrides._apply_unary_op(
+            x, f"{abs_op}({{x}})", index_expr_fn=sympy.Abs
+        )
 
     @staticmethod
     def neg(x: CuteDSLArg) -> CuteDSLArg:
         """Negation for both TensorSSA and scalar-like expressions."""
         if CuteDSLOpOverrides._is_tensor_like(x):
             return CuteDSLOpOverrides._apply_unary_op(
-                x, "cute.TensorSSA(-{x}, {x}.shape, {x}.dtype)"
+                x,
+                "cute.TensorSSA(-{x}, {x}.shape, {x}.dtype)",
+                index_expr_fn=lambda expr: -expr,
             )
-        return CuteDSLOpOverrides._apply_unary_op(x, "(-{x})")
+        return CuteDSLOpOverrides._apply_unary_op(
+            x, "(-{x})", index_expr_fn=lambda expr: -expr
+        )
 
     @staticmethod
     def to_dtype(
@@ -654,6 +681,12 @@ class CuteDSLOpOverrides(OpOverrides):
             )
             if CuteDSLOpOverrides._is_scalar_expr(x):
                 result.is_scalar_expr = True
+            if (
+                dtype in (torch.int32, torch.int64)
+                and isinstance(result, CuteDSLCSEVariable)
+                and isinstance(x, CuteDSLCSEVariable)
+            ):
+                result.index_expr = x.index_expr
             return result
 
         return f"{x}.to({cute_type})"

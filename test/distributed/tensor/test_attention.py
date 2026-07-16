@@ -257,7 +257,6 @@ class RingAttentionTest(DTensorTestBase):
         set_rotate_method(rotater_enum_to_str[rotater])
         self.assertEqual(_cp_options.rotate_method, rotater)
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
-        dtype = torch.bfloat16
         bs = 8
         seq_length = 1024
         seq_dim = 2
@@ -984,7 +983,9 @@ class TestSharding(DTensorTestBase):
                 # Verify the output is NOT sharded on sequence dimension (dim 2)
                 # This proves that CP sharding rules were not used
                 self.assertNotEqual(
-                    out.placements[0], Shard(2), f"Placement {out.placements}"
+                    out.placements[0],
+                    Shard(2),
+                    lambda msg: f"{msg}\nPlacement {out.placements}",
                 )
                 # The output should be replicated or sharded on batch head dimensions.
                 self.assertIn(out.placements[0], [Replicate(), Shard(0), Shard(1)])

@@ -156,9 +156,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
         # Redirect self.prefix so the base class codegen_input_symbol_assignment
         # writes into our buffer.
+        deferred_symbol_assignments = []
         with self._target_buf("prefix", code):
             for name, value in inputs:
-                self.codegen_input_symbol_assignment(name, value, bound_vars)
+                self.codegen_input_symbol_assignment(
+                    name, value, bound_vars, deferred_symbol_assignments
+                )
+            self._retry_deferred_symbol_assignments(deferred_symbol_assignments)
 
         for _, value in inputs:
             if not isinstance(value, ir.TensorBox):

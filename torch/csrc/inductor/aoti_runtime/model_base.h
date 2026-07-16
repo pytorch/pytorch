@@ -954,6 +954,7 @@ class AOTInductorModelBase {
   }
 
   void load_constants(bool force = false) {
+    did_call_load_constants_ = true;
     size_t num_constants = this->num_constants();
     size_t num_folded_constants = this->num_folded_constants();
     constants_map_->reserve(num_constants);
@@ -1113,11 +1114,21 @@ class AOTInductorModelBase {
     }
   }
 
-  RAIIDataPtr&& release_constant_blob() {
+  void set_constant_blob_releasable(bool releasable) {
+    constant_blob_releasable_ = releasable;
+  }
+
+  RAIIDataPtr release_constant_blob() {
+    if (!constant_blob_releasable_) {
+      return RAIIDataPtr{};
+    }
     return std::move(constant_blob_);
   }
 
-  RAIIDataPtr&& release_aux_cpu_constant_blob() {
+  RAIIDataPtr release_aux_cpu_constant_blob() {
+    if (!constant_blob_releasable_) {
+      return RAIIDataPtr{};
+    }
     return std::move(aux_cpu_constant_blob_);
   }
 
@@ -1321,6 +1332,10 @@ class AOTInductorModelBase {
 #endif
   }
 
+  bool did_call_load_constants() const {
+    return did_call_load_constants_;
+  }
+
   void update_constants_array_from_map() {
     if (!constants_map_) {
       throw std::runtime_error{
@@ -1517,6 +1532,10 @@ class AOTInductorModelBase {
   // If True, we would prepare the weight when loading the model, otherwise the
   // model will be loaded without weights, and need to be provided by the user.
   bool include_weights;
+  bool did_call_load_constants_{false};
+  // External-constants containers borrow tensor handles from the caller; their
+  // release_* calls intentionally return empty handles.
+  bool constant_blob_releasable_{true};
 
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can reuse this instance.

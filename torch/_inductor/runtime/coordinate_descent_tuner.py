@@ -9,6 +9,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..utils import get_max_numwarps
 from .hints import (
+    InductorMeta,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     TRITON_MAX_BLOCK,
@@ -62,7 +63,7 @@ class CoordescTuner:
         is_mix_order_reduction=False,
         name="unknown",
         size_hints=None,
-        inductor_meta=None,
+        inductor_meta: InductorMeta | None = None,
         frozen_fields=None,
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
@@ -77,7 +78,9 @@ class CoordescTuner:
         self.cached_benchmark_results = {}
         self.name = name
         self.size_hints = size_hints
-        self.inductor_meta = inductor_meta or {}
+        self.inductor_meta: InductorMeta = (
+            inductor_meta if inductor_meta is not None else {}
+        )
         self.frozen_fields: OrderedSet[str] = (
             OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
         )

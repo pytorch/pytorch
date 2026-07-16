@@ -1,3 +1,4 @@
+from argparse import Namespace
 from unittest import main, TestCase
 from unittest.mock import Mock, patch
 
@@ -277,7 +278,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for User1")
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for User1")
 
     def test_explicitly_opted_out_user(self) -> None:
         settings_text = """
@@ -294,7 +295,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for User1")
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for User1")
 
     def test_explicitly_opted_in_and_out_user_should_opt_out(self) -> None:
         settings_text = """
@@ -311,7 +312,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for User1")
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for User1")
 
     def test_opted_in_user_two_experiments(self) -> None:
         settings_text = """
@@ -328,9 +329,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
-        self.assertEqual(
-            "lf.otherExp.", result.prefix, "Runner prefix not correct for User2"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for User2")
 
     def test_opted_in_user_two_experiments_default(self) -> None:
         settings_text = """
@@ -348,7 +347,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
-        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for User2")
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for User2")
 
     def test_opted_in_user_two_experiments_default_exp(self) -> None:
         settings_text = """
@@ -368,9 +367,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         result = rd.get_runner_prefix(
             settings_text, ["User2"], USER_BRANCH, frozenset(["lf", "otherExp"])
         )
-        self.assertEqual(
-            "lf.otherExp.", result.prefix, "Runner prefix not correct for User2"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for User2")
 
     def test_opted_in_user_two_experiments_default_exp_2(self) -> None:
         settings_text = """
@@ -390,9 +387,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         result = rd.get_runner_prefix(
             settings_text, ["User2"], USER_BRANCH, frozenset(["otherExp"])
         )
-        self.assertEqual(
-            "otherExp.", result.prefix, "Runner prefix not correct for User2"
-        )
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for User2")
 
     @patch("random.uniform", return_value=50)
     def test_opted_out_user(self, mock_uniform: Mock) -> None:
@@ -410,7 +405,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=10)
     def test_opted_out_user_was_pulled_in_by_rollout(self, mock_uniform: Mock) -> None:
@@ -430,9 +425,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         # User3 is opted out, but is pulled into both experiments by the 10% rollout
         result = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
-        self.assertEqual(
-            "lf.otherExp.", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=10)
     def test_opted_out_user_was_pulled_in_by_rollout_excl_nondefault(
@@ -455,7 +448,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         # User3 is opted out, but is pulled into default experiments by the 10% rollout
         result = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
-        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=10)
     def test_opted_out_user_was_pulled_in_by_rollout_filter_exp(
@@ -480,9 +473,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         result = rd.get_runner_prefix(
             settings_text, ["User3"], USER_BRANCH, frozenset(["otherExp"])
         )
-        self.assertEqual(
-            "otherExp.", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=25)
     def test_opted_out_user_was_pulled_out_by_rollout_filter_exp(
@@ -505,7 +496,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         # User3 is opted out, but is pulled into default experiments by the 10% rollout
         result = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
     def test_lf_prefix_always_comes_first(self) -> None:
         settings_text = """
@@ -523,9 +514,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
-        self.assertEqual(
-            "lf.otherExp.", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     def test_ignores_commented_users(self) -> None:
         settings_text = """
@@ -543,7 +532,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
     def test_ignores_extra_experiments(self) -> None:
         settings_text = """
@@ -562,9 +551,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual(
-            "lf.otherExp.", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     def test_disables_experiment_on_exception_branches_when_not_explicitly_opted_in(
         self,
@@ -581,7 +568,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], EXCEPTION_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
     def test_allows_experiment_on_exception_branches_when_explicitly_opted_in(
         self,
@@ -599,7 +586,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], EXCEPTION_BRANCH)
-        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=5)
     def test_opted_in_user_with_rollout_perc_enabled(self, mock_uniform: Mock) -> None:
@@ -616,7 +603,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=50)
     def test_opted_in_user_with_rollout_perc_disabled(self, mock_uniform: Mock) -> None:
@@ -633,7 +620,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
     def test_opted_in_user_without_rollout_perc_always_enabled(self) -> None:
         """User opted in without percentage (default 100%) -> always enabled"""
@@ -649,7 +636,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=15)
     def test_multiple_requesters_uses_min_perc(self, mock_uniform: Mock) -> None:
@@ -668,7 +655,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         # random=15, min_perc=10 -> 15 > 10 -> disabled
         result = rd.get_runner_prefix(settings_text, ["User1", "User2"], USER_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=5)
     def test_multiple_requesters_uses_min_perc_enabled(
@@ -688,7 +675,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1", "User2"], USER_BRANCH)
-        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     def test_opt_out_overrides_rollout_perc(self) -> None:
         """Opt-out (-lf) wins over opt-in with rollout_perc (lf:50)."""
@@ -704,7 +691,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=5)
     def test_opted_in_user_with_rollout_perc_two_experiments(
@@ -725,9 +712,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual(
-            "lf.otherExp.", result.prefix, "Runner prefix not correct for user"
-        )
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=50)
     def test_opted_in_user_with_rollout_perc_partial_enable(
@@ -748,7 +733,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("lf.", result.prefix, "Runner prefix not correct for user")
+        self.assertEqual("lf-", result.prefix, "Runner prefix not correct for user")
 
     def test_opted_in_user_with_zero_rollout_perc(self) -> None:
         """User opted in with 0% rollout -> never enabled"""
@@ -764,428 +749,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("", result.prefix, "Runner prefix not correct for user")
-
-    @patch("random.uniform", return_value=5)
-    def test_arc_opted_in_user_with_rollout_perc_enabled(
-        self, mock_uniform: Mock
-    ) -> None:
-        """User opted into arc with 10% rollout, random=5 -> arc enabled"""
-        settings_text = """
-        experiments:
-            arc:
-                rollout_perc: 0
-        ---
-
-        Users:
-        @User1,arc:10
-
-        """
-
-        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("mt-", result.prefix)
-        self.assertTrue(result.use_arc)
-
-    @patch("random.uniform", return_value=50)
-    def test_arc_opted_in_user_with_rollout_perc_disabled(
-        self, mock_uniform: Mock
-    ) -> None:
-        """User opted into arc with 10% rollout, random=50 -> arc disabled"""
-        settings_text = """
-        experiments:
-            arc:
-                rollout_perc: 0
-        ---
-
-        Users:
-        @User1,arc:10
-
-        """
-
-        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("", result.prefix)
-        self.assertFalse(result.use_arc)
-
-
-class TestRunnerDeterminatorArcExperiment(TestCase):
-    ARC_SETTINGS = """
-        experiments:
-            arc:
-                rollout_perc: 0
-        ---
-
-        Users:
-        @User1,arc
-        @User2,lf
-
-        """
-
-    def test_arc_opted_in_user_returns_mt_prefix(self) -> None:
-        result = rd.get_runner_prefix(self.ARC_SETTINGS, ["User1"], USER_BRANCH)
-        self.assertEqual("mt-", result.prefix)
-        self.assertTrue(result.use_arc)
-
-    def test_arc_opted_in_user_canary_returns_c_mt_prefix(self) -> None:
-        result = rd.get_runner_prefix(
-            self.ARC_SETTINGS, ["User1"], USER_BRANCH, is_canary=True
-        )
-        self.assertEqual("c-mt-", result.prefix)
-        self.assertTrue(result.use_arc)
-
-    def test_arc_not_enabled_returns_use_arc_false(self) -> None:
-        result = rd.get_runner_prefix(self.ARC_SETTINGS, ["User2"], USER_BRANCH)
-        self.assertFalse(result.use_arc)
-
-    def test_arc_not_enabled_no_experiments_returns_use_arc_false(self) -> None:
-        settings_text = """
-        experiments:
-            arc:
-                rollout_perc: 0
-        ---
-
-        Users:
-        @User1,arc
-
-        """
-        result = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
-        self.assertEqual("", result.prefix)
-        self.assertFalse(result.use_arc)
-
-    @patch("random.uniform", return_value=10)
-    def test_arc_rollout_percentage(self, mock_uniform: Mock) -> None:
-        settings_text = """
-        experiments:
-            arc:
-                rollout_perc: 25
-        ---
-
-        Users:
-
-        """
-        result = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
-        self.assertEqual("mt-", result.prefix)
-        self.assertTrue(result.use_arc)
-
-    @patch("random.uniform", return_value=50)
-    def test_arc_rollout_percentage_not_selected(self, mock_uniform: Mock) -> None:
-        settings_text = """
-        experiments:
-            arc:
-                rollout_perc: 25
-        ---
-
-        Users:
-
-        """
-        result = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
-        self.assertEqual("", result.prefix)
-        self.assertFalse(result.use_arc)
-
-    def test_arc_opted_out_user(self) -> None:
-        settings_text = """
-        experiments:
-            arc:
-                rollout_perc: 100
-        ---
-
-        Users:
-        @User1,-arc
-
-        """
-        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("", result.prefix)
-        self.assertFalse(result.use_arc)
-
-    def test_arc_exception_branch_not_enabled(self) -> None:
-        result = rd.get_runner_prefix(self.ARC_SETTINGS, ["User1"], EXCEPTION_BRANCH)
-        self.assertEqual("", result.prefix)
-        self.assertFalse(result.use_arc)
-
-    def test_arc_exception_branch_all_branches(self) -> None:
-        settings_text = """
-        experiments:
-            arc:
-                rollout_perc: 0
-                all_branches: true
-        ---
-
-        Users:
-        @User1,arc
-
-        """
-        result = rd.get_runner_prefix(settings_text, ["User1"], EXCEPTION_BRANCH)
-        self.assertEqual("mt-", result.prefix)
-        self.assertTrue(result.use_arc)
-
-    def test_arc_combined_with_lf_returns_lf_prefix(self) -> None:
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 0
-            arc:
-                rollout_perc: 0
-        ---
-
-        Users:
-        @User1,lf,arc
-
-        """
-        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("lf-", result.prefix)
-        self.assertTrue(result.use_arc)
-
-    @patch("random.uniform", return_value=10)
-    def test_listed_workflow_uses_rollout_perc_enabled(
-        self, mock_uniform: Mock
-    ) -> None:
-        """Listed workflow with 50% rollout, random=10 -> enabled."""
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 50
-                workflows: pull,trunk
-        ---
-
-        Users:
-        @User1,otherExp
-
-        """
-        result = rd.get_runner_prefix(
-            settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
-        )
-        self.assertEqual("lf.", result.prefix)
-
-    @patch("random.uniform", return_value=80)
-    def test_listed_workflow_uses_rollout_perc_disabled(
-        self, mock_uniform: Mock
-    ) -> None:
-        """Listed workflow with 50% rollout, random=80 -> disabled."""
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 50
-                workflows: pull,trunk
-        ---
-
-        Users:
-        @User1,otherExp
-
-        """
-        result = rd.get_runner_prefix(
-            settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
-        )
-        self.assertEqual("", result.prefix)
-
-    @patch("random.uniform", return_value=10)
-    def test_unlisted_workflow_skipped_regardless_of_rollout_perc(
-        self, mock_uniform: Mock
-    ) -> None:
-        """Unlisted workflow is 0% even when rollout_perc=100."""
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 100
-                workflows: pull,trunk
-        ---
-
-        Users:
-        @User1,otherExp
-
-        """
-        result = rd.get_runner_prefix(
-            settings_text, ["User1"], USER_BRANCH, workflow_name="periodic"
-        )
-        self.assertEqual("", result.prefix)
-
-    @patch("random.uniform", return_value=70)
-    def test_workflows_all_applies_rollout_perc_to_every_workflow(
-        self, mock_uniform: Mock
-    ) -> None:
-        """workflows: ALL with 80% rollout, random=70 -> enabled for every workflow."""
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 80
-                workflows: ALL
-        ---
-
-        Users:
-        @User1,otherExp
-
-        """
-        for wf in ("pull", "trunk", "periodic", "anything-else"):
-            result = rd.get_runner_prefix(
-                settings_text, ["User1"], USER_BRANCH, workflow_name=wf
-            )
-            self.assertEqual("lf.", result.prefix, f"failed for workflow {wf}")
-
-    @patch("random.uniform", return_value=10)
-    def test_workflows_empty_applies_rollout_perc_to_every_workflow(
-        self, mock_uniform: Mock
-    ) -> None:
-        """Empty workflows behaves like ALL: rollout_perc applies to every workflow."""
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 25
-        ---
-
-        Users:
-        @User1,otherExp
-
-        """
-        result = rd.get_runner_prefix(
-            settings_text, ["User1"], USER_BRANCH, workflow_name="anything"
-        )
-        self.assertEqual("lf.", result.prefix)
-
-    def test_user_opt_in_bypasses_workflow_allowlist(self) -> None:
-        """User opt-in (100%) wins even when workflow is unlisted."""
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 100
-                workflows: trunk
-        ---
-
-        Users:
-        @User1,lf
-
-        """
-        result = rd.get_runner_prefix(
-            settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
-        )
-        self.assertEqual("lf.", result.prefix)
-
-    def test_user_opt_out_overrides_workflow_allowlist(self) -> None:
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 100
-                workflows: pull
-        ---
-
-        Users:
-        @User1,-lf
-
-        """
-        result = rd.get_runner_prefix(
-            settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
-        )
-        self.assertEqual("", result.prefix)
-
-    @patch("random.uniform", return_value=10)
-    def test_workflows_all_with_exclusion(self, mock_uniform: Mock) -> None:
-        """workflows: ALL,-excluded enables every workflow except the excluded one."""
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 100
-                workflows: ALL,-periodic
-        ---
-
-        Users:
-        @User1,otherExp
-
-        """
-        self.assertEqual(
-            "lf.",
-            rd.get_runner_prefix(
-                settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
-            ).prefix,
-        )
-        self.assertEqual(
-            "",
-            rd.get_runner_prefix(
-                settings_text, ["User1"], USER_BRANCH, workflow_name="periodic"
-            ).prefix,
-        )
-
-    @patch("random.uniform", return_value=10)
-    def test_workflows_exclusion_name_with_space(self, mock_uniform: Mock) -> None:
-        """Exclusions match the github.workflow name verbatim, including spaces."""
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 100
-                workflows: ALL,-B200 Smoke Tests
-        ---
-
-        Users:
-        @User1,otherExp
-
-        """
-        self.assertEqual(
-            "",
-            rd.get_runner_prefix(
-                settings_text, ["User1"], USER_BRANCH, workflow_name="B200 Smoke Tests"
-            ).prefix,
-        )
-        self.assertEqual(
-            "lf.",
-            rd.get_runner_prefix(
-                settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
-            ).prefix,
-        )
-
-    @patch("random.uniform", return_value=10)
-    def test_workflows_exclusion_only_acts_as_denylist(
-        self, mock_uniform: Mock
-    ) -> None:
-        """workflows with only exclusions enables every non-excluded workflow."""
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 100
-                workflows: -periodic
-        ---
-
-        Users:
-        @User1,otherExp
-
-        """
-        self.assertEqual(
-            "lf.",
-            rd.get_runner_prefix(
-                settings_text, ["User1"], USER_BRANCH, workflow_name="pull"
-            ).prefix,
-        )
-        self.assertEqual(
-            "",
-            rd.get_runner_prefix(
-                settings_text, ["User1"], USER_BRANCH, workflow_name="periodic"
-            ).prefix,
-        )
-
-    def test_parse_workflows_setting(self) -> None:
-        settings_text = """
-        ```
-        experiments:
-            arc:
-                rollout_perc: 0
-                all_branches: true
-                default: false
-                workflows: pull,trunk
-        ```
-        ---
-        """
-        settings = rd.parse_settings(settings_text)
-        self.assertEqual(
-            rd.Experiment(
-                rollout_perc=0,
-                all_branches=True,
-                default=False,
-                workflows="pull,trunk",
-            ),
-            settings.experiments["arc"],
-        )
-
-    def test_parse_workflow_list_helper(self) -> None:
-        self.assertEqual(
-            {"pull", "trunk", "periodic"},
-            rd.parse_workflow_list("pull, trunk , periodic, "),
-        )
-        self.assertEqual(set(), rd.parse_workflow_list(""))
+        self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
 
 class TestRunnerDeterminatorAmdDoExperiment(TestCase):
@@ -1204,31 +768,14 @@ class TestRunnerDeterminatorAmdDoExperiment(TestCase):
     def test_amd_do_opted_in_returns_prefix(self) -> None:
         result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User1"], USER_BRANCH)
         self.assertEqual("amd-do-", result.amd_do_prefix)
-        # amd-do is exposed via its own output, not folded into the shared prefix
-        self.assertEqual("", result.prefix)
+        # amd-do is exposed via its own output; the base prefix is the default fleet
+        self.assertEqual("mt-", result.prefix)
 
-    def test_amd_do_not_enabled_returns_empty_prefix(self) -> None:
+    def test_amd_do_not_enabled_returns_default_fleet(self) -> None:
+        # User2 opts into lf, but lf is not defined here, so it falls back to Meta
         result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User2"], USER_BRANCH)
         self.assertEqual("", result.amd_do_prefix)
-        self.assertEqual("", result.prefix)
-
-    def test_amd_do_with_arc_keeps_both(self) -> None:
-        settings_text = """
-        experiments:
-            arc:
-                rollout_perc: 0
-            amd-do:
-                rollout_perc: 0
-        ---
-
-        Users:
-        @User1,arc,amd-do
-
-        """
-        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("mt-", result.prefix)
-        self.assertTrue(result.use_arc)
-        self.assertEqual("amd-do-", result.amd_do_prefix)
 
     def test_amd_do_with_lf_keeps_both(self) -> None:
         settings_text = """
@@ -1244,8 +791,70 @@ class TestRunnerDeterminatorAmdDoExperiment(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("lf.", result.prefix)
+        self.assertEqual("lf-", result.prefix)
         self.assertEqual("amd-do-", result.amd_do_prefix)
+
+
+class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
+    """no-runner-experiments opts out of lf, so the run stays on the default Meta fleet."""
+
+    LF_ONLY = """
+        experiments:
+            lf:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf
+
+        """
+
+    def test_opt_out_lf_returns_meta(self) -> None:
+        result = rd.get_runner_prefix(
+            self.LF_ONLY,
+            ["User1"],
+            USER_BRANCH,
+            opt_out_experiments=frozenset({"lf"}),
+        )
+        self.assertEqual("mt-", result.prefix)
+
+    def test_without_opt_out_returns_lf(self) -> None:
+        result = rd.get_runner_prefix(self.LF_ONLY, ["User1"], USER_BRANCH)
+        self.assertEqual("lf-", result.prefix)
+
+    def _run_main(self, *, labels: list[str], settings: str) -> dict[str, str]:
+        args = Namespace(
+            github_token="t",
+            github_issue_repo="pytorch/test-infra",
+            github_repo="pytorch/pytorch",
+            github_issue=5132,
+            github_actor="User1",
+            github_issue_owner="User1",
+            github_branch=USER_BRANCH,
+            github_ref_type="branch",
+            eligible_experiments=frozenset({"lf"}),
+            opt_out_experiments=frozenset(),
+            pr_number="123",
+            workflow_name="pull",
+        )
+        captured: dict[str, str] = {}
+        with (
+            patch.object(rd, "parse_args", return_value=args),
+            patch.object(rd, "get_labels", return_value=set(labels)),
+            patch.object(rd, "get_rollout_state_from_issue", return_value=settings),
+            patch.object(rd, "get_potential_pr_author", return_value="User1"),
+            patch.object(rd, "set_github_output", side_effect=captured.__setitem__),
+        ):
+            rd.main()
+        return captured
+
+    def test_main_label_disables_lf_uses_meta(self) -> None:
+        out = self._run_main(labels=[rd.OPT_OUT_LABEL], settings=self.LF_ONLY)
+        self.assertEqual("mt-", out[rd.GH_OUTPUT_KEY_LABEL_TYPE])
+
+    def test_main_no_label_keeps_lf(self) -> None:
+        out = self._run_main(labels=[], settings=self.LF_ONLY)
+        self.assertEqual("lf-", out[rd.GH_OUTPUT_KEY_LABEL_TYPE])
 
 
 if __name__ == "__main__":
