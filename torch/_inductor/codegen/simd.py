@@ -3684,9 +3684,8 @@ class SIMDScheduling(BaseScheduling):
             is_persistent_reduction = (
                 features.is_reduction()
                 and V.choices.should_use_persistent_reduction(
-                    features,
+                    features.with_tiling_scores(tiling_scores),
                     cooperative_reduction=False,
-                    tiling_scores=tiling_scores,
                 )
             )
             node_schedule_map[pn] = NodeInfo(
