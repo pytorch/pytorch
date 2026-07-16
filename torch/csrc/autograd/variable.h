@@ -486,7 +486,7 @@ struct TORCH_API ViewInfo {
   /// The "base" and "tensor" are respectively the input and output of the
   /// differentiable view function that happened. They are required to properly
   /// set the optional view_fn_ when it is not provided. The "view_func", if
-  /// provided, should be a function that allows to re-do the view between
+  /// provided, should be a function that allows re-doing the view between
   /// "base" and "tensor".
   ViewInfo chain(
       const Variable& base,
@@ -523,7 +523,7 @@ struct TORCH_API ViewInfo {
 ///
 /// Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// This class allows to track both forward and backward AD differentiable
+/// This class allows tracking both forward and backward AD differentiable
 /// views. These views can have different base as non-differentiable view for
 /// forward and backward mode AD are not the same.
 ///

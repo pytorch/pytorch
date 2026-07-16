@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, TypeVar
+from typing import Any, Concatenate, ParamSpec, TypeVar
 
 import torch
 from torch.testing import make_tensor
@@ -55,6 +55,9 @@ XS = 3
 
 # Unique value to distinguish default from anything else
 _NOTHING = object()
+
+
+_P = ParamSpec("_P")
 
 
 # Extension of getattr to support qualified names
@@ -114,11 +117,19 @@ class DecorateInfo:
                     raise AssertionError(f"Expected torch.dtype, got {type(dtype)}")
 
     def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
+        device_type_matched = False
+        if isinstance(self.device_type, str):
+            device_type_matched = self.device_type == device_type
+        elif isinstance(self.device_type, (list, tuple)):
+            device_type_matched = device_type in self.device_type
+        elif self.device_type is None:
+            device_type_matched = True
+
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
-            and (self.device_type is None or self.device_type == device_type)
+            and device_type_matched
             and (self.dtypes is None or dtype in self.dtypes)
             # Support callables over kwargs to determine if the decorator is active.
             and (
@@ -844,7 +855,7 @@ class OpInfo:
     allow_cow_input_materialize_backward: list[int | str] = None
 
     # wrapper function for gradcheck
-    gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
+    gradcheck_wrapper: Callable[Concatenate[Callable[_P, Any], _P], Any] | None = None
 
     # whether to check batched grad when doing gradcheck
     # defaults to support_autograd's value
@@ -1269,6 +1280,15 @@ class OpInfo:
         """Returns the inplace operator variant of the operator, e.g operator.iadd
         Returns None if the operator has no inplace operator variant"""
         return self.inplace_operator_variant
+
+    def get_gradcheck_wrapper(
+        self,
+    ) -> Callable[Concatenate[Callable[_P, Any], _P], Any]:
+        """Returns the gradcheck_wrapper if present, or else a thin wrapper around the
+        operator."""
+        return self.gradcheck_wrapper or (
+            lambda op, *args, **kwargs: op(*args, **kwargs)
+        )
 
     # Returns a tuple of callables:
     # (TestCase -> subtest context, TestCase -> skip / xfail context)
@@ -3290,6 +3310,13 @@ def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
     return output
 
 
+def gradcheck_wrapper_native_norms(op, input, *args, **kwargs):
+    """Gradcheck wrapper for the various native_*_norm operations.  All of them return
+    (norm, mean, rstd), but checking gradients against mean and rstd is pointless."""
+    norm, mean, rstd = op(input, *args, **kwargs)
+    return norm
+
+
 def clone_sample(sample, **kwargs):
     """
     Given a SampleInput, this function analyzes its input, args and kwargs,
@@ -3303,7 +3330,7 @@ def clone_sample(sample, **kwargs):
         else:
             return t
 
-    sample_kwargs = kwargs if kwargs else sample.kwargs
+    sample_kwargs = kwargs or sample.kwargs
 
     return SampleInput(
         clone_tensor(sample.input),

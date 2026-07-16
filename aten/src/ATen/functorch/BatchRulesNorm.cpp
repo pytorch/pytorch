@@ -362,10 +362,10 @@ static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
   rstd_ = reshape_dim_into(0, 0, rstd_);         // [B0 * N, G]
 
   auto result0 = std::get<0>(native_group_norm_backward(
-      grad_out_.contiguous(),
-      input_.contiguous(),
-      mean_.contiguous(),
-      rstd_.contiguous(),
+      grad_out_,
+      input_,
+      mean_,
+      rstd_,
       std::nullopt, N * bdim_size, C, HxW, group, {true, false, false}));
   return reshape_dim_outof(0, bdim_size, result0);
 }

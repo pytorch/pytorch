@@ -90,7 +90,6 @@ full_codegen:
   - native_dropout_backward
   - native_group_norm
   - native_group_norm_backward
-  - native_group_norm_backward.multiple_grads
   - native_layer_norm
   - native_layer_norm_backward
   - ne.Scalar
