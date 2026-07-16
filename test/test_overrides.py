@@ -2030,8 +2030,8 @@ class TestTorchFunctionRedispatchOps(TestCase):
             torch.bfloat16,
             torch.complex32,
         ):
-            # Disabled due to CI failures; see #188678, #188684, #188686
-            self.skipTest("disabled due to CI failures; see #188678/#188684/#188686")
+            # Disabled due to CI failures; see #190241
+            self.skipTest("disabled due to CI failures; see #190241")
         if op.has_nondeterministic_output:
             self.skipTest("output is nondeterministic; not comparable across calls")
 
