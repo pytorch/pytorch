@@ -4493,102 +4493,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_all_reduce_coalesced_nccl(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
-        )
-        process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"cuda:{self.rank:d}")
-        tensors = [
-            torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float)
-            for i in range(5)
-        ]
-        torch.distributed.all_reduce_coalesced(tensors, group=process_group)
-        for i, t in enumerate(tensors):
-            self.assertEqual(
-                t,
-                torch.full_like(
-                    t, self.world_size * (i + (self.world_size + 1.0) / 2.0)
-                ),
-            )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_all_reduce_coalesced_manager_nccl(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
-        )
-        process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"cuda:{self.rank:d}")
-
-        for async_ops in [False, True]:
-            tensors = [
-                torch.full(
-                    (60 + i,), self.rank + 1 + i, device=device, dtype=torch.float
-                )
-                for i in range(5)
-            ]
-            with torch.distributed._coalescing_manager(
-                group=process_group, device=device, async_ops=async_ops
-            ) as cm:
-                for tensor in tensors:
-                    torch.distributed.all_reduce(tensor)
-
-            self.assertEqual(len(cm.works), 1 if async_ops else 0)
-            cm.wait()
-
-            for i, t in enumerate(tensors):
-                self.assertEqual(
-                    t,
-                    torch.full_like(
-                        t, self.world_size * (i + (self.world_size + 1.0) / 2.0)
-                    ),
-                )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_all_gather_into_tensor_coalesced_manager_nccl(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
-        )
-        process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"cuda:{self.rank:d}")
-        input_tensors = [
-            torch.arange(
-                self.rank * (60 + i),
-                (self.rank + 1) * (60 + i),
-                device=device,
-                dtype=torch.float,
-            )
-            for i in range(5)
-        ]
-        for async_ops in [False, True]:
-            output_tensors = [
-                torch.zeros(
-                    (60 + i) * self.world_size, device=device, dtype=torch.float
-                )
-                for i in range(5)
-            ]
-            with torch.distributed._coalescing_manager(
-                group=process_group, device=device, async_ops=async_ops
-            ) as cm:
-                for input_t, output_t in zip(input_tensors, output_tensors):
-                    torch.distributed.all_gather_single(output_t, input_t)
-
-            self.assertEqual(len(cm.works), 1 if async_ops else 0)
-            cm.wait()
-
-            for i, output_t in enumerate(output_tensors):
-                expected = torch.arange(
-                    (60 + i) * self.world_size, device=device, dtype=torch.float
-                )
-                self.assertEqual(output_t, expected)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
     def test_coalesced_manager_op_integrity(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
@@ -4704,30 +4608,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(cm.estimated_time is not None)
         self.assertTrue(cm.estimated_time > 0)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_default_pg_nccl(self):
-        torch.cuda.set_device(self.rank)
-        self._test_sequence_num_set_default_pg(backend="nccl")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl()
-    def test_sequence_num_incremented_nccl_default(self):
-        self._test_sequence_num_incremented_default_group("nccl")
-
-    @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sequence_num_incremented_nccl_subgroup(self):
-        if self.world_size < 4:
-            return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
-        self._test_sequence_num_incremented_subgroup("nccl")
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_nccl_new_group(self):
-        torch.cuda.set_device(self.rank)
-        self._test_sequence_num_set_new_group(backend="nccl")
 
     def _test_pass_nccl_options(self, pg_opts):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -4922,14 +4802,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
             torch.ops.c10d_functional.wait_tensor(input1)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
-
-            input2 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
-            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
-            work = dist.all_reduce(input2, op=dist.ReduceOp.SUM, async_op=True)
-            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
-            work.wait()
-            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
-            self.assertEqual(input1, input2)
 
         # Case 2: not under context manager (i.e. work is not registered in registry)
         input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")

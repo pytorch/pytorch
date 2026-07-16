@@ -94,6 +94,7 @@ void ProcessGroupNCCL::init(at::Device device) {
         device_,
         getRank(),
         getSize(),
+        bootstrap_generation_++,
         nccl_api_,
         options_c10d_->timeout);
     device_ = bootstrap->getDevice();

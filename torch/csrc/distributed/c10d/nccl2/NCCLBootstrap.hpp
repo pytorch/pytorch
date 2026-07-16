@@ -29,6 +29,7 @@ class NCCLBootstrap {
       c10::Device device,
       int rank,
       int comm_size,
+      uint64_t generation,
       std::shared_ptr<NcclApi> nccl_api,
       std::chrono::milliseconds timeout);
 
@@ -41,9 +42,6 @@ class NCCLBootstrap {
   ncclComm_t createNcclComm(
       const std::string& name,
       const std::unordered_map<std::string, std::string>& hints = {});
-  static std::string getNCCLStoreKey();
-  static std::string getNCCLStoreKeyPrefix();
-  static int getNCCLStoreKeyCounter();
 
   int getRank() {
     return rank_;
@@ -64,7 +62,7 @@ class NCCLBootstrap {
 
  private:
   const std::chrono::milliseconds timeout_;
-  static int counter_;
+  const uint64_t generation_;
 
   c10::intrusive_ptr<c10d::Store> store_;
   bool created_internal_store_;

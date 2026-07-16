@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceGuard.h>
 
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
@@ -174,12 +175,16 @@ bool WorkNCCL::wait(std::chrono::milliseconds /*timeout*/) {
   // Unlike c10d's default wait(), this does not block the CPU: for CUDA work it
   // is sufficient (and matches upstream torchcomms) to order the current stream
   // after the collective. The timeout arg is honored by the watchdog, not here.
-  synchronizeInternal();
+  synchronize();
   return true;
 }
 
 void WorkNCCL::synchronize() {
   synchronizeInternal();
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<WorkNCCL>::unsafe_reclaim_from_nonowning(this));
+  }
 }
 
 std::vector<at::Tensor> WorkNCCL::result() {
@@ -203,7 +208,7 @@ c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
 
   // Order the current stream after the collective before completing the future
   // so consumers observing the future see correct results.
-  synchronizeInternal();
+  synchronize();
 
   if (!outputs_.empty() && !devices.empty()) {
     c10::OptionalDeviceGuard guard(outputs_[0].device());
