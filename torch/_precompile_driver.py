@@ -361,5 +361,8 @@ def _inductor_forward(*args):
         out = out[: len(out) - n]
         for idx, g in zip(GRAD_PARAM_INDICES, grads):
             p = pb[idx]
-            p.grad = g if p.grad is None else p.grad + g
+            if p.grad is None:
+                p.grad = g
+            else:
+                p.grad.add_(g)
     return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))
