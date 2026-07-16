@@ -513,8 +513,12 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if only_gen_src_code:
             return src_code
 
-        # Precompile only base (non-EFC) kernels. EFC kernels produce
-        # closure-wrapped artifacts that can't be serialized to disk cache.
+        # Only base (non-EFC) kernels are precompiled here; EFC (epilogue-fused)
+        # kernels compile lazily on first run instead.
+        #
+        # TODO(nvgemm): precompile EFC kernels too. To do that, the worker needs
+        # the epilogue (its source plus aux-tensor shapes/dtypes) so it can
+        # rebuild the epilogue-bound operator before compiling.
         if epilogue_nodes:
             precompile_metadata = None
         else:
@@ -583,19 +587,26 @@ class NVUniversalGemmScheduling(BaseScheduling):
         kernel_name = ctb.kernel_metadata.get("kernel_name")
         try:
             if kernel_name and torch.cuda.is_available():
-                from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
-                    get_kernel_by_name,
+                from torch._inductor.codegen.nv_universal_gemm.operator_cache import (
+                    get_operator_by_name,
                 )
 
-                k = get_kernel_by_name(kernel_name)
-                if k is not None and hasattr(k, "impl"):
-                    from cutlass_api.providers.cutedsl.utils import (
+                # No-arg lookup: reads only the in-process name cache that
+                # discovery populated. Only base (non-epilogue) kernels reach
+                # here. A miss (e.g. a cache-loaded graph where discovery never
+                # ran) is cheap and harmless -- it does NOT materialize the
+                # catalog; the try/except just leaves max_active_clusters=None.
+                operator = get_operator_by_name(kernel_name)
+                if not operator:
+                    raise ValueError(f"Operator {kernel_name} not found")
+
+                cluster_shape = getattr(operator.metadata.design, "cluster_shape", None)
+                if cluster_shape is not None:
+                    from cutlass.operators.providers.cutedsl.integration_utils.mma import (
                         get_max_active_clusters,
                     )
 
-                    max_active_clusters = get_max_active_clusters(
-                        k.impl.cluster_shape_mn
-                    )
+                    max_active_clusters = get_max_active_clusters(cluster_shape)
         except Exception:
             log.debug(
                 "Failed to resolve max_active_clusters for precompile", exc_info=True

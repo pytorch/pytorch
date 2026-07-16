@@ -389,21 +389,18 @@ class TestFP4Support(TestCase):
 
     @unittest.skipIf(
         not torch.cuda.is_available()
-        or importlib.util.find_spec("cutlass_api") is None,
-        "requires CUDA and cutlass_api",
+        or importlib.util.find_spec("cutlass.operators") is None,
+        "requires CUDA and cutlass.operators",
     )
-    def test_ensure_fp4_dtype_registered(self):
-        """_ensure_fp4_dtype_registered should patch cutlass_api for FP4."""
-        from torch._inductor.utils import _ensure_fp4_dtype_registered
-
-        _ensure_fp4_dtype_registered()
+    def test_fp4_dtype_natively_mapped(self):
+        """cutlass.operators natively maps torch.float4_e2m1fn_x2 -> Float4E2M1FN."""
         import cutlass
-        import cutlass_api.utils
+        import cutlass.operators as ops
 
-        result = cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+        result = ops.utils.dtype.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
         self.assertEqual(result, cutlass.Float4E2M1FN)
 
-        result_fp32 = cutlass_api.utils.cutlass_type_from_torch_type(torch.float32)
+        result_fp32 = ops.utils.dtype.cutlass_type_from_torch_type(torch.float32)
         self.assertEqual(result_fp32, cutlass.Float32)
 
     def test_rand_strided_fp4(self):

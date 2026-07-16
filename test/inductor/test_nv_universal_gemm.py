@@ -92,10 +92,9 @@ def _nvgemm_config(**overrides):
     return cfg
 
 
-# TODO(nikhilap): Remove Blackwell restriction once cutlass_api includes H100 kernels
 @unittest.skipIf(
-    not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    not ensure_nv_universal_gemm_available(),
+    "NVIDIA Universal GEMM (cutlass.operators) library not available",
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemm(TestCase):
@@ -140,7 +139,7 @@ class TestNVUniversalGemm(TestCase):
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
 
-        cutlass_api requires 16-byte aligned base pointers. Since alignment
+        cutlass.operators requires 16-byte aligned base pointers. Since alignment
         can't be checked at compile time (FakeTensors don't have real pointers),
         Inductor must guard against unaligned buffers.
         """
@@ -211,13 +210,14 @@ class TestNVUniversalGemm(TestCase):
 
         torch._dynamo.reset()
 
-        import cutlass_api
+        import cutlass.operators as ops
+        from cutlass.operators.workspace import AllocationRequirement
 
         def patched_get_workspace_size(self, args):
-            return 1024
+            return AllocationRequirement(size_bytes=1024, ptr_alignment=16)
 
         with patch.object(
-            cutlass_api.Kernel,
+            ops.Operator,
             "get_workspace_size",
             patched_get_workspace_size,
         ):
@@ -351,11 +351,7 @@ class TestNVUniversalGemm(TestCase):
 
         torch._dynamo.reset()
 
-        with config.patch(
-            _nvgemm_config(
-                **{"test_configs.autotune_choice_desc_regex": "inductor_vendored"}
-            )
-        ):
+        with config.patch(_nvgemm_config()):
             compiled_fn = torch.compile(scaled_mm)
             result = compiled_fn(a_fp4, b_fp4_t, scale_a, scale_b)
 
@@ -406,11 +402,7 @@ class TestNVUniversalGemm(TestCase):
 
         torch._dynamo.reset()
 
-        with config.patch(
-            _nvgemm_config(
-                **{"test_configs.autotune_choice_desc_regex": "inductor_vendored"}
-            )
-        ):
+        with config.patch(_nvgemm_config()):
             compiled_fn = torch.compile(scaled_mm)
             result = compiled_fn(a_fp4, b_fp4_t, scale_a, scale_b)
 
@@ -601,7 +593,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         and is_datacenter_blackwell_arch()
         and ensure_nvmatmul_heuristics_available()
     ),
-    "Requires cutlass_api, nvMatmulHeuristics, and Blackwell GPU",
+    "Requires cutlass.operators, nvMatmulHeuristics, and Blackwell GPU",
 )
 class TestNVUniversalGemmHeuristicsIntegration(TestCase):
     """Integration tests for nvMatmulHeuristics with real library calls."""
@@ -663,7 +655,7 @@ class TestNVUniversalGemmHeuristicsIntegration(TestCase):
 
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
 )
 class TestNVUniversalGemmDynamicShapes(TestCase):
     """Test cases for NVIDIA Universal GEMM with dynamic shapes."""
@@ -726,7 +718,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
 
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemmEpilogueFusion(TestCase):
@@ -883,79 +875,158 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertTrue(epilogue_fused, "bias+relu was NOT fused into epilogue")
 
     def test_efc_disk_cache_round_trip(self):
-        """Verify that EFC kernel compiled artifacts can be serialized to disk
-        and reloaded correctly.
+        """An EFC (epilogue-fused) operator's compiled artifact round-trips
+        through the disk cache.
 
-        EFC kernels produce a closure-wrapped compiled_obj. The disk cache
-        unwraps the inner JIT function for serialization and rewraps it on
-        reload. This test compiles an EFC kernel, round-trips through disk
-        cache, and verifies the reloaded artifact produces correct results."""
-        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
-            _get_kernel_cache,
-        )
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
-            _rewrap_efc_compiled_obj,
-            _unwrap_efc_compiled_obj,
+        Compiled artifacts for Operators with epilogue-fusion capability are expected
+        to work no differently than those without it. This test verifies that.
+        """
+        import cutlass.operators as ops
+
+        from torch._inductor.codegen.nv_universal_gemm.operator_cache import (
+            compatible_operators,
         )
         from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
-
-        cache = _get_kernel_cache()
-        efc_kernel = None
-        for name, k in cache.items():
-            if (
-                "EFC" in name
-                and "ABFloat16" in name
-                and "outBFloat16" in name
-                and "ttt" in name
-            ):
-                efc_kernel = k
-                break
-        if efc_kernel is None:
-            self.skipTest("No matching EFC kernel found in cache")
-
-        import cutlass_api
-        from cutlass_api.artifact import CompiledArtifact
 
         a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
         out = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
 
-        args = cutlass_api.arguments.GemmArguments(
-            a, b, out, accumulator_type=torch.float32
+        # Create arguments with a real epilogue so we find operators that support them
+        def epi(accum):
+            D = accum * 2.0
+            return D
+
+        args = ops.GemmArguments(
+            a,
+            b,
+            out,
+            accumulator_type=torch.float32,
+            epilogue=ops.EpilogueArguments(epi, D=out),
         )
+
+        major, minor = torch.cuda.get_device_capability()
+        target_sm = ops.TargetSm(f"{major}{minor}a")
+
+        # An epilogue-fused operator is exactly one whose metadata carries an
+        # epilogue. dtype/layout are already guaranteed by compatible_operators(args).
+        efc_kernel = next(
+            (
+                op
+                for op in compatible_operators(args, target_sm)
+                if op.metadata.epilogue is not None
+            ),
+            None,
+        )
+        if efc_kernel is None:
+            self.skipTest("No epilogue-fused (EFC) operator found")
+
         artifact = efc_kernel.compile(args)
 
-        # Unwrap, serialize, reload, rewrap
-        inner = _unwrap_efc_compiled_obj(artifact.compiled_obj)
-        self.assertNotEqual(
-            type(inner).__name__,
-            "function",
-            "unwrap should extract the JIT function, not the closure",
+        # Serialize compiled_obj, reload from disk, and wrap it back into a
+        # CompiledArtifact. A fresh in-mem cache ({}) on get forces the read to
+        # come from disk.
+        disk_cache_set(
+            {}, "/tmp/test_efc_rt.py", ("efc",), ("key",), artifact.compiled_obj, 0
         )
-
-        test_cache: dict = {}
-        disk_cache_set(test_cache, "/tmp/test_efc_rt.py", ("efc",), ("key",), inner, 0)
         loaded = disk_cache_get({}, "/tmp/test_efc_rt.py", ("efc",), ("key",), 0)
         self.assertIsNotNone(loaded, "disk_cache_get returned None")
 
-        rewrapped = _rewrap_efc_compiled_obj(loaded, efc_kernel)
-        reloaded_artifact = CompiledArtifact(rewrapped, efc_kernel)
-
-        # Run with reloaded artifact and verify correctness
-        out2 = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
-        args2 = cutlass_api.arguments.GemmArguments(
-            a, b, out2, accumulator_type=torch.float32
+        reloaded_artifact = ops.CompiledArtifact(
+            loaded, efc_kernel, compiled_for=target_sm
         )
+
+        # Run the reloaded artifact and verify it reproduces the fused result.
         efc_kernel.run(
-            args2,
+            args,
             reloaded_artifact,
             stream=torch.cuda.current_stream(),
             workspace=None,
             assume_supported_args=True,
         )
         torch.cuda.synchronize()
-        expected = a.float() @ b.float()
-        torch.testing.assert_close(out2.float(), expected, atol=1e-2, rtol=1e-2)
+        expected = (a.float() @ b.float()) * 2.0
+        torch.testing.assert_close(out.float(), expected, atol=1e-2, rtol=1e-2)
+
+    def test_efc_distinct_epilogues_no_cache_collision(self):
+        """Two epilogues that share a base operator and aux-tensor signature but
+        differ in function body must NOT collide in the EFC operator cache.
+        """
+        import hashlib
+
+        import cutlass.operators as ops
+
+        from torch._inductor.codegen.nv_universal_gemm.operator_cache import (
+            _bind_epilogue,
+            compatible_operators,
+        )
+
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
+
+        # Two distinct epilogues, both with NO aux tensors -> identical aux
+        # signature. epilogue_source is the only thing that can tell them apart.
+        def epi_double(accum):
+            D = accum * 2.0
+            return D
+
+        def epi_triple(accum):
+            D = accum * 3.0
+            return D
+
+        epi_double_args = ops.EpilogueArguments(epi_double, D=out)
+        epi_triple_args = ops.EpilogueArguments(epi_triple, D=out)
+        args_double = ops.GemmArguments(
+            a, b, out, accumulator_type=torch.float32, epilogue=epi_double_args
+        )
+        args_triple = ops.GemmArguments(
+            a, b, out, accumulator_type=torch.float32, epilogue=epi_triple_args
+        )
+
+        major, minor = torch.cuda.get_device_capability()
+        target_sm = ops.TargetSm(f"{major}{minor}a")
+
+        base = next(
+            (
+                op
+                for op in compatible_operators(args_double, target_sm)
+                if op.metadata.epilogue is not None
+            ),
+            None,
+        )
+        if base is None:
+            self.skipTest("No epilogue-fused (EFC) operator found")
+        name = base.metadata.operator_name
+
+        # Distinct source hashes, exactly as codegen derives them from the
+        # emitted epilogue function body.
+        src_double = hashlib.sha256(b"def epi(accum): return accum * 2.0").hexdigest()
+        src_triple = hashlib.sha256(b"def epi(accum): return accum * 3.0").hexdigest()
+
+        bound_double = _bind_epilogue(base, name, epi_double_args, src_double)
+        bound_double_again = _bind_epilogue(base, name, epi_double_args, src_double)
+        bound_triple = _bind_epilogue(base, name, epi_triple_args, src_triple)
+
+        # Same (name, source, aux) -> same cached instance (caching still works).
+        self.assertIs(bound_double, bound_double_again)
+        # Different epilogue identity -> distinct instances. This is the
+        # assertion that fails when epilogue_source is dropped from the key.
+        self.assertIsNot(bound_double, bound_triple)
+
+        # End-to-end: the triple-bound operator must apply *3, not the *2 it
+        # would inherit from a collided cache entry.
+        artifact = bound_triple.compile(args_triple)
+        bound_triple.run(
+            args_triple,
+            artifact,
+            stream=torch.cuda.current_stream(),
+            workspace=None,
+            assume_supported_args=True,
+        )
+        torch.cuda.synchronize()
+        expected = (a.float() @ b.float()) * 3.0
+        torch.testing.assert_close(out.float(), expected, atol=1e-2, rtol=1e-2)
 
     def test_workspace_runtime_integration(self):
         """End-to-end: mock the chosen kernel's workspace_size to non-zero and
@@ -969,7 +1040,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         catch the regression we intercept _benchmark_nvgemm_module to record
         every (ms, path) it returns and assert at least one finite-ms result —
         i.e., at least one EFC choice with workspace did get benchmarked."""
-        import cutlass_api
+        import cutlass.operators as ops
+        from cutlass.operators.workspace import AllocationRequirement
 
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
@@ -992,7 +1064,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch._dynamo.reset()
         with (
             patch.object(
-                cutlass_api.Kernel, "get_workspace_size", lambda self, args: 4096
+                ops.Operator,
+                "get_workspace_size",
+                lambda self, args: AllocationRequirement(
+                    size_bytes=4096, ptr_alignment=16
+                ),
             ),
             mock.patch.object(
                 CUDACombinedScheduling, "_benchmark_nvgemm_module", capturing_bench

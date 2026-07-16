@@ -431,7 +431,7 @@ test_python_smoke() {
 test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
-  install_cutlass_api
+  install_cutlass_operators
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
