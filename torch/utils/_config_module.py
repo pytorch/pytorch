@@ -318,7 +318,7 @@ class _ConfigEntry:
     # environment variables are read at install time
     env_value_force: Any = _UNSET_SENTINEL
     env_value_default: Any = _UNSET_SENTINEL
-    # Used to work arounds bad assumptions in unittest.mock.patch
+    # Used to work around bad assumptions in unittest.mock.patch
     # The code to blame is
     # https://github.com/python/cpython/blob/94a7a4e22fb8f567090514785c69e65298acca42/Lib/unittest/mock.py#L1637
     # Essentially, mock.patch requires, that if __dict__ isn't accessible
@@ -553,7 +553,7 @@ class ConfigModule(ModuleType):
     ) -> dict[str, Any]:
         """Export a dictionary of current configuration keys and values.
 
-        This function is design to provide a single point which handles
+        This function is designed to provide a single point which handles
         accessing config options and exporting them into a dictionary.
         This is used by a number of different user facing export methods
         which all have slightly different semantics re: how and what to

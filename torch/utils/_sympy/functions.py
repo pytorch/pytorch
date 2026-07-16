@@ -187,7 +187,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
 
 # It would be nice to have assertions on whether or not inputs is_integer
 # However, with bugs like https://github.com/sympy/sympy/issues/26620 sympy
-# sometimes inconsistently reports floats an integers.
+# sometimes inconsistently reports floats as integers.
 #
 # What we can assume from sympy is that if something is an int, it
 # definitely is is_integer, but if it is a float it may or may not
