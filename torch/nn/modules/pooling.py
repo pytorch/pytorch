@@ -117,8 +117,8 @@ class MaxPool1d(_MaxPoolNd):
           where ``ceil_mode = True``
 
           .. math::
-              L_{out} = \left\lceil \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
-                    \times (\text{kernel\_size} - 1) - 1 + (stride - 1)}{\text{stride}}\right\rceil + 1
+              L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                    \times (\text{kernel\_size} - 1) - 1 + (\text{stride} - 1)}{\text{stride}}\right\rfloor + 1
 
         - Ensure that the last pooling starts inside the image, make :math:`L_{out} = L_{out} - 1`
           when :math:`(L_{out} - 1) * \text{stride} >= L_{in} + \text{padding}`.
@@ -1110,6 +1110,8 @@ class _LPPoolNd(Module):
         ceil_mode: bool = False,
     ) -> None:
         super().__init__()
+        if norm_type == 0:
+            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
         self.norm_type = norm_type
         self.kernel_size = kernel_size
         self.stride = stride
@@ -1130,7 +1132,7 @@ class LPPool1d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
     .. note:: If the sum to the power of `p` is zero, the gradient of this function is
@@ -1177,7 +1179,7 @@ class LPPool2d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
@@ -1237,7 +1239,7 @@ class LPPool3d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:

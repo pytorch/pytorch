@@ -14,7 +14,7 @@ autograd needs multithreading to keep up!)  (It might potentially be possible
 to trace through this with torch.compile and then compile it with CUDA graphs
 but this is currently a non-goal.)
 
-We do not directly handling MPMD. However in practice even in SPMD you may
+We do not directly handle MPMD. However in practice even in SPMD you may
 encounter divergence in behavior per rank (for example, uneven sharding
 across ranks). To support scenarios like this, we provide a helper decorator
 that allows you to run a function with no side effects for each LocalTensor
@@ -686,7 +686,7 @@ class _LocalOffsetBasedRNGTracker:
 
     @property
     def _device(self):
-        return torch.device(self._device_type, torch.cuda.current_device())
+        return torch.device(self._device_type, torch.accelerator.current_device_index())
 
     def _set_pre_op_offset(self, state, spec) -> None:
         """Compute and set per-rank offsets before the random operation."""
@@ -797,7 +797,7 @@ class _LocalOffsetBasedRNGTracker:
                 any_rank_state = lm._any_local_rng_state()
                 any_rank_cpu, any_rank_cuda = any_rank_state
 
-                if self._device.type == "cuda":
+                if self._device.type in {"cuda", "xpu"}:
                     if self._device.index not in any_rank_cuda:
                         raise AssertionError
                     any_rank_device_state = any_rank_cuda[self._device.index]
@@ -1261,9 +1261,12 @@ class LocalTensorMode(TorchDispatchMode):
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
-        # Cache for get_coordinate results, keyed by mesh id
-        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts
-        self._coordinate_cache: dict[int, list[SymInt]] = {}
+        # Cache for get_coordinate results, keyed by the inputs used to compute them:
+        # (ndim, flattened rank map, layout).
+        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts.
+        self._coordinate_cache: dict[
+            tuple[int, tuple, torch.distributed._mesh_layout._MeshLayout], list[SymInt]
+        ] = {}
         self._coordinate_cache_lock = threading.Lock()
 
     def __enter__(self) -> "LocalTensorMode":
@@ -1489,7 +1492,7 @@ class LocalTensorMode(TorchDispatchMode):
 
     def rank_map(self, cb: Callable[[int], Tensor]) -> LocalTensor:
         """
-        Creates a LocalTensor instance by mapping rank id to ids local shard.
+        Creates a LocalTensor instance by mapping rank id to its local shard.
         """
 
         with self.disable():
@@ -1500,7 +1503,7 @@ class LocalTensorMode(TorchDispatchMode):
         self, tensor: LocalTensor, cb: Callable[[int, Tensor], Tensor | None]
     ) -> LocalTensor:
         """
-        Creates a LocalTensor instance by mapping rank id to ids local shard.
+        Creates a LocalTensor instance by mapping rank id to its local shard.
         """
 
         with self.disable():
@@ -1632,16 +1635,17 @@ class _LocalDeviceMesh:
         if lm is None:
             raise AssertionError("Unexpectedly not in LocalTensorMode")
 
+        # Include all attributes used below in the cache key
+        cache_key = (self.ndim, self._flatten_rank_map, self._layout)
         # Check cache first (fast path without lock)
-        mesh_id = id(self)
-        if mesh_id in lm._coordinate_cache:
-            return lm._coordinate_cache[mesh_id]
+        if cache_key in lm._coordinate_cache:
+            return lm._coordinate_cache[cache_key]
 
         # Acquire lock for thread safety in MPMD contexts
         with lm._coordinate_cache_lock:
             # Double-check after acquiring lock
-            if mesh_id in lm._coordinate_cache:
-                return lm._coordinate_cache[mesh_id]
+            if cache_key in lm._coordinate_cache:
+                return lm._coordinate_cache[cache_key]
 
             coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
             # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
@@ -1657,7 +1661,7 @@ class _LocalDeviceMesh:
 
             out = [torch.SymInt(LocalIntNode(c)) for c in coords]
             # Cache the result
-            lm._coordinate_cache[mesh_id] = out
+            lm._coordinate_cache[cache_key] = out
             # The output contains coordinates for each of the ranks with respect to
             # their meshes formed from root mesh and selecting the same dimensions
             # as the current mesh.

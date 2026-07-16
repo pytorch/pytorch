@@ -92,7 +92,7 @@ def implements_per_sample_grads(torch_function):
 # ExpandedWeight represents a weight (parameter) Tensor that has an expanded
 # batch dimension. Operations on the ExpandedWeight Tensor act exactly like
 # those without an expanded batch dimension but a call to .backward() populates
-# the original (unexpanded) tensor with per-sample-gradients for in the grad_sample field
+# the original (unexpanded) tensor with per-sample-gradients in the grad_sample field
 #
 # ExpandedWeight has a fallback that always fails since we cannot know what the batch
 # dimension of the input tensor is and therefore cannot know if this is a valid call
@@ -118,7 +118,7 @@ class ExpandedWeight(torch.Tensor):
             )
         if not orig_weight.requires_grad:
             raise RuntimeError(
-                "Can only build ExpandedWeights objects of tensors that require_grad"
+                "Can only build ExpandedWeights objects of tensors that requires_grad"
             )
         ret = torch.Tensor._make_subclass(cls, orig_weight, True)
         return ret

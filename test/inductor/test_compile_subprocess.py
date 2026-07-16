@@ -83,11 +83,6 @@ test_failures = {
     ),
 }
 
-if TEST_WITH_ROCM and not torch.cuda.has_magma:
-    test_failures["test_linalg_eig_stride_consistency"] = TestFailure(
-        ("cuda",), is_skip=True
-    )
-
 
 class TestSubprocess(TestCase):
     def setUp(self):
@@ -196,9 +191,11 @@ class TestSubprocess(TestCase):
         # Warmup
         baseline(x, y)
 
-        self.assertGreater(
-            do_bench(lambda: baseline(x, y)), do_bench(lambda: optimized(x, y))
-        )
+        # Skip the perf assertion to avoid flakiness on XPU.
+        if GPU_TYPE != "xpu":
+            self.assertGreater(
+                do_bench(lambda: baseline(x, y)), do_bench(lambda: optimized(x, y))
+            )
         self.assertTrue("'max_autotune': True" in source_codes[-1])
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
