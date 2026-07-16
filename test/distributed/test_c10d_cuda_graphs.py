@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -16,12 +17,15 @@ from c10d_backend_common import (
     instantiate_backend_tests,
 )
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM
 
 
 ASYNC_OPS = (False, True)
 
 
+@unittest.skipIf(
+    TEST_WITH_ROCM, "RCCL does not support all collectives under HIP graph capture"
+)
 class AbstractCUDAGraphsTest(C10dBackendTest):
     def _tensor(self, dtype, rank=None):
         rank = self.rank if rank is None else rank
