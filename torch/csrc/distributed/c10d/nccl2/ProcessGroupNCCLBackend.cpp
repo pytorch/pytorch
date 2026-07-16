@@ -14,6 +14,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
@@ -224,10 +225,14 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const ::c10d::BroadcastOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
-  ensureInitialized(tensors.at(0).device());
+  auto tensor = tensors.at(0);
+  if (tensor.is_complex()) {
+    tensor = at::view_as_real(tensor);
+  }
+  ensureInitialized(tensor.device());
   ++sequence_number_;
   auto work = broadcastImpl(
-      tensors.at(0),
+      tensor,
       static_cast<int>(opts.rootRank),
       opts.asyncOp,
       operationTimeout(opts.timeout));
@@ -239,13 +244,19 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const ::c10d::AllreduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
-  ensureInitialized(tensors.at(0).device());
+  auto tensor = tensors.at(0);
+  if (tensor.is_complex()) {
+    TORCH_CHECK(
+        ::c10d::isComplexViewAsRealAllowed(opts.reduceOp),
+        "all_reduce does not support",
+        opts.reduceOp,
+        "on complex tensors");
+    tensor = at::view_as_real(tensor);
+  }
+  ensureInitialized(tensor.device());
   ++sequence_number_;
   auto work = all_reduce(
-      tensors.at(0),
-      opts.reduceOp,
-      opts.asyncOp,
-      operationTimeout(opts.timeout));
+      tensor, opts.reduceOp, opts.asyncOp, operationTimeout(opts.timeout));
   work->setOutputs(tensors);
   return work;
 }
@@ -273,10 +284,19 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ::c10d::ReduceOptions& opts) {
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
-  ensureInitialized(tensors.at(0).device());
+  auto tensor = tensors.at(0);
+  if (tensor.is_complex()) {
+    TORCH_CHECK(
+        ::c10d::isComplexViewAsRealAllowed(opts.reduceOp),
+        "reduce does not support",
+        opts.reduceOp,
+        "on complex tensors");
+    tensor = at::view_as_real(tensor);
+  }
+  ensureInitialized(tensor.device());
   ++sequence_number_;
   auto work = reduceImpl(
-      tensors.at(0),
+      tensor,
       static_cast<int>(opts.rootRank),
       opts.reduceOp,
       opts.asyncOp,

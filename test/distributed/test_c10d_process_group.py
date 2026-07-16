@@ -59,6 +59,30 @@ class AbstractProcessGroupTest(C10dBackendTest):
             work.wait()
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
+    def test_async_work_lifetime(self):
+        self._init_pg()
+        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+        del work
+        dist.barrier()
+        expected = torch.full_like(tensor, sum(range(1, self.world_size + 1)))
+        self.assertEqual(tensor, expected)
+
+        tensor = torch.ones(4, device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+        del tensor
+        del work
+        dist.barrier()
+
+    def test_work_future(self):
+        self._init_pg()
+        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+        work = dist.all_reduce(tensor, async_op=True)
+        future = work.get_future()
+        future.wait()
+        expected = torch.full_like(tensor, sum(range(1, self.world_size + 1)))
+        self.assertEqual(tensor, expected)
+
 
 instantiate_backend_tests(
     globals(), "ProcessGroup", AbstractProcessGroupTest, C10D_BACKENDS
