@@ -1618,27 +1618,6 @@ class FunctionDecoratedByContextlibContextManagerVariable(
             **kwargs,
         )
 
-    def _build_inline_tracer(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> "InliningGeneratorInstructionTranslator":
-        # NOTE: This only exists to not break support for context manager when
-        # config.enable_faithful_generator_behavior = False and
-        # config.enable_trace_contextlib = True. In case the former is false,
-        # Dynamo should still be able to trace through @contextmanager functions
-        tracer = super()._build_inline_tracer(tx, args, kwargs)
-        if not isinstance(
-            tracer,
-            torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
-        ):
-            raise AssertionError(
-                f"expected InliningGeneratorInstructionTranslator, got {type(tracer)}"
-            )
-        tracer.is_generator_from_ctx_manager = True
-        return tracer
-
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
