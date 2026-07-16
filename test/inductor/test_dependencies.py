@@ -15,7 +15,7 @@ from torch._inductor.ir import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
-from torch.testing._internal.inductor_utils import  HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
