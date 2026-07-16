@@ -23,6 +23,15 @@ from ..utils import (
     istype,
     np,
     raise_args_mismatch,
+    type_implements_nb_add,
+    type_implements_nb_and,
+    type_implements_nb_index,
+    type_implements_nb_lshift,
+    type_implements_nb_multiply,
+    type_implements_nb_or,
+    type_implements_nb_rshift,
+    type_implements_nb_subtract,
+    type_implements_nb_xor,
     unpack_iterable,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -474,7 +483,6 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         # CPython: int and bool define nb_index (returns self for int,
         # int(self) for bool). All other constant types do not.
-        from .object_protocol import type_implements_nb_index
 
         if type_implements_nb_index(type(self.value)):
             return ConstantVariable.create(operator.index(self.value))
@@ -532,7 +540,6 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         # CPython: only int defines nb_lshift; bool inherits via slot inheritance.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5489 (long_lshift)
-        from .object_protocol import type_implements_nb_lshift
 
         return self._nb_binary_impl(
             tx, other, operator.lshift, type_implements_nb_lshift, reverse
@@ -546,7 +553,6 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         # CPython: only int defines nb_rshift; bool inherits via slot inheritance.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5526 (long_rshift)
-        from .object_protocol import type_implements_nb_rshift
 
         return self._nb_binary_impl(
             tx, other, operator.rshift, type_implements_nb_rshift, reverse
@@ -648,7 +654,6 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1319 (set_or)
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L6028-L6030 (type_as_number.nb_or)
         # bool inherits int's nb_or via slot inheritance.
-        from .object_protocol import type_implements_nb_or
 
         return self._nb_binary_impl(
             tx, other, operator.or_, type_implements_nb_or, reverse
@@ -664,7 +669,6 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L3819-L3824 (long_sub_method)
         # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L598-L606 (float_sub)
         # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L494-L503 (COMPLEX_BINOP(sub, diff))
-        from .object_protocol import type_implements_nb_subtract
 
         return self._nb_binary_impl(
             tx, other, operator.sub, type_implements_nb_subtract, reverse
@@ -682,7 +686,6 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L506 (complex_mul)
         # str/bytes/bytearray do NOT have nb_multiply — they go through sq_repeat,
         # so this method should not see them as ``self``.
-        from .object_protocol import type_implements_nb_multiply
 
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
@@ -726,8 +729,6 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5574 (long_and)
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1506-L1518 (set_and)
         # bool inherits int's nb_and via slot inheritance.
-        from .object_protocol import type_implements_nb_and
-
         return self._nb_binary_impl(
             tx, other, operator.and_, type_implements_nb_and, reverse
         )
@@ -742,7 +743,6 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5587 (long_xor)
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1984-L1990 (set_xor)
         # bool inherits int's nb_xor via slot inheritance.
-        from .object_protocol import type_implements_nb_xor
 
         return self._nb_binary_impl(
             tx, other, operator.xor, type_implements_nb_xor, reverse
@@ -778,7 +778,6 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L3800 (long_add)
         # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L559 (float_add)
         # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L720 (COMPLEX_BINOP(add, sum))
-        from .object_protocol import type_implements_nb_add
 
         return self._nb_binary_impl(
             tx, other, operator.add, type_implements_nb_add, reverse

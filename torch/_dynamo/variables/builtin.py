@@ -77,6 +77,8 @@ from ..utils import (
     raise_args_mismatch,
     str_methods,
     tensortype_to_dtype,
+    type_implements_mp_length,
+    type_implements_sq_length,
     unpack_iterable,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
@@ -124,8 +126,6 @@ from .object_protocol import (
     python_constant_richcompare_impl,
     ternary_iop,
     ternary_op,
-    type_implements_mp_length,
-    type_implements_sq_length,
     vt_getitem,
     vt_identity_compare,
 )
