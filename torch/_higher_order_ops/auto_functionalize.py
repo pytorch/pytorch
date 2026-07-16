@@ -1151,7 +1151,7 @@ def auto_functionalized_v2_proxy(
         # Below code materializes the callable inputs to the hop as graph modules.
         # kwargs may contain general callables, that are not proxable e.g. FunctionWithNoFreeVars
         # this could happen when we auto_functionalize the backward of the hop,
-        # where backward fn is a callablle that wraps forward graph module.
+        # where backward fn is a callable that wraps forward graph module.
         # This function materialize the callable args according to the schema of the hop.
 
         # We cannot materialize the callables in kwargs directly because the inputs to callable

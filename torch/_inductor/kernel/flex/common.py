@@ -13,6 +13,7 @@ import torch
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._sympy.functions import Mod
 
 
 if TYPE_CHECKING:
@@ -47,6 +48,28 @@ from ...utils import load_template
 
 
 SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
+
+
+def can_skip_boundary_checks(seq_len, sparse_block_size) -> bool:
+    """True when per-tile bounds masking can be skipped along this dim.
+
+    This is decided before a config is chosen, so divisibility is checked
+    against 128, the max (and LCM) of all candidate pow2 tile sizes for
+    inner block_m/n.
+    """
+    return V.graph.sizevars.statically_known_true(
+        sympy.And(
+            sympy.Eq(Mod(seq_len, 128), 0),
+            sympy.Or(
+                sympy.Eq(Mod(seq_len, sparse_block_size), 0),
+                sympy.Ge(sparse_block_size, seq_len),
+            ),
+        )
+    )
+
+
+def is_tensor_ir_node(node: object) -> bool:
+    return isinstance(node, IRNode) and node.has_tensor_output()
 
 
 def _flex_kernel_options_example(kind: str) -> str:
@@ -87,30 +110,44 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
     """To support backwards on captured buffers we register a specific lowering for our specific custom up"""
     # Always accumulate into fp32 then cast
     grad = _full(0, values.get_device(), torch.float32, shape)
-    assert isinstance(grad, TensorBox)
+    if not isinstance(grad, TensorBox):
+        raise AssertionError(f"Expected TensorBox, got {type(grad)}")
     grad.realize()
     x_size = grad.get_size()
     values = to_dtype(values, grad.get_dtype())
-    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
-    indices, tensor_indices = check_and_broadcast_indices(indices, grad.get_device())
-    # We can use the first one since they are all required to be the same size
-    tensor_size = list(indices[tensor_indices[0]].get_size())
-    indexed_size = [x_size[i] for i in range(len(indices))]
-
-    expected_vals_size, inner_fn = index_output_size_and_inner_fn(
-        x_size,
-        indices,
-        tensor_indices,
-        tensor_size,
-        indices_loaders,
-        indexed_size,
-        None,
-        check=True,
-    )
-
-    values = expand(values, expected_vals_size)
     device = grad.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError("device must not be None")
+    if not indices:
+        if shape:
+            raise AssertionError(
+                "zeros_and_scatter with no indices only supports scalar outputs"
+            )
+        expected_vals_size = values.get_size()
+
+        def inner_fn(index):
+            return []
+
+    else:
+        indices_loaders = [i.make_loader() if i is not None else None for i in indices]
+        indices, tensor_indices = check_and_broadcast_indices(
+            indices, grad.get_device()
+        )
+        # We can use the first one since they are all required to be the same size
+        tensor_size = list(indices[tensor_indices[0]].get_size())
+        indexed_size = [x_size[i] for i in range(len(indices))]
+
+        expected_vals_size, inner_fn = index_output_size_and_inner_fn(
+            x_size,
+            indices,
+            tensor_indices,
+            tensor_size,
+            indices_loaders,
+            indexed_size,
+            None,
+            check=True,
+        )
+        values = expand(values, expected_vals_size)
     scatter = Scatter(
         device=device,
         dtype=grad.get_dtype(),
@@ -174,16 +211,17 @@ def build_subgraph_module_buffer(
         if isinstance(output_buffer, ComputedBuffer):
             # These nodes are coming from the output of zeros_and_scatter
             return output_buffer
-        assert isinstance(output_buffer, TensorBox), (
-            "The output node for flex attention's subgraph must be a TensorBox, but got: ",
-            type(output_buffer),
-        )
-        assert isinstance(output_buffer.data, StorageBox), (
-            "The output node for the flex attention subgraph must be a StorageBox, but got: ",
-            type(output_buffer),
-        )
+        if not isinstance(output_buffer, TensorBox):
+            raise AssertionError(
+                f"The output node for flex attention's subgraph must be a TensorBox, but got: {type(output_buffer)}"
+            )
+        if not isinstance(output_buffer.data, StorageBox):
+            raise AssertionError(
+                f"The output node for the flex attention subgraph must be a StorageBox, but got: {type(output_buffer.data)}"
+            )
         device = output_buffer.data.get_device()
-        assert device is not None
+        if device is None:
+            raise AssertionError("device must not be None for output buffer")
         subgraph_buffer = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
@@ -327,9 +365,8 @@ def construct_strides(
 ) -> Sequence[_IntLike]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
-    assert len(sizes) == len(fill_order), (
-        "Length of sizes must match the length of the fill order"
-    )
+    if len(sizes) != len(fill_order):
+        raise AssertionError("Length of sizes must match the length of the fill order")
     strides: list[_IntLike] = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
