@@ -879,34 +879,49 @@ class ViewAndMutationMeta:
         )
 
 
-@dataclass
 class InductorFwMetadata:
     """
-    Reduced-surface view of ViewAndMutationMeta containing only the fields
-    that Inductor (and other out-of-tree backends) actually consume via
-    TracingContext.fw_metadata.
+    A live proxy over ViewAndMutationMeta that exposes only the fields
+    Inductor needs. Using a proxy (rather than a one-time snapshot) ensures
+    that later mutations to the underlying metadata -- such as the
+    bw_donated_idxs reset in runtime_wrappers.py and the DDPOptimizer
+    per-bucket fw_metadata swap -- are visible to Inductor.
 
     See https://github.com/pytorch/pytorch/issues/114403
     """
 
-    input_info: list[InputAliasInfo]
-    output_info: list[OutputAliasInfo]
-    static_input_indices: list[int]
-    num_mutated_inp_runtime_indices: int
-    bw_donated_idxs: list[int] | None = None
+    def __init__(self, meta: "ViewAndMutationMeta") -> None:
+        self._meta = meta
+
+    @property
+    def input_info(self) -> "list[InputAliasInfo]":
+        return self._meta.input_info
+
+    @property
+    def output_info(self) -> "list[OutputAliasInfo]":
+        return self._meta.output_info
+
+    @property
+    def static_input_indices(self) -> "list[int]":
+        return self._meta.static_input_indices
+
+    @static_input_indices.setter
+    def static_input_indices(self, value: "list[int]") -> None:
+        self._meta.static_input_indices = value
+
+    @property
+    def num_mutated_inp_runtime_indices(self) -> int:
+        return self._meta.num_mutated_inp_runtime_indices
+
+    @property
+    def bw_donated_idxs(self) -> "list[int] | None":
+        return self._meta.bw_donated_idxs
 
     @staticmethod
     def from_view_and_mutation_meta(
-        meta: ViewAndMutationMeta,
-    ) -> InductorFwMetadata:
-        return InductorFwMetadata(
-            input_info=meta.input_info,
-            output_info=meta.output_info,
-            static_input_indices=meta.static_input_indices,
-            num_mutated_inp_runtime_indices=meta.num_mutated_inp_runtime_indices,
-            bw_donated_idxs=meta.bw_donated_idxs,
-        )
-
+        meta: "ViewAndMutationMeta",
+    ) -> "InductorFwMetadata":
+        return InductorFwMetadata(meta)
 
 @dataclass(eq=False)
 class SubclassMeta:
