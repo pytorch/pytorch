@@ -128,6 +128,7 @@ def get_backward_nested_region_config(
         return replace(
             fw_config,
             inductor_config_patches=fw_config.bw_inductor_config_patches,
+            bw_inductor_config_patches=None,
         )
     return fw_config
 
