@@ -161,7 +161,7 @@ struct TORCH_API Engine {
   // for the graph.
   //
   // NB: This API should only be used by internal autograd specific
-  // machinery and shouldn't be exposed to users in anyway.
+  // machinery and shouldn't be exposed to users in any way.
   virtual c10::intrusive_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       c10::intrusive_ptr<Node> graph_root,

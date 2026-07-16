@@ -361,7 +361,7 @@ class TransformerEncoder(Module):
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
-        # this attribute saves the value providedat object construction
+        # this attribute saves the value provided at object construction
         self.enable_nested_tensor = enable_nested_tensor
         # this attribute controls whether nested tensors are used
         self.use_nested_tensor = enable_nested_tensor
