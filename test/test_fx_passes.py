@@ -120,7 +120,7 @@ class TestPartitionFunctions:
         return relu, relu_1
 
     @staticmethod
-    def forward_depth_window_regression(a, b):
+    def forward_interleaved_unsupported_branches(a, b):
         rng = random.Random(0)
         num_nodes = 8
         num_unsupported = 5
@@ -532,7 +532,7 @@ class TestFXGraphPasses(JitTestCase):
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
 
-    def test_partitioner_skips_fast_stop_on_unrelated_deep_unsupporteds(self):
+    def test_partitioner_scans_past_unrelated_unsupported_chain(self):
         def fn(a, b):
             base = operator.add(a, b)
             blocked = base.relu()
@@ -559,8 +559,10 @@ class TestFXGraphPasses(JitTestCase):
             f"Unexpected partition nodes: {nodes_names}",
         )
 
-    def test_partitioner_depth_window_uses_input_and_output(self):
-        traced = symbolic_trace(TestPartitionFunctions.forward_depth_window_regression)
+    def test_partitioner_scans_interleaved_unsupported_branches(self):
+        traced = symbolic_trace(
+            TestPartitionFunctions.forward_interleaved_unsupported_branches
+        )
         supported_ops = MockOperatorSupport()
         partitioner = CapabilityBasedPartitioner(
             traced,
@@ -572,6 +574,576 @@ class TestFXGraphPasses(JitTestCase):
         self.assertEqual(len(partitions_name), 1)
         self.assertEqual(set(partitions_name[0]), {"add", "add_1", "add_2"})
 
+    def test_partitioner_preserves_operator_support_call_order(self):
+        class SecondCallSupport(OperatorSupport):
+            def __init__(self):
+                self.calls = []
+
+            def is_node_supported(self, submodules, node):
+                self.calls.append(node.name)
+                return node.op == "call_function" and len(self.calls) == 2
+
+        def fn(x):
+            add = x + x
+            return add + x
+
+        traced = symbolic_trace(fn)
+        support = SecondCallSupport()
+        partitions = CapabilityBasedPartitioner(
+            traced,
+            support,
+            allows_single_node_partition=True,
+        ).propose_partitions()
+        self.assertEqual(support.calls, ["output", "add_1", "add", "x"])
+        self.assertEqual(
+            [
+                (
+                    partition.id,
+                    [
+                        (node.name, node_order)
+                        for node, node_order in partition.nodes.items()
+                    ],
+                )
+                for partition in partitions
+            ],
+            [(0, [("add_1", 1)])],
+        )
+
+    def test_partitioner_fast_path_reassigns_dead_getitem(self):
+        class SupportAllButDeadGetitem(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return node.op == "call_function" and node.name != "getitem"
+
+        def fn(x):
+            parts = torch.split(x, 1, dim=0)
+            parts[0]
+            return parts[1] + 1
+
+        traced = symbolic_trace(fn)
+        partitions = CapabilityBasedPartitioner(
+            traced,
+            SupportAllButDeadGetitem(),
+            allows_single_node_partition=True,
+        ).propose_partitions()
+        self.assertEqual(
+            [
+                (
+                    partition.id,
+                    {
+                        node.name: node_order
+                        for node, node_order in partition.nodes.items()
+                    },
+                )
+                for partition in partitions
+            ],
+            [
+                (
+                    1,
+                    {
+                        "split": 4,
+                        "getitem_1": 2,
+                        "add": 1,
+                        "getitem": None,
+                    },
+                )
+            ],
+        )
+
+    @parametrize(
+        "skip_horizontal_fusion, allows_single_node_partition",
+        [(False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_partitioner_reassigns_unsupported_getitems_after_sort(
+        self, skip_horizontal_fusion, allows_single_node_partition
+    ):
+        class SupportAllButGetitem(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return (
+                    node.op == "call_function" and node.target is not operator.getitem
+                )
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                parts = torch.split(x, 1, dim=0)
+                return parts[0] + parts[1]
+
+        traced = symbolic_trace(M())
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            SupportAllButGetitem(),
+            allows_single_node_partition=allows_single_node_partition,
+            skip_horizontal_fusion=skip_horizontal_fusion,
+        )
+        partitions = partitioner.propose_partitions()
+        actual_partitions = [
+            (
+                partition.id,
+                {
+                    node.name: node_order
+                    for node, node_order in partition.nodes.items()
+                },
+            )
+            for partition in partitions
+        ]
+        expected_partitions = (
+            [
+                (0, {"add": 1}),
+                (1, {"split": 4, "getitem": None, "getitem_1": None}),
+            ]
+            if allows_single_node_partition
+            else []
+        )
+        self.assertEqual(actual_partitions, expected_partitions)
+
+        fused = partitioner.fuse_partitions(partitions)
+        x = torch.rand(2)
+        self.assertEqual(fused(x), M()(x))
+
+    @parametrize(
+        "skip_horizontal_fusion, allows_single_node_partition",
+        [(False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_partitioner_reassigns_nested_unsupported_getitems(
+        self, skip_horizontal_fusion, allows_single_node_partition
+    ):
+        class SupportProducerAndAdd(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return (
+                    node.op == "call_function"
+                    and node.target in {_nested_tuple_producer, operator.add}
+                )
+
+        traced = symbolic_trace(
+            TestNestedGetitemFunctions.forward_nested_getitem_cross_partition
+        )
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            SupportProducerAndAdd(),
+            allows_single_node_partition=allows_single_node_partition,
+            skip_horizontal_fusion=skip_horizontal_fusion,
+        )
+        partitions = partitioner.propose_partitions()
+        if allows_single_node_partition:
+            node_to_partition = {
+                node: partition for partition in partitions for node in partition.nodes
+            }
+            producer = next(
+                node
+                for node in traced.graph.nodes
+                if node.op == "call_function" and node.target is _nested_tuple_producer
+            )
+            producer_partition = node_to_partition[producer]
+            getitems = [
+                node
+                for node in traced.graph.nodes
+                if node.op == "call_function" and node.target is operator.getitem
+            ]
+            self.assertEqual(len(getitems), 3)
+            for getitem in getitems:
+                self.assertIs(node_to_partition[getitem], producer_partition)
+                self.assertIsNone(producer_partition.nodes[getitem])
+        else:
+            self.assertEqual(
+                [
+                    [
+                        (node.name, node_order)
+                        for node, node_order in partition.nodes.items()
+                    ]
+                    for partition in partitions
+                ],
+                [[("add", 2), ("add_1", 1)]],
+            )
+
+        fused = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        self.assertEqual(
+            fused(a, b, c),
+            TestNestedGetitemFunctions.forward_nested_getitem_cross_partition(a, b, c),
+        )
+
+    @parametrize(
+        "skip_horizontal_fusion, allows_single_node_partition",
+        [(False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_partitioner_removes_getitems_for_unsupported_producer(
+        self, skip_horizontal_fusion, allows_single_node_partition
+    ):
+        class SupportGetitemAndAdd(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return (
+                    node.op == "call_function"
+                    and node.target in {operator.getitem, operator.add}
+                )
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                parts = torch.split(x, 1, dim=0)
+                return parts[0] + parts[1]
+
+        traced = symbolic_trace(M())
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            SupportGetitemAndAdd(),
+            allows_single_node_partition=allows_single_node_partition,
+            skip_horizontal_fusion=skip_horizontal_fusion,
+        )
+        partitions = partitioner.propose_partitions()
+        expected_partitions = (
+            [{"add": 1}] if allows_single_node_partition else []
+        )
+        self.assertEqual(
+            [
+                {node.name: node_order for node, node_order in partition.nodes.items()}
+                for partition in partitions
+            ],
+            expected_partitions,
+        )
+
+        fused = partitioner.fuse_partitions(partitions)
+        x = torch.rand(2)
+        self.assertEqual(fused(x), M()(x))
+
+    @parametrize(
+        "skip_horizontal_fusion, allows_single_node_partition",
+        [(False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_partitioner_reassigns_mixed_support_getitems_with_none_order(
+        self, skip_horizontal_fusion, allows_single_node_partition
+    ):
+        class MixedGetitemSupport(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return node.name in {"split", "getitem", "add"}
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                parts = torch.split(x, 1, dim=0)
+                return parts[0] + parts[1]
+
+        traced = symbolic_trace(M())
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            MixedGetitemSupport(),
+            allows_single_node_partition=allows_single_node_partition,
+            skip_horizontal_fusion=skip_horizontal_fusion,
+        )
+        partitions = partitioner.propose_partitions()
+        expected_partitions = (
+            [
+                (1, {"add": 1}),
+                (2, {"split": 4, "getitem": None, "getitem_1": None}),
+            ]
+            if allows_single_node_partition
+            else []
+        )
+        self.assertEqual(
+            [
+                (
+                    partition.id,
+                    {
+                        node.name: node_order
+                        for node, node_order in partition.nodes.items()
+                    },
+                )
+                for partition in partitions
+            ],
+            expected_partitions,
+        )
+
+        fused = partitioner.fuse_partitions(partitions)
+        x = torch.rand(2)
+        self.assertEqual(fused(x), M()(x))
+
+    @parametrize(
+        "skip_horizontal_fusion, allows_single_node_partition",
+        [(False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_partitioner_preserves_fully_supported_getitems(
+        self, skip_horizontal_fusion, allows_single_node_partition
+    ):
+        class SupportAllCalls(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return node.op == "call_function"
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                parts = torch.split(x, 1, dim=0)
+                return parts[0] + parts[1]
+
+        traced = symbolic_trace(M())
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            SupportAllCalls(),
+            allows_single_node_partition=allows_single_node_partition,
+            skip_horizontal_fusion=skip_horizontal_fusion,
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(
+            [
+                (
+                    partition.id,
+                    {
+                        node.name: node_order
+                        for node, node_order in partition.nodes.items()
+                    },
+                )
+                for partition in partitions
+            ],
+            [(1, {"split": 4, "getitem": 3, "getitem_1": 2, "add": 1})],
+        )
+
+        fused = partitioner.fuse_partitions(partitions)
+        x = torch.rand(2)
+        self.assertEqual(fused(x), M()(x))
+
+    @parametrize(
+        "skip_horizontal_fusion, allows_single_node_partition",
+        [(False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_partitioner_removes_nested_getitems_for_unsupported_producer(
+        self, skip_horizontal_fusion, allows_single_node_partition
+    ):
+        class SupportGetitemAndAdd(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return (
+                    node.op == "call_function"
+                    and node.target in {operator.getitem, operator.add}
+                )
+
+        traced = symbolic_trace(
+            TestNestedGetitemFunctions.forward_nested_getitem_cross_partition
+        )
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            SupportGetitemAndAdd(),
+            allows_single_node_partition=allows_single_node_partition,
+            skip_horizontal_fusion=skip_horizontal_fusion,
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertFalse(
+            any(
+                node.target is operator.getitem
+                for partition in partitions
+                for node in partition.nodes
+                if node.op == "call_function"
+            )
+        )
+
+        fused = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        self.assertEqual(
+            fused(a, b, c),
+            TestNestedGetitemFunctions.forward_nested_getitem_cross_partition(a, b, c),
+        )
+
+    def test_partitioner_scans_past_blocklisted_sibling_branch(self):
+        class AllCallsButSecondRelu(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return node.op == "call_function" and node.name != "relu_1"
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a = x + 1
+                b = torch.relu(a)
+                c = b + 2
+                d = torch.tanh(c)
+                e = b + 3
+                f = torch.relu(e)
+                g = d + f
+                h = g + b
+                return h + 4
+
+        traced = symbolic_trace(M())
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            AllCallsButSecondRelu(),
+            allows_single_node_partition=True,
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(
+            {frozenset(node.name for node in partition.nodes) for partition in partitions},
+            {
+                frozenset({"add", "relu", "add_2"}),
+                frozenset({"add_1", "tanh", "add_3", "add_4", "add_5"}),
+            },
+        )
+
+        fused = partitioner.fuse_partitions(partitions)
+        x = torch.rand(4)
+        self.assertEqual(fused(x), M()(x))
+
+    def test_partitioner_scans_past_assigned_sibling_branch(self):
+        class AddMulSupport(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return (
+                    node.op == "call_function"
+                    and node.target in {operator.add, operator.mul}
+                )
+
+        class M(torch.nn.Module):
+            def forward(self, x, z):
+                a = x + z
+                b = a * a
+                sibling = z * x
+                f = b * b
+                blocked = torch.sigmoid(f)
+                sibling = sibling * z
+                out = blocked * sibling
+                return out, f
+
+        traced = symbolic_trace(M())
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            AddMulSupport(),
+            allows_single_node_partition=True,
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(
+            {frozenset(node.name for node in partition.nodes) for partition in partitions},
+            {
+                frozenset({"add", "mul", "mul_2"}),
+                frozenset({"mul_1", "mul_3", "mul_4"}),
+            },
+        )
+
+        fused = partitioner.fuse_partitions(partitions)
+        x, z = torch.rand(4), torch.rand(4)
+        self.assertEqual(fused(x, z), M()(x, z))
+
+    def test_partitioner_general_path_ordered_signature(self):
+        class NameSupport(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return node.name in {"add", "add_1", "add_3"}
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                n0 = x + y
+                n1 = y + x
+                n2 = n1 + x
+                n3 = n0 + n2
+                return n3, n0, n2
+
+        traced = symbolic_trace(M())
+        partitions = CapabilityBasedPartitioner(
+            traced,
+            NameSupport(),
+            allows_single_node_partition=True,
+        ).propose_partitions()
+        self.assertEqual(
+            [
+                (
+                    partition.id,
+                    [
+                        (node.name, node_order)
+                        for node, node_order in partition.nodes.items()
+                    ],
+                )
+                for partition in partitions
+            ],
+            [
+                (1, [("add_1", 3)]),
+                (2, [("add", 4), ("add_3", 1)]),
+            ],
+        )
+
+    @parametrize(
+        "skip_horizontal_fusion, allows_single_node_partition, non_compute, allowed",
+        [
+            (skip_horizontal_fusion, allows_single_node_partition, non_compute, allowed)
+            for skip_horizontal_fusion in (False, True)
+            for allows_single_node_partition in (False, True)
+            for non_compute in (False, True)
+            for allowed in (False, True)
+        ],
+    )
+    def test_partitioner_single_node_filtering_options(
+        self,
+        skip_horizontal_fusion,
+        allows_single_node_partition,
+        non_compute,
+        allowed,
+    ):
+        def fn(a, b):
+            return a + b
+
+        traced = symbolic_trace(fn)
+        partitions = CapabilityBasedPartitioner(
+            traced,
+            MockOperatorSupport(),
+            allows_single_node_partition=allows_single_node_partition,
+            non_compute_ops=["_operator.add"] if non_compute else [],
+            allowed_single_node_partition_ops=(
+                ["_operator.add"] if allowed else []
+            ),
+            skip_horizontal_fusion=skip_horizontal_fusion,
+        ).propose_partitions()
+        keep_partition = allows_single_node_partition or (
+            allowed and not non_compute
+        )
+        self.assertEqual(
+            [
+                {node.name: node_order for node, node_order in partition.nodes.items()}
+                for partition in partitions
+            ],
+            [{"add": 1}] if keep_partition else [],
+        )
+
+    @parametrize(
+        "seed, skip_horizontal_fusion, allows_single_node_partition",
+        [
+            (seed, skip_horizontal_fusion, allows_single_node_partition)
+            for seed in (0, 1, 17, 20260716)
+            for skip_horizontal_fusion in (False, True)
+            for allows_single_node_partition in (False, True)
+        ],
+    )
+    def test_partitioner_randomized_dag_is_deterministic(
+        self,
+        seed,
+        skip_horizontal_fusion,
+        allows_single_node_partition,
+    ):
+        signatures = []
+        for _ in range(4):
+            rng = random.Random(seed)
+
+            def fn(a, b, c):
+                values = [a, b, c]
+                for _ in range(12):
+                    lhs = values[rng.randrange(len(values))]
+                    rhs = values[rng.randrange(len(values))]
+                    op = rng.randrange(4)
+                    if op == 0:
+                        value = operator.add(lhs, rhs)
+                    elif op == 1:
+                        value = operator.mul(lhs, rhs)
+                    elif op == 2:
+                        value = torch.relu(lhs)
+                    else:
+                        value = torch.sigmoid(lhs)
+                    values.append(value)
+                return tuple(values[-3:])
+
+            traced = symbolic_trace(fn)
+            partitions = CapabilityBasedPartitioner(
+                traced,
+                MockOperatorSupport(),
+                allows_single_node_partition=allows_single_node_partition,
+                skip_horizontal_fusion=skip_horizontal_fusion,
+            ).propose_partitions()
+            signatures.append(
+                tuple(
+                    (
+                        partition.id,
+                        tuple(
+                            (node.name, node_order)
+                            for node, node_order in partition.nodes.items()
+                        ),
+                    )
+                    for partition in partitions
+                )
+            )
+        self.assertTrue(all(signature == signatures[0] for signature in signatures))
+
     def test_partitioner_long_chain_scattered_unsupported(self):
         """Multiple supported regions separated by unsupported nodes form separate partitions
         and fuse correctly."""
@@ -581,7 +1153,20 @@ class TestFXGraphPasses(JitTestCase):
             traced, supported_ops, allows_single_node_partition=True
         )
         partitions = partitioner.propose_partitions()
-        self.assertGreaterEqual(len(partitions), 1)
+        self.assertEqual(
+            [
+                [
+                    (node.name, node_order)
+                    for node, node_order in partition.nodes.items()
+                ]
+                for partition in partitions
+            ],
+            [
+                [("add_4", 1)],
+                [("add_2", 4), ("add_3", 3)],
+                [("add", 7), ("add_1", 6)],
+            ],
+        )
 
         fused = partitioner.fuse_partitions(partitions)
         a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
@@ -598,7 +1183,19 @@ class TestFXGraphPasses(JitTestCase):
             traced, supported_ops, allows_single_node_partition=True
         )
         partitions = partitioner.propose_partitions()
-        self.assertGreaterEqual(len(partitions), 1)
+        self.assertEqual(
+            [
+                [
+                    (node.name, node_order)
+                    for node, node_order in partition.nodes.items()
+                ]
+                for partition in partitions
+            ],
+            [
+                [("add_1", 3), ("add_2", 1)],
+                [("add", 4)],
+            ],
+        )
 
         fused = partitioner.fuse_partitions(partitions)
         a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
@@ -615,7 +1212,16 @@ class TestFXGraphPasses(JitTestCase):
             traced, supported_ops, allows_single_node_partition=True
         )
         partitions = partitioner.propose_partitions()
-        self.assertGreaterEqual(len(partitions), 1)
+        self.assertEqual(
+            [
+                [
+                    (node.name, node_order)
+                    for node, node_order in partition.nodes.items()
+                ]
+                for partition in partitions
+            ],
+            [[("add", 4), ("add_1", 3), ("add_2", 1)]],
+        )
 
         fused = partitioner.fuse_partitions(partitions)
         a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
@@ -632,7 +1238,19 @@ class TestFXGraphPasses(JitTestCase):
             traced, supported_ops, allows_single_node_partition=True
         )
         partitions = partitioner.propose_partitions()
-        self.assertGreaterEqual(len(partitions), 1)
+        self.assertEqual(
+            [
+                [
+                    (node.name, node_order)
+                    for node, node_order in partition.nodes.items()
+                ]
+                for partition in partitions
+            ],
+            [
+                [("add_3", 1)],
+                [("add", 5), ("add_1", 4), ("add_2", 3)],
+            ],
+        )
 
         fused = partitioner.fuse_partitions(partitions)
         a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
@@ -648,7 +1266,19 @@ class TestFXGraphPasses(JitTestCase):
             traced, supported_ops, allows_single_node_partition=True
         )
         partitions = partitioner.propose_partitions()
-        self.assertGreaterEqual(len(partitions), 1)
+        self.assertEqual(
+            [
+                [
+                    (node.name, node_order)
+                    for node, node_order in partition.nodes.items()
+                ]
+                for partition in partitions
+            ],
+            [
+                [("add_1", 1)],
+                [("add", 4)],
+            ],
+        )
 
         fused = partitioner.fuse_partitions(partitions)
         a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
@@ -665,7 +1295,26 @@ class TestFXGraphPasses(JitTestCase):
             traced, supported_ops, allows_single_node_partition=True
         )
         partitions = partitioner.propose_partitions()
-        self.assertGreaterEqual(len(partitions), 1)
+        self.assertEqual(
+            [
+                [
+                    (node.name, node_order)
+                    for node, node_order in partition.nodes.items()
+                ]
+                for partition in partitions
+            ],
+            [
+                [
+                    ("add_1", 7),
+                    ("add_2", 6),
+                    ("add_3", 5),
+                    ("add_4", 3),
+                    ("add_5", 2),
+                    ("add_6", 1),
+                ],
+                [("add", 8)],
+            ],
+        )
 
         fused = partitioner.fuse_partitions(partitions)
         a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
@@ -719,10 +1368,56 @@ class TestFXGraphPasses(JitTestCase):
             traced, supported_ops, allows_single_node_partition=True
         )
         partitions = partitioner.propose_partitions()
-        # All should be in one partition via fast path
         self.assertEqual(len(partitions), 1)
-        nodes = {node.name for node in partitions[0].nodes}
-        self.assertEqual(nodes, {"add", "add_1", "add_2"})
+        self.assertEqual(partitions[0].id, 1)
+        self.assertEqual(
+            [
+                (node.name, node_order)
+                for node, node_order in partitions[0].nodes.items()
+            ],
+            [("add", 3), ("add_1", 2), ("add_2", 1)],
+        )
+
+    def test_partitioner_preserves_legacy_partition_ids_and_sequence(self):
+        class NameSupport(OperatorSupport):
+            def is_node_supported(self, submodules, node):
+                return node.name in {"add", "add_1", "add_3"}
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                n0 = y + x
+                n1 = x + y
+                n2 = n1 + x
+                n3 = n0 + n2
+                return n3, n0, n2
+
+        traced = symbolic_trace(M())
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            NameSupport(),
+            allows_single_node_partition=True,
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(
+            [
+                (
+                    partition.id,
+                    [
+                        (node.name, node_order)
+                        for node, node_order in partition.nodes.items()
+                    ],
+                )
+                for partition in partitions
+            ],
+            [
+                (1, [("add_1", 3)]),
+                (2, [("add", 4), ("add_3", 1)]),
+            ],
+        )
+
+        fused = partitioner.fuse_partitions(partitions)
+        x, y = torch.rand(4), torch.rand(4)
+        self.assertEqual(fused(x, y), M()(x, y))
 
     def test_partitioner_fast_path_unsupported_at_boundary(self):
         """Unsupported nodes only at input/output boundaries still use fast path."""
