@@ -62,7 +62,7 @@ using CodeImpl = interpreter::CodeImpl;
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
 // In particular we:
-// *  Computes whether a input to a node is the last use, so we can issue MOVE
+// *  Computes whether an input to a node is the last use, so we can issue MOVE
 //    rather than LOAD instructions.
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
@@ -934,7 +934,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (get_cpp_stacktraces_enabled()) {
         ss << e.what() << '\n';
       }
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error(std::move(ss).str());
     }
   }
 

@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_subclass import RedispatchTensor
 from torch._dynamo.utils import clone_input
@@ -942,10 +943,6 @@ def generate_tensor_like_override_tests(cls):
                 return 3.5
             elif arg_type == "bool":
                 return False
-            elif arg_type == "Dimname":
-                return ""
-            elif arg_type == "DimnameList":
-                return [""]
             elif arg_type.startswith("int"):
                 return 0
             elif arg_type == "Stream":
@@ -1413,7 +1410,7 @@ class TestResolveName(TestCase):
                 self.assertEqual(
                     eval(torch.overrides.resolve_name(c)),
                     c,
-                    msg=f"{c}, {torch.overrides.resolve_name(c)}"
+                    msg=lambda msg: f"{msg}\n{c}, {torch.overrides.resolve_name(c)}"
                 )
 
 class TestTorchFunctionWarning(TestCase):
@@ -1692,6 +1689,7 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertTrue(called)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/162586")
     def test_getitem_call(self):
         # This failed because the parser thinks the function is called to()
         # but it's actually called _parse_to()

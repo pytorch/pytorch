@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -151,7 +152,7 @@ class TestGenericPytree(TestCase):
                                 str(python_param.annotation),
                             ),
                             msg=(
-                                f"C++ parameter {cxx_param} "
+                                lambda msg: f"{msg}\nC++ parameter {cxx_param} "
                                 f"does not match Python parameter {python_param} "
                                 f"for API `{name}`"
                             ),
@@ -161,7 +162,7 @@ class TestGenericPytree(TestCase):
                             cxx_param.annotation,
                             python_param.annotation,
                             msg=(
-                                f"C++ parameter {cxx_param} "
+                                lambda msg: f"{msg}\nC++ parameter {cxx_param} "
                                 f"does not match Python parameter {python_param} "
                                 f"for API `{name}`"
                             ),
@@ -622,12 +623,12 @@ class TestGenericPytree(TestCase):
             self.assertEqual(
                 list(result.keys()),
                 list(tree.keys()),
-                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+                msg=lambda msg: f"{msg}\nDictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
             )
             self.assertEqual(
                 list(result.values()),
                 list(tree.values()),
-                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+                msg=lambda msg: f"{msg}\nDictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
             )
 
     @parametrize_pytree_module
@@ -1340,6 +1341,7 @@ if "optree" in sys.modules:
         finally:
             python_pytree._deregister_pytree_node(CustomClass)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182645")
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
         # non-default `__hash__`.
@@ -1381,6 +1383,7 @@ if "optree" in sys.modules:
             msg = "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
             self.assertIn(msg, str(e))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184507")
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass
         class ACustomPytree:

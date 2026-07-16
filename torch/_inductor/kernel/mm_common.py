@@ -14,7 +14,7 @@ from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from .. import config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
-from ..utils import load_template
+from ..utils import load_template, triton_type
 
 
 log = logging.getLogger(__name__)
@@ -47,7 +47,9 @@ def persistent_grouped_mm_grid(*args):
 def acc_type(dtype):
     if dtype in (torch.float16, torch.bfloat16):
         return "tl.float32"
-    return f"tl.{dtype}".replace("torch.", "")
+    if dtype.is_floating_point and dtype.itemsize == 1:  # fp8 dtypes
+        return "tl.float32"
+    return triton_type(dtype)
 
 
 def mm_args(
@@ -84,7 +86,8 @@ def mm_args(
             [*b, m, n],
         )
     else:
-        assert out_dtype is None, "out_dtype is ignored if layout is specified."
+        if out_dtype is not None:
+            raise AssertionError("out_dtype is ignored if layout is specified.")
     from ..lowering import expand
 
     others = [realize_inputs(expand(x, layout.size)) for x in others]
@@ -191,6 +194,26 @@ def use_native_matmul(mat1, mat2):
     return True
 
 
+def _use_small_mm_pointwise(m, k, n, layout) -> bool:
+    """Check if mm should be lowered to pointwise ops for small K and N.
+
+    For very small inner dimensions (K < 5 and N < 5) with M >= 64,
+    cuBLAS launch overhead dominates and a fused pointwise kernel is
+    faster (1.2-4.8x on H200).  M >= 64 excludes tiny matrices where
+    pointwise kernel launch overhead negates the benefit.  K,N < 5
+    avoids shapes where Triton codegen quality is unstable (K=5 regresses
+    at large M due to reduction-dimension alignment).  Disabled under
+    max_autotune to preserve template selection.
+    See https://github.com/pytorch/pytorch/issues/186348
+    """
+    if config.max_autotune or config.max_autotune_gemm:
+        return False
+    if layout.device.type in ("cpu", "mps"):
+        return False
+    skt = V.graph.sizevars.statically_known_true
+    return skt(m >= 64) and skt(k < 5) and skt(n < 5)
+
+
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """
     Check if input tensors and output layout have static shapes and non-zero sizes.
@@ -252,7 +275,8 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
     sizes = [mat1.get_size(), mat2.get_size(), layout.size]
     strides = [mat1.get_stride(), mat2.get_stride(), layout.stride]
     for size, stride in zip(sizes, strides):
-        assert len(size) == len(stride) == 3, "Expect 3D tensors"
+        if not (len(size) == len(stride) == 3):
+            raise AssertionError("Expect 3D tensors")
         if stride[0] != 0 and stride[0] != sympy_product(size[1:]):
             return False
 
@@ -261,6 +285,3 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
 
 _KERNEL_TEMPLATE_DIR = Path(__file__).parent / "templates"
 load_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_DIR)
-
-_KERNEL_TEMPLATE_FB_DIR = Path(__file__).parent.parent / "fb" / "tlx_templates"
-load_fb_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_FB_DIR)

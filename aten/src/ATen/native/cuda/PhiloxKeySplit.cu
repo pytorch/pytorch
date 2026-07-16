@@ -52,20 +52,39 @@ __global__ void philox_key_split_kernel(
   }
 }
 
-__global__ void philox_key_fold_in_kernel(
+// Fold the scalar value `data` into every key.
+__device__ __forceinline__ void philox_key_fold_in_impl(
     const uint64_t* __restrict__ input,
     uint64_t* __restrict__ output,
     int64_t num_keys,
-    int64_t data) {
+    uint64_t data) {
   int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   for (; idx < num_keys; idx += static_cast<int64_t>(gridDim.x) * blockDim.x) {
     uint64_t seed = input[idx * 2];
     uint64_t offset = input[idx * 2 + 1];
 
     // Sample randomness to get the next (seed, offset pair).
-    uint4 r = philox_4x32(seed, offset + static_cast<uint64_t>(data));
+    uint4 r = philox_4x32(seed, offset + data);
     philox_derive_key(r, &output[idx * 2], &output[idx * 2 + 1]);
   }
+}
+
+// data passed by value (baked into the launch).
+__global__ void philox_key_fold_in_scalar_kernel(
+    const uint64_t* __restrict__ input,
+    uint64_t* __restrict__ output,
+    int64_t num_keys,
+    uint64_t data) {
+  philox_key_fold_in_impl(input, output, num_keys, data);
+}
+
+// data read from device (CUDA graph safe: not baked into the launch).
+__global__ void philox_key_fold_in_tensor_kernel(
+    const uint64_t* __restrict__ input,
+    uint64_t* __restrict__ output,
+    int64_t num_keys,
+    const uint64_t* __restrict__ data) {
+  philox_key_fold_in_impl(input, output, num_keys, data[0]);
 }
 
 } // anonymous namespace
@@ -127,11 +146,52 @@ Tensor _philox_key_fold_in_cuda(const Tensor& key, int64_t data) {
       at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 4);
 
   auto key_contig = key.contiguous();
-  philox_key_fold_in_kernel<<<num_blocks, block_size, 0,
+  philox_key_fold_in_scalar_kernel<<<num_blocks, block_size, 0,
       at::cuda::getCurrentCUDAStream()>>>(
       key_contig.data_ptr<uint64_t>(),
       output.data_ptr<uint64_t>(),
-      num_keys, data);
+      // Reinterpret the int64 schema arg as uint64.
+      num_keys, static_cast<uint64_t>(data));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  return output;
+}
+
+Tensor _philox_key_fold_in_tensor_cuda(const Tensor& key, const Tensor& data) {
+  TORCH_CHECK(key.dim() >= 1 && key.size(-1) == 2,
+      "_philox_key_fold_in: key must have shape (*batch, 2), got shape ",
+      key.sizes());
+  TORCH_CHECK(key.scalar_type() == kUInt64,
+      "_philox_key_fold_in: key must have dtype uint64, got ",
+      key.scalar_type());
+  TORCH_CHECK(data.scalar_type() == kUInt64,
+      "_philox_key_fold_in: data must have dtype uint64, got ",
+      data.scalar_type());
+  // TODO: Relax this and allow for arbitrary data shape that broadcasts with
+  // batched keys?
+  TORCH_CHECK(data.numel() == 1,
+      "_philox_key_fold_in: data must be a single value, got ",
+      data.numel(), " elements");
+
+  Tensor output = at::empty_like(key);
+  int64_t num_keys = key.numel() / 2;
+  if (num_keys == 0) {
+    return output;
+  }
+
+  auto key_contig = key.contiguous();
+
+  constexpr int block_size = 256;
+  int num_blocks = std::min(
+      static_cast<int>((num_keys + block_size - 1) / block_size),
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 4);
+
+  philox_key_fold_in_tensor_kernel<<<num_blocks, block_size, 0,
+      at::cuda::getCurrentCUDAStream()>>>(
+      key_contig.data_ptr<uint64_t>(),
+      output.data_ptr<uint64_t>(),
+      num_keys,
+      data.const_data_ptr<uint64_t>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;

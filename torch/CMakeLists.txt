@@ -89,7 +89,10 @@ set(TORCH_PYTHON_LINK_LIBRARIES
 if(USE_ASAN AND TARGET Sanitizer::address)
   list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::address)
 endif()
-if(USE_ASAN AND TARGET Sanitizer::undefined)
+# Skip UBSan on ROCm: see comment in cmake/Dependencies.cmake (UBSan + ASAN
+# on ROCm Clang produces misaligned ASAN global metadata that aborts at
+# startup).
+if(USE_ASAN AND TARGET Sanitizer::undefined AND NOT USE_ROCM)
   list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::undefined)
 endif()
 if(USE_LSAN AND TARGET Sanitizer::leak)
@@ -107,7 +110,16 @@ set(TORCH_PYTHON_LINK_FLAGS "")
 
 if(MSVC)
     string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES} onnx_library)
+    # Python headers use #pragma comment(lib, "pythonXX") which makes MSVC search
+    # for the library by bare name.  Add the directory so the linker can find it.
+    foreach(_pylib IN LISTS Python_LIBRARIES)
+      if(_pylib MATCHES "python[0-9].*\\.lib$")
+        get_filename_component(_pylib_dir "${_pylib}" DIRECTORY)
+        string(APPEND TORCH_PYTHON_LINK_FLAGS " /LIBPATH:\"${_pylib_dir}\"")
+        break()
+      endif()
+    endforeach()
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${Python_LIBRARIES} onnx_library)
     if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
@@ -310,6 +322,10 @@ if(USE_CUFILE AND NOT USE_ROCM)
   target_compile_definitions(torch_python PRIVATE USE_CUFILE)
 endif()
 
+if(BUILD_LAZY_TS_BACKEND)
+  target_compile_definitions(torch_python PRIVATE BUILD_LAZY_TS_BACKEND)
+endif()
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -424,10 +440,80 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
-    set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
+    set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
 endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+# Build the torch._C Python extension module from the thin stub that
+# forwards to torch_python.  This was historically built by setuptools;
+# building it here lets both setuptools and scikit-build-core use the
+# same code path.
+if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
+  Python_add_library(_C MODULE WITH_SOABI "${TORCH_SRC_DIR}/csrc/stub.c")
+  target_link_libraries(_C PRIVATE torch_python)
+  set_target_properties(_C PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
+    # libtorch_python.so is installed to lib/ relative to _C, so use
+    # $ORIGIN/lib as the install RPATH (the global default is just $ORIGIN).
+    INSTALL_RPATH "${_rpath_portable_origin}/lib"
+  )
+  if(NOT WIN32)
+    set_target_properties(_C PROPERTIES
+      C_VISIBILITY_PRESET "default"
+    )
+  endif()
+  # Install at the install prefix root, which maps to torch/ in the wheel
+  # via wheel.install-dir = "torch". The import library (Windows _C.lib) goes
+  # alongside the other import libs in torch/lib/, matching the layout that
+  # setup.py used before _C moved to CMake.
+  install(TARGETS _C
+    RUNTIME DESTINATION "."
+    LIBRARY DESTINATION "."
+    ARCHIVE DESTINATION "lib"
+  )
+
+  # ---[ NCCL EP extension (torch._nccl_ep)
+  # Optional standalone extension holding the NCCL EP bindings, imported lazily
+  # by torch/distributed/_token_switch.py so libtorch_cuda never references
+  # ncclEp*. How it links libnccl_ep follows how torch links NCCL:
+  #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
+  #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
+  #    headers baked from the submodule build dir; no nccl4py).
+  #  - USE_SYSTEM_NCCL=ON: __caffe2_nccl_ep is libnccl_ep.so, NEEDED-linked here
+  #    and resolved from the nccl4py wheel at runtime (RPATH to nccl/ep/lib; JIT
+  #    headers also from nccl4py, so nothing is baked).
+  if(USE_NCCL_EP)
+    Python_add_library(_nccl_ep MODULE WITH_SOABI
+      "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
+      "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep_pybind.cpp")
+    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL)
+    # torch_python: pybind + Tensor/ProcessGroup casters; torch_cuda:
+    # ProcessGroupNCCL::getCommPtr, getNcclDataType, CUDA stream, embedded NCCL;
+    # __caffe2_nccl_ep: libnccl_ep (static .a or shared .so) + nccl_ep headers.
+    target_link_libraries(_nccl_ep PRIVATE
+      torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
+    set_target_properties(_nccl_ep PROPERTIES
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch")
+    if(USE_SYSTEM_NCCL)
+      # Dynamic: resolve nccl4py's libnccl_ep.so (site-packages/nccl/ep/lib, one
+      # dir up from torch/ via $ORIGIN/..) at import.
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib;${_rpath_portable_origin}/../nccl/ep/lib")
+    else()
+      # Static: only torch's own libs needed; bake the in-tree JIT header dir so
+      # the extension self-configures NCCL_EP_HOME / NCCL_HOME at import.
+      target_compile_definitions(_nccl_ep PRIVATE
+        "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\"")
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib")
+    endif()
+    if(NOT WIN32)
+      set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")
+    endif()
+    install(TARGETS _nccl_ep RUNTIME DESTINATION "." LIBRARY DESTINATION ".")
+  endif()
+endif()
 
 # Generate torch/version.py from the appropriate CMake cache variables.
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
@@ -454,6 +540,9 @@ add_custom_target(
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_dependencies(torch_python gen_torch_version)
+# version.py is gitignored (generated), so scikit-build-core won't include it
+# via Python package collection. Install it explicitly via cmake instead.
+install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
 
 # Skip building this library under MacOS, since it is currently failing to build on Mac
 # Github issue #61930
@@ -470,6 +559,9 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     target_link_libraries(nnapi_backend PRIVATE torch)
   endif()
   target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt-header-only)
+  if(MSVC AND TORCH_PYTHON_LINK_FLAGS)
+    set_target_properties(nnapi_backend PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+  endif()
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
