@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from contextlib import contextmanager
+from torch.testing._internal.common_cuda import _get_torch_rocm_version
 from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS, IS_ARM64
 
 supported_qengines = list(torch.backends.quantized.supported_engines)
@@ -18,30 +19,6 @@ if 'qnnpack' in supported_qengines and any([IS_PPC, TEST_WITH_TSAN, IS_MACOS, IS
 # They are not supported on ARM64 architectures
 if IS_ARM64:
     supported_qengines = [qe for qe in supported_qengines if qe not in ('fbgemm', 'x86')]
-
-def _rocm_release_tuple() -> tuple[int, ...] | None:
-    r = getattr(torch.version, "rocm", None)
-    if r is None:
-        return None
-    try:
-        parts = [int(x) for x in str(r).split(".")[:3]]
-    except ValueError:
-        return None
-    while len(parts) < 3:
-        parts.append(0)
-    return (parts[0], parts[1], parts[2])
-
-
-def rocm_mxfp4_ext_scale_layout_available() -> bool:
-    """True when runtime ROCm is at least 7.13.0 (aligns with C++ EXT when ROCM_VERSION >= 71300)."""
-    t = _rocm_release_tuple()
-    return t is not None and t >= (7, 13, 0)
-
-
-def rocm_mxfp8_ext_scale_layout_available() -> bool:
-    """True when runtime ROCm is at least 7.14.0 (aligns with C++ EXT when ROCM_VERSION >= 71400)."""
-    t = _rocm_release_tuple()
-    return t is not None and t >= (7, 14, 0)
 
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
@@ -556,7 +533,7 @@ def to_blocked(input_matrix) -> torch.Tensor:
     rows, cols = input_matrix.shape
 
     if torch.version.hip:
-        if rocm_mxfp4_ext_scale_layout_available() or rocm_mxfp8_ext_scale_layout_available():
+        if _get_torch_rocm_version() >= (7, 13):
             padded_rows = ceil_div(rows, 32) * 32
             padded_cols = ceil_div(cols, 8) * 8
 
