@@ -946,6 +946,17 @@ class GraphLowering(torch.fx.Interpreter):
                 and n.args[1].meta["val"].size(1) <= 64  # type: ignore[union-attr, operator]
             )
 
+        def is_pointwise(n: torch.fx.Node) -> bool:
+            """1x1 kernel: MIOpen copies NHWC->NCHW on gfx950 (1.5-8x overhead).
+
+            Measured flop-weighted mean for convnextv2_nano 1x1 shapes on gfx950:
+            NHWC/NCHW ratio = 3.216 (see microbench in PR description).
+            """
+            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
+            if not isinstance(meta_val, torch.Tensor):
+                raise AssertionError(f"Expected torch.Tensor, got {type(meta_val)}")
+            return meta_val.size(2) == 1 and meta_val.size(3) == 1  # type: ignore[union-attr, operator]
+
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:
             flop_counts: dict[str, float] = defaultdict(float)
@@ -956,6 +967,8 @@ class GraphLowering(torch.fx.Interpreter):
 
                 if is_grouped(node):
                     node_type = "grouped"
+                elif is_pointwise(node):
+                    node_type = "pointwise"
                 elif is_small_channel(node):
                     node_type = "small"
                 elif is_in_out_channel(node):
@@ -971,6 +984,9 @@ class GraphLowering(torch.fx.Interpreter):
             # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
             # To regenerate these numbers follow https://gist.github.com/eellison/55d7a6ed6f39829d68ac56f95f4df5bb
             GROUPED_MULTIPLIER = 1.358
+            POINTWISE_MULTIPLIER = (
+                1.358  # NVIDIA: unmeasured, set conservative (same as GROUPED)
+            )
             DEFAULT_MULTIPLIER = 0.823
             IN_OUT_MULTIPLIER = 0.725
             SMALL_MULTIPLIER = 0.783
@@ -996,6 +1012,7 @@ class GraphLowering(torch.fx.Interpreter):
                     GROUPED_MULTIPLIER = 1.05
                 elif "gfx950" in _arch:
                     GROUPED_MULTIPLIER = 0.553
+                    POINTWISE_MULTIPLIER = 3.216  # measured: NHWC/NCHW flop-weighted mean for 1x1 on gfx950
                     DEFAULT_MULTIPLIER = 0.813
                     IN_OUT_MULTIPLIER = 0.642
                     SMALL_MULTIPLIER = 0.795
@@ -1003,6 +1020,7 @@ class GraphLowering(torch.fx.Interpreter):
             total_flops = sum(flop_counts.values())
             weighted_flops = (
                 flop_counts["grouped"] * GROUPED_MULTIPLIER
+                + flop_counts["pointwise"] * POINTWISE_MULTIPLIER
                 + flop_counts["small"] * SMALL_MULTIPLIER
                 + flop_counts["in_out"] * IN_OUT_MULTIPLIER
                 + flop_counts["default"] * DEFAULT_MULTIPLIER
