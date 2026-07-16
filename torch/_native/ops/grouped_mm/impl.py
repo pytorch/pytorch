@@ -29,6 +29,25 @@ def _valid_2d_or_3d_strides(t: torch.Tensor) -> bool:
     return False
 
 
+def _require_sm120_varlen_k_layout(mat1: torch.Tensor, mat2: torch.Tensor) -> None:
+    if not _valid_2d_or_3d_strides(mat1):
+        raise RuntimeError(
+            "QuACK SM120 grouped_mm 2d/2d requires mat1 to have a compact 16-byte aligned layout"
+        )
+    if not _valid_2d_or_3d_strides(mat2):
+        raise RuntimeError(
+            "QuACK SM120 grouped_mm 2d/2d requires mat2 to have a compact 16-byte aligned layout"
+        )
+    if mat1.stride(0) != 1:
+        raise RuntimeError(
+            "QuACK SM120 grouped_mm 2d/2d requires mat1 to be M-major with stride(0) == 1"
+        )
+    if mat2.stride(1) != 1:
+        raise RuntimeError(
+            "QuACK SM120 grouped_mm 2d/2d requires mat2 to be N-major with stride(1) == 1"
+        )
+
+
 def _grouped_mm_sm120_cond(
     self: torch.Tensor,
     mat2: torch.Tensor,
@@ -52,22 +71,42 @@ def _grouped_mm_sm120_cond(
 
     # QuACK's varlen-M GEMM maps the common grouped forward form:
     #   self: (total_m, k), mat2: (groups, k, n), offs: (groups,)
-    if self.dim() != 2 or mat2.dim() != 3 or offs is None:
+    # Its varlen-K path maps:
+    #   self: (m, total_k), mat2: (total_k, n), offs: (groups,)
+    if self.dim() != 2 or offs is None:
         return False
     if offs.dim() != 1 or offs.dtype != torch.int32 or offs.stride(0) != 1:
-        return False
-    if offs.numel() != mat2.size(0):
-        return False
-    if self.size(1) != mat2.size(1):
-        return False
-    if self.size(0) == 0 or self.size(1) == 0 or mat2.size(0) == 0 or mat2.size(2) == 0:
-        return False
-    if not _valid_2d_or_3d_strides(self) or not _valid_2d_or_3d_strides(mat2):
         return False
     is_cow = torch._C._is_cow_tensor  # pyrefly: ignore[missing-attribute]
     if is_cow(self) or is_cow(mat2) or is_cow(offs):
         return False
-    return True
+    if mat2.dim() == 3:
+        if offs.numel() != mat2.size(0):
+            return False
+        if self.size(1) != mat2.size(1):
+            return False
+        if (
+            self.size(0) == 0
+            or self.size(1) == 0
+            or mat2.size(0) == 0
+            or mat2.size(2) == 0
+        ):
+            return False
+        if not _valid_2d_or_3d_strides(self) or not _valid_2d_or_3d_strides(mat2):
+            return False
+        return True
+    if mat2.dim() == 2:
+        if self.size(1) != mat2.size(0):
+            return False
+        if (
+            self.size(0) == 0
+            or self.size(1) == 0
+            or mat2.size(1) == 0
+            or offs.numel() == 0
+        ):
+            return False
+        return True
+    return False
 
 
 def _grouped_mm_sm120_impl(
@@ -77,12 +116,18 @@ def _grouped_mm_sm120_impl(
     bias: torch.Tensor | None = None,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
-    from torch._vendor.quack.grouped_gemm import grouped_mm_sm120_varlen_m
+    from torch._vendor.quack.grouped_gemm import (
+        grouped_mm_sm120_varlen_k,
+        grouped_mm_sm120_varlen_m,
+    )
 
     assert offs is not None
     zero = torch.zeros(1, dtype=torch.int32, device=offs.device)
-    cu_seqlens_m = torch.cat((zero, offs))
-    return grouped_mm_sm120_varlen_m(self, mat2, cu_seqlens_m)
+    cu_seqlens = torch.cat((zero, offs))
+    if mat2.dim() == 2:
+        _require_sm120_varlen_k_layout(self, mat2)
+        return grouped_mm_sm120_varlen_k(self, mat2, cu_seqlens)
+    return grouped_mm_sm120_varlen_m(self, mat2, cu_seqlens)
 
 
 def register_to_dispatch() -> None:

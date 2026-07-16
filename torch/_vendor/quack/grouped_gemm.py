@@ -43,13 +43,15 @@ def _sm120_default_config() -> GemmConfig:
 
 @instrument_cutedsl_compile("aten::_grouped_mm")
 @jit_cache
-def _compile_sm120_grouped_mm_varlen_m(
+def _compile_sm120_grouped_mm_varlen(
     a_dtype,
     b_dtype,
     d_dtype,
     a_major,
     b_major,
     d_major,
+    varlen_m,
+    varlen_k,
     tile_shape_mn,
     cluster_shape_mnk,
     pingpong,
@@ -66,8 +68,8 @@ def _compile_sm120_grouped_mm_varlen_m(
         b_major,
         d_major,
         None,
-        varlen_m=True,
-        varlen_k=False,
+        varlen_m=varlen_m,
+        varlen_k=varlen_k,
         gather_A=False,
     )
     epi_args = GemmDefaultEpiMixin.EpilogueArguments(
@@ -84,7 +86,7 @@ def _compile_sm120_grouped_mm_varlen_m(
         False,
         l,
     )
-    varlen_args = make_fake_varlen_args(True, False, False, None)
+    varlen_args = make_fake_varlen_args(varlen_m, varlen_k, False, None)
     return compile_gemm_kernel(
         GemmDefaultSm120,
         a_dtype,
@@ -118,7 +120,7 @@ class _GroupedGemmPlan(NamedTuple):
 _plan_cache: dict[tuple, _GroupedGemmPlan] = {}
 
 
-def _plan(A: Tensor, B_lower: Tensor, out: Tensor) -> _GroupedGemmPlan:
+def _plan(A: Tensor, B_lower: Tensor, out: Tensor, *, varlen_m: bool, varlen_k: bool) -> _GroupedGemmPlan:
     config = _sm120_default_config()
     device_capacity = get_device_capacity(A.device)
     a_major, b_major, d_major, _ = get_majors(A, B_lower, out, None)
@@ -131,6 +133,8 @@ def _plan(A: Tensor, B_lower: Tensor, out: Tensor) -> _GroupedGemmPlan:
         a_major,
         b_major,
         d_major,
+        varlen_m,
+        varlen_k,
         device_capacity,
         config,
     )
@@ -139,13 +143,15 @@ def _plan(A: Tensor, B_lower: Tensor, out: Tensor) -> _GroupedGemmPlan:
         return cached
 
     cluster_shape_mnk = (config.cluster_m, config.cluster_n, config.cluster_k)
-    compiled_fn = _compile_sm120_grouped_mm_varlen_m(
+    compiled_fn = _compile_sm120_grouped_mm_varlen(
         a_dtype,
         b_dtype,
         d_dtype,
         a_major,
         b_major,
         d_major,
+        varlen_m,
+        varlen_k,
         (config.tile_m, config.tile_n),
         cluster_shape_mnk,
         config.pingpong,
@@ -187,7 +193,7 @@ def grouped_mm_sm120_varlen_m(A: Tensor, B: Tensor, cu_seqlens_m: Tensor) -> Ten
     """Run grouped GEMM for A[cu_seqlens_m[i]:cu_seqlens_m[i+1]] @ B[i]."""
     B_lower = B.permute(2, 1, 0)
     out = torch.empty((A.shape[0], B.shape[-1]), dtype=A.dtype, device=A.device)
-    plan = _plan(A, B_lower, out)
+    plan = _plan(A, B_lower, out, varlen_m=True, varlen_k=False)
     launch_gemm(
         plan,
         A,
@@ -197,5 +203,28 @@ def grouped_mm_sm120_varlen_m(A: Tensor, B: Tensor, cu_seqlens_m: Tensor) -> Ten
         plan.epi_static,
         plan.scheduler_static,
         make_varlen_args(cu_seqlens_m, None, None),
+    )
+    return out
+
+
+def grouped_mm_sm120_varlen_k(A: Tensor, B: Tensor, cu_seqlens_k: Tensor) -> Tensor:
+    """Run grouped GEMM for A[:, k_i:k_{i+1}] @ B[k_i:k_{i+1}]."""
+    B_lower = B.t()
+    out = torch.empty(
+        (cu_seqlens_k.numel() - 1, A.shape[0], B.shape[-1]),
+        dtype=A.dtype,
+        device=A.device,
+    )
+    out_lower = out.permute(1, 2, 0)
+    plan = _plan(A, B_lower, out_lower, varlen_m=False, varlen_k=True)
+    launch_gemm(
+        plan,
+        A,
+        B_lower,
+        out_lower,
+        None,
+        plan.epi_static,
+        plan.scheduler_static,
+        make_varlen_args(None, cu_seqlens_k, None),
     )
     return out

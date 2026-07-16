@@ -18,6 +18,14 @@ def _reference_grouped_mm(
     mat_b: torch.Tensor,
     offs: torch.Tensor,
 ) -> torch.Tensor:
+    if mat_a.dim() == 2 and mat_b.dim() == 2:
+        outs = []
+        start = 0
+        for end in offs.cpu().tolist():
+            outs.append(mat_a[:, start:end] @ mat_b[start:end])
+            start = end
+        return torch.stack(outs)
+
     outs = []
     start = 0
     for group, end in enumerate(offs.cpu().tolist()):
@@ -35,6 +43,29 @@ def _make_grouped_mm_inputs(dtype: torch.dtype):
     return mat_a, mat_b, offs
 
 
+def _make_grouped_mm_varlen_k_inputs(
+    dtype: torch.dtype,
+    *,
+    a_m_major: bool = True,
+    b_n_major: bool = True,
+):
+    torch.manual_seed(0)
+    sizes = [64, 96, 128, 32]
+    m, n, total_k = 128, 128, sum(sizes)
+    if a_m_major:
+        mat_a = torch.randn(total_k, m, device="cuda", dtype=dtype).t()
+    else:
+        mat_a = torch.randn(m, total_k, device="cuda", dtype=dtype)
+    if b_n_major:
+        mat_b = torch.randn(total_k, n, device="cuda", dtype=dtype)
+    else:
+        mat_b = torch.randn(n, total_k, device="cuda", dtype=dtype).t()
+    offs = (
+        torch.tensor(sizes, device="cuda", dtype=torch.int32).cumsum(0).to(torch.int32)
+    )
+    return mat_a, mat_b, offs
+
+
 @unittest.skipUnless(TEST_CUDA and SM120OrLater, "SM120 CUDA required")
 class TestGroupedMm(TestCase):
     @parametrize("dtype", (torch.float16, torch.bfloat16))
@@ -46,6 +77,54 @@ class TestGroupedMm(TestCase):
 
         atol = 2e-2 if dtype is torch.float16 else 2e-1
         self.assertEqual(actual, expected, atol=atol, rtol=0)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_sm120_varlen_k_grouped_mm(self, dtype):
+        mat_a, mat_b, offs = _make_grouped_mm_varlen_k_inputs(dtype)
+
+        actual = torch._grouped_mm(mat_a, mat_b, offs=offs)
+        expected = _reference_grouped_mm(mat_a, mat_b, offs)
+
+        atol = 2e-2 if dtype is torch.float16 else 2e-1
+        self.assertEqual(actual, expected, atol=atol, rtol=0)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_sm120_varlen_k_grouped_mm_cudagraph(self, dtype):
+        mat_a, mat_b, offs = _make_grouped_mm_varlen_k_inputs(dtype)
+
+        warmup_stream = torch.cuda.Stream()
+        warmup_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(warmup_stream):
+            for _ in range(3):
+                torch._grouped_mm(mat_a, mat_b, offs=offs)
+        torch.cuda.current_stream().wait_stream(warmup_stream)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            actual = torch._grouped_mm(mat_a, mat_b, offs=offs)
+        graph.replay()
+
+        expected = _reference_grouped_mm(mat_a, mat_b, offs)
+        atol = 2e-2 if dtype is torch.float16 else 2e-1
+        self.assertEqual(actual, expected, atol=atol, rtol=0)
+
+    def test_sm120_varlen_k_grouped_mm_bad_a_layout_errors(self):
+        mat_a, mat_b, offs = _make_grouped_mm_varlen_k_inputs(
+            torch.float16,
+            a_m_major=False,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "requires mat1 to be M-major"):
+            torch._grouped_mm(mat_a, mat_b, offs=offs)
+
+    def test_sm120_varlen_k_grouped_mm_bad_b_layout_errors(self):
+        mat_a, mat_b, offs = _make_grouped_mm_varlen_k_inputs(
+            torch.float16,
+            b_n_major=False,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "requires mat2 to be N-major"):
+            torch._grouped_mm(mat_a, mat_b, offs=offs)
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_sm120_varlen_m_grouped_mm_cudagraph(self, dtype):
