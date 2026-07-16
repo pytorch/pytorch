@@ -985,6 +985,7 @@ def tuned_scaled_mm_v2(
     swizzle patterns alongside the scale tensors, and supports multi-level
     scaling via lists.
     """
+
     def fallback():
         # contraction_dim is non-optional in the schema.
         fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
