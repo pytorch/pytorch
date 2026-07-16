@@ -4317,7 +4317,7 @@ if HAS_CUDA_AND_TRITON:
 
         @unittest.skip(
             "Disabled due to CI failures; see "
-            "https://github.com/pytorch/pytorch/issues/188677"
+            "https://github.com/pytorch/pytorch/issues/190233"
         )
         def test_graph_partition_view_fallback(self):
             def f(x):
